@@ -12,11 +12,11 @@ import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 // run on whichever device acquired the lock first.
 const criticalSectionStepSchema = z
   .object({
-    tool: z.string().describe("Tool name to execute"),
+    tool: z.string().describe("Tool name"),
     params: z
       .record(z.string(), z.any())
-      .describe("Tool-specific parameters. Must include a non-empty 'device'."),
-    label: z.string().optional().describe("Optional human-readable label"),
+      .describe("Tool params; must include device"),
+    label: z.string().optional().describe("Step label"),
   })
   .passthrough()
   .superRefine((step, ctx) => {
@@ -38,20 +38,20 @@ const criticalSectionSchema = z.object({
   lock: z
     .string()
     .describe(
-      "Global lock identifier. All devices using the same lock name will wait for each other at this barrier."
+      "Shared barrier lock name"
     ),
   steps: z
     .array(criticalSectionStepSchema)
     .min(1)
     .describe(
-      "Steps to execute serially within the critical section. Each step should target a specific device using the 'device' parameter."
+      "Serial steps; each needs params.device"
     ),
   deviceCount: z
     .number()
     .int()
     .positive()
     .describe(
-      "Number of devices expected to reach this critical section. All devices must arrive before any can proceed."
+      "Devices required at barrier"
     ),
   timeout: z
     .number()
@@ -59,7 +59,7 @@ const criticalSectionSchema = z.object({
     .positive()
     .optional()
     .describe(
-      "Timeout in milliseconds for waiting at the barrier (default: 30000ms)"
+      "Barrier timeout ms (default 30000)"
     ),
 });
 
@@ -217,9 +217,7 @@ const criticalSectionHandler = async (
 export function registerCriticalSectionTools(): void {
   ToolRegistry.registerDeviceAware(
     "criticalSection",
-    "Coordinate multiple devices at a synchronization barrier and execute steps serially. " +
-			"All devices must reach the critical section before any can proceed. " +
-			"Steps execute one device at a time in the order they acquire the lock.",
+    "Synchronize multiple devices at a barrier, then run steps serially.",
     criticalSectionSchema,
     criticalSectionHandler,
     false // Does not support progress notifications

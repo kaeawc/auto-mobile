@@ -25,6 +25,7 @@ class ServerConfig {
   private _deviceSnapshotDefaults: DeviceSnapshotConfigInput = {};
   private _appearanceDefaults: AppearanceConfigInput = {};
   private _skipCtrlProxyDownload: boolean = false;
+  private _embeddedSdkEnabled: boolean = false;
   private _networkMockableEnabled: boolean = false;
   private _mcpRecordingEnabled: boolean = false;
   private _dismissKeyboardAfterInputEnabled: boolean = false;
@@ -126,6 +127,14 @@ class ServerConfig {
 
   isSkipCtrlProxyDownloadEnabled(): boolean {
     return this._skipCtrlProxyDownload;
+  }
+
+  setEmbeddedSdkEnabled(enabled: boolean): void {
+    this._embeddedSdkEnabled = enabled;
+  }
+
+  isEmbeddedSdkEnabled(): boolean {
+    return this._embeddedSdkEnabled;
   }
 
   setNetworkMockableEnabled(enabled: boolean): void {

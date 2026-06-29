@@ -12,9 +12,9 @@ import type { SQLResult } from "../features/database/DatabaseInspector";
 // Schema for sqlQuery tool
 const sqlQuerySchema = addDeviceTargetingToSchema(
   z.object({
-    appId: z.string().describe("App package ID"),
-    databasePath: z.string().describe("Absolute path to the database file"),
-    query: z.string().describe("SQL query to execute (SELECT, INSERT, UPDATE, DELETE)")
+    appId: z.string(),
+    databasePath: z.string().describe("Database path"),
+    query: z.string().describe("SQL query")
   })
 );
 
@@ -177,11 +177,12 @@ export function registerDatabaseTools() {
   // Register the sqlQuery tool
   ToolRegistry.registerDeviceAware(
     "sqlQuery",
-    "Execute a SQL query on an Android or iOS app's SQLite database. Supports SELECT, INSERT, UPDATE, DELETE. " +
-    "On iOS this requires a DEBUG app build with the AutoMobile SDK integrated and DatabaseInspector.shared.setEnabled(true). " +
-    "For read-only operations (listing databases, tables, viewing data/schema), use the database resources instead.",
+    "Execute SQL on app SQLite database.",
     sqlQuerySchema,
-    sqlQueryHandler
+    sqlQueryHandler,
+    false,
+    false,
+    { embeddedSdkOnly: true }
   );
 }
 

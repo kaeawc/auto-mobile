@@ -13,7 +13,7 @@ import { DaemonState } from "../daemon/daemonState";
 
 // Schema definitions
 export const setActiveDeviceSchema = addSessionUuidToSchema(z.object({
-  deviceId: z.string().describe("Device ID"),
+  deviceId: z.string(),
   platform: platformSchema
 }));
 
@@ -42,7 +42,7 @@ const doNotDisturbStateInputSchema = z.object({
 export const getDeviceStateSchema = addDeviceTargetingToSchema(z.object({
   include: z.array(z.enum(["doNotDisturb"]))
     .optional()
-    .describe("Optional device state fields to read. Currently supports doNotDisturb.")
+    .describe("State fields to read; supports doNotDisturb")
 }));
 
 export const setDeviceStateSchema = addDeviceTargetingToSchema(z.object({
@@ -271,7 +271,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device-level state such as Do Not Disturb. Android supports off/none/priority/alarms; iOS simulators support binary DND only.",
+    "Set device state such as Do Not Disturb.",
     setDeviceStateSchema,
     setDeviceStateHandler
   );

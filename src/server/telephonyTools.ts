@@ -7,22 +7,19 @@ import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 
 export const phoneCallSchema = addDeviceTargetingToSchema(z.object({
   action: z.enum(["call", "accept", "cancel", "busy", "hold"]).describe(
-    "Phone call action: 'call' simulates an incoming call; 'accept' answers a ringing or waiting call; " +
-    "'cancel' ends the call from the network side; 'busy' rejects a waiting call with a busy signal; " +
-    "'hold' puts the active call on hold (no phoneNumber required)."
+    "call/accept/cancel/busy/hold; hold needs no phoneNumber"
   ),
   phoneNumber: z.string().optional().describe(
-    "Phone number for the call action. Required for all actions except 'hold'. " +
-    "Digits with optional leading '+', max 20 digits."
+    "Phone number; required except for hold"
   )
 }));
 
 export const sendSmsSchema = addDeviceTargetingToSchema(z.object({
   phoneNumber: z.string().describe(
-    "Sender phone number for the simulated incoming SMS. Digits with optional leading '+', max 20 digits."
+    "Sender phone number"
   ),
   message: z.string().describe(
-    "SMS message body. Max 1024 characters. Must not contain newlines, carriage returns, or NUL bytes."
+    "SMS body; max 1024 chars, no newlines/NUL"
   )
 }));
 
@@ -70,16 +67,14 @@ export function registerTelephonyTools() {
 
   ToolRegistry.registerDeviceAware(
     "phoneCall",
-    "Simulate an incoming phone call on an Android emulator via the emulator console (gsm call/accept/cancel/busy/hold). " +
-    "Emulator-only: physical devices return an unsupported error.",
+    "Simulate Android emulator phone call via gsm commands.",
     phoneCallSchema,
     phoneCallHandler
   );
 
   ToolRegistry.registerDeviceAware(
     "sendSms",
-    "Send a simulated incoming SMS to an Android emulator via the emulator console (sms send). " +
-    "Emulator-only: physical devices return an unsupported error.",
+    "Send simulated incoming SMS on Android emulator.",
     sendSmsSchema,
     sendSmsHandler
   );

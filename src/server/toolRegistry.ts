@@ -218,6 +218,7 @@ interface DeviceAwareToolOptions<T = any> {
   shouldEnsureDevice?: (args: T) => boolean;
   nonDeviceHandler?: ToolHandler<T>;
   outputSchema?: any;
+  embeddedSdkOnly?: boolean;
 }
 
 // Interface for a registered tool
@@ -230,6 +231,7 @@ export interface RegisteredTool {
   requiresDevice?: boolean;
   deviceAwareHandler?: DeviceAwareToolHandler;
   debugOnly?: boolean;
+  embeddedSdkOnly?: boolean;
   outputSchema?: any;
 }
 
@@ -249,7 +251,13 @@ class ToolRegistryClass {
   }
 
   private isToolAvailable(tool: RegisteredTool): boolean {
-    return !tool.debugOnly || isDebugModeEnabled();
+    if (tool.debugOnly && !isDebugModeEnabled()) {
+      return false;
+    }
+    if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
+      return false;
+    }
+    return true;
   }
 
   // Register a new tool
@@ -270,6 +278,7 @@ class ToolRegistryClass {
       supportsProgress,
       requiresDevice: false,
       debugOnly,
+      embeddedSdkOnly: false,
       outputSchema
     });
   }
@@ -643,6 +652,7 @@ class ToolRegistryClass {
       requiresDevice: true,
       deviceAwareHandler: handler,
       debugOnly,
+      embeddedSdkOnly: options.embeddedSdkOnly ?? false,
       outputSchema: options.outputSchema
     });
   }

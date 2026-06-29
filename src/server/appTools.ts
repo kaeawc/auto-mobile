@@ -44,21 +44,21 @@ export function resetListAppsToolDependencies(): void {
 
 // Schema definitions
 export const packageNameSchema = addDeviceTargetingToSchema(z.object({
-  appId: z.string().describe("App package ID"),
+  appId: z.string(),
 }));
 
 export const launchAppSchema = addDeviceTargetingToSchema(z.object({
-  appId: z.string().describe("App package ID"),
+  appId: z.string(),
   clearAppData: z.boolean().optional().describe("Clear app data before launch (default false)"),
   coldBoot: z.boolean().optional().describe("Cold boot app (default false)"),
 }));
 
 export const installAppSchema = addDeviceTargetingToSchema(z.object({
-  artifactPath: z.string().describe("Path to app artifact (.apk for Android, .app bundle for iOS simulator, .ipa for iOS physical device)"),
+  artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
 }));
 
 export const uninstallAppSchema = addDeviceTargetingToSchema(z.object({
-  appId: z.string().describe("App package ID or bundle identifier to uninstall"),
+  appId: z.string(),
   keepData: z.boolean().optional().describe("Keep app data after uninstall (Android only, default false)"),
 }));
 
@@ -66,7 +66,7 @@ const appPermissionActionSchema = z.enum(["grant", "revoke", "reset"]);
 
 export const setAppPermissionsSchema = addDeviceTargetingToSchema(
   z.object({
-    appId: z.string().describe("App package ID or bundle identifier"),
+    appId: z.string(),
     action: appPermissionActionSchema
       .optional()
       .describe("Permission action; defaults to grant"),
@@ -79,15 +79,15 @@ export const setAppPermissionsSchema = addDeviceTargetingToSchema(
       .int()
       .nonnegative()
       .optional()
-      .describe("Android user id for runtime permission grants"),
+      .describe("Android user id"),
     notificationPolicyAccess: z
       .boolean()
       .optional()
-      .describe("Android only: set notification policy / DND access"),
+      .describe("Android: set DND policy access"),
     scheduleExactAlarm: z
       .enum(["allow", "deny"])
       .optional()
-      .describe("Android only: set UID-level SCHEDULE_EXACT_ALARM appop"),
+      .describe("Android: set SCHEDULE_EXACT_ALARM appop"),
   })
 ).refine(
   args =>
@@ -99,7 +99,7 @@ export const setAppPermissionsSchema = addDeviceTargetingToSchema(
 
 export const getAppPermissionsSchema = addDeviceTargetingToSchema(
   z.object({
-    appId: z.string().describe("App package ID or bundle identifier"),
+    appId: z.string(),
     permissions: z
       .array(z.string().min(1))
       .optional()
@@ -316,7 +316,7 @@ export function registerAppTools(
 
   ToolRegistry.registerDeviceAware(
     "installApp",
-    "Install app on device (.apk for Android, .app for iOS simulator, .ipa for iOS physical device)",
+    "Install app on device (.apk, .app, or .ipa)",
     installAppSchema,
     installAppHandler
   );

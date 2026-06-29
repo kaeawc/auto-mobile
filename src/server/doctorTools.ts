@@ -15,7 +15,7 @@ export const doctorSchema = z.object({
   android: z.boolean().optional().describe("Run Android-specific checks only"),
   ios: z.boolean().optional().describe("Run iOS-specific checks only"),
   installCmdlineTools: z.boolean().optional().describe(
-    "Automatically download and install Android SDK Command-line Tools to ANDROID_HOME if missing"
+    "Install missing Android SDK cmdline tools"
   ),
   installXcodeCommandLineTools: z.boolean().optional().describe(
     "Install Xcode Command Line Tools if missing"
@@ -38,7 +38,7 @@ export interface DoctorArgs {
 export function registerDoctorTools(): void {
   ToolRegistry.register(
     "doctor",
-    "Run diagnostic checks to verify AutoMobile setup and environment configuration",
+    "Run AutoMobile setup diagnostics",
     doctorSchema,
     async (args: DoctorArgs) => {
       const report = await runDoctor({

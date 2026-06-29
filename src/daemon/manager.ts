@@ -470,6 +470,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.networkMockable) {
       args.push("--network-mockable");
     }
+    if (options.embeddedSdk) {
+      args.push("--embedded-sdk");
+    }
     if (options.dismissKeyboardAfterInput) {
       args.push("--dismiss-keyboard-after-input");
     }
@@ -964,6 +967,8 @@ function parseDaemonArgs(args: string[]): DaemonOptions {
       i++;
     } else if (args[i] === "--network-mockable") {
       options.networkMockable = true;
+    } else if (args[i] === "--embedded-sdk") {
+      options.embeddedSdk = true;
     } else if (args[i] === "--dismiss-keyboard-after-input") {
       options.dismissKeyboardAfterInput = true;
     } else if (args[i] === "--no-ui-perf-mode") {

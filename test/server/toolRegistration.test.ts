@@ -102,7 +102,17 @@ class ToolRegistrationValidator {
     // Debug-only tools (registered when isDebugModeEnabled() returns true)
     "bugReport",
     "debugSearch",
+    "accessibilityFocus",
+    "setUIState",
     "identifyInteractions",
+    "sqlQuery",
+    "setKeyValue",
+    "removeKeyValue",
+    "clearKeyValueFile",
+    "network",
+    "mockNetwork",
+    "clearMockNetwork",
+    "getNetworkGraph",
 
     // Feature-flag controlled tools
     "criticalSection",
@@ -433,7 +443,7 @@ describe("Tool Registration Validation (Unit Tests)", () => {
         });
       }
 
-      // Schema file has 38 tools (2 conditionally registered)
+      // Schema file may differ by the number of conditionally exposed tools.
       expect(() => {
         validator.validateToolCount(38);
       }).not.toThrow();
@@ -450,9 +460,11 @@ describe("Tool Registration Validation (Unit Tests)", () => {
         });
       }
 
-      // Schema file has 40 tools (difference of 10 > limit of 2)
+      const conditionalLimit = (validator as any).CONDITIONALLY_REGISTERED_TOOLS.size;
+      const schemaCountBeyondLimit = 30 + conditionalLimit + 1;
+
       expect(() => {
-        validator.validateToolCount(40);
+        validator.validateToolCount(schemaCountBeyondLimit);
       }).toThrow();
     });
   });

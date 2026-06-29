@@ -1,282 +1,7 @@
 [
   {
-    "name": "accessibilityFocus",
-    "description": "Set or clear the Android TalkBack accessibility-focus cursor on a target element (Android only). Provide one selector: resourceId, text, or contentDesc. action defaults to 'set'; pass 'clear' to clear the cursor.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "action": {
-          "description": "Set (default) or clear the accessibility (TalkBack) focus cursor",
-          "type": "string",
-          "enum": [
-            "set",
-            "clear"
-          ]
-        },
-        "resourceId": {
-          "description": "Resource ID of the target element, e.g. com.example:id/title",
-          "type": "string"
-        },
-        "text": {
-          "description": "Text of the target element (resolved to a resource-id via the element finder)",
-          "type": "string"
-        },
-        "contentDesc": {
-          "description": "Content description of the target element (resolved to a resource-id)",
-          "type": "string"
-        },
-        "platform": {
-          "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
-          "description": "Target platform"
-        },
-        "sessionUuid": {
-          "description": "Session ID",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "description": "Keep device awake",
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Plan device label",
-          "type": "string"
-        },
-        "deviceId": {
-          "description": "Device ID",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean"
-        },
-        "error": {
-          "type": "string"
-        },
-        "warning": {
-          "type": "string"
-        },
-        "focusedElement": {
-          "type": "object",
-          "properties": {
-            "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "top": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "right": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "bottom": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerX": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerY": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
-              ],
-              "additionalProperties": false
-            },
-            "text": {
-              "type": "string"
-            },
-            "resource-id": {
-              "type": "string"
-            },
-            "content-desc": {
-              "type": "string"
-            },
-            "class": {
-              "type": "string"
-            },
-            "package": {
-              "type": "string"
-            },
-            "checkable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "checked": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "clickable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "enabled": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focusable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "accessibility-focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "scrollable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "selected": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            }
-          },
-          "required": [
-            "bounds"
-          ],
-          "additionalProperties": {}
-        }
-      },
-      "required": [
-        "success"
-      ],
-      "additionalProperties": {}
-    }
-  },
-  {
     "name": "biometricAuth",
-    "description": "Simulate biometric authentication on Android emulators (fingerprint) and the iOS Simulator (Touch ID / Face ID via BiometricKit), or inject a deterministic result via the AutoMobile SDK on any Android device. Supports match/fail on both platforms; cancel/error require the AutoMobileBiometrics SDK (Android only). Physical iOS devices are not supported (no public biometric-injection API).",
+    "description": "Simulate biometric auth: Android emulator/SDK hook or iOS Simulator.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -289,10 +14,10 @@
             "cancel",
             "error"
           ],
-          "description": "Biometric action: 'match' triggers successful authentication, 'fail' simulates a non-matching biometric, 'cancel' cancels the prompt, 'error' injects a hard error (requires AutoMobileBiometrics SDK integration in the app)."
+          "description": "match/fail/cancel/error; cancel/error require Android SDK hook"
         },
         "modality": {
-          "description": "Biometric modality (default: 'any'). Android emulators reliably support only 'fingerprint'. iOS Simulator supports both: 'fingerprint' -> Touch ID, 'face' -> Face ID, 'any' posts both (the simulator's non-enrolled biometry is a no-op).",
+          "description": "Modality: any default, fingerprint, or face",
           "type": "string",
           "enum": [
             "any",
@@ -301,15 +26,15 @@
           ]
         },
         "fingerprintId": {
-          "description": "Fingerprint ID to simulate (default: 1 for 'match'/'error', 2 for 'fail'/'cancel'). Use enrolled ID (typically 1) for match/error, non-enrolled ID (typically 2) for fail/cancel.",
+          "description": "Fingerprint ID: default 1 for match/error, 2 for fail/cancel",
           "type": "number"
         },
         "errorCode": {
-          "description": "BiometricPrompt error code to inject (e.g. 7 for ERROR_LOCKOUT, 1 for ERROR_HW_UNAVAILABLE). Only valid when action is 'error'; providing it with any other action is a validation error.",
+          "description": "BiometricPrompt error code; action=error only",
           "type": "number"
         },
         "ttlMs": {
-          "description": "How long the SDK override remains active in milliseconds (default: 5000). The override is cleared after the first authentication callback or when the TTL expires.",
+          "description": "SDK override TTL ms (default 5000)",
           "type": "number"
         },
         "platform": {
@@ -317,23 +42,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -355,8 +77,7 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "locale": {
           "description": "Locale tag (e.g., ar-SA, ja-JP)",
@@ -395,19 +116,17 @@
           "minLength": 1
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -429,23 +148,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -464,7 +180,7 @@
       "properties": {
         "action": {
           "type": "string",
-          "description": "Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content",
+          "description": "Clipboard action",
           "enum": [
             "copy",
             "paste",
@@ -482,23 +198,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -526,14 +239,14 @@
   },
   {
     "name": "criticalSection",
-    "description": "Coordinate multiple devices at a synchronization barrier and execute steps serially. All devices must reach the critical section before any can proceed. Steps execute one device at a time in the order they acquire the lock.",
+    "description": "Synchronize multiple devices at a barrier, then run steps serially.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "lock": {
           "type": "string",
-          "description": "Global lock identifier. All devices using the same lock name will wait for each other at this barrier."
+          "description": "Shared barrier lock name"
         },
         "steps": {
           "minItems": 1,
@@ -543,7 +256,7 @@
             "properties": {
               "tool": {
                 "type": "string",
-                "description": "Tool name to execute"
+                "description": "Tool name"
               },
               "params": {
                 "type": "object",
@@ -551,10 +264,10 @@
                   "type": "string"
                 },
                 "additionalProperties": {},
-                "description": "Tool-specific parameters. Must include a non-empty 'device'."
+                "description": "Tool params; must include device"
               },
               "label": {
-                "description": "Optional human-readable label",
+                "description": "Step label",
                 "type": "string"
               }
             },
@@ -564,16 +277,16 @@
             ],
             "additionalProperties": {}
           },
-          "description": "Steps to execute serially within the critical section. Each step should target a specific device using the 'device' parameter."
+          "description": "Serial steps; each needs params.device"
         },
         "deviceCount": {
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991,
-          "description": "Number of devices expected to reach this critical section. All devices must arrive before any can proceed."
+          "description": "Devices required at barrier"
         },
         "timeout": {
-          "description": "Timeout in milliseconds for waiting at the barrier (default: 30000ms)",
+          "description": "Barrier timeout ms (default 30000)",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
@@ -589,46 +302,45 @@
   },
   {
     "name": "deviceSnapshot",
-    "description": "Capture or restore a device snapshot for the active device.",
+    "description": "Capture or restore device snapshot.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "description": "Action to perform",
           "enum": [
             "capture",
             "restore"
           ]
         },
         "snapshotName": {
-          "description": "Name for the snapshot",
+          "description": "Snapshot name",
           "type": "string",
           "minLength": 1
         },
         "includeAppData": {
-          "description": "Include app data directories in snapshot",
+          "description": "Include app data",
           "type": "boolean"
         },
         "includeSettings": {
-          "description": "Include system settings in snapshot",
+          "description": "Include settings",
           "type": "boolean"
         },
         "useVmSnapshot": {
-          "description": "Use emulator VM snapshot if available (faster, emulator only)",
+          "description": "Use emulator VM snapshot",
           "type": "boolean"
         },
         "strictBackupMode": {
-          "description": "If true, fail entire snapshot if app data backup fails or times out",
+          "description": "Fail if app data backup fails",
           "type": "boolean"
         },
         "backupTimeoutMs": {
-          "description": "Timeout in milliseconds for adb backup user confirmation",
+          "description": "adb backup confirmation timeout ms",
           "type": "number"
         },
         "userApps": {
-          "description": "Which apps to backup: 'current' (foreground app only) or 'all' (all user-installed apps)",
+          "description": "Apps to back up: current or all",
           "type": "string",
           "enum": [
             "current",
@@ -636,11 +348,11 @@
           ]
         },
         "vmSnapshotTimeoutMs": {
-          "description": "Timeout in milliseconds for emulator VM snapshot commands",
+          "description": "VM snapshot timeout ms",
           "type": "number"
         },
         "appBundleIds": {
-          "description": "iOS-only: bundle IDs to include in app data snapshots (omit to skip app data capture)",
+          "description": "iOS bundle IDs for app data snapshot",
           "type": "array",
           "items": {
             "type": "string"
@@ -651,23 +363,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -694,7 +403,7 @@
   },
   {
     "name": "doctor",
-    "description": "Run diagnostic checks to verify AutoMobile setup and environment configuration",
+    "description": "Run AutoMobile setup diagnostics",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -708,7 +417,7 @@
           "type": "boolean"
         },
         "installCmdlineTools": {
-          "description": "Automatically download and install Android SDK Command-line Tools to ANDROID_HOME if missing",
+          "description": "Install missing Android SDK cmdline tools",
           "type": "boolean"
         },
         "installXcodeCommandLineTools": {
@@ -811,23 +520,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -841,7 +547,7 @@
   },
   {
     "name": "executePlan",
-    "description": "Execute a series of tool calls from a YAML plan content. Stops execution if any step fails (success: false). Optionally can resume execution from a specific step index.",
+    "description": "Execute YAML plan steps; stops on first failed step.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -852,7 +558,7 @@
         },
         "startStep": {
           "default": 0,
-          "description": "Start step index (0-based, default: 0)",
+          "description": "Start step index",
           "type": "number"
         },
         "platform": {
@@ -860,27 +566,24 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session UUID for parallel execution",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "devices": {
-          "description": "Device labels for multi-device plans",
+          "description": "Device labels",
           "type": "array",
           "items": {
             "type": "string"
@@ -888,12 +591,12 @@
         },
         "deviceAllocationTimeoutMs": {
           "default": 300000,
-          "description": "Timeout in milliseconds for allocating all devices (default: 300000 = 5 minutes)",
+          "description": "Allocation timeout ms",
           "type": "number"
         },
         "abortStrategy": {
           "default": "immediate",
-          "description": "Abort strategy: immediate (default) or finish-current-step",
+          "description": "Abort strategy",
           "type": "string",
           "enum": [
             "immediate",
@@ -901,7 +604,7 @@
           ]
         },
         "testMetadata": {
-          "description": "Test metadata for timing history",
+          "description": "Test metadata",
           "type": "object",
           "properties": {
             "testClass": {
@@ -941,15 +644,15 @@
           "additionalProperties": false
         },
         "cleanupAppId": {
-          "description": "App ID to terminate after execution",
+          "description": "Cleanup app ID",
           "type": "string"
         },
         "cleanupClearAppData": {
-          "description": "Clear app data on cleanup",
+          "description": "Clear app data",
           "type": "boolean"
         },
         "captureObserveSteps": {
-          "description": "Single-device plans only: attach each successful observe step snapshot to executePlan result `debug.steps[n].details.stepObservation` (`summary` = metadata + element samples; `full` = includes viewHierarchy). Ignored for multi-device plans.",
+          "description": "Attach observe snapshots",
           "type": "string",
           "enum": [
             "summary",
@@ -1017,8 +720,7 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "deviceId": {
           "type": "string"
@@ -1101,17 +803,17 @@
   },
   {
     "name": "exportPlan",
-    "description": "Stop the active test recording and export recorded interactions as a YAML plan. Returns the plan content.",
+    "description": "Stop active recording and export a YAML plan.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "recordingId": {
-          "description": "Recording ID to export (uses active recording if not specified)",
+          "description": "Recording ID",
           "type": "string"
         },
         "planName": {
-          "description": "Name for the exported plan (auto-generated if not specified)",
+          "description": "Plan name",
           "type": "string"
         }
       },
@@ -1161,8 +863,7 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string",
-          "description": "App package ID or bundle identifier"
+          "type": "string"
         },
         "permissions": {
           "description": "Optional permissions or simulator privacy services to query",
@@ -1177,23 +878,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -1205,37 +903,33 @@
   },
   {
     "name": "getDeepLinks",
-    "description": "Query deep links for app",
+    "description": "Query app deep links",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string",
-          "description": "App package ID"
+          "type": "string"
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -1253,7 +947,7 @@
       "type": "object",
       "properties": {
         "include": {
-          "description": "Optional device state fields to read. Currently supports doNotDisturb.",
+          "description": "State fields to read; supports doNotDisturb",
           "type": "array",
           "items": {
             "type": "string",
@@ -1267,23 +961,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -1292,38 +983,34 @@
   },
   {
     "name": "getNotificationPolicy",
-    "description": "Read app notification policy state, including Android Do Not Disturb policy access",
+    "description": "Read app notification/DND policy state",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "appId": {
           "type": "string",
-          "minLength": 1,
-          "description": "App package ID or bundle identifier"
+          "minLength": 1
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -1335,7 +1022,7 @@
   },
   {
     "name": "highlight",
-    "description": "Draw a visual highlight around a UI element on the device screen for debugging.",
+    "description": "Draw a visual highlight around a UI element.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1345,11 +1032,9 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         },
         "timeoutMs": {
@@ -1930,14 +1615,14 @@
         },
         "elementId": {
           "type": "string",
-          "description": "Element resource-id (e.g. \"com.app:id/btn_login\"). Only use for resource-id values."
+          "description": "Resource ID, e.g. com.app:id/btn_login"
         },
         "text": {
           "type": "string",
-          "description": "Element text, content-desc, or placeholder value from observe output."
+          "description": "Text, content-desc, or placeholder"
         },
         "container": {
-          "description": "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }.",
+          "description": "Scope search to a container",
           "anyOf": [
             {
               "type": "object",
@@ -1968,11 +1653,11 @@
           ]
         },
         "containerOf": {
-          "description": "Whether to highlight the container of the selected element",
+          "description": "Highlight selected element's container",
           "type": "boolean"
         },
         "selectionStrategy": {
-          "description": "Element selection strategy when multiple matches are found (default: first)",
+          "description": "Selection strategy when multiple match (default: first)",
           "type": "string",
           "enum": [
             "first",
@@ -1980,15 +1665,14 @@
           ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         }
       },
@@ -2010,23 +1694,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2060,23 +1741,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2096,11 +1774,10 @@
       "properties": {
         "text": {
           "type": "string",
-          "minLength": 1,
-          "description": "Text to input"
+          "minLength": 1
         },
         "mode": {
-          "description": "(Android only; ignored on iOS) Text input mode. a11y (default) sets text directly. eventLast sets text with a11y up to the last printable non-whitespace ASCII character, sends that character as a real key event, then restores any suffix with a11y. eventAll clears the field with a11y, sends key events for mappable ASCII characters, and uses a11y for Unicode/emoji runs. Search fields that use autocomplete should probably try eventLast; otherwise accept the default.",
+          "description": "Android text mode: a11y default; eventLast helps autocomplete; eventAll sends key events",
           "type": "string",
           "enum": [
             "a11y",
@@ -2121,7 +1798,7 @@
           ]
         },
         "dismissKeyboard": {
-          "description": "(Android only) Dismiss soft keyboard after input (default: false). Ignored on iOS.",
+          "description": "Android: dismiss keyboard after input",
           "type": "boolean"
         },
         "platform": {
@@ -2129,23 +1806,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2158,37 +1832,34 @@
   },
   {
     "name": "installApp",
-    "description": "Install app on device (.apk for Android, .app for iOS simulator, .ipa for iOS physical device)",
+    "description": "Install app on device (.apk, .app, or .ipa)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "artifactPath": {
           "type": "string",
-          "description": "Path to app artifact (.apk for Android, .app bundle for iOS simulator, .ipa for iOS physical device)"
+          "description": "App artifact path (.apk, .app, or .ipa)"
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2219,23 +1890,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2261,16 +1929,14 @@
               "description": "Device image name"
             },
             "deviceId": {
-              "type": "string",
-              "description": "Device ID"
+              "type": "string"
             },
             "platform": {
               "type": "string",
               "enum": [
                 "android",
                 "ios"
-              ],
-              "description": "Target platform"
+              ]
             }
           },
           "required": [
@@ -2295,8 +1961,7 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string",
-          "description": "App package ID"
+          "type": "string"
         },
         "clearAppData": {
           "description": "Clear app data before launch (default false)",
@@ -2311,23 +1976,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2359,8 +2021,7 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         }
       },
       "required": [
@@ -2381,8 +2042,7 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         }
       },
       "additionalProperties": false
@@ -2400,8 +2060,7 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "waitFor": {
           "description": "Wait for element to appear before returning observation",
@@ -2418,7 +2077,7 @@
                   "type": "number"
                 },
                 "container": {
-                  "description": "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView).",
+                  "description": "Scope match to a container",
                   "anyOf": [
                     {
                       "type": "object",
@@ -2466,7 +2125,7 @@
                   "type": "number"
                 },
                 "container": {
-                  "description": "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView).",
+                  "description": "Scope match to a container",
                   "anyOf": [
                     {
                       "type": "object",
@@ -2505,27 +2164,25 @@
           ]
         },
         "raw": {
-          "description": "When true, include unprocessed view hierarchy in response alongside normal output (default: false)",
+          "description": "Include raw view hierarchy",
           "type": "boolean"
         },
         "skipBackStack": {
-          "description": "When true, skip back stack collection during waitFor polling to reduce ADB overhead (default: false)",
+          "description": "Skip back stack during waitFor polling",
           "type": "boolean"
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2551,23 +2208,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2580,7 +2234,7 @@
   },
   {
     "name": "phoneCall",
-    "description": "Simulate an incoming phone call on an Android emulator via the emulator console (gsm call/accept/cancel/busy/hold). Emulator-only: physical devices return an unsupported error.",
+    "description": "Simulate Android emulator phone call via gsm commands.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2594,10 +2248,10 @@
             "busy",
             "hold"
           ],
-          "description": "Phone call action: 'call' simulates an incoming call; 'accept' answers a ringing or waiting call; 'cancel' ends the call from the network side; 'busy' rejects a waiting call with a busy signal; 'hold' puts the active call on hold (no phoneNumber required)."
+          "description": "call/accept/cancel/busy/hold; hold needs no phoneNumber"
         },
         "phoneNumber": {
-          "description": "Phone number for the call action. Required for all actions except 'hold'. Digits with optional leading '+', max 20 digits.",
+          "description": "Phone number; required except for hold",
           "type": "string"
         },
         "platform": {
@@ -2605,23 +2259,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2671,7 +2322,7 @@
           "type": "boolean"
         },
         "container": {
-          "description": "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }.",
+          "description": "Scope search to a container",
           "anyOf": [
             {
               "type": "object",
@@ -2710,23 +2361,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2739,7 +2387,7 @@
   },
   {
     "name": "postNotification",
-    "description": "Post a notification: on Android, from the app-under-test when AutoMobile SDK hooks are installed; on the iOS Simulator, deliver a simulated remote push to the given bundle id via 'simctl push' (requires appId; physical iOS devices unsupported).",
+    "description": "Post notification via Android SDK hooks or iOS Simulator simctl push.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2763,11 +2411,11 @@
           ]
         },
         "imagePath": {
-          "description": "Host image file path to push to /sdcard/Download/automobile when imageType is bigPicture",
+          "description": "Host image path for bigPicture",
           "type": "string"
         },
         "actions": {
-          "description": "Action buttons to include (Android only)",
+          "description": "Android action buttons",
           "type": "array",
           "items": {
             "type": "object",
@@ -2791,36 +2439,33 @@
           }
         },
         "channelId": {
-          "description": "Notification channel ID (Android); reused as the APNs category on iOS",
+          "description": "Android channel ID / iOS APNs category",
           "type": "string"
         },
         "appId": {
           "type": "string",
           "minLength": 1,
-          "description": "iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android."
+          "description": "iOS target bundle ID"
         },
         "platform": {
           "type": "string",
-          "description": "Target platform",
           "enum": [
             "ios",
             "android"
           ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2864,31 +2509,27 @@
             "volume_up",
             "volume_down",
             "recent"
-          ],
-          "description": "Button to press"
+          ]
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2901,15 +2542,14 @@
   },
   {
     "name": "putAppFile",
-    "description": "Write a host file, UTF-8 text, or base64 content into an app container. Prefer this over platform-specific copy commands.",
+    "description": "Write file/text/base64 content into an app container.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "appId": {
           "type": "string",
-          "minLength": 1,
-          "description": "App identifier (Android package name or iOS bundle ID)"
+          "minLength": 1
         },
         "container": {
           "type": "string",
@@ -2920,47 +2560,44 @@
             "tmp",
             "externalFiles"
           ],
-          "description": "Logical app container"
+          "description": "App container"
         },
         "sourcePath": {
-          "description": "Local host file path to copy",
+          "description": "Host file path",
           "type": "string",
           "minLength": 1
         },
         "contentText": {
-          "description": "Inline UTF-8 text content to write",
+          "description": "UTF-8 content",
           "type": "string"
         },
         "contentBase64": {
-          "description": "Inline base64-encoded binary content",
+          "description": "Base64 content",
           "type": "string"
         },
         "destinationPath": {
           "type": "string",
-          "description": "Relative destination path inside the container"
+          "description": "Container-relative destination path"
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2984,23 +2621,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3012,7 +2646,7 @@
   },
   {
     "name": "recordSteps",
-    "description": "Record MCP tool calls as a replayable YAML test plan. Actions: 'begin' starts capturing plan-relevant tool calls, 'end' stops and exports the plan as YAML (both require the 'mcp-recording' feature flag), 'status' checks if a recording session is active (always available, even when the flag is off).",
+    "description": "Record MCP tool calls to YAML. begin/end require mcp-recording; status always works.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3023,11 +2657,10 @@
             "begin",
             "end",
             "status"
-          ],
-          "description": "begin: start capturing tool calls. end: stop and export the recorded plan as YAML. status: check if a recording session is active."
+          ]
         },
         "planName": {
-          "description": "Name for the exported plan (kebab-case recommended, auto-generated if not specified). Only used with action 'end'.",
+          "description": "Plan name for action=end",
           "type": "string"
         }
       },
@@ -3097,31 +2730,27 @@
           "enum": [
             "portrait",
             "landscape"
-          ],
-          "description": "Orientation"
+          ]
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3144,23 +2773,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3172,41 +2798,38 @@
   },
   {
     "name": "sendSms",
-    "description": "Send a simulated incoming SMS to an Android emulator via the emulator console (sms send). Emulator-only: physical devices return an unsupported error.",
+    "description": "Send simulated incoming SMS on Android emulator.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "phoneNumber": {
           "type": "string",
-          "description": "Sender phone number for the simulated incoming SMS. Digits with optional leading '+', max 20 digits."
+          "description": "Sender phone number"
         },
         "message": {
           "type": "string",
-          "description": "SMS message body. Max 1024 characters. Must not contain newlines, carriage returns, or NUL bytes."
+          "description": "SMS body; max 1024 chars, no newlines/NUL"
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3225,23 +2848,20 @@
       "type": "object",
       "properties": {
         "deviceId": {
-          "type": "string",
-          "description": "Device ID"
+          "type": "string"
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         }
       },
@@ -3260,8 +2880,7 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string",
-          "description": "App package ID or bundle identifier"
+          "type": "string"
         },
         "action": {
           "description": "Permission action; defaults to grant",
@@ -3281,17 +2900,17 @@
           }
         },
         "userId": {
-          "description": "Android user id for runtime permission grants",
+          "description": "Android user id",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
         "notificationPolicyAccess": {
-          "description": "Android only: set notification policy / DND access",
+          "description": "Android: set DND policy access",
           "type": "boolean"
         },
         "scheduleExactAlarm": {
-          "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop",
+          "description": "Android: set SCHEDULE_EXACT_ALARM appop",
           "type": "string",
           "enum": [
             "allow",
@@ -3303,23 +2922,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3331,7 +2947,7 @@
   },
   {
     "name": "setDeviceState",
-    "description": "Set device-level state such as Do Not Disturb. Android supports off/none/priority/alarms; iOS simulators support binary DND only.",
+    "description": "Set device state such as Do Not Disturb.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3362,23 +2978,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3387,42 +3000,38 @@
   },
   {
     "name": "setNotificationPolicy",
-    "description": "Set app notification policy state, including Android Do Not Disturb policy access",
+    "description": "Set app notification/DND policy state",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "appId": {
           "type": "string",
-          "minLength": 1,
-          "description": "App package ID or bundle identifier"
+          "minLength": 1
         },
         "policyAccess": {
           "type": "boolean",
-          "description": "Android only: allow or revoke app notification policy / DND access"
+          "description": "Android: allow DND policy access"
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3435,17 +3044,17 @@
   },
   {
     "name": "shake",
-    "description": "Shake device. iOS support is Simulator-only; physical iOS devices are not supported by XCTest.",
+    "description": "Shake device; iOS Simulator only.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "duration": {
-          "description": "Shake duration in ms (default: 1000). On iOS Simulator this contributes to the runner timeout budget.",
+          "description": "Shake duration ms (default 1000)",
           "type": "number"
         },
         "intensity": {
-          "description": "Shake acceleration intensity (default: 100). Ignored on iOS Simulator because XCTest shake has no intensity parameter.",
+          "description": "Shake intensity (Android; default 100)",
           "type": "number"
         },
         "platform": {
@@ -3453,23 +3062,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3491,8 +3097,7 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "minOsVersion": {
           "description": "Minimum OS version, inclusive (e.g., '14', '17.2')",
@@ -3534,7 +3139,6 @@
           "additionalProperties": false
         },
         "deviceId": {
-          "description": "Specific device ID (bypasses matching)",
           "type": "string"
         },
         "preferRunning": {
@@ -3554,7 +3158,7 @@
   },
   {
     "name": "startTestRecording",
-    "description": "Start test recording mode on the active device. Records user interactions for later export as a test plan. Returns the session ID which can be used with exportPlan.",
+    "description": "Start recording user interactions for exportPlan.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3602,7 +3206,7 @@
           "type": "boolean"
         },
         "container": {
-          "description": "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }.",
+          "description": "Scope search to a container",
           "anyOf": [
             {
               "type": "object",
@@ -3647,7 +3251,7 @@
           "description": "Swipe/scroll direction"
         },
         "gestureType": {
-          "description": "swipeFingerTowardsDirection: finger moves in direction (e.g., 'up' = finger up = content scrolls down). scrollTowardsDirection: content moves in direction (e.g., 'up' = content up = see content below). Default: scrollTowardsDirection.",
+          "description": "Finger direction or content scroll direction; default: scrollTowardsDirection",
           "type": "string",
           "enum": [
             "swipeFingerTowardsDirection",
@@ -3715,23 +3319,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3759,7 +3360,7 @@
             "dismiss",
             "clearAll"
           ],
-          "description": "Action: open=expand tray, close=collapse tray/shade, find=search for notification, tap=tap notification, dismiss=swipe away, clearAll=dismiss all for app"
+          "description": "open/close/find/tap/dismiss/clearAll notification"
         },
         "notification": {
           "description": "Notification criteria to match",
@@ -3793,23 +3394,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3822,13 +3420,13 @@
   },
   {
     "name": "tapAny",
-    "description": "Tap any clickable element without knowing its text or ID. Good for tapping the first list item. Use container to scope, selectionStrategy to pick 'first' (default) or 'random', and scrollableContainer: true to limit to list/RecyclerView items.",
+    "description": "Tap any clickable element; scope with container or scrollableContainer.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "container": {
-          "description": "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }.",
+          "description": "Scope search to a container",
           "anyOf": [
             {
               "type": "object",
@@ -3867,7 +3465,7 @@
           ]
         },
         "scrollableContainer": {
-          "description": "Only search within scrollable containers (lists/RecyclerViews). Use this to avoid tapping search bars or other clickable UI elements when you want the first list item.",
+          "description": "Search only scrollable containers/lists",
           "type": "boolean"
         },
         "action": {
@@ -3902,23 +3500,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3931,7 +3526,7 @@
   },
   {
     "name": "tapOn",
-    "description": "Tap a specific UI element identified by text or resource-id.\nProvide a selector: { \"text\": \"Login\" } or { \"elementId\": \"com.app:id/btn\" }.\nSet sibling: true to tap a clickable sibling adjacent to the matched element (e.g., a checkbox next to a label).\ncontent-desc values from observe should be passed as text, not elementId.",
+    "description": "Tap an element by text/content-desc or resource-id; use sibling for adjacent controls.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3944,7 +3539,7 @@
                 "elementId": {
                   "type": "string",
                   "minLength": 1,
-                  "description": "Element resource-id (e.g. \"com.app:id/btn_login\"). Only use for resource-id values."
+                  "description": "Resource ID, e.g. com.app:id/btn_login"
                 }
               },
               "required": [
@@ -3958,7 +3553,7 @@
                 "text": {
                   "type": "string",
                   "minLength": 1,
-                  "description": "Element text, content-desc, or placeholder value from observe output."
+                  "description": "Text, content-desc, or placeholder"
                 }
               },
               "required": [
@@ -3967,14 +3562,14 @@
               "additionalProperties": false
             }
           ],
-          "description": "Element to tap. Provide exactly one of elementId or text."
+          "description": "Element to tap: elementId or text"
         },
         "sibling": {
-          "description": "When true, tap a clickable sibling of the matched element instead of the element itself. Useful for tapping checkboxes, icons, or buttons adjacent to a text label.",
+          "description": "Tap a clickable sibling of the match, e.g. checkbox beside label",
           "type": "boolean"
         },
         "container": {
-          "description": "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }.",
+          "description": "Scope search to a container",
           "anyOf": [
             {
               "type": "object",
@@ -4016,7 +3611,7 @@
           ]
         },
         "selectionStrategy": {
-          "description": "Element selection strategy when multiple matches are found (default: first)",
+          "description": "Selection strategy when multiple match (default: first)",
           "type": "string",
           "enum": [
             "first",
@@ -4041,15 +3636,15 @@
           "additionalProperties": false
         },
         "preTapStability": {
-          "description": "When true, refresh the accessibility hierarchy before tapping and require consecutive re-finds with stable bounds before dispatching the gesture. Prevents tapping stale coordinates when the UI is still settling (loading overlays, list refreshes, keyboard). Recommended for search result lists and dynamic content.",
+          "description": "Require stable bounds before tapping; use for dynamic UI",
           "type": "boolean"
         },
         "retryIfNoChange": {
-          "description": "When true, compare the view hierarchy before and after the tap. If unchanged (ghost tap detected), retry the tap once after a short delay. Recommended for taps that should cause obvious UI changes like navigation or screen transitions.",
+          "description": "Retry once if the view hierarchy is unchanged after tap",
           "type": "boolean"
         },
         "ensureTap": {
-          "description": "Convenience flag that enables both preTapStability and retryIfNoChange. Use on taps in dynamic UI where you want both stable bounds before tapping and ghost-tap detection after.",
+          "description": "Enable preTapStability and retryIfNoChange",
           "type": "boolean"
         },
         "platform": {
@@ -4057,23 +3652,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -5065,31 +4657,27 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string",
-          "description": "App package ID"
+          "type": "string"
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -5107,8 +4695,7 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string",
-          "description": "App package ID or bundle identifier to uninstall"
+          "type": "string"
         },
         "keepData": {
           "description": "Keep app data after uninstall (Android only, default false)",
@@ -5119,23 +4706,20 @@
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         }
       },
@@ -5147,7 +4731,7 @@
   },
   {
     "name": "videoRecording",
-    "description": "Start or stop a low-overhead video recording for the active device.",
+    "description": "Start or stop device video recording.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -5157,27 +4741,23 @@
           "enum": [
             "start",
             "stop"
-          ],
-          "description": "Action to perform"
+          ]
         },
         "platform": {
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ],
-          "description": "Target platform"
+          ]
         },
         "deviceId": {
-          "description": "Device ID",
           "type": "string"
         },
         "recordingId": {
-          "description": "Recording ID to stop",
+          "description": "Recording ID",
           "type": "string"
         },
         "qualityPreset": {
-          "description": "Recording quality preset",
           "type": "string",
           "enum": [
             "low",
@@ -5186,37 +4766,35 @@
           ]
         },
         "targetBitrateKbps": {
-          "description": "Target bitrate in Kbps",
+          "description": "Bitrate Kbps",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
         },
         "maxThroughputMbps": {
-          "description": "Max throughput in Mbps",
+          "description": "Max throughput Mbps",
           "type": "number",
           "exclusiveMinimum": 0
         },
         "fps": {
-          "description": "Frames per second",
+          "description": "FPS",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
         },
         "resolution": {
-          "description": "Override capture resolution",
+          "description": "Resolution",
           "type": "object",
           "properties": {
             "width": {
               "type": "integer",
               "exclusiveMinimum": 0,
-              "maximum": 9007199254740991,
-              "description": "Override resolution width in pixels"
+              "maximum": 9007199254740991
             },
             "height": {
               "type": "integer",
               "exclusiveMinimum": 0,
-              "maximum": 9007199254740991,
-              "description": "Override resolution height in pixels"
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -5226,30 +4804,29 @@
           "additionalProperties": false
         },
         "format": {
-          "description": "Video format",
           "type": "string",
           "enum": [
             "mp4"
           ]
         },
         "maxDuration": {
-          "description": "Max seconds to record video for (default 30, max 300)",
+          "description": "Max duration seconds",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 300
         },
         "outputName": {
-          "description": "Optional label to identify the recording",
+          "description": "Recording label",
           "type": "string"
         },
         "highlights": {
-          "description": "Optional highlights to show during recording",
+          "description": "Recording highlights",
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
               "description": {
-                "description": "Description of the highlight",
+                "description": "Highlight description",
                 "type": "string"
               },
               "shape": {
@@ -5816,10 +5393,10 @@
                     "additionalProperties": false
                   }
                 ],
-                "description": "Highlight shape definition"
+                "description": "Highlight shape"
               },
               "timing": {
-                "description": "Optional highlight timing",
+                "description": "Highlight timing",
                 "type": "object",
                 "properties": {
                   "startTimeMs": {
@@ -5839,15 +5416,14 @@
           }
         },
         "sessionUuid": {
-          "description": "Session ID",
+          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
-          "description": "Plan device label",
+          "description": "Device label",
           "type": "string"
         }
       },

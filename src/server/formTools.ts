@@ -16,9 +16,9 @@ import {
 const fieldSpecSchema = z.object({
   selector: elementIdTextFieldsSchema.superRefine((value, ctx) => {
     validateElementIdTextSelector(value, ctx, "Provide exactly one of elementId or text in selector");
-  }).describe("Selector to find the field element"),
-  value: z.string().optional().describe("Value to set (for text inputs and dropdowns)"),
-  selected: z.boolean().optional().describe("Target selection state (for checkboxes and toggles)")
+  }).describe("Field selector"),
+  value: z.string().optional().describe("Text/dropdown value"),
+  selected: z.boolean().optional().describe("Checkbox/toggle state")
 }).refine(
   data => data.value !== undefined || data.selected !== undefined,
   { message: "Provide either value (for text/dropdown) or selected (for checkbox/toggle)" }
@@ -30,9 +30,9 @@ const fieldSpecSchema = z.object({
 const setUIStateSchema = z.object({
   fields: z.array(fieldSpecSchema)
     .min(1, "At least one field is required")
-    .describe("List of fields to set"),
+    .describe("Fields to set"),
   scrollDirection: z.enum(["up", "down"]).optional()
-    .describe("Initial scroll direction when searching (default: down)")
+    .describe("Initial search scroll direction")
 });
 
 /**
@@ -55,10 +55,10 @@ const fieldResultSchema = z.object({
  * Output schema for setUIState result
  */
 const setUIStateResultSchema = z.object({
-  success: z.boolean().describe("Whether all fields were set successfully"),
-  fields: z.array(fieldResultSchema).describe("Results for each field"),
-  totalAttempts: z.number().describe("Total attempts across all fields"),
-  error: z.string().optional().describe("Error message if the operation failed")
+  success: z.boolean().describe("All fields set"),
+  fields: z.array(fieldResultSchema).describe("Field results"),
+  totalAttempts: z.number().describe("Total attempts"),
+  error: z.string().optional().describe("Error message")
 });
 
 /**
@@ -68,27 +68,7 @@ export function registerFormTools(): void {
   // setUIState tool
   ToolRegistry.registerDeviceAware(
     "setUIState",
-    `Declaratively set UI form fields to desired values.
-
-Instead of procedural steps (tap, clear, type), specify the desired end-state for each field.
-Automatically handles:
-- Field type detection (text input, checkbox, toggle, dropdown)
-- Clearing existing text before typing
-- Toggling checkboxes only when needed
-- Scrolling to find hidden fields
-- Retry on failure
-- Value verification
-
-Example usage:
-\`\`\`json
-{
-  "fields": [
-    { "selector": { "elementId": "username" }, "value": "john@example.com" },
-    { "selector": { "text": "Password" }, "value": "secret123" },
-    { "selector": { "elementId": "remember_me" }, "selected": true }
-  ]
-}
-\`\`\``,
+    "Set multiple form fields by desired state.",
     addDeviceTargetingToSchema(setUIStateSchema),
     async (
       device: BootedDevice,
@@ -131,7 +111,7 @@ Example usage:
       });
     },
     true, // supportsProgress
-    false, // debugOnly
+    true, // debugOnly
     { outputSchema: setUIStateResultSchema }
   );
 }

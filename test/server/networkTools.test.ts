@@ -32,6 +32,7 @@ describe("network tool schema", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     NetworkState.resetInstance();
+    serverConfig.setEmbeddedSdkEnabled(true);
     serverConfig.setNetworkMockableEnabled(true);
     iosMessages = [];
     androidMessages = [];
@@ -53,6 +54,7 @@ describe("network tool schema", () => {
   afterEach(() => {
     ToolRegistry.clearTools();
     NetworkState.resetInstance();
+    serverConfig.setEmbeddedSdkEnabled(false);
     serverConfig.setNetworkMockableEnabled(false);
     iosGetInstanceSpy.mockRestore();
     androidGetInstanceSpy.mockRestore();

@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 /** Shared platform schema — single source of truth for all tool schemas. */
-export const platformSchema = z.enum(["android", "ios"]).describe("Target platform");
+export const platformSchema = z.enum(["android", "ios"]);
 
 export const DEVICE_LABEL_DESCRIPTION =
-  "Plan device label";
+  "Device label";
 
 /**
  * Helper to add sessionUuid field to tool schemas
@@ -15,8 +15,8 @@ export const DEVICE_LABEL_DESCRIPTION =
  */
 export function addSessionUuidToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
   return schema.extend({
-    sessionUuid: z.string().optional().describe("Session ID"),
-    keepScreenAwake: z.boolean().optional().describe("Keep device awake"),
+    sessionUuid: z.string().optional().describe("Session"),
+    keepScreenAwake: z.boolean().optional(),
   }) as z.ZodObject<any>;
 }
 
@@ -41,7 +41,7 @@ function addDeviceLabelToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObj
  */
 function addDeviceIdToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
   return schema.extend({
-    deviceId: z.string().optional().describe("Device ID"),
+    deviceId: z.string().optional(),
   }) as z.ZodObject<any>;
 }
 

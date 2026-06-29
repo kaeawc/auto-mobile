@@ -16,10 +16,11 @@ import { highlightShapeSchema, VisualHighlightClient } from "../features/debug/V
 import { recordVideoRecordingHighlightAdded } from "./videoRecordingManager";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { DefaultElementSelector } from "../features/utility/DefaultElementSelector";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementParser } from "../features/utility/ElementParser";
-import { NoOpPerformanceTracker } from "../utils/PerformanceTracker";
+import { NoOpPerformanceTracker, type PerformanceTracker } from "../utils/PerformanceTracker";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   elementContainerSchema,
@@ -28,8 +29,6 @@ import {
   validateElementIdTextSelector
 } from "./elementSelectorSchemas";
 import { boundsEqual } from "../utils/bounds";
-
-const UNSUPPORTED_MESSAGE = "Visual highlights are only supported on Android devices.";
 
 const generateHighlightId = (timer: Timer = defaultTimer): string => {
   const timestamp = timer.now();
@@ -200,19 +199,18 @@ const findContainerForElement = (
 
 const resolveHighlightShapeFromSelector = async (
   device: BootedDevice,
-  args: HighlightArgs
+  args: HighlightArgs,
+  dependencies: HighlightToolDependencies = {}
 ): Promise<HighlightShape> => {
   if (!args.elementId && !args.text) {
     throw new ActionableError("highlight requires elementId or text when shape is not provided.");
   }
 
-  if (device.platform !== "android") {
-    throw new ActionableError(UNSUPPORTED_MESSAGE);
-  }
-
-  const accessibilityService = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
+  const viewHierarchyClient = dependencies.viewHierarchyClientFactory
+    ? dependencies.viewHierarchyClientFactory(device)
+    : createDefaultViewHierarchyClient(device);
   const hierarchyTimeout = args.timeoutMs ?? DEFAULT_HIERARCHY_TIMEOUT_MS;
-  const syncResult = await accessibilityService.requestHierarchySync(
+  const syncResult = await viewHierarchyClient.requestHierarchySync(
     new NoOpPerformanceTracker(),
     false,
     undefined,
@@ -221,7 +219,7 @@ const resolveHighlightShapeFromSelector = async (
   if (!syncResult) {
     throw new ActionableError("Unable to retrieve view hierarchy for highlight.");
   }
-  const viewHierarchy = accessibilityService.convertToViewHierarchyResult(syncResult.hierarchy);
+  const viewHierarchy = viewHierarchyClient.convertToViewHierarchyResult(syncResult.hierarchy);
   const finder = new DefaultElementFinder();
   const elementSelector = new DefaultElementSelector(finder);
   const container = args.container ?? null;
@@ -274,9 +272,37 @@ const resolveHighlightShapeFromSelector = async (
   };
 };
 
-export function registerHighlightTools() {
+interface HighlightViewHierarchyClient {
+  requestHierarchySync(
+    perf: PerformanceTracker,
+    disableAllFiltering: boolean,
+    signal: AbortSignal | undefined,
+    timeoutMs: number
+  ): Promise<{ hierarchy: unknown } | null>;
+  convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
+}
+
+interface HighlightToolDependencies {
+  highlightClientFactory?: () => VisualHighlightClient;
+  viewHierarchyClientFactory?: (device: BootedDevice) => HighlightViewHierarchyClient;
+  generateHighlightId?: () => string;
+}
+
+const createDefaultViewHierarchyClient = (device: BootedDevice): HighlightViewHierarchyClient => {
+  if (device.platform === "android") {
+    return AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory) as HighlightViewHierarchyClient;
+  }
+  if (device.platform === "ios") {
+    return IOSCtrlProxyClient.getInstance(device) as HighlightViewHierarchyClient;
+  }
+  throw new ActionableError(`Visual highlights are not supported on ${device.platform} devices.`);
+};
+
+export function registerHighlightTools(dependencies: HighlightToolDependencies = {}) {
   const highlightHandler = async (device: BootedDevice, args: HighlightArgs) => {
-    const highlightClient = new VisualHighlightClient();
+    const highlightClient = dependencies.highlightClientFactory
+      ? dependencies.highlightClientFactory()
+      : new VisualHighlightClient();
     const options = {
       device,
       deviceId: args.deviceId ?? device.deviceId,
@@ -286,8 +312,10 @@ export function registerHighlightTools() {
     };
 
     try {
-      const highlightId = generateHighlightId();
-      const resolvedShape = args.shape ?? await resolveHighlightShapeFromSelector(device, args);
+      const highlightId = dependencies.generateHighlightId
+        ? dependencies.generateHighlightId()
+        : generateHighlightId();
+      const resolvedShape = args.shape ?? await resolveHighlightShapeFromSelector(device, args, dependencies);
       const result = await highlightClient.addHighlight(highlightId, resolvedShape, options);
       await recordVideoRecordingHighlightAdded(device, {
         description: args.description,
@@ -299,23 +327,12 @@ export function registerHighlightTools() {
     }
   };
 
-  const highlightNonDeviceHandler = async (args: HighlightArgs) => {
-    return createJSONToolResponse({
-      success: false,
-      error: UNSUPPORTED_MESSAGE
-    });
-  };
-
   ToolRegistry.registerDeviceAware(
     "highlight",
     "Draw a visual highlight around a UI element on the device screen for debugging.",
     highlightSchema,
     highlightHandler,
     false,
-    false,
-    {
-      shouldEnsureDevice: args => args.platform !== "ios",
-      nonDeviceHandler: highlightNonDeviceHandler
-    }
+    false
   );
 }

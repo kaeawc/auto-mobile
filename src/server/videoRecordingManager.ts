@@ -31,8 +31,10 @@ import { VisualHighlightClient } from "../features/debug/VisualHighlight";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
 const MAX_DURATION_SECONDS = 300;
-// Keep in sync with HighlightAnimator's total fade-in + display + fade-out duration.
-const HIGHLIGHT_ANIMATION_DURATION_MS = 6000;
+// Android uses HighlightAnimator's total fade-in + display + fade-out duration.
+// iOS SDK/runner overlays auto-remove after their 3 second TTL.
+const ANDROID_HIGHLIGHT_ANIMATION_DURATION_MS = 6000;
+const IOS_HIGHLIGHT_ANIMATION_DURATION_MS = 3000;
 
 interface StartVideoRecordingRequest {
   device: BootedDevice;
@@ -306,8 +308,14 @@ function recordHighlightAdded(
     description: highlight.description,
     shape: highlight.shape,
     appearedAtMs,
-    disappearedAtMs: appearedAtMs + HIGHLIGHT_ANIMATION_DURATION_MS,
+    disappearedAtMs: appearedAtMs + highlightAnimationDurationMs(session.platform),
   });
+}
+
+function highlightAnimationDurationMs(platform: BootedDevice["platform"]): number {
+  return platform === "ios"
+    ? IOS_HIGHLIGHT_ANIMATION_DURATION_MS
+    : ANDROID_HIGHLIGHT_ANIMATION_DURATION_MS;
 }
 
 function generateHighlightId(timer: Timer = defaultTimer): string {
@@ -541,9 +549,6 @@ export async function startVideoRecording(
   const maxDurationSeconds = resolveMaxDurationSeconds(request.maxDurationSeconds);
   const highlightInputs = request.highlights ?? [];
 
-  if (highlightInputs.length > 0 && request.device.platform !== "android") {
-    throw new ActionableError("Visual highlights are only supported on Android devices.");
-  }
   for (const highlight of highlightInputs) {
     normalizeHighlightTiming(highlight);
   }
@@ -574,19 +579,17 @@ export async function startVideoRecording(
     config: active.config,
   });
 
-  if (request.device.platform === "android") {
-    const highlightSession = createHighlightSession(
-      active.recordingId,
-      request.device,
-      active.startedAt,
-      timer
-    );
-    highlightSessions.set(active.recordingId, highlightSession);
-    highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
+  const highlightSession = createHighlightSession(
+    active.recordingId,
+    request.device,
+    active.startedAt,
+    timer
+  );
+  highlightSessions.set(active.recordingId, highlightSession);
+  highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
 
-    if (highlightInputs.length > 0) {
-      await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
-    }
+  if (highlightInputs.length > 0) {
+    await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
   }
 
   await scheduleAutoStop(active.recordingId, maxDurationSeconds);

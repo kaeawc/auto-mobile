@@ -54,7 +54,7 @@ Example config payload:
     - `platform`: `android` or `ios`.
     - `deviceId`/`sessionUuid`/`device`: optional device targeting. If omitted, the action applies to all devices on the platform.
     - `recordingId`: optional (stop only).
-    - `highlights`: optional list of highlight entries (Android only) to show during recording. Each entry includes optional `description`, `shape`, and optional `timing` (`startTimeMs`).
+    - `highlights`: optional list of highlight entries to show during recording on Android and iOS apps with the AutoMobileSDK in-app bridge. Each entry includes optional `description`, `shape`, and optional `timing` (`startTimeMs`). iOS runner-process fallback overlays are disabled by default unless `AUTOMOBILE_IOS_LIVE_HIGHLIGHTS=true`.
     - Optional overrides for `targetBitrateKbps`, `fps`, `resolution`, `qualityPreset`, `format`,
       `maxDuration` (seconds, default 30, max 300), and `outputName`.
   - Returns: per-device recording metadata and any evictions.

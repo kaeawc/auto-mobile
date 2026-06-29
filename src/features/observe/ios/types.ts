@@ -6,6 +6,7 @@
  */
 
 import type { ViewHierarchyWindowInfo } from "../../../models";
+import type { HighlightOperationResult } from "../../../models";
 import type {
   PerfTiming,
   BaseResult,
@@ -218,6 +219,9 @@ export interface CtrlProxyVoiceOverActionResult {
   totalTimeMs?: number;
   error?: string;
 }
+
+/** Highlight result from CtrlProxy iOS */
+export type CtrlProxyHighlightResult = HighlightOperationResult;
 
 /**
  * Interface for cached hierarchy with metadata

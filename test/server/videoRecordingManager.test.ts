@@ -172,6 +172,87 @@ describe("videoRecordingManager", () => {
     ]);
   });
 
+  test("records scheduled highlight timelines for iOS recordings", async () => {
+    const iosDevice: BootedDevice = {
+      deviceId: "ios-device",
+      platform: "ios",
+      name: "iPhone Simulator",
+    };
+    const highlightShape = {
+      type: "box",
+      bounds: { x: 10, y: 20, width: 30, height: 40 },
+    } as const;
+
+    const active = await startVideoRecording({
+      device: iosDevice,
+      highlights: [
+        {
+          description: "iOS target",
+          shape: highlightShape,
+          timing: { startTimeMs: 0 },
+        },
+      ],
+      maxDurationSeconds: 5,
+    });
+
+    fakeTimer.advanceTime(1000);
+    await new Promise(resolve => setImmediate(resolve));
+    fakeBackend.setStopResultOverrides({
+      endedAt: new Date(fakeTimer.now()).toISOString(),
+    });
+
+    const { metadata } = await stopVideoRecording(active.recordingId);
+
+    expect(fakeHighlightClient.addCalls[0]?.options.platform).toBe("ios");
+    expect(metadata.highlights).toEqual([
+      {
+        description: "iOS target",
+        shape: highlightShape,
+        timeline: { appearedAtSeconds: 0, disappearedAtSeconds: 1 },
+      },
+    ]);
+  });
+
+  test("uses iOS overlay lifetime for long recording highlight timelines", async () => {
+    const iosDevice: BootedDevice = {
+      deviceId: "ios-device",
+      platform: "ios",
+      name: "iPhone Simulator",
+    };
+    const highlightShape = {
+      type: "box",
+      bounds: { x: 10, y: 20, width: 30, height: 40 },
+    } as const;
+
+    const active = await startVideoRecording({
+      device: iosDevice,
+      highlights: [
+        {
+          description: "iOS target",
+          shape: highlightShape,
+          timing: { startTimeMs: 0 },
+        },
+      ],
+      maxDurationSeconds: 10,
+    });
+
+    fakeTimer.advanceTime(5000);
+    await new Promise(resolve => setImmediate(resolve));
+    fakeBackend.setStopResultOverrides({
+      endedAt: new Date(fakeTimer.now()).toISOString(),
+    });
+
+    const { metadata } = await stopVideoRecording(active.recordingId);
+
+    expect(metadata.highlights).toEqual([
+      {
+        description: "iOS target",
+        shape: highlightShape,
+        timeline: { appearedAtSeconds: 0, disappearedAtSeconds: 3 },
+      },
+    ]);
+  });
+
   test("records dynamic highlight events during recording", async () => {
     const highlightShape = {
       type: "box",

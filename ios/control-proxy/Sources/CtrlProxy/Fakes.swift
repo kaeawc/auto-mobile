@@ -742,8 +742,11 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
     private var _fetchServerInfoCallCount = 0
     private var _isAvailableCallCount = 0
     private var _setMockRulesCallCount = 0
+    private var _addHighlightCallCount = 0
     private var _lastMockRules: [NetworkMockRuleDTO]?
+    private var _lastHighlight: (id: String, shape: HighlightShape)?
     public var setMockRulesResult = true
+    public var addHighlightResult = false
 
     public init() {}
 
@@ -805,10 +808,22 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         return _setMockRulesCallCount
     }
 
+    public var addHighlightCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _addHighlightCallCount
+    }
+
     public var lastMockRules: [NetworkMockRuleDTO]? {
         lock.lock()
         defer { lock.unlock() }
         return _lastMockRules
+    }
+
+    public var lastHighlight: (id: String, shape: HighlightShape)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _lastHighlight
     }
 
     public func clearHistory() {
@@ -818,7 +833,9 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         _fetchServerInfoCallCount = 0
         _isAvailableCallCount = 0
         _setMockRulesCallCount = 0
+        _addHighlightCallCount = 0
         _lastMockRules = nil
+        _lastHighlight = nil
         lock.unlock()
     }
 
@@ -861,6 +878,15 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         _setMockRulesCallCount += 1
         _lastMockRules = rules
         let result = setMockRulesResult
+        lock.unlock()
+        return result
+    }
+
+    public func addHighlight(id: String, shape: HighlightShape) -> Bool {
+        lock.lock()
+        _addHighlightCallCount += 1
+        _lastHighlight = (id: id, shape: shape)
+        let result = addHighlightResult
         lock.unlock()
         return result
     }

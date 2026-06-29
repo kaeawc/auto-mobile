@@ -822,24 +822,17 @@ class ToolRegistryClass {
   getToolDefinitions() {
     const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
     return this.getAllTools().map(tool => {
-      const definition: {
-        name: string;
-        description: string;
-        inputSchema: Record<string, unknown>;
-        outputSchema?: Record<string, unknown>;
-        _meta?: { "anthropic/alwaysLoad": true };
-      } = {
+      const outputSchema = tool.outputSchema
+        ? flattenTopLevelUnion(toJSONSchema(tool.outputSchema))
+        : undefined;
+
+      return {
         name: tool.name,
         description: tool.description,
         inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)),
+        ...(outputSchema && { outputSchema }),
         ...(alwaysLoad && { _meta: { "anthropic/alwaysLoad": true } })
       };
-
-      if (tool.outputSchema) {
-        definition.outputSchema = flattenTopLevelUnion(toJSONSchema(tool.outputSchema));
-      }
-
-      return definition;
     });
   }
 

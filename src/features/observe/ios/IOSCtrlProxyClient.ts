@@ -19,6 +19,7 @@ import { getFailureRecorder } from "../../failures/FailureRecorder";
 import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
+  HighlightShape,
   ImeAction,
   ViewHierarchyResult,
 } from "../../../models";
@@ -106,6 +107,7 @@ import { CtrlProxyClipboard } from "./CtrlProxyClipboard";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyVoiceOver } from "./CtrlProxyVoiceOver";
 import { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
+import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 
 // Import types
 import type {
@@ -137,6 +139,7 @@ import type {
   CtrlProxyVoiceOverActionResult,
   CtrlProxyActionResult,
   CtrlProxyClipboardResult,
+  CtrlProxyHighlightResult,
   WebSocketMessage,
 } from "./types";
 
@@ -161,6 +164,12 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     signal?: AbortSignal,
     timeoutMs?: number
   ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null>;
+  requestAddHighlight(
+    id: string,
+    shape: HighlightShape,
+    timeoutMs?: number,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyHighlightResult>;
 
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
@@ -326,6 +335,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private _voiceOver: CtrlProxyVoiceOver | null = null;
   private _storage: CtrlProxyStorage | null = null;
   private _keyboard: CtrlProxyKeyboard | null = null;
+  private _highlights: CtrlProxyHighlights | null = null;
 
   // Logging tag for base class
   protected readonly logTag = "IOSCtrlProxyClient";
@@ -631,6 +641,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this._keyboard = new CtrlProxyKeyboard(this.createDelegateContext());
     }
     return this._keyboard;
+  }
+
+  private get highlights(): CtrlProxyHighlights {
+    if (!this._highlights) {
+      this._highlights = new CtrlProxyHighlights(this.createDelegateContext());
+    }
+    return this._highlights;
   }
 
   // ===========================================================================
@@ -1161,6 +1178,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           };
           break;
 
+        case "highlight_response":
+          result = {
+            success: message.success ?? true,
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+            requestId,
+            timestamp: message.timestamp,
+          };
+          break;
+
         case "multi_finger_swipe_result":
           result = {
             success: message.success ?? true,
@@ -1389,6 +1416,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   clearCache(): void {
     this.cachedHierarchy = null;
+  }
+
+  // ===========================================================================
+  // Delegated Public Methods - Highlights
+  // ===========================================================================
+
+  async requestAddHighlight(
+    id: string,
+    shape: HighlightShape,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<CtrlProxyHighlightResult> {
+    return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
   }
 
   // ===========================================================================

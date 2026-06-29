@@ -243,6 +243,8 @@ public protocol SdkHierarchyFetching {
     func isAvailable() -> Bool
     /// Replace network mock rules in the in-app SDK.
     func setMockRules(_ rules: [NetworkMockRuleDTO]) -> Bool
+    /// Draw a highlight in the in-app SDK process.
+    func addHighlight(id: String, shape: HighlightShape) -> Bool
 }
 
 /// Protocol for accessing the cached SDK hierarchy.

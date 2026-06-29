@@ -9,6 +9,7 @@ import Network
 /// - `GET /health` → `{"status":"ok","bundleId":"<sdk app bundle id>"}`
 /// - `GET /hierarchy` → latest cached hierarchy (fast, no main-thread work)
 /// - `GET /hierarchy/fresh` → synchronous main-thread walk (slower but guaranteed fresh)
+/// - `POST /highlight` → render a debug highlight in the app-under-test process
 final class SdkHierarchyServer: @unchecked Sendable {
 
     static let port: UInt16 = 8766
@@ -97,6 +98,8 @@ final class SdkHierarchyServer: @unchecked Sendable {
                 self.handleHealth(connection)
             } else if request.contains("POST /network/mock") {
                 self.handleNetworkMock(connection, data: data)
+            } else if request.contains("POST /highlight") {
+                self.handleHighlight(connection, data: data)
             } else {
                 self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
             }
@@ -145,6 +148,19 @@ final class SdkHierarchyServer: @unchecked Sendable {
             return
         }
         NetworkMockRuleStore.shared.setRules(payload.rules)
+        sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+    }
+
+    private func handleHighlight(_ connection: NWConnection, data: Data) {
+        guard let body = Self.httpBody(from: data),
+              let payload = try? JSONDecoder().decode(SdkAddHighlightBody.self, from: body) else {
+            sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+            return
+        }
+        guard SdkHighlightOverlayManager.shared.show(id: payload.id, shape: payload.shape) else {
+            sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"highlight_failed\"}".utf8))
+            return
+        }
         sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
     }
 

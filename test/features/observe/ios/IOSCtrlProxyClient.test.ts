@@ -1474,4 +1474,68 @@ describe("IOSCtrlProxyClient", function() {
       }
     });
   });
+
+  describe("getSupportedCommands", function() {
+    test("returns the advertised command set (sorted) once the runner handshakes", async function() {
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_shake", "add_highlight", "request_press_button"]
+        }));
+        await flushPromises();
+
+        const commands = await testClient.getSupportedCommands();
+
+        expect(commands).toEqual(["add_highlight", "request_press_button", "request_shake"]);
+        // Cached accessor never opens a connection and mirrors the live set.
+        expect(testClient.getCachedSupportedCommands()).toEqual([
+          "add_highlight",
+          "request_press_button",
+          "request_shake"
+        ]);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("getExistingInstance does not create a client when none exists", function() {
+      IOSCtrlProxyClient.resetInstances();
+      expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBeNull();
+
+      const created = IOSCtrlProxyClient.getInstance(testDevice);
+      expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBe(created);
+    });
+
+    test("returns null when the runner cannot be reached", async function() {
+      const testTimer = fakeTimer;
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+
+      try {
+        const commands = await testClient.getSupportedCommands();
+        expect(commands).toBeNull();
+        expect(testClient.getCachedSupportedCommands()).toBeNull();
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
 });

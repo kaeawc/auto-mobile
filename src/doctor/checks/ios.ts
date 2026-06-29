@@ -8,12 +8,41 @@ import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { ExecResult } from "../../models";
+import type { BootedDevice, ExecResult } from "../../models";
 import { CheckResult, DoctorOptions } from "../types";
 import { SimCtl, SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger, type Logger } from "../../utils/logger";
+import { IOS_CTRL_PROXY_RELEASE_VERSION, resolveAssetVersion } from "../../constants/release";
+import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyClient, IOS_RUNNER_FEATURE_COMMANDS } from "../../features/observe/ios/IOSCtrlProxyClient";
+
+// Re-exported so doctor consumers (and tests) can reference the feature command
+// set without reaching into the runner client module.
+export { IOS_RUNNER_FEATURE_COMMANDS };
 
 const MIN_XCODE_VERSION = "15.0";
+
+const IOS_RUNNER_REBUILD_RECOMMENDATION =
+  "Rebuild and redeploy the iOS CtrlProxy runner: run scripts/ios/ctrl-proxy-build-for-testing.sh " +
+  "and point AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH at the rebuilt bundle, or run the iOS hot-reload " +
+  "watcher with --manage-ios-runner.";
+
+/** Per-simulator runner identity gathered by the inspector. */
+export interface IosRunnerInspection {
+  deviceId: string;
+  name: string;
+  installed: boolean;
+  running: boolean;
+  /** Advertised command set, or null when the runner could not be reached. */
+  supportedCommands: string[] | null;
+}
+
+/** Source of booted-simulator runner identities (injectable for tests). */
+export interface IosCtrlProxyRunnerInspector {
+  inspectBootedRunners(): Promise<IosRunnerInspection[]>;
+}
+
+type IosRunnerVersionStatus = "compatible" | "stale" | "unknown";
 
 /**
  * Bound every external diagnostic call. Tools like `xcrun`, `security`
@@ -35,6 +64,64 @@ export interface IosDoctorDependencies {
   homedir: () => string;
   logger: Logger;
   createSimctlClient: () => SimCtl;
+  runnerInspector: IosCtrlProxyRunnerInspector;
+}
+
+/**
+ * Real inspector: for each booted simulator, read installed/running from the
+ * CtrlProxy manager and the advertised command set from the runner's `connected`
+ * handshake (connecting only when the runner is running).
+ */
+function createIosCtrlProxyRunnerInspector(
+  createSimctlClient: () => SimCtl,
+  log: Logger
+): IosCtrlProxyRunnerInspector {
+  return {
+    async inspectBootedRunners(): Promise<IosRunnerInspection[]> {
+      const simctl = createSimctlClient();
+      if (!(await simctl.isAvailable())) {
+        return [];
+      }
+
+      const simulators = await simctl.getBootedSimulators();
+      const inspections: IosRunnerInspection[] = [];
+      for (const simulator of simulators) {
+        const device: BootedDevice = {
+          name: simulator.name,
+          platform: "ios",
+          deviceId: simulator.deviceId,
+          source: simulator.source,
+        };
+        const manager = IOSCtrlProxyManager.getInstance(device);
+        const installed = await manager.isInstalled();
+        const running = installed ? await manager.isRunning() : false;
+
+        let supportedCommands: string[] | null = null;
+        if (running) {
+          try {
+            const client = IOSCtrlProxyClient.getInstance(device);
+            supportedCommands = await client.getSupportedCommands();
+          } catch (error) {
+            // Treated as an unreachable runner (versionStatus=unknown), not a hard
+            // failure: doctor still reports installed/running for the simulator.
+            log.warn(
+              `iOS CtrlProxy runner command probe failed for ${simulator.deviceId}: ${normalizeErrorMessage(error)}`,
+              error
+            );
+          }
+        }
+
+        inspections.push({
+          deviceId: simulator.deviceId,
+          name: simulator.name,
+          installed,
+          running,
+          supportedCommands,
+        });
+      }
+      return inspections;
+    },
+  };
 }
 
 const createExecResult = (stdout: string, stderr: string): ExecResult => ({
@@ -66,7 +153,8 @@ const createIosDoctorDependencies = (): IosDoctorDependencies => ({
   readDir: async path => fs.readdir(path),
   homedir,
   logger,
-  createSimctlClient: () => new SimCtlClient()
+  createSimctlClient: () => new SimCtlClient(),
+  runnerInspector: createIosCtrlProxyRunnerInspector(() => new SimCtlClient(), logger)
 });
 
 function parseXcodeVersion(output: string): string | null {
@@ -578,21 +666,138 @@ export async function checkBootedSimulators(
   }
 }
 
+interface IosRunnerClassification {
+  status: IosRunnerVersionStatus;
+  missingCommands: string[];
+  line: string;
+}
+
+function classifyRunner(
+  inspection: IosRunnerInspection,
+  expectedVersion: string
+): IosRunnerClassification {
+  let status: IosRunnerVersionStatus;
+  let missingCommands: string[] = [];
+
+  if (!inspection.installed) {
+    status = "unknown";
+  } else if (!inspection.running) {
+    status = "unknown";
+  } else if (inspection.supportedCommands === null) {
+    status = "unknown";
+  } else {
+    const advertised = new Set(inspection.supportedCommands);
+    missingCommands = IOS_RUNNER_FEATURE_COMMANDS.filter(command => !advertised.has(command));
+    status = missingCommands.length === 0 ? "compatible" : "stale";
+  }
+
+  const parts = [
+    "platform=ios",
+    `device=${inspection.deviceId}`,
+    `installed=${inspection.installed}`,
+    `running=${inspection.running}`,
+    `expectedVersion=${expectedVersion}`,
+    `versionStatus=${status}`,
+  ];
+  if (missingCommands.length > 0) {
+    parts.push(`missingCommands=${missingCommands.join(",")}`);
+  }
+
+  return { status, missingCommands, line: parts.join("; ") };
+}
+
+/**
+ * Check the iOS CtrlProxy runner on each booted simulator, mirroring the Android
+ * CtrlProxy check. Reports installed/running, the expected pinned runner version,
+ * and a `versionStatus` derived from the runner's advertised feature command set
+ * so a stale runner (e.g. released v0.0.38) is flagged with remediation instead of
+ * silently passing.
+ */
+export async function checkIosCtrlProxyRunner(
+  dependencies = createIosDoctorDependencies()
+): Promise<CheckResult> {
+  const name = "iOS CtrlProxy Runner";
+
+  if (dependencies.platform() !== "darwin") {
+    return {
+      name,
+      status: "skip",
+      message: "iOS simulators only available on macOS",
+    };
+  }
+
+  try {
+    const inspections = await dependencies.runnerInspector.inspectBootedRunners();
+
+    if (inspections.length === 0) {
+      return {
+        name,
+        status: "skip",
+        message: "No booted simulators to check",
+      };
+    }
+
+    const expectedVersion = resolveAssetVersion(IOS_CTRL_PROXY_RELEASE_VERSION);
+    const classifications = inspections.map(inspection => classifyRunner(inspection, expectedVersion));
+
+    const message = classifications.map(classification => classification.line).join(" | ");
+    const hasStale = classifications.some(classification => classification.status === "stale");
+    const hasUnknown = classifications.some(classification => classification.status === "unknown");
+
+    if (hasStale) {
+      return {
+        name,
+        status: "warn",
+        message,
+        recommendation: IOS_RUNNER_REBUILD_RECOMMENDATION,
+      };
+    }
+
+    if (hasUnknown) {
+      return {
+        name,
+        status: "warn",
+        message,
+        recommendation:
+          "Could not confirm the iOS CtrlProxy runner identity. Ensure the runner is installed and " +
+          `running, then re-run doctor. ${IOS_RUNNER_REBUILD_RECOMMENDATION}`,
+      };
+    }
+
+    return {
+      name,
+      status: "pass",
+      message,
+    };
+  } catch (error) {
+    dependencies.logger.warn(`iOS CtrlProxy runner check failed: ${normalizeErrorMessage(error)}`, error);
+    return {
+      name,
+      status: "skip",
+      message: `Could not check iOS CtrlProxy runner: ${normalizeErrorMessage(error)}`,
+    };
+  }
+}
+
 /**
  * Run all iOS checks
  */
-export async function runIosChecks(options: DoctorOptions = {}): Promise<CheckResult[]> {
+export async function runIosChecks(
+  options: DoctorOptions = {},
+  dependencies = createIosDoctorDependencies()
+): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
-  results.push(await checkXcodeInstallation());
-  results.push(await checkXcodeCommandLineTools(options));
-  results.push(await checkXcrunAvailable());
-  results.push(await checkSimctlAvailable());
-  results.push(await checkSimulatorRuntimes());
-  results.push(await checkCodeSigning());
-  results.push(await checkAppleDeveloperAccount());
-  results.push(await checkProvisioningProfiles());
-  results.push(await checkBootedSimulators());
+  results.push(await checkXcodeInstallation(MIN_XCODE_VERSION, dependencies));
+  results.push(await checkXcodeCommandLineTools(options, dependencies));
+  results.push(await checkXcrunAvailable(dependencies));
+  results.push(await checkSimctlAvailable(dependencies));
+  results.push(await checkSimulatorRuntimes(dependencies));
+  results.push(await checkCodeSigning(dependencies));
+  results.push(await checkAppleDeveloperAccount(dependencies));
+  results.push(await checkProvisioningProfiles(dependencies));
+  results.push(await checkBootedSimulators(dependencies));
+  results.push(await checkIosCtrlProxyRunner(dependencies));
 
   return results;
 }

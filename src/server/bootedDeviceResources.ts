@@ -8,6 +8,7 @@ import type { Session } from "../daemon/sessionManager";
 import type { DevicePool } from "../daemon/devicePool";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyClient, IOS_RUNNER_FEATURE_COMMANDS } from "../features/observe/ios/IOSCtrlProxyClient";
 import {
   IOS_CTRL_PROXY_RELEASE_VERSION,
   RELEASE_VERSION,
@@ -29,6 +30,13 @@ interface DeviceServiceStatus {
   installedSha256: string | null;
   expectedSha256: string;
   isCompatible: boolean;
+  /**
+   * iOS only: whether the running runner advertises the full feature command set.
+   * The iOS runner exposes no version/hash (installedSha256 stays null), so this
+   * is the runner-identity signal that makes isCompatible meaningful instead of
+   * always-true. null when the runner has not handshaked (identity unknown).
+   */
+  supportedCommandsComplete?: boolean | null;
 }
 
 // Booted device info for resource response
@@ -414,13 +422,33 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
         manager.isRunning(),
       ]);
       const expectedSha256 = resolveChecksum(IOS_CTRL_PROXY_RELEASE_VERSION, "ios");
+
+      // The iOS runner exposes no hash/version, so identity comes from the cached
+      // `supportedCommands` handshake. Read it connection-free (this hot path must
+      // not open a WebSocket); null means identity is unknown this fetch.
+      let supportedCommandsComplete: boolean | null = null;
+      if (running) {
+        const client = IOSCtrlProxyClient.getExistingInstance(bootedDevice.deviceId);
+        const cached = client?.getCachedSupportedCommands() ?? null;
+        if (cached !== null) {
+          const advertised = new Set(cached);
+          supportedCommandsComplete = IOS_RUNNER_FEATURE_COMMANDS.every(command => advertised.has(command));
+        }
+      }
+
+      // Only claim compatibility we can verify. When the command set is known,
+      // a stale runner (incomplete features) is reported incompatible instead of
+      // the previous always-true reassurance; when unknown, fall back to running.
+      const isCompatible = supportedCommandsComplete === null ? running : supportedCommandsComplete;
+
       return {
         installed,
         enabled: running,
         running,
         installedSha256: null,
         expectedSha256,
-        isCompatible: running,
+        isCompatible,
+        supportedCommandsComplete,
       };
     }
   } catch (error) {

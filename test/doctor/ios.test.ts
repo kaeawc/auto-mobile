@@ -4,13 +4,17 @@ import {
   checkAppleDeveloperAccount,
   checkBootedSimulators,
   checkCodeSigning,
+  checkIosCtrlProxyRunner,
   checkProvisioningProfiles,
   checkSimctlAvailable,
   checkSimulatorRuntimes,
   checkXcodeCommandLineTools,
   checkXcodeInstallation,
-  checkXcrunAvailable
+  checkXcrunAvailable,
+  IOS_RUNNER_FEATURE_COMMANDS,
+  runIosChecks
 } from "../../src/doctor/checks/ios";
+import type { IosRunnerInspection } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLogger } from "../fakes/FakeLogger";
@@ -57,7 +61,10 @@ const baseDependencies: IosDoctorDependencies = {
     terminateApp: async () => {},
     getScreenSize: async () => ({ width: 100, height: 100 }),
     setAppearance: async () => {}
-  })
+  }),
+  runnerInspector: {
+    inspectBootedRunners: async () => []
+  }
 };
 
 describe("iOS doctor checks", () => {
@@ -576,5 +583,129 @@ describe("iOS doctor checks", () => {
       expect(result.status).toBe("skip");
       expect(logger.at("warn").length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe("checkIosCtrlProxyRunner", () => {
+  // A fresh runner advertises every feature command plus the baseline ones.
+  const FRESH_COMMANDS = [
+    ...IOS_RUNNER_FEATURE_COMMANDS,
+    "request_hierarchy",
+    "request_screenshot",
+    "request_tap_coordinates"
+  ];
+  // The released v0.0.38 runner predates `request_shake` (and the other features).
+  const STALE_COMMANDS = FRESH_COMMANDS.filter(command => command !== "request_shake");
+
+  const inspection = (over: Partial<IosRunnerInspection> = {}): IosRunnerInspection => ({
+    deviceId: "SIM-1",
+    name: "iPhone 15",
+    installed: true,
+    running: true,
+    supportedCommands: [...FRESH_COMMANDS],
+    ...over
+  });
+
+  const withRunners = (inspections: IosRunnerInspection[]) => ({
+    ...baseDependencies,
+    runnerInspector: { inspectBootedRunners: async () => inspections }
+  });
+
+  test("passes when a booted runner advertises every feature command", async () => {
+    const result = await checkIosCtrlProxyRunner(withRunners([inspection()]));
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("device=SIM-1");
+    expect(result.message).toContain("versionStatus=compatible");
+    expect(result.message).not.toContain("missingCommands");
+  });
+
+  test("warns and lists missing commands when the runner is stale", async () => {
+    const result = await checkIosCtrlProxyRunner(
+      withRunners([inspection({ supportedCommands: [...STALE_COMMANDS] })])
+    );
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("versionStatus=stale");
+    expect(result.message).toContain("request_shake");
+    expect(result.recommendation).toContain("ctrl-proxy-build-for-testing.sh");
+    expect(result.recommendation).toContain("AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH");
+  });
+
+  test("reports unknown when the runner is installed but not running", async () => {
+    const result = await checkIosCtrlProxyRunner(
+      withRunners([inspection({ running: false, supportedCommands: null })])
+    );
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("versionStatus=unknown");
+    expect(result.message).toContain("running=false");
+  });
+
+  test("reports unknown when the runner is running but unreachable", async () => {
+    const result = await checkIosCtrlProxyRunner(
+      withRunners([inspection({ supportedCommands: null })])
+    );
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("versionStatus=unknown");
+  });
+
+  test("reports unknown when the runner is not installed", async () => {
+    const result = await checkIosCtrlProxyRunner(
+      withRunners([inspection({ installed: false, running: false, supportedCommands: null })])
+    );
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("installed=false");
+    expect(result.message).toContain("versionStatus=unknown");
+  });
+
+  test("skips when no simulators are booted", async () => {
+    const result = await checkIosCtrlProxyRunner(withRunners([]));
+    expect(result.status).toBe("skip");
+  });
+
+  test("skips on non-macOS platforms", async () => {
+    const result = await checkIosCtrlProxyRunner({
+      ...baseDependencies,
+      platform: () => "linux"
+    });
+    expect(result.status).toBe("skip");
+  });
+
+  test("overall status is the worst across multiple simulators", async () => {
+    const result = await checkIosCtrlProxyRunner(
+      withRunners([
+        inspection({ deviceId: "SIM-A" }),
+        inspection({ deviceId: "SIM-B", supportedCommands: [...STALE_COMMANDS] })
+      ])
+    );
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("device=SIM-A");
+    expect(result.message).toContain("device=SIM-B");
+  });
+
+  test("logs and returns skip when the inspector throws", async () => {
+    const logger = new FakeLogger();
+    const result = await checkIosCtrlProxyRunner({
+      ...baseDependencies,
+      logger,
+      runnerInspector: {
+        inspectBootedRunners: async () => {
+          throw new Error("inspection failed");
+        }
+      }
+    });
+
+    expect(result.status).toBe("skip");
+    expect(logger.at("warn").length).toBeGreaterThan(0);
+  });
+
+  test("runIosChecks includes the iOS CtrlProxy runner check", async () => {
+    const results = await runIosChecks({}, baseDependencies);
+    const names = results.map(check => check.name);
+    expect(names).toContain("iOS CtrlProxy Runner");
   });
 });

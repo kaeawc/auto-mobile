@@ -62,11 +62,22 @@ interface SqliteColumnInfo {
   name: string;
 }
 
+export interface SqliteCommandExecutor {
+  execFile(command: string, args: string[]): Promise<{ stdout: string }>;
+}
+
 export interface TccPermissionReader {
   readPermissions(deviceId: string, appId: string, permissions?: string[]): Promise<TccPermissionRow[]>;
 }
 
 const execFileAsync = promisify(execFile);
+
+class NodeSqliteCommandExecutor implements SqliteCommandExecutor {
+  async execFile(command: string, args: string[]): Promise<{ stdout: string }> {
+    const { stdout } = await execFileAsync(command, args);
+    return { stdout };
+  }
+}
 
 const TCC_SERVICE_BY_PERMISSION = new Map<string, string>([
   ["calendar", "kTCCServiceCalendar"],
@@ -134,9 +145,14 @@ function stateFromAllowed(value: number | null | undefined): IosSimulatorPermiss
 }
 
 export class SqliteTccPermissionReader implements TccPermissionReader {
+  constructor(
+    private readonly sqlite: SqliteCommandExecutor = new NodeSqliteCommandExecutor(),
+    private readonly homeDirectory: string = homedir()
+  ) {}
+
   async readPermissions(deviceId: string, appId: string, permissions?: string[]): Promise<TccPermissionRow[]> {
     const tccPath = join(
-      homedir(),
+      this.homeDirectory,
       "Library",
       "Developer",
       "CoreSimulator",
@@ -158,18 +174,17 @@ export class SqliteTccPermissionReader implements TccPermissionReader {
       .filter(column => columns.has(column));
     const selectColumns = ["service", "client", ...optionalColumns].join(", ");
     const query = [
-      ".mode json",
       `select ${selectColumns}`,
       "from access",
       `where client = '${appId.replace(/'/g, "''")}'${serviceFilter};`
     ].join("\n");
 
-    const { stdout } = await execFileAsync("sqlite3", [tccPath, query]);
+    const { stdout } = await this.sqlite.execFile("sqlite3", ["-json", tccPath, query]);
     return JSON.parse(stdout.trim() || "[]") as TccPermissionRow[];
   }
 
   private async readAccessColumns(tccPath: string): Promise<Set<string>> {
-    const { stdout } = await execFileAsync("sqlite3", [tccPath, ".mode json\npragma table_info(access);"]);
+    const { stdout } = await this.sqlite.execFile("sqlite3", ["-json", tccPath, "pragma table_info(access);"]);
     const columns = JSON.parse(stdout.trim() || "[]") as SqliteColumnInfo[];
     return new Set(columns.map(column => column.name));
   }

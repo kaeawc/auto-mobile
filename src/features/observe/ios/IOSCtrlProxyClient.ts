@@ -293,6 +293,22 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
 }
 
 /**
+ * Command rawValues a *fresh* iOS CtrlProxy runner advertises in its `connected`
+ * handshake that the released v0.0.38 runner predates. The runner exposes no
+ * version/hash, so presence of all of these in `supportedCommands` is the runner
+ * identity used by diagnostics (doctor) and the booted-devices resource to tell a
+ * current runner from a stale one.
+ */
+export const IOS_RUNNER_FEATURE_COMMANDS = [
+  "request_shake",
+  "request_press_button",
+  "request_multi_finger_swipe",
+  "add_highlight",
+  "execute_sql",
+  "set_network_mock_rules",
+] as const;
+
+/**
  * IOSCtrlProxyClient - WebSocket client for iOS CtrlProxy
  * Provides iOS UI hierarchy and interaction capabilities matching Android IOSCtrlProxyClient
  *
@@ -399,6 +415,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const client = new IOSCtrlProxyClient(device, resolvedPort);
     IOSCtrlProxyClient.instances.set(key, client);
     return client;
+  }
+
+  /**
+   * Return the existing client for a device without creating one (or allocating a
+   * port). Hot paths that only want a connection-free read of cached state — e.g.
+   * the booted-devices resource reading `getCachedSupportedCommands()` — use this
+   * so listing devices never spins up a client or reserves a port as a side effect.
+   */
+  public static getExistingInstance(deviceId: string): IOSCtrlProxyClient | null {
+    return IOSCtrlProxyClient.instances.get(deviceId) ?? null;
   }
 
   /**
@@ -1358,6 +1384,48 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private isCommandSupported(messageType: string): boolean {
     return this.supportedCommands === null || this.supportedCommands.has(messageType);
+  }
+
+  /**
+   * Runner-identity accessor for diagnostics (doctor). Connects if needed so the
+   * `connected` handshake's `supportedCommands` set is available, then returns it
+   * sorted. Returns null when the runner cannot be reached (no handshake), which
+   * the caller surfaces as an `unknown` runner status rather than a false pass.
+   */
+  public async getSupportedCommands(): Promise<string[] | null> {
+    if (this.supportedCommands === null) {
+      const connected = await this.ensureConnected();
+      // ensureConnected resolves on the WebSocket `open` event, but the runner's
+      // `supportedCommands` arrive a beat later in the `connected` handshake
+      // message. Without waiting for it, the first probe (e.g. doctor) of a
+      // healthy runner reads null and misreports it as `unknown`. Poll briefly
+      // for the handshake before reading.
+      if (connected) {
+        await this.waitForHandshake();
+      }
+    }
+    return this.getCachedSupportedCommands();
+  }
+
+  private static readonly HANDSHAKE_WAIT_TIMEOUT_MS = 2000;
+  private static readonly HANDSHAKE_POLL_INTERVAL_MS = 50;
+
+  private async waitForHandshake(
+    timeoutMs: number = IOSCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS
+  ): Promise<void> {
+    const deadline = this.timer.now() + timeoutMs;
+    while (this.supportedCommands === null && this.timer.now() < deadline) {
+      await this.timer.sleep(IOSCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS);
+    }
+  }
+
+  /**
+   * Cheap, connection-free view of the last advertised command set. Used by the
+   * booted-devices resource hot path, which must not open a WebSocket just to
+   * report status. Returns null when no handshake has been seen.
+   */
+  public getCachedSupportedCommands(): string[] | null {
+    return this.supportedCommands === null ? null : Array.from(this.supportedCommands).sort();
   }
 
   private buildUnsupportedCommandError(messageType: string): string {

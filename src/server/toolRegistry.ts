@@ -351,6 +351,7 @@ class ToolRegistryClass {
 
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
+      let toolDurationMs: number | undefined;
 
       try {
         // Extract platform from args, default to "either" for backward compatibility
@@ -537,7 +538,7 @@ class ToolRegistryClass {
           }
 
           // Emit tool call telemetry
-          const toolDurationMs = this.timer.now() - toolStartMs;
+          toolDurationMs = this.timer.now() - toolStartMs;
           TelemetryRecorder.getInstance().recordToolCallEvent({
             timestamp: toolStartMs,
             toolName: name,
@@ -634,7 +635,7 @@ class ToolRegistryClass {
           toolName: name,
           timestamp: toolCallTimestamp,
           sessionUuid,
-          durationMs: this.timer.now() - toolStartMs,
+          durationMs: toolDurationMs ?? this.timer.now() - toolStartMs,
         });
       }
     };

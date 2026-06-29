@@ -17,7 +17,8 @@ exclude = [
     "^https://hub\\.docker\\.com/",
     # WebAIM contrast checker has unreliable uptime / timeouts in CI
     "^https://webaim\\.org/",
-    # Contributor Covenant translations page intermittently resets CI connections
+    # Contributor Covenant pages intermittently reset CI connections
+    "^https://www\\.contributor-covenant\\.org/?$",
     "^https://www\\.contributor-covenant\\.org/translations/?$",
 ]
 

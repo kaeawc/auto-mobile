@@ -900,6 +900,53 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
       expect(hash2).toBe(hash4);
     });
   });
+
+  // Golden-hash stability guard: pins the exact hash output for fixed inputs so
+  // that the `any` -> typed annotation refactor is proven to make zero runtime
+  // change. If any of these values shift, the type migration altered behavior.
+  describe("Golden hash stability (refactor guard)", () => {
+    test("navigation-id fingerprint hash is stable", () => {
+      const hierarchy = createHierarchy({
+        node: {
+          "resource-id": "navigation.HomeDestination",
+          "node": { "text": "Home Screen", "resource-id": "home_screen_content" },
+        },
+      });
+
+      const result = ScreenFingerprint.compute(hierarchy);
+
+      expect(result.method).toBe(FingerprintMethod.NAVIGATION_ID);
+      expect(result.hash).toBe("5c6a39c949cfeec058c563e7a0c1bd8f9f9226e1626ca48e3998df4c6b50f64d");
+    });
+
+    test("shallow-scrollable filtered fingerprint hash is stable", () => {
+      const hierarchy = createHierarchy({
+        node: {
+          className: "Root",
+          node: [
+            {
+              "scrollable": "true",
+              "resource-id": "app:id/list",
+              "className": "RecyclerView",
+              "node": [
+                { "selected": "true", "text": "Tab One", "resource-id": "app:id/tab1" },
+                { "selected": "false", "text": "Tab Two", "resource-id": "app:id/tab2" },
+              ],
+            },
+            { "text": "Static Label", "resource-id": "app:id/label" },
+            { "content-desc": "Battery 50 percent" },
+            { "text": "12:34" },
+          ],
+        },
+      });
+
+      const result = ScreenFingerprint.compute(hierarchy);
+
+      expect(result.method).toBe(FingerprintMethod.SHALLOW_SCROLLABLE);
+      expect(result.hash).toBe("ff3379f2bb03233f1101775d913077b39802854a9e62ab1236ab7c512744a1f3");
+      expect(result.elementCount).toBe(4);
+    });
+  });
 });
 
 // Helper function to create AccessibilityHierarchy

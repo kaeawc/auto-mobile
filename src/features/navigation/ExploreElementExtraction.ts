@@ -1,4 +1,4 @@
-import type { Element } from "../../models";
+import type { Element, ViewHierarchyResult } from "../../models";
 import { isTruthy, isFalsy } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TrackedElement } from "./ExploreTypes";
@@ -7,7 +7,7 @@ import type { TrackedElement } from "./ExploreTypes";
  * Extract elements likely to be navigation controls
  */
 export function extractNavigationElements(
-  viewHierarchy: any,
+  viewHierarchy: ViewHierarchyResult,
   elementParser: ElementParser
 ): Element[] {
   const flatElements = elementParser.flattenViewHierarchy(viewHierarchy);
@@ -71,7 +71,7 @@ export function enrichElementWithChildProperties(element: Element): Element {
  * Extract scrollable containers for swiping
  */
 export function extractScrollableContainers(
-  viewHierarchy: any,
+  viewHierarchy: ViewHierarchyResult,
   elementParser: ElementParser
 ): Element[] {
   const flatElements = elementParser.flattenViewHierarchy(viewHierarchy);
@@ -152,7 +152,7 @@ export function isNavigationCandidate(element: Element): boolean {
  * Extract all elements from hierarchy (including non-clickable)
  */
 export function extractAllElements(
-  viewHierarchy: any,
+  viewHierarchy: ViewHierarchyResult,
   elementParser: ElementParser
 ): Element[] {
   const flatElements = elementParser.flattenViewHierarchy(viewHierarchy);

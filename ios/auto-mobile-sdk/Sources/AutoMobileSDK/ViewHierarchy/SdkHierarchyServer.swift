@@ -14,6 +14,7 @@ final class SdkHierarchyServer: @unchecked Sendable {
 
     static let port: UInt16 = 8766
     private static let httpHeaderDelimiter = Data("\r\n\r\n".utf8)
+    private static let maxHttpBodyBytes = 1024 * 1024
 
     private let lock = NSLock()
     private var listener: NWListener?
@@ -279,6 +280,10 @@ final class SdkHierarchyServer: @unchecked Sendable {
             return
         }
         guard contentLength >= 0 else {
+            completion(nil)
+            return
+        }
+        guard contentLength <= Self.maxHttpBodyBytes else {
             completion(nil)
             return
         }

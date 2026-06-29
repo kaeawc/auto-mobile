@@ -5,6 +5,7 @@ import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
@@ -33,6 +34,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     private const val OCCLUSION_FILTER_ENABLED = true
     private const val OCCLUSION_THRESHOLD = 0.95
     private const val DEFAULT_WINDOW_KEY = -1
+    private const val CONTENT_HIDDEN_REASON_COMPOSE_INTEROP =
+        "compose-interop-no-hide-descendants"
+    private const val MIN_HIDDEN_REGION_SCREEN_AREA = 0.25
+    private const val MAX_VISIBLE_CHILD_COVERAGE = 0.25
 
     private val GENERIC_CLASS_NAMES =
         setOf(
@@ -80,6 +85,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               dedupeTextContentDesc,
               accessibilityFocusedNode,
           )
+      val contentHiddenRegions =
+          rootElement?.let {
+            val (screenWidth, screenHeight) = resolveScreenDimensions(it, screenDimensions)
+            detectContentHiddenRegions(it, screenWidth, screenHeight)
+          }
 
       // Skip optimization and filtering if disableAllFiltering is true
       val processedElement =
@@ -136,6 +146,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           intentChooserDetected = intentChooserDetected,
           notificationPermissionDetected = notificationPermissionDetected,
           accessibilityFocusedElement = accessibilityFocusedElement,
+          contentHiddenRegions = contentHiddenRegions?.takeIf { it.isNotEmpty() },
       )
     } catch (e: Exception) {
       Log.e(TAG, "Error extracting view hierarchy", e)
@@ -192,6 +203,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     var activeWindowLayer = 0
     var activeWindowKey: Int? = null
     val windowInfos = mutableListOf<WindowInfo>()
+    val contentHiddenRegions = mutableListOf<ContentHiddenRegion>()
 
     // Track whether the accessibility service hierarchy is incomplete
     // This happens when active windows have null roots or only system UI is accessible
@@ -264,6 +276,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
                 accessibilityFocusedNode,
                 parentPath = "w${window.id}",
             )
+        if (element != null) {
+          val (screenWidth, screenHeight) = resolveScreenDimensions(element, screenDimensions)
+          contentHiddenRegions.addAll(detectContentHiddenRegions(element, screenWidth, screenHeight))
+        }
         // Skip optimization if disableAllFiltering is true
         val processedElement =
             if (disableAllFiltering) {
@@ -327,6 +343,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               dedupeTextContentDesc,
               accessibilityFocusedNode,
           )
+      if (element != null) {
+        val (screenWidth, screenHeight) = resolveScreenDimensions(element, screenDimensions)
+        contentHiddenRegions.addAll(detectContentHiddenRegions(element, screenWidth, screenHeight))
+      }
       // Skip optimization if disableAllFiltering is true
       mainHierarchy =
           if (disableAllFiltering) {
@@ -438,8 +458,130 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         notificationPermissionDetected = notificationPermissionDetected,
         accessibilityFocusedElement = accessibilityFocusedElement,
         ctrlProxyIncomplete = if (ctrlProxyIncomplete) true else null,
+        contentHiddenRegions =
+            contentHiddenRegions.distinctBy { it.bounds }.takeIf { it.isNotEmpty() },
     )
   }
+
+  private fun resolveScreenDimensions(
+      element: UIElementInfo,
+      screenDimensions: ScreenDimensions?,
+  ): Pair<Int, Int> {
+    if (screenDimensions?.isValid() == true) {
+      return Pair(screenDimensions.width, screenDimensions.height)
+    }
+    val bounds = element.bounds
+    return Pair(bounds?.right ?: 0, bounds?.bottom ?: 0)
+  }
+
+  private fun detectContentHiddenRegions(
+      root: UIElementInfo,
+      screenWidth: Int,
+      screenHeight: Int,
+  ): List<ContentHiddenRegion> {
+    val screenArea = screenWidth * screenHeight
+    if (screenArea <= 0) {
+      return emptyList()
+    }
+
+    val candidates = mutableListOf<ContentHiddenRegion>()
+
+    fun visit(node: UIElementInfo, isComposeDescendant: Boolean) {
+      val nodeIsComposeView = node.className?.contains("ComposeView") == true
+      val children = extractChildrenFromNode(node.node)
+
+      if (isComposeDescendant && isLikelyComposeInteropHiddenBoundary(node, children, screenArea)) {
+        val bounds = node.bounds ?: return
+        val areaPercent = ((bounds.area().toDouble() / screenArea.toDouble()) * 100).toInt()
+        candidates.add(
+            ContentHiddenRegion(
+                bounds = bounds,
+                reason = CONTENT_HIDDEN_REASON_COMPOSE_INTEROP,
+                areaPercent = areaPercent,
+            ),
+        )
+        return
+      }
+
+      val childIsComposeDescendant = isComposeDescendant || nodeIsComposeView
+      for (child in children) {
+        visit(child, childIsComposeDescendant)
+      }
+    }
+
+    visit(root, false)
+    return candidates
+  }
+
+  private fun isLikelyComposeInteropHiddenBoundary(
+      node: UIElementInfo,
+      children: List<UIElementInfo>,
+      screenArea: Int,
+  ): Boolean {
+    val bounds = node.bounds ?: return false
+    val nodeArea = bounds.area()
+    if (nodeArea <= 0) {
+      return false
+    }
+
+    val areaPercent = nodeArea.toDouble() / screenArea.toDouble()
+    if (areaPercent <= MIN_HIDDEN_REGION_SCREEN_AREA) {
+      return false
+    }
+
+    if (countTextBearingNodes(node) > 0) {
+      return false
+    }
+
+    if (isInteractive(node)) {
+      return false
+    }
+
+    val childCoverage = directChildCoverage(bounds, children)
+    return childCoverage <= MAX_VISIBLE_CHILD_COVERAGE
+  }
+
+  private fun countTextBearingNodes(node: UIElementInfo): Int {
+    val hasText = !node.text.isNullOrBlank() || !node.contentDesc.isNullOrBlank()
+    return (if (hasText) 1 else 0) +
+        extractChildrenFromNode(node.node).sumOf { countTextBearingNodes(it) }
+  }
+
+  private fun isInteractive(node: UIElementInfo): Boolean {
+    val actions = node.actions.orEmpty()
+    return node.isClickable ||
+        node.isScrollable ||
+        node.isLongClickable ||
+        actions.any {
+          it == "click" ||
+              it == "long_click" ||
+              it == "scroll_forward" ||
+              it == "scroll_backward"
+        }
+  }
+
+  private fun directChildCoverage(
+      parentBounds: ElementBounds,
+      children: List<UIElementInfo>,
+  ): Double {
+    if (children.isEmpty()) {
+      return 0.0
+    }
+    val coveredArea =
+        children.sumOf { child ->
+          val childBounds = child.bounds ?: return@sumOf 0
+          val left = max(parentBounds.left, childBounds.left)
+          val top = max(parentBounds.top, childBounds.top)
+          val right = min(parentBounds.right, childBounds.right)
+          val bottom = min(parentBounds.bottom, childBounds.bottom)
+          val width = max(0, right - left)
+          val height = max(0, bottom - top)
+          width * height
+        }
+    return coveredArea.toDouble() / parentBounds.area().toDouble()
+  }
+
+  private fun ElementBounds.area(): Int = width * height
 
   /** Detect intent chooser indicators in an optimized hierarchy. */
   private fun detectIntentChooserIndicators(element: UIElementInfo): Boolean {

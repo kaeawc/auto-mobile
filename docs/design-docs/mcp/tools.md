@@ -72,6 +72,30 @@ Android app files support `externalFiles` through `/sdcard/Android/data/{appId}/
 
 Android private containers (`documents`, `cache`, and `tmp`) use `run-as {appId}` and require a debuggable app build. Non-debuggable apps fail with an actionable error instead of reporting a successful write. `library` is not an Android container; use `documents`, `cache`, `tmp`, or `externalFiles`.
 
+iOS app files are supported for simulators through `xcrun simctl get_app_container {deviceId} {bundleId} data`. Logical containers map to the app data container as follows:
+
+| Container | iOS path |
+|-----------|----------|
+| `documents` | `Documents` |
+| `library` | `Library` |
+| `cache` | `Library/Caches` |
+| `tmp` | `tmp` |
+
+Use `documents` for user-visible fixtures, `cache` for cache-like test data, and `tmp` for temporary files:
+
+```json
+{
+  "tool": "putAppFile",
+  "params": {
+    "appId": "com.example.app",
+    "container": "cache",
+    "contentBase64": "AAEC/w==",
+    "destinationPath": "fixtures/image.bin",
+    "platform": "ios"
+  }
+}
+```
+
 Manual emulator validation for Android:
 
 ```sh
@@ -79,6 +103,16 @@ printf '{"enabled":true}\n' > /tmp/automobile-settings.json
 # Call putAppFile with appId=com.example.app, container=externalFiles,
 # sourcePath=/tmp/automobile-settings.json, destinationPath=config/settings.json.
 adb shell cat /sdcard/Android/data/com.example.app/files/config/settings.json
+```
+
+Manual simulator validation for iOS:
+
+```sh
+printf 'hello simulator\n' > /tmp/automobile-ios-fixture.txt
+# Call putAppFile with appId=com.example.app, container=documents,
+# sourcePath=/tmp/automobile-ios-fixture.txt, destinationPath=fixtures/hello.txt.
+APP_CONTAINER=$(xcrun simctl get_app_container booted com.example.app data)
+cat "$APP_CONTAINER/Documents/fixtures/hello.txt"
 ```
 
 #### Input Methods

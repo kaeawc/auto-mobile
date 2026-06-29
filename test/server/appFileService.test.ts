@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
+import { dirname, join } from "node:path";
+import { describe, expect, test } from "bun:test";
 import {
+  type AppFileFileSystem,
+  type AppFileStats,
   createAppFileServiceForTesting,
   type AppFileProvider,
   type PutAppFileProviderRequest,
@@ -30,12 +30,11 @@ function adbFactoryFor(executor: FakeAdbExecutor): AdbClientFactory {
 }
 
 describe("AppFileService", () => {
-  const tempDirs: string[] = [];
-
-  afterEach(async () => {
-    await Promise.all(tempDirs.map(dir => rm(dir, { recursive: true, force: true })));
-    tempDirs.length = 0;
-  });
+  const iosSimulatorDevice: BootedDevice = {
+    deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+    name: "iPhone",
+    platform: "ios",
+  };
 
   test("selects the matching provider and passes normalized put requests", async () => {
     const androidDevice: BootedDevice = {
@@ -219,21 +218,20 @@ describe("AppFileService", () => {
   });
 
   test("writes iOS files through the provider resolved app data container", async () => {
-    const dataRoot = await mkdtemp(join(tmpdir(), "automobile-ios-app-file-"));
-    tempDirs.push(dataRoot);
+    const fileSystem = new TestAppFileFileSystem();
+    const dataRoot = "/simulators/SIM-1/data";
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandResult("get_app_container 'SIM-1' 'com.example.app' data", dataRoot);
+    simctl.setCommandResult(
+      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      dataRoot
+    );
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
+      fileSystem,
     });
-    const device: BootedDevice = {
-      deviceId: "SIM-1",
-      name: "iPhone",
-      platform: "ios",
-    };
 
     const result = await service.putFile({
-      device,
+      device: iosSimulatorDevice,
       appId: "com.example.app",
       container: "library",
       contentText: "hello ios",
@@ -242,24 +240,241 @@ describe("AppFileService", () => {
 
     expect(result).toMatchObject({
       success: true,
-      deviceId: "SIM-1",
+      deviceId: iosSimulatorDevice.deviceId,
       platform: "ios",
       appId: "com.example.app",
       container: "library",
       destinationPath: "Support/config.txt",
       byteCount: 9,
     });
-    await expect(readFile(join(dataRoot, "Library", "Support", "config.txt"), "utf8")).resolves.toBe("hello ios");
+    await expect(fileSystem.readText(join(dataRoot, "Library", "Support", "config.txt"))).resolves.toBe("hello ios");
+  });
+
+  test("maps iOS logical containers to simulator data container folders", async () => {
+    const fileSystem = new TestAppFileFileSystem();
+    const dataRoot = "/simulators/SIM-1/data";
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      dataRoot
+    );
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as any,
+      fileSystem,
+    });
+
+    await service.putFile({
+      device: iosSimulatorDevice,
+      appId: "com.example.app",
+      container: "documents",
+      contentText: "documents",
+      destinationPath: "fixtures/value.txt",
+    });
+    await service.putFile({
+      device: iosSimulatorDevice,
+      appId: "com.example.app",
+      container: "cache",
+      contentText: "cache",
+      destinationPath: "fixtures/value.txt",
+    });
+    await service.putFile({
+      device: iosSimulatorDevice,
+      appId: "com.example.app",
+      container: "tmp",
+      contentText: "tmp",
+      destinationPath: "fixtures/value.txt",
+    });
+
+    await expect(fileSystem.readText(join(dataRoot, "Documents", "fixtures", "value.txt"))).resolves.toBe("documents");
+    await expect(fileSystem.readText(join(dataRoot, "Library", "Caches", "fixtures", "value.txt"))).resolves.toBe("cache");
+    await expect(fileSystem.readText(join(dataRoot, "tmp", "fixtures", "value.txt"))).resolves.toBe("tmp");
+  });
+
+  test("preserves iOS binary app files exactly when writing and reading", async () => {
+    const fileSystem = new TestAppFileFileSystem();
+    const dataRoot = "/simulators/SIM-1/data";
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      dataRoot
+    );
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as any,
+      fileSystem,
+      deviceResolver: async () => iosSimulatorDevice,
+    });
+    const sourceBytes = Buffer.from([0, 1, 2, 239, 187, 191, 255]);
+    const sourcePath = "/host/fixtures/source.bin";
+    await fileSystem.writeFileBuffer(sourcePath, sourceBytes);
+
+    const putResult = await service.putFile({
+      device: iosSimulatorDevice,
+      appId: "com.example.app",
+      container: "documents",
+      sourcePath,
+      destinationPath: "fixtures/welcome.bin",
+    });
+    const readResult = await service.readFile({
+      deviceId: iosSimulatorDevice.deviceId,
+      appId: "com.example.app",
+      container: "documents",
+      path: "fixtures/welcome.bin",
+    });
+
+    expect(putResult.byteCount).toBe(sourceBytes.byteLength);
+    expect(readResult).toMatchObject({
+      deviceId: iosSimulatorDevice.deviceId,
+      platform: "ios",
+      appId: "com.example.app",
+      container: "documents",
+      path: "fixtures/welcome.bin",
+      byteCount: sourceBytes.byteLength,
+      mimeType: "application/octet-stream",
+      blob: sourceBytes.toString("base64"),
+    });
+    expect(readResult.text).toBeUndefined();
+  });
+
+  test("lists iOS app files and directories with relative metadata only", async () => {
+    const fileSystem = new TestAppFileFileSystem();
+    const dataRoot = "/simulators/SIM-1/data";
+    await fileSystem.mkdir(join(dataRoot, "Documents", "fixtures"));
+    await fileSystem.writeFileBuffer(join(dataRoot, "Documents", "root.txt"), Buffer.from("root"));
+    await fileSystem.writeFileBuffer(join(dataRoot, "Documents", "fixtures", "welcome.png"), Buffer.from([0, 1, 2]));
+    fileSystem.setSymlink(join(dataRoot, "Documents", "broken-link"));
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      dataRoot
+    );
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as any,
+      fileSystem,
+      deviceResolver: async () => iosSimulatorDevice,
+    });
+
+    const result = await service.listFiles({
+      deviceId: iosSimulatorDevice.deviceId,
+      appId: "com.example.app",
+      container: "documents",
+    });
+
+    expect(result.files.map(file => file.path).sort()).toEqual([
+      "fixtures",
+      "fixtures/welcome.png",
+      "root.txt",
+    ]);
+    expect(result.files.every(file => !file.path.startsWith(dataRoot))).toBe(true);
+    expect(result.files.find(file => file.path === "fixtures")).toMatchObject({
+      name: "fixtures",
+      isDirectory: true,
+      resourceUri: `automobile:devices/${iosSimulatorDevice.deviceId}/apps/com.example.app/files/documents/fixtures`,
+    });
+    const fileEntry = result.files.find(file => file.path === "fixtures/welcome.png");
+    expect(fileEntry).toMatchObject({
+      name: "welcome.png",
+      byteCount: 3,
+      isDirectory: false,
+      resourceUri: `automobile:devices/${iosSimulatorDevice.deviceId}/apps/com.example.app/files/documents/fixtures/welcome.png`,
+    });
+    expect(fileEntry?.lastModified).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  test("returns clear iOS simulator-only errors without invoking simctl for physical devices", async () => {
+    const simctl = new FakeSimCtlClient();
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as any,
+      fileSystem: new TestAppFileFileSystem(),
+      deviceResolver: async deviceId => ({ deviceId, name: "iPhone", platform: "ios" }),
+    });
+    const physicalDevice: BootedDevice = {
+      deviceId: "00008030-001A2B3C0E11002E",
+      name: "iPhone",
+      platform: "ios",
+    };
+
+    await expect(service.putFile({
+      device: physicalDevice,
+      appId: "com.example.app",
+      container: "documents",
+      contentText: "hello",
+      destinationPath: "config.txt",
+    })).rejects.toThrow("iOS app file putFile is only supported on iOS simulators");
+
+    await expect(service.listFiles({
+      deviceId: physicalDevice.deviceId,
+      appId: "com.example.app",
+      container: "documents",
+    })).rejects.toThrow("iOS app file listFiles is only supported on iOS simulators");
+    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+  });
+
+  test("maps missing iOS app containers to actionable simulator errors", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandError(
+      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.missing.app' data`,
+      new Error("An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=2): The application is not installed.")
+    );
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as any,
+      fileSystem: new TestAppFileFileSystem(),
+      deviceResolver: async () => iosSimulatorDevice,
+    });
+
+    await expect(service.readFile({
+      deviceId: iosSimulatorDevice.deviceId,
+      appId: "com.missing.app",
+      container: "documents",
+      path: "config.json",
+    })).rejects.toThrow("iOS app com.missing.app is not installed on simulator");
+  });
+
+  test("maps unavailable iOS simulators to actionable errors", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandError(
+      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      new Error("No such device or device is shutdown")
+    );
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as any,
+      fileSystem: new TestAppFileFileSystem(),
+      deviceResolver: async () => iosSimulatorDevice,
+    });
+
+    await expect(service.listFiles({
+      deviceId: iosSimulatorDevice.deviceId,
+      appId: "com.example.app",
+      container: "documents",
+    })).rejects.toThrow("iOS simulator AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE is unavailable or not booted");
+  });
+
+  test("does not let iOS app file paths escape the resolved app container", async () => {
+    const simctl = new FakeSimCtlClient();
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as any,
+      fileSystem: new TestAppFileFileSystem(),
+      deviceResolver: async () => iosSimulatorDevice,
+    });
+
+    await expect(service.readFile({
+      deviceId: iosSimulatorDevice.deviceId,
+      appId: "com.example.app",
+      container: "documents",
+      path: "../Library/Preferences/config.plist",
+    })).rejects.toThrow("destinationPath must be a non-empty relative path without '.' or '..' segments");
+
+    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
 
   test("maps iOS externalFiles to explicit unsupported capability errors", async () => {
     const simctl = new FakeSimCtlClient();
     const service = createAppFileServiceForTesting({
       simctlFactory: () => simctl as any,
+      fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async deviceId => ({ deviceId, name: "iPhone", platform: "ios" }),
     });
     const device: BootedDevice = {
-      deviceId: "SIM-1",
+      deviceId: iosSimulatorDevice.deviceId,
       name: "iPhone",
       platform: "ios",
     };
@@ -273,7 +488,7 @@ describe("AppFileService", () => {
     })).rejects.toThrow("putFile is not supported for appId com.example.app in externalFiles on ios");
 
     await expect(service.listFiles({
-      deviceId: "SIM-1",
+      deviceId: iosSimulatorDevice.deviceId,
       appId: "com.example.app",
       container: "externalFiles",
     })).rejects.toThrow("listFiles is not supported for appId com.example.app in externalFiles on ios");
@@ -491,29 +706,6 @@ describe("AppFileService", () => {
     );
   });
 
-  test("skips broken symlinks when listing iOS app container files", async () => {
-    const root = await mkdtemp(join(tmpdir(), "automobile-app-files-"));
-    tempDirs.push(root);
-    const dataRoot = join(root, "data");
-    const documentsRoot = join(dataRoot, "Documents");
-    await mkdir(documentsRoot, { recursive: true });
-    await writeFile(join(documentsRoot, "welcome.txt"), "hello");
-    await symlink(join(documentsRoot, "missing.txt"), join(documentsRoot, "broken-link"));
-    const simctl = new FakeSimCtlClient();
-    simctl.setCommandResult("get_app_container 'ios-sim-1' 'com.example.app' data", dataRoot);
-    const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
-      deviceResolver: async () => ({ deviceId: "ios-sim-1", name: "iPhone", platform: "ios" }),
-    });
-
-    const result = await service.listFiles({
-      deviceId: "ios-sim-1",
-      appId: "com.example.app",
-      container: "documents",
-    });
-
-    expect(result.files.map(file => file.path)).toEqual(["welcome.txt"]);
-  });
 });
 
 class RecordingAppFileProvider implements AppFileProvider {
@@ -531,5 +723,150 @@ class RecordingAppFileProvider implements AppFileProvider {
 
   async readFile(): Promise<never> {
     throw new Error(`${this.platform} readFile not supported in fake`);
+  }
+}
+
+class TestAppFileFileSystem implements AppFileFileSystem {
+  private readonly files = new Map<string, Buffer>();
+  private readonly directories = new Set<string>(["/"]);
+  private readonly symlinks = new Set<string>();
+  private tempIndex = 0;
+
+  async stat(path: string): Promise<AppFileStats> {
+    const normalized = this.normalize(path);
+    if (this.files.has(normalized)) {
+      return this.stats(this.files.get(normalized)?.byteLength ?? 0, "file");
+    }
+    if (this.directories.has(normalized)) {
+      return this.stats(0, "directory");
+    }
+    throw this.notFound(path);
+  }
+
+  async lstat(path: string): Promise<AppFileStats> {
+    const normalized = this.normalize(path);
+    if (this.symlinks.has(normalized)) {
+      return this.stats(0, "symlink");
+    }
+    return this.stat(path);
+  }
+
+  async readdir(path: string): Promise<Array<{ name: string }>> {
+    const normalized = this.normalize(path);
+    if (!this.directories.has(normalized)) {
+      throw this.notFound(path);
+    }
+    const prefix = normalized === "/" ? "/" : `${normalized}/`;
+    const names = new Set<string>();
+
+    for (const directory of this.directories) {
+      if (directory !== normalized && directory.startsWith(prefix)) {
+        names.add(directory.slice(prefix.length).split("/")[0] ?? "");
+      }
+    }
+    for (const file of this.files.keys()) {
+      if (file.startsWith(prefix)) {
+        names.add(file.slice(prefix.length).split("/")[0] ?? "");
+      }
+    }
+    for (const symlink of this.symlinks) {
+      if (symlink.startsWith(prefix)) {
+        names.add(symlink.slice(prefix.length).split("/")[0] ?? "");
+      }
+    }
+
+    return [...names].filter(Boolean).sort().map(name => ({ name }));
+  }
+
+  async mkdir(path: string): Promise<void> {
+    this.ensureDirectory(path);
+  }
+
+  async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
+    const source = await this.readFileBuffer(sourcePath);
+    await this.writeFileBuffer(destinationPath, source);
+  }
+
+  async readFileBuffer(path: string): Promise<Buffer> {
+    const normalized = this.normalize(path);
+    const data = this.files.get(normalized);
+    if (data === undefined) {
+      throw this.notFound(path);
+    }
+    return Buffer.from(data);
+  }
+
+  async readText(path: string): Promise<string> {
+    return (await this.readFileBuffer(path)).toString("utf8");
+  }
+
+  async writeFileBuffer(path: string, data: Buffer): Promise<void> {
+    const normalized = this.normalize(path);
+    this.ensureDirectory(dirname(normalized));
+    this.files.set(normalized, Buffer.from(data));
+  }
+
+  async mkdtemp(prefix: string): Promise<string> {
+    const path = this.normalize(`${prefix}${++this.tempIndex}`);
+    this.ensureDirectory(path);
+    return path;
+  }
+
+  async rm(path: string): Promise<void> {
+    const normalized = this.normalize(path);
+    const prefix = normalized === "/" ? "/" : `${normalized}/`;
+
+    for (const file of [...this.files.keys()]) {
+      if (file === normalized || file.startsWith(prefix)) {
+        this.files.delete(file);
+      }
+    }
+    for (const symlink of [...this.symlinks]) {
+      if (symlink === normalized || symlink.startsWith(prefix)) {
+        this.symlinks.delete(symlink);
+      }
+    }
+    for (const directory of [...this.directories]) {
+      if (directory !== "/" && (directory === normalized || directory.startsWith(prefix))) {
+        this.directories.delete(directory);
+      }
+    }
+  }
+
+  setSymlink(path: string): void {
+    const normalized = this.normalize(path);
+    this.ensureDirectory(dirname(normalized));
+    this.symlinks.add(normalized);
+  }
+
+  private ensureDirectory(path: string): void {
+    const normalized = this.normalize(path);
+    const segments = normalized.split("/").filter(Boolean);
+    let current = normalized.startsWith("/") ? "/" : "";
+
+    for (const segment of segments) {
+      current = current === "/" || current === "" ? `${current}${segment}` : `${current}/${segment}`;
+      this.directories.add(current);
+    }
+  }
+
+  private normalize(path: string): string {
+    const normalized = path.replace(/\\/g, "/").replace(/\/+/g, "/");
+    return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+  }
+
+  private stats(size: number, kind: "file" | "directory" | "symlink"): AppFileStats {
+    return {
+      size,
+      mtime: new Date("2026-06-29T00:00:00.000Z"),
+      isFile: () => kind === "file",
+      isDirectory: () => kind === "directory",
+    };
+  }
+
+  private notFound(path: string): NodeJS.ErrnoException {
+    const error = new Error(`ENOENT: no such file or directory, ${path}`) as NodeJS.ErrnoException;
+    error.code = "ENOENT";
+    return error;
   }
 }

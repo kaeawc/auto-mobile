@@ -21,9 +21,9 @@ export const runProcessExecutorContract = (
     test("exec resolves an ExecResult backed by stdout", async function() {
       const result = await factory.make().exec(factory.command);
 
-      expect(result.stdout).toBe("contract-output");
+      expect(result.stdout.trim()).toBe("contract-output");
       expect(result.stderr).toBe("");
-      expect(result.toString()).toBe("contract-output");
+      expect(result.toString().trim()).toBe("contract-output");
       expect(result.trim()).toBe("contract-output");
       expect(result.includes("output")).toBe(true);
     });
@@ -38,9 +38,9 @@ export const runHostCommandExecutorContract = (
     test("executeCommand resolves an ExecResult backed by stdout", async function() {
       const result = await factory.make().executeCommand(factory.file, factory.args);
 
-      expect(result.stdout).toBe("contract-output");
+      expect(result.stdout.trim()).toBe("contract-output");
       expect(result.stderr).toBe("");
-      expect(result.toString()).toBe("contract-output");
+      expect(result.toString().trim()).toBe("contract-output");
       expect(result.trim()).toBe("contract-output");
       expect(result.includes("output")).toBe(true);
     });

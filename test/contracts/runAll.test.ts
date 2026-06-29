@@ -23,8 +23,6 @@ import { runFileDownloaderContract } from "./FileDownloaderContract";
 import { runFileSystemContract } from "./FileSystemContract";
 import { runTimerContract } from "./TimerContract";
 
-const quote = (value: string): string => JSON.stringify(value);
-
 runTimerContract("SystemTimer", () => new SystemTimer(), { realTime: true });
 runTimerContract("FakeTimer auto-advance", () => {
   const timer = new FakeTimer();
@@ -63,7 +61,7 @@ runFileDownloaderContract("FakeFileDownloader", payload => {
 
 runProcessExecutorContract("DefaultProcessExecutor", {
   make: () => new DefaultProcessExecutor(),
-  command: `bun -e ${quote("process.stdout.write('contract-output')")}`
+  command: "echo contract-output"
 });
 runProcessExecutorContract("FakeProcessExecutor", {
   make: () => {

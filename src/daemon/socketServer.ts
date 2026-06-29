@@ -420,31 +420,33 @@ export class UnixSocketServer {
     const record = args as Record<string, unknown>;
     const hasSessionUuid = typeof record.sessionUuid === "string" && record.sessionUuid.length > 0;
     const hasDeviceLabel = typeof record.device === "string" && record.device.length > 0;
-    if (hasSessionUuid && hasDeviceLabel) {
-      const sessionUuid = this.resolveDeviceLabelSession(record.sessionUuid as string, record.device);
-      const assignedDevice = this.getAssignedDeviceForSession(sessionUuid);
-      if (assignedDevice) {
-        return `device:${assignedDevice}`;
-      }
-      return `session:${sessionUuid}`;
-    }
 
+    // Precedence (pinned by #2565 review): a device label resolves the mapped session before
+    // an explicit deviceId, which in turn beats a raw session, which beats implicit autolock.
+    if (hasSessionUuid && hasDeviceLabel) {
+      return this.sessionToScopeKey(this.resolveDeviceLabelSession(record.sessionUuid as string, record.device));
+    }
     // An explicit target device must serialize by physical device even when a session is present.
     if (typeof record.deviceId === "string" && record.deviceId.length > 0) {
       return `device:${record.deviceId}`;
     }
     if (hasSessionUuid) {
-      const sessionUuid = record.sessionUuid as string;
-      const assignedDevice = this.getAssignedDeviceForSession(sessionUuid);
-      if (assignedDevice) {
-        return `device:${assignedDevice}`;
-      }
-      return `session:${sessionUuid}`;
+      return this.sessionToScopeKey(record.sessionUuid as string);
     }
     if (typeof record.__mcpSessionId === "string" && record.__mcpSessionId.length > 0) {
       return this.getImplicitAutolockScopeKey(record.__mcpSessionId, args) ?? `mcp-session:${record.__mcpSessionId}`;
     }
     return undefined;
+  }
+
+  /**
+   * Resolve a session UUID to its forwarding scope key: the bound physical device when one is
+   * assigned (so independent devices serialize together), otherwise the raw session. This is the
+   * single resolver every session-keyed branch feeds, including implicit autolock resolution.
+   */
+  private sessionToScopeKey(sessionUuid: string): string {
+    const assignedDevice = this.getAssignedDeviceForSession(sessionUuid);
+    return assignedDevice ? `device:${assignedDevice}` : `session:${sessionUuid}`;
   }
 
   private getImplicitAutolockScopeKey(mcpSessionId: string, args: unknown): string | undefined {
@@ -459,8 +461,7 @@ export class UnixSocketServer {
       if (!autolockSession) {
         return undefined;
       }
-      const assignedDevice = this.getAssignedDeviceForSession(autolockSession);
-      return assignedDevice ? `device:${assignedDevice}` : `session:${autolockSession}`;
+      return this.sessionToScopeKey(autolockSession);
     } catch (error) {
       logger.debug(`Unable to resolve autolock session for MCP session ${mcpSessionId}: ${error}`);
       return undefined;

@@ -512,16 +512,33 @@ describe("SystemConfigurationManager", () => {
 
   describe("Android setTimeZone still works", () => {
     test("uses adb commands for Android", async () => {
+      fakeAdbClient.setCommandResult("shell getprop persist.sys.timezone", "America/New_York");
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
       const result = await mgr.setTimeZone("America/New_York");
 
       expect(result.success).toBe(true);
       expect(fakeExec.getExecutedCommands()).toHaveLength(0);
-      expect(fakeAdbClient.wasCommandExecuted("setprop persist.sys.timezone America/New_York")).toBe(true);
+      expect(fakeAdbClient.wasCommandExecuted("setprop persist.sys.timezone 'America/New_York'")).toBe(true);
     });
 
     test("reads previous timezone before setting", async () => {
-      fakeAdbClient.setCommandResult("shell getprop persist.sys.timezone", "America/Los_Angeles");
+      // First getprop (previous) returns the old zone; the read-back after
+      // setprop returns the new zone so verification passes.
+      const responses = ["America/Los_Angeles", "Asia/Tokyo"];
+      const original = fakeAdbClient.executeCommand.bind(fakeAdbClient);
+      fakeAdbClient.executeCommand = (async (command: string, ...rest: any[]) => {
+        if (command === "shell getprop persist.sys.timezone") {
+          const stdout = responses.shift() ?? "Asia/Tokyo";
+          return {
+            stdout,
+            stderr: "",
+            toString: () => stdout,
+            trim: () => stdout,
+            includes: (s: string) => stdout.includes(s),
+          };
+        }
+        return original(command, ...rest);
+      }) as any;
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
       const result = await mgr.setTimeZone("Asia/Tokyo");
 
@@ -538,7 +555,7 @@ describe("SystemConfigurationManager", () => {
     });
 
     test("returns error when adb command fails", async () => {
-      fakeAdbClient.setCommandError("shell setprop persist.sys.timezone Bad/Zone", new Error("setprop failed"));
+      fakeAdbClient.setCommandError("shell setprop persist.sys.timezone 'Bad/Zone'", new Error("setprop failed"));
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
       const result = await mgr.setTimeZone("Bad/Zone");
 

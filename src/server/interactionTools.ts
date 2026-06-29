@@ -393,6 +393,13 @@ export function formatClipboardMessage(result: ClipboardResult): string {
   }
 }
 
+export function formatRecentAppsMessage(result: { success?: boolean; error?: string }): string {
+  if (result.success === false) {
+    return `Failed to open recent apps: ${result.error ?? "unknown error"}`;
+  }
+  return "Opened recent apps";
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -870,7 +877,7 @@ export function registerInteractionTools() {
       const result = await recentApps.execute(progress);
 
       return createJSONToolResponse({
-        message: "Opened recent apps",
+        message: formatRecentAppsMessage(result),
         observation: result.observation,
         ...result
       });

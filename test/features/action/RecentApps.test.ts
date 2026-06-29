@@ -410,5 +410,20 @@ describe("RecentApps", () => {
         expect((error as Error).message).toContain("Connection lost");
       }
     });
+
+    test("should return explicit failure when CtrlProxy cannot verify App Switcher on iOS", async () => {
+      fakeIOSCtrlProxy.setRecentAppsResult({
+        success: false,
+        totalTimeMs: 100,
+        error: "iOS App Switcher did not appear after recent apps invocation"
+      });
+
+      const result = await iosRecentApps.execute();
+
+      expect(result.success).toBe(false);
+      expect(result.method).toBe("ios_swipe");
+      expect(result.error).toBe("iOS App Switcher did not appear after recent apps invocation");
+      expect(result.observation).toBeDefined();
+    });
   });
 });

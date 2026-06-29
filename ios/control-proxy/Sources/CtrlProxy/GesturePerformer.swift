@@ -963,7 +963,9 @@ public class GesturePerformer: GesturePerforming {
             case "home":
                 try pressHome()
             case "recent":
-                try openRecentApps()
+                guard try openRecentApps() else {
+                    throw GestureError.gestureFailed("iOS App Switcher did not appear after recent apps invocation")
+                }
             case "back":
                 try pressBack()
             case "volume_up", "volume_down":
@@ -1088,21 +1090,59 @@ public class GesturePerformer: GesturePerforming {
             }
         #endif
 
-        public func openRecentApps() throws {
+        public func openRecentApps() throws -> Bool {
+            guard let app = resolveNavigationApp() else {
+                throw GestureError.noApplication
+            }
+
             try runOnMainThread {
-                let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-                let screenSize = springboard.frame.size
-                let startCoordinate = springboard.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: screenSize.width / 2, dy: screenSize.height - 5))
-                let endCoordinate = springboard.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: screenSize.width / 2, dy: screenSize.height * 0.4))
+                let frame = app.frame
+                guard frame.width > 0, frame.height > 0 else {
+                    throw GestureError.gestureFailed("Cannot determine application frame for recent apps gesture")
+                }
+
+                let startCoordinate = app.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: frame.width / 2, dy: frame.height - 1))
+                let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: frame.width / 2, dy: frame.height * 0.58))
+                let distance = abs((frame.height - 1) - (frame.height * 0.58))
+                let velocity = XCUIGestureVelocity(distance / 0.6)
+
                 startCoordinate.press(
-                    forDuration: 0.05,
+                    forDuration: 0.35,
                     thenDragTo: endCoordinate,
-                    withVelocity: .default,
-                    thenHoldForDuration: 1.0
+                    withVelocity: velocity,
+                    thenHoldForDuration: 0.8
                 )
             }
+
+            return isAppSwitcherVisible()
+        }
+
+        private func isAppSwitcherVisible() -> Bool {
+            runOnMainThreadNonThrowing({
+                let candidates = [
+                    self.springboard.otherElements["AppSwitcher"],
+                    self.springboard.otherElements["App Switcher"],
+                    self.springboard.otherElements["AppSwitcherContentView"],
+                    self.springboard.collectionViews["AppSwitcher"],
+                    self.springboard.scrollViews["AppSwitcher"],
+                ]
+
+                for candidate in candidates where candidate.waitForExistence(timeout: 0.2) {
+                    return true
+                }
+
+                let appSwitcherPredicate = NSPredicate(
+                    format: "identifier CONTAINS[c] %@ OR label CONTAINS[c] %@",
+                    "AppSwitcher",
+                    "App Switcher"
+                )
+                return self.springboard.descendants(matching: .any)
+                    .matching(appSwitcherPredicate)
+                    .firstMatch
+                    .waitForExistence(timeout: 0.5)
+            }, fallback: false)
         }
 
         // MARK: - App Control
@@ -1260,7 +1300,7 @@ public class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
-        public func openRecentApps() throws {
+        public func openRecentApps() throws -> Bool {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

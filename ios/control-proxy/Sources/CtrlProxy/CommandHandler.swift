@@ -753,8 +753,17 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handleRecentApps")
         defer { perfProvider.end() }
 
-        try perfProvider.track("openRecentApps") {
+        let didOpen = try perfProvider.track("openRecentApps") {
             try gesturePerformer.openRecentApps()
+        }
+
+        guard didOpen else {
+            return WebSocketResponse.error(
+                type: ResponseType.recentAppsResult.rawValue,
+                requestId: request.requestId,
+                error: "iOS App Switcher did not appear after recent apps invocation",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
         }
 
         // Explicit state transition: app switcher is SpringBoard UI

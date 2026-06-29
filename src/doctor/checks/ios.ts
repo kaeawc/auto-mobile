@@ -97,7 +97,9 @@ export interface IosRunnerInspectorHooks {
 const defaultIosRunnerInspectorHooks: IosRunnerInspectorHooks = {
   getManager: device => IOSCtrlProxyManager.getInstance(device),
   getExistingClient: deviceId => IOSCtrlProxyClient.getExistingInstance(deviceId),
-  createClient: device => IOSCtrlProxyClient.getInstance(device),
+  // Detached (not singleton-registered) so closing it leaves nothing for a later
+  // probe to rediscover and reconnect — see IOSCtrlProxyClient.createDetached.
+  createClient: device => IOSCtrlProxyClient.createDetached(device),
 };
 
 /**

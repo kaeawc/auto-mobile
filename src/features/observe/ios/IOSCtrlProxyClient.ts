@@ -428,6 +428,23 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   /**
+   * Build a throwaway client that is NOT registered in the singleton map. Used by
+   * short-lived diagnostics (doctor) that must open a connection, read, and close
+   * without leaving anything behind: because it is never cached, a later
+   * `getExistingInstance` can't rediscover a closed probe and mistake it for a
+   * live session (which would reconnect and leak the socket/SDK polling timer).
+   * Identical to `getInstance` otherwise — same port allocation and production
+   * defaults — just unregistered.
+   */
+  public static createDetached(device: BootedDevice): IOSCtrlProxyClient {
+    requireBootedDevice(device, "IOSCtrlProxyClient.createDetached");
+    const port = device.platform === "ios"
+      ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
+      : IOSCtrlProxyClient.DEFAULT_PORT;
+    return new IOSCtrlProxyClient(device, port);
+  }
+
+  /**
    * Bind this client to a session for multi-agent NavigationGraphManager isolation.
    */
   public bindSession(sessionId: string): void {

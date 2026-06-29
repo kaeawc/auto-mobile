@@ -345,6 +345,53 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(inFlight).toBe(0);
   });
 
+  test("device-label tools/call ignores a stale deviceId when choosing the forward key", async () => {
+    sessionDevices.set("session-a", "device-1");
+    sessionDevices.set("session-a:B", "device-2");
+    sessionCustomData.set("session-a", {
+      deviceLabelMap: {
+        A: "session-a",
+        B: "session-a:B",
+      },
+    });
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => {
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise<void>(resolve => {
+            fakeTimer.setTimeout(resolve, 40);
+          });
+          inFlight -= 1;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const [labelResult, explicitDeviceResult] = await Promise.all([
+      sendToolsCallWithArgs(socketPath, "observe", {
+        sessionUuid: "session-a",
+        device: "B",
+        deviceId: "device-1",
+      }),
+      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-2" }),
+    ]);
+
+    expect(labelResult.success).toBe(true);
+    expect(explicitDeviceResult.success).toBe(true);
+    expect(maxInFlight).toBe(1);
+    expect(inFlight).toBe(0);
+  });
+
   test("queued unbound session tools/call rekeys after the session binds to a device", async () => {
     let inFlightAfterBind = 0;
     let maxInFlightAfterBind = 0;

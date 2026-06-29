@@ -40,7 +40,7 @@ const defaultDependencies: AppFileServiceDependencies = {
   simctlFactory: device => new SimCtlClient(device),
 };
 
-const ANDROID_APP_FILE_READ_MAX_BUFFER = 64 * 1024 * 1024;
+const ANDROID_APP_FILE_MAX_BUFFER = 64 * 1024 * 1024;
 
 let appFileService: AppFileService | null = null;
 
@@ -194,7 +194,7 @@ class DefaultAppFileService implements AppFileService {
       ? (await adb.executeCommand(
         `shell if [ -d ${shellQuote(posix.dirname(base.absolutePath))} ]; then find ${shellQuote(posix.dirname(base.absolutePath))} -type f; fi`,
         undefined,
-        undefined,
+        ANDROID_APP_FILE_MAX_BUFFER,
         true
       )).stdout
       : (await adb.executeCommand(
@@ -202,7 +202,7 @@ class DefaultAppFileService implements AppFileService {
           `if [ -d ${shellQuote(posix.dirname(base.relativePath))} ]; then find ${shellQuote(posix.dirname(base.relativePath))} -type f; fi`
         )}`,
         undefined,
-        undefined,
+        ANDROID_APP_FILE_MAX_BUFFER,
         true
       )).stdout;
 
@@ -236,13 +236,13 @@ class DefaultAppFileService implements AppFileService {
       ? (await adb.executeCommand(
         `shell base64 ${shellQuote(target.absolutePath)}`,
         undefined,
-        ANDROID_APP_FILE_READ_MAX_BUFFER,
+        ANDROID_APP_FILE_MAX_BUFFER,
         true
       )).stdout
       : (await adb.executeCommand(
         `shell run-as ${shellQuote(appId)} base64 ${shellQuote(target.relativePath)}`,
         undefined,
-        ANDROID_APP_FILE_READ_MAX_BUFFER,
+        ANDROID_APP_FILE_MAX_BUFFER,
         true
       )).stdout;
     const blob = stdout.replace(/\s+/g, "");

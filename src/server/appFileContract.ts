@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import type { Platform } from "../models";
 
 export const APP_FILE_CONTAINERS = [
@@ -104,7 +104,7 @@ export function normalizeAppFileRelativePath(path: string): string {
   return normalized;
 }
 
-export const putAppFileSchema = addDeviceTargetingToSchema(z.object({
+export const putAppFileSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   appId: z.string().min(1),
   container: appFileContainerSchema.describe("App container"),
   sourcePath: z.string().min(1).optional().describe("Host file path"),
@@ -144,7 +144,7 @@ export const putAppFileSchema = addDeviceTargetingToSchema(z.object({
       });
     }
   }
-}));
+})));
 
 function encodePathSegments(path: string): string {
   return normalizeAppFileRelativePath(path)

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -10,13 +10,13 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { SQLResult } from "../features/database/DatabaseInspector";
 
 // Schema for sqlQuery tool
-const sqlQuerySchema = addDeviceTargetingToSchema(
+const sqlQuerySchema = withAppIdAliases(addDeviceTargetingToSchema(
   z.object({
     appId: z.string(),
     databasePath: z.string().describe("Database path"),
     query: z.string().describe("SQL query")
   })
-);
+));
 
 // Type interface for tool arguments
 interface SqlQueryArgs {

@@ -4,12 +4,12 @@ import { GetDeepLinks } from "../features/utility/GetDeepLinks";
 import { ActionableError, BootedDevice } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 
 // Schema definitions for tool arguments
-export const getDeepLinksSchema = addDeviceTargetingToSchema(z.object({
+export const getDeepLinksSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   appId: z.string(),
-}));
+})));
 
 // Type definitions for better TypeScript support
 export interface GetDeepLinksArgs {

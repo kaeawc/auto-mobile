@@ -7,7 +7,7 @@ import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
 import { AppPermissions } from "../features/action/AppPermissions";
 import { createJSONToolResponse, DefaultToolResponseFormatter, ToolResponseFormatter } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import {
   APPS_RESOURCE_URIS,
   APP_RESOURCE_TEMPLATES,
@@ -43,28 +43,28 @@ export function resetListAppsToolDependencies(): void {
 }
 
 // Schema definitions
-export const packageNameSchema = addDeviceTargetingToSchema(z.object({
+export const packageNameSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   appId: z.string(),
-}));
+})));
 
-export const launchAppSchema = addDeviceTargetingToSchema(z.object({
+export const launchAppSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   appId: z.string(),
   clearAppData: z.boolean().optional().describe("Clear app data before launch (default false)"),
   coldBoot: z.boolean().optional().describe("Cold boot app (default false)"),
-}));
+})));
 
 export const installAppSchema = addDeviceTargetingToSchema(z.object({
   artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
 }));
 
-export const uninstallAppSchema = addDeviceTargetingToSchema(z.object({
+export const uninstallAppSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   appId: z.string(),
   keepData: z.boolean().optional().describe("Keep app data after uninstall (Android only, default false)"),
-}));
+})));
 
 const appPermissionActionSchema = z.enum(["grant", "revoke", "reset"]);
 
-export const setAppPermissionsSchema = addDeviceTargetingToSchema(
+export const setAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSchema(
   z.object({
     appId: z.string(),
     action: appPermissionActionSchema
@@ -89,7 +89,7 @@ export const setAppPermissionsSchema = addDeviceTargetingToSchema(
       .optional()
       .describe("Android: set SCHEDULE_EXACT_ALARM appop"),
   })
-).refine(
+)).refine(
   args =>
     (args.permissions !== undefined && args.permissions.length > 0) ||
     args.notificationPolicyAccess !== undefined ||
@@ -97,7 +97,7 @@ export const setAppPermissionsSchema = addDeviceTargetingToSchema(
   "Provide at least one permission or platform-specific permission option"
 );
 
-export const getAppPermissionsSchema = addDeviceTargetingToSchema(
+export const getAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSchema(
   z.object({
     appId: z.string(),
     permissions: z
@@ -105,7 +105,7 @@ export const getAppPermissionsSchema = addDeviceTargetingToSchema(
       .optional()
       .describe("Optional permissions or simulator privacy services to query"),
   })
-);
+));
 
 export const listAppsSchema = z.object({}).passthrough();
 

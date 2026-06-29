@@ -773,7 +773,7 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
     private var _lastMockRules: [NetworkMockRuleDTO]?
     private var _lastHighlight: (id: String, shape: HighlightShape)?
     public var setMockRulesResult = true
-    public var addHighlightResult = false
+    public var addHighlightResult: SdkHighlightOutcome = .unavailable
 
     public init() {}
 
@@ -909,7 +909,7 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         return result
     }
 
-    public func addHighlight(id: String, shape: HighlightShape) -> Bool {
+    public func addHighlight(id: String, shape: HighlightShape) -> SdkHighlightOutcome {
         lock.lock()
         _addHighlightCallCount += 1
         _lastHighlight = (id: id, shape: shape)

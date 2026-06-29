@@ -1596,7 +1596,7 @@ final class CommandHandlerTests: XCTestCase {
     func testAddHighlightUsesSdkBridgeBeforeRunnerOverlay() {
         let highlightManager = FakeHighlightOverlayManager()
         let sdkClient = FakeSdkHierarchyFetcher()
-        sdkClient.addHighlightResult = true
+        sdkClient.addHighlightResult = .rendered
         fakeElementLocator.foregroundBundleId = "com.test.app"
         sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
         commandHandler = CommandHandler.createForTesting(
@@ -1630,7 +1630,7 @@ final class CommandHandlerTests: XCTestCase {
     func testAddHighlightFallsBackWithoutPostingWhenSdkBridgeTargetsDifferentBundle() {
         let highlightManager = FakeHighlightOverlayManager()
         let sdkClient = FakeSdkHierarchyFetcher()
-        sdkClient.addHighlightResult = true
+        sdkClient.addHighlightResult = .rendered
         fakeElementLocator.foregroundBundleId = "com.test.app"
         sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.other.app"))
         commandHandler = CommandHandler.createForTesting(
@@ -1663,7 +1663,7 @@ final class CommandHandlerTests: XCTestCase {
     func testAddHighlightFallsBackToRunnerOverlayWhenSdkBridgeUnavailable() {
         let highlightManager = FakeHighlightOverlayManager()
         let sdkClient = FakeSdkHierarchyFetcher()
-        sdkClient.addHighlightResult = false
+        sdkClient.addHighlightResult = .unavailable
         fakeElementLocator.foregroundBundleId = "com.test.app"
         sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
         commandHandler = CommandHandler.createForTesting(
@@ -1692,11 +1692,51 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(highlightManager.showCalls.count, 1)
     }
 
+    func testAddHighlightRejectionFromSdkBridgeDoesNotFallBackToRunnerOverlay() {
+        // Issue #2682: when the SDK bridge owns the foreground app and rejects the
+        // highlight (e.g. missing source dimensions), the runner overlay must NOT
+        // render it unscaled — the request fails loudly instead.
+        let highlightManager = FakeHighlightOverlayManager()
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = .rejected
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: sdkClient,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(
+            response.error,
+            "Target app SDK highlight bridge rejected the highlight "
+                + "(missing source dimensions or invalid shape)."
+        )
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 1)
+        XCTAssertTrue(highlightManager.showCalls.isEmpty)
+    }
+
     func testAddHighlightReturnsClearErrorWhenSdkAndRunnerOverlayUnavailable() {
         let highlightManager = FakeHighlightOverlayManager()
         highlightManager.showResult = false
         let sdkClient = FakeSdkHierarchyFetcher()
-        sdkClient.addHighlightResult = false
+        sdkClient.addHighlightResult = .unavailable
         fakeElementLocator.foregroundBundleId = "com.test.app"
         sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
         commandHandler = CommandHandler.createForTesting(

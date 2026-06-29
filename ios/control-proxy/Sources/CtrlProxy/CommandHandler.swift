@@ -982,15 +982,29 @@ public class CommandHandler: CommandHandling {
             )
         }
         let highlightId = request.id ?? request.requestId ?? UUID().uuidString
-        if sdkHierarchyClient != nil,
-           sdkServerMatchesTrackedForegroundApp(),
-           sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) == true
-        {
-            return WebSocketResponse.success(
-                type: ResponseType.highlightResponse.rawValue,
-                requestId: request.requestId,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
+        // When the in-app SDK bridge owns the foreground app, it is the authoritative
+        // highlight path. A rejection there (e.g. missing source dimensions, issue
+        // #2682) must fail loudly — falling back to the runner overlay would draw the
+        // highlight unscaled and misplace it. Only an unreachable bridge falls back.
+        if sdkHierarchyClient != nil, sdkServerMatchesTrackedForegroundApp() {
+            switch sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) {
+            case .rendered:
+                return WebSocketResponse.success(
+                    type: ResponseType.highlightResponse.rawValue,
+                    requestId: request.requestId,
+                    totalTimeMs: totalTimeMs(from: startTime)
+                )
+            case .rejected:
+                return WebSocketResponse.error(
+                    type: ResponseType.highlightResponse.rawValue,
+                    requestId: request.requestId,
+                    error: "Target app SDK highlight bridge rejected the highlight "
+                        + "(missing source dimensions or invalid shape).",
+                    totalTimeMs: totalTimeMs(from: startTime)
+                )
+            case .unavailable, .none:
+                break // Bridge unreachable — fall through to the runner overlay.
+            }
         }
         guard highlightOverlayManager.show(id: highlightId, shape: shape) else {
             return WebSocketResponse.error(

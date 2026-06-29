@@ -45,11 +45,11 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
     }
 
     /// Draw a highlight in the target app through the SDK's in-app server.
-    public func addHighlight(id: String, shape: HighlightShape) -> Bool {
+    public func addHighlight(id: String, shape: HighlightShape) -> SdkHighlightOutcome {
         guard let body = try? JSONEncoder().encode(AddHighlightBody(id: id, shape: shape)) else {
-            return false
+            return .unavailable
         }
-        return postSync(path: "/highlight", body: body, session: urlSession)
+        return postHighlight(path: "/highlight", body: body, session: urlSession)
     }
 
     // MARK: - Private
@@ -81,6 +81,29 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
 
         semaphore.wait()
         return result
+    }
+
+    /// POST a highlight and classify the result: an HTTP response distinguishes a
+    /// deliberate rejection (non-200) from the bridge being unreachable (no response).
+    private func postHighlight(path: String, body: Data, session: URLSession) -> SdkHighlightOutcome {
+        let url = baseURL.appendingPathComponent(path)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var outcome: SdkHighlightOutcome = .unavailable
+
+        session.dataTask(with: request) { _, response, _ in
+            defer { semaphore.signal() }
+            // No HTTP response means the in-app bridge was unreachable.
+            guard let http = response as? HTTPURLResponse else { return }
+            outcome = http.statusCode == 200 ? .rendered : .rejected
+        }.resume()
+
+        semaphore.wait()
+        return outcome
     }
 
     private func postSync(path: String, body: Data, session: URLSession) -> Bool {

@@ -555,6 +555,22 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `accepts accessibilityFocus tool published in generated definitions`() {
+    val yaml =
+        """
+        name: accessibility-focus-plan
+        steps:
+          - tool: accessibilityFocus
+            params:
+              resourceId: login_button
+        """
+            .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "accessibilityFocus should be accepted: ${result.errors}")
+  }
+
+  @Test
   fun `detects multiple invalid tool names`() {
     val yaml =
         """

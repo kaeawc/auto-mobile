@@ -25,9 +25,14 @@ import { registerSnapshotTools } from "../src/server/snapshotTools";
 import { registerBiometricTools } from "../src/server/biometricTools";
 import { registerTelephonyTools } from "../src/server/telephonyTools";
 import { registerHighlightTools } from "../src/server/highlightTools";
-import { registerAccessibilityFocusTools } from "../src/server/accessibilityFocusTools";
-import { registerDebugTools } from "../src/server/debugTools";
+import { registerDatabaseTools } from "../src/server/databaseTools";
+import { registerStorageTools } from "../src/server/storageTools";
 import { registerAppFileTools } from "../src/server/appFileTools";
+import { registerFormTools } from "../src/server/formTools";
+import { registerAccessibilityTools } from "../src/server/accessibilityTools";
+import { registerAccessibilityFocusTools } from "../src/server/accessibilityFocusTools";
+import { registerNetworkTools } from "../src/server/networkTools";
+import { registerDebugTools } from "../src/server/debugTools";
 
 const OUTPUT_PATH = "schemas/tool-definitions.json";
 
@@ -48,13 +53,18 @@ function registerAllTools(): void {
   registerBiometricTools();
   registerTelephonyTools();
   registerHighlightTools();
-  registerAccessibilityFocusTools();
+  registerDatabaseTools();
+  registerStorageTools();
   registerAppFileTools();
+  registerFormTools();
+  registerAccessibilityTools();
+  registerAccessibilityFocusTools();
+  registerNetworkTools();
   registerDebugTools();
 }
 
 function writeToolDefinitions(outputPath: string): void {
-  const toolDefinitions = ToolRegistry.getToolDefinitions()
+  const toolDefinitions = ToolRegistry.getToolDefinitions({ includeUnavailable: true })
     .slice()
     .sort((left, right) => left.name.localeCompare(right.name));
   const resolvedPath = path.resolve(process.cwd(), outputPath);

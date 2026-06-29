@@ -1,5 +1,339 @@
 [
   {
+    "name": "accessibility",
+    "description": "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator only). Always returns fresh state from the device.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "talkback": {
+          "description": "Enable (true) or disable (false) TalkBack on the active Android device",
+          "type": "boolean"
+        },
+        "voiceover": {
+          "description": "Enable (true) or disable (false) VoiceOver on iOS Simulator",
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "service": {
+          "type": "string",
+          "enum": [
+            "talkback",
+            "voiceover",
+            "unknown"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "service"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  {
+    "name": "accessibilityFocus",
+    "description": "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "set default or clear TalkBack focus",
+          "type": "string",
+          "enum": [
+            "set",
+            "clear"
+          ]
+        },
+        "resourceId": {
+          "description": "Target resource ID",
+          "type": "string"
+        },
+        "text": {
+          "description": "Target text",
+          "type": "string"
+        },
+        "contentDesc": {
+          "description": "Target content-desc",
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "focusedElement": {
+          "type": "object",
+          "properties": {
+            "bounds": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "top": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "right": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "bottom": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "centerX": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "centerY": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "left",
+                "top",
+                "right",
+                "bottom"
+              ],
+              "additionalProperties": false
+            },
+            "text": {
+              "type": "string"
+            },
+            "resource-id": {
+              "type": "string"
+            },
+            "content-desc": {
+              "type": "string"
+            },
+            "class": {
+              "type": "string"
+            },
+            "package": {
+              "type": "string"
+            },
+            "checkable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "checked": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "clickable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "focusable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "focused": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "accessibility-focused": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "scrollable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "selected": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            }
+          },
+          "required": [
+            "bounds"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "biometricAuth",
     "description": "Simulate biometric auth: Android emulator/SDK hook or iOS Simulator.",
     "inputSchema": {
@@ -61,6 +395,53 @@
       },
       "required": [
         "action"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "bugReport",
+    "description": "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, logcat, window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "appId": {
+          "description": "App package ID to filter logcat for specific app",
+          "type": "string"
+        },
+        "logcatLines": {
+          "description": "Number of recent logcat lines to include (default: 1000)",
+          "type": "number"
+        },
+        "saveDir": {
+          "description": "Directory to save report to",
+          "type": "string"
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform"
       ],
       "additionalProperties": false
     }
@@ -133,6 +514,88 @@
       "required": [
         "platform"
       ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "clearKeyValueFile",
+    "description": "Clear app key-value storage file.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "description": "Storage name"
+        },
+        "fileName": {
+          "description": "Deprecated alias for name",
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "clearMockNetwork",
+    "description": "Clear mock network response rules.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "mockId": {
+          "description": "Mock ID; omit to clear all",
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
       "additionalProperties": false
     }
   },
@@ -296,6 +759,96 @@
         "lock",
         "steps",
         "deviceCount"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "debugSearch",
+    "description": "Debug element search operations. Shows all matching elements, which one would be selected, and near-misses that almost matched. Use this to understand why an element isn't being found or why the wrong element is being selected.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "text": {
+          "description": "Text to search for in elements",
+          "type": "string"
+        },
+        "elementId": {
+          "description": "Element resource ID / accessibility identifier to search for",
+          "type": "string"
+        },
+        "container": {
+          "description": "Container element to scope the search - specify elementId or text to locate it",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "description": "Container resource ID"
+                }
+              },
+              "required": [
+                "elementId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Container text"
+                }
+              },
+              "required": [
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "partialMatch": {
+          "description": "Whether to use partial matching (substring containment, default: true)",
+          "type": "boolean"
+        },
+        "caseSensitive": {
+          "description": "Whether to use case-sensitive matching (default: false)",
+          "type": "boolean"
+        },
+        "includeNearMisses": {
+          "description": "Include elements that almost matched (default: true)",
+          "type": "boolean"
+        },
+        "maxNearMisses": {
+          "description": "Maximum number of near-misses to include (default: 10)",
+          "type": "number"
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform"
       ],
       "additionalProperties": false
     }
@@ -802,6 +1355,84 @@
     }
   },
   {
+    "name": "explore",
+    "description": "Automatically explore app to build navigation graph",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "maxInteractions": {
+          "description": "Max interactions (default: 50)",
+          "type": "number"
+        },
+        "timeoutMs": {
+          "description": "Timeout ms (default: 300000)",
+          "type": "number"
+        },
+        "strategy": {
+          "description": "Strategy (default: weighted)",
+          "type": "string",
+          "enum": [
+            "breadth-first",
+            "depth-first",
+            "weighted"
+          ]
+        },
+        "resetToHome": {
+          "description": "Reset to home periodically (default: false)",
+          "type": "boolean"
+        },
+        "resetInterval": {
+          "description": "Reset interval (default: 15)",
+          "type": "number"
+        },
+        "mode": {
+          "description": "Mode (default: hybrid)",
+          "type": "string",
+          "enum": [
+            "discover",
+            "validate",
+            "hybrid"
+          ]
+        },
+        "packageName": {
+          "description": "Package to limit exploration",
+          "type": "string"
+        },
+        "dryRun": {
+          "description": "Dry run (no interactions)",
+          "type": "boolean"
+        },
+        "platform": {
+          "default": "android",
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "exportPlan",
     "description": "Stop active recording and export a YAML plan.",
     "inputSchema": {
@@ -955,6 +1586,89 @@
               "doNotDisturb"
             ]
           }
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "getNavigationGraph",
+    "description": "Get navigation graph for debugging",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "default": "android",
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "getNetworkGraph",
+    "description": "Get aggregate captured network graph.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "sinceSeconds": {
+          "description": "Lookback seconds",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "method": {
+          "description": "Filter by HTTP method",
+          "type": "string"
+        },
+        "minRequests": {
+          "description": "Minimum request count",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
         },
         "platform": {
           "type": "string",
@@ -1718,6 +2432,93 @@
     }
   },
   {
+    "name": "identifyInteractions",
+    "description": "Suggest likely interactions",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "filter": {
+          "description": "Filter options",
+          "type": "object",
+          "properties": {
+            "types": {
+              "description": "Interaction types",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "navigation",
+                  "input",
+                  "action",
+                  "scroll",
+                  "toggle"
+                ]
+              }
+            },
+            "minConfidence": {
+              "description": "Min confidence (0-1)",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "limit": {
+              "description": "Max results",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        },
+        "includeContext": {
+          "description": "Context options",
+          "type": "object",
+          "properties": {
+            "navigationGraph": {
+              "description": "Include nav graph predictions",
+              "type": "boolean"
+            },
+            "elementDetails": {
+              "description": "Include element details",
+              "type": "boolean"
+            },
+            "suggestedParams": {
+              "description": "Include tool params",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "imeAction",
     "description": "Perform IME action",
     "inputSchema": {
@@ -2043,6 +2844,215 @@
             "android",
             "ios"
           ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "mockNetwork",
+    "description": "Add mock network response rule.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Host pattern (regex)"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path pattern (regex)"
+        },
+        "method": {
+          "description": "HTTP method; default *",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Mock response limit",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "statusCode": {
+          "description": "Response status; default 200",
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "responseHeaders": {
+          "description": "Response headers",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "responseBody": {
+          "description": "Response body (max 10KB)",
+          "type": "string"
+        },
+        "contentType": {
+          "description": "Content-Type; default application/json",
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "navigateTo",
+    "description": "Navigate to screen using navigation graph",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "targetScreen": {
+          "type": "string",
+          "description": "Target screen name"
+        },
+        "platform": {
+          "default": "android",
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "targetScreen",
+        "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "network",
+    "description": "Control network capture and error simulation.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "capture": {
+          "description": "Toggle capture",
+          "type": "boolean"
+        },
+        "simulateErrors": {
+          "description": "Error simulation settings",
+          "type": "object",
+          "properties": {
+            "errorType": {
+              "description": "Error type; default http500",
+              "type": "string",
+              "enum": [
+                "http500",
+                "timeout",
+                "connectionRefused",
+                "dnsFailure",
+                "tlsFailure"
+              ]
+            },
+            "limit": {
+              "description": "Max errors",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "durationSeconds": {
+              "description": "Simulation duration seconds",
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "cancel": {
+              "description": "Cancel active simulation",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "notifFilter": {
+          "description": "Notification filter",
+          "type": "string",
+          "enum": [
+            "all",
+            "errors",
+            "slow"
+          ]
+        },
+        "notifDebounceMs": {
+          "description": "Notification debounce ms",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "slowThresholdMs": {
+          "description": "Slow threshold ms",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -2719,6 +3729,57 @@
     }
   },
   {
+    "name": "removeKeyValue",
+    "description": "Remove app key-value storage entry.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "description": "Storage name"
+        },
+        "fileName": {
+          "description": "Deprecated alias for name",
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "description": "Key"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "key"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "rotate",
     "description": "Rotate device orientation",
     "inputSchema": {
@@ -2999,6 +4060,88 @@
     }
   },
   {
+    "name": "setKeyValue",
+    "description": "Set app key-value storage entry.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "description": "Storage name"
+        },
+        "fileName": {
+          "description": "Deprecated alias for name",
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "description": "Key"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Value string; null clears"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "STRING",
+            "INT",
+            "LONG",
+            "FLOAT",
+            "DOUBLE",
+            "BOOLEAN",
+            "STRING_SET",
+            "DATA",
+            "DATE",
+            "ARRAY",
+            "DICTIONARY",
+            "UNKNOWN"
+          ],
+          "description": "Value type"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "key",
+        "value",
+        "type"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "setNotificationPolicy",
     "description": "Set app notification/DND policy state",
     "inputSchema": {
@@ -3043,6 +4186,162 @@
     }
   },
   {
+    "name": "setUIState",
+    "description": "Set multiple form fields by desired state.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "fields": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "selector": {
+                "type": "object",
+                "properties": {
+                  "elementId": {
+                    "type": "string",
+                    "description": "Resource ID, e.g. com.app:id/btn_login"
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "Text, content-desc, or placeholder"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Field selector"
+              },
+              "value": {
+                "description": "Text/dropdown value",
+                "type": "string"
+              },
+              "selected": {
+                "description": "Checkbox/toggle state",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "selector"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Fields to set"
+        },
+        "scrollDirection": {
+          "description": "Initial search scroll direction",
+          "type": "string",
+          "enum": [
+            "up",
+            "down"
+          ]
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "description": "All fields set"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "selector": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "elementId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "success": {
+                "type": "boolean"
+              },
+              "attempts": {
+                "type": "number"
+              },
+              "verified": {
+                "type": "boolean"
+              },
+              "error": {
+                "type": "string"
+              },
+              "fieldType": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "checkbox",
+                  "toggle",
+                  "dropdown",
+                  "unknown"
+                ]
+              },
+              "skipped": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "selector",
+              "success",
+              "attempts"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Field results"
+        },
+        "totalAttempts": {
+          "type": "number",
+          "description": "Total attempts"
+        },
+        "error": {
+          "description": "Error message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "success",
+        "fields",
+        "totalAttempts"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "shake",
     "description": "Shake device; iOS Simulator only.",
     "inputSchema": {
@@ -3081,6 +4380,54 @@
       },
       "required": [
         "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "sqlQuery",
+    "description": "Execute SQL on app SQLite database.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string"
+        },
+        "databasePath": {
+          "type": "string",
+          "description": "Database path"
+        },
+        "query": {
+          "type": "string",
+          "description": "SQL query"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "databasePath",
+        "query"
       ],
       "additionalProperties": false
     }

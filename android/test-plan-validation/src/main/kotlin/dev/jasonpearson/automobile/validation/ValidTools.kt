@@ -8,6 +8,7 @@ object ValidTools {
   val TOOLS =
       setOf(
           "accessibility",
+          "accessibilityFocus",
           "biometricAuth",
           "bugReport",
           "captureDeviceSnapshot",

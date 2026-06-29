@@ -26,7 +26,7 @@ import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
 import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { serverConfig } from "../utils/ServerConfig";
 import {
   createElementIdTextSelectorSchema,
@@ -268,7 +268,7 @@ const systemTraySchemaBase = z.object({
   platform: platformSchema
 });
 
-export const systemTraySchema = addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
+export const systemTraySchema = withAppIdAliases(addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
   const notification = value.notification ?? {};
 
   if (value.action === "open" || value.action === "close") {
@@ -296,18 +296,18 @@ export const systemTraySchema = addDeviceTargetingToSchema(systemTraySchemaBase)
       message: "notification.tapActionLabel is only valid for tap action"
     });
   }
-});
-
-export const stopAppSchema = addDeviceTargetingToSchema(z.object({
-  appId: z.string(),
-  platform: platformSchema
 }));
 
-export const clearStateSchema = addDeviceTargetingToSchema(z.object({
+export const stopAppSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
+  appId: z.string(),
+  platform: platformSchema
+})));
+
+export const clearStateSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   appId: z.string(),
   clearKeychain: z.boolean().optional().describe("Clear iOS keychain"),
   platform: platformSchema
-}));
+})));
 
 export const inputTextSchema = addDeviceTargetingToSchema(z.object({
   text: z.string().min(1),

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { addDeviceTargetingToSchema, platformSchema } from "../../src/server/toolSchemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  appIdFieldAliases,
+  platformSchema,
+  withFieldAliases
+} from "../../src/server/toolSchemaHelpers";
 import { accessibilitySchema } from "../../src/server/accessibilityTools";
 import { packageNameSchema, launchAppSchema, installAppSchema, uninstallAppSchema, getAppPermissionsSchema } from "../../src/server/appTools";
 import { biometricAuthSchema } from "../../src/server/biometricTools";
@@ -109,6 +114,138 @@ describe("addDeviceTargetingToSchema", () => {
     expect(withExplicit.success).toBe(true);
     if (withExplicit.success) {
       expect(withExplicit.data.platform).toBe("ios");
+    }
+  });
+});
+
+describe("withFieldAliases", () => {
+  const schema = withFieldAliases(
+    z.object({
+      appId: z.string(),
+      nested: z.object({
+        appId: z.string().optional(),
+      }).optional(),
+    }).strict(),
+    {
+      appId: appIdFieldAliases,
+    }
+  );
+
+  test("maps common app identifier aliases to appId", () => {
+    for (const alias of appIdFieldAliases) {
+      const result = schema.safeParse({ [alias]: "com.example.app" });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.appId).toBe("com.example.app");
+        expect(alias in result.data).toBe(false);
+      }
+    }
+  });
+
+  test("preserves appId when an alias is also present", () => {
+    const result = schema.safeParse({
+      appId: "com.example.primary",
+      packageId: "com.example.alias",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.appId).toBe("com.example.primary");
+      expect("packageId" in result.data).toBe(false);
+    }
+  });
+
+  test("normalizes nested objects with appId aliases", () => {
+    const result = schema.safeParse({
+      appId: "com.example.outer",
+      nested: {
+        bundleId: "com.example.inner",
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.nested?.appId).toBe("com.example.inner");
+    }
+  });
+
+  test("does not recurse into non-plain objects", () => {
+    const date = new Date("2026-01-01T00:00:00.000Z");
+    const dateSchema = withFieldAliases(z.object({
+      appId: z.string(),
+      value: z.instanceof(Date),
+    }), {
+      appId: appIdFieldAliases,
+    });
+
+    const result = dateSchema.safeParse({
+      packageId: "com.example.app",
+      value: date,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.value).toBe(date);
+    }
+  });
+});
+
+describe("appId aliases on tool schemas", () => {
+  test("launchAppSchema accepts packageId as an appId alias", () => {
+    const result = launchAppSchema.safeParse({
+      packageId: "com.example.app",
+      platform: "android",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.appId).toBe("com.example.app");
+      expect("packageId" in result.data).toBe(false);
+    }
+  });
+
+  test("launchAppSchema accepts natural app identifier aliases", () => {
+    for (const alias of ["package", "packageName", "bundle", "bundleId", "application", "applicationId"]) {
+      const result = launchAppSchema.safeParse({
+        [alias]: "com.example.app",
+        platform: "ios",
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.appId).toBe("com.example.app");
+      }
+    }
+  });
+
+  test("postNotificationSchema accepts bundleId for the iOS appId field", () => {
+    const result = postNotificationSchema.safeParse({
+      platform: "ios",
+      title: "Hello",
+      body: "World",
+      bundleId: "com.example.app",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.appId).toBe("com.example.app");
+    }
+  });
+
+  test("systemTraySchema accepts appId aliases in notification criteria", () => {
+    const result = systemTraySchema.safeParse({
+      platform: "android",
+      action: "clearAll",
+      notification: {
+        packageName: "com.example.app",
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.notification?.appId).toBe("com.example.app");
+      expect("packageName" in (result.data.notification ?? {})).toBe(false);
     }
   });
 });

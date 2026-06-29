@@ -6,6 +6,75 @@ export const platformSchema = z.enum(["android", "ios"]);
 export const DEVICE_LABEL_DESCRIPTION =
   "Device label";
 
+export const appIdFieldAliases = [
+  "packageId",
+  "package",
+  "packageName",
+  "appPackage",
+  "appPackageId",
+  "bundle",
+  "bundleId",
+  "bundleID",
+  "bundleIdentifier",
+  "application",
+  "applicationId",
+  "applicationIdentifier",
+  "app",
+  "appIdentifier",
+  "package_id",
+  "package_name",
+  "bundle_id",
+  "application_id",
+] as const;
+
+export type FieldAliasMap = Record<string, readonly string[]>;
+
+export function withFieldAliases<T extends z.ZodTypeAny>(schema: T, aliases: FieldAliasMap): T {
+  return z.preprocess(input => normalizeFieldAliases(input, aliases), schema) as unknown as T;
+}
+
+export function withAppIdAliases<T extends z.ZodTypeAny>(schema: T): T {
+  return withFieldAliases(schema, { appId: appIdFieldAliases });
+}
+
+function normalizeFieldAliases(input: unknown, aliases: FieldAliasMap): unknown {
+  if (Array.isArray(input)) {
+    return input.map(item => normalizeFieldAliases(item, aliases));
+  }
+
+  if (!isPlainObject(input)) {
+    return input;
+  }
+
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    normalized[key] = normalizeFieldAliases(value, aliases);
+  }
+
+  for (const [canonicalField, fieldAliases] of Object.entries(aliases)) {
+    if (normalized[canonicalField] === undefined) {
+      const matchingAlias = fieldAliases.find(alias => normalized[alias] !== undefined);
+      if (matchingAlias) {
+        normalized[canonicalField] = normalized[matchingAlias];
+      }
+    }
+
+    for (const alias of fieldAliases) {
+      delete normalized[alias];
+    }
+  }
+
+  return normalized;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 /**
  * Helper to add sessionUuid field to tool schemas
  *

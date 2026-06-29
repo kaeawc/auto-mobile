@@ -5,7 +5,7 @@ import { DebugSearch } from "../features/debug/DebugSearch";
 import { BugReport } from "../features/debug/BugReport";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { BootedDevice, Platform } from "../models";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
   elementContainerSchema,
@@ -61,12 +61,12 @@ export const debugSearchSchema = addDeviceTargetingToSchema(debugSearchBaseSchem
   validateElementIdTextSelector(value, ctx);
 });
 
-export const bugReportSchema = addDeviceTargetingToSchema(z.object({
+export const bugReportSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
   appId: z.string().optional().describe("App package ID to filter logcat for specific app"),
   logcatLines: z.number().optional().describe("Number of recent logcat lines to include (default: 1000)"),
   saveDir: z.string().optional().describe("Directory to save report to")
-}));
+})));
 
 // Register debug tools
 export function registerDebugTools() {

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { PostNotification, PostNotificationOptions } from "../features/utility/PostNotification";
 import { NotificationPolicy } from "../features/utility/NotificationPolicy";
 
@@ -26,7 +26,7 @@ const postNotificationCommonShape = {
   channelId: z.string().optional().describe("Android channel ID / iOS APNs category"),
 };
 
-export const postNotificationSchema = z.discriminatedUnion("platform", [
+export const postNotificationSchema = withAppIdAliases(z.discriminatedUnion("platform", [
   addDeviceTargetingToSchema(z.object({
     ...postNotificationCommonShape,
     appId: z.string({ error: iosAppIdRequiredMessage })
@@ -39,16 +39,16 @@ export const postNotificationSchema = z.discriminatedUnion("platform", [
     appId: z.string().min(1).optional().describe("iOS target bundle ID"),
     platform: z.literal("android")
   }))
-]);
+]));
 
-export const getNotificationPolicySchema = addDeviceTargetingToSchema(z.object({
+export const getNotificationPolicySchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   appId: z.string().min(1),
-}));
+})));
 
-export const setNotificationPolicySchema = addDeviceTargetingToSchema(z.object({
+export const setNotificationPolicySchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   appId: z.string().min(1),
   policyAccess: z.boolean().describe("Android: allow DND policy access"),
-}));
+})));
 
 export type GetNotificationPolicyArgs = z.infer<typeof getNotificationPolicySchema>;
 

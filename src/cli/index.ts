@@ -15,6 +15,13 @@ import { registerDoctorTools } from "../server/doctorTools";
 import { registerVideoRecordingTools } from "../server/videoRecordingTools";
 import { registerNotificationTools } from "../server/notificationTools";
 
+type CliHelpSchemaShape = Record<string, any> | undefined;
+interface CliHelpParameterInfo {
+  isOptional: boolean;
+  typeName: string;
+  description?: string;
+}
+
 // Initialize tool registry for CLI mode
 function initializeCliTools(): void {
 
@@ -448,18 +455,16 @@ function showToolHelp(toolName: string): void {
   // Show schema information
   console.log("\nParameters:");
   try {
-    const schema = tool.schema._def;
-    if (schema && schema.shape) {
-      Object.entries(schema.shape).forEach(([key, value]: [string, any]) => {
-        const isOptional = value._def.typeName === "ZodOptional";
-        const actualType = isOptional ? value._def.innerType : value;
-        const typeName = actualType._def.typeName || "unknown";
+    const shape = getCliHelpSchemaShape(tool.schema);
+    if (shape) {
+      Object.entries(shape).forEach(([key, value]: [string, any]) => {
+        const parameter = getCliHelpParameterInfo(value);
 
-        console.log(`  --${key} ${isOptional ? "(optional)" : "(required)"}`);
-        console.log(`    Type: ${typeName.replace("Zod", "").toLowerCase()}`);
+        console.log(`  --${key} ${parameter.isOptional ? "(optional)" : "(required)"}`);
+        console.log(`    Type: ${parameter.typeName}`);
 
-        if (actualType._def.description) {
-          console.log(`    Description: ${actualType._def.description}`);
+        if (parameter.description) {
+          console.log(`    Description: ${parameter.description}`);
         }
       });
     } else {
@@ -471,4 +476,38 @@ function showToolHelp(toolName: string): void {
 
   console.log(`\nExample usage:`);
   console.log(`  bunx @kaeawc/auto-mobile@latest --cli ${toolName} [parameters...]`);
+}
+
+export function getCliHelpSchemaShape(schema: any): CliHelpSchemaShape {
+  const definition = schema?._def;
+  if (!definition) {
+    return undefined;
+  }
+
+  if (definition.shape) {
+    return definition.shape;
+  }
+
+  if (definition.type === "pipe" && definition.out?._def?.shape) {
+    return definition.out._def.shape;
+  }
+
+  return undefined;
+}
+
+export function getCliHelpParameterInfo(schema: any): CliHelpParameterInfo {
+  const isOptional = typeof schema?.isOptional === "function"
+    ? schema.isOptional()
+    : schema?._def?.typeName === "ZodOptional";
+  const actualType = isOptional
+    ? schema?._def?.innerType ?? schema
+    : schema;
+  const rawTypeName = actualType?._def?.typeName ?? actualType?._def?.type ?? "unknown";
+  const typeName = String(rawTypeName).replace(/^Zod/, "").toLowerCase();
+
+  return {
+    isOptional,
+    typeName,
+    description: schema?.description ?? actualType?.description ?? actualType?._def?.description,
+  };
 }

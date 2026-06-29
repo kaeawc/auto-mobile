@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -45,7 +45,7 @@ function resolveStorageName(args: { name?: string; fileName?: string }): string 
 }
 
 // Schema for setKeyValue tool
-const setKeyValueSchema = z.union([
+const setKeyValueSchema = withAppIdAliases(z.union([
   addDeviceTargetingToSchema(z.object({
     appId: z.string(),
     name: z.string().describe(STORAGE_NAME_DESCRIPTION),
@@ -66,10 +66,10 @@ const setKeyValueSchema = z.union([
       "Value type"
     ),
   })),
-]);
+]));
 
 // Schema for removeKeyValue tool
-const removeKeyValueSchema = z.union([
+const removeKeyValueSchema = withAppIdAliases(z.union([
   addDeviceTargetingToSchema(z.object({
     appId: z.string(),
     name: z.string().describe(STORAGE_NAME_DESCRIPTION),
@@ -82,10 +82,10 @@ const removeKeyValueSchema = z.union([
     fileName: z.string().describe(legacyFileNameDescription),
     key: z.string().describe("Key"),
   })),
-]);
+]));
 
 // Schema for clearKeyValueFile tool
-const clearKeyValueFileSchema = z.union([
+const clearKeyValueFileSchema = withAppIdAliases(z.union([
   addDeviceTargetingToSchema(z.object({
     appId: z.string(),
     name: z.string().describe(STORAGE_NAME_DESCRIPTION),
@@ -96,7 +96,7 @@ const clearKeyValueFileSchema = z.union([
     name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
     fileName: z.string().describe(legacyFileNameDescription),
   })),
-]);
+]));
 
 interface SetKeyValueArgs {
   appId: string;

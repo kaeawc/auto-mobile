@@ -175,7 +175,9 @@ public class FakeGesturePerformer: GesturePerforming {
     public struct PinchCall {
         public let centerX: Double
         public let centerY: Double
-        public let scale: Double
+        public let distanceStart: Double
+        public let distanceEnd: Double
+        public let rotationDegrees: Double
         public let duration: TimeInterval
     }
 
@@ -397,7 +399,9 @@ public class FakeGesturePerformer: GesturePerforming {
         fingerCount: Int,
         fingerSpacing: Double,
         duration: TimeInterval
-    ) throws {
+    )
+        throws
+    {
         try checkFailure("multiFingerSwipe")
         multiFingerSwipeHistory.append(MultiFingerSwipeCall(
             startX: startX,
@@ -433,9 +437,25 @@ public class FakeGesturePerformer: GesturePerforming {
         ))
     }
 
-    public func pinch(centerX: Double, centerY: Double, scale: Double, duration: TimeInterval) throws {
+    public func pinch(
+        centerX: Double,
+        centerY: Double,
+        distanceStart: Double,
+        distanceEnd: Double,
+        rotationDegrees: Double,
+        duration: TimeInterval
+    )
+        throws
+    {
         try checkFailure("pinch")
-        pinchHistory.append(PinchCall(centerX: centerX, centerY: centerY, scale: scale, duration: duration))
+        pinchHistory.append(PinchCall(
+            centerX: centerX,
+            centerY: centerY,
+            distanceStart: distanceStart,
+            distanceEnd: distanceEnd,
+            rotationDegrees: rotationDegrees,
+            duration: duration
+        ))
     }
 
     public func typeText(text: String) throws {

@@ -575,7 +575,57 @@ final class CommandHandlerTests: XCTestCase {
 
         XCTAssertFalse(response.success ?? true)
         XCTAssertEqual(response.type, "multi_finger_swipe_result")
-        XCTAssertTrue(response.error?.contains("XCTest private multi-touch event synthesis classes are unavailable") ?? false)
+        XCTAssertTrue(response.error?
+            .contains("XCTest private multi-touch event synthesis classes are unavailable") ?? false)
+    }
+
+    func testPinchSuccessForwardsRequestPayload() {
+        let request = WebSocketRequest(
+            type: "request_pinch",
+            requestId: "test-pinch",
+            duration: 700,
+            centerX: 100,
+            centerY: 200,
+            distanceStart: 40,
+            distanceEnd: 120,
+            rotationDegrees: 15
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertTrue(response.success ?? false)
+        XCTAssertEqual(response.type, "pinch_result")
+        XCTAssertEqual(response.requestId, "test-pinch")
+
+        let history = fakeGesturePerformer.getPinchHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history.first?.centerX, 100)
+        XCTAssertEqual(history.first?.centerY, 200)
+        XCTAssertEqual(history.first?.distanceStart, 40)
+        XCTAssertEqual(history.first?.distanceEnd, 120)
+        XCTAssertEqual(history.first?.rotationDegrees, 15)
+        XCTAssertEqual(history.first?.duration ?? -1, 0.7, accuracy: 0.0001)
+    }
+
+    func testPinchFailureReturnsTypedError() {
+        fakeGesturePerformer.setFailure(
+            for: "pinch",
+            error: GesturePerformer.GestureError.gestureFailed("pinch synthesis failed")
+        )
+        let request = WebSocketRequest(
+            type: "request_pinch",
+            requestId: "test-pinch-failure",
+            centerX: 100,
+            centerY: 200,
+            distanceStart: 40,
+            distanceEnd: 120
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertFalse(response.success ?? true)
+        XCTAssertEqual(response.type, "pinch_result")
+        XCTAssertTrue(response.error?.contains("pinch synthesis failed") ?? false)
     }
 
     // MARK: - Text Input Tests

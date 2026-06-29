@@ -468,14 +468,13 @@ public class CommandHandler: CommandHandling {
             throw CommandError.missingParameter("centerX, centerY, distanceStart, distanceEnd")
         }
 
-        let duration = request.duration ?? 300
-        let scale = Double(distanceEnd) / Double(distanceStart)
-
         try gesturePerformer.pinch(
             centerX: Double(centerX),
             centerY: Double(centerY),
-            scale: scale,
-            duration: TimeInterval(duration) / 1000.0
+            distanceStart: Double(distanceStart),
+            distanceEnd: Double(distanceEnd),
+            rotationDegrees: Double(request.rotationDegrees ?? 0),
+            duration: TimeInterval(request.duration ?? 300) / 1000.0
         )
 
         return WebSocketResponse.success(
@@ -985,7 +984,8 @@ public class CommandHandler: CommandHandling {
         let highlightId = request.id ?? request.requestId ?? UUID().uuidString
         if sdkHierarchyClient != nil,
            sdkServerMatchesTrackedForegroundApp(),
-           sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) == true {
+           sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) == true
+        {
             return WebSocketResponse.success(
                 type: ResponseType.highlightResponse.rawValue,
                 requestId: request.requestId,

@@ -104,8 +104,16 @@ public protocol GesturePerforming {
 
     // MARK: - Pinch Gestures
 
-    /// Pinch at center with scale
-    func pinch(centerX: Double, centerY: Double, scale: Double, duration: TimeInterval) throws
+    /// Pinch at center with explicit starting and ending finger distances.
+    func pinch(
+        centerX: Double,
+        centerY: Double,
+        distanceStart: Double,
+        distanceEnd: Double,
+        rotationDegrees: Double,
+        duration: TimeInterval
+    )
+        throws
 
     // MARK: - Text Input
 

@@ -3,6 +3,7 @@ import path from "path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 
 /**
  * Regression test for the module-load-time-vs-runtime path hazard.
@@ -34,6 +35,23 @@ describe("database path lazy resolution", () => {
   async function importFreshDatabaseModule() {
     // Fresh module instance so its lazy cache is not shared with other tests.
     return import(`../../src/db/database.ts?lazy-db-path-test=${Date.now()}-${Math.random()}`);
+  }
+
+  async function removeTempDirWithRetry(dir: string): Promise<void> {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        await rm(dir, { recursive: true, force: true });
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EBUSY" && code !== "EPERM") {
+          throw error;
+        }
+        await defaultTimer.sleep(50);
+      }
+    }
+
+    await rm(dir, { recursive: true, force: true });
   }
 
   test("resolves relative AUTOMOBILE_DB_DIR against the launch cwd set AFTER import", async () => {
@@ -90,7 +108,7 @@ describe("database path lazy resolution", () => {
       expect(rows).toEqual([]);
     } finally {
       await databaseModule.closeDatabase();
-      await rm(dbDir, { recursive: true, force: true });
+      await removeTempDirWithRetry(dbDir);
     }
   });
 });

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { promises as nodeFs } from "node:fs";
-import type { Stats } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix, relative } from "node:path";
 import { TextDecoder } from "node:util";
@@ -20,6 +19,7 @@ import { ActionableError, BootedDevice, Platform, type ExecResult } from "../mod
 import { defaultAdbClientFactory, type AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 
 export interface PutAppFileRequest extends PutAppFileArgs {
@@ -65,16 +65,61 @@ interface FileSource {
   cleanup?: () => Promise<void>;
 }
 
+export interface AppFileStats {
+  size: number;
+  mtime: Date;
+  isFile(): boolean;
+  isDirectory(): boolean;
+}
+
+export interface AppFileDirEntry {
+  name: string;
+}
+
+export interface AppFileFileSystem {
+  stat(path: string): Promise<AppFileStats>;
+  lstat(path: string): Promise<AppFileStats>;
+  readdir(path: string): Promise<AppFileDirEntry[]>;
+  mkdir(path: string): Promise<void>;
+  copyFile(sourcePath: string, destinationPath: string): Promise<void>;
+  readFileBuffer(path: string): Promise<Buffer>;
+  writeFileBuffer(path: string, data: Buffer): Promise<void>;
+  mkdtemp(prefix: string): Promise<string>;
+  rm(path: string): Promise<void>;
+}
+
 export interface AppFileServiceDependencies {
   adbFactory?: AdbClientFactory;
   simctlFactory?: (device: BootedDevice) => SimCtlClient;
+  fileSystem?: AppFileFileSystem;
   providers?: AppFileProvider[];
   deviceResolver?: (deviceId: string) => Promise<BootedDevice>;
 }
 
-const defaultDependencies: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "deviceResolver">> = {
+const nodeAppFileFileSystem: AppFileFileSystem = {
+  stat: async path => nodeFs.stat(path),
+  lstat: async path => nodeFs.lstat(path),
+  readdir: async path => nodeFs.readdir(path, { withFileTypes: true }),
+  mkdir: async path => {
+    await nodeFs.mkdir(path, { recursive: true });
+  },
+  copyFile: async (sourcePath, destinationPath) => {
+    await nodeFs.copyFile(sourcePath, destinationPath);
+  },
+  readFileBuffer: async path => nodeFs.readFile(path),
+  writeFileBuffer: async (path, data) => {
+    await nodeFs.writeFile(path, data);
+  },
+  mkdtemp: async prefix => nodeFs.mkdtemp(prefix),
+  rm: async path => {
+    await nodeFs.rm(path, { recursive: true, force: true });
+  },
+};
+
+const defaultDependencies: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "fileSystem" | "deviceResolver">> = {
   adbFactory: defaultAdbClientFactory,
   simctlFactory: device => new SimCtlClient(device),
+  fileSystem: nodeAppFileFileSystem,
   deviceResolver: findBootedDevice,
 };
 
@@ -84,7 +129,11 @@ let appFileService: AppFileService | null = null;
 
 export function getAppFileService(): AppFileService {
   if (!appFileService) {
-    appFileService = new DefaultAppFileService(createDefaultProviders(defaultDependencies), defaultDependencies.deviceResolver);
+    appFileService = new DefaultAppFileService(
+      createDefaultProviders(defaultDependencies),
+      defaultDependencies.deviceResolver,
+      defaultDependencies.fileSystem
+    );
   }
   return appFileService;
 }
@@ -101,20 +150,22 @@ export function createAppFileServiceForTesting(deps: AppFileServiceDependencies 
   const resolvedDeps = {
     adbFactory: deps.adbFactory ?? defaultDependencies.adbFactory,
     simctlFactory: deps.simctlFactory ?? defaultDependencies.simctlFactory,
+    fileSystem: deps.fileSystem ?? defaultDependencies.fileSystem,
     deviceResolver: deps.deviceResolver ?? defaultDependencies.deviceResolver,
   };
   return new DefaultAppFileService(
     deps.providers ?? createDefaultProviders(resolvedDeps),
-    resolvedDeps.deviceResolver
+    resolvedDeps.deviceResolver,
+    resolvedDeps.fileSystem
   );
 }
 
 function createDefaultProviders(
-  deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory">>
+  deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "fileSystem">>
 ): AppFileProvider[] {
   return [
     new AndroidAppFileProvider(deps.adbFactory),
-    new IosSimulatorAppFileProvider(deps.simctlFactory),
+    new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
   ];
 }
 
@@ -123,7 +174,8 @@ class DefaultAppFileService implements AppFileService {
 
   constructor(
     providers: AppFileProvider[],
-    private readonly deviceResolver: (deviceId: string) => Promise<BootedDevice>
+    private readonly deviceResolver: (deviceId: string) => Promise<BootedDevice>,
+    private readonly fileSystem: AppFileFileSystem
   ) {
     for (const provider of providers) {
       this.providersByPlatform.set(provider.platform, provider);
@@ -202,7 +254,7 @@ class DefaultAppFileService implements AppFileService {
 
   private async prepareSource(args: PutAppFileArgs): Promise<FileSource> {
     if (args.sourcePath !== undefined) {
-      const stat = await nodeFs.stat(args.sourcePath);
+      const stat = await this.fileSystem.stat(args.sourcePath);
       if (!stat.isFile()) {
         throw new ActionableError(`sourcePath is not a file: ${args.sourcePath}`);
       }
@@ -212,14 +264,14 @@ class DefaultAppFileService implements AppFileService {
     const buffer = args.contentBase64 !== undefined
       ? Buffer.from(args.contentBase64, "base64")
       : Buffer.from(args.contentText ?? "", "utf8");
-    const dir = await nodeFs.mkdtemp(join(tmpdir(), "automobile-app-file-"));
+    const dir = await this.fileSystem.mkdtemp(join(tmpdir(), "automobile-app-file-"));
     const tempPath = join(dir, "content");
-    await nodeFs.writeFile(tempPath, buffer);
+    await this.fileSystem.writeFileBuffer(tempPath, buffer);
     return {
       path: tempPath,
       byteCount: buffer.byteLength,
       cleanup: async () => {
-        await nodeFs.rm(dir, { recursive: true, force: true });
+        await this.fileSystem.rm(dir);
       },
     };
   }
@@ -369,17 +421,20 @@ class AndroidAppFileProvider implements AppFileProvider {
 class IosSimulatorAppFileProvider implements AppFileProvider {
   readonly platform = "ios" as const;
 
-  constructor(private readonly simctlFactory: (device: BootedDevice) => SimCtlClient) {}
+  constructor(
+    private readonly simctlFactory: (device: BootedDevice) => SimCtlClient,
+    private readonly fileSystem: AppFileFileSystem
+  ) {}
 
   async putFile(request: PutAppFileProviderRequest): Promise<void> {
     const target = await this.resolvePath(request.device, request.appId, request.container, request.destinationPath, "putFile");
-    await nodeFs.mkdir(dirname(target), { recursive: true });
-    await nodeFs.copyFile(request.sourcePath, target);
+    await this.fileSystem.mkdir(dirname(target));
+    await this.fileSystem.copyFile(request.sourcePath, target);
   }
 
   async listFiles(request: AppFileProviderListRequest): Promise<AppFileListResult> {
     const root = await this.resolvePath(request.device, request.appId, request.container, undefined, "listFiles");
-    const files = await listLocalFiles(root);
+    const files = await listLocalFiles(root, this.fileSystem);
     return {
       deviceId: request.device.deviceId,
       platform: request.device.platform,
@@ -399,7 +454,7 @@ class IosSimulatorAppFileProvider implements AppFileProvider {
 
   async readFile(request: AppFileProviderReadRequest): Promise<AppFileReadResult> {
     const target = await this.resolvePath(request.device, request.appId, request.container, request.path, "readFile");
-    const buffer = await nodeFs.readFile(target);
+    const buffer = await this.fileSystem.readFileBuffer(target);
     const text = decodeUtf8Text(buffer);
     return {
       deviceId: request.device.deviceId,
@@ -425,11 +480,25 @@ class IosSimulatorAppFileProvider implements AppFileProvider {
       throw unsupportedAppFileOperation(operation, device.platform, appId, container, "externalFiles is not available for iOS app containers");
     }
 
+    if (!isIosSimulatorUdid(device.deviceId)) {
+      throw new ActionableError(
+        `iOS app file ${operation} is only supported on iOS simulators. ` +
+        `Device ${device.deviceId} looks like a physical iOS device; app data containers require xcrun simctl.`
+      );
+    }
+
     const simctl = this.simctlFactory(device);
-    const result = await simctl.executeCommand(`get_app_container ${shellQuote(device.deviceId)} ${shellQuote(appId)} data`);
+    const result = await executeIosAppContainerCommand(
+      simctl,
+      `get_app_container ${shellQuote(device.deviceId)} ${shellQuote(appId)} data`,
+      { device, appId, container, operation }
+    );
     const dataRoot = result.stdout.trim();
     if (!dataRoot) {
-      throw new ActionableError(`Unable to resolve iOS app data container for ${appId} on ${device.deviceId}.`);
+      throw new ActionableError(
+        `Unable to resolve iOS simulator app data container for ${appId} on ${device.deviceId}. ` +
+        "Confirm the simulator is booted and the app is installed."
+      );
     }
 
     const containerRoot = join(dataRoot, iosContainerRelativePath(container, operation, appId, device.platform));
@@ -523,19 +592,18 @@ function iosContainerRelativePath(
 
 type LocalFileListEntry = Omit<AppFileListEntry, "resourceUri">;
 
-async function listLocalFiles(root: string): Promise<LocalFileListEntry[]> {
+async function listLocalFiles(root: string, fileSystem: AppFileFileSystem): Promise<LocalFileListEntry[]> {
   const entries: LocalFileListEntry[] = [];
 
   async function visit(dir: string): Promise<void> {
-    const children = await nodeFs.readdir(dir, { withFileTypes: true });
+    const children = await fileSystem.readdir(dir);
     for (const child of children) {
       const childPath = join(dir, child.name);
-      if (child.isDirectory()) {
-        const stat = await nodeFs.stat(childPath);
+      const stat = await fileSystem.lstat(childPath);
+      if (stat.isDirectory()) {
         entries.push(buildLocalListEntry(root, childPath, stat, true));
         await visit(childPath);
-      } else if (child.isFile()) {
-        const stat = await nodeFs.stat(childPath);
+      } else if (stat.isFile()) {
         entries.push(buildLocalListEntry(root, childPath, stat, false));
       }
     }
@@ -552,7 +620,7 @@ async function listLocalFiles(root: string): Promise<LocalFileListEntry[]> {
   return entries;
 }
 
-function buildLocalListEntry(root: string, childPath: string, stat: Stats, isDirectory: boolean): LocalFileListEntry {
+function buildLocalListEntry(root: string, childPath: string, stat: AppFileStats, isDirectory: boolean): LocalFileListEntry {
   const filePath = relative(root, childPath).replace(/\\/g, "/");
   return {
     path: filePath,
@@ -561,6 +629,54 @@ function buildLocalListEntry(root: string, childPath: string, stat: Stats, isDir
     isDirectory,
     lastModified: stat.mtime.toISOString(),
   };
+}
+
+interface IosAppContainerCommandContext {
+  device: BootedDevice;
+  appId: string;
+  container: AppFileContainer;
+  operation: string;
+}
+
+async function executeIosAppContainerCommand(
+  simctl: SimCtlClient,
+  command: string,
+  context: IosAppContainerCommandContext
+): Promise<ExecResult> {
+  try {
+    return await simctl.executeCommand(command);
+  } catch (error) {
+    throw mapIosAppContainerError(error, context);
+  }
+}
+
+function mapIosAppContainerError(error: unknown, context: IosAppContainerCommandContext): ActionableError {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/not installed|application.*not.*installed|no such app|bundle.*not found|missing bundle/i.test(message)) {
+    return new ActionableError(
+      `iOS app ${context.appId} is not installed on simulator ${context.device.deviceId}; ` +
+      `cannot ${context.operation} ${context.container} app files. Original error: ${message}`
+    );
+  }
+
+  if (/no such device|invalid device|unavailable|shutdown|not booted/i.test(message)) {
+    return new ActionableError(
+      `iOS simulator ${context.device.deviceId} is unavailable or not booted; ` +
+      `cannot ${context.operation} ${context.container} app files for ${context.appId}. Original error: ${message}`
+    );
+  }
+
+  if (/host-control|docker|Driving the iOS simulator from inside Docker/i.test(message)) {
+    return new ActionableError(
+      `iOS simulator app file ${context.operation} requires local macOS simctl access; ` +
+      `host-control or Docker simulator access is unsupported. Original error: ${message}`
+    );
+  }
+
+  return new ActionableError(
+    `Failed to ${context.operation} iOS simulator ${context.container} app files for ` +
+    `${context.appId} on ${context.device.deviceId}: ${message}`
+  );
 }
 
 function parseAndroidStatListing(

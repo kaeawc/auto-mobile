@@ -571,4 +571,51 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(locator.foregroundBundleId, "com.example.second")
         XCTAssertEqual(locator.switchedBundleIds, ["com.example.first", "com.example.second"])
     }
+
+    // MARK: - resolveScreenDimensions (issue #2683)
+
+    func testResolveScreenDimensions_prefersRootBoundsOverStaleFallback() {
+        // The runner can report a legacy 320x480 compatibility size; the
+        // foreground app's root frame carries the true device size and wins.
+        let root = ElementBounds(left: 0, top: 0, right: 402, bottom: 874)
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: root,
+            fallbackWidth: 320,
+            fallbackHeight: 480
+        )
+        XCTAssertEqual(resolved.width, 402)
+        XCTAssertEqual(resolved.height, 874)
+    }
+
+    func testResolveScreenDimensions_usesRootBoundsWithNonZeroOrigin() {
+        let root = ElementBounds(left: 10, top: 20, right: 410, bottom: 820)
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: root,
+            fallbackWidth: 320,
+            fallbackHeight: 480
+        )
+        XCTAssertEqual(resolved.width, 400)
+        XCTAssertEqual(resolved.height, 800)
+    }
+
+    func testResolveScreenDimensions_fallsBackWhenRootBoundsMissing() {
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: nil,
+            fallbackWidth: 402,
+            fallbackHeight: 874
+        )
+        XCTAssertEqual(resolved.width, 402)
+        XCTAssertEqual(resolved.height, 874)
+    }
+
+    func testResolveScreenDimensions_fallsBackWhenRootBoundsDegenerate() {
+        let zero = ElementBounds(left: 0, top: 0, right: 0, bottom: 0)
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: zero,
+            fallbackWidth: 402,
+            fallbackHeight: 874
+        )
+        XCTAssertEqual(resolved.width, 402)
+        XCTAssertEqual(resolved.height, 874)
+    }
 }

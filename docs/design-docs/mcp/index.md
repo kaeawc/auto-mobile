@@ -18,6 +18,7 @@ The MCP server exposes AutoMobile's capabilities as tool calls, resources, and r
 - 📹 **[Video recording](observe/video-recording.md)** Low-overhead capture for CI artifacts
 - 💄 **[Visual Highlighting](observe/visual-highlighting.md)** Overlays for calling out important elements or regressions
 - 📱 **[Device Snapshots](storage/snapshots.md)** Emulator Snapshots & Simulator App Containers
+- 📄 **[App file service](app-file-service.md)** Shared app-container file operations behind platform providers
 - 🗺️ **[Navigation graph](nav/index.md)** Automatic screen flow mapping
 - ⚙️ **[Feature flags](feature-flags.md)** to gate debug or advanced features to be toggled at runtime in IDE integrations.
 - 🦆 **[Migrations](storage/migrations.md)** Database & test plan schema management

@@ -73,8 +73,11 @@ extract_nav_files() {
 
 # List all .md files in docs/ directory relative to docs/
 list_actual_files() {
-    find "$DOCS_DIR" -type f -name "*.md" -not -path "*/\.*" | \
-        sed "s|^$DOCS_DIR/||" | \
+    (
+        cd "$DOCS_DIR"
+        find . -type f -name "*.md" -not -path "./.*" | \
+            sed 's|^\./||'
+    ) | \
         sort
 }
 

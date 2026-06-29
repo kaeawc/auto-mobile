@@ -10,7 +10,7 @@ export function registerAppFileTools(): void {
     "Write a host file, UTF-8 text, or base64 content into an app container. Prefer this over platform-specific copy commands.",
     putAppFileSchema,
     async (device: BootedDevice, args: PutAppFileArgs, _progress, signal) => {
-      const result = await getAppFileService().putFile(device, args, signal);
+      const result = await getAppFileService().putFile({ ...args, device, signal });
       return createJSONToolResponse(result);
     }
   );

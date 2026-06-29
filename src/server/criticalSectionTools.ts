@@ -132,8 +132,9 @@ const criticalSectionHandler = async (
       );
 
       try {
-        // Get the tool from registry
-        const tool = ToolRegistry.getTool(step.tool);
+        // Critical-section steps are plan steps, so use the same lookup rules
+        // as executePlan for tools hidden from MCP discovery.
+        const tool = ToolRegistry.getToolForPlan(step.tool);
         if (!tool) {
           throw new ActionableError(`Tool "${step.tool}" not found in registry`);
         }

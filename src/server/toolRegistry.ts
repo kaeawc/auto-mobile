@@ -252,14 +252,19 @@ class ToolRegistryClass {
     this.timer = timer;
   }
 
-  private isToolAvailable(tool: RegisteredTool): boolean {
+  private getToolAvailabilityGateReasons(tool: RegisteredTool): string[] {
+    const reasons: string[] = [];
     if (tool.debugOnly && !isDebugModeEnabled()) {
-      return false;
+      reasons.push("--debug is disabled");
     }
     if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
-      return false;
+      reasons.push("embedded SDK mode is disabled");
     }
-    return true;
+    return reasons;
+  }
+
+  private isToolAvailable(tool: RegisteredTool): boolean {
+    return this.getToolAvailabilityGateReasons(tool).length === 0;
   }
 
   // Register a new tool
@@ -800,11 +805,15 @@ class ToolRegistryClass {
     if (!tool) {
       return undefined;
     }
-    if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
+
+    const gateReasons = this.getToolAvailabilityGateReasons(tool);
+    if (gateReasons.length > 0 && !tool.planExecutable) {
       return undefined;
     }
-    if (tool.debugOnly && !isDebugModeEnabled() && !tool.planExecutable) {
-      return undefined;
+    if (gateReasons.length > 0) {
+      logger.warn(
+        `[ToolRegistry] Plan execution is using gated tool "${name}" (${gateReasons.join(", ")}). Tool is hidden from normal MCP discovery but marked planExecutable.`
+      );
     }
     return tool;
   }

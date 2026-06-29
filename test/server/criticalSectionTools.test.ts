@@ -1,9 +1,12 @@
-import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import type { BootedDevice } from "../../src/models";
 import { z } from "zod";
+import { setDebugModeEnabled } from "../../src/utils/debug";
+import { logger } from "../../src/utils/logger";
+import { serverConfig } from "../../src/utils/ServerConfig";
 
 describe("criticalSection tool", () => {
   beforeAll(() => {
@@ -16,6 +19,8 @@ describe("criticalSection tool", () => {
   beforeEach(() => {
     // Reset coordinator before each test
     CriticalSectionCoordinator.getInstance().reset();
+    setDebugModeEnabled(false);
+    serverConfig.setEmbeddedSdkEnabled(false);
   });
 
   test("tool is registered with correct schema", () => {
@@ -203,6 +208,173 @@ describe("criticalSection tool", () => {
     expect(result.success).toBe(true);
     expect(result.executedSteps).toBe(3);
     expect(executionLog).toEqual(["step1", "step2", "step3"]);
+  });
+
+  test("executes plan-executable debug-only steps hidden from MCP discovery", async () => {
+    const tool = ToolRegistry.getTool("criticalSection");
+    expect(tool).toBeDefined();
+
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "test-device-hidden-plan-tool",
+      name: "Test Device Hidden Plan Tool",
+    };
+
+    const executionLog: string[] = [];
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    ToolRegistry.registerDeviceAware(
+      "mockPlanExecutableHiddenStep",
+      "Mock hidden plan-executable step",
+      z.object({
+        device: z.string(),
+        value: z.string(),
+      }),
+      async (_device, params: { device: string; value: string }) => {
+        executionLog.push(`${params.device}:${params.value}`);
+        return { success: true };
+      },
+      false,
+      true,
+      { planExecutable: true }
+    );
+
+    expect(ToolRegistry.getTool("mockPlanExecutableHiddenStep")).toBeUndefined();
+    expect(ToolRegistry.getToolForPlan("mockPlanExecutableHiddenStep")).toBeDefined();
+    warnSpy.mockClear();
+
+    const params = {
+      lock: "hidden-plan-tool-lock",
+      deviceCount: 1,
+      steps: [
+        {
+          tool: "mockPlanExecutableHiddenStep",
+          params: { device: "A", value: "filled" },
+        },
+      ],
+    };
+
+    const response = await tool!.deviceAwareHandler!(
+      fakeDevice,
+      params,
+      undefined,
+      undefined
+    );
+
+    expect(response.content).toBeDefined();
+    const result = JSON.parse(response.content[0].text);
+    expect(result.success).toBe(true);
+    expect(result.executedSteps).toBe(1);
+    expect(executionLog).toEqual(["A:filled"]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Plan execution is using gated tool \"mockPlanExecutableHiddenStep\"")
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("--debug is disabled")
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  test("rejects debug-only steps that are not plan-executable", async () => {
+    const tool = ToolRegistry.getTool("criticalSection");
+    expect(tool).toBeDefined();
+
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "test-device-hidden-debug-tool",
+      name: "Test Device Hidden Debug Tool",
+    };
+
+    ToolRegistry.registerDeviceAware(
+      "mockDebugOnlyHiddenStep",
+      "Mock debug-only hidden step",
+      z.object({ device: z.string() }),
+      async () => ({ success: true }),
+      false,
+      true
+    );
+
+    expect(ToolRegistry.getTool("mockDebugOnlyHiddenStep")).toBeUndefined();
+    expect(ToolRegistry.getToolForPlan("mockDebugOnlyHiddenStep")).toBeUndefined();
+
+    const params = {
+      lock: "hidden-debug-tool-lock",
+      deviceCount: 1,
+      steps: [
+        {
+          tool: "mockDebugOnlyHiddenStep",
+          params: { device: "A" },
+        },
+      ],
+    };
+
+    await expect(
+      tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined)
+    ).rejects.toThrow(/Tool "mockDebugOnlyHiddenStep" not found in registry/);
+  });
+
+  test("executes plan-executable steps gated by non-debug feature flags with a warning", async () => {
+    const tool = ToolRegistry.getTool("criticalSection");
+    expect(tool).toBeDefined();
+
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "test-device-embedded-plan-tool",
+      name: "Test Device Embedded Plan Tool",
+    };
+
+    const executionLog: string[] = [];
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    ToolRegistry.registerDeviceAware(
+      "mockEmbeddedPlanExecutableStep",
+      "Mock embedded plan-executable step",
+      z.object({
+        device: z.string(),
+        value: z.string(),
+      }),
+      async (_device, params: { device: string; value: string }) => {
+        executionLog.push(`${params.device}:${params.value}`);
+        return { success: true };
+      },
+      false,
+      false,
+      { embeddedSdkOnly: true, planExecutable: true }
+    );
+
+    expect(ToolRegistry.getTool("mockEmbeddedPlanExecutableStep")).toBeUndefined();
+    expect(ToolRegistry.getToolForPlan("mockEmbeddedPlanExecutableStep")).toBeDefined();
+    warnSpy.mockClear();
+
+    const params = {
+      lock: "embedded-plan-tool-lock",
+      deviceCount: 1,
+      steps: [
+        {
+          tool: "mockEmbeddedPlanExecutableStep",
+          params: { device: "A", value: "synced" },
+        },
+      ],
+    };
+
+    const response = await tool!.deviceAwareHandler!(
+      fakeDevice,
+      params,
+      undefined,
+      undefined
+    );
+
+    const result = JSON.parse(response.content[0].text);
+    expect(result.success).toBe(true);
+    expect(result.executedSteps).toBe(1);
+    expect(executionLog).toEqual(["A:synced"]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Plan execution is using gated tool \"mockEmbeddedPlanExecutableStep\"")
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("embedded SDK mode is disabled")
+    );
+
+    warnSpy.mockRestore();
   });
 
 

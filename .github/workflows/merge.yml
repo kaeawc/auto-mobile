@@ -662,7 +662,9 @@ jobs:
   # Re-enabled in #110
   junit-runner-emulator-tests:
     name: "Run JUnit Runner Emulator Tests"
-    # Disabled: consistently several minutes on merge and not required for release/docs publishing.
+    # Disabled on merge: low signal and runner-heavy. Runs nightly instead
+    # (see nightly.yml). PRs cover the TS<->device path via the iOS simulator
+    # integration tripwire (pull_request.yml native_integration filter).
     if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -709,7 +711,8 @@ jobs:
 
   playground-automobile-emulator-tests:
     name: "Run Playground Automobile Emulator Tests"
-    # Disabled: consistently several minutes on merge and not required for release/docs publishing.
+    # Disabled on merge: low signal and runner-heavy. Runs nightly instead
+    # (see nightly.yml).
     if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

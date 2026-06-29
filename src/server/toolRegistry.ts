@@ -631,7 +631,7 @@ class ToolRegistryClass {
           }
         }
       } finally {
-        void this.toolCallRepository.recordToolCall({
+        await this.toolCallRepository.recordToolCall({
           toolName: name,
           timestamp: toolCallTimestamp,
           sessionUuid,

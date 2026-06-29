@@ -91,4 +91,61 @@ describe("ToolRegistry tool call duration recording", () => {
       }),
     ]);
   });
+
+  test("waits for duration recording before resolving the tool call", async () => {
+    let finishRecord!: () => void;
+    const recordGate = new Promise<void>(resolve => {
+      finishRecord = resolve;
+    });
+    let recordStarted = false;
+    (ToolRegistry as any).toolCallRepository = {
+      async recordToolCall(record: any): Promise<void> {
+        recordStarted = true;
+        records.push(record);
+        await recordGate;
+      },
+    };
+
+    ToolRegistry.registerDeviceAware(
+      "durationAwaitProbe",
+      "Waits for duration recording",
+      z.object({}),
+      async () => ({ success: true }),
+      false,
+      false,
+      {
+        shouldEnsureDevice: () => false,
+        nonDeviceHandler: async () => {
+          timer.advanceTime(11);
+          return { success: true };
+        },
+      }
+    );
+
+    const tool = ToolRegistry.getTool("durationAwaitProbe");
+    expect(tool).toBeDefined();
+
+    let settled = false;
+    const handlerPromise = tool!.handler({}).then(result => {
+      settled = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recordStarted).toBe(true);
+    expect(records).toEqual([
+      expect.objectContaining({
+        toolName: "durationAwaitProbe",
+        durationMs: 11,
+      }),
+    ]);
+    expect(settled).toBe(false);
+
+    finishRecord();
+
+    await expect(handlerPromise).resolves.toEqual({ success: true });
+    expect(settled).toBe(true);
+  });
 });

@@ -60,6 +60,8 @@ import { serverConfig } from "../../../utils/ServerConfig";
 import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import type { StackTraceElement } from "../../../server/failuresResources";
+import { NetworkState } from "../../../server/NetworkState";
+import { buildNetworkMockRules } from "../../../server/networkMockRules";
 import type {
   PreferenceFile,
   KeyValueEntry,
@@ -1058,25 +1060,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private syncNetworkStateToDevice(): void {
     try {
-      const { NetworkState } = require("../../../server/NetworkState");
       const state = NetworkState.getInstance();
 
-      // Always sync mock rules on reconnect — use limit (not remaining) so
-      // the device-side store reinitializes fresh counts. Sending an empty
-      // list clears stale rules that may linger from a previous connection.
-      const mocks = state.getMocks();
-      const rules = Array.from(mocks.values()).map((r: any) => ({
-        mockId: r.mockId,
-        host: r.host,
-        path: r.path,
-        method: r.method,
-        limit: r.limit,
-        remaining: r.limit,
-        statusCode: r.statusCode,
-        responseHeaders: r.responseHeaders,
-        responseBody: r.responseBody,
-        contentType: r.contentType,
-      }));
+      // Always sync mock rules on reconnect — buildNetworkMockRules uses limit
+      // (not remaining) so the device-side store reinitializes fresh counts.
+      // Sending an empty list clears stale rules that may linger from a
+      // previous connection.
+      const rules = buildNetworkMockRules(state);
       this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
 
       // Always re-sync error simulation state (including disabled) so the

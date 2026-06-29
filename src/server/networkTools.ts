@@ -3,6 +3,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { NetworkState, type SimulatedErrorType } from "./NetworkState";
+import { buildNetworkMockRules } from "./networkMockRules";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";
@@ -124,18 +125,7 @@ function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void 
       : IOSCtrlProxyClient.getInstance(device);
     // Use limit (not remaining) since the server never tracks consumption —
     // the device-side NetworkMockRuleStore manages its own remaining count
-    const rules = Array.from(state.getMocks().values()).map(r => ({
-      mockId: r.mockId,
-      host: r.host,
-      path: r.path,
-      method: r.method,
-      limit: r.limit,
-      remaining: r.limit,
-      statusCode: r.statusCode,
-      responseHeaders: r.responseHeaders,
-      responseBody: r.responseBody,
-      contentType: r.contentType,
-    }));
+    const rules = buildNetworkMockRules(state);
     const msg = JSON.stringify({ type: "set_network_mock_rules", rules });
     const sent = client.sendMessage(msg);
     logger.info(`[networkTools] syncMockRules(${device.platform}): ${rules.length} rules, sent=${sent}`);

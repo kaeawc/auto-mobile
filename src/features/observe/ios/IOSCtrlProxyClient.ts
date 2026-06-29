@@ -34,6 +34,8 @@ import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../../utils/IOSCtrl
 import { PlatformDeviceManagerFactory } from "../../../utils/factories/PlatformDeviceManagerFactory";
 import { NavigationGraphManager } from "../../navigation/NavigationGraphManager";
 import { serverConfig } from "../../../utils/ServerConfig";
+import { NetworkState } from "../../../server/NetworkState";
+import { buildNetworkMockRules } from "../../../server/networkMockRules";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import {
   HierarchyNavigationDetector,
@@ -702,26 +704,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     try {
-      const { NetworkState } = require("../../../server/NetworkState");
-      const state = NetworkState.getInstance();
-
       // Always sync mock rules on reconnect. Sending an empty list clears
       // stale rules that may linger in the iOS SDK after a CtrlProxy restart.
-      const rules = Array.from(state.getMocks().values()).map((r: any) => ({
-        mockId: r.mockId,
-        host: r.host,
-        path: r.path,
-        method: r.method,
-        limit: r.limit,
-        remaining: r.limit,
-        statusCode: r.statusCode,
-        responseHeaders: r.responseHeaders,
-        responseBody: r.responseBody,
-        contentType: r.contentType,
-      }));
+      const rules = buildNetworkMockRules(NetworkState.getInstance());
       this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
     } catch (e) {
-      logger.debug(`[IOSCtrlProxyClient] Failed to sync network mock rules on reconnect: ${e}`);
+      logger.warn(`[IOSCtrlProxyClient] Failed to sync network mock rules on reconnect: ${e}`);
     }
   }
 

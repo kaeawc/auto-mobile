@@ -436,6 +436,7 @@ public class AutoMobileURLProtocol: URLProtocol {
         receivedData = Data()
         totalBytesReceived = 0
 
+        #if DEBUG
         if AutoMobileSDK.shared.isEnabled,
            let url = request.url,
            let match = NetworkMockRuleStore.shared.findMatchingRule(
@@ -478,6 +479,7 @@ public class AutoMobileURLProtocol: URLProtocol {
             ))
             return
         }
+        #endif
 
         guard let mutableRequest = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest else {
             client?.urlProtocol(self, didFailWithError: URLError(.badURL))

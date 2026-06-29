@@ -298,6 +298,53 @@ export class DaemonMcpProxy {
     }
   }
 
+  private async withRecoverableReconnect<T>(
+    operation: () => Promise<T>
+  ): Promise<T> {
+    await this.ensureConnected();
+
+    try {
+      return await operation();
+    } catch (error) {
+      if (!this.isRecoverableDaemonSessionError(error)) {
+        throw error;
+      }
+
+      logger.warn(
+        `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${error instanceof Error ? error.message : String(error)}`
+      );
+      await this.resetConnection();
+      await this.ensureConnected();
+      return await operation();
+    }
+  }
+
+  private isRecoverableDaemonSessionError(error: unknown): boolean {
+    if (error instanceof DaemonUnavailableError) {
+      return true;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("Session not found");
+  }
+
+  private async resetConnection(): Promise<void> {
+    const staleClient = this.client;
+    this.connected = false;
+    this.client = null;
+    this.invalidateCache();
+
+    if (!staleClient) {
+      return;
+    }
+
+    try {
+      await staleClient.close();
+    } catch (error) {
+      logger.warn(`[DaemonMcpProxy] Failed to close stale daemon client: ${error}`);
+    }
+  }
+
   /**
    * Get list of available tools from daemon
    */
@@ -307,10 +354,10 @@ export class DaemonMcpProxy {
       return this.cachedTools;
     }
 
-    await this.ensureConnected();
-
     try {
-      const result = await this.client!.callDaemonMethod("tools/list", {});
+      const result = await this.withRecoverableReconnect(() =>
+        this.client!.callDaemonMethod("tools/list", {})
+      );
       const tools = result?.tools ?? [];
       this.cachedTools = tools;
       return tools;
@@ -327,22 +374,7 @@ export class DaemonMcpProxy {
     name: string,
     args: Record<string, unknown>
   ): Promise<any> {
-    await this.ensureConnected();
-
-    try {
-      const result = await this.client!.callTool(name, args);
-      return result;
-    } catch (error) {
-      // Handle connection errors by reconnecting
-      if (error instanceof DaemonUnavailableError) {
-        this.connected = false;
-        this.client = null;
-        // Retry once after reconnecting
-        await this.ensureConnected();
-        return await this.client!.callTool(name, args);
-      }
-      throw error;
-    }
+    return await this.withRecoverableReconnect(() => this.client!.callTool(name, args));
   }
 
   /**
@@ -354,10 +386,10 @@ export class DaemonMcpProxy {
       return this.cachedResources;
     }
 
-    await this.ensureConnected();
-
     try {
-      const result = await this.client!.callDaemonMethod("resources/list", {});
+      const result = await this.withRecoverableReconnect(() =>
+        this.client!.callDaemonMethod("resources/list", {})
+      );
       const resources = result?.resources ?? [];
       this.cachedResources = resources;
       return resources;
@@ -376,10 +408,10 @@ export class DaemonMcpProxy {
       return this.cachedResourceTemplates;
     }
 
-    await this.ensureConnected();
-
     try {
-      const result = await this.client!.callDaemonMethod("resources/list-templates", {});
+      const result = await this.withRecoverableReconnect(() =>
+        this.client!.callDaemonMethod("resources/list-templates", {})
+      );
       const templates = result?.resourceTemplates ?? [];
       this.cachedResourceTemplates = templates;
       return templates;
@@ -393,22 +425,7 @@ export class DaemonMcpProxy {
    * Read a resource from the daemon
    */
   async readResource(uri: string): Promise<any> {
-    await this.ensureConnected();
-
-    try {
-      const result = await this.client!.readResource(uri);
-      return result;
-    } catch (error) {
-      // Handle connection errors by reconnecting
-      if (error instanceof DaemonUnavailableError) {
-        this.connected = false;
-        this.client = null;
-        // Retry once after reconnecting
-        await this.ensureConnected();
-        return await this.client!.readResource(uri);
-      }
-      throw error;
-    }
+    return await this.withRecoverableReconnect(() => this.client!.readResource(uri));
   }
 
   /**

@@ -43,7 +43,7 @@ export class BunSqliteDialect implements Dialect {
 }
 
 interface BunSqliteDialectConfig {
-  database: BunDatabase;
+  database: BunDatabase | (() => BunDatabase);
   beforeQuery?: () => Promise<void>;
 }
 
@@ -87,7 +87,7 @@ class BunSqliteDriver implements Driver {
 
   async destroy(): Promise<void> {
     if (this.#connectionState) {
-      this.#config.database.close();
+      this.#connectionState.close();
       this.#connectionState = undefined;
     }
   }
@@ -101,15 +101,17 @@ class BunSqliteDriver implements Driver {
 }
 
 class BunSqliteConnectionState {
-  readonly #db: BunDatabase;
+  readonly #databaseSource: BunDatabase | (() => BunDatabase);
   readonly #beforeQuery?: () => Promise<void>;
+  #db: BunDatabase | null = null;
   #transactionOwner: symbol | null = null;
   #pendingTransactions = 0;
   #activeQueries = 0;
   #waiters: Array<() => void> = [];
 
-  constructor(db: BunDatabase, beforeQuery?: () => Promise<void>) {
-    this.#db = db;
+  constructor(database: BunDatabase | (() => BunDatabase), beforeQuery?: () => Promise<void>) {
+    this.#databaseSource = database;
+    this.#db = typeof database === "function" ? null : database;
     this.#beforeQuery = beforeQuery;
   }
 
@@ -154,9 +156,10 @@ class BunSqliteConnectionState {
 
     try {
       await this.#beforeQuery?.();
+      const db = this.#getDatabase();
 
       // Prepare statement
-      const stmt = this.#db.prepare(sql);
+      const stmt = db.prepare(sql);
 
       // Check if this is a SELECT query or query with RETURNING clause
       const sqlLower = sql.trim().toLowerCase();
@@ -190,6 +193,24 @@ class BunSqliteConnectionState {
       this.#activeQueries -= 1;
       this.#notifyWaiters();
     }
+  }
+
+  close(): void {
+    if (this.#db) {
+      this.#db.close();
+      this.#db = null;
+    }
+  }
+
+  #getDatabase(): BunDatabase {
+    if (!this.#db) {
+      this.#db =
+        typeof this.#databaseSource === "function"
+          ? this.#databaseSource()
+          : this.#databaseSource;
+    }
+
+    return this.#db;
   }
 
   async #reserveTransaction(owner: symbol): Promise<void> {

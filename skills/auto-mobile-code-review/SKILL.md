@@ -1,0 +1,50 @@
+---
+name: auto-mobile-code-review
+description: Use this workflow skill to review an AutoMobile change (a PR number or the current branch diff) the way this repo demands — ground every finding in file:line, reproduce before asserting, separate real bugs from daemon-session/environment artifacts, prefer reusing existing repo helpers and conventions over new code, and catch the regression or false-negative a fix can introduce. Deliver few verified findings, not many speculative ones.
+---
+
+# AutoMobile Code Review
+
+Review a change — a PR (its number passed as the argument) or, with no argument, the current branch's diff vs `origin/main` — for correctness, regressions, and fit with AutoMobile's architecture and conventions. The deliverable is a **verified, actionable** review.
+
+## Scope the diff
+
+- `git fetch origin main` first — always review against **latest main**, not a stale base.
+- For a PR number: `gh pr view <n> --json title,body,headRefOid,files,closingIssuesReferences`, `gh pr diff <n>`, then read the changed files on disk and the **issue it claims to close**. A PR's reviewed head can differ from what squash-**merged**, and a "fix" PR can merge **test-only** — check `git log origin/main` for what actually landed.
+- No argument: `git diff origin/main...HEAD`, then read the changed files in full (the hunk lies by omission).
+- Use the `github-cli` and `pr-analysis` skills for the mechanics of fetching PR metadata and posting review comments.
+
+## Review principles (verify, don't speculate)
+
+1. **Ground every finding in code.** Cite `file:line` and read the surrounding context — never assert from the diff text or memory alone.
+2. **Reproduce before asserting a bug.** Run it: `sqlite3` the TCC db, query `~/.auto-mobile/auto-mobile.db`, run the `cmd locale` subcommand, drive the tool on a device. If you can't run it, label the finding **unverified** and give the exact repro. (Reproduce locally — e.g. `sqlite3 .mode json` "extra argument", invalid `cmd locale set-locales` — before filing.)
+3. **Separate real bugs from environment/session artifacts.** A tool failing with `Session not found` is almost always the daemon-restart **session wedge**, not a bug in that tool — confirm with a second, unrelated tool. A slow tool call may be the ctrlproxy slow-network runner download. Disambiguate before filing.
+4. **Check provenance + current state.** `git blame` the lines: don't blame the PR for pre-existing code. `git log origin/main -- <file>` to see if it's already fixed or superseded — inspect **latest main**, not just the diff.
+5. **For a fix PR, verify it closes the ISSUE, not just the symptom — and name the false-negative it introduces.** Ask "what does this change stop catching?" e.g. narrowing daemon detection to the pid-file PID kills a false positive but stops detecting a live cross-worktree rogue daemon; a `success ?? true` default reports a non-render as a successful highlight.
+6. **Prefer reuse + existing conventions over new code.** Find the existing helper first and recommend *that* (see gotchas below).
+7. **Know which layer owns a field.** The CtrlProxy runner emits the **raw** hierarchy; the TS layer **adds** fields (the `view-id` content-hash, the duplicated `elements` arrays). For a claim about the runner, verify against the runner's `connected` handshake `supportedCommands` / raw hierarchy, not the post-processed TS output.
+8. **Tests must follow repo conventions and prove the behavior.** Interface + Fake + FakeTimer, no real device/network, <100ms per unit test. Flag a fix lacking the test the issue asked for, and flag tests **narrowed to a new contract to pass** rather than proving the original behavior holds.
+
+## Architecture (for grounding)
+
+- **MCP server (`src/`, TS/Bun)** forwards tool calls to a **daemon** (`src/daemon/`) that owns a **DevicePool** and per-platform **CtrlProxy runners**: the Android accessibility-service APK (`android/control-proxy`) and the iOS XCUITest runner (`ios/control-proxy`), each speaking a WebSocket protocol (iOS on `:8765`). Apps under test may embed the **AutoMobile SDK** (`android/auto-mobile-sdk`, `ios/auto-mobile-sdk`) for in-app capabilities (DB inspection, network mock, highlight overlay) relayed through the runner.
+- Tools are registered in `src/server/index.ts`. The IDE/test-plan artifact `schemas/tool-definitions.json` is **generated** by `scripts/generate-tool-definitions.ts`.
+
+## Repo-specific gotchas to weigh (hard-won)
+
+- **Daemon lifecycle:** one per-UID socket + pidfile shared across worktrees, **per-connection** session — restarting the daemon **wedges** connected MCP clients (`Session not found`, no auto-recovery). Live-daemon detection should scan the full `ps` table for `--daemon-mode` and filter by **liveness** (catches cross-worktree rogues, drops dead probes), **not** narrow to the pid-file PID. Takeover must escalate SIGTERM→SIGKILL (daemons ignore SIGTERM). `findAllDaemonProcesses` should **fail closed** (throw), not return `[]`, on a `ps` error.
+- **CtrlProxy capability gate:** every tool is gated by the runner's `connected` handshake `supportedCommands`. The daemon **downloads a pinned release runner** (version-agnostic cache), so local runner changes need overrides — Android: `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED` / `AUTOMOBILE_CTRL_PROXY_APK_PATH`; iOS: `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`. When iOS runner source changes, the release + checksum registry (`src/constants/release.ts`) must be re-cut or the feature is undeliverable. A mismatch between advertised `supportedCommands` and what TS routes is a real bug (e.g. `pinchOn` refuses iOS while the runner advertises `request_pinch`).
+- **Release-build SDK gating:** debug-only SDK behavior (network-mock enforcement, DB inspector, highlight overlay) MUST be `#if DEBUG`-gated. Verify a **release** build can't ship it — check the enforcement path, not just the rule-setting route.
+- **Schema drift:** `schemas/tool-definitions.json` is generated and silently drifts. The generator must register the **same** `register*Tools` categories as `src/server/index.ts`; flag any production tool missing from the artifact (and any gated/daemon-only tool falsely advertised). No CI drift guard exists.
+- **Relative paths under a detached daemon:** after the daemon `chdir`s to a stable cwd, a relative path arg MUST go through `resolvePathFromDaemonLaunchWorkingDirectory`. Grep for raw `fs.stat`/`copyFile`/`readFile` on a user-supplied relative path.
+- **Per-device singletons:** managers use `getInstance(device)` keyed by deviceId; an instance-level cache persists across calls — verify a cache fix persists where it's read.
+- **Plan vs MCP tool lookup:** plan/criticalSection execution must resolve via `getToolForPlan()`, not `getTool()` (the MCP-visibility gate) — otherwise `planExecutable`-but-hidden tools won't resolve inside a plan.
+- **Conditional schemas:** the flattener emits JSON-Schema `if/then` (e.g. `postNotification` requires `appId` iff iOS). Verify the host accepts it and that `appId` aliases (`bundleId`/`packageName`) are coerced, including nested (`systemTray.notification.appId`).
+- **Huge outputs:** `observe`/action results carry the full hierarchy (~25k tokens); `elements` duplicates the tree. Summarize — never paste raw hierarchies. Save long output under `scratch/`.
+- **Use the right tool form:** `sqlite3 -json <db> "<one statement>"`, NOT `.mode json` + SQL combined in one positional arg (errors "extra argument").
+
+## Output
+
+For **each** finding: a **Verdict** (`Confirmed bug` · `Correctly fixes` · `Partial` · `Risky (regression / false-negative)` · `Already fixed on main` · `False positive`), **Evidence** (`file:line` + how you verified: reproduced / read code / checked main / `git blame`), and a **Fix** (a named existing helper/convention, the manual device check to confirm, and any regression the change risks).
+
+When reviewing a PR, post findings as **inline review comments** anchored to the changed line (via `gh api .../pulls/<n>/reviews` with a `comments[]` array, `event: COMMENT`) plus a short summary body — not one monolithic comment. Close with a one-paragraph **summary verdict** and the single most important thing to verify first. Stay skeptical: a verified "couldn't reproduce" beats an unverified bug report.

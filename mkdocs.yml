@@ -97,6 +97,7 @@ nav:
       - 'MCP':
           - 'Overview': design-docs/mcp/index.md
           - 'Tools': design-docs/mcp/tools.md
+          - 'App File Service': design-docs/mcp/app-file-service.md
           - 'Observe':
              - 'Overview': design-docs/mcp/observe/index.md
              - 'Appearance Sync': design-docs/mcp/observe/appearance.md

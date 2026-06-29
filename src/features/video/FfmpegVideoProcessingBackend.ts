@@ -18,6 +18,7 @@ import type {
 
 const PROCESS_EXIT_TIMEOUT_MS = 5000;
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
+const IOS_RECORDING_START_TIMEOUT_MS = 30000;
 
 interface ProcessExitState {
   exitCode?: number | null;
@@ -43,6 +44,7 @@ type FfmpegInput =
   | { type: "file"; path: string };
 
 type FfmpegDiagnosticsTracker = Pick<ProcessTracker, "exitState" | "stderr">;
+type ProcessDiagnosticsTracker = Pick<ProcessTracker, "exitState" | "stderr">;
 
 function isFailedExitCode(exitCode: number | null | undefined): boolean {
   return exitCode !== undefined && exitCode !== 0;
@@ -167,6 +169,50 @@ async function waitForProcessCompletion(
   }
 
   await exitPromise;
+}
+
+async function waitForStderrMessage(
+  tracker: ProcessTracker,
+  message: string,
+  timeoutMs: number
+): Promise<void> {
+  if (tracker.stderr.join("").includes(message)) {
+    return;
+  }
+
+  let timeoutId: NodeJS.Timeout | undefined;
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      tracker.process.stderr.off("data", onData);
+      tracker.process.off("exit", onExit);
+      tracker.process.off("error", onError);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+    const onData = () => {
+      if (tracker.stderr.join("").includes(message)) {
+        cleanup();
+        resolve();
+      }
+    };
+    const onExit = () => {
+      cleanup();
+      reject(new Error(`Process exited before ${message}`));
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+
+    tracker.process.stderr.on("data", onData);
+    tracker.process.once("exit", onExit);
+    tracker.process.once("error", onError);
+    timeoutId = defaultTimer.setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${message}`));
+    }, timeoutMs);
+  });
 }
 
 export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
@@ -352,6 +398,23 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
 
     const captureTracker = trackProcess(captureProcess);
 
+    try {
+      await waitForStderrMessage(
+        captureTracker,
+        "Recording started",
+        IOS_RECORDING_START_TIMEOUT_MS
+      );
+    } catch (error) {
+      throw new ActionableError(
+        this.buildProcessFailureMessage(
+          `Failed to start iOS recording: ${error}`,
+          "xcrun",
+          args,
+          captureTracker
+        )
+      );
+    }
+
     const backendHandle: FfmpegBackendHandle = {
       kind: "ffmpeg",
       platform: "ios",
@@ -376,7 +439,21 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
 
     const exists = await pathExists(capturePath);
     if (!exists) {
-      throw new ActionableError(`iOS recording file missing at ${capturePath}`);
+      throw new ActionableError(
+        this.buildProcessFailureMessage(
+          `iOS recording file missing at ${capturePath}`,
+          "xcrun",
+          [
+            "simctl",
+            "io",
+            backendHandle.config.device?.deviceId ?? "(unknown-device)",
+            "recordVideo",
+            capturePath,
+          ],
+          backendHandle.captureTracker,
+          capturePath
+        )
+      );
     }
 
     const hwAccel = await this.detectHardwareAccel();
@@ -719,6 +796,25 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       summary,
       outputPath ? `output: ${outputPath}` : undefined,
       `command: ${this.ffmpegPath} ${args.join(" ")}`,
+      `exitCode: ${tracker.exitState.exitCode ?? "null"}`,
+      `signal: ${tracker.exitState.signal ?? "null"}`,
+      `stderr:\n${tracker.stderr.join("").trim() || "(empty)"}`,
+    ].filter((line): line is string => Boolean(line));
+
+    return details.join("\n");
+  }
+
+  private buildProcessFailureMessage(
+    summary: string,
+    command: string,
+    args: string[],
+    tracker: ProcessDiagnosticsTracker,
+    outputPath?: string
+  ): string {
+    const details = [
+      summary,
+      outputPath ? `output: ${outputPath}` : undefined,
+      `command: ${command} ${args.join(" ")}`,
       `exitCode: ${tracker.exitState.exitCode ?? "null"}`,
       `signal: ${tracker.exitState.signal ?? "null"}`,
       `stderr:\n${tracker.stderr.join("").trim() || "(empty)"}`,

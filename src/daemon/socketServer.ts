@@ -592,8 +592,11 @@ export class UnixSocketServer {
 
         if (args.platform === "android") {
           const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
-          const result = await manager.ensureCompatibleVersion();
-          const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled"]);
+          const result = await manager.ensureCompatibleVersion({
+            allowDownloadWhenInstalled: true,
+            bypassVersionCheckCache: true
+          });
+          const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled", "skipped"]);
           return {
             success: successStatuses.has(result.status),
             message: `Accessibility service ${result.status}${result.error ? `: ${result.error}` : ""}`,

@@ -182,7 +182,10 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
     return this.versionCompatible;
   }
 
-  async ensureCompatibleVersion(): Promise<{
+  async ensureCompatibleVersion(_options?: {
+    allowDownloadWhenInstalled?: boolean;
+    bypassVersionCheckCache?: boolean;
+  }): Promise<{
     status: "skipped" | "not_installed" | "compatible" | "upgraded" | "installed" | "reinstalled" | "failed";
     expectedSha256?: string;
     installedSha256?: string | null;

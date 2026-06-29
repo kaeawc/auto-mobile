@@ -200,7 +200,10 @@ The accessibility service runs as a standard Android accessibility service that:
 AutoMobile manages accessibility service versions automatically:
 
 - Compares installed APK checksum against expected release version
-- Upgrades when version mismatch detected
+- Accepts an already-installed CtrlProxy during normal readiness checks even when
+  the checksum differs, so local/offline tool calls do not block on a release APK download
+- Queues a background release APK prefetch when a mismatch is detected with the default downloader
+- Upgrades when version mismatch is detected through an explicit service update request
 - Falls back to reinstallation if upgrade fails
 - Validates downloaded APKs via SHA256 checksum
 - Supports local APK overrides for development
@@ -218,10 +221,10 @@ If the version is incompatible, it surfaces a warning/error advising you to reru
 
 ## Environment Variables
 
-- `AUTOMOBILE_ACCESSIBILITY_APK_PATH`: Override APK source with a local file path.
+- `AUTOMOBILE_CTRL_PROXY_APK_PATH`: Override APK source with a local file path.
 - `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM`: Skip checksum validation (development mode).
 - `AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK` (deprecated): Legacy alias for skipping checksum validation.
-- `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED`: Skip version check if the service is already installed.
+- `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED`: Explicitly skip version check if the service is already installed.
 - `AUTOMOBILE_ACCESSIBILITY_TOGGLE_METHOD`: Not supported; settings-based toggling is the only automated path.
 
 See [GitHub Issue #483](https://github.com/kaeawc/auto-mobile/issues/483) for ongoing work to standardize environment variable naming.

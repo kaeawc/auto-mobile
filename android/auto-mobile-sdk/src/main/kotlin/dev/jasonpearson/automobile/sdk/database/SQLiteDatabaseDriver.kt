@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
 
+  private val databaseLock = Any()
   private val openDatabases = ConcurrentHashMap<String, SQLiteDatabase>()
 
   override fun getDatabases(): List<DatabaseDescriptor> {
@@ -51,109 +52,121 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   }
 
   override fun getTables(databasePath: String): List<String> {
-    val db = openDatabase(databasePath, readOnly = true)
-    val tables = mutableListOf<String>()
+    synchronized(databaseLock) {
+      val db = openDatabase(databasePath, readOnly = true)
+      val tables = mutableListOf<String>()
 
-    db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name", null)
-        .use { cursor ->
-          while (cursor.moveToNext()) {
-            val name = cursor.getString(0)
-            // Exclude internal SQLite tables
-            if (!name.startsWith("sqlite_") && !name.startsWith("android_")) {
-              tables.add(name)
-            }
+      db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name", null).use {
+          cursor ->
+        while (cursor.moveToNext()) {
+          val name = cursor.getString(0)
+          // Exclude internal SQLite tables
+          if (!name.startsWith("sqlite_") && !name.startsWith("android_")) {
+            tables.add(name)
           }
         }
+      }
 
-    return tables
+      return tables
+    }
   }
 
   override fun getTableData(
       databasePath: String,
       table: String,
       limit: Int,
-      offset: Int
+      offset: Int,
   ): TableDataResult {
-    val db = openDatabase(databasePath, readOnly = true)
+    synchronized(databaseLock) {
+      val db = openDatabase(databasePath, readOnly = true)
 
-    // Validate table exists
-    if (!tableExists(db, table)) {
-      throw DatabaseError.TableNotFound(table)
-    }
+      // Validate table exists
+      if (!tableExists(db, table)) {
+        throw DatabaseError.TableNotFound(table)
+      }
 
-    // Get total count
-    val total =
-        db.rawQuery("SELECT COUNT(*) FROM \"${table.replace("\"", "\"\"")}\"", null).use { cursor ->
-          cursor.moveToFirst()
-          cursor.getInt(0)
-        }
-
-    // Get paginated data
-    val columns = mutableListOf<String>()
-    val rows = mutableListOf<List<Any?>>()
-
-    db.rawQuery(
-            "SELECT * FROM \"${table.replace("\"", "\"\"")}\" LIMIT ? OFFSET ?",
-            arrayOf(limit.toString(), offset.toString()))
-        .use { cursor ->
-          // Get column names
-          columns.addAll(cursor.columnNames)
-
-          // Get row data
-          while (cursor.moveToNext()) {
-            val row = mutableListOf<Any?>()
-            for (i in 0 until cursor.columnCount) {
-              row.add(getColumnValue(cursor, i))
-            }
-            rows.add(row)
+      // Get total count
+      val total =
+          db.rawQuery("SELECT COUNT(*) FROM \"${table.replace("\"", "\"\"")}\"", null).use { cursor
+            ->
+            cursor.moveToFirst()
+            cursor.getInt(0)
           }
-        }
 
-    return TableDataResult(columns = columns, rows = rows, total = total)
+      // Get paginated data
+      val columns = mutableListOf<String>()
+      val rows = mutableListOf<List<Any?>>()
+
+      db.rawQuery(
+              "SELECT * FROM \"${table.replace("\"", "\"\"")}\" LIMIT ? OFFSET ?",
+              arrayOf(limit.toString(), offset.toString()),
+          )
+          .use { cursor ->
+            // Get column names
+            columns.addAll(cursor.columnNames)
+
+            // Get row data
+            while (cursor.moveToNext()) {
+              val row = mutableListOf<Any?>()
+              for (i in 0 until cursor.columnCount) {
+                row.add(getColumnValue(cursor, i))
+              }
+              rows.add(row)
+            }
+          }
+
+      return TableDataResult(columns = columns, rows = rows, total = total)
+    }
   }
 
   override fun getTableStructure(databasePath: String, table: String): TableStructureResult {
-    val db = openDatabase(databasePath, readOnly = true)
+    synchronized(databaseLock) {
+      val db = openDatabase(databasePath, readOnly = true)
 
-    // Validate table exists
-    if (!tableExists(db, table)) {
-      throw DatabaseError.TableNotFound(table)
-    }
-
-    val columns = mutableListOf<ColumnInfo>()
-
-    db.rawQuery("PRAGMA table_info(\"${table.replace("\"", "\"\"")}\")", null).use { cursor ->
-      while (cursor.moveToNext()) {
-        // Columns: cid, name, type, notnull, dflt_value, pk
-        val name = cursor.getString(1)
-        val type = cursor.getString(2) ?: "TEXT"
-        val notNull = cursor.getInt(3) == 1
-        val defaultValue = if (cursor.isNull(4)) null else cursor.getString(4)
-        val isPrimaryKey = cursor.getInt(5) > 0
-
-        columns.add(
-            ColumnInfo(
-                name = name,
-                type = type,
-                nullable = !notNull,
-                primaryKey = isPrimaryKey,
-                defaultValue = defaultValue))
+      // Validate table exists
+      if (!tableExists(db, table)) {
+        throw DatabaseError.TableNotFound(table)
       }
-    }
 
-    return TableStructureResult(columns = columns)
+      val columns = mutableListOf<ColumnInfo>()
+
+      db.rawQuery("PRAGMA table_info(\"${table.replace("\"", "\"\"")}\")", null).use { cursor ->
+        while (cursor.moveToNext()) {
+          // Columns: cid, name, type, notnull, dflt_value, pk
+          val name = cursor.getString(1)
+          val type = cursor.getString(2) ?: "TEXT"
+          val notNull = cursor.getInt(3) == 1
+          val defaultValue = if (cursor.isNull(4)) null else cursor.getString(4)
+          val isPrimaryKey = cursor.getInt(5) > 0
+
+          columns.add(
+              ColumnInfo(
+                  name = name,
+                  type = type,
+                  nullable = !notNull,
+                  primaryKey = isPrimaryKey,
+                  defaultValue = defaultValue,
+              )
+          )
+        }
+      }
+
+      return TableStructureResult(columns = columns)
+    }
   }
 
   override fun executeSQL(databasePath: String, query: String): SQLExecutionResult {
-    val trimmedQuery = query.trim()
+    synchronized(databaseLock) {
+      val trimmedQuery = query.trim()
 
-    // Determine if this is a query or mutation
-    val isQuery = isReadQuery(trimmedQuery)
+      // Determine if this is a query or mutation
+      val isQuery = isReadQuery(trimmedQuery)
 
-    return if (isQuery) {
-      executeQuery(databasePath, trimmedQuery)
-    } else {
-      executeMutation(databasePath, trimmedQuery)
+      return if (isQuery) {
+        executeQuery(databasePath, trimmedQuery)
+      } else {
+        executeMutation(databasePath, trimmedQuery)
+      }
     }
   }
 
@@ -167,9 +180,11 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     val upperQuery = query.uppercase()
 
     // Direct read queries
-    if (upperQuery.startsWith("SELECT") ||
-        upperQuery.startsWith("PRAGMA") ||
-        upperQuery.startsWith("EXPLAIN")) {
+    if (
+        upperQuery.startsWith("SELECT") ||
+            upperQuery.startsWith("PRAGMA") ||
+            upperQuery.startsWith("EXPLAIN")
+    ) {
       return true
     }
 
@@ -187,8 +202,8 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   }
 
   /**
-   * Check if text starts with a keyword followed by a word boundary.
-   * Prevents matching CTE names like "select_cte" as statement keywords.
+   * Check if text starts with a keyword followed by a word boundary. Prevents matching CTE names
+   * like "select_cte" as statement keywords.
    */
   private fun startsWithKeyword(text: String, keyword: String): Boolean {
     if (!text.startsWith(keyword)) return false
@@ -200,8 +215,8 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   /**
    * Find the actual statement type after CTE definitions.
    *
-   * Parses past WITH ... AS (...) clauses to find SELECT/INSERT/UPDATE/DELETE.
-   * Uses word boundary checks to avoid matching CTE names like "update_cte".
+   * Parses past WITH ... AS (...) clauses to find SELECT/INSERT/UPDATE/DELETE. Uses word boundary
+   * checks to avoid matching CTE names like "update_cte".
    */
   private fun findStatementAfterCTE(upperQuery: String): String? {
     var depth = 0
@@ -304,15 +319,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     try {
       val db = SQLiteDatabase.openDatabase(path, null, flags)
       if (!readOnly) {
-        // Allow up to 5 seconds waiting for write locks held by Room or other connections.
-        // Without this, SQLite fails immediately with "database is locked" if the app has
-        // an active write transaction open on the same database.
-        //
-        // Use compileStatement().execute() instead of execSQL() here for the same reason
-        // as in executeMutation: on Android 15 (API 35) with WAL-mode databases, execSQL()
-        // calls throwIfReadOnly() which throws even on OPEN_READWRITE connections when Room
-        // holds the WAL write connection. compileStatement().execute() bypasses that check.
-        db.compileStatement("PRAGMA busy_timeout=5000").execute()
+        setBusyTimeout(db)
       }
       openDatabases[path] = db
       return db
@@ -321,19 +328,44 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     }
   }
 
+  private fun setBusyTimeout(db: SQLiteDatabase) {
+    // Allow up to 5 seconds waiting for write locks held by Room or other connections.
+    // Without this, SQLite fails immediately with "database is locked" if the app has
+    // an active write transaction open on the same database.
+    //
+    // Use compileStatement().execute() instead of execSQL() here for the same reason as
+    // in executeMutation: on Android 15 (API 35) with WAL-mode databases, execSQL() calls
+    // throwIfReadOnly() which throws even on OPEN_READWRITE connections when Room holds
+    // the WAL write connection. compileStatement().execute() bypasses that check.
+    try {
+      db.compileStatement("PRAGMA busy_timeout=5000").execute()
+    } catch (_: RuntimeException) {
+      db.rawQuery("PRAGMA busy_timeout=5000", null).use { cursor ->
+        while (cursor.moveToNext()) {
+          // Exhaust the cursor so SQLite applies the pragma on Robolectric.
+        }
+      }
+    }
+  }
+
   private fun validatePath(path: String) {
     val dataDir = context.applicationInfo.dataDir
     val normalizedPath = File(path).canonicalPath
     val normalizedDataDir = File(dataDir).canonicalPath
 
-    if (!normalizedPath.startsWith(normalizedDataDir)) {
+    if (
+        normalizedPath != normalizedDataDir &&
+            !normalizedPath.startsWith(normalizedDataDir + File.separator)
+    ) {
       throw DatabaseError.InvalidPath(path)
     }
   }
 
   private fun tableExists(db: SQLiteDatabase, table: String): Boolean {
     return db.rawQuery(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", arrayOf(table))
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            arrayOf(table),
+        )
         .use { cursor -> cursor.count > 0 }
   }
 
@@ -354,15 +386,17 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
 
   /** Close all open database connections. */
   fun closeAll() {
-    openDatabases.values.forEach { db ->
-      try {
-        if (db.isOpen) {
-          db.close()
+    synchronized(databaseLock) {
+      openDatabases.values.forEach { db ->
+        try {
+          if (db.isOpen) {
+            db.close()
+          }
+        } catch (_: Exception) {
+          // Ignore close errors
         }
-      } catch (_: Exception) {
-        // Ignore close errors
       }
+      openDatabases.clear()
     }
-    openDatabases.clear()
   }
 }

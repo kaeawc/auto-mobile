@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import path from "path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 
 /**
  * Regression test for the module-load-time-vs-runtime path hazard.
@@ -15,6 +18,8 @@ import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 describe("database path lazy resolution", () => {
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
   const originalDbDir = process.env.AUTOMOBILE_DB_DIR;
+  const originalMigrationsDir = process.env.AUTOMOBILE_MIGRATIONS_DIR;
+  const originalLegacyMigrationsDir = process.env.AUTO_MOBILE_MIGRATIONS_DIR;
 
   function restore(key: string, value: string | undefined): void {
     if (value === undefined) {
@@ -27,11 +32,30 @@ describe("database path lazy resolution", () => {
   afterEach(() => {
     restore(DAEMON_LAUNCH_CWD_ENV, originalLaunchCwd);
     restore("AUTOMOBILE_DB_DIR", originalDbDir);
+    restore("AUTOMOBILE_MIGRATIONS_DIR", originalMigrationsDir);
+    restore("AUTO_MOBILE_MIGRATIONS_DIR", originalLegacyMigrationsDir);
   });
 
   async function importFreshDatabaseModule() {
     // Fresh module instance so its lazy cache is not shared with other tests.
     return import(`../../src/db/database.ts?lazy-db-path-test=${Date.now()}-${Math.random()}`);
+  }
+
+  async function removeTempDirWithRetry(dir: string): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        await rm(dir, { recursive: true, force: true });
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
+          throw error;
+        }
+        await defaultTimer.sleep(50);
+      }
+    }
+
+    await rm(dir, { recursive: true, force: true });
   }
 
   test("resolves relative AUTOMOBILE_DB_DIR against the launch cwd set AFTER import", async () => {
@@ -69,5 +93,54 @@ describe("database path lazy resolution", () => {
     const second = databaseModule.getDatabasePath();
 
     expect(second).toBe(first);
+  });
+
+  test("queries issued immediately after getDatabase wait for startup migrations", async () => {
+    const dbDir = await mkdtemp(path.join(tmpdir(), "auto-mobile-db-startup-"));
+    process.env.AUTOMOBILE_DB_DIR = dbDir;
+    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+
+    const databaseModule = await importFreshDatabaseModule();
+    const db = databaseModule.getDatabase();
+
+    try {
+      const rows = await db
+        .selectFrom("tool_calls" as any)
+        .selectAll()
+        .execute();
+
+      expect(rows).toEqual([]);
+    } finally {
+      await databaseModule.closeDatabase();
+      await removeTempDirWithRetry(dbDir);
+    }
+  });
+
+  test("queries fail clearly and consistently when startup migrations fail", async () => {
+    const dbDir = await mkdtemp(path.join(tmpdir(), "auto-mobile-db-startup-fail-"));
+    process.env.AUTOMOBILE_DB_DIR = dbDir;
+    process.env.AUTOMOBILE_MIGRATIONS_DIR = path.join(dbDir, "missing-migrations");
+    delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
+    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+
+    const databaseModule = await importFreshDatabaseModule();
+    const db = databaseModule.getDatabase();
+    const query = () =>
+      db
+        .selectFrom("tool_calls" as any)
+        .selectAll()
+        .execute();
+
+    try {
+      await expect(query()).rejects.toThrow(
+        "Database startup migrations failed; refusing to run queries until the daemon restarts."
+      );
+      await expect(query()).rejects.toThrow(
+        "Database startup migrations failed; refusing to run queries until the daemon restarts."
+      );
+    } finally {
+      await databaseModule.closeDatabase();
+      await removeTempDirWithRetry(dbDir);
+    }
   });
 });

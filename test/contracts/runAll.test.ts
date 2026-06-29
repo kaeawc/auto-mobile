@@ -1,3 +1,4 @@
+import { afterAll } from "bun:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +33,9 @@ runTimerContract("FakeTimer auto-advance", () => {
 });
 
 const realFileSystemRoot = await fs.mkdtemp(path.join(os.tmpdir(), "automobile-fs-contract-"));
+afterAll(async function() {
+  await fs.rm(realFileSystemRoot, { recursive: true, force: true });
+});
 runFileSystemContract("DefaultFileSystem", () => new DefaultFileSystem(), {
   root: realFileSystemRoot
 });

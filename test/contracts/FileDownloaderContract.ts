@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import fs from "node:fs/promises";
 import http from "node:http";
-import os from "node:os";
 import path from "node:path";
 import type { FileDownloader } from "../../src/utils/FileDownloader";
 
@@ -21,7 +20,7 @@ export const runFileDownloaderContract = (
 
     test("writes the downloaded payload to the requested destination", async function() {
       const payload = Buffer.from("download contract payload");
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "download-contract-"));
+      tempDir = await makeScratchTempDir("download-contract-");
       const destination = path.join(tempDir, "nested", "payload.txt");
       const downloader = makeDownloader(payload);
       const server = await createPayloadServer(payload);
@@ -34,6 +33,12 @@ export const runFileDownloaderContract = (
       }
     });
   });
+};
+
+const makeScratchTempDir = async (prefix: string): Promise<string> => {
+  const scratchDir = path.join(process.cwd(), "scratch");
+  await fs.mkdir(scratchDir, { recursive: true });
+  return fs.mkdtemp(path.join(scratchDir, prefix));
 };
 
 const createPayloadServer = async (

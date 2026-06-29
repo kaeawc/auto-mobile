@@ -13,8 +13,8 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 
 @RunWith(RobolectricTestRunner::class)
 class SQLiteDatabaseDriverTest {
@@ -37,8 +37,7 @@ class SQLiteDatabaseDriverTest {
     val siblingPath = context.applicationInfo.dataDir + "-other/databases/outside.db"
     val driver = SQLiteDatabaseDriver(context)
 
-    val error =
-        kotlin.runCatching { driver.executeSQL(siblingPath, "SELECT 1") }.exceptionOrNull()
+    val error = kotlin.runCatching { driver.executeSQL(siblingPath, "SELECT 1") }.exceptionOrNull()
 
     assertTrue(error is DatabaseError.InvalidPath)
   }
@@ -56,7 +55,10 @@ class SQLiteDatabaseDriverTest {
         try {
           start.await(2, TimeUnit.SECONDS)
           if (index % 4 == 0) {
-            driver.executeSQL(dbFile.absolutePath, "UPDATE items SET value = value + 1 WHERE id = 1")
+            driver.executeSQL(
+                dbFile.absolutePath,
+                "UPDATE items SET value = value + 1 WHERE id = 1",
+            )
           } else {
             val data = driver.getTableData(dbFile.absolutePath, "items", 10, 0)
             assertEquals(listOf("id", "value"), data.columns)
@@ -79,6 +81,70 @@ class SQLiteDatabaseDriverTest {
     assertTrue(errors.isEmpty(), errors.joinToString("\n") { it.stackTraceToString() })
   }
 
+  @Test
+  fun `returning writes are classified as row returning and writable`() {
+    val driver = SQLiteDatabaseDriver(context)
+
+    listOf(
+            "INSERT INTO notes (body) VALUES ('delta') RETURNING id, body",
+            "UPDATE notes SET body = 'beta2' WHERE body = 'beta' RETURNING id, body",
+            "DELETE FROM notes WHERE body = 'gamma' RETURNING id, body",
+            """
+            WITH target AS (
+              SELECT id FROM notes WHERE body = 'alpha'
+            )
+            UPDATE notes SET body = 'alpha2'
+            WHERE id IN (SELECT id FROM target)
+            RETURNING id, body
+            """
+                .trimIndent(),
+        )
+        .forEach { query ->
+          assertEquals(
+              Classification(returnsRows = true, readOnly = false),
+              classifySQL(driver, query),
+              query,
+          )
+        }
+  }
+
+  @Test
+  fun `returning inside a string literal does not make a mutation return rows`() {
+    val dbFile = createNotesDatabase("returning-string-${System.nanoTime()}.db")
+    val driver = SQLiteDatabaseDriver(context)
+
+    assertEquals(
+        Classification(returnsRows = false, readOnly = false),
+        classifySQL(driver, "UPDATE notes SET body = 'not RETURNING syntax' WHERE body = 'alpha'"),
+    )
+
+    val result =
+        driver.executeSQL(
+            dbFile.absolutePath,
+            "UPDATE notes SET body = 'not RETURNING syntax' WHERE body = 'alpha'",
+        )
+
+    assertEquals(SQLExecutionResult.Mutation(rowsAffected = 1), result)
+    driver.closeAll()
+  }
+
+  @Test
+  fun `ddl statements with inner select are not classified as read only queries`() {
+    val driver = SQLiteDatabaseDriver(context)
+
+    listOf(
+            "CREATE TABLE backup AS SELECT * FROM notes",
+            "CREATE VIEW notes_view AS SELECT * FROM notes",
+        )
+        .forEach { query ->
+          assertEquals(
+              Classification(returnsRows = false, readOnly = false),
+              classifySQL(driver, query),
+              query,
+          )
+        }
+  }
+
   private fun createDatabase(name: String): File {
     val dbFile = context.getDatabasePath(name)
     dbFile.parentFile?.mkdirs()
@@ -92,4 +158,35 @@ class SQLiteDatabaseDriverTest {
 
     return dbFile
   }
+
+  private fun createNotesDatabase(name: String): File {
+    val dbFile = context.getDatabasePath(name)
+    dbFile.parentFile?.mkdirs()
+    dbFile.delete()
+    filesToDelete.add(dbFile)
+
+    SQLiteDatabase.openOrCreateDatabase(dbFile, null).use { db ->
+      db.execSQL("CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL)")
+      db.execSQL("INSERT INTO notes (body) VALUES ('alpha'), ('beta'), ('gamma')")
+    }
+
+    return dbFile
+  }
+
+  private fun classifySQL(driver: SQLiteDatabaseDriver, query: String): Classification {
+    val classify =
+        SQLiteDatabaseDriver::class
+            .java
+            .getDeclaredMethod("classifySQL", String::class.java)
+            .apply {
+              isAccessible = true
+            }
+    val result = classify.invoke(driver, query) as Pair<*, *>
+    return Classification(
+        returnsRows = result.first as Boolean,
+        readOnly = result.second as Boolean,
+    )
+  }
+
+  private data class Classification(val returnsRows: Boolean, val readOnly: Boolean)
 }

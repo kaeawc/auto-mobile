@@ -222,6 +222,10 @@ interface DeviceAwareToolOptions<T = any> {
   planExecutable?: boolean;
 }
 
+interface ToolListingOptions {
+  includeUnavailable?: boolean;
+}
+
 // Interface for a registered tool
 export interface RegisteredTool {
   name: string;
@@ -785,8 +789,12 @@ class ToolRegistryClass {
   }
 
   // Get all registered tools
-  getAllTools(): RegisteredTool[] {
-    return Array.from(this.tools.values()).filter(tool => this.isToolAvailable(tool));
+  getAllTools(options: ToolListingOptions = {}): RegisteredTool[] {
+    const tools = Array.from(this.tools.values());
+    if (options.includeUnavailable) {
+      return tools;
+    }
+    return tools.filter(tool => this.isToolAvailable(tool));
   }
 
   // Get a specific tool by name
@@ -863,9 +871,9 @@ class ToolRegistryClass {
   }
 
   // Get tools in MCP format
-  getToolDefinitions() {
+  getToolDefinitions(options: ToolListingOptions = {}) {
     const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
-    return this.getAllTools().map(tool => {
+    return this.getAllTools(options).map(tool => {
       const outputSchema = tool.outputSchema
         ? flattenTopLevelUnion(toJSONSchema(tool.outputSchema))
         : undefined;

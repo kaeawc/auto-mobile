@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { RegisteredTool } from "../../src/server/toolRegistry";
+import { createMcpServer } from "../../src/server";
+import { serverConfig } from "../../src/utils/ServerConfig";
+import { setDebugModeEnabled } from "../../src/utils/debug";
 
 /**
  * Tool Registration Regression Tests
@@ -643,6 +646,44 @@ describe("Tool Registration Validation (Integration Tests)", () => {
       expect(schemas[0]).toHaveProperty("name");
       expect(schemas[0]).toHaveProperty("description");
       expect(schemas[0]).toHaveProperty("inputSchema");
+    }
+  });
+
+  test("should keep committed tool definitions in sync with all served tool modes", async () => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
+    const originalEmbeddedSdkEnabled = serverConfig.isEmbeddedSdkEnabled();
+
+    try {
+      ToolRegistry.clearTools();
+      serverConfig.setEmbeddedSdkEnabled(true);
+      setDebugModeEnabled(true);
+      createMcpServer({ daemonMode: true });
+
+      const schemaContent = await fs.readFile(schemaPath, "utf-8");
+      const schemaToolNameList = (JSON.parse(schemaContent) as ToolSchemaDefinition[]).map(tool => tool.name);
+      const schemaToolNames = new Set(schemaToolNameList);
+      const productionToolNames = ToolRegistry.getToolDefinitions().map(tool => tool.name);
+      const missingToolNames = productionToolNames.filter(name => !schemaToolNames.has(name));
+
+      expect(missingToolNames).toEqual([]);
+      expect(schemaToolNameList).toEqual(expect.arrayContaining([
+        "accessibility",
+        "clearKeyValueFile",
+        "clearMockNetwork",
+        "getNetworkGraph",
+        "mockNetwork",
+        "network",
+        "removeKeyValue",
+        "setKeyValue",
+        "setUIState",
+        "sqlQuery",
+      ]));
+    } finally {
+      ToolRegistry.clearTools();
+      serverConfig.setEmbeddedSdkEnabled(originalEmbeddedSdkEnabled);
+      setDebugModeEnabled(false);
     }
   });
 

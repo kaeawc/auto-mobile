@@ -723,6 +723,46 @@ describe("DevicePool", () => {
 
       expect(assignments.get("session-a")).toBe("sim-1");
     });
+
+    test("should prefer the least-recently-used idle device for criteria allocation", async () => {
+      // Regression test for LRU drift between tryAssignDevice and
+      // tryAssignDeviceWithCriteria (issue #2656). Criteria-based allocation
+      // must distribute load to the least-recently-used idle device, the same
+      // way platform-based allocation does.
+      await devicePool.initializeWithDevices([
+        createBootedDevice("dev-a", "android"),
+        createBootedDevice("dev-b", "android"),
+        createBootedDevice("dev-c", "android"),
+      ]);
+
+      // Touch devices in reverse insertion order so lastUsedAt ordering
+      // (c < b < a) differs from map insertion order (a, b, c).
+      await devicePool.bindOrReuseDeviceSession("seed-c", "dev-c", "android");
+      await devicePool.bindOrReuseDeviceSession("seed-b", "dev-b", "android");
+      await devicePool.bindOrReuseDeviceSession("seed-a", "dev-a", "android");
+
+      await devicePool.releaseDevice("dev-a");
+      await devicePool.releaseDevice("dev-b");
+      await devicePool.releaseDevice("dev-c");
+
+      // Re-bind dev-c so it is busy (and remains the lastReleasedDeviceId,
+      // which should be ignored because it is no longer idle). Idle pool is
+      // now {dev-a, dev-b}; insertion order would yield dev-a, but dev-b is
+      // less recently used and must win.
+      await devicePool.bindOrReuseDeviceSession("seed-c2", "dev-c", "android");
+
+      const assignments = await devicePool.assignMultipleDevicesByCriteria(
+        [
+          {
+            sessionId: "session-lru",
+            criteria: { platform: "android" },
+          },
+        ],
+        1000
+      );
+
+      expect(assignments.get("session-lru")).toBe("dev-b");
+    });
   });
 
   describe("releaseDevice", () => {

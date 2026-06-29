@@ -28,12 +28,14 @@ caller's contract, not by local precedent. The building blocks already exist:
    ```
 
 2. **Log, then return a typed failure** — for diagnostic/best-effort paths that
-   return a status object (e.g. `doctor` checks) instead of throwing. Always
-   `logger.debug`/`logger.warn` the underlying error *before* returning, so there
-   is a trace even when the user only sees a summarized message:
+   return a status object (e.g. `doctor` checks) instead of throwing. Log the
+   underlying error *before* returning, so there is a trace even when the user
+   only sees a summarized message. Use `logger.warn` for unexpected failures —
+   the default level is `INFO`, so `logger.debug` is **dropped** unless the user
+   opted into debug logging, which defeats the trace:
    ```ts
    } catch (error) {
-     logger.debug(`simctl check failed: ${normalizeErrorMessage(error)}`, error);
+     logger.warn(`simctl check failed: ${normalizeErrorMessage(error)}`, error);
      return { name: "simctl", status: "fail", message: "..." };
    }
    ```

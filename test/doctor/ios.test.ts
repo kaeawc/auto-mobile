@@ -462,7 +462,7 @@ describe("iOS doctor checks", () => {
       });
 
       expect(result.status).toBe("fail");
-      const debug = logger.at("debug");
+      const debug = logger.at("warn");
       expect(debug.length).toBeGreaterThan(0);
       expect(JSON.stringify(debug)).toContain("xcrun: command not found");
     });
@@ -476,7 +476,7 @@ describe("iOS doctor checks", () => {
       });
 
       expect(result.status).toBe("fail");
-      expect(logger.at("debug").length).toBeGreaterThan(0);
+      expect(logger.at("warn").length).toBeGreaterThan(0);
     });
 
     test("checkXcrunAvailable logs the underlying error before returning fail", async () => {
@@ -488,7 +488,7 @@ describe("iOS doctor checks", () => {
       });
 
       expect(result.status).toBe("fail");
-      expect(logger.at("debug").length).toBeGreaterThan(0);
+      expect(logger.at("warn").length).toBeGreaterThan(0);
     });
 
     test("checkSimctlAvailable logs the underlying error before returning fail", async () => {
@@ -502,7 +502,7 @@ describe("iOS doctor checks", () => {
       });
 
       expect(result.status).toBe("fail");
-      expect(logger.at("debug").length).toBeGreaterThan(0);
+      expect(logger.at("warn").length).toBeGreaterThan(0);
     });
 
     test("checkSimulatorRuntimes logs the underlying error before returning fail", async () => {
@@ -520,7 +520,7 @@ describe("iOS doctor checks", () => {
       });
 
       expect(result.status).toBe("fail");
-      expect(logger.at("debug").length).toBeGreaterThan(0);
+      expect(logger.at("warn").length).toBeGreaterThan(0);
     });
 
     test("checkCodeSigning logs the underlying error before returning warn", async () => {
@@ -532,7 +532,7 @@ describe("iOS doctor checks", () => {
       });
 
       expect(result.status).toBe("warn");
-      expect(logger.at("debug").length).toBeGreaterThan(0);
+      expect(logger.at("warn").length).toBeGreaterThan(0);
     });
 
     test("checkAppleDeveloperAccount logs the underlying error before returning warn", async () => {
@@ -546,7 +546,7 @@ describe("iOS doctor checks", () => {
       });
 
       expect(result.status).toBe("warn");
-      expect(logger.at("debug").length).toBeGreaterThan(0);
+      expect(logger.at("warn").length).toBeGreaterThan(0);
     });
 
     test("checkProvisioningProfiles logs the underlying error before returning warn", async () => {
@@ -560,7 +560,7 @@ describe("iOS doctor checks", () => {
       });
 
       expect(result.status).toBe("warn");
-      expect(logger.at("debug").length).toBeGreaterThan(0);
+      expect(logger.at("warn").length).toBeGreaterThan(0);
     });
 
     test("checkBootedSimulators logs the underlying error before returning skip", async () => {
@@ -574,7 +574,7 @@ describe("iOS doctor checks", () => {
       });
 
       expect(result.status).toBe("skip");
-      expect(logger.at("debug").length).toBeGreaterThan(0);
+      expect(logger.at("warn").length).toBeGreaterThan(0);
     });
   });
 });

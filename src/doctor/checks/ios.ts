@@ -155,7 +155,7 @@ export async function checkXcodeInstallation(
       value: version,
     };
   } catch (error) {
-    dependencies.logger.debug(`Xcode installation check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Xcode installation check failed: ${normalizeErrorMessage(error)}`, error);
     return {
       name: "Xcode",
       status: "fail",
@@ -201,7 +201,7 @@ export async function checkXcodeCommandLineTools(
         };
       }
 
-      dependencies.logger.debug(`Command Line Tools install failed: ${normalizeErrorMessage(error)}`, error);
+      dependencies.logger.warn(`Command Line Tools install failed: ${normalizeErrorMessage(error)}`, error);
       return {
         name,
         status: "fail",
@@ -244,7 +244,7 @@ export async function checkXcodeCommandLineTools(
       value: developerDir,
     };
   } catch (error) {
-    dependencies.logger.debug(`Command Line Tools check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Command Line Tools check failed: ${normalizeErrorMessage(error)}`, error);
     return {
       name,
       status: "fail",
@@ -276,7 +276,7 @@ export async function checkXcrunAvailable(
       message: "xcrun functional",
     };
   } catch (error) {
-    dependencies.logger.debug(`xcrun check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`xcrun check failed: ${normalizeErrorMessage(error)}`, error);
     return {
       name: "xcrun",
       status: "fail",
@@ -319,7 +319,7 @@ export async function checkSimctlAvailable(
       recommendation: "Install Xcode Command Line Tools: xcode-select --install",
     };
   } catch (error) {
-    dependencies.logger.debug(`simctl check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`simctl check failed: ${normalizeErrorMessage(error)}`, error);
     return {
       name: "simctl",
       status: "fail",
@@ -375,7 +375,7 @@ export async function checkSimulatorRuntimes(
       value: iosRuntimes.length,
     };
   } catch (error) {
-    dependencies.logger.debug(`Simulator runtimes check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Simulator runtimes check failed: ${normalizeErrorMessage(error)}`, error);
     return {
       name,
       status: "fail",
@@ -422,7 +422,7 @@ export async function checkCodeSigning(
       recommendation: "Sign in to Xcode and install a development certificate for device testing.",
     };
   } catch (error) {
-    dependencies.logger.debug(`Code signing check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Code signing check failed: ${normalizeErrorMessage(error)}`, error);
     return {
       name,
       status: "warn",
@@ -467,7 +467,7 @@ export async function checkAppleDeveloperAccount(
       recommendation: "Sign in to Xcode to enable device testing.",
     };
   } catch (error) {
-    dependencies.logger.debug(`Apple Developer account check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Apple Developer account check failed: ${normalizeErrorMessage(error)}`, error);
     return {
       name,
       status: "warn",
@@ -514,7 +514,7 @@ export async function checkProvisioningProfiles(
       recommendation: "Create a provisioning profile in Xcode to enable device testing.",
     };
   } catch (error) {
-    dependencies.logger.debug(`Provisioning profiles check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Provisioning profiles check failed: ${normalizeErrorMessage(error)}`, error);
     return {
       name,
       status: "warn",
@@ -568,7 +568,7 @@ export async function checkBootedSimulators(
       value: simulators.length,
     };
   } catch (error) {
-    dependencies.logger.debug(`Booted simulators check failed: ${normalizeErrorMessage(error)}`, error);
+    dependencies.logger.warn(`Booted simulators check failed: ${normalizeErrorMessage(error)}`, error);
     return {
       name: "Booted Simulators",
       status: "skip",

@@ -3131,14 +3131,20 @@ class CtrlProxy : AccessibilityService() {
             }
             "get" -> {
               try {
-                val clip = clipboardManager.primaryClip
-                val clipText = clip?.getItemAt(0)?.text?.toString()
-                if (clipText != null) {
-                  Log.d(TAG, "Clipboard get successful (${clipText.length} chars)")
+                val readResult =
+                    CtrlProxyClipboard.readResultFromPrimaryClip(clipboardManager.primaryClip)
+                if (readResult.success) {
+                  val clipText = readResult.text ?: ""
+                  if (clipText.isEmpty()) {
+                    Log.d(TAG, "Clipboard is empty")
+                  } else {
+                    Log.d(TAG, "Clipboard get successful (${clipText.length} chars)")
+                  }
                   Triple(true, clipText, null)
                 } else {
-                  Log.d(TAG, "Clipboard is empty")
-                  Triple(true, "", null)
+                  val readError = readResult.error ?: "Clipboard read failed"
+                  Log.w(TAG, readError)
+                  Triple(false, null, readError)
                 }
               } catch (e: Exception) {
                 Log.e(TAG, "Clipboard get failed", e)

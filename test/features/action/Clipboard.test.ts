@@ -125,6 +125,12 @@ describe("Clipboard iOS", () => {
 });
 
 describe("Clipboard Android", () => {
+  const androidDevice: BootedDevice = {
+    name: "Test Android",
+    platform: "android",
+    deviceId: "test-android",
+  };
+
   // Regression for https://github.com/kaeawc/auto-mobile/issues/2227.
   // AndroidCtrlProxyClient.getInstance expects an AdbClientFactory and calls
   // `.create(device)` on it. Passing the resolved AdbExecutor instead
@@ -136,19 +142,85 @@ describe("Clipboard Android", () => {
       requestClipboard: async () => ({ success: true, action: "copy", totalTimeMs: 1 }),
     } as unknown as AndroidCtrlProxyClient);
 
-    const device: BootedDevice = {
-      name: "Test Android",
-      platform: "android",
-      deviceId: "test-android",
-    };
-    const clipboard = new Clipboard(device, factory);
+    const clipboard = new Clipboard(androidDevice, factory);
     await clipboard.execute("copy", "hello");
 
     expect(getInstanceSpy).toHaveBeenCalled();
     const [, passedFactory] = getInstanceSpy.mock.calls[0] as [BootedDevice, FakeAdbClientFactory];
     expect(typeof passedFactory.create).toBe("function");
     expect(passedFactory).toBe(factory);
-    expect(factory.wasCalledForDevice(device.deviceId)).toBe(true);
+    expect(factory.wasCalledForDevice(androidDevice.deviceId)).toBe(true);
+
+    getInstanceSpy.mockRestore();
+  });
+
+  test("get returns accessibility restriction error without ADB fallback when Android denies clipboard reads", async () => {
+    const factory = new FakeAdbClientFactory();
+    const fakeAdb = factory.getFakeClient();
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestClipboard: async () => ({
+        success: false,
+        action: "get",
+        totalTimeMs: 1,
+        error: "Clipboard read is restricted while CtrlProxy is not foreground",
+      }),
+    } as unknown as AndroidCtrlProxyClient);
+
+    const clipboard = new Clipboard(androidDevice, factory);
+    const result = await clipboard.execute("get");
+
+    expect(result.success).toBe(false);
+    expect(result.action).toBe("get");
+    expect(result.method).toBe("a11y");
+    expect(result.error).toContain("Clipboard read is restricted");
+    expect(fakeAdb.getAllCommands()).not.toContain("shell cmd clipboard get");
+
+    getInstanceSpy.mockRestore();
+  });
+
+  test("get returns default accessibility error when Android read fails without details", async () => {
+    const factory = new FakeAdbClientFactory();
+    const fakeAdb = factory.getFakeClient();
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestClipboard: async () => ({
+        success: false,
+        action: "get",
+        totalTimeMs: 1,
+      }),
+    } as unknown as AndroidCtrlProxyClient);
+
+    const clipboard = new Clipboard(androidDevice, factory);
+    const result = await clipboard.execute("get");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Accessibility clipboard get failed");
+    expect(result.method).toBe("a11y");
+    expect(fakeAdb.getAllCommands()).not.toContain("shell cmd clipboard get");
+
+    getInstanceSpy.mockRestore();
+  });
+
+  test("get does not use unsupported cmd clipboard fallback for an empty accessibility read", async () => {
+    const factory = new FakeAdbClientFactory();
+    const fakeAdb = factory.getFakeClient();
+    fakeAdb.setCommandResult("shell cmd clipboard get", "No shell command implementation");
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestClipboard: async () => ({
+        success: true,
+        action: "get",
+        text: "",
+        totalTimeMs: 1,
+      }),
+    } as unknown as AndroidCtrlProxyClient);
+
+    const clipboard = new Clipboard(androidDevice, factory);
+    const result = await clipboard.execute("get");
+
+    expect(result.success).toBe(true);
+    expect(result.action).toBe("get");
+    expect(result.text).toBe("");
+    expect(result.method).toBe("a11y");
+    expect(fakeAdb.getAllCommands()).not.toContain("shell cmd clipboard get");
 
     getInstanceSpy.mockRestore();
   });

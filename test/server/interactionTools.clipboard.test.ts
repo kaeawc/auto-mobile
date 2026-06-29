@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { clipboardSchema, registerInteractionTools } from "../../src/server/interactionTools";
+import { clipboardSchema, formatClipboardMessage, registerInteractionTools } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 describe("clipboard tool schema", () => {
@@ -59,5 +59,35 @@ describe("clipboard tool schema", () => {
     expect(schema.anyOf).toBeUndefined();
     expect(schema.oneOf).toBeUndefined();
     expect(schema.allOf).toBeUndefined();
+  });
+
+  test("formats failed actions without success wording", () => {
+    for (const action of ["copy", "paste", "clear", "get"] as const) {
+      const message = formatClipboardMessage({
+        success: false,
+        action,
+        error: "Clipboard access denied",
+      });
+
+      expect(message).toBe(`Failed to execute clipboard ${action}: Clipboard access denied`);
+      expect(message).not.toContain("Copied");
+      expect(message).not.toContain("Pasted");
+      expect(message).not.toContain("Cleared");
+      expect(message).not.toContain("Retrieved empty");
+    }
+  });
+
+  test("formats successful get with content preview and empty clipboard message", () => {
+    expect(formatClipboardMessage({
+      success: true,
+      action: "get",
+      text: "hello",
+    })).toBe("Retrieved clipboard content: \"hello\"");
+
+    expect(formatClipboardMessage({
+      success: true,
+      action: "get",
+      text: "",
+    })).toBe("Retrieved empty clipboard");
   });
 });

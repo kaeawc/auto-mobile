@@ -20,6 +20,7 @@ import { Keyboard } from "../features/action/Keyboard";
 import {
   ActionableError,
   BootedDevice,
+  ClipboardResult,
 } from "../models";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
@@ -382,6 +383,25 @@ export const clipboardSchema = z.discriminatedUnion("action", [
     ...clipboardPlatformSchema,
   }))
 ]);
+
+export function formatClipboardMessage(result: ClipboardResult): string {
+  if (!result.success) {
+    return `Failed to execute clipboard ${result.action}: ${result.error ?? "unknown error"}`;
+  }
+
+  switch (result.action) {
+    case "copy":
+      return "Copied text to clipboard";
+    case "paste":
+      return "Pasted clipboard content into focused field";
+    case "clear":
+      return "Cleared clipboard";
+    case "get":
+      return result.text
+        ? `Retrieved clipboard content: "${result.text.substring(0, 50)}${result.text.length > 50 ? "..." : ""}"`
+        : "Retrieved empty clipboard";
+  }
+}
 
 // ============================================================================
 // Tool Registration
@@ -907,24 +927,7 @@ export function registerInteractionTools() {
       const clipboard = new Clipboard(device);
       const result = await clipboard.execute(args.action, args.text);
 
-      // Build descriptive message based on action
-      let message = "";
-      switch (args.action) {
-        case "copy":
-          message = `Copied text to clipboard`;
-          break;
-        case "paste":
-          message = `Pasted clipboard content into focused field`;
-          break;
-        case "clear":
-          message = `Cleared clipboard`;
-          break;
-        case "get":
-          message = result.text
-            ? `Retrieved clipboard content: "${result.text.substring(0, 50)}${result.text.length > 50 ? "..." : ""}"`
-            : `Retrieved empty clipboard`;
-          break;
-      }
+      let message = formatClipboardMessage(result);
 
       if (result.method) {
         message += ` (via ${result.method})`;

@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { promises as nodeFs } from "node:fs";
+import type { Stats } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix, relative } from "node:path";
+import { TextDecoder } from "node:util";
 import {
   AppFileContainer,
+  AppFileListEntry,
   AppFileListRequest,
   AppFileListResult,
   AppFileReadRequest,
@@ -13,8 +16,9 @@ import {
   buildAppFileResourceUri,
   normalizeAppFileRelativePath,
 } from "./appFileContract";
-import { ActionableError, BootedDevice, Platform } from "../models";
+import { ActionableError, BootedDevice, Platform, type ExecResult } from "../models";
 import { defaultAdbClientFactory, type AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 
@@ -234,19 +238,45 @@ class AndroidAppFileProvider implements AppFileProvider {
     }
 
     if (target.kind === "external") {
-      await adb.executeCommand(`shell mkdir -p ${shellQuote(posix.dirname(target.absolutePath))}`, undefined, undefined, true, request.signal);
-      await adb.executeCommand(`push ${shellQuote(request.sourcePath)} ${shellQuote(target.absolutePath)}`, undefined, undefined, true, request.signal);
+      await executeAndroidAppFileCommand(
+        adb,
+        `shell mkdir -p ${shellQuote(posix.dirname(target.absolutePath))}`,
+        { device: request.device, appId: request.appId, container: request.container, operation: "write", access: "externalFiles" },
+        undefined,
+        undefined,
+        true,
+        request.signal
+      );
+      await executeAndroidAppFileCommand(
+        adb,
+        `push ${shellQuote(request.sourcePath)} ${shellQuote(target.absolutePath)}`,
+        { device: request.device, appId: request.appId, container: request.container, operation: "write", access: "externalFiles" },
+        undefined,
+        undefined,
+        true,
+        request.signal
+      );
       return;
     }
 
     const tempDevicePath = `/data/local/tmp/automobile-${randomUUID()}-${posix.basename(request.destinationPath)}`;
-    await adb.executeCommand(`push ${shellQuote(request.sourcePath)} ${shellQuote(tempDevicePath)}`, undefined, undefined, true, request.signal);
+    await executeAndroidAppFileCommand(
+      adb,
+      `push ${shellQuote(request.sourcePath)} ${shellQuote(tempDevicePath)}`,
+      { device: request.device, appId: request.appId, container: request.container, operation: "write", access: "run-as" },
+      undefined,
+      undefined,
+      true,
+      request.signal
+    );
     try {
       const command = `mkdir -p ${shellQuote(posix.dirname(target.relativePath))} && ` +
         `cp ${shellQuote(tempDevicePath)} ${shellQuote(target.relativePath)} && ` +
         `chmod 600 ${shellQuote(target.relativePath)}`;
-      await adb.executeCommand(
+      await executeAndroidAppFileCommand(
+        adb,
         `shell run-as ${shellQuote(request.appId)} sh -c ${shellQuote(command)}`,
+        { device: request.device, appId: request.appId, container: request.container, operation: "write", access: "run-as" },
         undefined,
         undefined,
         true,
@@ -264,37 +294,27 @@ class AndroidAppFileProvider implements AppFileProvider {
       throw unsupportedAppFileOperation("listFiles", request.device.platform, request.appId, request.container, base.message);
     }
 
+    const root = base.kind === "external" ? posix.dirname(base.absolutePath) : posix.dirname(base.relativePath);
+    const script = `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -exec stat -c '%F|%s|%Y|%n' {} \\; ; fi`;
     const stdout = base.kind === "external"
-      ? (await adb.executeCommand(
-        `shell if [ -d ${shellQuote(posix.dirname(base.absolutePath))} ]; then find ${shellQuote(posix.dirname(base.absolutePath))} -type f; fi`,
+      ? (await executeAndroidAppFileCommand(
+        adb,
+        `shell ${script}`,
+        { device: request.device, appId: request.appId, container: request.container, operation: "list", access: "externalFiles" },
         undefined,
         ANDROID_APP_FILE_MAX_BUFFER,
         true
       )).stdout
-      : (await adb.executeCommand(
-        `shell run-as ${shellQuote(request.appId)} sh -c ${shellQuote(
-          `if [ -d ${shellQuote(posix.dirname(base.relativePath))} ]; then find ${shellQuote(posix.dirname(base.relativePath))} -type f; fi`
-        )}`,
+      : (await executeAndroidAppFileCommand(
+        adb,
+        `shell run-as ${shellQuote(request.appId)} sh -c ${shellQuote(script)}`,
+        { device: request.device, appId: request.appId, container: request.container, operation: "list", access: "run-as" },
         undefined,
         ANDROID_APP_FILE_MAX_BUFFER,
         true
       )).stdout;
 
-    const root = base.kind === "external" ? posix.dirname(base.absolutePath) : posix.dirname(base.relativePath);
-    const files = stdout
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean)
-      .map(filePath => filePath.startsWith(`${root}/`) ? filePath.slice(root.length + 1) : filePath)
-      .map(path => ({
-        path,
-        resourceUri: buildAppFileResourceUri({
-          deviceId: request.device.deviceId,
-          appId: request.appId,
-          container: request.container,
-          path,
-        }),
-      }));
+    const files = parseAndroidStatListing(stdout, root, request.device, request.appId, request.container);
 
     return {
       deviceId: request.device.deviceId,
@@ -313,28 +333,35 @@ class AndroidAppFileProvider implements AppFileProvider {
     }
 
     const stdout = target.kind === "external"
-      ? (await adb.executeCommand(
+      ? (await executeAndroidAppFileCommand(
+        adb,
         `shell base64 ${shellQuote(target.absolutePath)}`,
+        { device: request.device, appId: request.appId, container: request.container, operation: "read", access: "externalFiles" },
         undefined,
         ANDROID_APP_FILE_MAX_BUFFER,
         true
       )).stdout
-      : (await adb.executeCommand(
+      : (await executeAndroidAppFileCommand(
+        adb,
         `shell run-as ${shellQuote(request.appId)} base64 ${shellQuote(target.relativePath)}`,
+        { device: request.device, appId: request.appId, container: request.container, operation: "read", access: "run-as" },
         undefined,
         ANDROID_APP_FILE_MAX_BUFFER,
         true
       )).stdout;
     const blob = stdout.replace(/\s+/g, "");
+    const buffer = Buffer.from(blob, "base64");
+    const text = decodeUtf8Text(buffer);
     return {
       deviceId: request.device.deviceId,
       platform: request.device.platform,
       appId: request.appId,
       container: request.container,
       path: request.path,
-      byteCount: Buffer.from(blob, "base64").byteLength,
-      mimeType: "application/octet-stream",
-      blob,
+      byteCount: buffer.byteLength,
+      ...(text === undefined
+        ? { mimeType: "application/octet-stream", blob }
+        : { mimeType: "text/plain; charset=utf-8", text }),
     };
   }
 }
@@ -359,8 +386,7 @@ class IosSimulatorAppFileProvider implements AppFileProvider {
       appId: request.appId,
       container: request.container,
       files: files.map(file => ({
-        path: file.path,
-        byteCount: file.byteCount,
+        ...file,
         resourceUri: buildAppFileResourceUri({
           deviceId: request.device.deviceId,
           appId: request.appId,
@@ -374,6 +400,7 @@ class IosSimulatorAppFileProvider implements AppFileProvider {
   async readFile(request: AppFileProviderReadRequest): Promise<AppFileReadResult> {
     const target = await this.resolvePath(request.device, request.appId, request.container, request.path, "readFile");
     const buffer = await nodeFs.readFile(target);
+    const text = decodeUtf8Text(buffer);
     return {
       deviceId: request.device.deviceId,
       platform: request.device.platform,
@@ -381,8 +408,9 @@ class IosSimulatorAppFileProvider implements AppFileProvider {
       container: request.container,
       path: request.path,
       byteCount: buffer.byteLength,
-      mimeType: "application/octet-stream",
-      blob: buffer.toString("base64"),
+      ...(text === undefined
+        ? { mimeType: "application/octet-stream", blob: buffer.toString("base64") }
+        : { mimeType: "text/plain; charset=utf-8", text }),
     };
   }
 
@@ -493,21 +521,22 @@ function iosContainerRelativePath(
   }
 }
 
-async function listLocalFiles(root: string): Promise<Array<{ path: string; byteCount: number }>> {
-  const entries: Array<{ path: string; byteCount: number }> = [];
+type LocalFileListEntry = Omit<AppFileListEntry, "resourceUri">;
+
+async function listLocalFiles(root: string): Promise<LocalFileListEntry[]> {
+  const entries: LocalFileListEntry[] = [];
 
   async function visit(dir: string): Promise<void> {
     const children = await nodeFs.readdir(dir, { withFileTypes: true });
     for (const child of children) {
       const childPath = join(dir, child.name);
       if (child.isDirectory()) {
+        const stat = await nodeFs.stat(childPath);
+        entries.push(buildLocalListEntry(root, childPath, stat, true));
         await visit(childPath);
       } else if (child.isFile()) {
         const stat = await nodeFs.stat(childPath);
-        entries.push({
-          path: relative(root, childPath).replace(/\\/g, "/"),
-          byteCount: stat.size,
-        });
+        entries.push(buildLocalListEntry(root, childPath, stat, false));
       }
     }
   }
@@ -521,4 +550,129 @@ async function listLocalFiles(root: string): Promise<Array<{ path: string; byteC
   }
 
   return entries;
+}
+
+function buildLocalListEntry(root: string, childPath: string, stat: Stats, isDirectory: boolean): LocalFileListEntry {
+  const filePath = relative(root, childPath).replace(/\\/g, "/");
+  return {
+    path: filePath,
+    name: posix.basename(filePath),
+    ...(isDirectory ? {} : { byteCount: stat.size }),
+    isDirectory,
+    lastModified: stat.mtime.toISOString(),
+  };
+}
+
+function parseAndroidStatListing(
+  stdout: string,
+  root: string,
+  device: BootedDevice,
+  appId: string,
+  container: AppFileContainer
+): AppFileListEntry[] {
+  return stdout
+    .split(/\n/)
+    .map(line => line.replace(/\r$/, ""))
+    .filter(line => line.length > 0)
+    .map(line => parseAndroidStatLine(line, root, device, appId, container))
+    .filter((entry): entry is AppFileListEntry => entry !== null);
+}
+
+function parseAndroidStatLine(
+  line: string,
+  root: string,
+  device: BootedDevice,
+  appId: string,
+  container: AppFileContainer
+): AppFileListEntry | null {
+  const parts = line.split("|");
+  if (parts.length < 4) {
+    return null;
+  }
+
+  const [fileType, sizeText, modifiedSecondsText, ...pathParts] = parts;
+  const absolutePath = pathParts.join("|");
+  if (absolutePath === root) {
+    return null;
+  }
+
+  const relativePath = absolutePath.startsWith(`${root}/`)
+    ? absolutePath.slice(root.length + 1)
+    : absolutePath;
+  const path = normalizeAppFileRelativePath(relativePath);
+  const isDirectory = fileType.toLowerCase().includes("directory");
+  const byteCount = Number(sizeText);
+  const modifiedSeconds = Number(modifiedSecondsText);
+
+  return {
+    path,
+    name: posix.basename(path),
+    ...(isDirectory || !Number.isFinite(byteCount) ? {} : { byteCount }),
+    isDirectory,
+    ...(Number.isFinite(modifiedSeconds) ? { lastModified: new Date(modifiedSeconds * 1000).toISOString() } : {}),
+    resourceUri: buildAppFileResourceUri({ deviceId: device.deviceId, appId, container, path }),
+  };
+}
+
+interface AndroidAppFileCommandContext {
+  device: BootedDevice;
+  appId: string;
+  container: AppFileContainer;
+  operation: "write" | "list" | "read";
+  access: "externalFiles" | "run-as";
+}
+
+async function executeAndroidAppFileCommand(
+  adb: AdbExecutor,
+  command: string,
+  context: AndroidAppFileCommandContext,
+  timeoutMs?: number,
+  maxBuffer?: number,
+  noRetry?: boolean,
+  signal?: AbortSignal
+): Promise<ExecResult> {
+  try {
+    return await adb.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+  } catch (error) {
+    throw mapAndroidAppFileError(error, context);
+  }
+}
+
+function mapAndroidAppFileError(error: unknown, context: AndroidAppFileCommandContext): ActionableError {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/not debuggable/i.test(message)) {
+    return new ActionableError(
+      `Android ${context.container} app file ${context.operation} for ${context.appId} on ${context.device.deviceId} ` +
+      "requires a debuggable app build because it uses run-as. Install a debuggable build or use externalFiles. " +
+      `Original error: ${message}`
+    );
+  }
+
+  if (/package .* (unknown|not found)|unknown package|not installed|does not exist/i.test(message)) {
+    return new ActionableError(
+      `Android app ${context.appId} is not installed on ${context.device.deviceId}; ` +
+      `cannot ${context.operation} ${context.container} app files. Original error: ${message}`
+    );
+  }
+
+  if (/permission denied|operation not permitted/i.test(message)) {
+    return new ActionableError(
+      `Android ${context.container} app file ${context.operation} for ${context.appId} on ${context.device.deviceId} ` +
+      `was denied by the device. ${context.access === "run-as" ? "Use a debuggable build for private storage or choose externalFiles." : "Check app install state and external storage access."} ` +
+      `Original error: ${message}`
+    );
+  }
+
+  return new ActionableError(
+    `Failed to ${context.operation} Android ${context.container} app files for ${context.appId} on ${context.device.deviceId}: ${message}`
+  );
+}
+
+function decodeUtf8Text(buffer: Buffer): string | undefined {
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buffer);
+    return text.includes("\u0000") ? undefined : text;
+  } catch {
+    return undefined;
+  }
 }

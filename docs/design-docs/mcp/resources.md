@@ -73,6 +73,8 @@ Lists files in a logical app container without requiring callers to know Android
 - `tmp`
 - `externalFiles` where the platform supports it
 
+List responses include each entry's relative `path`, `name`, `resourceUri`, `isDirectory` marker, byte size for files when available, and `lastModified` timestamp when the platform can report one.
+
 Example list request:
 
 ```json
@@ -87,6 +89,7 @@ Example list request:
 **URI Template**: `automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}`
 
 Reads a single file from an app container. Nested paths and filenames containing spaces are encoded as URI path segments. Binary content is returned as an MCP `blob` so it can be round-tripped losslessly.
+UTF-8 text files are returned as text with `text/plain; charset=utf-8` so clients do not need Android or iOS specific decoding logic.
 
 Example read request:
 

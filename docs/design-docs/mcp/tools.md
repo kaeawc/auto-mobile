@@ -55,6 +55,32 @@ Write inline configuration without a temporary file:
 
 After writing, use `automobile:devices/{deviceId}/apps/{appId}/files/{container}` to list files or `automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}` to read one back. Prefer this API over direct `adb push`, `run-as`, or `simctl get_app_container` copy commands.
 
+Android app files support `externalFiles` through `/sdcard/Android/data/{appId}/files`. Use this for app-readable fixture files that do not require private app storage:
+
+```json
+{
+  "tool": "putAppFile",
+  "params": {
+    "appId": "com.example.app",
+    "container": "externalFiles",
+    "sourcePath": "/Users/me/fixtures/document.pdf",
+    "destinationPath": "fixtures/document.pdf",
+    "platform": "android"
+  }
+}
+```
+
+Android private containers (`documents`, `cache`, and `tmp`) use `run-as {appId}` and require a debuggable app build. Non-debuggable apps fail with an actionable error instead of reporting a successful write. `library` is not an Android container; use `documents`, `cache`, `tmp`, or `externalFiles`.
+
+Manual emulator validation for Android:
+
+```sh
+printf '{"enabled":true}\n' > /tmp/automobile-settings.json
+# Call putAppFile with appId=com.example.app, container=externalFiles,
+# sourcePath=/tmp/automobile-settings.json, destinationPath=config/settings.json.
+adb shell cat /sdcard/Android/data/com.example.app/files/config/settings.json
+```
+
 #### Input Methods
 
 - ⌨️ `inputText` and `imeAction` for typing and IME actions.

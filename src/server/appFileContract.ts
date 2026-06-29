@@ -57,7 +57,10 @@ export interface AppFileListRequest {
 
 export interface AppFileListEntry {
   path: string;
+  name?: string;
   byteCount?: number;
+  isDirectory?: boolean;
+  lastModified?: string;
   resourceUri: string;
 }
 

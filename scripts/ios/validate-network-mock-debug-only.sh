@@ -14,11 +14,15 @@ fail() {
 line_number() {
   local pattern="$1"
   local file="$2"
-  rg -n -m 1 "$pattern" "$file" | cut -d: -f1 || true
+  awk -v pattern="$pattern" '$0 ~ pattern { print NR; exit }' "$file"
 }
 
-first_significant_line="$(rg -n '^[[:space:]]*[^[:space:]]' "$STORE_FILE" | head -1 | cut -d: -f2-)"
-last_significant_line="$(rg -n '^[[:space:]]*[^[:space:]]' "$STORE_FILE" | tail -1 | cut -d: -f2-)"
+first_significant_line="$(
+  awk '/^[[:space:]]*[^[:space:]]/ { sub(/^[[:space:]]*/, ""); print; exit }' "$STORE_FILE"
+)"
+last_significant_line="$(
+  awk '/^[[:space:]]*[^[:space:]]/ { line = $0 } END { sub(/^[[:space:]]*/, "", line); print line }' "$STORE_FILE"
+)"
 
 [[ "$first_significant_line" == "#if DEBUG" ]] ||
   fail "NetworkMockRuleStore.swift must compile only inside #if DEBUG"

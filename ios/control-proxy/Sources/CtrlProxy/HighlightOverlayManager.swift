@@ -200,6 +200,23 @@ public final class HighlightOverlayManager: HighlightOverlayManaging {
 }
 
 public final class DefaultHighlightOverlayRenderer: HighlightOverlayRendering {
+    public static func defaultLiveOverlayEnabled() -> Bool {
+        liveOverlayEnabled(environment: ProcessInfo.processInfo.environment)
+    }
+
+    public static func liveOverlayEnabled(environment: [String: String]) -> Bool {
+        let flag = environment["AUTOMOBILE_IOS_LIVE_HIGHLIGHTS"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if flag == "0" || flag == "false" || flag == "no" {
+            return false
+        }
+        if flag == "1" || flag == "true" || flag == "yes" {
+            return true
+        }
+        return true
+    }
+
     #if canImport(UIKit) && canImport(QuartzCore)
         private var window: UIWindow?
         private var layers: [String: CAShapeLayer] = [:]
@@ -243,14 +260,6 @@ public final class DefaultHighlightOverlayRenderer: HighlightOverlayRendering {
                 DispatchQueue.main.sync(execute: draw)
             }
             return rendered
-        }
-
-        public static func defaultLiveOverlayEnabled() -> Bool {
-            let flag = ProcessInfo.processInfo.environment["AUTOMOBILE_IOS_LIVE_HIGHLIGHTS"]?.lowercased()
-            if flag == "1" || flag == "true" || flag == "yes" {
-                return true
-            }
-            return false
         }
 
         public func remove(id: String) {

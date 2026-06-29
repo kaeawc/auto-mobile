@@ -147,6 +147,37 @@ final class HighlightOverlayManagerTests: XCTestCase {
         XCTAssertTrue(renderer.rendered.isEmpty)
         XCTAssertTrue(scheduler.scheduled.isEmpty)
     }
+
+    func testLiveOverlayDefaultsEnabledWhenEnvironmentFlagIsUnset() {
+        XCTAssertTrue(DefaultHighlightOverlayRenderer.liveOverlayEnabled(environment: [:]))
+    }
+
+    func testLiveOverlayEnvironmentFlagCanDisableOverlay() {
+        XCTAssertFalse(DefaultHighlightOverlayRenderer.liveOverlayEnabled(environment: [
+            "AUTOMOBILE_IOS_LIVE_HIGHLIGHTS": "false",
+        ]))
+        XCTAssertFalse(DefaultHighlightOverlayRenderer.liveOverlayEnabled(environment: [
+            "AUTOMOBILE_IOS_LIVE_HIGHLIGHTS": "0",
+        ]))
+        XCTAssertFalse(DefaultHighlightOverlayRenderer.liveOverlayEnabled(environment: [
+            "AUTOMOBILE_IOS_LIVE_HIGHLIGHTS": "no",
+        ]))
+        XCTAssertFalse(DefaultHighlightOverlayRenderer.liveOverlayEnabled(environment: [
+            "AUTOMOBILE_IOS_LIVE_HIGHLIGHTS": " FALSE ",
+        ]))
+    }
+
+    func testLiveOverlayEnvironmentFlagCanExplicitlyEnableOverlay() {
+        XCTAssertTrue(DefaultHighlightOverlayRenderer.liveOverlayEnabled(environment: [
+            "AUTOMOBILE_IOS_LIVE_HIGHLIGHTS": "true",
+        ]))
+        XCTAssertTrue(DefaultHighlightOverlayRenderer.liveOverlayEnabled(environment: [
+            "AUTOMOBILE_IOS_LIVE_HIGHLIGHTS": "1",
+        ]))
+        XCTAssertTrue(DefaultHighlightOverlayRenderer.liveOverlayEnabled(environment: [
+            "AUTOMOBILE_IOS_LIVE_HIGHLIGHTS": "yes",
+        ]))
+    }
 }
 
 private final class FakeHighlightOverlayRenderer: HighlightOverlayRendering {

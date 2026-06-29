@@ -11,6 +11,7 @@ import { XcodeSigningManager } from "./ios-cmdline-tools/XcodeSigning";
 import { DeviceAppInspector } from "./ios-cmdline-tools/DeviceAppInspector";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { isRunningInDocker } from "./dockerEnv";
+import { exponentialBackoff } from "./Backoff";
 import { createConnection } from "node:net";
 import {
   getHostControlHost,
@@ -1114,10 +1115,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     this.restartAttempts++;
-    const delay = Math.min(
-      IOSCtrlProxyManager.RESTART_BASE_DELAY_MS * Math.pow(2, this.restartAttempts - 1),
-      IOSCtrlProxyManager.RESTART_MAX_DELAY_MS
-    );
+    const delay = exponentialBackoff({
+      initialDelayMs: IOSCtrlProxyManager.RESTART_BASE_DELAY_MS,
+      maxDelayMs: IOSCtrlProxyManager.RESTART_MAX_DELAY_MS
+    }).delayForAttempt(this.restartAttempts);
 
     logger.info(`[IOSCtrlProxy] Scheduling auto-restart in ${delay}ms (attempt ${this.restartAttempts}/${IOSCtrlProxyManager.MAX_RESTART_ATTEMPTS})`);
 
@@ -1667,10 +1668,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     this.iproxyRestartAttempts++;
-    const delay = Math.min(
-      IOSCtrlProxyManager.IPROXY_RESTART_BASE_DELAY_MS * Math.pow(2, this.iproxyRestartAttempts - 1),
-      IOSCtrlProxyManager.IPROXY_RESTART_MAX_DELAY_MS
-    );
+    const delay = exponentialBackoff({
+      initialDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_BASE_DELAY_MS,
+      maxDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_MAX_DELAY_MS
+    }).delayForAttempt(this.iproxyRestartAttempts);
 
     this.iproxyRestartTimeout = this.timer.setTimeout(() => {
       this.iproxyRestartTimeout = null;

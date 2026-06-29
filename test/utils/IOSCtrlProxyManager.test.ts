@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyManager, type HostPortAvailabilityChecker } from "../../src/utils/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -130,6 +130,11 @@ describe("IOSCtrlProxyManager", function() {
     // Reset singleton instances
     IOSCtrlProxyManager.resetInstances();
     PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+  });
+
+  afterEach(function() {
+    PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
   describe("getInstance", function() {

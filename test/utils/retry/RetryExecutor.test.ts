@@ -3,6 +3,7 @@ import {
   DefaultRetryExecutor,
   DEFAULT_RETRY_OPTIONS,
 } from "../../../src/utils/retry/RetryExecutor";
+import { exponentialBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("DefaultRetryExecutor", () => {
@@ -128,6 +129,30 @@ describe("DefaultRetryExecutor", () => {
       expect(result.success).toBe(true);
       expect(timer.wasSleepCalled(100)).toBe(true); // First retry: attempt 1 * 100
       expect(timer.wasSleepCalled(200)).toBe(true); // Second retry: attempt 2 * 100
+    });
+
+    it("respects BackoffPolicy delays", async () => {
+      timer.enableAutoAdvance();
+      let attempts = 0;
+
+      const result = await executor.execute(
+        async () => {
+          attempts++;
+          if (attempts < 4) {
+            throw new Error("Retry");
+          }
+          return "done";
+        },
+        {
+          delays: exponentialBackoff({ initialDelayMs: 50, multiplier: 2, maxDelayMs: 200 }),
+          maxAttempts: 4,
+        }
+      );
+
+      expect(result.success).toBe(true);
+      expect(timer.wasSleepCalled(50)).toBe(true);
+      expect(timer.wasSleepCalled(100)).toBe(true);
+      expect(timer.wasSleepCalled(200)).toBe(true);
     });
 
     it("aborts when signal is aborted", async () => {

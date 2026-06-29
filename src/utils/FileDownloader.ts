@@ -15,6 +15,8 @@ export interface FileDownloader {
 
 export class DefaultFileDownloader implements FileDownloader {
   public async download(url: string, destination: string): Promise<void> {
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+
     try {
       await this.downloadWithCurl(url, destination);
       return;
@@ -72,8 +74,6 @@ export class DefaultFileDownloader implements FileDownloader {
     if (redirectCount > 5) {
       throw new Error(`Too many redirects while downloading ${url}`);
     }
-
-    await fs.mkdir(path.dirname(destination), { recursive: true });
 
     await new Promise<void>((resolve, reject) => {
       const transport = url.startsWith("https:") ? https : http;

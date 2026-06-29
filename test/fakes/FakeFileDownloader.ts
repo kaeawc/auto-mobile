@@ -1,5 +1,4 @@
 import * as fs from "fs/promises";
-import * as os from "os";
 import * as path from "path";
 import type { FileDownloader } from "../../src/utils/FileDownloader";
 
@@ -16,9 +15,8 @@ export class FakeFileDownloader implements FileDownloader {
     }
     this.downloadedUrls.push(url);
     this.downloadedDestinations.push(destination);
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "fake-dl-"));
-    const tempFile = path.join(tempDir, "downloaded-file");
-    await fs.writeFile(tempFile, this.payload);
-    this.lastWrittenPath = tempFile;
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.writeFile(destination, this.payload);
+    this.lastWrittenPath = destination;
   }
 }

@@ -115,13 +115,16 @@ read_required_compile_sdk() {
 }
 
 # Verify the Gradle-required SDK platform (the android.jar) is actually
-# installed under ${android_home}/platforms/android-<compileSdk>.
+# installed under ${android_home}/platforms/android-<compileSdk>. Mirrors the
+# build's fallback (android/video-server/build.gradle.kts), which accepts both
+# the `android-<sdk>` and `android-<sdk>.0` directory layouts.
 # Returns 0 when present, non-zero otherwise.
 android_platform_installed() {
     local android_home="$1"
     local compile_sdk="$2"
     [[ -n "${android_home}" && -n "${compile_sdk}" ]] || return 1
-    [[ -f "${android_home}/platforms/android-${compile_sdk}/android.jar" ]]
+    [[ -f "${android_home}/platforms/android-${compile_sdk}/android.jar" \
+        || -f "${android_home}/platforms/android-${compile_sdk}.0/android.jar" ]]
 }
 
 # Locate the sdkmanager binary so we can surface an exact install command.

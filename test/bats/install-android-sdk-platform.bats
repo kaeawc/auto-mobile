@@ -94,6 +94,18 @@ TOML
   [ "$status" -ne 0 ]
 }
 
+@test "android_platform_installed honors the android-<sdk>.0 directory layout" {
+  # Some SDK installs lay the platform out as android-37.0; the Gradle build
+  # accepts that jar (android/video-server/build.gradle.kts), so the installer
+  # must too — otherwise it warns about a platform the build can use.
+  mkdir -p "${ANDROID_HOME_DIR}/platforms/android-37.0"
+  touch "${ANDROID_HOME_DIR}/platforms/android-37.0/android.jar"
+
+  run_helper "android_platform_installed '${ANDROID_HOME_DIR}' 37"
+
+  [ "$status" -eq 0 ]
+}
+
 @test "android_platform_installed fails when the platform is entirely absent" {
   mkdir -p "${ANDROID_HOME_DIR}/platforms/android-35"
   touch "${ANDROID_HOME_DIR}/platforms/android-35/android.jar"
@@ -197,6 +209,18 @@ TOML
   [ "$status" -eq 2 ]
   [[ "$output" == *"platforms;android-37"* ]]
   [[ "$output" == *"${bin}/sdkmanager"* ]]
+}
+
+@test "advice returns ok (0) for the android-<sdk>.0 layout" {
+  write_toml <<'TOML'
+build-android-compileSdk = "37"
+TOML
+  mkdir -p "${ANDROID_HOME_DIR}/platforms/android-37.0"
+  touch "${ANDROID_HOME_DIR}/platforms/android-37.0/android.jar"
+
+  run_helper "android_platform_install_advice '${ANDROID_HOME_DIR}' '${TOML}'"
+
+  [ "$status" -eq 0 ]
 }
 
 @test "advice tracks the compileSdk version from the toml (no hardcoded 37)" {

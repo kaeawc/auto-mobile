@@ -1,7 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix, relative } from "node:path";
-import { randomUUID } from "node:crypto";
 import {
   AppFileContainer,
   AppFileListRequest,
@@ -13,13 +13,44 @@ import {
   buildAppFileResourceUri,
   normalizeAppFileRelativePath,
 } from "./appFileContract";
-import { ActionableError, BootedDevice } from "../models";
+import { ActionableError, BootedDevice, Platform } from "../models";
 import { defaultAdbClientFactory, type AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 
+export interface PutAppFileRequest extends PutAppFileArgs {
+  device: BootedDevice;
+  signal?: AbortSignal;
+}
+
+export interface PutAppFileProviderRequest {
+  device: BootedDevice;
+  appId: string;
+  container: AppFileContainer;
+  destinationPath: string;
+  sourcePath: string;
+  byteCount: number;
+  signal?: AbortSignal;
+}
+
+export interface AppFileProviderListRequest extends AppFileListRequest {
+  device: BootedDevice;
+}
+
+export interface AppFileProviderReadRequest extends AppFileReadRequest {
+  device: BootedDevice;
+  path: string;
+}
+
+export interface AppFileProvider {
+  readonly platform: Platform;
+  putFile(request: PutAppFileProviderRequest): Promise<void>;
+  listFiles(request: AppFileProviderListRequest): Promise<AppFileListResult>;
+  readFile(request: AppFileProviderReadRequest): Promise<AppFileReadResult>;
+}
+
 export interface AppFileService {
-  putFile(device: BootedDevice, args: PutAppFileArgs, signal?: AbortSignal): Promise<PutAppFileResult>;
+  putFile(request: PutAppFileRequest): Promise<PutAppFileResult>;
   listFiles(request: AppFileListRequest): Promise<AppFileListResult>;
   readFile(request: AppFileReadRequest): Promise<AppFileReadResult>;
 }
@@ -31,13 +62,16 @@ interface FileSource {
 }
 
 export interface AppFileServiceDependencies {
-  adbFactory: AdbClientFactory;
-  simctlFactory: (device: BootedDevice) => SimCtlClient;
+  adbFactory?: AdbClientFactory;
+  simctlFactory?: (device: BootedDevice) => SimCtlClient;
+  providers?: AppFileProvider[];
+  deviceResolver?: (deviceId: string) => Promise<BootedDevice>;
 }
 
-const defaultDependencies: AppFileServiceDependencies = {
+const defaultDependencies: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "deviceResolver">> = {
   adbFactory: defaultAdbClientFactory,
   simctlFactory: device => new SimCtlClient(device),
+  deviceResolver: findBootedDevice,
 };
 
 const ANDROID_APP_FILE_MAX_BUFFER = 64 * 1024 * 1024;
@@ -46,7 +80,7 @@ let appFileService: AppFileService | null = null;
 
 export function getAppFileService(): AppFileService {
   if (!appFileService) {
-    appFileService = new DefaultAppFileService(defaultDependencies);
+    appFileService = new DefaultAppFileService(createDefaultProviders(defaultDependencies), defaultDependencies.deviceResolver);
   }
   return appFileService;
 }
@@ -59,37 +93,67 @@ export function resetAppFileServiceForTesting(): void {
   appFileService = null;
 }
 
-export function createAppFileServiceForTesting(deps: AppFileServiceDependencies): AppFileService {
-  return new DefaultAppFileService(deps);
+export function createAppFileServiceForTesting(deps: AppFileServiceDependencies = {}): AppFileService {
+  const resolvedDeps = {
+    adbFactory: deps.adbFactory ?? defaultDependencies.adbFactory,
+    simctlFactory: deps.simctlFactory ?? defaultDependencies.simctlFactory,
+    deviceResolver: deps.deviceResolver ?? defaultDependencies.deviceResolver,
+  };
+  return new DefaultAppFileService(
+    deps.providers ?? createDefaultProviders(resolvedDeps),
+    resolvedDeps.deviceResolver
+  );
+}
+
+function createDefaultProviders(
+  deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory">>
+): AppFileProvider[] {
+  return [
+    new AndroidAppFileProvider(deps.adbFactory),
+    new IosSimulatorAppFileProvider(deps.simctlFactory),
+  ];
 }
 
 class DefaultAppFileService implements AppFileService {
-  constructor(private readonly deps: AppFileServiceDependencies) {}
+  private readonly providersByPlatform = new Map<Platform, AppFileProvider>();
 
-  async putFile(device: BootedDevice, args: PutAppFileArgs, signal?: AbortSignal): Promise<PutAppFileResult> {
-    const destinationPath = normalizeAppFileRelativePath(args.destinationPath);
-    const source = await this.prepareSource(args);
+  constructor(
+    providers: AppFileProvider[],
+    private readonly deviceResolver: (deviceId: string) => Promise<BootedDevice>
+  ) {
+    for (const provider of providers) {
+      this.providersByPlatform.set(provider.platform, provider);
+    }
+  }
+
+  async putFile(request: PutAppFileRequest): Promise<PutAppFileResult> {
+    const appId = normalizeAppId(request.appId);
+    const destinationPath = normalizeAppFileRelativePath(request.destinationPath);
+    const provider = this.getProvider(request.device.platform, "putFile", appId, request.container);
+    const source = await this.prepareSource(request);
     try {
-      if (device.platform === "android") {
-        await this.putAndroidFile(device, args.appId, args.container, source.path, destinationPath, signal);
-      } else if (device.platform === "ios") {
-        await this.putIosFile(device, args.appId, args.container, source.path, destinationPath);
-      } else {
-        throw new ActionableError(`Unsupported platform: ${device.platform}`);
-      }
+      await provider.putFile({
+        device: request.device,
+        appId,
+        container: request.container,
+        destinationPath,
+        sourcePath: source.path,
+        byteCount: source.byteCount,
+        signal: request.signal,
+      });
 
       return {
         success: true,
-        deviceId: device.deviceId,
-        platform: device.platform,
-        appId: args.appId,
-        container: args.container,
+        deviceId: request.device.deviceId,
+        platform: request.device.platform,
+        appId,
+        container: request.container,
         destinationPath,
         byteCount: source.byteCount,
         resourceUri: buildAppFileResourceUri({
-          deviceId: device.deviceId,
-          appId: args.appId,
-          container: args.container,
+          deviceId: request.device.deviceId,
+          appId,
+          container: request.container,
           path: destinationPath,
         }),
       };
@@ -99,26 +163,37 @@ class DefaultAppFileService implements AppFileService {
   }
 
   async listFiles(request: AppFileListRequest): Promise<AppFileListResult> {
-    const device = await findBootedDevice(request.deviceId);
-    if (device.platform === "android") {
-      return this.listAndroidFiles(device, request.appId, request.container);
-    }
-    if (device.platform === "ios") {
-      return this.listIosFiles(device, request.appId, request.container);
-    }
-    throw new ActionableError(`Unsupported platform: ${device.platform}`);
+    const appId = normalizeAppId(request.appId);
+    const device = await this.deviceResolver(request.deviceId);
+    const provider = this.getProvider(device.platform, "listFiles", appId, request.container);
+    return provider.listFiles({
+      device,
+      deviceId: device.deviceId,
+      appId,
+      container: request.container,
+    });
   }
 
   async readFile(request: AppFileReadRequest): Promise<AppFileReadResult> {
+    const appId = normalizeAppId(request.appId);
     const path = normalizeAppFileRelativePath(request.path);
-    const device = await findBootedDevice(request.deviceId);
-    if (device.platform === "android") {
-      return this.readAndroidFile(device, request.appId, request.container, path);
+    const device = await this.deviceResolver(request.deviceId);
+    const provider = this.getProvider(device.platform, "readFile", appId, request.container);
+    return provider.readFile({
+      device,
+      deviceId: device.deviceId,
+      appId,
+      container: request.container,
+      path,
+    });
+  }
+
+  private getProvider(platform: Platform, operation: string, appId: string, container: AppFileContainer): AppFileProvider {
+    const provider = this.providersByPlatform.get(platform);
+    if (!provider) {
+      throw unsupportedAppFileOperation(operation, platform, appId, container, "no app file provider is registered");
     }
-    if (device.platform === "ios") {
-      return this.readIosFile(device, request.appId, request.container, path);
-    }
-    throw new ActionableError(`Unsupported platform: ${device.platform}`);
+    return provider;
   }
 
   private async prepareSource(args: PutAppFileArgs): Promise<FileSource> {
@@ -144,50 +219,49 @@ class DefaultAppFileService implements AppFileService {
       },
     };
   }
+}
 
-  private async putAndroidFile(
-    device: BootedDevice,
-    appId: string,
-    container: AppFileContainer,
-    sourcePath: string,
-    destinationPath: string,
-    signal?: AbortSignal
-  ): Promise<void> {
-    const adb = this.deps.adbFactory.create(device);
-    const target = resolveAndroidTarget(appId, container, destinationPath);
+class AndroidAppFileProvider implements AppFileProvider {
+  readonly platform = "android" as const;
+
+  constructor(private readonly adbFactory: AdbClientFactory) {}
+
+  async putFile(request: PutAppFileProviderRequest): Promise<void> {
+    const adb = this.adbFactory.create(request.device);
+    const target = resolveAndroidTarget(request.appId, request.container, request.destinationPath);
     if (target.kind === "unsupported") {
-      throw new ActionableError(target.message);
+      throw unsupportedAppFileOperation("putFile", request.device.platform, request.appId, request.container, target.message);
     }
 
     if (target.kind === "external") {
-      await adb.executeCommand(`shell mkdir -p ${shellQuote(posix.dirname(target.absolutePath))}`, undefined, undefined, true, signal);
-      await adb.executeCommand(`push ${shellQuote(sourcePath)} ${shellQuote(target.absolutePath)}`, undefined, undefined, true, signal);
+      await adb.executeCommand(`shell mkdir -p ${shellQuote(posix.dirname(target.absolutePath))}`, undefined, undefined, true, request.signal);
+      await adb.executeCommand(`push ${shellQuote(request.sourcePath)} ${shellQuote(target.absolutePath)}`, undefined, undefined, true, request.signal);
       return;
     }
 
-    const tempDevicePath = `/data/local/tmp/automobile-${randomUUID()}-${posix.basename(destinationPath)}`;
-    await adb.executeCommand(`push ${shellQuote(sourcePath)} ${shellQuote(tempDevicePath)}`, undefined, undefined, true, signal);
+    const tempDevicePath = `/data/local/tmp/automobile-${randomUUID()}-${posix.basename(request.destinationPath)}`;
+    await adb.executeCommand(`push ${shellQuote(request.sourcePath)} ${shellQuote(tempDevicePath)}`, undefined, undefined, true, request.signal);
     try {
       const command = `mkdir -p ${shellQuote(posix.dirname(target.relativePath))} && ` +
         `cp ${shellQuote(tempDevicePath)} ${shellQuote(target.relativePath)} && ` +
         `chmod 600 ${shellQuote(target.relativePath)}`;
       await adb.executeCommand(
-        `shell run-as ${shellQuote(appId)} sh -c ${shellQuote(command)}`,
+        `shell run-as ${shellQuote(request.appId)} sh -c ${shellQuote(command)}`,
         undefined,
         undefined,
         true,
-        signal
+        request.signal
       );
     } finally {
-      await adb.executeCommand(`shell rm -f ${shellQuote(tempDevicePath)}`, undefined, undefined, true, signal).catch(() => {});
+      await adb.executeCommand(`shell rm -f ${shellQuote(tempDevicePath)}`, undefined, undefined, true, request.signal).catch(() => {});
     }
   }
 
-  private async listAndroidFiles(device: BootedDevice, appId: string, container: AppFileContainer): Promise<AppFileListResult> {
-    const adb = this.deps.adbFactory.create(device);
-    const base = resolveAndroidTarget(appId, container, "placeholder");
+  async listFiles(request: AppFileProviderListRequest): Promise<AppFileListResult> {
+    const adb = this.adbFactory.create(request.device);
+    const base = resolveAndroidTarget(request.appId, request.container, "placeholder");
     if (base.kind === "unsupported") {
-      throw new ActionableError(base.message);
+      throw unsupportedAppFileOperation("listFiles", request.device.platform, request.appId, request.container, base.message);
     }
 
     const stdout = base.kind === "external"
@@ -198,7 +272,7 @@ class DefaultAppFileService implements AppFileService {
         true
       )).stdout
       : (await adb.executeCommand(
-        `shell run-as ${shellQuote(appId)} sh -c ${shellQuote(
+        `shell run-as ${shellQuote(request.appId)} sh -c ${shellQuote(
           `if [ -d ${shellQuote(posix.dirname(base.relativePath))} ]; then find ${shellQuote(posix.dirname(base.relativePath))} -type f; fi`
         )}`,
         undefined,
@@ -214,22 +288,28 @@ class DefaultAppFileService implements AppFileService {
       .map(filePath => filePath.startsWith(`${root}/`) ? filePath.slice(root.length + 1) : filePath)
       .map(path => ({
         path,
-        resourceUri: buildAppFileResourceUri({ deviceId: device.deviceId, appId, container, path }),
+        resourceUri: buildAppFileResourceUri({
+          deviceId: request.device.deviceId,
+          appId: request.appId,
+          container: request.container,
+          path,
+        }),
       }));
 
-    return { deviceId: device.deviceId, platform: device.platform, appId, container, files };
+    return {
+      deviceId: request.device.deviceId,
+      platform: request.device.platform,
+      appId: request.appId,
+      container: request.container,
+      files,
+    };
   }
 
-  private async readAndroidFile(
-    device: BootedDevice,
-    appId: string,
-    container: AppFileContainer,
-    path: string
-  ): Promise<AppFileReadResult> {
-    const adb = this.deps.adbFactory.create(device);
-    const target = resolveAndroidTarget(appId, container, path);
+  async readFile(request: AppFileProviderReadRequest): Promise<AppFileReadResult> {
+    const adb = this.adbFactory.create(request.device);
+    const target = resolveAndroidTarget(request.appId, request.container, request.path);
     if (target.kind === "unsupported") {
-      throw new ActionableError(target.message);
+      throw unsupportedAppFileOperation("readFile", request.device.platform, request.appId, request.container, target.message);
     }
 
     const stdout = target.kind === "external"
@@ -240,90 +320,91 @@ class DefaultAppFileService implements AppFileService {
         true
       )).stdout
       : (await adb.executeCommand(
-        `shell run-as ${shellQuote(appId)} base64 ${shellQuote(target.relativePath)}`,
+        `shell run-as ${shellQuote(request.appId)} base64 ${shellQuote(target.relativePath)}`,
         undefined,
         ANDROID_APP_FILE_MAX_BUFFER,
         true
       )).stdout;
     const blob = stdout.replace(/\s+/g, "");
     return {
-      deviceId: device.deviceId,
-      platform: device.platform,
-      appId,
-      container,
-      path,
+      deviceId: request.device.deviceId,
+      platform: request.device.platform,
+      appId: request.appId,
+      container: request.container,
+      path: request.path,
       byteCount: Buffer.from(blob, "base64").byteLength,
       mimeType: "application/octet-stream",
       blob,
     };
   }
+}
 
-  private async putIosFile(
-    device: BootedDevice,
-    appId: string,
-    container: AppFileContainer,
-    sourcePath: string,
-    destinationPath: string
-  ): Promise<void> {
-    const target = await this.resolveIosPath(device, appId, container, destinationPath);
+class IosSimulatorAppFileProvider implements AppFileProvider {
+  readonly platform = "ios" as const;
+
+  constructor(private readonly simctlFactory: (device: BootedDevice) => SimCtlClient) {}
+
+  async putFile(request: PutAppFileProviderRequest): Promise<void> {
+    const target = await this.resolvePath(request.device, request.appId, request.container, request.destinationPath, "putFile");
     await nodeFs.mkdir(dirname(target), { recursive: true });
-    await nodeFs.copyFile(sourcePath, target);
+    await nodeFs.copyFile(request.sourcePath, target);
   }
 
-  private async listIosFiles(device: BootedDevice, appId: string, container: AppFileContainer): Promise<AppFileListResult> {
-    const root = await this.resolveIosPath(device, appId, container);
+  async listFiles(request: AppFileProviderListRequest): Promise<AppFileListResult> {
+    const root = await this.resolvePath(request.device, request.appId, request.container, undefined, "listFiles");
     const files = await listLocalFiles(root);
     return {
-      deviceId: device.deviceId,
-      platform: device.platform,
-      appId,
-      container,
+      deviceId: request.device.deviceId,
+      platform: request.device.platform,
+      appId: request.appId,
+      container: request.container,
       files: files.map(file => ({
         path: file.path,
         byteCount: file.byteCount,
-        resourceUri: buildAppFileResourceUri({ deviceId: device.deviceId, appId, container, path: file.path }),
+        resourceUri: buildAppFileResourceUri({
+          deviceId: request.device.deviceId,
+          appId: request.appId,
+          container: request.container,
+          path: file.path,
+        }),
       })),
     };
   }
 
-  private async readIosFile(
-    device: BootedDevice,
-    appId: string,
-    container: AppFileContainer,
-    path: string
-  ): Promise<AppFileReadResult> {
-    const target = await this.resolveIosPath(device, appId, container, path);
+  async readFile(request: AppFileProviderReadRequest): Promise<AppFileReadResult> {
+    const target = await this.resolvePath(request.device, request.appId, request.container, request.path, "readFile");
     const buffer = await nodeFs.readFile(target);
     return {
-      deviceId: device.deviceId,
-      platform: device.platform,
-      appId,
-      container,
-      path,
+      deviceId: request.device.deviceId,
+      platform: request.device.platform,
+      appId: request.appId,
+      container: request.container,
+      path: request.path,
       byteCount: buffer.byteLength,
       mimeType: "application/octet-stream",
       blob: buffer.toString("base64"),
     };
   }
 
-  private async resolveIosPath(
+  private async resolvePath(
     device: BootedDevice,
     appId: string,
     container: AppFileContainer,
-    path?: string
+    path: string | undefined,
+    operation: string
   ): Promise<string> {
     if (container === "externalFiles") {
-      throw new ActionableError("externalFiles is not supported for iOS app containers.");
+      throw unsupportedAppFileOperation(operation, device.platform, appId, container, "externalFiles is not available for iOS app containers");
     }
 
-    const simctl = this.deps.simctlFactory(device);
+    const simctl = this.simctlFactory(device);
     const result = await simctl.executeCommand(`get_app_container ${shellQuote(device.deviceId)} ${shellQuote(appId)} data`);
     const dataRoot = result.stdout.trim();
     if (!dataRoot) {
       throw new ActionableError(`Unable to resolve iOS app data container for ${appId} on ${device.deviceId}.`);
     }
 
-    const containerRoot = join(dataRoot, iosContainerRelativePath(container));
+    const containerRoot = join(dataRoot, iosContainerRelativePath(container, operation, appId, device.platform));
     return path === undefined ? containerRoot : join(containerRoot, normalizeAppFileRelativePath(path));
   }
 }
@@ -341,6 +422,32 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice> {
   return device;
 }
 
+function normalizeAppId(appId: string): string {
+  const normalized = appId.trim();
+  const segments = normalized.split(".");
+  if (
+    normalized.length === 0 ||
+    normalized.includes("/") ||
+    normalized.includes("\\") ||
+    segments.some(segment => segment.length === 0 || segment === "." || segment === "..")
+  ) {
+    throw new ActionableError("appId must be a non-empty app identifier without path separators or traversal segments.");
+  }
+  return normalized;
+}
+
+function unsupportedAppFileOperation(
+  operation: string,
+  platform: Platform,
+  appId: string,
+  container: AppFileContainer,
+  reason: string
+): ActionableError {
+  return new ActionableError(
+    `${operation} is not supported for appId ${appId} in ${container} on ${platform}: ${reason}`
+  );
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
@@ -352,7 +459,6 @@ type AndroidTarget =
 
 function resolveAndroidTarget(appId: string, container: AppFileContainer, path: string): AndroidTarget {
   const safePath = normalizeAppFileRelativePath(path);
-  validateAndroidAppIdForPath(appId);
   switch (container) {
     case "documents":
       return { kind: "runAs", relativePath: posix.join("files", safePath) };
@@ -363,23 +469,16 @@ function resolveAndroidTarget(appId: string, container: AppFileContainer, path: 
     case "externalFiles":
       return { kind: "external", absolutePath: `/sdcard/Android/data/${appId}/files/${safePath}` };
     case "library":
-      return { kind: "unsupported", message: "library is not supported for Android app containers. Use documents, cache, tmp, or externalFiles." };
+      return { kind: "unsupported", message: "library is not available for Android app containers. Use documents, cache, tmp, or externalFiles." };
   }
 }
 
-function validateAndroidAppIdForPath(appId: string): void {
-  const segments = appId.split(".");
-  if (
-    appId.length === 0 ||
-    appId.includes("/") ||
-    appId.includes("\\") ||
-    segments.some(segment => segment.length === 0 || segment === "." || segment === "..")
-  ) {
-    throw new ActionableError("appId must not contain path separators or traversal segments.");
-  }
-}
-
-function iosContainerRelativePath(container: AppFileContainer): string {
+function iosContainerRelativePath(
+  container: AppFileContainer,
+  operation: string,
+  appId: string,
+  platform: Platform
+): string {
   switch (container) {
     case "documents":
       return "Documents";
@@ -390,7 +489,7 @@ function iosContainerRelativePath(container: AppFileContainer): string {
     case "tmp":
       return "tmp";
     case "externalFiles":
-      throw new ActionableError("externalFiles is not supported for iOS app containers.");
+      throw unsupportedAppFileOperation(operation, platform, appId, container, "externalFiles is not available for iOS app containers");
   }
 }
 

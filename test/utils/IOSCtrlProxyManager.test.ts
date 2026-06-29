@@ -134,6 +134,8 @@ describe("IOSCtrlProxyManager", function() {
   });
 
   afterEach(function() {
+    IOSCtrlProxyManager.resetInstances();
+    PortManager.reset();
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 

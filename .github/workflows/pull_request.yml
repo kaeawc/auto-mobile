@@ -773,6 +773,8 @@ jobs:
       - name: "Setup Auto Mobile"
         if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: ./.github/actions/setup-auto-mobile-npm-package
+        with:
+          install-global: "false"
 
       - name: "Run Lint"
         if: env.RUN_MCP_BUILD_TEST == 'true'

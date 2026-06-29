@@ -6,6 +6,10 @@ inputs:
     description: "The shell to use for any steps that use shells"
     default: "bash"
     required: "true"
+  install-global:
+    description: "Whether to globally install the checked-out AutoMobile package"
+    default: "true"
+    required: "false"
 
 runs:
   using: "composite"
@@ -33,6 +37,7 @@ runs:
         bunx turbo run build --output-logs=errors-only
 
     - name: "Globally Install AutoMobile"
+      if: ${{ inputs.install-global == 'true' }}
       shell: ${{ inputs.shell }}
       run: |
         if [[ "${RUNNER_OS:-}" == "Windows" ]]; then

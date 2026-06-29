@@ -296,19 +296,13 @@ class AndroidAppFileProvider implements AppFileProvider {
         adb,
         `shell mkdir -p ${shellQuote(posix.dirname(target.absolutePath))}`,
         { device: request.device, appId: request.appId, container: request.container, operation: "write", access: "externalFiles" },
-        undefined,
-        undefined,
-        true,
-        request.signal
+        { noRetry: true, signal: request.signal }
       );
       await executeAndroidAppFileCommand(
         adb,
         `push ${shellQuote(request.sourcePath)} ${shellQuote(target.absolutePath)}`,
         { device: request.device, appId: request.appId, container: request.container, operation: "write", access: "externalFiles" },
-        undefined,
-        undefined,
-        true,
-        request.signal
+        { noRetry: true, signal: request.signal }
       );
       return;
     }
@@ -318,10 +312,7 @@ class AndroidAppFileProvider implements AppFileProvider {
       adb,
       `push ${shellQuote(request.sourcePath)} ${shellQuote(tempDevicePath)}`,
       { device: request.device, appId: request.appId, container: request.container, operation: "write", access: "run-as" },
-      undefined,
-      undefined,
-      true,
-      request.signal
+      { noRetry: true, signal: request.signal }
     );
     try {
       const command = `mkdir -p ${shellQuote(posix.dirname(target.relativePath))} && ` +
@@ -331,10 +322,7 @@ class AndroidAppFileProvider implements AppFileProvider {
         adb,
         `shell run-as ${shellQuote(request.appId)} sh -c ${shellQuote(command)}`,
         { device: request.device, appId: request.appId, container: request.container, operation: "write", access: "run-as" },
-        undefined,
-        undefined,
-        true,
-        request.signal
+        { noRetry: true, signal: request.signal }
       );
     } finally {
       await adb.executeCommand(`shell rm -f ${shellQuote(tempDevicePath)}`, undefined, undefined, true, request.signal).catch(() => {});
@@ -355,17 +343,13 @@ class AndroidAppFileProvider implements AppFileProvider {
         adb,
         `shell ${script}`,
         { device: request.device, appId: request.appId, container: request.container, operation: "list", access: "externalFiles" },
-        undefined,
-        ANDROID_APP_FILE_MAX_BUFFER,
-        true
+        { maxBuffer: ANDROID_APP_FILE_MAX_BUFFER, noRetry: true }
       )).stdout
       : (await executeAndroidAppFileCommand(
         adb,
         `shell run-as ${shellQuote(request.appId)} sh -c ${shellQuote(script)}`,
         { device: request.device, appId: request.appId, container: request.container, operation: "list", access: "run-as" },
-        undefined,
-        ANDROID_APP_FILE_MAX_BUFFER,
-        true
+        { maxBuffer: ANDROID_APP_FILE_MAX_BUFFER, noRetry: true }
       )).stdout;
 
     const files = parseAndroidStatListing(stdout, root, request.device, request.appId, request.container);
@@ -391,17 +375,13 @@ class AndroidAppFileProvider implements AppFileProvider {
         adb,
         `shell base64 ${shellQuote(target.absolutePath)}`,
         { device: request.device, appId: request.appId, container: request.container, operation: "read", access: "externalFiles" },
-        undefined,
-        ANDROID_APP_FILE_MAX_BUFFER,
-        true
+        { maxBuffer: ANDROID_APP_FILE_MAX_BUFFER, noRetry: true }
       )).stdout
       : (await executeAndroidAppFileCommand(
         adb,
         `shell run-as ${shellQuote(request.appId)} base64 ${shellQuote(target.relativePath)}`,
         { device: request.device, appId: request.appId, container: request.container, operation: "read", access: "run-as" },
-        undefined,
-        ANDROID_APP_FILE_MAX_BUFFER,
-        true
+        { maxBuffer: ANDROID_APP_FILE_MAX_BUFFER, noRetry: true }
       )).stdout;
     const blob = stdout.replace(/\s+/g, "");
     const buffer = Buffer.from(blob, "base64");
@@ -740,17 +720,21 @@ interface AndroidAppFileCommandContext {
   access: "externalFiles" | "run-as";
 }
 
+interface AndroidAppFileExecOptions {
+  timeoutMs?: number;
+  maxBuffer?: number;
+  noRetry?: boolean;
+  signal?: AbortSignal;
+}
+
 async function executeAndroidAppFileCommand(
   adb: AdbExecutor,
   command: string,
   context: AndroidAppFileCommandContext,
-  timeoutMs?: number,
-  maxBuffer?: number,
-  noRetry?: boolean,
-  signal?: AbortSignal
+  options: AndroidAppFileExecOptions = {}
 ): Promise<ExecResult> {
   try {
-    return await adb.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return await adb.executeCommand(command, options.timeoutMs, options.maxBuffer, options.noRetry, options.signal);
   } catch (error) {
     throw mapAndroidAppFileError(error, context);
   }

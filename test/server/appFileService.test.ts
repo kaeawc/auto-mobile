@@ -598,6 +598,64 @@ describe("AppFileService", () => {
     expect(calls[1]?.maxBuffer).toBe(calls[0]?.maxBuffer);
   });
 
+  test("suppresses ADB retries on every read and list app-file command", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const service = createAppFileServiceForTesting({
+      adbFactory,
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+    });
+
+    await service.readFile({
+      deviceId: "emulator-5554",
+      appId: "com.example.app",
+      container: "documents",
+      path: "screenshots/home.png",
+    });
+    await service.listFiles({
+      deviceId: "emulator-5554",
+      appId: "com.example.app",
+      container: "externalFiles",
+    });
+
+    const calls = adbFactory.getFakeClient().getCommandCalls();
+    expect(calls).toHaveLength(2);
+    expect(calls.every(call => call.noRetry === true)).toBe(true);
+  });
+
+  test("propagates noRetry and the caller's AbortSignal through every Android putFile command", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const service = createAppFileServiceForTesting({
+      adbFactory,
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+    });
+    const device: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "Pixel",
+      platform: "android",
+    };
+    const controller = new AbortController();
+
+    await service.putFile({
+      device,
+      appId: "com.example.app",
+      container: "documents",
+      contentText: "hello",
+      destinationPath: "fixtures/welcome.txt",
+      signal: controller.signal,
+    });
+
+    const calls = adbFactory.getFakeClient().getCommandCalls();
+    // push to temp, run-as cp, and the rm cleanup all flow through the helper / adb.
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    expect(calls.every(call => call.noRetry === true)).toBe(true);
+    expect(calls.every(call => call.signal === controller.signal)).toBe(true);
+  });
+
   test("lists Android externalFiles with file names, directory markers, byte sizes, and last-modified metadata", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("find '/sdcard/Android/data/com.example.app/files'", execResult([

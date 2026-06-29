@@ -350,287 +350,292 @@ class ToolRegistryClass {
       }
 
       const toolStartMs = this.timer.now();
-
-      // Extract platform from args, default to "either" for backward compatibility
-      let platform: SomePlatform = args.platform || "either";
-
-      if (shouldResolveDevice) {
-        const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId);
-        if (implicitSessionUuid) {
-          sessionUuid = implicitSessionUuid;
-          args.sessionUuid = implicitSessionUuid;
-          logger.info(`[ToolRegistry] Resolved implicit autolock session for MCP session ${mcpSessionId}: ${implicitSessionUuid}`);
-        }
-        await this.enforceSessionUuidForMultipleIos(platform, sessionUuid, providedDeviceId);
-        await this.enforceSessionUuidForAutolock(platform, sessionUuid, providedDeviceId);
-      }
-
-      logger.info(`[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`);
-      void this.toolCallRepository.recordToolCall({
-        toolName: name,
-        timestamp: new Date().toISOString(),
-        sessionUuid,
-      });
-
-      // If session UUID provided, resolve device from session
-      if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
-        logger.info(`[ToolRegistry] Entering session-based device assignment for ${sessionUuid}`);
-        const sessionManager = DaemonState.getInstance().getSessionManager();
-        const devicePool = DaemonState.getInstance().getDevicePool();
-        const context = await createToolExecutionContext(sessionUuid, sessionManager, devicePool, {
-          keepScreenAwake,
-          platform: platform === "android" || platform === "ios" ? platform : undefined
-        });
-        if (context.deviceId && !providedDeviceId) {
-          providedDeviceId = context.deviceId;
-          logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
-        }
-        if (platform === "either" && context.devicePlatform) {
-          platform = context.devicePlatform;
-        }
-      } else if (sessionUuid) {
-        logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
-      }
-
-      let device: BootedDevice | undefined;
-      if (shouldResolveDevice) {
-        if (sessionUuid && DaemonState.getInstance().isInitialized() && providedDeviceId) {
-          // Daemon session path: device already resolved via createToolExecutionContext.
-          // Construct BootedDevice directly to avoid mutating global DeviceSessionManager state.
-          const resolvedPlatform = (platform === "android" || platform === "ios") ? platform : "android";
-          const pooledDevice = DaemonState.getInstance().getDevicePool().getDevice(providedDeviceId);
-          device = {
-            deviceId: providedDeviceId,
-            name: pooledDevice?.name ?? providedDeviceId,
-            platform: pooledDevice?.platform ?? resolvedPlatform,
-            iosVersion: pooledDevice?.iosVersion,
-          };
-          logger.info(`[ToolRegistry] ${name}: Using session-resolved device ${device.deviceId}`);
-        } else {
-          // Legacy single-agent path or no session: use DeviceSessionManager (may set global state)
-          logger.info(`[ToolRegistry] ${name}: Resolving device for platform=${platform}, providedDeviceId=${providedDeviceId}`);
-          device = await this.deviceSessionManager.ensureDeviceReady(
-            platform,
-            providedDeviceId,
-            { skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled() }
-          );
-          logger.info(`[ToolRegistry] ${name}: Using device ${device.deviceId}`);
-        }
-      } else {
-        logger.info(`[ToolRegistry] ${name}: Skipping device resolution.`);
-      }
-
-      // Enforce autolock: a locked device may only be driven by the session that locked it.
-      if (device && isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
-        DaemonState.getInstance().getDevicePool().assertAutolockAccess(device.deviceId, sessionUuid);
-      }
-
-      // Bind session to device's CtrlProxyClient for multi-agent NavigationGraphManager isolation
-      if (device && sessionUuid) {
-        try {
-          if (device.platform === "android") {
-            AndroidCtrlProxyClient.getInstance(device).bindSession(sessionUuid);
-          } else if (device.platform === "ios") {
-            IOSCtrlProxyClient.getInstance(device).bindSession(sessionUuid);
-          }
-        } catch {
-          // CtrlProxy may not be initialized yet — binding is best-effort
-        }
-      }
+      const toolCallTimestamp = new Date().toISOString();
 
       try {
-        // Record tool call for navigation graph correlation
-        // Only record UI interaction tools that may cause navigation
-        // Excludes app lifecycle tools (launchApp, terminateApp, homeScreen, etc.)
-        // as they don't represent replayable in-app navigation paths
-        const navigationRelevantTools = [
-          "tapOn", "swipeOn", "pinchOn", "dragAndDrop",
-          "pressButton", "inputText", "clearText", "imeAction"
-        ];
-        if (navigationRelevantTools.includes(name)) {
-          // Extract UI state from the most recent cached observation
-          const cachedResult = device
-            ? RealObserveScreen.getRecentCachedResultForDevice(device.deviceId)
-            : RealObserveScreen.getRecentCachedResult();
-          const uiState = new UIStateExtractor().extractFromObservation(cachedResult);
-          const navManager = sessionUuid
-            ? NavigationGraphManager.getInstanceForSession(sessionUuid)
-            : NavigationGraphManager.getInstance();
-          navManager.recordToolCall(name, args, uiState);
-        }
+        // Extract platform from args, default to "either" for backward compatibility
+        let platform: SomePlatform = args.platform || "either";
 
-        let response: any | undefined;
-        if (!shouldResolveDevice) {
-          if (!options.nonDeviceHandler) {
-            throw new ActionableError(`Tool ${name} requires a device.`);
+        if (shouldResolveDevice) {
+          const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId);
+          if (implicitSessionUuid) {
+            sessionUuid = implicitSessionUuid;
+            args.sessionUuid = implicitSessionUuid;
+            logger.info(`[ToolRegistry] Resolved implicit autolock session for MCP session ${mcpSessionId}: ${implicitSessionUuid}`);
           }
-          response = await options.nonDeviceHandler(args, progress, signal);
-        } else if (device !== undefined) {
-          // Check if memory performance audit mode is enabled
-          const memPerfAuditEnabled = serverConfig.isMemPerfAuditEnabled();
-
-          if (memPerfAuditEnabled && device.platform === "android") {
-            // Get the foreground app package name
-            const packageName = await this.getForegroundPackageName(device);
-
-            if (packageName) {
-              logger.info(`[ToolRegistry] Running memory audit for ${packageName} during ${name}`);
-
-              // Create memory audit instance
-              const memoryAudit = new MemoryAudit(device);
-              const perf = createGlobalPerformanceTracker();
-
-              // Run the handler within memory audit
-              const auditResult = await memoryAudit.runAudit(
-                packageName,
-                name,
-                args,
-                async () => {
-                  response = await handler(device, args, progress, signal);
-                },
-                perf
-              );
-
-              // If audit failed, throw error with diagnostics
-              if (!auditResult.passed) {
-                const errorMsg = `Memory audit FAILED for ${packageName} during ${name}\n\n${auditResult.diagnostics}`;
-                logger.error(`[ToolRegistry] ${errorMsg}`);
-                throw new ActionableError(errorMsg);
-              }
-
-              logger.info(`[ToolRegistry] Memory audit PASSED for ${packageName} during ${name}`);
-            } else {
-              logger.warn(`[ToolRegistry] Could not determine foreground app, skipping memory audit for ${name}`);
-              response = await handler(device, args, progress, signal);
-            }
-          } else {
-            // Memory audit not enabled or not Android platform, execute normally
-            response = await handler(device, args, progress, signal);
-          }
+          await this.enforceSessionUuidForMultipleIos(platform, sessionUuid, providedDeviceId);
+          await this.enforceSessionUuidForAutolock(platform, sessionUuid, providedDeviceId);
         }
 
-        // Unwrap MCP response envelope to get the inner result for success/error checks.
-        // Tools may return { content: [{ type: "text", text: '{"success":false,...}' }] }
-        // instead of a plain { success, error } object.
-        let unwrapped = response;
-        if (
-          response && typeof response === "object" &&
-          !("success" in response) &&
-          Array.isArray(response.content) && response.content.length > 0
-        ) {
-          const first = response.content[0];
-          if (first?.type === "text" && typeof first.text === "string") {
-            try {
-              const parsed = JSON.parse(first.text);
-              if (parsed && typeof parsed === "object" && "success" in parsed) {
-                unwrapped = parsed;
-              }
-            } catch { /* not JSON — use original response */ }
-          }
-        }
+        logger.info(`[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`);
 
-        const toolSuccess = unwrapped && typeof unwrapped === "object" && "success" in unwrapped
-          ? unwrapped.success !== false
-          : true;
-        const toolError = unwrapped && typeof unwrapped === "object" && "error" in unwrapped
-          ? String(unwrapped.error || "")
-          : null;
-        if (unwrapped && typeof unwrapped === "object" && "success" in unwrapped) {
-          logger.info(`[ToolRegistry] ${name} result: success=${unwrapped.success}${unwrapped.success === false ? `, error=${unwrapped.error || "unknown"}` : ""}`);
-        }
-
-        // Emit tool call telemetry
-        const toolDurationMs = this.timer.now() - toolStartMs;
-        TelemetryRecorder.getInstance().recordToolCallEvent({
-          timestamp: toolStartMs,
-          toolName: name,
-          durationMs: toolDurationMs,
-          success: toolSuccess,
-          error: toolError,
-          args: typeof args === "object" ? args : null,
-        });
-
-        // Record successful tool call for MCP recording (test plan generation)
-        if (toolSuccess) {
-          getMcpRecorder()?.record(name, args);
-        }
-
-        // After swipeOn executes with lookFor, update the tool call with scroll position
-        if (name === "swipeOn" && args.lookFor && response?.success && response?.found) {
-          const scrollPosition = UIStateExtractor.createScrollPosition(args);
-          if (scrollPosition) {
-            const scrollNavManager = sessionUuid
-              ? NavigationGraphManager.getInstanceForSession(sessionUuid)
-              : NavigationGraphManager.getInstance();
-            scrollNavManager.updateScrollPosition(scrollPosition);
-          }
-        }
-
-        // Update session cache if sessionUuid provided
+        // If session UUID provided, resolve device from session
         if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
+          logger.info(`[ToolRegistry] Entering session-based device assignment for ${sessionUuid}`);
           const sessionManager = DaemonState.getInstance().getSessionManager();
           const devicePool = DaemonState.getInstance().getDevicePool();
           const context = await createToolExecutionContext(sessionUuid, sessionManager, devicePool, {
             keepScreenAwake,
             platform: platform === "android" || platform === "ios" ? platform : undefined
           });
-
-          // Cache observation data for certain tools to reduce API calls
-          if (name === "observe" && response?.viewHierarchy) {
-            await updateSessionCache(context, "lastHierarchy", response.viewHierarchy);
+          if (context.deviceId && !providedDeviceId) {
+            providedDeviceId = context.deviceId;
+            logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
           }
-          if (name === "observe" && response?.screenshot) {
-            await updateSessionCache(context, "lastScreenshot", response.screenshot);
+          if (platform === "either" && context.devicePlatform) {
+            platform = context.devicePlatform;
           }
-
-          // Update last action timestamp for interaction tools
-          if (["tapOn", "swipeOn", "pinchOn", "dragAndDrop", "scroll", "inputText", "clearText", "pressButton"].includes(name)) {
-            await updateSessionCache(context, "lastActionTime", this.timer.now());
-          }
+        } else if (sessionUuid) {
+          logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
         }
 
-        return response;
-      } catch (error) {
-        if (error instanceof ActionableError) {
-          throw error;
-        }
-        const deviceContext = device ? ` on device ${device.deviceId}` : "";
-        throw new ActionableError(`Failed to execute tool ${name}${deviceContext}: ${error}`);
-      } finally {
-        if (device && name === "executePlan" && args?.cleanupAppId) {
-          await this.cleanupService.cleanup(device, {
-            appId: args.cleanupAppId,
-            clearAppData: args.cleanupClearAppData,
-          });
+        let device: BootedDevice | undefined;
+        if (shouldResolveDevice) {
+          if (sessionUuid && DaemonState.getInstance().isInitialized() && providedDeviceId) {
+            // Daemon session path: device already resolved via createToolExecutionContext.
+            // Construct BootedDevice directly to avoid mutating global DeviceSessionManager state.
+            const resolvedPlatform = (platform === "android" || platform === "ios") ? platform : "android";
+            const pooledDevice = DaemonState.getInstance().getDevicePool().getDevice(providedDeviceId);
+            device = {
+              deviceId: providedDeviceId,
+              name: pooledDevice?.name ?? providedDeviceId,
+              platform: pooledDevice?.platform ?? resolvedPlatform,
+              iosVersion: pooledDevice?.iosVersion,
+            };
+            logger.info(`[ToolRegistry] ${name}: Using session-resolved device ${device.deviceId}`);
+          } else {
+            // Legacy single-agent path or no session: use DeviceSessionManager (may set global state)
+            logger.info(`[ToolRegistry] ${name}: Resolving device for platform=${platform}, providedDeviceId=${providedDeviceId}`);
+            device = await this.deviceSessionManager.ensureDeviceReady(
+              platform,
+              providedDeviceId,
+              { skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled() }
+            );
+            logger.info(`[ToolRegistry] ${name}: Using device ${device.deviceId}`);
+          }
+        } else {
+          logger.info(`[ToolRegistry] ${name}: Skipping device resolution.`);
         }
 
-        // Auto-release session after executePlan completes
-        // This frees the device immediately for parallel test execution
-        if (shouldResolveDevice && sessionUuid && name === "executePlan" && DaemonState.getInstance().isInitialized()) {
+        // Enforce autolock: a locked device may only be driven by the session that locked it.
+        if (device && isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
+          DaemonState.getInstance().getDevicePool().assertAutolockAccess(device.deviceId, sessionUuid);
+        }
+
+        // Bind session to device's CtrlProxyClient for multi-agent NavigationGraphManager isolation
+        if (device && sessionUuid) {
           try {
+            if (device.platform === "android") {
+              AndroidCtrlProxyClient.getInstance(device).bindSession(sessionUuid);
+            } else if (device.platform === "ios") {
+              IOSCtrlProxyClient.getInstance(device).bindSession(sessionUuid);
+            }
+          } catch {
+            // CtrlProxy may not be initialized yet — binding is best-effort
+          }
+        }
+
+        try {
+          // Record tool call for navigation graph correlation
+          // Only record UI interaction tools that may cause navigation
+          // Excludes app lifecycle tools (launchApp, terminateApp, homeScreen, etc.)
+          // as they don't represent replayable in-app navigation paths
+          const navigationRelevantTools = [
+            "tapOn", "swipeOn", "pinchOn", "dragAndDrop",
+            "pressButton", "inputText", "clearText", "imeAction"
+          ];
+          if (navigationRelevantTools.includes(name)) {
+            // Extract UI state from the most recent cached observation
+            const cachedResult = device
+              ? RealObserveScreen.getRecentCachedResultForDevice(device.deviceId)
+              : RealObserveScreen.getRecentCachedResult();
+            const uiState = new UIStateExtractor().extractFromObservation(cachedResult);
+            const navManager = sessionUuid
+              ? NavigationGraphManager.getInstanceForSession(sessionUuid)
+              : NavigationGraphManager.getInstance();
+            navManager.recordToolCall(name, args, uiState);
+          }
+
+          let response: any | undefined;
+          if (!shouldResolveDevice) {
+            if (!options.nonDeviceHandler) {
+              throw new ActionableError(`Tool ${name} requires a device.`);
+            }
+            response = await options.nonDeviceHandler(args, progress, signal);
+          } else if (device !== undefined) {
+            // Check if memory performance audit mode is enabled
+            const memPerfAuditEnabled = serverConfig.isMemPerfAuditEnabled();
+
+            if (memPerfAuditEnabled && device.platform === "android") {
+              // Get the foreground app package name
+              const packageName = await this.getForegroundPackageName(device);
+
+              if (packageName) {
+                logger.info(`[ToolRegistry] Running memory audit for ${packageName} during ${name}`);
+
+                // Create memory audit instance
+                const memoryAudit = new MemoryAudit(device);
+                const perf = createGlobalPerformanceTracker();
+
+                // Run the handler within memory audit
+                const auditResult = await memoryAudit.runAudit(
+                  packageName,
+                  name,
+                  args,
+                  async () => {
+                    response = await handler(device, args, progress, signal);
+                  },
+                  perf
+                );
+
+                // If audit failed, throw error with diagnostics
+                if (!auditResult.passed) {
+                  const errorMsg = `Memory audit FAILED for ${packageName} during ${name}\n\n${auditResult.diagnostics}`;
+                  logger.error(`[ToolRegistry] ${errorMsg}`);
+                  throw new ActionableError(errorMsg);
+                }
+
+                logger.info(`[ToolRegistry] Memory audit PASSED for ${packageName} during ${name}`);
+              } else {
+                logger.warn(`[ToolRegistry] Could not determine foreground app, skipping memory audit for ${name}`);
+                response = await handler(device, args, progress, signal);
+              }
+            } else {
+              // Memory audit not enabled or not Android platform, execute normally
+              response = await handler(device, args, progress, signal);
+            }
+          }
+
+          // Unwrap MCP response envelope to get the inner result for success/error checks.
+          // Tools may return { content: [{ type: "text", text: '{"success":false,...}' }] }
+          // instead of a plain { success, error } object.
+          let unwrapped = response;
+          if (
+            response && typeof response === "object" &&
+            !("success" in response) &&
+            Array.isArray(response.content) && response.content.length > 0
+          ) {
+            const first = response.content[0];
+            if (first?.type === "text" && typeof first.text === "string") {
+              try {
+                const parsed = JSON.parse(first.text);
+                if (parsed && typeof parsed === "object" && "success" in parsed) {
+                  unwrapped = parsed;
+                }
+              } catch { /* not JSON — use original response */ }
+            }
+          }
+
+          const toolSuccess = unwrapped && typeof unwrapped === "object" && "success" in unwrapped
+            ? unwrapped.success !== false
+            : true;
+          const toolError = unwrapped && typeof unwrapped === "object" && "error" in unwrapped
+            ? String(unwrapped.error || "")
+            : null;
+          if (unwrapped && typeof unwrapped === "object" && "success" in unwrapped) {
+            logger.info(`[ToolRegistry] ${name} result: success=${unwrapped.success}${unwrapped.success === false ? `, error=${unwrapped.error || "unknown"}` : ""}`);
+          }
+
+          // Emit tool call telemetry
+          const toolDurationMs = this.timer.now() - toolStartMs;
+          TelemetryRecorder.getInstance().recordToolCallEvent({
+            timestamp: toolStartMs,
+            toolName: name,
+            durationMs: toolDurationMs,
+            success: toolSuccess,
+            error: toolError,
+            args: typeof args === "object" ? args : null,
+          });
+
+          // Record successful tool call for MCP recording (test plan generation)
+          if (toolSuccess) {
+            getMcpRecorder()?.record(name, args);
+          }
+
+          // After swipeOn executes with lookFor, update the tool call with scroll position
+          if (name === "swipeOn" && args.lookFor && response?.success && response?.found) {
+            const scrollPosition = UIStateExtractor.createScrollPosition(args);
+            if (scrollPosition) {
+              const scrollNavManager = sessionUuid
+                ? NavigationGraphManager.getInstanceForSession(sessionUuid)
+                : NavigationGraphManager.getInstance();
+              scrollNavManager.updateScrollPosition(scrollPosition);
+            }
+          }
+
+          // Update session cache if sessionUuid provided
+          if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
             const sessionManager = DaemonState.getInstance().getSessionManager();
             const devicePool = DaemonState.getInstance().getDevicePool();
-            const releaseSessionUuid = baseSessionUuid ?? sessionUuid;
-            if (releaseSessionUuid) {
-              await releaseDeviceLabelSessions(releaseSessionUuid);
+            const context = await createToolExecutionContext(sessionUuid, sessionManager, devicePool, {
+              keepScreenAwake,
+              platform: platform === "android" || platform === "ios" ? platform : undefined
+            });
+
+            // Cache observation data for certain tools to reduce API calls
+            if (name === "observe" && response?.viewHierarchy) {
+              await updateSessionCache(context, "lastHierarchy", response.viewHierarchy);
+            }
+            if (name === "observe" && response?.screenshot) {
+              await updateSessionCache(context, "lastScreenshot", response.screenshot);
             }
 
-            const session = releaseSessionUuid ? sessionManager.getSession(releaseSessionUuid) : null;
-            if (session) {
-              const deviceId = session.assignedDevice;
-              sessionManager.releaseSession(session.sessionId);
-              await devicePool.releaseDevice(deviceId);
-              // Clean up session-scoped navigation state and observe cache
-              NavigationGraphManager.releaseSession(releaseSessionUuid);
-              RealObserveScreen.clearCache(deviceId);
-              logger.info(`Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`);
+            // Update last action timestamp for interaction tools
+            if (["tapOn", "swipeOn", "pinchOn", "dragAndDrop", "scroll", "inputText", "clearText", "pressButton"].includes(name)) {
+              await updateSessionCache(context, "lastActionTime", this.timer.now());
             }
-          } catch (releaseError) {
-            // Don't fail the tool if session release fails
-            // Session will be cleaned up by timeout mechanism
-            logger.warn(`Failed to auto-release session ${sessionUuid}: ${releaseError}`);
+          }
+
+          return response;
+        } catch (error) {
+          if (error instanceof ActionableError) {
+            throw error;
+          }
+          const deviceContext = device ? ` on device ${device.deviceId}` : "";
+          throw new ActionableError(`Failed to execute tool ${name}${deviceContext}: ${error}`);
+        } finally {
+          if (device && name === "executePlan" && args?.cleanupAppId) {
+            await this.cleanupService.cleanup(device, {
+              appId: args.cleanupAppId,
+              clearAppData: args.cleanupClearAppData,
+            });
+          }
+
+          // Auto-release session after executePlan completes
+          // This frees the device immediately for parallel test execution
+          if (shouldResolveDevice && sessionUuid && name === "executePlan" && DaemonState.getInstance().isInitialized()) {
+            try {
+              const sessionManager = DaemonState.getInstance().getSessionManager();
+              const devicePool = DaemonState.getInstance().getDevicePool();
+              const releaseSessionUuid = baseSessionUuid ?? sessionUuid;
+              if (releaseSessionUuid) {
+                await releaseDeviceLabelSessions(releaseSessionUuid);
+              }
+
+              const session = releaseSessionUuid ? sessionManager.getSession(releaseSessionUuid) : null;
+              if (session) {
+                const deviceId = session.assignedDevice;
+                sessionManager.releaseSession(session.sessionId);
+                await devicePool.releaseDevice(deviceId);
+                // Clean up session-scoped navigation state and observe cache
+                NavigationGraphManager.releaseSession(releaseSessionUuid);
+                RealObserveScreen.clearCache(deviceId);
+                logger.info(`Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`);
+              }
+            } catch (releaseError) {
+              // Don't fail the tool if session release fails
+              // Session will be cleaned up by timeout mechanism
+              logger.warn(`Failed to auto-release session ${sessionUuid}: ${releaseError}`);
+            }
           }
         }
+      } finally {
+        void this.toolCallRepository.recordToolCall({
+          toolName: name,
+          timestamp: toolCallTimestamp,
+          sessionUuid,
+          durationMs: this.timer.now() - toolStartMs,
+        });
       }
     };
 

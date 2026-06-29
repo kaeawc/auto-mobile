@@ -22,6 +22,7 @@ describe("ToolCallRepository", () => {
       toolName: "tapOn",
       timestamp: "2024-01-01T00:00:00.000Z",
       sessionUuid: "session-1",
+      durationMs: 42,
     });
 
     const rows = await db.selectFrom("tool_calls").selectAll().execute();
@@ -29,6 +30,7 @@ describe("ToolCallRepository", () => {
     expect(rows[0].tool_name).toBe("tapOn");
     expect(rows[0].timestamp).toBe("2024-01-01T00:00:00.000Z");
     expect(rows[0].session_uuid).toBe("session-1");
+    expect(rows[0].duration_ms).toBe(42);
   });
 
   test("recordToolCall with null session uuid", async () => {

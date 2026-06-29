@@ -11,7 +11,9 @@ private final class EventCollector: @unchecked Sendable {
 final class AutoMobileNetworkTests: XCTestCase {
     override func tearDown() {
         AutoMobileNetwork.shared.reset()
+        #if DEBUG
         NetworkMockRuleStore.shared.setRules([])
+        #endif
         super.tearDown()
     }
 
@@ -246,6 +248,7 @@ final class AutoMobileNetworkTests: XCTestCase {
 
     // MARK: - Network Mock Rules
 
+    #if DEBUG
     func testNetworkMockRuleStoreMatchesWildcardMethodAndRegex() {
         let store = NetworkMockRuleStore()
         store.setRules([
@@ -389,4 +392,5 @@ final class AutoMobileNetworkTests: XCTestCase {
         XCTAssertEqual(event?.contentType, "application/json")
         XCTAssertEqual(event?.error, "mocked:mock-1")
     }
+    #endif
 }

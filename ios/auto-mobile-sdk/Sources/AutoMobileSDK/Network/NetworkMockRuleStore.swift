@@ -1,3 +1,4 @@
+#if DEBUG
 import Foundation
 
 struct NetworkMockRuleDTO: Codable, Equatable {
@@ -101,3 +102,4 @@ final class NetworkMockRuleStore: @unchecked Sendable {
         return regex.firstMatch(in: value, range: range) != nil
     }
 }
+#endif

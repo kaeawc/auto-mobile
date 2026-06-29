@@ -206,6 +206,28 @@ export default [
 		rules: baseRules,
 	},
 	{
+		// Navigation hierarchy logic is correctness-sensitive: screen
+		// fingerprinting drives navigation-graph dedup and element extraction
+		// drives Explore, so a wrong field name silently produces a wrong
+		// fingerprint/hash. Ban the `any` escape hatch in these files so the
+		// typed ViewHierarchyResult / AccessibilityNode model is always used and
+		// the #1122-style carry-over regression cannot recur. Genuine boundaries
+		// must opt out with an inline
+		// `// eslint-disable-next-line @typescript-eslint/no-explicit-any -- <reason>`.
+		// (Other navigation files still carry pre-existing `any`; broadening the
+		// scope to the full directory is a follow-up once those are migrated.)
+		files: [
+			"src/features/navigation/ScreenFingerprint.ts",
+			"src/features/navigation/ExploreElementExtraction.ts",
+		],
+		plugins,
+		languageOptions,
+		rules: {
+			...baseRules,
+			"@typescript-eslint/no-explicit-any": "error",
+		},
+	},
+	{
         files: ["test/**/*.ts", "**/scratch/**/*.ts"],
 		plugins,
 		languageOptions,

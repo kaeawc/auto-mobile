@@ -99,4 +99,34 @@ describe("App file resources", () => {
     expect(content.blob).toBe("AAEC/w==");
     expect(content.text).toBeUndefined();
   });
+
+  test("reads UTF-8 app files as MCP text content", async () => {
+    setAppFileServiceForTesting({
+      ...fakeService,
+      readFile: async request => ({
+        deviceId: request.deviceId,
+        platform: "android",
+        appId: request.appId,
+        container: request.container,
+        path: request.path,
+        byteCount: 17,
+        mimeType: "text/plain; charset=utf-8",
+        text: "{\"enabled\":true}\n",
+      }),
+    });
+    registerAppFileResources();
+
+    const match = ResourceRegistry.matchTemplate(
+      "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/config/settings.json"
+    );
+    expect(match).toBeDefined();
+
+    const content = await match!.template.handler(match!.params);
+    expect(content.uri).toBe(
+      "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/config/settings.json"
+    );
+    expect(content.mimeType).toBe("text/plain; charset=utf-8");
+    expect(content.text).toBe("{\"enabled\":true}\n");
+    expect(content.blob).toBeUndefined();
+  });
 });

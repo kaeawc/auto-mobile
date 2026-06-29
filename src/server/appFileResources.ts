@@ -52,7 +52,7 @@ export function registerAppFileResources(): void {
   ResourceRegistry.registerTemplate(
     APP_FILE_RESOURCE_TEMPLATES.FILE,
     "App Container File",
-    "Read a file from a logical app container. Binary content is returned as a base64 MCP blob.",
+    "Read a file from a logical app container. UTF-8 content is returned as text; binary content is returned as a base64 MCP blob.",
     "application/octet-stream",
     readAppFileResource
   );

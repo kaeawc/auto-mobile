@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -8,8 +8,26 @@ import {
   type PutAppFileProviderRequest,
 } from "../../src/server/appFileService";
 import type { BootedDevice } from "../../src/models";
+import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+
+function execResult(stdout: string, stderr = "") {
+  return {
+    stdout,
+    stderr,
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  };
+}
+
+function adbFactoryFor(executor: FakeAdbExecutor): AdbClientFactory {
+  return {
+    create: () => executor,
+  };
+}
 
 describe("AppFileService", () => {
   const tempDirs: string[] = [];
@@ -323,6 +341,178 @@ describe("AppFileService", () => {
     expect(calls[1]?.command).toContain("shell if [ -d '/sdcard/Android/data/com.example.app/files'");
     expect(calls[1]?.command).toContain("find");
     expect(calls[1]?.maxBuffer).toBe(calls[0]?.maxBuffer);
+  });
+
+  test("lists Android externalFiles with file names, directory markers, byte sizes, and last-modified metadata", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("find '/sdcard/Android/data/com.example.app/files'", execResult([
+      "directory|4096|1710000000|/sdcard/Android/data/com.example.app/files",
+      "directory|4096|1710000060|/sdcard/Android/data/com.example.app/files/fixtures",
+      "regular file|4|1710000123|/sdcard/Android/data/com.example.app/files/fixtures/welcome file.txt",
+    ].join("\n")));
+    const service = createAppFileServiceForTesting({
+      adbFactory: adbFactoryFor(adb),
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+    });
+
+    const result = await service.listFiles({
+      deviceId: "emulator-5554",
+      appId: "com.example.app",
+      container: "externalFiles",
+    });
+
+    expect(result.files).toEqual([
+      {
+        path: "fixtures",
+        name: "fixtures",
+        isDirectory: true,
+        lastModified: "2024-03-09T16:01:00.000Z",
+        resourceUri: "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/fixtures",
+      },
+      {
+        path: "fixtures/welcome file.txt",
+        name: "welcome file.txt",
+        byteCount: 4,
+        isDirectory: false,
+        lastModified: "2024-03-09T16:02:03.000Z",
+        resourceUri: "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/fixtures/welcome%20file.txt",
+      },
+    ]);
+  });
+
+  test("reads Android UTF-8 files as text without platform-specific decoding", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("base64 '/sdcard/Android/data/com.example.app/files/config/settings.json'", execResult(
+      Buffer.from("{\"enabled\":true}\n", "utf8").toString("base64")
+    ));
+    const service = createAppFileServiceForTesting({
+      adbFactory: adbFactoryFor(adb),
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+    });
+
+    const result = await service.readFile({
+      deviceId: "emulator-5554",
+      appId: "com.example.app",
+      container: "externalFiles",
+      path: "config/settings.json",
+    });
+
+    expect(result).toMatchObject({
+      byteCount: 17,
+      mimeType: "text/plain; charset=utf-8",
+      text: "{\"enabled\":true}\n",
+    });
+    expect(result.blob).toBeUndefined();
+  });
+
+  test("preserves UTF-8 BOM bytes when reading text app files", async () => {
+    const bytes = Buffer.from([0xef, 0xbb, 0xbf, 0x7b, 0x7d]);
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("base64 '/sdcard/Android/data/com.example.app/files/config/bom.json'", execResult(
+      bytes.toString("base64")
+    ));
+    const service = createAppFileServiceForTesting({
+      adbFactory: adbFactoryFor(adb),
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+    });
+
+    const result = await service.readFile({
+      deviceId: "emulator-5554",
+      appId: "com.example.app",
+      container: "externalFiles",
+      path: "config/bom.json",
+    });
+
+    expect(result).toMatchObject({
+      byteCount: bytes.byteLength,
+      mimeType: "text/plain; charset=utf-8",
+      text: "\uFEFF{}",
+    });
+    expect(Buffer.from(result.text!, "utf8")).toEqual(bytes);
+    expect(result.blob).toBeUndefined();
+  });
+
+  test("keeps Android binary reads as lossless MCP blobs", async () => {
+    const bytes = Buffer.from([0, 159, 146, 150, 255]);
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("base64 '/sdcard/Android/data/com.example.app/files/fixtures/pixel.bin'", execResult(
+      bytes.toString("base64")
+    ));
+    const service = createAppFileServiceForTesting({
+      adbFactory: adbFactoryFor(adb),
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+    });
+
+    const result = await service.readFile({
+      deviceId: "emulator-5554",
+      appId: "com.example.app",
+      container: "externalFiles",
+      path: "fixtures/pixel.bin",
+    });
+
+    expect(result).toMatchObject({
+      byteCount: bytes.byteLength,
+      mimeType: "application/octet-stream",
+      blob: bytes.toString("base64"),
+    });
+    expect(result.text).toBeUndefined();
+  });
+
+  test("maps Android run-as failures to actionable private-storage guidance", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("shell run-as 'com.example.app'", new Error("run-as: Package 'com.example.app' is not debuggable"));
+    const service = createAppFileServiceForTesting({
+      adbFactory: adbFactoryFor(adb),
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+      deviceResolver: async () => ({ deviceId: "emulator-5554", name: "Pixel", platform: "android" }),
+    });
+
+    await expect(service.readFile({
+      deviceId: "emulator-5554",
+      appId: "com.example.app",
+      container: "documents",
+      path: "fixtures/private.txt",
+    })).rejects.toThrow(
+      "Android documents app file read for com.example.app on emulator-5554 requires a debuggable app build because it uses run-as"
+    );
+  });
+
+  test("skips broken symlinks when listing iOS app container files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "automobile-app-files-"));
+    tempDirs.push(root);
+    const dataRoot = join(root, "data");
+    const documentsRoot = join(dataRoot, "Documents");
+    await mkdir(documentsRoot, { recursive: true });
+    await writeFile(join(documentsRoot, "welcome.txt"), "hello");
+    await symlink(join(documentsRoot, "missing.txt"), join(documentsRoot, "broken-link"));
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult("get_app_container 'ios-sim-1' 'com.example.app' data", dataRoot);
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as any,
+      deviceResolver: async () => ({ deviceId: "ios-sim-1", name: "iPhone", platform: "ios" }),
+    });
+
+    const result = await service.listFiles({
+      deviceId: "ios-sim-1",
+      appId: "com.example.app",
+      container: "documents",
+    });
+
+    expect(result.files.map(file => file.path)).toEqual(["welcome.txt"]);
   });
 });
 

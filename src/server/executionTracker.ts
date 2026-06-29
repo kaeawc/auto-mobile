@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 
 interface ActiveExecution {
   id: string;
@@ -24,9 +24,11 @@ export class ExecutionTracker {
   private sessionExecutions = new Map<string, Set<string>>();
   private sessionUuidExecutions = new Map<string, Set<string>>();
   private timer: Timer;
+  private idGenerator: IdGenerator;
 
-  constructor(timer: Timer = defaultTimer) {
+  constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
     this.timer = timer;
+    this.idGenerator = idGenerator;
   }
 
   startExecution(
@@ -34,7 +36,7 @@ export class ExecutionTracker {
     sessionId?: string,
     sessionUuid?: string
   ): ActiveExecution {
-    const id = randomUUID();
+    const id = this.idGenerator.next();
     const execution: ActiveExecution = {
       id,
       toolName,

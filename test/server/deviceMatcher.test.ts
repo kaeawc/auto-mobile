@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { DefaultDeviceMatcher, compareVersions } from "../../src/server/deviceMatcher";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { SeededRandom } from "../../src/utils/Random";
 
 const matcher = new DefaultDeviceMatcher();
 
@@ -216,6 +217,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
   });
 
   it("RANDOM strategy returns a valid candidate", () => {
+    const matcher = new DefaultDeviceMatcher(new SeededRandom(1));
     const devices = [
       bootedDevice({ deviceId: "1", osVersion: "14" }),
       bootedDevice({ deviceId: "2", osVersion: "15" }),
@@ -227,7 +229,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       "RANDOM"
     );
     expect(result).not.toBeNull();
-    expect(["1", "2"]).toContain(result!.deviceId);
+    expect(result!.deviceId).toBe("2");
   });
 
   it("returns null for empty device list", () => {

@@ -97,7 +97,9 @@ export async function getDaemonHealthReport(
   // serving via socket even when PID bookkeeping is stale or missing.
   if (report.socketExists) {
     try {
-      const available = await DaemonClient.isAvailable(socketPath);
+      // Observation-only probe: never unlink a live daemon's socket if PID
+      // bookkeeping is momentarily stale (issue #2658).
+      const available = await DaemonClient.isAvailable(socketPath, { skipStaleCleanup: true });
       report.socketConnectable = available;
       if (!available) {
         report.recommendations.push(
@@ -199,9 +201,13 @@ export interface SocketDiagnostics {
 /**
  * Run socket diagnostics
  */
-export async function runSocketDiagnostics(timer: Timer = defaultTimer): Promise<SocketDiagnostics> {
+export async function runSocketDiagnostics(
+  timer: Timer = defaultTimer,
+  options: DaemonHealthReportOptions = {}
+): Promise<SocketDiagnostics> {
+  const socketPath = options.socketPath ?? SOCKET_PATH;
   const diagnostics: SocketDiagnostics = {
-    socketExists: existsSync(SOCKET_PATH),
+    socketExists: existsSync(socketPath),
     socketReadable: false,
     socketWritable: false,
     socketConnectable: false,
@@ -216,7 +222,7 @@ export async function runSocketDiagnostics(timer: Timer = defaultTimer): Promise
 
   // Try to get file stats to check read/write permissions
   try {
-    await (await import("node:fs/promises")).stat(SOCKET_PATH);
+    await (await import("node:fs/promises")).stat(socketPath);
     diagnostics.socketReadable = true;
     diagnostics.socketWritable = true;
   } catch (error) {
@@ -224,10 +230,11 @@ export async function runSocketDiagnostics(timer: Timer = defaultTimer): Promise
     return diagnostics;
   }
 
-  // Try to connect
+  // Try to connect. Observation-only probe: never unlink a live daemon's
+  // socket if PID bookkeeping is momentarily stale (issue #2658).
   try {
     const startTime = timer.now();
-    const available = await DaemonClient.isAvailable(SOCKET_PATH);
+    const available = await DaemonClient.isAvailable(socketPath, { skipStaleCleanup: true });
     const latency = timer.now() - startTime;
 
     if (available) {

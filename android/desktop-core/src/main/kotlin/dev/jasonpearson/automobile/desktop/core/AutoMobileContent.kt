@@ -159,6 +159,24 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
   return activeDeviceId != null && deviceId == activeDeviceId
 }
 
+internal interface AutoMobileDeviceStreamEventSink {
+  fun disconnectLayout()
+
+  fun clearPerformanceMetrics()
+}
+
+internal class AutoMobileDeviceStreamEventHandler(
+    private val activeDeviceId: () -> String?,
+    private val sink: AutoMobileDeviceStreamEventSink,
+) {
+  fun handle(event: DeviceStreamEvent): DeviceStreamEvent.DeviceConnectionLost? {
+    val lostEvent = activeDeviceConnectionLostEvent(event, activeDeviceId()) ?: return null
+    sink.disconnectLayout()
+    sink.clearPerformanceMetrics()
+    return lostEvent
+  }
+}
+
 // Notification handler is injected via parameter
 
 enum class Dashboard(val title: String, val icon: String) {
@@ -603,8 +621,12 @@ fun AutoMobileContent(
     val baseDelayMs = 5000L
     val maxDelayMs = 60000L
     while (true) {
-      val delayMs = if (consecutiveFailures <= 1) baseDelayMs
-          else (baseDelayMs * (1L shl (consecutiveFailures - 1).coerceAtMost(4))).coerceAtMost(maxDelayMs)
+      val delayMs =
+          if (consecutiveFailures <= 1) baseDelayMs
+          else
+              (baseDelayMs * (1L shl (consecutiveFailures - 1).coerceAtMost(4))).coerceAtMost(
+                  maxDelayMs
+              )
       kotlinx.coroutines.delay(delayMs)
       kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
@@ -903,12 +925,24 @@ fun AutoMobileContent(
   // stale last frame for the active device.
   LaunchedEffect(observationStreamClient, activeDeviceId) {
     val client = observationStreamClient ?: return@LaunchedEffect
+    val clearLivePerformanceMetrics = { clearPerformanceMetrics() }
+    val eventHandler =
+        AutoMobileDeviceStreamEventHandler(
+            activeDeviceId = { activeDeviceId },
+            sink =
+                object : AutoMobileDeviceStreamEventSink {
+                  override fun disconnectLayout() {
+                    layoutInspectorState.disconnect()
+                  }
+
+                  override fun clearPerformanceMetrics() {
+                    clearLivePerformanceMetrics()
+                  }
+                },
+        )
     client.deviceEvents.collect { event ->
-      activeDeviceConnectionLostEvent(event, activeDeviceId)?.let { lostEvent ->
-        LOG.warn("Device connection lost for ${lostEvent.deviceId}: ${lostEvent.error}")
-        layoutInspectorState.disconnect()
-        clearPerformanceMetrics()
-      }
+      val lostEvent = eventHandler.handle(event) ?: return@collect
+      LOG.warn("Device connection lost for ${lostEvent.deviceId}: ${lostEvent.error}")
     }
   }
 
@@ -1088,7 +1122,11 @@ fun AutoMobileContent(
 
   // Search provider wired to telemetry events, navigation screens, and installed apps
   val searchProvider: SearchResultProvider =
-      remember(telemetryEventCache.size, telemetryEventCache.lastOrNull()?.timestamp, installedApps.size) {
+      remember(
+          telemetryEventCache.size,
+          telemetryEventCache.lastOrNull()?.timestamp,
+          installedApps.size,
+      ) {
         object : SearchResultProvider {
           override fun search(query: String): List<SearchResult> {
             if (query.isBlank()) return emptyList()
@@ -1725,13 +1763,16 @@ fun AutoMobileContent(
                         }
                     // Version slider — only shown when 2+ distinct versions exist
                     var minIdx by remember { mutableStateOf(0f) }
-                    var maxIdxState by remember { mutableStateOf((allVersions.size - 1).coerceAtLeast(0).toFloat()) }
+                    var maxIdxState by remember {
+                      mutableStateOf((allVersions.size - 1).coerceAtLeast(0).toFloat())
+                    }
                     if (allVersions.size >= 2) {
                       val maxIdx = (allVersions.size - 1).toFloat()
                       // Clamp state in case allVersions changed
                       val clampedMaxIdx = maxIdxState.coerceIn(0f, maxIdx)
                       val clampedMinIdx = minIdx.coerceIn(0f, clampedMaxIdx)
-                      val minVer = allVersions.getOrElse(clampedMinIdx.toInt()) { allVersions.first() }
+                      val minVer =
+                          allVersions.getOrElse(clampedMinIdx.toInt()) { allVersions.first() }
                       val maxVer =
                           allVersions.getOrElse(
                               clampedMaxIdx.toInt().coerceAtMost(allVersions.size - 1)
@@ -1972,7 +2013,11 @@ fun AutoMobileContent(
         },
         bottomPaneContent = {
           val spans =
-              remember(telemetryEventCache.size, telemetryEventCache.lastOrNull()?.timestamp, filteredTimelineCategories) {
+              remember(
+                  telemetryEventCache.size,
+                  telemetryEventCache.lastOrNull()?.timestamp,
+                  filteredTimelineCategories,
+              ) {
                 buildTimelineSpans(telemetryEventCache.toList(), filteredTimelineCategories)
               }
           val lanes = remember(spans) { activeLanes(spans) }

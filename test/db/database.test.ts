@@ -15,6 +15,20 @@ class FakeSqliteDatabase {
   }
 }
 
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+}
+
+function createDeferred<T = void>(): Deferred<T> {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(res => {
+    resolve = res;
+  });
+
+  return { promise, resolve };
+}
+
 describe("configureSqliteDatabase", () => {
   test("enables WAL, busy timeout, and foreign keys for new connections", () => {
     const db = new FakeSqliteDatabase();
@@ -93,6 +107,55 @@ describe("BunSqliteDialect transactions", () => {
 
       const rows = await db.selectFrom("items").selectAll().execute();
       expect(rows).toEqual([{ id: 1, name: "committed" }]);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("waits to run non-transaction queries while a transaction is open", async () => {
+    const db = new Kysely<{ items: { id: number; name: string } }>({
+      dialect: new BunSqliteDialect({
+        database: new BunDatabase(":memory:"),
+      }),
+    });
+
+    try {
+      await db.schema
+        .createTable("items")
+        .addColumn("id", "integer", col => col.primaryKey())
+        .addColumn("name", "text", col => col.notNull())
+        .execute();
+
+      const transactionStarted = createDeferred();
+      const failTransaction = createDeferred();
+
+      const transaction = db.transaction().execute(async trx => {
+        await trx.insertInto("items").values({ id: 1, name: "rolled-back" }).execute();
+        transactionStarted.resolve();
+        await failTransaction.promise;
+        throw new Error("force rollback");
+      });
+
+      await transactionStarted.promise;
+
+      let outsideInsertFinished = false;
+      const outsideInsert = db
+        .insertInto("items")
+        .values({ id: 2, name: "outside" })
+        .execute()
+        .then(() => {
+          outsideInsertFinished = true;
+        });
+
+      await Promise.resolve();
+      expect(outsideInsertFinished).toBe(false);
+
+      failTransaction.resolve();
+      await expect(transaction).rejects.toThrow("force rollback");
+      await outsideInsert;
+
+      const rows = await db.selectFrom("items").selectAll().orderBy("id").execute();
+      expect(rows).toEqual([{ id: 2, name: "outside" }]);
     } finally {
       await db.destroy();
     }

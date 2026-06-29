@@ -1,8 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Kysely } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import {
@@ -19,13 +16,6 @@ class FakeSqliteDatabase {
 }
 
 describe("configureSqliteDatabase", () => {
-  let tempDirs: string[] = [];
-
-  afterEach(async () => {
-    await Promise.all(tempDirs.map(dir => rm(dir, { recursive: true, force: true })));
-    tempDirs = [];
-  });
-
   test("enables WAL, busy timeout, and foreign keys for new connections", () => {
     const db = new FakeSqliteDatabase();
 
@@ -38,10 +28,8 @@ describe("configureSqliteDatabase", () => {
     ]);
   });
 
-  test("sets a 5 second busy timeout on Bun SQLite file databases", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "auto-mobile-sqlite-"));
-    tempDirs.push(tempDir);
-    const sqliteDb = new BunDatabase(join(tempDir, "auto-mobile.db"));
+  test("sets a 5 second busy timeout on Bun SQLite databases", async () => {
+    const sqliteDb = new BunDatabase(":memory:");
 
     try {
       configureSqliteDatabase(sqliteDb);

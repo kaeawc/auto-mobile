@@ -1635,7 +1635,7 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(response.success, false)
         XCTAssertEqual(
             response.error,
-            "Unable to render highlight on iOS: target app SDK highlight bridge unavailable and runner overlay fallback disabled."
+            "Unable to render highlight on iOS: target app SDK highlight bridge unavailable and runner overlay fallback failed."
         )
     }
 

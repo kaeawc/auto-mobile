@@ -987,7 +987,7 @@ public class CommandHandler: CommandHandling {
             return WebSocketResponse.error(
                 type: ResponseType.highlightResponse.rawValue,
                 requestId: request.requestId,
-                error: "Unable to render highlight on iOS: target app SDK highlight bridge unavailable and runner overlay fallback disabled.",
+                error: "Unable to render highlight on iOS: target app SDK highlight bridge unavailable and runner overlay fallback failed.",
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }

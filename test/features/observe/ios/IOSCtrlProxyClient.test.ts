@@ -552,6 +552,46 @@ describe("IOSCtrlProxyClient", function() {
         await testClient.close();
       }
     });
+
+    test("treats iOS highlight responses without success as failures", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+      const shape: HighlightShape = {
+        type: "box",
+        bounds: {
+          x: 10,
+          y: 20,
+          width: 100,
+          height: 80,
+        },
+      };
+
+      try {
+        const requestPromise = testClient.requestAddHighlight("highlight-1", shape, 2000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const payload = JSON.parse(socket!.sentMessages[0]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "highlight_response",
+          requestId: payload.requestId,
+        }));
+
+        const result = await requestPromise;
+        expect(result.success).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
   });
 
   describe("requestScreenshot", function() {

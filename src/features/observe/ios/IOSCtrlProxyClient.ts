@@ -1189,7 +1189,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
         case "highlight_response":
           result = {
-            success: message.success ?? true,
+            success: message.success ?? false,
             totalTimeMs: message.totalTimeMs ?? 0,
             error: message.error,
             requestId,

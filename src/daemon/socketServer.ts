@@ -592,7 +592,10 @@ export class UnixSocketServer {
 
         if (args.platform === "android") {
           const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
-          const result = await manager.ensureCompatibleVersion();
+          const result = await manager.ensureCompatibleVersion({
+            allowDownloadWhenInstalled: true,
+            bypassVersionCheckCache: true
+          });
           const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled"]);
           return {
             success: successStatuses.has(result.status),

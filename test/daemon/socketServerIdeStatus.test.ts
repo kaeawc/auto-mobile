@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -8,6 +8,9 @@ import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
+import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import type { BootedDevice } from "../../src/models";
 
 function createFakeDaemonState() {
   return {
@@ -133,5 +136,40 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
 
     expect(response.success).toBe(false);
     expect(response.error).toContain("Invalid platform");
+  });
+
+  test("ide/updateService does not report skipped Android update as success", async () => {
+    const device: BootedDevice = {
+      deviceId: "emulator-5554",
+      platform: "android",
+      isEmulator: true,
+      name: "Pixel"
+    };
+    const platformSpy = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
+      getBootedDevices: async () => [device]
+    } as any);
+    const ctrlProxySpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
+      ensureCompatibleVersion: async () => ({
+        status: "skipped",
+        expectedSha256: "",
+        acceptedPreinstalled: true
+      })
+    } as any);
+
+    try {
+      const response = await sendRequest(socketPath, "ide/updateService", {
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
+
+      expect(response.success).toBe(true);
+      const result = response.result as { success: boolean; message: string; status: { status: string } };
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Accessibility service skipped");
+      expect(result.status.status).toBe("skipped");
+    } finally {
+      ctrlProxySpy.mockRestore();
+      platformSpy.mockRestore();
+    }
   });
 });

@@ -11,6 +11,7 @@ import os from "os";
 import AdmZip from "adm-zip";
 
 import { FakeAccessibilityDetector } from "../fakes/FakeAccessibilityDetector";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 
 describe("CtrlProxyManager", function() {
@@ -49,9 +50,10 @@ describe("CtrlProxyManager", function() {
     accessibilityServiceClient.clearAvailabilityCache();
   });
 
-  afterEach(function() {
+  afterEach(async function() {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting(null);
     AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(null);
+    await AndroidCtrlProxyManager.cleanupPrefetchedApk();
     if (originalApkPathEnv === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     } else {
@@ -283,7 +285,45 @@ describe("CtrlProxyManager", function() {
       expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
     });
 
-    test("should upgrade when installed SHA mismatches expected", async function() {
+    test("should accept preinstalled APK when installed SHA mismatches expected by default", async function() {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+
+      let downloadCalls = 0;
+      AndroidCtrlProxyManager.resetInstances();
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        localFakeAdb,
+        new FakeTimer(),
+        {
+          download: async () => {
+            downloadCalls++;
+            throw new Error("download should not be called for readiness");
+          }
+        }
+      );
+
+      const result = await manager.ensureCompatibleVersion();
+      expect(result.status).toBe("skipped");
+      expect(result.installedSha256).toBe("different-sha");
+      expect(result.attemptedDownload).toBe(false);
+      expect(downloadCalls).toBe(0);
+      expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
+    });
+
+    test("should upgrade when installed SHA mismatches expected and installed download is explicitly allowed", async function() {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
       localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
@@ -305,9 +345,209 @@ describe("CtrlProxyManager", function() {
       (manager as any).downloadApk = async () => "/tmp/fake-accessibility.apk";
       (manager as any).cleanupApk = async () => undefined;
 
-      const result = await manager.ensureCompatibleVersion();
+      const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("upgraded");
       expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(true);
+    });
+
+    test("should install local APK override when explicit update is requested", async function() {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-local-update-"));
+      const localApkPath = path.join(tempDir, "control-proxy-debug.apk");
+      const zip = new AdmZip();
+      zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+      zip.addFile("classes.dex", crypto.randomBytes(15000));
+      zip.writeZip(localApkPath);
+
+      process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "local-dev-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
+
+      AndroidCtrlProxyManager.resetInstances();
+      const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => localFakeAdb });
+
+      const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
+      expect(result.status).toBe("upgraded");
+      expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(true);
+
+      await fs.rm(tempDir, { recursive: true, force: true });
+    });
+
+    test("should install completed background prefetch on later readiness check without downloading", async function() {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-prefetch-source-"));
+      const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
+      await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
+      (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
+
+      let downloadCalls = 0;
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        localFakeAdb,
+        new FakeTimer(),
+        {
+          download: async () => {
+            downloadCalls++;
+            throw new Error("download should not be called for completed prefetch");
+          }
+        }
+      );
+
+      const result = await manager.ensureCompatibleVersion();
+      expect(result.status).toBe("upgraded");
+      expect(result.attemptedDownload).toBe(false);
+      expect(result.attemptedInstall).toBe(true);
+      expect(downloadCalls).toBe(0);
+      expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(true);
+    });
+
+    test("should keep completed prefetch install failure failed after fallback uninstall removes service", async function() {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-prefetch-source-"));
+      const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
+      await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
+      (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+
+      const packageCheckCommand = `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`;
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponseSequence(packageCheckCommand, [
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+        createExecResult("", "")
+      ]);
+      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandError("install -r -d", new Error("INSTALL_FAILED_UPDATE_INCOMPATIBLE"));
+      localFakeAdb.setCommandResponse(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`, createExecResult("Success", ""));
+      localFakeAdb.setCommandError("install \"", new Error("INSTALL_FAILED_ABORTED"));
+
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        localFakeAdb,
+        new FakeTimer(),
+        {
+          download: async () => {
+            throw new Error("download should not be called for completed prefetch");
+          }
+        }
+      );
+
+      const result = await manager.ensureCompatibleVersion();
+      const packageCheckCalls = localFakeAdb.getExecutedCommands()
+        .filter(command => command.includes(packageCheckCommand));
+
+      expect(result.status).toBe("failed");
+      expect(result.acceptedPreinstalled).toBeUndefined();
+      expect(result.attemptedInstall).toBe(true);
+      expect(result.attemptedReinstall).toBe(true);
+      expect(packageCheckCalls.length).toBe(2);
+      expect(localFakeAdb.wasCommandExecuted(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`)).toBe(true);
+    });
+
+    test("should allow background refresh to retry failed prefetches", async function() {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
+      const zip = new AdmZip();
+      zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+      zip.addFile("classes.dex", crypto.randomBytes(15000));
+      const payload = zip.toBuffer();
+      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
+      let downloadCalls = 0;
+      let failedDestination: string | null = null;
+
+      try {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+          download: async (_url: string, destination: string) => {
+            downloadCalls++;
+            if (downloadCalls === 1) {
+              failedDestination = destination;
+              throw new Error("network is unreachable");
+            }
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          }
+        };
+
+        AndroidCtrlProxyManager.prefetchApk();
+        expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
+        expect(failedDestination).not.toBeNull();
+        await expect(fs.stat(path.dirname(failedDestination!))).rejects.toThrow();
+
+        AndroidCtrlProxyManager.prefetchApk();
+        const retriedPath = await AndroidCtrlProxyManager.getPrefetchedApkPath();
+
+        expect(downloadCalls).toBe(2);
+        expect(retriedPath).not.toBeNull();
+      } finally {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+      }
+    });
+
+    test("should cache failed download result briefly instead of retrying every call", async function() {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+      const fakeTimer = new FakeTimer();
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "",
+        stderr: ""
+      });
+
+      let downloadCalls = 0;
+      AndroidCtrlProxyManager.resetInstances();
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        localFakeAdb,
+        fakeTimer,
+        {
+          download: async () => {
+            downloadCalls++;
+            throw new Error("Could not resolve host");
+          }
+        }
+      );
+
+      const firstResult = await manager.ensureCompatibleVersion();
+      const secondResult = await manager.ensureCompatibleVersion();
+      expect(firstResult.status).toBe("failed");
+      expect(firstResult.downloadUnavailable).toBe(true);
+      expect(secondResult.status).toBe("failed");
+      expect(downloadCalls).toBe(1);
+
+      fakeTimer.advanceTime(61_000);
+      await manager.ensureCompatibleVersion();
+      expect(downloadCalls).toBe(2);
     });
 
     test("should reinstall when upgrade install fails", async function() {
@@ -347,7 +587,7 @@ describe("CtrlProxyManager", function() {
       (manager as any).install = async () => undefined;
       (manager as any).enable = async () => undefined;
 
-      const result = await manager.ensureCompatibleVersion();
+      const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("reinstalled");
       expect(localFakeAdb.wasCommandExecuted("shell pm uninstall")).toBe(true);
     });
@@ -434,7 +674,7 @@ describe("CtrlProxyManager", function() {
       (manager as any).install = async () => undefined;
       (manager as any).enable = async () => undefined;
 
-      const result = await manager.ensureCompatibleVersion();
+      const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("reinstalled");
       expect(executedCommands.some(command => command.includes("install -r -d"))).toBe(false);
       expect(executedCommands.some(command => command.includes("shell pm uninstall"))).toBe(true);
@@ -457,15 +697,57 @@ describe("CtrlProxyManager", function() {
       });
 
       AndroidCtrlProxyManager.resetInstances();
-      const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => localFakeAdb });
-      (manager as any).downloadApk = async () => {
-        throw new Error("Could not resolve host");
-      };
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        localFakeAdb,
+        new FakeTimer(),
+        {
+          download: async () => {
+            throw new Error("Could not resolve host");
+          }
+        }
+      );
 
-      const result = await manager.ensureCompatibleVersion();
+      const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("failed");
       expect(result.downloadUnavailable).toBe(true);
       expect(result.error).toContain("offline");
+    });
+
+    test("should not let forced update failures poison nonblocking readiness cache", async function() {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+
+      AndroidCtrlProxyManager.resetInstances();
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        localFakeAdb,
+        new FakeTimer(),
+        {
+          download: async () => {
+            throw new Error("Could not resolve host");
+          }
+        }
+      );
+
+      const forcedResult = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
+      const readinessResult = await manager.ensureCompatibleVersion();
+
+      expect(forcedResult.status).toBe("failed");
+      expect(readinessResult.status).toBe("skipped");
+      expect(readinessResult.downloadUnavailable).toBeUndefined();
     });
   });
 

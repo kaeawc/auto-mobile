@@ -13,6 +13,10 @@ object CtrlProxyClipboard {
 
   fun readResultFromPrimaryClip(clip: ClipData?, sdkInt: Int = Build.VERSION.SDK_INT): ReadResult {
     if (clip == null) {
+      // Android 10+ only permits clipboard reads from the focused app, default IME, or
+      // privileged/system services. CtrlProxy runs as a background accessibility service, so a
+      // null primary clip can mean Android denied the read rather than the target app clipboard
+      // being empty. Report that restriction instead of masking it as successful empty content.
       return if (sdkInt >= Build.VERSION_CODES.Q) {
         ReadResult(success = false, text = null, error = RESTRICTED_READ_ERROR)
       } else {

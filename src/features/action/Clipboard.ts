@@ -120,6 +120,10 @@ export class Clipboard {
 
       logger.warn(`[Clipboard] Accessibility service ${action} failed: ${a11yResult.error}`);
       if (action === "get") {
+        // On Android 10+, a background service cannot directly read a target app's clipboard.
+        // Working read strategies require foreground target-app code, the default IME role, or
+        // paste-then-read from a focused editable node. `cmd clipboard get` is not a recovery path
+        // on modern Android builds because the shell command is usually unimplemented.
         return {
           success: false,
           action,

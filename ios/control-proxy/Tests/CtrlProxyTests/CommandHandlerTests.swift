@@ -970,6 +970,27 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(errorResponse.success, false)
     }
 
+    func testClipboardGetRestrictedFailureSurfacesStaleShadowRisk() {
+        fakeGesturePerformer.setFailure(
+            for: "clipboard",
+            error: GesturePerformer.GestureError.clipboardReadUnavailable
+        )
+
+        let request = WebSocketRequest(
+            type: "request_clipboard",
+            requestId: "clip-restricted-1",
+            action: "get"
+        )
+
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+        XCTAssertEqual(errorResponse.success, false)
+        XCTAssertEqual(errorResponse.type, "clipboard_result")
+        XCTAssertEqual(
+            errorResponse.error,
+            "Clipboard read unavailable; live pasteboard access may be restricted, so shadow clipboard content was not returned"
+        )
+    }
+
     // MARK: - Device Control Tests
 
     func testPressHomeSuccess() {

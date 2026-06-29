@@ -3,10 +3,8 @@ import {
   delayForAttempt,
   exponentialBackoff,
   fixedBackoff,
-  sequenceBackoff,
-  withJitter
+  sequenceBackoff
 } from "../../src/utils/Backoff";
-import { SeededRandom } from "../../src/utils/Random";
 
 describe("Backoff", function() {
   test("fixedBackoff returns the same delay for every attempt", function() {
@@ -35,18 +33,6 @@ describe("Backoff", function() {
     expect(policy.delayForAttempt(2)).toBe(150);
     expect(policy.delayForAttempt(3)).toBe(450);
     expect(policy.delayForAttempt(4)).toBe(500);
-  });
-
-  test("withJitter stays inside the configured spread", function() {
-    const policy = withJitter(fixedBackoff(100), {
-      factor: 0.1,
-      random: new SeededRandom(1)
-    });
-
-    const delay = policy.delayForAttempt(1);
-
-    expect(delay).toBeGreaterThanOrEqual(90);
-    expect(delay).toBeLessThanOrEqual(110);
   });
 
   test("delayForAttempt accepts callback policies", function() {

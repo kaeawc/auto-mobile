@@ -1,5 +1,4 @@
 import { createServer as createHttpServer, Server as HttpServer } from "node:http";
-import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
@@ -52,6 +51,7 @@ import { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } from "../ut
 import { startPerformanceMonitor, stopPerformanceMonitor, getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
 import { interruptVideoRecording, listActiveVideoRecordings, stopVideoRecording } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import { evaluateDeviceDisconnects } from "./disconnectMonitor";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
@@ -102,6 +102,7 @@ export class Daemon {
   private installedAppsRepository: InstalledAppsStore;
   private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
+  private idGenerator: IdGenerator;
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
@@ -110,7 +111,8 @@ export class Daemon {
     options: DaemonOptions = {},
     installedAppsRepository?: InstalledAppsStore,
     timer: Timer = defaultTimer,
-    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository()
+    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
+    idGenerator: IdGenerator = defaultIdGenerator
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -118,7 +120,8 @@ export class Daemon {
     // which surfaces as ConnectionRefused on the Unix-socket → Streamable HTTP MCP hop (common in Linux CI).
     this.host = options.host || "127.0.0.1";
     this.debug = options.debug || false;
-    this.daemonSessionId = randomUUID();
+    this.idGenerator = idGenerator;
+    this.daemonSessionId = this.idGenerator.next();
     this.timer = timer;
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
@@ -475,7 +478,7 @@ export class Daemon {
           // Create new transport for initialization or when no session ID
           const sessionContext: { sessionId?: string } = {};
           streamableTransport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
+            sessionIdGenerator: () => this.idGenerator.next(),
             onsessioninitialized: newSessionId => {
               this.transports.set(newSessionId, streamableTransport);
               sessionContext.sessionId = newSessionId;

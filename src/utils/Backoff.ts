@@ -1,5 +1,3 @@
-import type { Random } from "./Random";
-
 export interface BackoffPolicy {
   delayForAttempt(attempt: number): number;
 }
@@ -8,11 +6,6 @@ export interface ExponentialBackoffOptions {
   readonly initialDelayMs: number;
   readonly multiplier?: number;
   readonly maxDelayMs?: number;
-}
-
-export interface JitterOptions {
-  readonly factor?: number;
-  readonly random: Random;
 }
 
 export type BackoffInput =
@@ -60,27 +53,6 @@ export const exponentialBackoff = (options: ExponentialBackoffOptions): BackoffP
     delayForAttempt(attempt: number): number {
       assertAttempt(attempt);
       return normalizeDelay(Math.min(initialDelayMs * multiplier ** (attempt - 1), maxDelayMs));
-    }
-  };
-};
-
-export const withJitter = (policy: BackoffPolicy, options: JitterOptions): BackoffPolicy => {
-  const factor = options.factor ?? 0.2;
-  if (!Number.isFinite(factor) || factor < 0 || factor > 1) {
-    throw new Error(`withJitter factor must be between 0 and 1, got ${factor}`);
-  }
-
-  return {
-    delayForAttempt(attempt: number): number {
-      const delay = policy.delayForAttempt(attempt);
-      if (delay === 0 || factor === 0) {
-        return delay;
-      }
-
-      const spread = delay * factor;
-      const min = delay - spread;
-      const max = delay + spread;
-      return normalizeDelay(min + (max - min) * options.random.next());
     }
   };
 };

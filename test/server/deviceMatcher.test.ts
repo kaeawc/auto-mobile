@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { DefaultDeviceMatcher, compareVersions } from "../../src/server/deviceMatcher";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { SeededRandom } from "../../src/utils/Random";
+import { SeededRandom } from "../fakes/SeededRandom";
 
 const matcher = new DefaultDeviceMatcher();
 

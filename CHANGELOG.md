@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- iOS `highlight`: remove the non-functional runner-overlay fallback and report honestly that highlighting requires the in-app AutoMobile SDK ([#2681](https://github.com/kaeawc/auto-mobile/issues/2681)) (ios)
+
 ## [v0.0.39] - 2026-06-29
 ### Added
 - Implement iOS Simulator app-container file management ([#2571](https://github.com/kaeawc/auto-mobile/issues/2571))

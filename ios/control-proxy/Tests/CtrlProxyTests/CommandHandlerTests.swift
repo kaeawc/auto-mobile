@@ -1563,13 +1563,16 @@ final class CommandHandlerTests: XCTestCase {
 
     // MARK: - Highlight Tests
 
-    func testAddHighlightRendersShapeAndReturnsSuccess() {
-        let highlightManager = FakeHighlightOverlayManager()
+    func testAddHighlightUsesSdkBridgeWhenForegroundAppHasSdk() {
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = true
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
         commandHandler = CommandHandler.createForTesting(
             elementLocator: fakeElementLocator,
             gesturePerformer: fakeGesturePerformer,
             perfProvider: perfProvider,
-            highlightOverlayManager: highlightManager
+            sdkHierarchyClient: sdkClient
         )
         let shape = HighlightShape(
             type: "box",
@@ -1588,23 +1591,17 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(response.requestId, "highlight-request")
         XCTAssertEqual(response.success, true)
         XCTAssertNil(response.error)
-        XCTAssertEqual(highlightManager.showCalls.count, 1)
-        XCTAssertEqual(highlightManager.showCalls.first?.id, "highlight-1")
-        XCTAssertEqual(highlightManager.showCalls.first?.shape.type, "box")
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 1)
+        XCTAssertEqual(sdkClient.lastHighlight?.id, "highlight-1")
+        XCTAssertEqual(sdkClient.lastHighlight?.shape.type, "box")
     }
 
-    func testAddHighlightUsesSdkBridgeBeforeRunnerOverlay() {
-        let highlightManager = FakeHighlightOverlayManager()
-        let sdkClient = FakeSdkHierarchyFetcher()
-        sdkClient.addHighlightResult = true
-        fakeElementLocator.foregroundBundleId = "com.test.app"
-        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
+    func testAddHighlightReturnsSdkRequiredErrorWhenNoSdkClient() {
+        fakeElementLocator.foregroundBundleId = "com.apple.reminders"
         commandHandler = CommandHandler.createForTesting(
             elementLocator: fakeElementLocator,
             gesturePerformer: fakeGesturePerformer,
-            perfProvider: perfProvider,
-            sdkHierarchyClient: sdkClient,
-            highlightOverlayManager: highlightManager
+            perfProvider: perfProvider
         )
         let shape = HighlightShape(
             type: "box",
@@ -1620,91 +1617,25 @@ final class CommandHandlerTests: XCTestCase {
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(response.type, "highlight_response")
-        XCTAssertEqual(response.success, true)
-        XCTAssertEqual(sdkClient.addHighlightCallCount, 1)
-        XCTAssertEqual(sdkClient.lastHighlight?.id, "highlight-1")
-        XCTAssertEqual(sdkClient.lastHighlight?.shape.type, "box")
-        XCTAssertTrue(highlightManager.showCalls.isEmpty)
+        XCTAssertEqual(response.requestId, "highlight-request")
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(
+            response.error,
+            "Highlighting com.apple.reminders requires the AutoMobile SDK embedded in the target app; "
+                + "iOS cannot draw an overlay into another app from the test runner."
+        )
     }
 
-    func testAddHighlightFallsBackWithoutPostingWhenSdkBridgeTargetsDifferentBundle() {
-        let highlightManager = FakeHighlightOverlayManager()
+    func testAddHighlightReturnsSdkRequiredErrorWhenSdkTargetsDifferentBundle() {
         let sdkClient = FakeSdkHierarchyFetcher()
         sdkClient.addHighlightResult = true
-        fakeElementLocator.foregroundBundleId = "com.test.app"
+        fakeElementLocator.foregroundBundleId = "com.apple.reminders"
         sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.other.app"))
         commandHandler = CommandHandler.createForTesting(
             elementLocator: fakeElementLocator,
             gesturePerformer: fakeGesturePerformer,
             perfProvider: perfProvider,
-            sdkHierarchyClient: sdkClient,
-            highlightOverlayManager: highlightManager
-        )
-        let shape = HighlightShape(
-            type: "box",
-            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
-        )
-        let request = WebSocketRequest(
-            type: "add_highlight",
-            requestId: "highlight-request",
-            id: "highlight-1",
-            shape: shape
-        )
-
-        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
-
-        XCTAssertEqual(response.type, "highlight_response")
-        XCTAssertEqual(response.success, true)
-        XCTAssertEqual(sdkClient.fetchServerInfoCallCount, 1)
-        XCTAssertEqual(sdkClient.addHighlightCallCount, 0)
-        XCTAssertEqual(highlightManager.showCalls.count, 1)
-    }
-
-    func testAddHighlightFallsBackToRunnerOverlayWhenSdkBridgeUnavailable() {
-        let highlightManager = FakeHighlightOverlayManager()
-        let sdkClient = FakeSdkHierarchyFetcher()
-        sdkClient.addHighlightResult = false
-        fakeElementLocator.foregroundBundleId = "com.test.app"
-        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
-        commandHandler = CommandHandler.createForTesting(
-            elementLocator: fakeElementLocator,
-            gesturePerformer: fakeGesturePerformer,
-            perfProvider: perfProvider,
-            sdkHierarchyClient: sdkClient,
-            highlightOverlayManager: highlightManager
-        )
-        let shape = HighlightShape(
-            type: "box",
-            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
-        )
-        let request = WebSocketRequest(
-            type: "add_highlight",
-            requestId: "highlight-request",
-            id: "highlight-1",
-            shape: shape
-        )
-
-        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
-
-        XCTAssertEqual(response.type, "highlight_response")
-        XCTAssertEqual(response.success, true)
-        XCTAssertEqual(sdkClient.addHighlightCallCount, 1)
-        XCTAssertEqual(highlightManager.showCalls.count, 1)
-    }
-
-    func testAddHighlightReturnsClearErrorWhenSdkAndRunnerOverlayUnavailable() {
-        let highlightManager = FakeHighlightOverlayManager()
-        highlightManager.showResult = false
-        let sdkClient = FakeSdkHierarchyFetcher()
-        sdkClient.addHighlightResult = false
-        fakeElementLocator.foregroundBundleId = "com.test.app"
-        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
-        commandHandler = CommandHandler.createForTesting(
-            elementLocator: fakeElementLocator,
-            gesturePerformer: fakeGesturePerformer,
-            perfProvider: perfProvider,
-            sdkHierarchyClient: sdkClient,
-            highlightOverlayManager: highlightManager
+            sdkHierarchyClient: sdkClient
         )
         let shape = HighlightShape(
             type: "box",
@@ -1721,19 +1652,53 @@ final class CommandHandlerTests: XCTestCase {
 
         XCTAssertEqual(response.type, "highlight_response")
         XCTAssertEqual(response.success, false)
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 0)
         XCTAssertEqual(
             response.error,
-            "Unable to render highlight on iOS: target app SDK highlight bridge unavailable and runner overlay fallback failed."
+            "Highlighting com.apple.reminders requires the AutoMobile SDK embedded in the target app; "
+                + "iOS cannot draw an overlay into another app from the test runner."
         )
     }
 
-    func testAddHighlightRequiresShape() {
-        let highlightManager = FakeHighlightOverlayManager()
+    func testAddHighlightReturnsSdkRequiredErrorWhenSdkBridgeCallFails() {
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = false
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
         commandHandler = CommandHandler.createForTesting(
             elementLocator: fakeElementLocator,
             gesturePerformer: fakeGesturePerformer,
             perfProvider: perfProvider,
-            highlightOverlayManager: highlightManager
+            sdkHierarchyClient: sdkClient
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 1)
+        XCTAssertEqual(
+            response.error,
+            "Highlighting com.test.app requires the AutoMobile SDK embedded in the target app; "
+                + "iOS cannot draw an overlay into another app from the test runner."
+        )
+    }
+
+    func testAddHighlightRequiresShape() {
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider
         )
         let request = WebSocketRequest(
             type: "add_highlight",
@@ -1747,17 +1712,6 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(response.requestId, "highlight-request")
         XCTAssertEqual(response.success, false)
         XCTAssertEqual(response.error, "add_highlight requires a shape")
-        XCTAssertTrue(highlightManager.showCalls.isEmpty)
-    }
-}
-
-private final class FakeHighlightOverlayManager: HighlightOverlayManaging {
-    var showResult = true
-    var showCalls: [(id: String, shape: HighlightShape)] = []
-
-    func show(id: String, shape: HighlightShape) -> Bool {
-        showCalls.append((id, shape))
-        return showResult
     }
 }
 

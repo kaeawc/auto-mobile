@@ -66,6 +66,8 @@ export interface DaemonStatus {
   startedAt?: number;
   /** Daemon version */
   version?: string;
+  /** Options used to start the daemon */
+  options?: DaemonOptions;
 }
 
 /**
@@ -84,6 +86,8 @@ export interface PidFileData {
   startedAt: number;
   /** Daemon version */
   version: string;
+  /** Options used to start the daemon */
+  options?: DaemonOptions;
 }
 
 /**

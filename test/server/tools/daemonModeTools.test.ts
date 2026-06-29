@@ -36,6 +36,8 @@ describe("Daemon-only MCP tools", () => {
 
     expect(ToolRegistry.getTool("accessibilityFocus")).toBeUndefined();
     expect(ToolRegistry.getTool("setUIState")).toBeUndefined();
+    expect(ToolRegistry.getToolForPlan("accessibilityFocus")).toBeUndefined();
+    expect(ToolRegistry.getToolForPlan("setUIState")).toBeDefined();
     expect(ToolRegistry.getToolDefinitions().map(tool => tool.name)).not.toContain("accessibilityFocus");
     expect(ToolRegistry.getToolDefinitions().map(tool => tool.name)).not.toContain("setUIState");
 
@@ -45,6 +47,8 @@ describe("Daemon-only MCP tools", () => {
 
     expect(ToolRegistry.getTool("accessibilityFocus")).toBeDefined();
     expect(ToolRegistry.getTool("setUIState")).toBeDefined();
+    expect(ToolRegistry.getToolForPlan("accessibilityFocus")).toBeDefined();
+    expect(ToolRegistry.getToolForPlan("setUIState")).toBeDefined();
     expect(ToolRegistry.getToolDefinitions().map(tool => tool.name)).toContain("accessibilityFocus");
     expect(ToolRegistry.getToolDefinitions().map(tool => tool.name)).toContain("setUIState");
   });

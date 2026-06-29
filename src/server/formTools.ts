@@ -112,6 +112,6 @@ export function registerFormTools(): void {
     },
     true, // supportsProgress
     true, // debugOnly
-    { outputSchema: setUIStateResultSchema }
+    { outputSchema: setUIStateResultSchema, planExecutable: true }
   );
 }

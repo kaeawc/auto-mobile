@@ -748,6 +748,7 @@ export class DaemonManager implements DaemonManagerLike {
         sockets: pidData.sockets,
         startedAt: pidData.startedAt,
         version: pidData.version,
+        options: pidData.options,
       };
     } catch (error) {
       logger.warn(`Error reading PID file: ${error instanceof Error ? error.message : String(error)}`);

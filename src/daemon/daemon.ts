@@ -100,6 +100,7 @@ export class Daemon {
   private installedAppsRepository: InstalledAppsStore;
   private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
+  private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
 
@@ -109,6 +110,7 @@ export class Daemon {
     timer: Timer = defaultTimer,
     deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository()
   ) {
+    this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
     // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
     // which surfaces as ConnectionRefused on the Unix-socket → Streamable HTTP MCP hop (common in Linux CI).
@@ -601,6 +603,7 @@ export class Daemon {
       port: this.port,
       startedAt: this.timer.now(),
       version: DAEMON_VERSION,
+      options: this.options,
     };
 
     await mkdir(dirname(PID_FILE_PATH), { recursive: true });

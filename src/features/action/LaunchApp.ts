@@ -1,6 +1,6 @@
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange } from "./BaseVisualChange";
-import { BootedDevice, LaunchAppResult } from "../../models";
+import { BootedDevice, LaunchAppResult, ObserveResult } from "../../models";
 import { ActionableError } from "../../models";
 import { TerminateApp } from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
@@ -16,6 +16,9 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
+
+const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
+const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
 
 export interface TargetUserDetector {
   detectTargetUserId(packageName: string, userId?: number): Promise<number>;
@@ -245,7 +248,7 @@ export class LaunchApp extends BaseVisualChange {
 
     const isSystemBundleId = bundleId.startsWith("com.apple.");
 
-    return this.observedInteraction(
+    const result = await this.observedInteraction(
       async () => {
         // Set bundle ID before starting CtrlProxy so it targets the app, not SpringBoard
         if (!isSystemBundleId) {
@@ -377,6 +380,8 @@ export class LaunchApp extends BaseVisualChange {
         overrideMinTimestamp: 0
       }
     );
+
+    return this.ensureLaunchObservationMatchesPackage(result, bundleId);
   }
 
   private async waitForIosHierarchyReady(
@@ -635,13 +640,16 @@ export class LaunchApp extends BaseVisualChange {
           );
         }
         const launchOutcome = await this.performLaunch(packageName, activityName, targetUserId, perf);
-        await this.waitForAppForeground(
+        const foregroundReady = await this.waitForAppForeground(
           packageName,
           targetUserId,
           foregroundWaitTimeoutMs,
           foregroundPollIntervalMs,
           perf
         );
+        if (!foregroundReady) {
+          logger.warn(`[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`);
+        }
         observationTimestampMs = await this.adb.getDeviceTimestampMs();
         return launchOutcome;
       },
@@ -655,8 +663,10 @@ export class LaunchApp extends BaseVisualChange {
       }
     );
 
-    logger.info(`[LaunchApp] TTI capture check: collector=${!!displayedMetricsCollector}, startMs=${displayedMetricsStartMs}, hasObservation=${!!launchResult?.observation}`);
-    if (displayedMetricsCollector && displayedMetricsStartMs !== null && launchResult?.observation) {
+    const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(launchResult, packageName);
+
+    logger.info(`[LaunchApp] TTI capture check: collector=${!!displayedMetricsCollector}, startMs=${displayedMetricsStartMs}, hasObservation=${!!settledLaunchResult?.observation}`);
+    if (displayedMetricsCollector && displayedMetricsStartMs !== null && settledLaunchResult?.observation) {
       const displayedMetricsEndMs = await perf.track(
         "displayedLogcatEndTime",
         () => this.adb.getDeviceTimestampMs()
@@ -671,7 +681,7 @@ export class LaunchApp extends BaseVisualChange {
         perf
       );
       logger.info(`[LaunchApp] Captured ${displayedTimeMetrics.length} displayed metrics`);
-      launchResult.observation.displayedTimeMetrics = displayedTimeMetrics;
+      settledLaunchResult.observation.displayedTimeMetrics = displayedTimeMetrics;
 
       // Store TTI for the performance monitor to report
       // Use the first displayed metric as the TTI (time to first frame / interactive)
@@ -686,7 +696,98 @@ export class LaunchApp extends BaseVisualChange {
       logger.info(`[LaunchApp] Skipping TTI capture - conditions not met`);
     }
 
-    return launchResult;
+    return settledLaunchResult;
+  }
+
+  private async ensureLaunchObservationMatchesPackage(
+    result: LaunchAppResult,
+    expectedPackageName: string,
+    timeoutMs: number = LAUNCH_OBSERVATION_TIMEOUT_MS,
+    pollIntervalMs: number = LAUNCH_OBSERVATION_POLL_INTERVAL_MS
+  ): Promise<LaunchAppResult> {
+    if (!result.observation || this.launchObservationMatchesPackage(result.observation, expectedPackageName)) {
+      return result;
+    }
+
+    if (!result.success) {
+      return this.withoutStaleLaunchObservation(result, expectedPackageName, result.observation);
+    }
+
+    const startTime = this.timer.now();
+    let latestObservation = result.observation;
+
+    while (this.timer.now() - startTime < timeoutMs) {
+      logger.info(`[LaunchApp] Launch observation still reports previous app; re-observing for ${expectedPackageName}`);
+      await this.timer.sleep(pollIntervalMs);
+      latestObservation = await this.observeScreen.execute({ skipWaitForFresh: false });
+      if (this.launchObservationMatchesPackage(latestObservation, expectedPackageName)) {
+        result.observation = this.preserveLaunchObservationMetadata(latestObservation, result.observation);
+        return result;
+      }
+    }
+
+    return this.withoutStaleLaunchObservation(
+      {
+        ...result,
+        success: false,
+        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${this.describeLaunchObservationPackages(latestObservation)}`
+      },
+      expectedPackageName,
+      latestObservation
+    );
+  }
+
+  private withoutStaleLaunchObservation(
+    result: LaunchAppResult,
+    expectedPackageName: string,
+    staleObservation: ObserveResult
+  ): LaunchAppResult {
+    logger.warn(
+      `[LaunchApp] Omitting stale launch observation for ${expectedPackageName}; ` +
+      `last observation reported ${this.describeLaunchObservationPackages(staleObservation)}`
+    );
+    const resultWithoutObservation = { ...result };
+    delete resultWithoutObservation.observation;
+    return resultWithoutObservation;
+  }
+
+  private preserveLaunchObservationMetadata(
+    observation: ObserveResult,
+    previousObservation: ObserveResult
+  ): ObserveResult {
+    return {
+      ...observation,
+      gfxMetrics: observation.gfxMetrics ?? previousObservation.gfxMetrics,
+      perfTiming: observation.perfTiming ?? previousObservation.perfTiming
+    };
+  }
+
+  private launchObservationMatchesPackage(observation: ObserveResult, expectedPackageName: string): boolean {
+    if (this.isLaunchPermissionDialogObservation(observation)) {
+      return true;
+    }
+
+    const packageNames = this.getLaunchObservationPackageNames(observation);
+    return packageNames.length === 0 || packageNames.every(packageName => packageName === expectedPackageName);
+  }
+
+  private isLaunchPermissionDialogObservation(observation: ObserveResult): boolean {
+    return observation.notificationPermissionDetected === true &&
+      observation.activeWindow?.type === "notification_permission_dialog";
+  }
+
+  private describeLaunchObservationPackages(observation: ObserveResult): string {
+    const packageNames = this.getLaunchObservationPackageNames(observation);
+    return packageNames.length > 0 ? packageNames.join(", ") : "unknown app";
+  }
+
+  private getLaunchObservationPackageNames(observation: ObserveResult): string[] {
+    const packageNames = [
+      observation.activeWindow?.appId,
+      observation.viewHierarchy?.packageName
+    ].filter((packageName): packageName is string => !!packageName);
+
+    return [...new Set(packageNames)];
   }
 
   /**

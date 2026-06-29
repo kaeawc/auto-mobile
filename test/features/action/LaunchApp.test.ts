@@ -27,11 +27,12 @@ describe("LaunchApp", () => {
 
   const packageName = "com.example.app";
 
-  const createObserveResult = (): ObserveResult => ({
+  const createObserveResult = (appId?: string): ObserveResult => ({
     updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} }
+    viewHierarchy: appId ? { node: {}, packageName: appId } as any : { node: {} },
+    activeWindow: appId ? { appId, activityName: "MainActivity", layoutSeqSum: 1 } : undefined
   });
 
   const configureInstalledApp = () => {
@@ -95,6 +96,67 @@ describe("LaunchApp", () => {
     expect(result.success).toBe(true);
     expect(result.observation).toBeDefined();
     expect(fakeTimer.getSleepCallCount()).toBeGreaterThan(0);
+  });
+
+  test("re-observes until the launch observation reports the launched Android app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const previousPackageName = "com.example.previous";
+    const observations = [
+      createObserveResult(previousPackageName),
+      createObserveResult(packageName)
+    ];
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => observations.shift() ?? createObserveResult(packageName));
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.activeWindow?.appId).toBe(packageName);
+    expect(result.observation?.viewHierarchy?.packageName).toBe(packageName);
+    expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("treats Android notification permission dialogs as valid launch observations", async () => {
+    fakeTimer.enableAutoAdvance();
+    const permissionControllerPackageName = "com.google.android.permissioncontroller";
+
+    fakeAdb.setForegroundApp({ packageName: permissionControllerPackageName, userId: 0 });
+    fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult({
+      ...createObserveResult(permissionControllerPackageName),
+      activeWindow: {
+        appId: permissionControllerPackageName,
+        activityName: "GrantPermissionsActivity",
+        layoutSeqSum: 1,
+        type: "notification_permission_dialog"
+      },
+      notificationPermissionDetected: true
+    });
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.notificationPermissionDetected).toBe(true);
+    expect(result.observation?.activeWindow?.type).toBe("notification_permission_dialog");
+    expect(result.observation?.activeWindow?.appId).toBe(permissionControllerPackageName);
+    expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
+  });
+
+  test("fails without embedding a stale Android observation when the launched app never appears", async () => {
+    fakeTimer.enableAutoAdvance();
+    const previousPackageName = "com.example.previous";
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => createObserveResult(previousPackageName));
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(`Timed out waiting for launch observation to show ${packageName}`);
+    expect(result.observation).toBeUndefined();
   });
 
   test("runs target user detection and install check in parallel", async () => {
@@ -352,6 +414,63 @@ describe("LaunchApp", () => {
         // bundle ID via SIMCTL_CHILD_CTRL_PROXY_IOS_BUNDLE_ID when it starts.
         expect(callOrder.indexOf(`setTargetBundleId:${userBundleId}`))
           .toBeLessThan(callOrder.indexOf(`simctlLaunch:${userBundleId}`));
+      } finally {
+        ctrlProxySpy.mockRestore();
+        managerSpy.mockRestore();
+      }
+    });
+
+    test("re-observes until the iOS launch observation hierarchy reports the launched bundle", async () => {
+      fakeTimer.enableAutoAdvance();
+      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "ios-observation" };
+      const previousBundleId = "com.apple.Maps";
+      const observations = [
+        {
+          updatedAt: Date.now(),
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          viewHierarchy: { hierarchy: { node: {} }, packageName: previousBundleId } as any,
+        },
+        {
+          updatedAt: Date.now(),
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
+        },
+      ];
+
+      const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        new FakeIOSCtrlProxy() as unknown as IOSCtrlProxyClient
+      );
+      const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+        setTargetBundleId: () => {},
+      } as unknown as IOSCtrlProxyManager);
+      const fakeSimctl = {
+        launchApp: async () => ({ success: true, pid: 123 }),
+        terminateApp: async () => {},
+      };
+      const iosObserveScreen = new FakeObserveScreen();
+      iosObserveScreen.setObserveResult(() => observations.shift() ?? {
+        updatedAt: Date.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
+      });
+      const iosWindow = new FakeWindow();
+      iosWindow.configureCachedActiveWindow({ appId: userBundleId, activityName: "Main", layoutSeqSum: 1 });
+      const installedApps = new FakeInstalledAppsProvider(fakeTimer, { installedApps: [userBundleId] });
+
+      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, { installedAppsProvider: installedApps });
+      (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
+      (iosLaunchApp as any).observeScreen = iosObserveScreen;
+      (iosLaunchApp as any).window = iosWindow;
+      (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
+
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, false, false);
+        expect(result.success).toBe(true);
+        expect(result.observation?.viewHierarchy?.packageName).toBe(userBundleId);
+        expect(iosObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
       } finally {
         ctrlProxySpy.mockRestore();
         managerSpy.mockRestore();

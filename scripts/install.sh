@@ -89,6 +89,96 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# ============================================================================
+# Android SDK platform helpers (issue #2680)
+#
+# These are intentionally pure (no gum / network / global state) so they can
+# be sourced and unit-tested in isolation (see
+# test/bats/install-android-sdk-platform.bats).
+# ============================================================================
+
+# Read the required Android compileSdk version from libs.versions.toml so the
+# installer never hardcodes the platform number — bumping
+# `build-android-compileSdk` is the single source of truth.
+# Echoes the version (e.g. "37") on success; non-zero exit if missing/unreadable.
+read_required_compile_sdk() {
+    local toml_file="$1"
+    [[ -f "${toml_file}" ]] || return 1
+
+    local version
+    version=$(grep -E '^[[:space:]]*build-android-compileSdk[[:space:]]*=' "${toml_file}" 2>/dev/null \
+        | head -1 \
+        | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+
+    [[ -n "${version}" ]] || return 1
+    printf '%s\n' "${version}"
+}
+
+# Verify the Gradle-required SDK platform (the android.jar) is actually
+# installed under ${android_home}/platforms/android-<compileSdk>.
+# Returns 0 when present, non-zero otherwise.
+android_platform_installed() {
+    local android_home="$1"
+    local compile_sdk="$2"
+    [[ -n "${android_home}" && -n "${compile_sdk}" ]] || return 1
+    [[ -f "${android_home}/platforms/android-${compile_sdk}/android.jar" ]]
+}
+
+# Locate the sdkmanager binary so we can surface an exact install command.
+# Prefers the modern cmdline-tools layout, then any versioned cmdline-tools
+# dir, then the legacy tools/bin location. Echoes the path on success.
+find_sdkmanager() {
+    local android_home="$1"
+    [[ -n "${android_home}" ]] || return 1
+
+    local candidate
+    if [[ -x "${android_home}/cmdline-tools/latest/bin/sdkmanager" ]]; then
+        printf '%s\n' "${android_home}/cmdline-tools/latest/bin/sdkmanager"
+        return 0
+    fi
+
+    for candidate in "${android_home}"/cmdline-tools/*/bin/sdkmanager; do
+        if [[ -x "${candidate}" ]]; then
+            printf '%s\n' "${candidate}"
+            return 0
+        fi
+    done
+
+    if [[ -x "${android_home}/tools/bin/sdkmanager" ]]; then
+        printf '%s\n' "${android_home}/tools/bin/sdkmanager"
+        return 0
+    fi
+
+    return 1
+}
+
+# Compose the helpers into the installer's decision. Given an SDK home and the
+# libs.versions.toml, determine whether the Gradle-required platform is present
+# and, when not, print the exact sdkmanager install command on stdout.
+# Exit codes (mirrored into the installer's status + messaging):
+#   0 = platform installed (ok)
+#   1 = unable to determine required compileSdk (no toml / key) — skip silently
+#   2 = platform missing (stdout = actionable `sdkmanager "platforms;..."` cmd)
+android_platform_install_advice() {
+    local android_home="$1"
+    local libs_toml="$2"
+
+    local compile_sdk
+    compile_sdk=$(read_required_compile_sdk "${libs_toml}") || return 1
+
+    if android_platform_installed "${android_home}" "${compile_sdk}"; then
+        return 0
+    fi
+
+    local sdkmanager_path
+    if sdkmanager_path=$(find_sdkmanager "${android_home}"); then
+        printf '"%s" "platforms;android-%s"\n' "${sdkmanager_path}" "${compile_sdk}"
+    else
+        printf 'sdkmanager "platforms;android-%s"\n' "${compile_sdk}"
+    fi
+    return 2
+}
+
 # Compare semver versions: returns 0 if $1 >= $2
 version_gte() {
     local v1="$1"
@@ -3876,6 +3966,32 @@ main() {
                 log_warn "Checking Android emulator: missing — install via Android Studio SDK Manager or: sdkmanager 'emulator'"
             fi
 
+            # Verify the SDK platform Gradle requires (platforms/android-<compileSdk>)
+            # is installed. Without it, `adb` is present but the build fails with
+            # "Unable to find android.jar for compileSdk N" (issue #2680). Derive
+            # the version from libs.versions.toml so bumping compileSdk needs no
+            # installer edit.
+            local libs_toml="${PROJECT_ROOT}/android/gradle/libs.versions.toml"
+            local compile_sdk install_advice platform_status
+            compile_sdk=$(read_required_compile_sdk "${libs_toml}" 2>/dev/null || true)
+            # Capture status via `if` so `set -e` doesn't abort on the non-zero
+            # (missing/unknown) return codes, which are expected signals here.
+            if install_advice=$(android_platform_install_advice "${detected_android_home}" "${libs_toml}"); then
+                platform_status=0
+            else
+                platform_status=$?
+            fi
+            if [[ "${platform_status}" -eq 0 ]]; then
+                log_info "Checking Android SDK platform (android-${compile_sdk}): ok"
+            elif [[ "${platform_status}" -eq 2 ]]; then
+                # Surface an actionable message BEFORE the Gradle build runs, and
+                # drop the green Android status so this isn't silently skipped.
+                ANDROID_SETUP_OK=false
+                log_warn "Checking Android SDK platform (android-${compile_sdk}): missing — required for compileSdk ${compile_sdk}. Install with: ${install_advice}"
+            fi
+            # platform_status == 1: required compileSdk unknown (running outside
+            # the repo / toml absent) — nothing actionable, skip the check.
+
             # List available AVDs with API levels
             if [[ -x "${emulator_path}" ]]; then
                 local avd_list
@@ -4206,4 +4322,10 @@ main() {
     fi
 }
 
-main "$@"
+# Run main unless the script is being sourced for testing (e.g. by BATS).
+# Tests set INSTALL_SH_SOURCE_ONLY=true to load helper functions without
+# executing the installer. The default (unset) path still runs main for both
+# `bash install.sh` and piped `curl | bash` invocations.
+if [[ "${INSTALL_SH_SOURCE_ONLY:-}" != "true" ]]; then
+    main "$@"
+fi

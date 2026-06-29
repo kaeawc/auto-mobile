@@ -14,6 +14,7 @@ import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { boundsArea, clamp } from "../../utils/bounds";
@@ -83,24 +84,9 @@ export class PinchOn extends BaseVisualChange {
       return this.createErrorResult("Pinch direction is required ('in' or 'out')", options);
     }
 
-    if (this.device.platform === "ios") {
-      perf.end();
-      return this.createErrorResult("pinchOn is not supported on iOS yet.", options);
-    }
-
-    if (this.device.platform !== "android") {
+    if (this.device.platform !== "android" && this.device.platform !== "ios") {
       perf.end();
       return this.createErrorResult(`Unsupported platform: ${this.device.platform}`, options);
-    }
-
-    const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, this.adb);
-    const available = await perf.track("a11yAvailable", () => a11yManager.isAvailable());
-    if (!available) {
-      perf.end();
-      return this.createErrorResult(
-        "pinchOn requires the AutoMobile accessibility service to be installed and enabled.",
-        options
-      );
     }
 
     if (options.scale !== undefined && options.scale <= 0) {
@@ -129,18 +115,46 @@ export class PinchOn extends BaseVisualChange {
       }
     }
 
+    if (this.device.platform === "android") {
+      const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, this.adb);
+      const available = await perf.track("a11yAvailable", () => a11yManager.isAvailable());
+      if (!available) {
+        perf.end();
+        return this.createErrorResult(
+          "pinchOn requires the AutoMobile accessibility service to be installed and enabled.",
+          options
+        );
+      }
+    }
+
     try {
       const target = await perf.track("resolveTarget", () => this.resolveTarget(options));
       const { centerX, centerY } = this.getCenter(target.bounds);
-      const { distanceStart, distanceEnd, scale } = this.resolveDistances(options, target.bounds);
+      let { distanceStart, distanceEnd, scale } = this.resolveDistances(options, target.bounds);
+      if (this.device.platform === "ios") {
+        distanceStart = Math.round(distanceStart);
+        distanceEnd = Math.round(distanceEnd);
+        scale = distanceStart > 0 ? distanceEnd / distanceStart : scale;
+      }
       const duration = options.duration ?? 300;
       const rotationDegrees = options.rotationDegrees ?? 0;
 
-      const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-
       const pinchResult = await this.observedInteraction(
         async () => {
-          return await a11yClient.requestPinch(
+          if (this.device.platform === "ios") {
+            return await IOSCtrlProxyClient.getInstance(this.device).requestPinch(
+              centerX,
+              centerY,
+              distanceStart,
+              distanceEnd,
+              rotationDegrees,
+              duration,
+              5000,
+              perf
+            );
+          }
+
+          return await AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory).requestPinch(
             centerX,
             centerY,
             distanceStart,

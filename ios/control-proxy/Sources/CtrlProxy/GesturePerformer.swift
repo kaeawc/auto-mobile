@@ -1,7 +1,7 @@
 import Foundation
 import ObjCExceptionCatcher
 #if canImport(os)
-import os
+    import os
 #endif
 #if canImport(XCTest) && os(iOS)
     import XCTest
@@ -80,7 +80,9 @@ public class GesturePerformer: GesturePerforming {
         private static func snapshotHasTextInputWithFocus(
             _ snapshot: XCUIElementSnapshot,
             depth: Int = 0
-        ) -> Bool {
+        )
+            -> Bool
+        {
             if depth > 64 { return false }
 
             let type = snapshot.elementType
@@ -140,7 +142,8 @@ public class GesturePerformer: GesturePerforming {
                 // the app we want is never SpringBoard in a text-input flow.
                 if app.identifier != "com.apple.springboard" {
                     if let snapshot = try? app.snapshot(),
-                       GesturePerformer.snapshotHasTextInputWithFocus(snapshot) {
+                       GesturePerformer.snapshotHasTextInputWithFocus(snapshot)
+                    {
                         return (true, "snapshot.hasFocus")
                     }
                 }
@@ -166,7 +169,10 @@ public class GesturePerformer: GesturePerforming {
             let (hasFocus, strategy) = try detectKeyboardFocus(app: app)
             let elapsedMs = Int(Date().timeIntervalSince(queryStart) * 1000)
             let appLabel = runOnMainThreadNonThrowing({ app.label }, fallback: "unknown")
-            gestureLog.debug("requireKeyboardFocus hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) context=\"\(context, privacy: .public)\" elapsedMs=\(elapsedMs, privacy: .public) appLabel=\(appLabel, privacy: .public)")
+            gestureLog
+                .debug(
+                    "requireKeyboardFocus hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) context=\"\(context, privacy: .public)\" elapsedMs=\(elapsedMs, privacy: .public) appLabel=\(appLabel, privacy: .public)"
+                )
 
             guard hasFocus else {
                 let diag = buildFocusDiagnostic(app: app, reason: "requireKeyboardFocus: \(context)")
@@ -188,9 +194,14 @@ public class GesturePerformer: GesturePerforming {
             app: XCUIApplication,
             element: XCUIElement,
             resourceId: String
-        ) throws {
+        )
+            throws
+        {
             let tapStart = Date()
-            gestureLog.debug("tapAndAwaitKeyboardFocus begin resourceId=\(resourceId, privacy: .public) exists=\(element.exists, privacy: .public) isHittable=\(element.isHittable, privacy: .public) type=\(element.elementType.rawValue, privacy: .public)")
+            gestureLog
+                .debug(
+                    "tapAndAwaitKeyboardFocus begin resourceId=\(resourceId, privacy: .public) exists=\(element.exists, privacy: .public) isHittable=\(element.isHittable, privacy: .public) type=\(element.elementType.rawValue, privacy: .public)"
+                )
             element.tap()
 
             let deadline = Date().addingTimeInterval(0.5)
@@ -207,7 +218,10 @@ public class GesturePerformer: GesturePerforming {
                 }
             }
             let elapsedMs = Int(Date().timeIntervalSince(tapStart) * 1000)
-            gestureLog.debug("tapAndAwaitKeyboardFocus done resourceId=\(resourceId, privacy: .public) hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) iterations=\(iterations, privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)")
+            gestureLog
+                .debug(
+                    "tapAndAwaitKeyboardFocus done resourceId=\(resourceId, privacy: .public) hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) iterations=\(iterations, privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+                )
 
             guard hasFocus else {
                 let diag = buildFocusDiagnostic(app: app, reason: "tapAndAwaitKeyboardFocus: \(resourceId)")
@@ -243,7 +257,7 @@ public class GesturePerformer: GesturePerforming {
                     // Only introspect a small number to avoid heavy XPC.
                     let cap = min(count, 5)
                     if cap > 0 {
-                        for i in 0..<cap {
+                        for i in 0 ..< cap {
                             let el = query.element(boundBy: i)
                             let hasFocus = (el.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
                             let identifier = el.identifier
@@ -251,7 +265,10 @@ public class GesturePerformer: GesturePerforming {
                             let isSelected = el.isSelected
                             let isHittable = el.isHittable
                             let frame = el.frame
-                            parts.append("\(name)[\(i)]={id=\"\(identifier)\",hasKeyboardFocus=\(hasFocus),isSelected=\(isSelected),isHittable=\(isHittable),value.len=\(value.count),frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.size.width)),\(Int(frame.size.height))}")
+                            parts
+                                .append(
+                                    "\(name)[\(i)]={id=\"\(identifier)\",hasKeyboardFocus=\(hasFocus),isSelected=\(isSelected),isHittable=\(isHittable),value.len=\(value.count),frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.size.width)),\(Int(frame.size.height))}"
+                                )
                         }
                     }
                 }
@@ -340,7 +357,9 @@ public class GesturePerformer: GesturePerforming {
             fingerCount: Int,
             fingerSpacing: Double,
             duration: TimeInterval
-        ) throws {
+        )
+            throws
+        {
             guard application != nil else {
                 throw GestureError.noApplication
             }
@@ -432,10 +451,38 @@ public class GesturePerformer: GesturePerforming {
 
         // MARK: - Pinch Gestures
 
-        public func pinch(centerX _: Double, centerY _: Double, scale _: Double, duration _: TimeInterval) throws {
-            // Pinch gesture using XCUITest is limited
-            // We can simulate by using the app's pinch method if an element is available
-            throw GestureError.notSupported("Coordinate-based pinch not yet implemented")
+        public func pinch(
+            centerX: Double,
+            centerY: Double,
+            distanceStart: Double,
+            distanceEnd: Double,
+            rotationDegrees: Double,
+            duration: TimeInterval
+        )
+            throws
+        {
+            guard application != nil else {
+                throw GestureError.noApplication
+            }
+
+            try runOnMainThread {
+                let orientation = GesturePerformer.currentInterfaceOrientation()
+                var errorMessage: NSString?
+                let succeeded = ObjCExceptionCatcher_synthesizePinch(
+                    CGFloat(centerX),
+                    CGFloat(centerY),
+                    CGFloat(distanceStart),
+                    CGFloat(distanceEnd),
+                    CGFloat(rotationDegrees),
+                    duration,
+                    orientation.rawValue,
+                    &errorMessage
+                )
+
+                if !succeeded {
+                    throw GestureError.gestureFailed(errorMessage as String? ?? "pinch synthesis failed")
+                }
+            }
         }
 
         // MARK: - Text Input
@@ -544,7 +591,7 @@ public class GesturePerformer: GesturePerforming {
                 for query in queries {
                     let count = query.count
                     guard count > 0 else { continue }
-                    for i in 0..<count {
+                    for i in 0 ..< count {
                         let candidate = query.element(boundBy: i)
                         guard let snap = try? candidate.snapshot() else { continue }
                         if snap.hasFocus { return candidate }
@@ -553,10 +600,10 @@ public class GesturePerformer: GesturePerforming {
 
                 let otherQuery = app.otherElements
                 let otherCount = otherQuery.count
-                for i in 0..<otherCount {
+                for i in 0 ..< otherCount {
                     let candidate = otherQuery.element(boundBy: i)
                     guard let snap = try? candidate.snapshot() else { continue }
-                    if snap.hasFocus && GesturePerformer.snapshotLooksLikeTextInput(snap) {
+                    if snap.hasFocus, GesturePerformer.snapshotLooksLikeTextInput(snap) {
                         return candidate
                     }
                 }
@@ -595,7 +642,7 @@ public class GesturePerformer: GesturePerforming {
         /// so the loop runs the full count. Extra deletes on an empty field
         /// are harmless no-ops.
         private static func clearViaDeletes(element: XCUIElement) {
-            for _ in 0..<clearViaDeletesMaxIterations {
+            for _ in 0 ..< clearViaDeletesMaxIterations {
                 let current = (element.value as? String) ?? ""
                 if current.isEmpty { break }
                 element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
@@ -672,7 +719,9 @@ public class GesturePerformer: GesturePerforming {
             expected: Bool,
             timeout: TimeInterval = 1.0,
             interval: TimeInterval = 0.05
-        ) -> Bool {
+        )
+            -> Bool
+        {
             let deadline = Date().addingTimeInterval(timeout)
             var visible = isKeyboardVisible(app: app)
             while visible != expected && Date() < deadline {
@@ -1196,7 +1245,16 @@ public class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
-        public func pinch(centerX _: Double, centerY _: Double, scale _: Double, duration _: TimeInterval) throws {
+        public func pinch(
+            centerX _: Double,
+            centerY _: Double,
+            distanceStart _: Double,
+            distanceEnd _: Double,
+            rotationDegrees _: Double,
+            duration _: TimeInterval
+        )
+            throws
+        {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

@@ -43,4 +43,18 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
     NSString *_Nullable *_Nullable errorMessage
 );
 
+/// Synthesizes a two-finger pinch through XCTest private event APIs.
+/// Returns NO with a descriptive error message when the private symbols are unavailable
+/// or synthesis fails. Objective-C exceptions are caught and reported through errorMessage.
+FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizePinch(
+    CGFloat centerX,
+    CGFloat centerY,
+    CGFloat distanceStart,
+    CGFloat distanceEnd,
+    CGFloat rotationDegrees,
+    NSTimeInterval duration,
+    NSInteger interfaceOrientation,
+    NSString *_Nullable *_Nullable errorMessage
+);
+
 NS_ASSUME_NONNULL_END

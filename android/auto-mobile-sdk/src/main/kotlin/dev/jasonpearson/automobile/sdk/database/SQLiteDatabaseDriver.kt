@@ -158,84 +158,124 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   override fun executeSQL(databasePath: String, query: String): SQLExecutionResult {
     synchronized(databaseLock) {
       val trimmedQuery = query.trim()
+      val (returnsRows, readOnly) = classifySQL(trimmedQuery)
 
-      // Determine if this is a query or mutation
-      val isQuery = isReadQuery(trimmedQuery)
-
-      return if (isQuery) {
-        executeQuery(databasePath, trimmedQuery)
+      return if (returnsRows) {
+        executeQuery(databasePath, trimmedQuery, readOnly = readOnly)
       } else {
         executeMutation(databasePath, trimmedQuery)
       }
     }
   }
 
-  /**
-   * Determine if a SQL statement is a read query (returns rows) vs a mutation.
-   *
-   * Handles CTE queries (WITH ... SELECT) by looking past the CTE prefix to find the actual
-   * statement type.
-   */
-  private fun isReadQuery(query: String): Boolean {
-    val upperQuery = query.uppercase()
+  private fun classifySQL(query: String): Pair<Boolean, Boolean> {
+    val statement = findTopLevelStatement(query)
+    val keyword = statement?.first ?: return Pair(false, false)
+    val statementIndex = statement.second
 
-    // Direct read queries
-    if (
-        upperQuery.startsWith("SELECT") ||
-            upperQuery.startsWith("PRAGMA") ||
-            upperQuery.startsWith("EXPLAIN")
-    ) {
-      return true
+    if (keyword == "SELECT" || keyword == "PRAGMA" || keyword == "EXPLAIN") {
+      return Pair(true, true)
     }
 
-    // CTE queries: WITH ... followed by SELECT/INSERT/UPDATE/DELETE
-    // We need to find the actual statement after the CTE definitions
-    if (upperQuery.startsWith("WITH")) {
-      // Find the final statement after all CTE definitions
-      // CTEs are: WITH name AS (...), name2 AS (...) SELECT/INSERT/UPDATE/DELETE
-      // We look for the last occurrence of a statement keyword not inside parentheses
-      val statementType = findStatementAfterCTE(upperQuery)
-      return statementType == "SELECT"
+    if (keyword == "INSERT" || keyword == "UPDATE" || keyword == "DELETE") {
+      val hasReturning =
+          findTopLevelKeyword(query, statementIndex + keyword.length, listOf("RETURNING")) != null
+      return Pair(hasReturning, false)
     }
 
-    return false
+    return Pair(false, false)
   }
 
-  /**
-   * Check if text starts with a keyword followed by a word boundary. Prevents matching CTE names
-   * like "select_cte" as statement keywords.
-   */
-  private fun startsWithKeyword(text: String, keyword: String): Boolean {
-    if (!text.startsWith(keyword)) return false
-    val nextChar = text.getOrNull(keyword.length)
-    // Word boundary: next char is null (end of string) or not a word character
-    return nextChar == null || (!nextChar.isLetterOrDigit() && nextChar != '_')
+  private fun startsWithKeyword(text: String, keyword: String): Boolean =
+      matchesKeywordAt(text, 0, keyword)
+
+  private fun matchesKeywordAt(text: String, index: Int, keyword: String): Boolean {
+    if (index > 0 && isWordChar(text[index - 1])) return false
+    if (!text.regionMatches(index, keyword, 0, keyword.length, ignoreCase = true)) return false
+    val nextChar = text.getOrNull(index + keyword.length)
+    return nextChar == null || !isWordChar(nextChar)
   }
 
-  /**
-   * Find the actual statement type after CTE definitions.
-   *
-   * Parses past WITH ... AS (...) clauses to find SELECT/INSERT/UPDATE/DELETE. Uses word boundary
-   * checks to avoid matching CTE names like "update_cte".
-   */
-  private fun findStatementAfterCTE(upperQuery: String): String? {
+  private fun isWordChar(char: Char): Boolean = char.isLetterOrDigit() || char == '_'
+
+  private fun findTopLevelStatement(query: String): Pair<String, Int>? {
+    val keywords = listOf("SELECT", "PRAGMA", "EXPLAIN", "INSERT", "UPDATE", "DELETE")
+    if (!startsWithKeyword(query, "WITH")) {
+      return keywords
+          .firstOrNull { keyword -> startsWithKeyword(query, keyword) }
+          ?.let { keyword ->
+            Pair(keyword, 0)
+          }
+    }
+
+    return findTopLevelKeyword(
+        query,
+        "WITH".length,
+        keywords,
+    )
+  }
+
+  private fun findTopLevelKeyword(
+      query: String,
+      startIndex: Int,
+      keywords: List<String>,
+  ): Pair<String, Int>? {
     var depth = 0
-    var i = 4 // Skip "WITH"
+    var i = startIndex
+    var inSingleQuote = false
+    var inDoubleQuote = false
+    var inBacktickQuote = false
+    var inBracketQuote = false
+    var inLineComment = false
+    var inBlockComment = false
 
-    while (i < upperQuery.length) {
-      val char = upperQuery[i]
+    while (i < query.length) {
+      val char = query[i]
+      val next = query.getOrNull(i + 1)
 
       when {
+        inLineComment -> if (char == '\n' || char == '\r') inLineComment = false
+        inBlockComment -> {
+          if (char == '*' && next == '/') {
+            inBlockComment = false
+            i++
+          }
+        }
+        inSingleQuote -> {
+          if (char == '\'' && next == '\'') {
+            i++
+          } else if (char == '\'') {
+            inSingleQuote = false
+          }
+        }
+        inDoubleQuote -> {
+          if (char == '"' && next == '"') {
+            i++
+          } else if (char == '"') {
+            inDoubleQuote = false
+          }
+        }
+        inBacktickQuote -> if (char == '`') inBacktickQuote = false
+        inBracketQuote -> if (char == ']') inBracketQuote = false
+        char == '-' && next == '-' -> {
+          inLineComment = true
+          i++
+        }
+        char == '/' && next == '*' -> {
+          inBlockComment = true
+          i++
+        }
+        char == '\'' -> inSingleQuote = true
+        char == '"' -> inDoubleQuote = true
+        char == '`' -> inBacktickQuote = true
+        char == '[' -> inBracketQuote = true
         char == '(' -> depth++
-        char == ')' -> depth--
+        char == ')' && depth > 0 -> depth--
         depth == 0 -> {
-          // Check for statement keywords at this position (with word boundary)
-          val remaining = upperQuery.substring(i).trimStart()
-          when {
-            startsWithKeyword(remaining, "SELECT") -> return "SELECT"
-            startsWithKeyword(remaining, "INSERT") -> return "INSERT"
-            startsWithKeyword(remaining, "UPDATE") -> return "UPDATE"
-            startsWithKeyword(remaining, "DELETE") -> return "DELETE"
+          for (keyword in keywords) {
+            if (matchesKeywordAt(query, i, keyword)) {
+              return Pair(keyword, i)
+            }
           }
         }
       }
@@ -245,8 +285,12 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     return null
   }
 
-  private fun executeQuery(databasePath: String, query: String): SQLExecutionResult.Query {
-    val db = openDatabase(databasePath, readOnly = true)
+  private fun executeQuery(
+      databasePath: String,
+      query: String,
+      readOnly: Boolean,
+  ): SQLExecutionResult.Query {
+    val db = openDatabase(databasePath, readOnly = readOnly)
     val columns = mutableListOf<String>()
     val rows = mutableListOf<List<Any?>>()
 

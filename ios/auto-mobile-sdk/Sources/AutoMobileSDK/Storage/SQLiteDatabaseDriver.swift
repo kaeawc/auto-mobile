@@ -166,14 +166,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         defer { operationLock.unlock() }
 
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let isRead = isReadQuery(trimmed)
-        let readOnly = isRead
-        guard let db = openDatabase(path: databasePath, readOnly: readOnly) else {
+        let classification = classifySQL(trimmed)
+        guard let db = openDatabase(path: databasePath, readOnly: classification.readOnly) else {
             return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0, error: "Failed to open database")
         }
 
-        if isRead {
-            return executeQuery(db: db, query: trimmed)
+        if classification.returnsRows {
+            return executeQuery(db: db, query: trimmed, includeRowsAffected: !classification.readOnly)
         } else {
             return executeMutation(db: db, query: trimmed)
         }
@@ -212,44 +211,133 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         return db
     }
 
-    private func isReadQuery(_ query: String) -> Bool {
-        let upper = query.uppercased()
-        if startsWithKeyword(upper, "SELECT") || startsWithKeyword(upper, "EXPLAIN") {
-            return true
+    private func classifySQL(_ query: String) -> SQLClassification {
+        guard let statement = findTopLevelStatement(in: query) else {
+            return SQLClassification(returnsRows: false, readOnly: false)
         }
-        // PRAGMA is read-only unless it contains '=' (e.g. PRAGMA user_version = 1)
-        if startsWithKeyword(upper, "PRAGMA") {
-            return !upper.contains("=")
+
+        switch statement.keyword {
+        case "SELECT", "EXPLAIN":
+            return SQLClassification(returnsRows: true, readOnly: true)
+        case "PRAGMA":
+            // PRAGMA is read-only unless it contains '=' (e.g. PRAGMA user_version = 1).
+            return SQLClassification(returnsRows: !query.contains("="), readOnly: !query.contains("="))
+        case "INSERT", "UPDATE", "DELETE":
+            let hasReturning = findTopLevelKeyword(
+                in: query,
+                from: query.index(statement.index, offsetBy: statement.keyword.count),
+                keywords: ["RETURNING"]
+            ) != nil
+            return SQLClassification(returnsRows: hasReturning, readOnly: false)
+        default:
+            return SQLClassification(returnsRows: false, readOnly: false)
         }
-        if startsWithKeyword(upper, "WITH") {
-            // CTE: find the actual statement after the CTE definitions
-            if let range = findStatementAfterCTE(upper) {
-                return startsWithKeyword(range, "SELECT")
-            }
-        }
-        return false
     }
 
     private func startsWithKeyword(_ text: String, _ keyword: String) -> Bool {
-        guard text.hasPrefix(keyword) else { return false }
-        let idx = text.index(text.startIndex, offsetBy: keyword.count)
-        guard idx < text.endIndex else { return true }
-        let next = text[idx]
-        return !next.isLetter && next != "_" && !next.isNumber
+        matchesKeyword(in: text, at: text.startIndex, keyword: keyword)
     }
 
-    private func findStatementAfterCTE(_ query: String) -> String? {
-        // Simple heuristic: find the last unmatched SELECT/INSERT/UPDATE/DELETE after WITH
+    private func matchesKeyword(in text: String, at index: String.Index, keyword: String) -> Bool {
+        if index > text.startIndex, isWordChar(text[text.index(before: index)]) {
+            return false
+        }
+        guard text[index...].range(of: keyword, options: [.anchored, .caseInsensitive]) != nil else {
+            return false
+        }
+        guard let next = text.index(index, offsetBy: keyword.count, limitedBy: text.endIndex),
+              next < text.endIndex
+        else {
+            return true
+        }
+        return !isWordChar(text[next])
+    }
+
+    private func isWordChar(_ char: Character) -> Bool {
+        char.isLetter || char.isNumber || char == "_"
+    }
+
+    private func findTopLevelStatement(in query: String) -> SQLKeyword? {
+        let keywords = ["SELECT", "PRAGMA", "EXPLAIN", "INSERT", "UPDATE", "DELETE"]
+        if !startsWithKeyword(query, "WITH") {
+            return keywords.first(where: { startsWithKeyword(query, $0) }).map {
+                SQLKeyword(keyword: $0, index: query.startIndex)
+            }
+        }
+
+        return findTopLevelKeyword(
+            in: query,
+            from: query.index(query.startIndex, offsetBy: "WITH".count),
+            keywords: keywords
+        )
+    }
+
+    private func findTopLevelKeyword(in query: String, from start: String.Index, keywords: [String]) -> SQLKeyword? {
         var depth = 0
-        var i = query.index(query.startIndex, offsetBy: 4) // skip "WITH"
+        var i = start
+        var inSingleQuote = false
+        var inDoubleQuote = false
+        var inBacktickQuote = false
+        var inBracketQuote = false
+        var inLineComment = false
+        var inBlockComment = false
+
         while i < query.endIndex {
-            let remaining = String(query[i...]).trimmingCharacters(in: .whitespaces)
-            if remaining.hasPrefix("(") { depth += 1 }
-            else if remaining.hasPrefix(")") { depth -= 1 }
-            else if depth == 0 {
-                for keyword in ["SELECT", "INSERT", "UPDATE", "DELETE"] {
-                    if startsWithKeyword(remaining, keyword) {
-                        return remaining
+            let char = query[i]
+            let nextIndex = query.index(after: i)
+            let next = nextIndex < query.endIndex ? query[nextIndex] : nil
+
+            if inLineComment {
+                if char == "\n" || char == "\r" {
+                    inLineComment = false
+                }
+            } else if inBlockComment {
+                if char == "*", next == "/" {
+                    inBlockComment = false
+                    i = nextIndex
+                }
+            } else if inSingleQuote {
+                if char == "'", next == "'" {
+                    i = nextIndex
+                } else if char == "'" {
+                    inSingleQuote = false
+                }
+            } else if inDoubleQuote {
+                if char == "\"", next == "\"" {
+                    i = nextIndex
+                } else if char == "\"" {
+                    inDoubleQuote = false
+                }
+            } else if inBacktickQuote {
+                if char == "`" {
+                    inBacktickQuote = false
+                }
+            } else if inBracketQuote {
+                if char == "]" {
+                    inBracketQuote = false
+                }
+            } else if char == "-", next == "-" {
+                inLineComment = true
+                i = nextIndex
+            } else if char == "/", next == "*" {
+                inBlockComment = true
+                i = nextIndex
+            } else if char == "'" {
+                inSingleQuote = true
+            } else if char == "\"" {
+                inDoubleQuote = true
+            } else if char == "`" {
+                inBacktickQuote = true
+            } else if char == "[" {
+                inBracketQuote = true
+            } else if char == "(" {
+                depth += 1
+            } else if char == ")", depth > 0 {
+                depth -= 1
+            } else if depth == 0 {
+                for keyword in keywords {
+                    if matchesKeyword(in: query, at: i, keyword: keyword) {
+                        return SQLKeyword(keyword: keyword, index: i)
                     }
                 }
             }
@@ -258,7 +346,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         return nil
     }
 
-    private func executeQuery(db: OpaquePointer, query: String) -> SQLExecutionResult {
+    private func executeQuery(
+        db: OpaquePointer,
+        query: String,
+        includeRowsAffected: Bool = false
+    )
+        -> SQLExecutionResult
+    {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
             let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
@@ -275,15 +369,23 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
 
         var rows: [[String?]] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var stepResult = sqlite3_step(stmt)
+        while stepResult == SQLITE_ROW {
             var row: [String?] = []
             for i in 0 ..< columnCount {
                 row.append(getColumnValue(stmt: stmt, index: Int32(i)))
             }
             rows.append(row)
+            stepResult = sqlite3_step(stmt)
         }
 
-        return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: 0)
+        if stepResult != SQLITE_DONE {
+            let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
+            return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0, error: error)
+        }
+
+        let rowsAffected = includeRowsAffected ? Int(sqlite3_changes(db)) : 0
+        return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: rowsAffected)
     }
 
     private func executeMutation(db: OpaquePointer, query: String) -> SQLExecutionResult {
@@ -371,4 +473,14 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         openDatabases.removeAll()
         lock.unlock()
     }
+}
+
+private struct SQLClassification {
+    let returnsRows: Bool
+    let readOnly: Bool
+}
+
+private struct SQLKeyword {
+    let keyword: String
+    let index: String.Index
 }

@@ -63,7 +63,7 @@ runFileDownloaderContract("FakeFileDownloader", payload => {
 
 runProcessExecutorContract("DefaultProcessExecutor", {
   make: () => new DefaultProcessExecutor(),
-  command: `${quote(process.execPath)} -e ${quote("process.stdout.write('contract-output')")}`
+  command: `bun -e ${quote("process.stdout.write('contract-output')")}`
 });
 runProcessExecutorContract("FakeProcessExecutor", {
   make: () => {

@@ -4,8 +4,11 @@
  */
 
 import { CheckResult } from "../types";
+import type { DoctorOptions } from "../types";
 import { DaemonManager } from "../../daemon/manager";
 import { getDaemonHealthReport } from "../../daemon/debugTools";
+import type { DaemonHealthReport } from "../../daemon/debugTools";
+import type { DaemonStatus } from "../../daemon/types";
 import { LATEST_RELEASE_VERSION, RELEASE_VERSION, resolveAssetVersion } from "../../constants/release";
 import { getMcpServerVersion } from "../../utils/mcpVersion";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -14,6 +17,20 @@ import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { logger } from "../../utils/logger";
 
 const RELEASES_URL = "https://github.com/kaeawc/auto-mobile/releases";
+
+interface DaemonStatusManager {
+  status(): Promise<DaemonStatus>;
+}
+
+export interface DaemonStatusDependencies {
+  daemonManager?: DaemonStatusManager;
+  getDaemonHealthReport?: () => Promise<DaemonHealthReport>;
+}
+
+export interface AutoMobileCheckDependencies {
+  checkDaemonStatus?: () => Promise<CheckResult>;
+  checkDaemonConnectivity?: () => Promise<CheckResult>;
+}
 
 /**
  * Report the daemon JS package version, sourced from package.json.
@@ -46,9 +63,21 @@ export function checkCtrlProxyVersion(): CheckResult {
 /**
  * Check daemon status
  */
-async function checkDaemonStatus(): Promise<CheckResult> {
+export async function checkDaemonStatus(
+  dependencies: DaemonStatusDependencies = {}
+): Promise<CheckResult> {
   try {
-    const manager = new DaemonManager();
+    const report = await (dependencies.getDaemonHealthReport ?? getDaemonHealthReport)();
+    if (report.socketConnectable) {
+      return {
+        name: "Daemon Status",
+        status: "pass",
+        message: "Running (serving via socket)",
+        ...(report.daemonPid !== undefined ? { value: report.daemonPid } : {}),
+      };
+    }
+
+    const manager = dependencies.daemonManager ?? new DaemonManager();
     const status = await manager.status();
 
     if (status.running) {
@@ -79,9 +108,11 @@ async function checkDaemonStatus(): Promise<CheckResult> {
 /**
  * Check daemon connectivity
  */
-async function checkDaemonConnectivity(): Promise<CheckResult> {
+export async function checkDaemonConnectivity(
+  getHealthReport: () => Promise<DaemonHealthReport> = getDaemonHealthReport
+): Promise<CheckResult> {
   try {
-    const report = await getDaemonHealthReport();
+    const report = await getHealthReport();
 
     if (report.socketConnectable) {
       return {
@@ -144,6 +175,7 @@ export async function checkCtrlProxy(
     const isEnabled = await serviceManager.isEnabled();
 
     const diagnostics: string[] = [
+      `platform=${device.platform}`,
       `device=${device.deviceId}`,
       `installed=${isInstalled}`,
       `enabled=${isEnabled}`
@@ -331,15 +363,32 @@ export async function checkWorkProfileAccessibility(
 /**
  * Run all AutoMobile checks
  */
-export async function runAutoMobileChecks(): Promise<CheckResult[]> {
+export async function runAutoMobileChecks(
+  options: DoctorOptions = {},
+  dependencies: AutoMobileCheckDependencies = {}
+): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
   results.push(checkDaemonVersion());
   results.push(checkCtrlProxyVersion());
-  results.push(await checkDaemonStatus());
-  results.push(await checkDaemonConnectivity());
-  results.push(await checkCtrlProxy());
-  results.push(await checkWorkProfileAccessibility());
+  results.push(await (dependencies.checkDaemonStatus ?? (() => checkDaemonStatus()))());
+  results.push(await (dependencies.checkDaemonConnectivity ?? (() => checkDaemonConnectivity()))());
+
+  if (options.ios === true && options.android !== true) {
+    results.push({
+      name: "CtrlProxy",
+      status: "skip",
+      message: "Skipped for iOS-only doctor run",
+    });
+    results.push({
+      name: "Work Profile Accessibility",
+      status: "skip",
+      message: "Skipped for iOS-only doctor run",
+    });
+  } else {
+    results.push(await checkCtrlProxy());
+    results.push(await checkWorkProfileAccessibility());
+  }
 
   return results;
 }

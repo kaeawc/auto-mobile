@@ -88,7 +88,7 @@ export async function runDoctor(
   }
 
   // Always run AutoMobile checks
-  const autoMobileChecks = await runAutoMobileChecks();
+  const autoMobileChecks = await runAutoMobileChecks(options);
   allChecks.push(...autoMobileChecks);
 
   // Calculate summary and recommendations

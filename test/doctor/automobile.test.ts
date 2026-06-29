@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   checkCtrlProxy,
   checkCtrlProxyVersion,
+  checkDaemonStatus,
   checkDaemonVersion,
+  runAutoMobileChecks,
 } from "../../src/doctor/checks/automobile";
 import {
   LATEST_RELEASE_VERSION,
@@ -42,6 +44,57 @@ describe("checkCtrlProxyVersion", () => {
     if (RELEASE_VERSION === LATEST_RELEASE_VERSION) {
       expect(result.message).toMatch(/\(latest\)$/);
     }
+  });
+});
+
+describe("checkDaemonStatus", () => {
+  test("probes daemon socket before invoking status cleanup", async () => {
+    const result = await checkDaemonStatus({
+      daemonManager: {
+        status: async () => {
+          throw new Error("status should not run before socket probe succeeds");
+        },
+      },
+      getDaemonHealthReport: async () => ({
+        timestamp: "2026-06-29T00:00:00.000Z",
+        daemonRunning: true,
+        socketExists: true,
+        socketAccessible: true,
+        pidFileExists: true,
+        pidFileValid: true,
+        daemonPid: 12345,
+        socketConnectable: true,
+        recommendations: [],
+      }),
+    });
+
+    expect(result.name).toBe("Daemon Status");
+    expect(result.status).toBe("pass");
+    expect(result.message).toBe("Running (serving via socket)");
+    expect(result.value).toBe(12345);
+  });
+
+  test("reports responsive serving daemon when pid status is stale", async () => {
+    const result = await checkDaemonStatus({
+      daemonManager: {
+        status: async () => ({ running: false }),
+      },
+      getDaemonHealthReport: async () => ({
+        timestamp: "2026-06-29T00:00:00.000Z",
+        daemonRunning: false,
+        socketExists: true,
+        socketAccessible: true,
+        pidFileExists: false,
+        pidFileValid: false,
+        socketConnectable: true,
+        recommendations: [],
+      }),
+    });
+
+    expect(result.name).toBe("Daemon Status");
+    expect(result.status).toBe("pass");
+    expect(result.message).toBe("Running (serving via socket)");
+    expect(result.recommendation).toBeUndefined();
   });
 });
 
@@ -141,6 +194,8 @@ describe("checkCtrlProxy", () => {
       const result = await checkCtrlProxy(fakeFactory);
 
       expect(result.status).toBe("pass");
+      expect(result.message).toContain("platform=android");
+      expect(result.message).toContain("device=emulator-5554");
       expect(result.message).toContain("versionStatus=skipped");
       expect(result.message).not.toContain("acceptedPreinstalled=true");
       expect(result.recommendation).toBeUndefined();
@@ -151,5 +206,31 @@ describe("checkCtrlProxy", () => {
         process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = originalSkipDownload;
       }
     }
+  });
+});
+
+describe("runAutoMobileChecks", () => {
+  test("skips Android CtrlProxy diagnostics during iOS-only doctor runs", async () => {
+    const results = await runAutoMobileChecks(
+      { ios: true },
+      {
+        checkDaemonStatus: async () => ({
+          name: "Daemon Status",
+          status: "pass",
+          message: "Running (serving via socket)",
+        }),
+        checkDaemonConnectivity: async () => ({
+          name: "Daemon Connectivity",
+          status: "pass",
+          message: "Daemon is responsive",
+        }),
+      }
+    );
+
+    const ctrlProxy = results.find(result => result.name === "CtrlProxy");
+
+    expect(ctrlProxy?.status).toBe("skip");
+    expect(ctrlProxy?.message).toBe("Skipped for iOS-only doctor run");
+    expect(ctrlProxy?.message).not.toContain("emulator-5554");
   });
 });

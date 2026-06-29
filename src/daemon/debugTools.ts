@@ -26,10 +26,20 @@ export interface DaemonHealthReport {
   recommendations: string[];
 }
 
+export interface DaemonHealthReportOptions {
+  socketPath?: string;
+  pidFilePath?: string;
+}
+
 /**
  * Get comprehensive daemon health report
  */
-export async function getDaemonHealthReport(timer: Timer = defaultTimer): Promise<DaemonHealthReport> {
+export async function getDaemonHealthReport(
+  timer: Timer = defaultTimer,
+  options: DaemonHealthReportOptions = {}
+): Promise<DaemonHealthReport> {
+  const socketPath = options.socketPath ?? SOCKET_PATH;
+  const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const report: DaemonHealthReport = {
     timestamp: new Date().toISOString(),
     daemonRunning: false,
@@ -42,7 +52,7 @@ export async function getDaemonHealthReport(timer: Timer = defaultTimer): Promis
   };
 
   // Check socket file
-  report.socketExists = existsSync(SOCKET_PATH);
+  report.socketExists = existsSync(socketPath);
   if (!report.socketExists) {
     report.recommendations.push("Socket file not found. Daemon may not be running.");
   } else {
@@ -50,14 +60,14 @@ export async function getDaemonHealthReport(timer: Timer = defaultTimer): Promis
   }
 
   // Check PID file
-  report.pidFileExists = existsSync(PID_FILE_PATH);
+  report.pidFileExists = existsSync(pidFilePath);
   if (!report.pidFileExists) {
     if (report.socketExists) {
       report.recommendations.push("Socket exists but PID file missing. Daemon may be in bad state.");
     }
   } else {
     try {
-      const pidContent = await readFile(PID_FILE_PATH, "utf-8");
+      const pidContent = await readFile(pidFilePath, "utf-8");
       const pidData: PidFileData = JSON.parse(pidContent);
       report.pidFileValid = true;
       report.daemonPid = pidData.pid;
@@ -83,15 +93,21 @@ export async function getDaemonHealthReport(timer: Timer = defaultTimer): Promis
     }
   }
 
-  // Try to connect to socket to verify daemon responsiveness
-  if (report.socketExists && report.daemonRunning) {
+  // Try to connect to socket to verify daemon responsiveness. A daemon can be
+  // serving via socket even when PID bookkeeping is stale or missing.
+  if (report.socketExists) {
     try {
-      const available = await DaemonClient.isAvailable(SOCKET_PATH);
+      const available = await DaemonClient.isAvailable(socketPath);
       report.socketConnectable = available;
       if (!available) {
         report.recommendations.push(
-          "Socket file exists and process is running, but socket is not responding. " +
+          "Socket file exists, but socket is not responding. " +
           "Daemon may be stuck or unresponsive."
+        );
+      } else if (!report.daemonRunning) {
+        report.daemonRunning = true;
+        report.recommendations.push(
+          "Daemon socket is responsive, but PID bookkeeping is stale or missing."
         );
       }
     } catch (error) {

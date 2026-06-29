@@ -17,6 +17,7 @@ import type {
 } from "./VideoRecorderService";
 
 const PROCESS_EXIT_TIMEOUT_MS = 5000;
+const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
 
 interface ProcessExitState {
   exitCode?: number | null;
@@ -45,6 +46,10 @@ type FfmpegDiagnosticsTracker = Pick<ProcessTracker, "exitState" | "stderr">;
 
 function isFailedExitCode(exitCode: number | null | undefined): boolean {
   return exitCode !== undefined && exitCode !== 0;
+}
+
+function isFailedExitState(exitState: ProcessExitState): boolean {
+  return isFailedExitCode(exitState.exitCode) || exitState.signal !== undefined && exitState.signal !== null;
 }
 
 interface FfmpegBackendHandle {
@@ -124,6 +129,35 @@ async function waitForExit(
       }
       resolve();
     }, PROCESS_EXIT_TIMEOUT_MS);
+  });
+
+  await Promise.race([exitPromise, timeoutPromise]);
+
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+
+  await exitPromise;
+}
+
+async function waitForProcessCompletion(
+  process: ChildProcessWithoutNullStreams,
+  exitPromise: Promise<void>,
+  timeoutMs: number
+): Promise<void> {
+  if (process.exitCode !== null || process.killed) {
+    await exitPromise;
+    return;
+  }
+
+  let timeoutId: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<void>(resolve => {
+    timeoutId = defaultTimer.setTimeout(() => {
+      if (process.exitCode === null) {
+        process.kill("SIGKILL");
+      }
+      resolve();
+    }, timeoutMs);
   });
 
   await Promise.race([exitPromise, timeoutPromise]);
@@ -367,9 +401,13 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     const ffmpegTracker = trackProcess(ffmpegProcess);
     backendHandle.ffmpegTracker = ffmpegTracker;
 
-    await waitForExit(ffmpegProcess, ffmpegTracker.exitPromise);
+    await waitForProcessCompletion(
+      ffmpegProcess,
+      ffmpegTracker.exitPromise,
+      FFMPEG_POST_PROCESS_TIMEOUT_MS
+    );
 
-    if (isFailedExitCode(ffmpegTracker.exitState.exitCode)) {
+    if (isFailedExitState(ffmpegTracker.exitState)) {
       throw new ActionableError(
         this.buildFfmpegFailureMessage(
           "FFmpeg post-processing failed",

@@ -59,6 +59,39 @@ describe("configureSqliteDatabase", () => {
 });
 
 describe("BunSqliteDialect transactions", () => {
+  test("defers opening a lazy database until beforeQuery resolves", async () => {
+    const releaseQuery = createDeferred();
+    let databaseOpened = false;
+
+    const db = new Kysely<unknown>({
+      dialect: new BunSqliteDialect({
+        database: () => {
+          databaseOpened = true;
+          return new BunDatabase(":memory:");
+        },
+        beforeQuery: async () => {
+          await releaseQuery.promise;
+        },
+      }),
+    });
+
+    try {
+      const query = db
+        .selectFrom("sqlite_master" as any)
+        .selectAll()
+        .execute();
+
+      await Promise.resolve();
+      expect(databaseOpened).toBe(false);
+
+      releaseQuery.resolve();
+      await query;
+      expect(databaseOpened).toBe(true);
+    } finally {
+      await db.destroy();
+    }
+  });
+
   test("rolls back all statements when a transaction throws", async () => {
     const db = new Kysely<{ items: { id: number; name: string } }>({
       dialect: new BunSqliteDialect({

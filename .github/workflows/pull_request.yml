@@ -1257,6 +1257,12 @@ jobs:
       - name: "Boot iOS Simulator (Xcode 26.3)"
         run: ./scripts/ios/boot-simulator.sh
 
+      - name: "Run videoRecording MP4 integration test"
+        timeout-minutes: 10
+        run: |
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          ./scripts/ios/video-recording-start-stop-integration.sh
+
       - name: "Run Reminders integration tests (Xcode 26.3)"
         timeout-minutes: 10
         env:

@@ -9,6 +9,7 @@ import { BunSqliteDialect } from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 type BunDatabaseConstructor = typeof import("bun:sqlite").Database;
+type BunDatabase = import("bun:sqlite").Database;
 
 let bunDatabaseConstructor: BunDatabaseConstructor | null = null;
 
@@ -112,16 +113,19 @@ function createSqliteKysely<T>(
   dbPath: string,
   beforeQuery?: () => Promise<void>
 ): Kysely<T> {
-  const BunDatabaseConstructor = resolveBunDatabaseConstructor();
-  const sqliteDb = new BunDatabaseConstructor(dbPath);
-  configureSqliteDatabase(sqliteDb);
-
   return new Kysely<T>({
     dialect: new BunSqliteDialect({
-      database: sqliteDb,
+      database: () => openConfiguredSqliteDatabase(dbPath),
       beforeQuery,
     }),
   });
+}
+
+function openConfiguredSqliteDatabase(dbPath: string): BunDatabase {
+  const BunDatabaseConstructor = resolveBunDatabaseConstructor();
+  const sqliteDb = new BunDatabaseConstructor(dbPath);
+  configureSqliteDatabase(sqliteDb);
+  return sqliteDb;
 }
 
 async function startMigrations(dbPath: string): Promise<void> {

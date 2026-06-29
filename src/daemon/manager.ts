@@ -25,7 +25,10 @@ import {
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { cleanupDaemonFiles } from "./daemonFiles";
+import {
+  cleanupDaemonFiles,
+  isProcessRunning as isDaemonProcessRunning,
+} from "./daemonFiles";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   resolveDaemonLaunchWorkingDirectory,
@@ -110,7 +113,11 @@ export function parseDaemonProcessTable(psOutput: string): DaemonProcessRecord[]
   return records;
 }
 
-export class PsDaemonProcessFinder implements DaemonProcessFinder {
+export interface DaemonProcessLivenessChecker {
+  isProcessRunning(pid: number): boolean;
+}
+
+export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
 
   findDaemonProcesses(): DaemonProcessRecord[] {
@@ -119,6 +126,10 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder {
       maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
     });
     return parseDaemonProcessTable(psOutput);
+  }
+
+  isProcessRunning(pid: number): boolean {
+    return isDaemonProcessRunning(pid);
   }
 }
 
@@ -129,6 +140,10 @@ export interface DaemonProcessSpawner {
 const nodeDaemonProcessSpawner: DaemonProcessSpawner = {
   spawn: nodeSpawn,
 };
+
+function hasProcessLivenessChecker(value: unknown): value is DaemonProcessLivenessChecker {
+  return typeof (value as Partial<DaemonProcessLivenessChecker> | undefined)?.isProcessRunning === "function";
+}
 
 const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 
@@ -196,6 +211,7 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly socketPath: string;
   private readonly processFinder: DaemonProcessFinder;
   private readonly processSpawner: DaemonProcessSpawner;
+  private readonly processLivenessChecker: DaemonProcessLivenessChecker;
 
   constructor(
     clientFactory: DaemonClientFactory | undefined = undefined,
@@ -215,9 +231,14 @@ export class DaemonManager implements DaemonManagerLike {
     if ("findDaemonProcesses" in processFinderOrSpawner) {
       this.processFinder = processFinderOrSpawner;
       this.processSpawner = processSpawner;
+      this.processLivenessChecker = hasProcessLivenessChecker(processFinderOrSpawner)
+        ? processFinderOrSpawner
+        : new PsDaemonProcessFinder();
     } else {
-      this.processFinder = new PsDaemonProcessFinder();
+      const processFinder = new PsDaemonProcessFinder();
+      this.processFinder = processFinder;
       this.processSpawner = processFinderOrSpawner;
+      this.processLivenessChecker = processFinder;
     }
     this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath));
   }
@@ -303,13 +324,18 @@ export class DaemonManager implements DaemonManagerLike {
     try {
       return this.normalizeDaemonProcessRecords(this.processFinder.findDaemonProcesses());
     } catch (error) {
-      // No matching processes found or command failed
-      return [];
+      throw new ActionableError(
+        `Failed to inspect daemon process table: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
   findOtherDaemonProcesses(activeDaemonPid: number | undefined): number[] {
-    return this.findAllDaemonProcesses().filter(pid => pid !== activeDaemonPid);
+    return this.findLiveDaemonProcesses().filter(pid => pid !== activeDaemonPid);
+  }
+
+  findLiveDaemonProcesses(): number[] {
+    return this.findAllDaemonProcesses().filter(pid => this.isProcessRunning(pid));
   }
 
   private normalizeDaemonProcessRecords(records: DaemonProcessRecord[]): number[] {
@@ -387,7 +413,7 @@ export class DaemonManager implements DaemonManagerLike {
    */
   private async startUnlocked(options: DaemonOptions): Promise<void> {
     // Check for any running daemon processes from ANY worktree
-    const otherDaemons = this.findAllDaemonProcesses();
+    const otherDaemons = this.findLiveDaemonProcesses();
     if (otherDaemons.length > 0) {
       stderrLog(
         `\nWARNING: Found ${otherDaemons.length} other auto-mobile daemon process(es) running:`
@@ -403,7 +429,7 @@ export class DaemonManager implements DaemonManagerLike {
       for (const pid of otherDaemons) {
         try {
           process.kill(pid, "SIGTERM");
-          stderrLog(`  Stopped PID ${pid}`);
+          stderrLog(`  Sent SIGTERM to PID ${pid}`);
         } catch (error) {
           stderrLog(`  Failed to stop PID ${pid}: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -411,6 +437,19 @@ export class DaemonManager implements DaemonManagerLike {
 
       // Wait for processes to terminate
       await this.timer.sleep(1000);
+
+      const remainingDaemonPids = new Set(this.findLiveDaemonProcesses());
+      for (const pid of otherDaemons) {
+        if (!remainingDaemonPids.has(pid)) {
+          continue;
+        }
+        try {
+          process.kill(pid, "SIGKILL");
+          stderrLog(`  Sent SIGKILL to PID ${pid}`);
+        } catch (error) {
+          stderrLog(`  Failed to kill PID ${pid}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
     }
 
     // Enforce single daemon policy: stop any existing daemon before starting
@@ -892,13 +931,7 @@ export class DaemonManager implements DaemonManagerLike {
    * Check if a process is running
    */
   private isProcessRunning(pid: number): boolean {
-    try {
-      // Sending signal 0 checks if process exists without actually sending a signal
-      process.kill(pid, 0);
-      return true;
-    } catch (error) {
-      return false;
-    }
+    return this.processLivenessChecker.isProcessRunning(pid);
   }
 
   /**

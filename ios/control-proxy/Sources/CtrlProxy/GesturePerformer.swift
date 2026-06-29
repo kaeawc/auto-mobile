@@ -882,7 +882,7 @@ public class GesturePerformer: GesturePerforming {
                 return .unavailable
             }
             guard let text = box.text else { return .unavailable }
-            return text.isEmpty ? .unavailable : .value(text)
+            return .value(text)
         }
 
         private final class ClipboardReadBox {

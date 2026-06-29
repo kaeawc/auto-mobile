@@ -18,6 +18,14 @@ final class ClipboardResolutionTests: XCTestCase {
         XCTAssertNil(text)
     }
 
+    func testGetReturnsEmptyWhenLivePasteboardValueIsEmptyString() throws {
+        let text = try GesturePerformer.resolveClipboardGet(
+            readResult: .value("")
+        )
+
+        XCTAssertNil(text)
+    }
+
     func testGetThrowsWhenLivePasteboardReadIsUnavailableInsteadOfReturningShadow() {
         XCTAssertThrowsError(try GesturePerformer.resolveClipboardGet(
             readResult: .unavailable

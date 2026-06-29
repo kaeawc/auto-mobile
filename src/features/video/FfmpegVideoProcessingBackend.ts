@@ -405,9 +405,19 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         IOS_RECORDING_START_TIMEOUT_MS
       );
     } catch (error) {
+      let stopError: unknown;
+      try {
+        await waitForExit(captureTracker.process, captureTracker.exitPromise);
+      } catch (cleanupError) {
+        stopError = cleanupError;
+      }
+
+      const cleanupSuffix = stopError
+        ? `; cleanup failed: ${stopError}`
+        : "";
       throw new ActionableError(
         this.buildProcessFailureMessage(
-          `Failed to start iOS recording: ${error}`,
+          `Failed to start iOS recording: ${error}${cleanupSuffix}`,
           "xcrun",
           args,
           captureTracker

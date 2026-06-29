@@ -192,4 +192,32 @@ export class HierarchyCollector {
 
     return null;
   }
+
+  /**
+   * Reconcile the duplicated `screenWidth`/`screenHeight` fields on the view
+   * hierarchy with the authoritative screen size.
+   *
+   * The iOS CtrlProxy runner reports `UIScreen.main.bounds`, which can be the
+   * legacy 320x480 compatibility value when the runner app has no launch screen
+   * (see issue #2683). The top-level `screenSize` is derived from the root
+   * element bounds and is correct, so we copy it back onto the hierarchy to keep
+   * the two values consistent for any consumer that trusts the hierarchy fields.
+   *
+   * Mutates and returns the same `viewHierarchy` object. When `screenSize` is
+   * missing or non-positive the hierarchy is left untouched.
+   */
+  reconcileScreenDimensions(
+    viewHierarchy: ObserveResult["viewHierarchy"],
+    screenSize: { width: number; height: number } | null
+  ): ObserveResult["viewHierarchy"] {
+    if (!viewHierarchy || typeof viewHierarchy === "string") {
+      return viewHierarchy;
+    }
+    if (!screenSize || screenSize.width <= 0 || screenSize.height <= 0) {
+      return viewHierarchy;
+    }
+    viewHierarchy.screenWidth = screenSize.width;
+    viewHierarchy.screenHeight = screenSize.height;
+    return viewHierarchy;
+  }
 }

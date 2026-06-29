@@ -510,6 +510,13 @@ export class RealObserveScreen implements ObserveScreen {
         // Filter offscreen nodes to keep payload small. Original hierarchy stays
         // attached for raw element search when enabled.
         if (result.viewHierarchy && result.screenSize?.width > 0 && result.screenSize?.height > 0) {
+          // Reconcile the duplicated viewHierarchy.screenWidth/screenHeight fields
+          // with the authoritative screenSize before filtering (which preserves
+          // them). The iOS runner can report a stale 320x480 (legacy compatibility
+          // mode) value; keep the hierarchy fields consistent for consumers that
+          // read them directly (issue #2683).
+          this.hierarchyCollector.reconcileScreenDimensions(result.viewHierarchy, result.screenSize);
+
           const rawHierarchy = result.viewHierarchy;
           result.viewHierarchy = this.viewHierarchy.filterOffscreenNodes(
             rawHierarchy,

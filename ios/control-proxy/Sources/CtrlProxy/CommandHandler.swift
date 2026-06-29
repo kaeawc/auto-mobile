@@ -21,7 +21,6 @@ public class CommandHandler: CommandHandling {
     private let storageInspector: StorageInspecting?
     private let sdkHierarchyClient: (any SdkHierarchyFetching)?
     private let sdkHierarchyCache: (any SdkHierarchyCaching)?
-    private let highlightOverlayManager: HighlightOverlayManaging
     private let sdkDatabaseClient: (any SdkDatabaseFetching)?
 
     public init(
@@ -31,7 +30,6 @@ public class CommandHandler: CommandHandling {
         storageInspector: StorageInspecting? = nil,
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
-        highlightOverlayManager: HighlightOverlayManaging = HighlightOverlayManager(),
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil
     ) {
         self.elementLocator = elementLocator
@@ -40,7 +38,6 @@ public class CommandHandler: CommandHandling {
         self.storageInspector = storageInspector
         self.sdkHierarchyClient = sdkHierarchyClient
         self.sdkHierarchyCache = sdkHierarchyCache
-        self.highlightOverlayManager = highlightOverlayManager
         self.sdkDatabaseClient = sdkDatabaseClient
     }
 
@@ -52,7 +49,6 @@ public class CommandHandler: CommandHandling {
         storageInspector: StorageInspecting? = nil,
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
-        highlightOverlayManager: HighlightOverlayManaging = HighlightOverlayManager(),
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil
     )
         -> CommandHandler
@@ -64,7 +60,6 @@ public class CommandHandler: CommandHandling {
             storageInspector: storageInspector,
             sdkHierarchyClient: sdkHierarchyClient,
             sdkHierarchyCache: sdkHierarchyCache,
-            highlightOverlayManager: highlightOverlayManager,
             sdkDatabaseClient: sdkDatabaseClient
         )
     }
@@ -983,9 +978,10 @@ public class CommandHandler: CommandHandling {
         }
         let highlightId = request.id ?? request.requestId ?? UUID().uuidString
         // When the in-app SDK bridge owns the foreground app, it is the authoritative
-        // highlight path. A rejection there (e.g. missing source dimensions, issue
-        // #2682) must fail loudly — falling back to the runner overlay would draw the
-        // highlight unscaled and misplace it. Only an unreachable bridge falls back.
+        // (and only) highlight path. A rejection there — e.g. missing source dimensions
+        // (issue #2682) — must be reported precisely rather than collapsed into the
+        // generic "SDK not embedded" error below, which would mislead since the SDK is
+        // in fact embedded. An unreachable bridge falls through to that generic error.
         if sdkHierarchyClient != nil, sdkServerMatchesTrackedForegroundApp() {
             switch sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) {
             case .rendered:
@@ -1003,20 +999,19 @@ public class CommandHandler: CommandHandling {
                     totalTimeMs: totalTimeMs(from: startTime)
                 )
             case .unavailable, .none:
-                break // Bridge unreachable — fall through to the runner overlay.
+                break // Bridge unreachable — fall through to the SDK-required error.
             }
         }
-        guard highlightOverlayManager.show(id: highlightId, shape: shape) else {
-            return WebSocketResponse.error(
-                type: ResponseType.highlightResponse.rawValue,
-                requestId: request.requestId,
-                error: "Unable to render highlight on iOS: target app SDK highlight bridge unavailable and runner overlay fallback failed.",
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-        return WebSocketResponse.success(
+        // iOS cannot draw an overlay into another app from the test runner: the runner's
+        // own UIWindow only composites while the runner is foreground, which never happens
+        // during automation. Highlighting the app-under-test requires the in-app AutoMobile
+        // SDK bridge, so report that honestly instead of pretending it rendered.
+        let foregroundBundleId = elementLocator.foregroundBundleId ?? "the foreground app"
+        return WebSocketResponse.error(
             type: ResponseType.highlightResponse.rawValue,
             requestId: request.requestId,
+            error: "Highlighting \(foregroundBundleId) requires the AutoMobile SDK embedded in the target app; "
+                + "iOS cannot draw an overlay into another app from the test runner.",
             totalTimeMs: totalTimeMs(from: startTime)
         )
     }

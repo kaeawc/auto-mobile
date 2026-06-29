@@ -517,11 +517,20 @@ public class ElementLocator: ElementLocating {
             // Get screen scale and dimensions for coordinate conversion
             // iOS reports bounds in points, but screenshots are in pixels
             // screenScale converts: pixels = points * screenScale
-            let (screenScale, screenWidth, screenHeight): (Float, Int, Int) = try runOnMainThread {
+            //
+            // The runner's UIScreen.main.bounds can be a stale 320x480 compatibility
+            // value (issue #2683), so prefer the foreground app's root frame and only
+            // fall back to UIScreen.main.bounds.
+            let (screenScale, fallbackWidth, fallbackHeight): (Float, Int, Int) = try runOnMainThread {
                 let scale = Float(UIScreen.main.scale)
                 let bounds = UIScreen.main.bounds
                 return (scale, Int(bounds.width), Int(bounds.height))
             }
+            let (screenWidth, screenHeight) = ElementLocator.resolveScreenDimensions(
+                rootBounds: finalHierarchy.bounds,
+                fallbackWidth: fallbackWidth,
+                fallbackHeight: fallbackHeight
+            )
 
             return ViewHierarchy(
                 packageName: bundleId,
@@ -1173,6 +1182,24 @@ public class ElementLocator: ElementLocating {
             || element.resourceId != nil
             || element.contentDesc != nil
             || element.hintText != nil
+    }
+
+    /// Resolve the logical screen dimensions reported in the hierarchy.
+    ///
+    /// The XCUITest runner process can report a stale 320x480 `UIScreen.main.bounds`
+    /// when it runs in legacy compatibility mode (issue #2683). The foreground app's
+    /// root snapshot frame reflects the true device size, so prefer it and fall back
+    /// to the runner-reported bounds only when the root frame is unavailable or
+    /// degenerate.
+    static func resolveScreenDimensions(
+        rootBounds: ElementBounds?,
+        fallbackWidth: Int,
+        fallbackHeight: Int
+    ) -> (width: Int, height: Int) {
+        if let bounds = rootBounds, bounds.width > 0, bounds.height > 0 {
+            return (bounds.width, bounds.height)
+        }
+        return (fallbackWidth, fallbackHeight)
     }
 
     /// Collapse same-type text-input children into their parent.

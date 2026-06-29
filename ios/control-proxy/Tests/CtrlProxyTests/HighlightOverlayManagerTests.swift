@@ -33,7 +33,7 @@ final class HighlightOverlayManagerTests: XCTestCase {
         XCTAssertEqual(command.bounds?.x, 30)
         XCTAssertEqual(command.bounds?.width, 80)
         XCTAssertEqual(command.strokeColor, "#FF0000")
-        XCTAssertEqual(command.strokeWidth, 3)
+        XCTAssertEqual(command.strokeWidth, 8)
     }
 
     func testBuildsPathRenderCommand() throws {
@@ -45,7 +45,7 @@ final class HighlightOverlayManagerTests: XCTestCase {
         let shape = HighlightShape(
             type: "path",
             points: points,
-            style: HighlightStyle(strokeColor: "#FF3B30", strokeWidth: 2)
+            style: HighlightStyle(strokeColor: "#FF3B30", strokeWidth: 2, smoothing: "catmull-rom", tension: 0.6)
         )
 
         let command = try HighlightOverlayCommandBuilder.command(for: shape)
@@ -58,6 +58,48 @@ final class HighlightOverlayManagerTests: XCTestCase {
         XCTAssertEqual(command.points[2].y, 6)
         XCTAssertEqual(command.strokeColor, "#FF3B30")
         XCTAssertEqual(command.strokeWidth, 2)
+        XCTAssertEqual(command.smoothing, "catmull-rom")
+        XCTAssertEqual(command.tension, 0.6)
+    }
+
+    func testBuildsHandDrawnEllipseSegmentsWithJitterAndWidthVariation() {
+        let segments = HighlightOverlayHandDrawnSegments.ellipseSegments(
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 80),
+            baseStrokeWidth: 8,
+            phaseX: 0,
+            phaseY: 0,
+            startAngleJitter: 0
+        )
+
+        XCTAssertEqual(segments.count, 160)
+        XCTAssertLessThan(segments.map(\.strokeWidth).min() ?? 0, 7)
+        XCTAssertGreaterThan(segments.map(\.strokeWidth).max() ?? 0, 15)
+        XCTAssertNotEqual(segments[0].startX, segments[40].startX)
+        XCTAssertNotEqual(segments[0].strokeWidth, segments[40].strokeWidth)
+    }
+
+    func testBuildsHandDrawnPathSegmentsWithDefaultSmoothingAndTaper() {
+        let points = [
+            HighlightPoint(x: 10, y: 20),
+            HighlightPoint(x: 40, y: 35),
+            HighlightPoint(x: 80, y: 25),
+        ]
+
+        let segments = HighlightOverlayHandDrawnSegments.pathSegments(
+            points: points,
+            smoothing: nil,
+            tension: nil,
+            baseStrokeWidth: 8
+        )
+
+        XCTAssertGreaterThan(segments.count, points.count - 1)
+        XCTAssertEqual(segments.first?.startX, 10)
+        XCTAssertEqual(segments.first?.startY, 20)
+        XCTAssertEqual(segments.last?.endX, 80)
+        XCTAssertEqual(segments.last?.endY, 25)
+        XCTAssertLessThan(segments.first?.strokeWidth ?? 0, 8)
+        XCTAssertLessThan(segments.last?.strokeWidth ?? 0, 8)
+        XCTAssertGreaterThan(segments.map(\.strokeWidth).max() ?? 0, 7)
     }
 
     func testScalesScreenshotBoundsToOverlayTargetSize() throws {

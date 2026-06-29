@@ -127,8 +127,11 @@ BOOL ObjCExceptionCatcher_synthesizePinch(
             return;
         }
 
-        CGFloat startRadius = MAX(distanceStart, 1) / 2.0;
-        CGFloat endRadius = MAX(distanceEnd, 1) / 2.0;
+        // Avoid the MAX() macro: it expands to a GNU statement expression, which
+        // Xcode 26.3's clang flags under -Wgnu-statement-expression-from-macro-expansion
+        // and the target builds with -pedantic -Werror.
+        CGFloat startRadius = (distanceStart > 1 ? distanceStart : 1) / 2.0;
+        CGFloat endRadius = (distanceEnd > 1 ? distanceEnd : 1) / 2.0;
         CGFloat endRadians = rotationDegrees * (CGFloat)M_PI / 180.0;
         CGFloat dxStart = startRadius;
         CGFloat dyStart = 0;

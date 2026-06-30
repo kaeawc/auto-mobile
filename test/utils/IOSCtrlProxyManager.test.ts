@@ -981,6 +981,45 @@ describe("IOSCtrlProxyManager", function() {
       }
     });
 
+    test("startOnSimulator() reallocates when the current simulator port becomes busy before launch", async function() {
+      const unavailablePorts = new Set<number>();
+      const checkedPorts: number[] = [];
+      PortManager.setPortAvailabilityCheckerForTesting({
+        isPortAvailable: (port: number) => {
+          checkedPorts.push(port);
+          return !unavailablePorts.has(port);
+        },
+      });
+      try {
+        const fakeBuilder = {
+          getXctestrunPath: async () => "/tmp/test.xctestrun",
+          getRunnerBinaryPath: async () => null,
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeTimer,
+          fakeBuilder,
+          fakeExecutor
+        );
+        expect(manager.getServicePort()).toBe(8765);
+
+        unavailablePorts.add(8765);
+
+        await (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator();
+
+        const spawn = fakeExecutor.getSpawnedProcesses()[0];
+        expect(checkedPorts).toEqual([8765, 8765, 8767]);
+        expect(manager.getServicePort()).toBe(8767);
+        expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
+        expect(spawn.options?.env).toMatchObject({
+          CTRL_PROXY_IOS_PORT: "8767",
+          SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8767",
+        });
+      } finally {
+        PortManager.setPortAvailabilityCheckerForTesting(null);
+      }
+    });
+
     test("host-control simulator start skips ports that are busy on the host", async function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",

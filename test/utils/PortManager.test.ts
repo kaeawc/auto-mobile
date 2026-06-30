@@ -197,4 +197,35 @@ describe("PortManager", () => {
 
     expect(PortManager.getAllocatedCount()).toBe(50);
   });
+
+  test("should support 100 iOS devices while skipping reserved ports", () => {
+    const ports: number[] = [];
+
+    for (let i = 0; i < PortManager.getMaxDevices(); i++) {
+      ports.push(PortManager.allocate(`ios-device-${i}`, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS }));
+    }
+
+    expect(ports).toHaveLength(100);
+    expect(new Set(ports).size).toBe(100);
+    expect(ports).not.toContain(8766);
+    expect(ports[0]).toBe(8765);
+    expect(ports[99]).toBe(8865);
+  });
+
+  test("should support 100 mixed Android and iOS devices when the default port is already in use", () => {
+    const checker = new FakePortAvailabilityChecker(new Set([8765]));
+    PortManager.setPortAvailabilityCheckerForTesting(checker);
+    const ports: number[] = [];
+
+    for (let i = 0; i < PortManager.getMaxDevices(); i++) {
+      const reservedPorts = i % 2 === 0 ? IOS_CTRL_PROXY_RESERVED_PORTS : undefined;
+      ports.push(PortManager.allocate(`device-${i}`, { reservedPorts }));
+    }
+
+    expect(ports).toHaveLength(100);
+    expect(new Set(ports).size).toBe(100);
+    expect(ports).not.toContain(8765);
+    expect(ports[0]).toBe(8767);
+    expect(ports[99]).toBe(8865);
+  });
 });

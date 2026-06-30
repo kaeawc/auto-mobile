@@ -221,6 +221,25 @@ describe("AppPreferences", () => {
     expect(writtenXml).toContain("<boolean name=\"onboarding_complete\" value=\"true\"/>");
   });
 
+  test("rejects Android SharedPreferences int values outside the Java 32-bit range", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
+
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+    await expect(preferences.setPreference({
+      scope: "sharedPreferences",
+      appId: "com.example.app",
+      suite: "settings",
+      key: "timestamp_id",
+      value: 1710000000000,
+      type: "int",
+    })).rejects.toThrow("32-bit");
+
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell run-as com.example.app cat shared_prefs/settings.xml",
+    ]);
+  });
+
   test("rejects Android SharedPreferences suite names with shell metacharacters", async () => {
     const adb = new FakeAdbExecutor();
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });

@@ -54,6 +54,8 @@ interface AndroidPreferenceEntry {
 }
 
 const IOS_DEFAULTS_TIMEOUT_MS = 5000;
+const ANDROID_INT_MIN = -2147483648;
+const ANDROID_INT_MAX = 2147483647;
 
 const ANDROID_TYPE_TO_TAG: Record<PreferenceValueType, AndroidPreferenceTag> = {
   string: "string",
@@ -360,12 +362,23 @@ function androidNodeFor(key: string, value: PreferenceValue, type: PreferenceVal
   if (type === "string") {
     return { _: stringValue(value), $: { name: key } };
   }
+  if (type === "int") {
+    assertAndroidSharedPreferencesInt(value);
+  }
   return {
     $: {
       name: key,
       value: stringValue(value),
     },
   };
+}
+
+function assertAndroidSharedPreferencesInt(value: PreferenceValue): void {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < ANDROID_INT_MIN || value > ANDROID_INT_MAX) {
+    throw new ActionableError(
+      `Android SharedPreferences int values must fit in the signed 32-bit range (${ANDROID_INT_MIN} to ${ANDROID_INT_MAX}).`
+    );
+  }
 }
 
 function iosDefaultsDomain(input: GetPreferenceInput): string {

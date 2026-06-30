@@ -7,11 +7,16 @@ import path from "node:path";
 import {
   containsIosRecordingStartMessage,
   FfmpegVideoProcessingBackend,
+  IOS_RECORDING_STOP_TIMEOUT_MS,
+  PROCESS_EXIT_TIMEOUT_MS,
+  waitForExit,
   waitForStderrMessage,
   type ProcessTracker,
+  type StoppableProcess,
 } from "../../../src/features/video/FfmpegVideoProcessingBackend";
 import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 function commandVersionAvailable(command: string): boolean {
   const result = spawnSync(command, ["-version"], { stdio: "ignore" });
@@ -475,5 +480,128 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       expect(encoders.length).toBeGreaterThan(0);
       expect(listEncodersCalls).toBe(1);
     });
+  });
+});
+
+interface FakeProcessControl {
+  process: StoppableProcess;
+  exitPromise: Promise<void>;
+  killSignals: Array<NodeJS.Signals | number>;
+  exit: (code?: number) => void;
+}
+
+/**
+ * A fake capture process that records which signals it received. It only exits
+ * when the test explicitly calls `exit()` or when it is sent SIGKILL — mirroring
+ * a real `simctl recordVideo` process that ignores everything but SIGINT (which
+ * triggers a flush) and SIGKILL (which terminates immediately).
+ */
+function createFakeProcess(): FakeProcessControl {
+  const killSignals: Array<NodeJS.Signals | number> = [];
+  let resolveExit: () => void = () => {};
+  const exitPromise = new Promise<void>(resolve => {
+    resolveExit = resolve;
+  });
+
+  const exit = (code = 0): void => {
+    if (process.exitCode !== null) {
+      return;
+    }
+    process.exitCode = code;
+    resolveExit();
+  };
+
+  const process: StoppableProcess = {
+    exitCode: null,
+    killed: false,
+    kill(signal?: NodeJS.Signals | number): boolean {
+      killSignals.push(signal ?? "SIGTERM");
+      process.killed = true;
+      if (signal === "SIGKILL") {
+        exit(137);
+      }
+      return true;
+    },
+  };
+
+  return { process, exitPromise, killSignals, exit };
+}
+
+describe("waitForExit - graceful capture stop", function() {
+  test("sends SIGINT and returns without SIGKILL when the process flushes in time", async function() {
+    const timer = new FakeTimer();
+    const { process, exitPromise, killSignals, exit } = createFakeProcess();
+
+    const pending = waitForExit(process, exitPromise, IOS_RECORDING_STOP_TIMEOUT_MS, timer);
+
+    // SIGINT is delivered synchronously so simctl can begin flushing the moov atom.
+    expect(killSignals).toEqual(["SIGINT"]);
+
+    // simctl takes 8s to write the file under load — well within the iOS window.
+    timer.advanceTime(8000);
+    await Promise.resolve();
+    expect(killSignals).toEqual(["SIGINT"]);
+
+    exit(0);
+    await pending;
+
+    // No SIGKILL: the file was allowed to finalize cleanly.
+    expect(killSignals).toEqual(["SIGINT"]);
+  });
+
+  test("escalates to SIGKILL once the timeout elapses", async function() {
+    const timer = new FakeTimer();
+    const { process, exitPromise, killSignals } = createFakeProcess();
+
+    const pending = waitForExit(process, exitPromise, PROCESS_EXIT_TIMEOUT_MS, timer);
+
+    expect(killSignals).toEqual(["SIGINT"]);
+
+    // Just before the deadline the process is still given a chance to exit cleanly.
+    timer.advanceTime(PROCESS_EXIT_TIMEOUT_MS - 1);
+    await Promise.resolve();
+    expect(killSignals).toEqual(["SIGINT"]);
+
+    // After the deadline it is force-killed so the caller never hangs.
+    timer.advanceTime(1);
+    await pending;
+    expect(killSignals).toEqual(["SIGINT", "SIGKILL"]);
+  });
+
+  test("the legacy 5s window would SIGKILL a slow simctl flush that the iOS window survives", async function() {
+    const slowFlushMs = 8000;
+
+    // Legacy generic timeout: the same slow flush is force-killed mid-write.
+    const legacyTimer = new FakeTimer();
+    const legacy = createFakeProcess();
+    const legacyPending = waitForExit(
+      legacy.process,
+      legacy.exitPromise,
+      PROCESS_EXIT_TIMEOUT_MS,
+      legacyTimer
+    );
+    legacyTimer.advanceTime(slowFlushMs);
+    await legacyPending;
+    expect(legacy.killSignals).toEqual(["SIGINT", "SIGKILL"]);
+
+    // iOS window: the slow flush completes and the process exits via SIGINT only.
+    const iosTimer = new FakeTimer();
+    const ios = createFakeProcess();
+    const iosPending = waitForExit(
+      ios.process,
+      ios.exitPromise,
+      IOS_RECORDING_STOP_TIMEOUT_MS,
+      iosTimer
+    );
+    iosTimer.advanceTime(slowFlushMs);
+    await Promise.resolve();
+    ios.exit(0);
+    await iosPending;
+    expect(ios.killSignals).toEqual(["SIGINT"]);
+  });
+
+  test("iOS stop window is generous enough for a moov-atom flush under load", function() {
+    expect(IOS_RECORDING_STOP_TIMEOUT_MS).toBeGreaterThan(PROCESS_EXIT_TIMEOUT_MS);
+    expect(IOS_RECORDING_STOP_TIMEOUT_MS).toBeGreaterThanOrEqual(30000);
   });
 });

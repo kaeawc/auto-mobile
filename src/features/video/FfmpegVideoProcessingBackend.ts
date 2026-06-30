@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { ActionableError, type BootedDevice } from "../../models";
-import { defaultTimer } from "../../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -16,7 +16,14 @@ import type {
   VideoCaptureConfig,
 } from "./VideoRecorderService";
 
-const PROCESS_EXIT_TIMEOUT_MS = 5000;
+export const PROCESS_EXIT_TIMEOUT_MS = 5000;
+// `xcrun simctl io ... recordVideo` only writes the MP4/MOV moov atom after it
+// receives SIGINT. If we SIGKILL it before the flush finishes the on-disk file is
+// truncated (often 0 bytes), and the downstream ffmpeg `-c copy` remux fails with
+// "moov atom not found". On a loaded CI macOS runner the flush can take well over
+// the generic 5s window, so the iOS stop path waits much longer before escalating
+// to SIGKILL. In the normal case simctl exits within ~1s and we return immediately.
+export const IOS_RECORDING_STOP_TIMEOUT_MS = 30000;
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
 const IOS_RECORDING_START_TIMEOUT_MS = 30000;
 const IOS_RECORDING_START_MESSAGES = [
@@ -111,9 +118,28 @@ function trackProcess(process: ChildProcessWithoutNullStreams): ProcessTracker {
   return { process, exitState, exitPromise, stderr };
 }
 
-async function waitForExit(
-  process: ChildProcessWithoutNullStreams,
-  exitPromise: Promise<void>
+/**
+ * Minimal child-process surface needed to gracefully stop a recording. Narrowed
+ * from `ChildProcessWithoutNullStreams` so the SIGINT→SIGKILL escalation can be
+ * unit-tested with a fake process instead of a real spawn.
+ */
+export interface StoppableProcess {
+  exitCode: number | null;
+  killed: boolean;
+  kill(signal?: NodeJS.Signals | number): boolean;
+}
+
+/**
+ * Stop a capture process by sending SIGINT first (which lets `simctl`/`screenrecord`
+ * flush and finalize the file), then escalating to SIGKILL only if the process has
+ * not exited within `timeoutMs`. Callers that record formats requiring a trailing
+ * moov-atom flush (iOS simctl) should pass a generous `timeoutMs`.
+ */
+export async function waitForExit(
+  process: StoppableProcess,
+  exitPromise: Promise<void>,
+  timeoutMs: number = PROCESS_EXIT_TIMEOUT_MS,
+  timer: Timer = defaultTimer
 ): Promise<void> {
   if (process.exitCode !== null) {
     await exitPromise;
@@ -129,18 +155,18 @@ async function waitForExit(
 
   let timeoutId: NodeJS.Timeout | undefined;
   const timeoutPromise = new Promise<void>(resolve => {
-    timeoutId = defaultTimer.setTimeout(() => {
+    timeoutId = timer.setTimeout(() => {
       if (process.exitCode === null) {
         process.kill("SIGKILL");
       }
       resolve();
-    }, PROCESS_EXIT_TIMEOUT_MS);
+    }, timeoutMs);
   });
 
   await Promise.race([exitPromise, timeoutPromise]);
 
   if (timeoutId) {
-    clearTimeout(timeoutId);
+    timer.clearTimeout(timeoutId);
   }
 
   await exitPromise;
@@ -289,9 +315,13 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         );
       }
     } else {
+      // iOS: simctl writes the moov atom only after SIGINT, so give it a generous
+      // window to finalize the file before escalating to SIGKILL. A premature
+      // SIGKILL truncates the raw .mov and breaks the ffmpeg `-c copy` remux.
       await waitForExit(
         backendHandle.captureTracker.process,
-        backendHandle.captureTracker.exitPromise
+        backendHandle.captureTracker.exitPromise,
+        IOS_RECORDING_STOP_TIMEOUT_MS
       );
       await this.postProcessRecording(backendHandle);
     }

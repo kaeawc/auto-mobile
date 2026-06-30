@@ -90,6 +90,17 @@ describe("resolveDaemonLaunchCommand", () => {
       "current package version is unknown"
     );
   });
+
+  test("strips a dev git-SHA stamp so the bunx specifier is an installable release", () => {
+    // A dev build reports e.g. "0.0.39+g1a2b3c4.dirty"; that is not an installable
+    // npm tag, so the bunx fallback must pin the published release portion.
+    const launch = resolveDaemonLaunchCommand("", "bunx", "0.0.39+g1a2b3c4d5e6f.dirty.abc123def456");
+
+    expect(launch).toEqual({
+      command: "bunx",
+      args: ["-y", "@kaeawc/auto-mobile@0.0.39", "--daemon-mode"],
+    });
+  });
 });
 
 describe("Daemon manager process detection", () => {

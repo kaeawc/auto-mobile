@@ -8,7 +8,9 @@ import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 
 export type PreferenceScope = "systemProperty" | "sharedPreferences" | "userDefaults";
 export type PreferenceValueType = "string" | "bool" | "int" | "float";
+export type PreferenceResultType = PreferenceValueType | "long" | "stringSet";
 export type PreferenceValue = string | boolean | number;
+export type PreferenceResultValue = PreferenceValue | string[];
 
 export interface GetPreferenceInput {
   scope: PreferenceScope;
@@ -30,8 +32,8 @@ export interface PreferenceResult {
   appId?: string;
   suite?: string;
   key: string;
-  value: PreferenceValue | null;
-  type?: PreferenceValueType;
+  value: PreferenceResultValue | null;
+  type?: PreferenceResultType;
   found: boolean;
   verified?: boolean;
   warning?: string;
@@ -50,8 +52,8 @@ export interface AppPreferencesDependencies {
 type AndroidPreferenceTag = "string" | "boolean" | "int" | "float";
 
 interface AndroidPreferenceEntry {
-  value: PreferenceValue;
-  type: PreferenceValueType;
+  value: PreferenceResultValue;
+  type: PreferenceResultType;
 }
 
 const IOS_DEFAULTS_TIMEOUT_MS = 5000;
@@ -245,8 +247,8 @@ export class AppPreferences {
   private result(
     input: GetPreferenceInput,
     found: boolean,
-    value: PreferenceValue | null,
-    type?: PreferenceValueType
+    value: PreferenceResultValue | null,
+    type?: PreferenceResultType
   ): PreferenceResult {
     return {
       success: true,
@@ -294,6 +296,16 @@ async function readAndroidPreferenceEntry(xml: string, key: string): Promise<And
   const floatNode = findNamedNode(map.float, key);
   if (floatNode) {
     return { type: "float", value: parsePreferenceValue(floatNode.$?.value ?? "", "float") };
+  }
+
+  const longNode = findNamedNode(map.long, key);
+  if (longNode) {
+    return { type: "long", value: parseLongValue(longNode.$?.value ?? "") };
+  }
+
+  const stringSetNode = findNamedNode(map.set, key);
+  if (stringSetNode) {
+    return { type: "stringSet", value: readAndroidStringSetValues(stringSetNode) };
   }
 
   return null;
@@ -371,6 +383,15 @@ function arrayOfNodes(nodes: unknown): any[] {
     return [];
   }
   return [nodes];
+}
+
+function readAndroidStringSetValues(node: any): string[] {
+  return arrayOfNodes(node.string).map(stringNode => {
+    if (typeof stringNode === "string") {
+      return stringNode;
+    }
+    return stringNode?._ ?? "";
+  });
 }
 
 function androidNodeFor(key: string, value: PreferenceValue, type: PreferenceValueType): Record<string, unknown> {
@@ -485,6 +506,24 @@ function parseInteger(value: string): number {
     throw new ActionableError(`Expected int preference value, got '${value}'.`);
   }
   return parsed;
+}
+
+function parseLongValue(value: string): string | number {
+  const trimmed = value.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    throw new ActionableError(`Expected long preference value, got '${value}'.`);
+  }
+
+  const parsed = BigInt(trimmed);
+  const minLong = -9223372036854775808n;
+  const maxLong = 9223372036854775807n;
+  if (parsed < minLong || parsed > maxLong) {
+    throw new ActionableError(`Expected signed 64-bit long preference value, got '${value}'.`);
+  }
+  if (parsed < BigInt(Number.MIN_SAFE_INTEGER) || parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return trimmed;
+  }
+  return Number(parsed);
 }
 
 function parseFloatValue(value: string): number {

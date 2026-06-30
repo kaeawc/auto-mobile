@@ -150,6 +150,60 @@ describe("AppPreferences", () => {
     ]);
   });
 
+  test("reports Android SharedPreferences long entries as found", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "cat shared_prefs/automobile_anr.xml",
+      createExecResult(
+        "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
+          "<map><long name=\"last_reported_timestamp\" value=\"1710000000000\" /></map>\n",
+        ""
+      )
+    );
+
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+    const result = await preferences.getPreference({
+      scope: "sharedPreferences",
+      appId: "com.example.app",
+      suite: "automobile_anr",
+      key: "last_reported_timestamp",
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      found: true,
+      type: "long",
+      value: 1710000000000,
+    });
+  });
+
+  test("reports Android SharedPreferences string sets as found", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "cat shared_prefs/settings.xml",
+      createExecResult(
+        "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
+          "<map><set name=\"enabled_flags\"><string>first</string><string>second</string></set></map>\n",
+        ""
+      )
+    );
+
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+    const result = await preferences.getPreference({
+      scope: "sharedPreferences",
+      appId: "com.example.app",
+      suite: "settings",
+      key: "enabled_flags",
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      found: true,
+      type: "stringSet",
+      value: ["first", "second"],
+    });
+  });
+
   test("writes typed Android SharedPreferences XML, preserves other entries, and verifies read-back", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("cat shared_prefs/settings.xml", [

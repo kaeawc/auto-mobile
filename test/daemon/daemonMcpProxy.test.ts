@@ -21,6 +21,18 @@ const NEWER_VERSION = "9999.0.0";
 const CLIENT_VERSION = "0.0.39";
 const ANCIENT_TIMESTAMP = 1;
 
+// A FakeDaemonManager reporting a running daemon whose version matches this
+// client (the ambient stamped DAEMON_VERSION). Forwarding/recovery tests use a
+// real DaemonClient stub but must NOT consult the real local DaemonManager —
+// otherwise a release daemon running on the dev machine (version "0.0.39") would
+// mismatch the stamped client and trip the version gate. No buildId is set, so
+// the build-identity gate treats it as a match (missing identity = compatible).
+const matchingDaemonManager = (): FakeDaemonManager => {
+  const manager = new FakeDaemonManager();
+  manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
+  return manager;
+};
+
 class ScriptedDaemonClient implements DaemonClientLike {
   readonly callToolCalls: Array<{ toolName: string; params: Record<string, any> }> = [];
   readonly readResourceCalls: string[] = [];
@@ -549,6 +561,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -576,6 +589,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -599,6 +613,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -629,6 +644,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -663,6 +679,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -686,6 +703,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -716,6 +734,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -751,6 +770,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -771,6 +791,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -798,6 +819,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -829,6 +851,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
       });
 
@@ -1044,6 +1067,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
       });
 
@@ -1082,6 +1106,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
         buildIdentity: { entryScript: "/client/dist/index.js", buildId: "clientbuild" },
       });
@@ -1116,6 +1141,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
       });
 

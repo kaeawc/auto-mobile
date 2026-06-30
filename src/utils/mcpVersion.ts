@@ -1,15 +1,20 @@
 import fs from "fs";
 import path from "path";
+import { createHash } from "crypto";
 import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 
 /**
  * Identity of the git commit a dev/source checkout is built from.
- * `shortSha` is the abbreviated commit hash; `dirty` flags uncommitted tracked changes.
+ * `shortSha` is the abbreviated commit hash; `dirty` flags uncommitted tracked
+ * changes; `dirtyHash` is a short content hash of those changes (null when clean)
+ * so two checkouts at the same commit with *different* uncommitted edits report
+ * different versions rather than colliding on a bare `.dirty` marker.
  */
 export interface GitVersionInfo {
   shortSha: string;
   dirty: boolean;
+  dirtyHash?: string | null;
 }
 
 /**
@@ -121,7 +126,18 @@ export const readGitVersion = (
   // --untracked-files=no: only tracked changes alter the built code; untracked
   // scratch files should not flip a checkout to "dirty".
   const status = run(cwd, ["status", "--porcelain", "--untracked-files=no"]);
-  return { shortSha, dirty: status !== null && status.length > 0 };
+  const dirty = status !== null && status.length > 0;
+  // When dirty, hash the actual tracked diff so two checkouts at the same commit
+  // with different uncommitted edits get distinct stamps (a bare boolean would
+  // collide). Falls back to the plain `.dirty` marker if the diff is unavailable.
+  let dirtyHash: string | null = null;
+  if (dirty) {
+    const diff = run(cwd, ["diff", "HEAD"]);
+    if (diff) {
+      dirtyHash = createHash("sha256").update(diff).digest("hex").slice(0, 12);
+    }
+  }
+  return { shortSha, dirty, dirtyHash };
 };
 
 /**
@@ -146,7 +162,9 @@ export const formatMcpServerVersion = (baseVersion: string, git: GitVersionInfo 
   if (!git || git.shortSha.length === 0) {
     return baseVersion;
   }
-  const dirty = git.dirty ? ".dirty" : "";
+  // Dirty suffix: `.dirty` for the human marker, plus the tracked-diff hash when
+  // available so distinct working trees at the same commit don't collide.
+  const dirty = git.dirty ? (git.dirtyHash ? `.dirty.${git.dirtyHash}` : ".dirty") : "";
   return `${baseVersion}+g${git.shortSha}${dirty}`;
 };
 

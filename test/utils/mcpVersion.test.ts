@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   formatMcpServerVersion,
+  getMcpServerVersion,
   readGitVersion,
   releaseVersion,
   resolveMcpServerVersion,
@@ -9,7 +10,8 @@ import {
 } from "../../src/utils/mcpVersion";
 import { compareVersions } from "../../src/server/deviceMatcher";
 
-const git = (shortSha: string, dirty = false): GitVersionInfo => ({ shortSha, dirty });
+const git = (shortSha: string, dirty = false, dirtyHash: string | null = null): GitVersionInfo =>
+  ({ shortSha, dirty, dirtyHash });
 
 describe("releaseVersion", () => {
   test("returns the version unchanged when there is no build metadata", () => {
@@ -22,6 +24,15 @@ describe("releaseVersion", () => {
 
   test("strips the dirty marker too", () => {
     expect(releaseVersion("0.0.39+g1a2b3c4d5e6f.dirty")).toBe("0.0.39");
+  });
+
+  test("the value persisted into plan files matches the test-plan schema's mcpVersion pattern", () => {
+    // PlanSerializer writes releaseVersion(getMcpServerVersion()) so a dev build's
+    // `+g<sha>` stamp never reaches the schema gate (^\d+\.\d+\.\d+$), which runs
+    // before plan migration could strip it.
+    const schemaPattern = /^\d+\.\d+\.\d+$/;
+    expect(releaseVersion(getMcpServerVersion())).toMatch(schemaPattern);
+    expect(releaseVersion("0.0.39+g1a2b3c4d5e6f.dirty.abc123def456")).toMatch(schemaPattern);
   });
 });
 
@@ -38,8 +49,13 @@ describe("formatMcpServerVersion", () => {
     expect(formatMcpServerVersion("0.0.39", git("1a2b3c4d5e6f"))).toBe("0.0.39+g1a2b3c4d5e6f");
   });
 
-  test("appends a dirty marker when the working tree is dirty", () => {
+  test("appends a bare dirty marker when no diff hash is available", () => {
     expect(formatMcpServerVersion("0.0.39", git("1a2b3c4d5e6f", true))).toBe("0.0.39+g1a2b3c4d5e6f.dirty");
+  });
+
+  test("includes the tracked-diff hash in the dirty marker when available", () => {
+    expect(formatMcpServerVersion("0.0.39", git("1a2b3c4d5e6f", true, "abc123def456")))
+      .toBe("0.0.39+g1a2b3c4d5e6f.dirty.abc123def456");
   });
 
   test("two different commits yield two different version strings", () => {
@@ -53,13 +69,20 @@ describe("formatMcpServerVersion", () => {
     const dirty = formatMcpServerVersion("0.0.39", git("1a2b3c4d5e6f", true));
     expect(clean).not.toBe(dirty);
   });
+
+  test("two dirty checkouts at the same commit with different edits are distinguished", () => {
+    const a = formatMcpServerVersion("0.0.39", git("1a2b3c4d5e6f", true, "aaaaaaaaaaaa"));
+    const b = formatMcpServerVersion("0.0.39", git("1a2b3c4d5e6f", true, "bbbbbbbbbbbb"));
+    expect(a).not.toBe(b);
+  });
 });
 
 describe("formatMcpServerVersion + the daemon version gate", () => {
   // The stamp is semver build metadata: it makes the *string* vary with the
   // commit (for doctor/logs/DaemonVersionMismatchError diagnostics) while the
   // release portion before `+` stays stable. The version gate compares the
-  // release portion and defers same-release dev-skew to the build-identity gate.
+  // release portion for newer/older decisions and treats a same-release/
+  // different-stamp difference as a reconcilable dev-skew (restart, not throw).
   test("stamped dev builds share the same release portion (gate treats them as same-release)", () => {
     const a = formatMcpServerVersion("0.0.39", git("aaaaaaaaaaaa"));
     const b = formatMcpServerVersion("0.0.39", git("bbbbbbbbbbbb"));
@@ -90,6 +113,7 @@ describe("readGitVersion", () => {
       if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {return responses.toplevel ?? null;}
       if (args[0] === "rev-parse" && args[1] === "--short=12") {return responses.sha ?? null;}
       if (args[0] === "status") {return responses.status ?? null;}
+      if (args[0] === "diff") {return responses.diff ?? null;}
       return null;
     };
   const ownsRepo = () => OWN;
@@ -119,12 +143,40 @@ describe("readGitVersion", () => {
 
   test("stamps a clean checkout of AutoMobile's own repo", () => {
     const run = fakeRun({ toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: "" });
-    expect(readGitVersion("/src/auto-mobile", run, ownsRepo)).toEqual({ shortSha: "1a2b3c4d5e6f", dirty: false });
+    expect(readGitVersion("/src/auto-mobile", run, ownsRepo)).toEqual({
+      shortSha: "1a2b3c4d5e6f",
+      dirty: false,
+      dirtyHash: null,
+    });
   });
 
-  test("marks the checkout dirty when there are tracked changes", () => {
-    const run = fakeRun({ toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: " M src/index.ts" });
-    expect(readGitVersion("/src/auto-mobile", run, ownsRepo)).toEqual({ shortSha: "1a2b3c4d5e6f", dirty: true });
+  test("marks the checkout dirty and hashes the tracked diff", () => {
+    const run = fakeRun({
+      toplevel: "/src/auto-mobile",
+      sha: "1a2b3c4d5e6f",
+      status: " M src/index.ts",
+      diff: "diff --git a/src/index.ts b/src/index.ts\n+console.log('a')",
+    });
+    const result = readGitVersion("/src/auto-mobile", run, ownsRepo);
+    expect(result?.shortSha).toBe("1a2b3c4d5e6f");
+    expect(result?.dirty).toBe(true);
+    expect(result?.dirtyHash).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  test("two different dirty diffs produce different dirty hashes", () => {
+    const base = { toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: " M src/index.ts" };
+    const a = readGitVersion("/src/auto-mobile", fakeRun({ ...base, diff: "edit A" }), ownsRepo);
+    const b = readGitVersion("/src/auto-mobile", fakeRun({ ...base, diff: "edit B" }), ownsRepo);
+    expect(a?.dirtyHash).not.toBe(b?.dirtyHash);
+  });
+
+  test("falls back to a bare dirty marker when the diff is unavailable", () => {
+    const run = fakeRun({ toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: " M x", diff: null });
+    expect(readGitVersion("/src/auto-mobile", run, ownsRepo)).toEqual({
+      shortSha: "1a2b3c4d5e6f",
+      dirty: true,
+      dirtyHash: null,
+    });
   });
 });
 

@@ -23,6 +23,12 @@ import {
   formatSocketDiagnostics,
 } from "./debugTools";
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
+import {
+  buildIdentitiesMatch,
+  describeBuildIdentity,
+  getCurrentBuildIdentity,
+  type BuildIdentity,
+} from "./buildIdentity";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import {
@@ -1057,6 +1063,39 @@ export interface RunDaemonCommandOptions {
   stateProvider?: () => DaemonStateLike;
 }
 
+/**
+ * Build the `--daemon status` lines that surface the running daemon's build
+ * identity (`buildId` + `entryScript`) and flag wrong-build skew against this
+ * client. Pure so it is unit-testable without a live daemon. See #2736.
+ *
+ * @param status the running daemon's status (must be `running`)
+ * @param client this client's build identity
+ */
+export function daemonBuildIdentityStatusLines(
+  status: DaemonStatus,
+  client: BuildIdentity
+): string[] {
+  const daemon: BuildIdentity = {
+    entryScript: status.entryScript ?? "",
+    buildId: status.buildId ?? "unknown",
+  };
+  const lines = [
+    `  Build ID: ${daemon.buildId || "unknown"}`,
+    `  Entry Script: ${daemon.entryScript || "unknown"}`,
+  ];
+
+  if (!buildIdentitiesMatch(client, daemon)) {
+    lines.push(
+      "\n⚠️  WARNING: the running daemon is a different build than this checkout:",
+      `  daemon build=${describeBuildIdentity(daemon)}`,
+      `  client build=${describeBuildIdentity(client)}`,
+      "\nRun 'bunx @kaeawc/auto-mobile@latest --daemon restart' to align them."
+    );
+  }
+
+  return lines;
+}
+
 export async function runDaemonCommand(
   command: string,
   args: string[],
@@ -1086,6 +1125,9 @@ export async function runDaemonCommand(
           console.log(
             `  Started: ${status.startedAt ? new Date(status.startedAt).toISOString() : "unknown"}`
           );
+          for (const line of daemonBuildIdentityStatusLines(status, getCurrentBuildIdentity())) {
+            console.log(line);
+          }
 
           // Check for other daemon processes (exclude current daemon)
           const otherDaemons = manager.findOtherDaemonProcesses(status.pid);

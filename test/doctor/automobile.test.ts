@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   checkCtrlProxy,
   checkCtrlProxyVersion,
+  checkDaemonBuildIdentity,
   checkDaemonStatus,
   checkDaemonVersion,
   runAutoMobileChecks,
 } from "../../src/doctor/checks/automobile";
+import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import {
   LATEST_RELEASE_VERSION,
   RELEASE_VERSION,
@@ -95,6 +97,83 @@ describe("checkDaemonStatus", () => {
     expect(result.status).toBe("pass");
     expect(result.message).toBe("Running (serving via socket)");
     expect(result.recommendation).toBeUndefined();
+  });
+});
+
+describe("checkDaemonBuildIdentity", () => {
+  const client: BuildIdentity = {
+    entryScript: "/wt/dist/src/index.js",
+    buildId: "1111111111111111",
+  };
+
+  test("skips when the daemon is not running", async () => {
+    const result = await checkDaemonBuildIdentity({
+      daemonManager: { status: async () => ({ running: false }) },
+      getClientBuildIdentity: () => client,
+    });
+
+    expect(result.name).toBe("Daemon Build Identity");
+    expect(result.status).toBe("skip");
+    expect(result.message).toBe("Daemon is not running");
+  });
+
+  test("passes and surfaces buildId + entryScript when client and daemon builds match", async () => {
+    const result = await checkDaemonBuildIdentity({
+      daemonManager: {
+        status: async () => ({
+          running: true,
+          pid: 4242,
+          entryScript: "/wt/dist/src/index.js",
+          buildId: "1111111111111111",
+        }),
+      },
+      getClientBuildIdentity: () => client,
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.value).toBe("1111111111111111");
+    expect(result.message).toContain("1111111111111111");
+    expect(result.message).toContain("/wt/dist/src/index.js");
+    expect(result.recommendation).toBeUndefined();
+  });
+
+  test("warns and shows BOTH identities when the daemon is a different build", async () => {
+    const result = await checkDaemonBuildIdentity({
+      daemonManager: {
+        status: async () => ({
+          running: true,
+          pid: 4242,
+          entryScript: "/main/dist/src/index.js",
+          buildId: "2222222222222222",
+        }),
+      },
+      getClientBuildIdentity: () => client,
+    });
+
+    expect(result.status).toBe("warn");
+    // daemon identity
+    expect(result.message).toContain("2222222222222222");
+    expect(result.message).toContain("/main/dist/src/index.js");
+    // client identity
+    expect(result.message).toContain("1111111111111111");
+    expect(result.message).toContain("/wt/dist/src/index.js");
+    expect(result.recommendation).toContain("restart");
+  });
+
+  test("does not report a false skew for a legacy daemon without build identity", async () => {
+    const result = await checkDaemonBuildIdentity({
+      daemonManager: {
+        status: async () => ({
+          running: true,
+          pid: 4242,
+          // legacy daemon predating build identity: no entryScript/buildId
+        }),
+      },
+      getClientBuildIdentity: () => client,
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("unknown");
   });
 });
 
@@ -210,27 +289,40 @@ describe("checkCtrlProxy", () => {
 });
 
 describe("runAutoMobileChecks", () => {
+  const stubChecks = {
+    checkDaemonStatus: async () => ({
+      name: "Daemon Status",
+      status: "pass" as const,
+      message: "Running (serving via socket)",
+    }),
+    checkDaemonConnectivity: async () => ({
+      name: "Daemon Connectivity",
+      status: "pass" as const,
+      message: "Daemon is responsive",
+    }),
+    checkDaemonBuildIdentity: async () => ({
+      name: "Daemon Build Identity",
+      status: "pass" as const,
+      message: "Build 1111111111111111 (/wt/dist/src/index.js)",
+    }),
+  };
+
   test("skips Android CtrlProxy diagnostics during iOS-only doctor runs", async () => {
-    const results = await runAutoMobileChecks(
-      { ios: true },
-      {
-        checkDaemonStatus: async () => ({
-          name: "Daemon Status",
-          status: "pass",
-          message: "Running (serving via socket)",
-        }),
-        checkDaemonConnectivity: async () => ({
-          name: "Daemon Connectivity",
-          status: "pass",
-          message: "Daemon is responsive",
-        }),
-      }
-    );
+    const results = await runAutoMobileChecks({ ios: true }, stubChecks);
 
     const ctrlProxy = results.find(result => result.name === "CtrlProxy");
 
     expect(ctrlProxy?.status).toBe("skip");
     expect(ctrlProxy?.message).toBe("Skipped for iOS-only doctor run");
     expect(ctrlProxy?.message).not.toContain("emulator-5554");
+  });
+
+  test("includes the daemon build identity check", async () => {
+    const results = await runAutoMobileChecks({ ios: true }, stubChecks);
+
+    const buildIdentity = results.find(result => result.name === "Daemon Build Identity");
+
+    expect(buildIdentity).toBeDefined();
+    expect(buildIdentity?.status).toBe("pass");
   });
 });

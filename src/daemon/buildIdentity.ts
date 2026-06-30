@@ -88,3 +88,14 @@ export function buildIdentitiesMatch(a: BuildIdentity, b: BuildIdentity): boolea
   }
   return true;
 }
+
+/**
+ * Render a {@link BuildIdentity} as a single human-readable token:
+ * `"<buildId> (<entryScript>)"`. Falls back to `unknown` for an empty entry
+ * script so the rendering stays stable for legacy daemons that predate build
+ * identity. Shared by `doctor` and the `--daemon status` CLI so both surface the
+ * daemon's build in the same format.
+ */
+export function describeBuildIdentity(identity: BuildIdentity): string {
+  return `${identity.buildId} (${identity.entryScript || "unknown"})`;
+}

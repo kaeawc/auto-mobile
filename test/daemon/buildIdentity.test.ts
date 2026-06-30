@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import {
   computeBuildIdentity,
   buildIdentitiesMatch,
+  describeBuildIdentity,
   type BuildIdentity,
 } from "../../src/daemon/buildIdentity";
 
@@ -68,6 +69,18 @@ describe("buildIdentity", () => {
       const legacy: BuildIdentity = { entryScript: "", buildId: "unknown" };
       expect(buildIdentitiesMatch(wt, legacy)).toBe(true);
       expect(buildIdentitiesMatch(legacy, main)).toBe(true);
+    });
+  });
+
+  describe("describeBuildIdentity", () => {
+    test("renders '<buildId> (<entryScript>)' for a known identity", () => {
+      const id: BuildIdentity = { entryScript: "/wt/dist/index.js", buildId: "aaaabbbbccccdddd" };
+      expect(describeBuildIdentity(id)).toBe("aaaabbbbccccdddd (/wt/dist/index.js)");
+    });
+
+    test("falls back to 'unknown' entry script when it is empty", () => {
+      const id: BuildIdentity = { entryScript: "", buildId: "unknown" };
+      expect(describeBuildIdentity(id)).toBe("unknown (unknown)");
     });
   });
 });

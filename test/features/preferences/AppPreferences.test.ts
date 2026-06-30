@@ -19,6 +19,12 @@ const iosSimulator: BootedDevice = {
   deviceId: "12345678-1234-1234-1234-123456789ABC",
 };
 
+const physicalIosDevice: BootedDevice = {
+  name: "Jason's iPhone",
+  platform: "ios",
+  deviceId: "00008110-001C195E0E42801E",
+};
+
 class SingleAdbFactory implements AdbClientFactory {
   constructor(private readonly adb: AdbExecutor) {}
 
@@ -188,6 +194,47 @@ describe("AppPreferences", () => {
     expect(writtenXml).toContain("<int name=\"launch_count\" value=\"3\"/>");
   });
 
+  test("writes the first Android SharedPreferences entry when the XML map is empty", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("cat shared_prefs/settings.xml", [
+      createExecResult("<map/>", ""),
+      createExecResult(
+        "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
+          "<map><boolean name=\"onboarding_complete\" value=\"true\" /></map>\n",
+        ""
+      ),
+    ]);
+
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+    const result = await preferences.setPreference({
+      scope: "sharedPreferences",
+      appId: "com.example.app",
+      suite: "settings",
+      key: "onboarding_complete",
+      value: true,
+      type: "bool",
+    });
+
+    expect(result.verified).toBe(true);
+    const writeCommand = commandText(adb.getExecutedCommands(), "base64 -d > shared_prefs/settings.xml");
+    const writtenXml = decodeBase64WritePayload(writeCommand);
+    expect(writtenXml).toContain("<boolean name=\"onboarding_complete\" value=\"true\"/>");
+  });
+
+  test("rejects Android SharedPreferences suite names with shell metacharacters", async () => {
+    const adb = new FakeAdbExecutor();
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+    await expect(preferences.getPreference({
+      scope: "sharedPreferences",
+      appId: "com.example.app",
+      suite: "prefs; echo pwn #",
+      key: "host",
+    })).rejects.toThrow("SharedPreferences suite");
+
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
   test("writes iOS simulator UserDefaults through defaults daemon and verifies read-back", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
@@ -315,5 +362,15 @@ describe("AppPreferences", () => {
       value: null,
       key: "missingKey",
     });
+  });
+
+  test("rejects physical iOS UserDefaults instead of reading the runner process defaults", async () => {
+    const preferences = new AppPreferences(physicalIosDevice);
+
+    await expect(preferences.getPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "onboardingComplete",
+    })).rejects.toThrow("iOS physical devices");
   });
 });

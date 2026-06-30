@@ -4,9 +4,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
-import { IOSCtrlProxyClient } from "../observe/ios";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
-import type { KeyValueEntry, KeyValueType } from "../storage/storageTypes";
 
 export type PreferenceScope = "systemProperty" | "sharedPreferences" | "userDefaults";
 export type PreferenceValueType = "string" | "bool" | "int" | "float";
@@ -43,15 +41,9 @@ interface IosSimulatorPreferenceClient {
   executeCommand(command: string, timeoutMs?: number): Promise<{ stdout: string; stderr: string }>;
 }
 
-interface CtrlProxyPreferenceClient {
-  getPreference(packageName: string, fileName: string, key: string, timeoutMs?: number): Promise<KeyValueEntry | null>;
-  setPreference(packageName: string, fileName: string, key: string, value: string | null, type: KeyValueType, timeoutMs?: number): Promise<void>;
-}
-
 export interface AppPreferencesDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorPreferenceClient | null;
-  ctrlProxyClientFactory?: (device: BootedDevice) => CtrlProxyPreferenceClient;
 }
 
 type AndroidPreferenceTag = "string" | "boolean" | "int" | "float";
@@ -70,17 +62,9 @@ const ANDROID_TYPE_TO_TAG: Record<PreferenceValueType, AndroidPreferenceTag> = {
   float: "float",
 };
 
-const STORAGE_TYPE_BY_PREFERENCE_TYPE: Record<PreferenceValueType, KeyValueType> = {
-  string: "STRING",
-  bool: "BOOLEAN",
-  int: "INT",
-  float: "FLOAT",
-};
-
 export class AppPreferences {
   private readonly adbFactory: AdbClientFactory;
   private readonly simctl: IosSimulatorPreferenceClient | null | undefined;
-  private readonly ctrlProxyClientFactory: (device: BootedDevice) => CtrlProxyPreferenceClient;
 
   constructor(
     private readonly device: BootedDevice,
@@ -88,8 +72,6 @@ export class AppPreferences {
   ) {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl;
-    this.ctrlProxyClientFactory = dependencies.ctrlProxyClientFactory
-      ?? (targetDevice => IOSCtrlProxyClient.getInstance(targetDevice));
   }
 
   async getPreference(input: GetPreferenceInput): Promise<PreferenceResult> {
@@ -189,17 +171,7 @@ export class AppPreferences {
 
   private async getIosUserDefault(input: GetPreferenceInput): Promise<PreferenceResult> {
     if (!isIosSimulatorDevice(this.device)) {
-      const entry = await this.ctrlProxyClientFactory(this.device)
-        .getPreference(input.appId!, iosSuiteName(input), input.key);
-      if (!entry) {
-        return this.result(input, false, null);
-      }
-      return this.result(
-        input,
-        true,
-        parseCtrlProxyValue(entry),
-        preferenceTypeFromStorageType(entry.type)
-      );
+      throw unsupportedPhysicalIosUserDefaultsError();
     }
 
     const domain = iosDefaultsDomain(input);
@@ -220,14 +192,7 @@ export class AppPreferences {
 
   private async setIosUserDefault(input: SetPreferenceInput): Promise<void> {
     if (!isIosSimulatorDevice(this.device)) {
-      await this.ctrlProxyClientFactory(this.device).setPreference(
-        input.appId!,
-        iosSuiteName(input),
-        input.key,
-        stringValue(input.value),
-        STORAGE_TYPE_BY_PREFERENCE_TYPE[input.type]
-      );
-      return;
+      throw unsupportedPhysicalIosUserDefaultsError();
     }
 
     const domain = iosDefaultsDomain(input);
@@ -283,10 +248,11 @@ export class AppPreferences {
 
 function androidSharedPreferencesFileName(input: GetPreferenceInput): string {
   const name = input.suite ?? `${input.appId}_preferences`;
-  if (name.includes("/") || name.includes("\0") || name === "." || name === "..") {
-    throw new ActionableError("Android SharedPreferences suite must be a file name, not a path.");
+  const fileName = name.endsWith(".xml") ? name.slice(0, -4) : name;
+  if (!/^[A-Za-z0-9_.-]+$/.test(fileName) || fileName === "." || fileName === "..") {
+    throw new ActionableError("Android SharedPreferences suite must be a safe file name using letters, numbers, underscore, dash, or dot.");
   }
-  return name.endsWith(".xml") ? name.slice(0, -4) : name;
+  return fileName;
 }
 
 async function readAndroidPreferenceEntry(xml: string, key: string): Promise<AndroidPreferenceEntry | null> {
@@ -348,11 +314,24 @@ async function parseAndroidPreferencesXml(xml: string): Promise<any> {
       explicitRoot: true,
       trim: false,
     });
-    parsed.map ??= {};
-    return parsed;
+    return normalizeAndroidPreferencesDocument(parsed);
   } catch (error) {
     throw new ActionableError(`Failed to parse Android SharedPreferences XML: ${error}`);
   }
+}
+
+function normalizeAndroidPreferencesDocument(parsed: unknown): { map: Record<string, unknown> } {
+  if (!isRecord(parsed)) {
+    return { map: {} };
+  }
+  if (!isRecord(parsed.map)) {
+    return { ...parsed, map: {} };
+  }
+  return parsed as { map: Record<string, unknown> };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function findNamedNode(nodes: unknown, key: string): any | null {
@@ -391,10 +370,6 @@ function androidNodeFor(key: string, value: PreferenceValue, type: PreferenceVal
 
 function iosDefaultsDomain(input: GetPreferenceInput): string {
   return input.suite ?? input.appId!;
-}
-
-function iosSuiteName(input: GetPreferenceInput): string {
-  return input.suite ?? "Standard";
 }
 
 function iosDefaultsTypeFlag(type: PreferenceValueType): string {
@@ -518,39 +493,6 @@ function looksLikeMissingIosDefault(error: unknown): boolean {
   return /does not exist|Domain .* does not exist|does not contain/i.test(message);
 }
 
-function parseCtrlProxyValue(entry: KeyValueEntry): PreferenceValue | null {
-  if (entry.value === null) {
-    return null;
-  }
-  const preferenceType = preferenceTypeFromStorageType(entry.type);
-  if (!preferenceType) {
-    return entry.value;
-  }
-  try {
-    const decoded = JSON.parse(entry.value);
-    return parsePreferenceValue(String(decoded), preferenceType);
-  } catch {
-    return parsePreferenceValue(entry.value, preferenceType);
-  }
-}
-
-function preferenceTypeFromStorageType(type: KeyValueType): PreferenceValueType | undefined {
-  switch (type) {
-    case "BOOLEAN":
-      return "bool";
-    case "INT":
-    case "LONG":
-      return "int";
-    case "FLOAT":
-    case "DOUBLE":
-      return "float";
-    case "STRING":
-      return "string";
-    default:
-      return undefined;
-  }
-}
-
 function preferenceWriteWarning(platform: "android" | "ios", scope: PreferenceScope): string | undefined {
   if (platform === "ios" && scope === "userDefaults") {
     return "UserDefaults writes go through the preferences daemon; a running app that cached the value may need a cold relaunch to observe the change.";
@@ -559,4 +501,12 @@ function preferenceWriteWarning(platform: "android" | "ios", scope: PreferenceSc
     return "Android system properties are global and generally reset on reboot.";
   }
   return undefined;
+}
+
+function unsupportedPhysicalIosUserDefaultsError(): ActionableError {
+  return new ActionableError(
+    "iOS physical devices are not supported for UserDefaults preferences yet. " +
+    "The available CtrlProxy storage APIs run in the runner process and cannot safely read or write another app's UserDefaults sandbox. " +
+    "Use an iOS Simulator for UserDefaults automation."
+  );
 }

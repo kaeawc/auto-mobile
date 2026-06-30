@@ -101,6 +101,7 @@ interface ListeningProcess {
   pid: number;
   port: number;
   command: string;
+  environment?: string;
   ppid?: number;
 }
 
@@ -1328,14 +1329,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           continue;
         }
         try {
-          const { stdout: argsOut } = await this.processExecutor.exec(
-            `ps -p ${pid} -o args= 2>/dev/null`
-          );
+          const processInfo = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, pid);
+          const argsOut = processInfo?.command ?? "";
           if (argsOut.includes("CtrlProxy")) {
-            if (!argsOut.includes(`id=${this.device.deviceId}`)) {
+            if (await this.isDaemonManagedSimulatorXcodebuildProcess(argsOut, processInfo)) {
               continue;
             }
-            const port = this.parseCtrlProxyPortFromProcessArgs(argsOut) ?? IOSCtrlProxyManager.DEFAULT_PORT;
+            const identityText = `${argsOut} ${processInfo?.environment ?? ""}`;
+            if (!IOSCtrlProxyManager.hasDeviceIdentity(identityText, this.device.deviceId)) {
+              continue;
+            }
+            const port = this.parseCtrlProxyPortFromProcessArgs(argsOut) ??
+              this.parseCtrlProxyPortFromProcessArgs(processInfo?.environment ?? "") ??
+              IOSCtrlProxyManager.DEFAULT_PORT;
             logger.info(`[IOSCtrlProxy] Found external xcodebuild CtrlProxy process: ${pid}`);
             return { pid, port };
           }
@@ -1395,12 +1401,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return;
       }
 
-      const ownedProcesses: ListeningProcess[] = [];
-      for (const process of listeningProcesses) {
-        if (this.isOwnedCtrlProxyRunnerProcess(process)) {
-          ownedProcesses.push(process);
-        }
-      }
+      const ownedProcesses = listeningProcesses.filter(process =>
+        this.isOwnedCtrlProxyRunnerProcess(process)
+      );
       if (ownedProcesses.length > 0) {
         for (const process of ownedProcesses) {
           logger.warn(
@@ -1413,14 +1416,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         if (remainingProcesses.length === 0) {
           return;
         }
-        let ownedProcessStillHoldingPort = false;
-        for (const process of remainingProcesses) {
-          if (this.isOwnedCtrlProxyRunnerProcess(process)) {
-            ownedProcessStillHoldingPort = true;
-            break;
-          }
-        }
-        if (ownedProcessStillHoldingPort) {
+        if (remainingProcesses.some(process => this.isOwnedCtrlProxyRunnerProcess(process))) {
           throw new Error(
             `CtrlProxy recovery failed, port ${this.servicePort} still held by ` +
             this.formatListeningProcesses(remainingProcesses)
@@ -1465,7 +1461,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(process.command)) {
       return false;
     }
-    return process.command.includes(this.device.deviceId);
+    return IOSCtrlProxyManager.hasDeviceIdentity(process.command, this.device.deviceId) ||
+      IOSCtrlProxyManager.hasDeviceIdentity(process.environment ?? "", this.device.deviceId);
   }
 
   private async processAncestryContainsDeviceId(process: ListeningProcess): Promise<boolean> {
@@ -1478,7 +1475,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (!processInfo) {
         return false;
       }
-      if (processInfo.command.includes(this.device.deviceId)) {
+      if (
+        IOSCtrlProxyManager.hasDeviceIdentity(processInfo.command, this.device.deviceId) ||
+        processInfo.command.includes(this.device.deviceId)
+      ) {
         return true;
       }
       parentPid = processInfo.ppid;
@@ -1532,7 +1532,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private static async getProcessInfo(
     processExecutor: ProcessExecutor,
     pid: number
-  ): Promise<{ ppid?: number; command: string } | null> {
+  ): Promise<{ ppid?: number; command: string; environment?: string } | null> {
     try {
       const { stdout } = await processExecutor.exec(`ps -p ${pid} -o ppid= -o args= 2>/dev/null`);
       const output = stdout.trim();
@@ -1540,16 +1540,86 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return null;
       }
       const match = output.match(/^(\d+)\s+([\s\S]+)$/);
+      const environment = await IOSCtrlProxyManager.getProcessEnvironment(processExecutor, pid);
       if (!match) {
-        return { command: output };
+        return { command: output, environment };
       }
       return {
         ppid: Number.parseInt(match[1], 10),
         command: match[2],
+        environment,
       };
     } catch {
       return null;
     }
+  }
+
+  private static async getProcessEnvironment(
+    processExecutor: ProcessExecutor,
+    pid: number
+  ): Promise<string | undefined> {
+    try {
+      const { stdout } = await processExecutor.exec(`ps eww -p ${pid} -o command= 2>/dev/null`);
+      const output = stdout.trim();
+      return output.length > 0 ? output : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private static hasDeviceIdentity(text: string, deviceId: string): boolean {
+    return text.includes(`id=${deviceId}`) ||
+      text.includes(`AUTOMOBILE_DEVICE_ID=${deviceId}`) ||
+      text.includes(`SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=${deviceId}`);
+  }
+
+  private async isDaemonManagedSimulatorXcodebuildProcess(
+    command: string,
+    processInfo?: { ppid?: number; environment?: string } | null
+  ): Promise<boolean> {
+    const environment = processInfo?.environment ?? "";
+    if (!IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(command)) {
+      return false;
+    }
+    if (processInfo?.ppid === 1) {
+      return true;
+    }
+    if (await this.hasOrphanedDaemonManagedShellParent(processInfo?.ppid)) {
+      return true;
+    }
+    return !IOSCtrlProxyManager.hasExternalXcodebuildIdentity(environment);
+  }
+
+  private async hasOrphanedDaemonManagedShellParent(parentPid: number | undefined): Promise<boolean> {
+    if (parentPid === undefined || parentPid <= 1) {
+      return false;
+    }
+    const parentInfo = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, parentPid);
+    if (!parentInfo || parentInfo.ppid !== 1) {
+      return false;
+    }
+    return IOSCtrlProxyManager.isShellCommand(parentInfo.command) &&
+      IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command);
+  }
+
+  private static isDaemonManagedSimulatorXcodebuildCommandShape(command: string): boolean {
+    return command.includes("xcodebuild") &&
+      command.includes("test-without-building") &&
+      command.includes("-xctestrun") &&
+      command.includes("platform=iOS Simulator") &&
+      command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") &&
+      !command.includes("CTRL_PROXY_IOS_PORT=") &&
+      !command.includes("AUTOMOBILE_DEVICE_ID=");
+  }
+
+  private static isShellCommand(command: string): boolean {
+    return /(?:^|\/)(?:ba|z|c|t?c|k)?sh(?:\s|$)/.test(command);
+  }
+
+  private static hasExternalXcodebuildIdentity(environment: string): boolean {
+    return environment.includes("CTRL_PROXY_IOS_PORT=") ||
+      environment.includes("AUTOMOBILE_DEVICE_ID=") ||
+      environment.includes("SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=");
   }
 
   private static isCtrlProxyRunnerCommand(command: string): boolean {

@@ -458,12 +458,10 @@ async function main() {
       AndroidCtrlProxyManager.prefetchApk();
     }
 
-    // Start iOS CtrlProxy iOS build prefetch (macOS only)
-    // This runs asynchronously and will be ready when first iOS device connects
+    // Reap orphaned iOS runners before the daemon accepts iOS work, then start
+    // the build prefetch asynchronously so it can be ready for first use.
     if (process.platform === "darwin") {
-      IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup().catch(error => {
-        logger.debug(`[IOSCtrlProxy] Startup orphan sweep failed: ${error}`);
-      });
+      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup();
       IOSCtrlProxyBuilder.prefetchBuild();
     }
 

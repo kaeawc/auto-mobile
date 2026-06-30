@@ -117,6 +117,7 @@ interface FakeListeningProcess {
   pid: number;
   port: number;
   command: string;
+  environment?: string;
   ppid?: number;
   alive: boolean;
   ignoreTerm?: boolean;
@@ -140,6 +141,14 @@ function installListeningProcessFakes(
     const process = processes.find(candidate => candidate.pid === pid && candidate.alive);
     return createExecResult(
       process ? `${process.ppid ?? 1} ${process.command}` : "",
+      ""
+    );
+  });
+  fakeExecutor.setCommandHandler("ps eww -p", command => {
+    const pid = Number(command.match(/ps eww -p\s+(\d+)/)?.[1]);
+    const process = processes.find(candidate => candidate.pid === pid && candidate.alive);
+    return createExecResult(
+      process ? `${process.command} ${process.environment ?? ""}`.trim() : "",
       ""
     );
   });
@@ -1370,6 +1379,75 @@ describe("IOSCtrlProxyManager", function() {
 
       expect(otherSimulatorProcess.alive).toBe(true);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 3335")).toBe(false);
+      expect(manager.getServicePort()).toBe(8767);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
+      expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
+        CTRL_PROXY_IOS_PORT: "8767",
+        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8767",
+      });
+    });
+
+    test("start() terminates a stale direct runner identified by environment before spawning", async function() {
+      const staleProcess: FakeListeningProcess = {
+        pid: 3335,
+        port: 8765,
+        command: "/tmp/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests-Runner",
+        environment: `AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+        ignoreTerm: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [staleProcess]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "", "")
+      );
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      await manager.start();
+
+      expect(staleProcess.alive).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 3335")).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL 3335")).toBe(true);
+      expect(manager.getServicePort()).toBe(8765);
+      expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
+        CTRL_PROXY_IOS_PORT: "8765",
+        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8765",
+      });
+    });
+
+    test("start() reallocates instead of killing another simulator's direct runner identified by environment", async function() {
+      const otherSimulatorProcess: FakeListeningProcess = {
+        pid: 3336,
+        port: 8765,
+        command: "/tmp/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests-Runner",
+        environment: "AUTOMOBILE_DEVICE_ID=OTHER-SIMULATOR",
+        alive: true,
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [otherSimulatorProcess]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "", "")
+      );
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      await manager.start();
+
+      expect(otherSimulatorProcess.alive).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 3336")).toBe(false);
       expect(manager.getServicePort()).toBe(8767);
       expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
       expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({

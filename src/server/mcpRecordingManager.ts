@@ -1,7 +1,7 @@
 import * as yaml from "js-yaml";
 import { Plan } from "../models";
 import { logger } from "../utils/logger";
-import { getMcpServerVersion } from "../utils/mcpVersion";
+import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import { PlanValidator } from "../utils/plan/PlanValidator";
 import { McpCallRecorder } from "../features/record/McpCallRecorder";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -115,7 +115,9 @@ export function stopMcpRecording(
     const plan: Plan = {
       name: resolvedName,
       steps,
-      mcpVersion: getMcpServerVersion(),
+      // Release portion only — recorded plans are schema-validated (`^\d+\.\d+\.\d+$`)
+      // before migration, so a dev build's `+g<sha>` stamp would make them unusable.
+      mcpVersion: releaseVersion(getMcpServerVersion()),
       metadata: {
         createdAt: new Date(stoppedAt).toISOString(),
         version: "1.0.0",

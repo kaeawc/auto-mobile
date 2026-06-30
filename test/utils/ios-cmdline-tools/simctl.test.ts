@@ -120,6 +120,46 @@ describe("Simctl", function() {
       expect(executedFile).toBe("xcrun");
       expect(executedArgs).toEqual(["simctl", "list", "devices"]);
     });
+
+    test("should execute pre-split simctl arguments without dropping empty strings or backslashes", async function() {
+      let executedFile = "";
+      let executedArgs: string[] = [];
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        executedFile = file;
+        executedArgs = args;
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        return createExecResult("command executed", "");
+      };
+
+      simctl = new Simctl(mockDevice, mockExecAsync);
+      await simctl.executeCommandArgs([
+        "spawn",
+        "test-ios-device-id",
+        "defaults",
+        "write",
+        "com.example.app",
+        "windowsPath",
+        "-string",
+        "C:\\tmp",
+        "",
+      ]);
+
+      expect(executedFile).toBe("xcrun");
+      expect(executedArgs).toEqual([
+        "simctl",
+        "spawn",
+        "test-ios-device-id",
+        "defaults",
+        "write",
+        "com.example.app",
+        "windowsPath",
+        "-string",
+        "C:\\tmp",
+        "",
+      ]);
+    });
   });
 
   describe("docker host-control mode (iOS unsupported)", function() {

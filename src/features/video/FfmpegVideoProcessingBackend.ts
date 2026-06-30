@@ -19,6 +19,10 @@ import type {
 const PROCESS_EXIT_TIMEOUT_MS = 5000;
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
 const IOS_RECORDING_START_TIMEOUT_MS = 30000;
+const IOS_RECORDING_START_MESSAGES = [
+  "Recording started",
+  "Defaulting to display:",
+];
 
 interface ProcessExitState {
   exitCode?: number | null;
@@ -171,16 +175,28 @@ async function waitForProcessCompletion(
   await exitPromise;
 }
 
-function hasStderrMessage(tracker: Pick<ProcessTracker, "stderr">, message: string): boolean {
-  return tracker.stderr.join("").includes(message);
+function stderrMessages(messages: string | string[]): string[] {
+  return Array.isArray(messages) ? messages : [messages];
+}
+
+function hasStderrMessage(tracker: Pick<ProcessTracker, "stderr">, messages: string | string[]): boolean {
+  const stderr = tracker.stderr.join("");
+  return stderrMessages(messages).some(message => stderr.includes(message));
+}
+
+export function containsIosRecordingStartMessage(stderr: string): boolean {
+  return IOS_RECORDING_START_MESSAGES.some(message => stderr.includes(message));
 }
 
 export async function waitForStderrMessage(
   tracker: ProcessTracker,
-  message: string,
+  messages: string | string[],
   timeoutMs: number
 ): Promise<void> {
-  if (hasStderrMessage(tracker, message)) {
+  const expected = stderrMessages(messages);
+  const expectedDescription = expected.join(" or ");
+
+  if (hasStderrMessage(tracker, expected)) {
     return;
   }
 
@@ -204,12 +220,12 @@ export async function waitForStderrMessage(
       callback();
     };
     const onData = () => {
-      if (hasStderrMessage(tracker, message)) {
+      if (hasStderrMessage(tracker, expected)) {
         complete(resolve);
       }
     };
     const onExit = () => {
-      complete(() => reject(new Error(`Process exited before ${message}`)));
+      complete(() => reject(new Error(`Process exited before ${expectedDescription}`)));
     };
     const onError = (error: Error) => {
       complete(() => reject(error));
@@ -220,11 +236,11 @@ export async function waitForStderrMessage(
     tracker.process.once("error", onError);
     onData();
     timeoutId = defaultTimer.setTimeout(() => {
-      if (hasStderrMessage(tracker, message)) {
+      if (hasStderrMessage(tracker, expected)) {
         complete(resolve);
         return;
       }
-      complete(() => reject(new Error(`Timed out waiting for ${message}`)));
+      complete(() => reject(new Error(`Timed out waiting for ${expectedDescription}`)));
     }, timeoutMs);
   });
 }
@@ -415,7 +431,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     try {
       await waitForStderrMessage(
         captureTracker,
-        "Recording started",
+        IOS_RECORDING_START_MESSAGES,
         IOS_RECORDING_START_TIMEOUT_MS
       );
     } catch (error) {

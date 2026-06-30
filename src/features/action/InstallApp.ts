@@ -322,6 +322,9 @@ export class InstallApp {
 
     const newBundles = this.diffSets(beforeBundleIds, afterBundleIds);
     let packageName = this.findBundleIdByPath(afterApps, appPath);
+    if (!packageName && newBundles.length === 1) {
+      packageName = newBundles[0];
+    }
 
     if (!packageName) {
       const expectedBundleId = await perf.track("resolveBundleId", () => this.resolveAppBundleId(appPath));
@@ -343,9 +346,7 @@ export class InstallApp {
     }
 
     if (!packageName) {
-      if (newBundles.length === 1) {
-        packageName = newBundles[0];
-      } else if (newBundles.length > 1) {
+      if (newBundles.length > 1) {
         warnings.push("Installed app but multiple new bundle IDs were detected; unable to determine the bundle ID reliably.");
       } else {
         warnings.push("Installed app but bundle ID could not be determined from simctl listapps output.");

@@ -4,7 +4,12 @@ import { EventEmitter } from "node:events";
 import { promises as fsPromises } from "node:fs";
 import os, { platform } from "node:os";
 import path from "node:path";
-import { FfmpegVideoProcessingBackend, waitForStderrMessage, type ProcessTracker } from "../../../src/features/video/FfmpegVideoProcessingBackend";
+import {
+  containsIosRecordingStartMessage,
+  FfmpegVideoProcessingBackend,
+  waitForStderrMessage,
+  type ProcessTracker,
+} from "../../../src/features/video/FfmpegVideoProcessingBackend";
 import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
 
@@ -364,6 +369,14 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
   });
 
   describe("FFmpeg Diagnostics", function() {
+    test("should treat simctl display selection as iOS recording startup", function() {
+      expect(containsIosRecordingStartMessage(
+        "Note: No display specified. Defaulting to display: 4FCB34AC-FD7C-4A7E-9A19-CB10950490D8 (screenID: 1, name: LCD)\n"
+      )).toBe(true);
+      expect(containsIosRecordingStartMessage("Recording started\n")).toBe(true);
+      expect(containsIosRecordingStartMessage("Unable to boot simulator\n")).toBe(false);
+    });
+
     test("should resolve when stderr captured the expected message without another data event", async function() {
       const tracker = createProcessTracker();
       const wait = waitForStderrMessage(tracker, "Recording started", 1);

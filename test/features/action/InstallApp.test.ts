@@ -233,11 +233,12 @@ describe("InstallApp", () => {
       [{ bundleId: "com.example.old" }],
       [{ bundleId: "com.example.old" }, { bundleId: "com.example.new" }]
     ]);
+    fakeHost.setCommandResponse("plutil", createExecResult("com.example.unused\n"));
 
     const installApp = new InstallApp(
       iosSimulatorDevice,
       fakeAdbFactory,
-      null,
+      fakeHost,
       null,
       () => perf,
       sequencedSimctl
@@ -249,6 +250,7 @@ describe("InstallApp", () => {
     expect(result.packageName).toBe("com.example.new");
     expect(result.upgrade).toBe(false);
     expect(sequencedSimctl.wasMethodCalled("installApp")).toBe(true);
+    expect(fakeHost.wasCommandExecuted("plutil")).toBe(false);
   });
 
   test("installs iOS .ipa on physical device via devicectl", async () => {

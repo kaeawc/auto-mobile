@@ -9,6 +9,13 @@ import { DaemonManager } from "../../daemon/manager";
 import { getDaemonHealthReport } from "../../daemon/debugTools";
 import type { DaemonHealthReport } from "../../daemon/debugTools";
 import type { DaemonStatus } from "../../daemon/types";
+import {
+  buildIdentitiesMatch,
+  buildIdentityFromStatus,
+  describeBuildIdentity,
+  getCurrentBuildIdentity,
+} from "../../daemon/buildIdentity";
+import type { BuildIdentity } from "../../daemon/buildIdentity";
 import { LATEST_RELEASE_VERSION, RELEASE_VERSION, resolveAssetVersion } from "../../constants/release";
 import { getMcpServerVersion } from "../../utils/mcpVersion";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -27,9 +34,15 @@ export interface DaemonStatusDependencies {
   getDaemonHealthReport?: () => Promise<DaemonHealthReport>;
 }
 
+export interface DaemonBuildIdentityDependencies {
+  daemonManager?: DaemonStatusManager;
+  getClientBuildIdentity?: () => BuildIdentity;
+}
+
 export interface AutoMobileCheckDependencies {
   checkDaemonStatus?: () => Promise<CheckResult>;
   checkDaemonConnectivity?: () => Promise<CheckResult>;
+  checkDaemonBuildIdentity?: () => Promise<CheckResult>;
 }
 
 /**
@@ -141,6 +154,70 @@ export async function checkDaemonConnectivity(
       name: "Daemon Connectivity",
       status: "warn",
       message: `Connectivity check failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/**
+ * Surface the running daemon's build identity (`buildId` + `entryScript`) and
+ * flag wrong-build skew.
+ *
+ * Two checkouts on one machine share a single per-uid daemon socket, so the
+ * daemon serving this frontend can be from a *different* build (see #2732). The
+ * build-identity content hash recorded in the PID file (#2733) lets `doctor`
+ * make that visible *before* a tool call fails — rather than after.
+ */
+export async function checkDaemonBuildIdentity(
+  dependencies: DaemonBuildIdentityDependencies = {}
+): Promise<CheckResult> {
+  try {
+    const manager = dependencies.daemonManager ?? new DaemonManager();
+    const status = await manager.status();
+
+    if (!status.running) {
+      return {
+        name: "Daemon Build Identity",
+        status: "skip",
+        message: "Daemon is not running",
+      };
+    }
+
+    const daemon = buildIdentityFromStatus(status);
+    const client = (dependencies.getClientBuildIdentity ?? getCurrentBuildIdentity)();
+
+    if (buildIdentitiesMatch(client, daemon)) {
+      // No `value`: the console formatter renders `value` *instead of* `message`,
+      // and we want both the buildId and the entryScript visible — so carry them
+      // in the message.
+      return {
+        name: "Daemon Build Identity",
+        status: "pass",
+        message: `Build ${describeBuildIdentity(daemon)}`,
+      };
+    }
+
+    return {
+      name: "Daemon Build Identity",
+      status: "warn",
+      message: `Build skew: daemon ${describeBuildIdentity(daemon)}, client ${describeBuildIdentity(client)}`,
+      recommendation:
+        "The running daemon is a different build than this checkout. Restart the daemon " +
+        "from THIS checkout so it matches — run `--daemon restart` with the same auto-mobile " +
+        "CLI you invoked here. Avoid `@latest`, which starts the published build and may not " +
+        "match this checkout.",
+    };
+  } catch (error) {
+    // Diagnostic path: log the underlying error before returning a typed failure
+    // so there is a trace even though the user only sees the summarized message
+    // (CLAUDE.md error-handling convention #2).
+    logger.warn(
+      `Daemon build identity check failed: ${error instanceof Error ? error.message : String(error)}`,
+      error
+    );
+    return {
+      name: "Daemon Build Identity",
+      status: "warn",
+      message: `Could not check daemon build identity: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }
@@ -373,6 +450,7 @@ export async function runAutoMobileChecks(
   results.push(checkCtrlProxyVersion());
   results.push(await (dependencies.checkDaemonStatus ?? (() => checkDaemonStatus()))());
   results.push(await (dependencies.checkDaemonConnectivity ?? (() => checkDaemonConnectivity()))());
+  results.push(await (dependencies.checkDaemonBuildIdentity ?? (() => checkDaemonBuildIdentity()))());
 
   if (options.ios === true && options.android !== true) {
     results.push({

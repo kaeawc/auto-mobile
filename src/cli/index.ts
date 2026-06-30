@@ -193,7 +193,7 @@ async function runDoctorCommand(params: Record<string, any>): Promise<void> {
   try {
     logger.debug("Attempting to run doctor via daemon");
     const daemonResult = await runToolViaDaemon("doctor", daemonParams);
-    handleDoctorResult(daemonResult, jsonOutput);
+    await handleDoctorResult(daemonResult, jsonOutput);
     return;
   } catch (error) {
     logger.debug(`Daemon not available for doctor, falling back to direct execution: ${error}`);
@@ -223,7 +223,7 @@ async function runDoctorCommand(params: Record<string, any>): Promise<void> {
 /**
  * Handle doctor command result from daemon
  */
-function handleDoctorResult(result: any, jsonOutput: boolean): void {
+async function handleDoctorResult(result: any, jsonOutput: boolean): Promise<void> {
   // Extract the report from MCP response format
   let report = result;
   if (result && typeof result === "object" && "content" in result && Array.isArray(result.content)) {
@@ -236,13 +236,23 @@ function handleDoctorResult(result: any, jsonOutput: boolean): void {
     }
   }
 
+  // The daemon runs doctor in its own process, so its build-identity check
+  // compared the daemon to itself. Recompute it here, client-side, so the
+  // comparison uses THIS checkout's identity vs the daemon's PID-file identity
+  // and a wrong-build skew is actually surfaced (issue #2736).
+  try {
+    const { applyClientBuildIdentity } = await import("../doctor");
+    report = await applyClientBuildIdentity(report);
+  } catch (error) {
+    logger.debug(`Could not reconcile daemon build identity client-side: ${error}`);
+  }
+
   if (jsonOutput) {
     console.log(JSON.stringify(report, null, 2));
   } else {
     // Use the formatter for console output
-    import("../doctor").then(({ formatConsoleOutput }) => {
-      console.log(formatConsoleOutput(report, process.stdout.isTTY ?? true));
-    });
+    const { formatConsoleOutput } = await import("../doctor");
+    console.log(formatConsoleOutput(report, process.stdout.isTTY ?? true));
   }
 
   // Exit with error code if any failures

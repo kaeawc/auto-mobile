@@ -5,12 +5,15 @@ import { tmpdir } from "node:os";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+  daemonBuildIdentityStatusLines,
   DaemonManager,
   parseDaemonProcessTable,
   PsDaemonProcessFinder,
   resolveDaemonLaunchCommand,
   runDaemonCommand
 } from "../../src/daemon/manager";
+import type { BuildIdentity } from "../../src/daemon/buildIdentity";
+import type { DaemonStatus } from "../../src/daemon/types";
 import type {
   DaemonProcessFinder,
   DaemonProcessLivenessChecker,
@@ -20,6 +23,56 @@ import type {
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+describe("daemonBuildIdentityStatusLines", () => {
+  const client: BuildIdentity = {
+    entryScript: "/wt/dist/src/index.js",
+    buildId: "1111111111111111",
+  };
+
+  test("always reports the daemon's Build ID and Entry Script", () => {
+    const status: DaemonStatus = {
+      running: true,
+      pid: 99,
+      entryScript: "/wt/dist/src/index.js",
+      buildId: "1111111111111111",
+    };
+
+    const lines = daemonBuildIdentityStatusLines(status, client);
+
+    expect(lines).toContain("  Build ID: 1111111111111111");
+    expect(lines).toContain("  Entry Script: /wt/dist/src/index.js");
+  });
+
+  test("falls back to 'unknown' for a legacy daemon and does not warn", () => {
+    const status: DaemonStatus = { running: true, pid: 99 };
+
+    const lines = daemonBuildIdentityStatusLines(status, client);
+
+    expect(lines).toContain("  Build ID: unknown");
+    expect(lines).toContain("  Entry Script: unknown");
+    expect(lines.some(line => line.includes("WARNING"))).toBe(false);
+  });
+
+  test("warns and shows both builds when the daemon is a different build", () => {
+    const status: DaemonStatus = {
+      running: true,
+      pid: 99,
+      entryScript: "/main/dist/src/index.js",
+      buildId: "2222222222222222",
+    };
+
+    const lines = daemonBuildIdentityStatusLines(status, client);
+    const text = lines.join("\n");
+
+    expect(text).toContain("WARNING");
+    expect(text).toContain("2222222222222222");
+    expect(text).toContain("/main/dist/src/index.js");
+    expect(text).toContain("1111111111111111");
+    expect(text).toContain("/wt/dist/src/index.js");
+    expect(text).toContain("--daemon restart");
+  });
+});
 
 class FakeDaemonClient implements DaemonClientLike {
   readonly readResourceCalls: string[] = [];

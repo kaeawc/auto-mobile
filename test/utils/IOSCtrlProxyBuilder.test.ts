@@ -352,6 +352,23 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(resolved).toBe(sourcePath);
     });
 
+    test("per-launch copy is excluded even from the platform-agnostic getXctestrunPath glob", async function() {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun");
+      await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
+      // Make the source older so a naive newest-mtime pick would prefer the copy.
+      await fs.utimes(sourcePath, new Date("2026-01-01"), new Date("2026-01-01"));
+
+      const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+      const outputPath = await builder.writeRunnerEnvironment(sourcePath, { CTRL_PROXY_IOS_PORT: "8767" }, "SIM-UUID");
+      await fs.utimes(outputPath, new Date("2026-06-01"), new Date("2026-06-01"));
+
+      // No platform argument → no platform filter; the runner copy must still be skipped.
+      const resolved = await builder.getXctestrunPath();
+      expect(resolved).toBe(sourcePath);
+    });
+
     test("sanitizes the device id used in the copy filename", async function() {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });

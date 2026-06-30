@@ -67,6 +67,12 @@ type IOSCtrlProxyBundleMetadata = {
  * Handles release bundle download and extraction for CtrlProxy
  */
 export class IOSCtrlProxyBuilder {
+  /**
+   * Filename prefix for the per-launch xctestrun copies written by
+   * {@link writeRunnerEnvironment}. Distinct from the build-products xctestrun so
+   * the copies are excluded from source discovery/cleanup globs.
+   */
+  private static readonly RUNNER_XCTESTRUN_PREFIX = "automobile-runner-";
   private static readonly DEFAULT_PROJECT_ROOT = process.cwd();
   private static readonly DEFAULT_DERIVED_DATA_PATH = "/tmp/automobile-ctrl-proxy";
   private static readonly DEFAULT_SCHEME = "CtrlProxyApp";
@@ -209,7 +215,10 @@ export class IOSCtrlProxyBuilder {
     const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
     try {
       const files = await fs.readdir(productsDir);
-      const xctestrunFiles = files.filter(file => file.endsWith(".xctestrun"));
+      const xctestrunFiles = files.filter(
+        file => file.endsWith(".xctestrun") &&
+          !file.startsWith(IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX)
+      );
       if (xctestrunFiles.length === 0) {
         return null;
       }
@@ -289,7 +298,7 @@ export class IOSCtrlProxyBuilder {
       const safeDeviceId = deviceId.replace(/[^A-Za-z0-9._-]/g, "_") || "device";
       const outputPath = path.join(
         path.dirname(xctestrunPath),
-        `automobile-runner-${safeDeviceId}.xctestrun`
+        `${IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX}${safeDeviceId}.xctestrun`
       );
       await fs.writeFile(outputPath, buildPlist(root), "utf-8");
       logger.info(
@@ -311,7 +320,10 @@ export class IOSCtrlProxyBuilder {
     const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
     try {
       const files = await fs.readdir(productsDir);
-      const xctestrunFiles = files.filter(file => file.endsWith(".xctestrun"));
+      const xctestrunFiles = files.filter(
+        file => file.endsWith(".xctestrun") &&
+          !file.startsWith(IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX)
+      );
       if (xctestrunFiles.length <= 1) {
         return;
       }

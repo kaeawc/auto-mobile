@@ -405,6 +405,44 @@ describe("IOSCtrlProxyClient", function() {
         await testClient.close();
       }
     });
+
+    test("returns reconnecting metadata for default observe skip-wait hierarchy calls during cooldown", async function() {
+      const testTimer = new FakeTimer();
+
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      try {
+        await testClient.ensureConnected();
+        await testClient.ensureConnected();
+        await testClient.ensureConnected();
+
+        const result = await testClient.getLatestHierarchy(
+          false,
+          100,
+          undefined,
+          true
+        );
+
+        expect(result.hierarchy).toBeNull();
+        expect(result.fresh).toBe(false);
+        expect(result.reconnectStatus).toEqual({
+          state: "cooldown",
+          retryAfterMs: 2000,
+          retryAfterSeconds: 2,
+          connectionAttempts: 3,
+          maxConnectionAttempts: 3,
+        });
+        expect(result.reconnectMessage).toBe("CtrlProxy reconnecting, retry in 2s");
+      } finally {
+        await testClient.close();
+      }
+    });
   });
 
   describe("requestSwipe", function() {

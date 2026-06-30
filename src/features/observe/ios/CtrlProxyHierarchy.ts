@@ -153,6 +153,16 @@ export class CtrlProxyHierarchy {
       };
     }
 
+    const reconnectStatus = this.context.getReconnectStatus?.();
+    if (reconnectStatus) {
+      return {
+        hierarchy: null,
+        fresh: false,
+        reconnectStatus,
+        reconnectMessage: this.buildReconnectMessage(reconnectStatus.retryAfterSeconds)
+      };
+    }
+
     return { hierarchy: null, fresh: false };
   }
 

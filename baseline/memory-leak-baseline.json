@@ -25,11 +25,6 @@
     "heapUsedStart": 24333376,
     "heapUsedEnd": 24724544,
     "heapGrowthBytes": 391168,
-    "heapDiffBytes": 0,
     "effectiveGrowthBytes": 391168
-  },
-  "memwatch": {
-    "leakDetected": false,
-    "leakEventCount": 0
   }
 }

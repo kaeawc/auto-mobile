@@ -14,6 +14,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 const OLDER_VERSION = "0.0.1";
 const NEWER_VERSION = "9999.0.0";
+// Pinned plain client version for the version-gate suite. The ambient
+// DAEMON_VERSION is git-SHA-stamped in a source checkout (e.g. "0.0.39+g...")
+// which is intentionally non-numeric; these tests exercise release-version
+// (numeric) comparison semantics, so the client version is injected explicitly.
+const CLIENT_VERSION = "0.0.39";
 const ANCIENT_TIMESTAMP = 1;
 
 class ScriptedDaemonClient implements DaemonClientLike {
@@ -145,6 +150,7 @@ describe("DaemonMcpProxy", () => {
         waitForReadyResult?: boolean;
         daemonOptions?: { debug?: boolean; port?: number };
         statusAfterRestartVersion?: string;
+        clientVersion?: string;
       } = {}) {
         const timer = new FakeTimer();
         timer.advanceTime(100_000);
@@ -165,7 +171,7 @@ describe("DaemonMcpProxy", () => {
           initialStatus,
           {
             ...initialStatus,
-            version: opts.statusAfterRestartVersion ?? DAEMON_VERSION,
+            version: opts.statusAfterRestartVersion ?? CLIENT_VERSION,
             startedAt: timer.now(),
           },
         ];
@@ -179,6 +185,7 @@ describe("DaemonMcpProxy", () => {
           autoStartDaemon: opts.autoStartDaemon ?? true,
           daemonOptions: opts.daemonOptions,
           timer,
+          clientVersion: opts.clientVersion ?? CLIENT_VERSION,
         });
         return { fakeClient, fakeManager, isAvailableSpy, proxy };
       }
@@ -216,7 +223,7 @@ describe("DaemonMcpProxy", () => {
           const error = await expectVersionMismatch(proxy.listTools());
           expect(error.reason).toBe("daemonNewer");
           expect(error.daemonVersion).toBe(NEWER_VERSION);
-          expect(error.clientVersion).toBe(DAEMON_VERSION);
+          expect(error.clientVersion).toBe(CLIENT_VERSION);
           expect(fakeManager.restartCalled).toBe(false);
           expect(fakeClient.isConnected()).toBe(false);
         } finally {
@@ -227,7 +234,26 @@ describe("DaemonMcpProxy", () => {
 
       test("does not restart when versions match", async () => {
         const { fakeManager, isAvailableSpy, proxy } = makeProxy({
-          runningVersion: DAEMON_VERSION,
+          runningVersion: CLIENT_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("defers dev-build skew (same release version, different git stamp) to the build-identity gate", async () => {
+        // Two checkouts at different commits both report release 0.0.39 but carry
+        // different git build metadata. The version gate must NOT hard-throw on the
+        // non-numeric difference — that would defeat the build-identity gate's
+        // self-heal. With matching (absent) build identity it connects cleanly.
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          clientVersion: "0.0.39+gaaaaaaaaaaaa",
+          runningVersion: "0.0.39+gbbbbbbbbbbbb",
           startedAt: ANCIENT_TIMESTAMP,
         });
         try {
@@ -1080,6 +1106,33 @@ describe("DaemonMcpProxy", () => {
         isAvailableSpy.mockRestore();
         await proxy.close();
       }
+    });
+  });
+
+  describe("DaemonVersionMismatchError restart hint", () => {
+    test("strips git build metadata from the bunx restart hint for dev builds", () => {
+      const error = new DaemonVersionMismatchError({
+        clientVersion: "0.0.39+g1a2b3c4d5e6f.dirty",
+        daemonVersion: "0.0.39+gffffffffffff",
+        reason: "nonNumeric",
+        detail: "version comparison is not numeric",
+      });
+      // The hint must be npm-installable: build metadata (+...) is not a valid npm tag.
+      expect(error.message).toContain("bunx @kaeawc/auto-mobile@0.0.39 --daemon restart");
+      expect(error.message).not.toContain("bunx @kaeawc/auto-mobile@0.0.39+g");
+      // The displayed client/daemon versions stay fully qualified for diagnostics.
+      expect(error.message).toContain("client=0.0.39+g1a2b3c4d5e6f.dirty");
+      expect(error.message).toContain("daemon=0.0.39+gffffffffffff");
+    });
+
+    test("leaves a plain release version untouched in the restart hint", () => {
+      const error = new DaemonVersionMismatchError({
+        clientVersion: "0.0.40",
+        daemonVersion: "0.0.39",
+        reason: "daemonNewer",
+        detail: "daemon is newer",
+      });
+      expect(error.message).toContain("bunx @kaeawc/auto-mobile@0.0.40 --daemon restart");
     });
   });
 });

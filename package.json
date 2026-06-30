@@ -115,7 +115,7 @@
     "@img/sharp-darwin-x64": "0.34.5",
     "@img/sharp-libvips-darwin-arm64": "1.2.4",
     "@img/sharp-libvips-darwin-x64": "1.2.4",
-    "@img/sharp-libvips-linux-arm": "1.2.4",
+    "@img/sharp-libvips-linux-arm": "1.3.2",
     "@img/sharp-libvips-linux-arm64": "1.2.4",
     "@img/sharp-libvips-linux-ppc64": "1.2.4",
     "@img/sharp-libvips-linux-riscv64": "1.2.4",

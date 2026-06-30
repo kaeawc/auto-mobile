@@ -19,6 +19,21 @@ const createFixtureApp = async (root: string): Promise<string> => {
   return appDir;
 };
 
+const createFakeLogger = () => {
+  const debugMessages: string[] = [];
+  const warnMessages: string[] = [];
+  return {
+    debugMessages,
+    warnMessages,
+    debug(message: string) {
+      debugMessages.push(message);
+    },
+    warn(message: string) {
+      warnMessages.push(message);
+    }
+  };
+};
+
 const parseArgValue = (command: string, arg: string): string | null => {
   const match = command.match(new RegExp(`${arg}\\s+([^\\s]+)`));
   if (!match) {
@@ -75,6 +90,7 @@ describe("DeviceAppInspector", () => {
       readdir: async path => fs.readdir(path),
       stat: async path => fs.stat(path),
       tmpdir,
+      logger: createFakeLogger(),
       hostControl
     });
 
@@ -104,6 +120,7 @@ describe("DeviceAppInspector", () => {
       readdir: async path => fs.readdir(path),
       stat: async path => fs.stat(path),
       tmpdir,
+      logger: createFakeLogger(),
       hostControl
     });
 
@@ -145,11 +162,174 @@ describe("DeviceAppInspector", () => {
       readdir: async path => fs.readdir(path),
       stat: async path => fs.stat(path),
       tmpdir,
+      logger: createFakeLogger(),
       hostControl
     });
 
     const hash = await inspector.getInstalledAppBundleHash("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", bundleId, true);
     expect(hash).toBe(fixtureHash);
+  });
+
+  test("logs missing simulator app bundle lookup at debug rather than warn", async () => {
+    const hostControl = new FakeHostControlDeviceAppInspector();
+    const fakeLogger = createFakeLogger();
+    const inspector = new DeviceAppInspector({
+      platform: () => "darwin",
+      exec: async command => {
+        if (command.includes("simctl get_app_container")) {
+          throw new Error("No such file or directory");
+        }
+        return {
+          stdout: "",
+          stderr: "",
+          toString() { return this.stdout; },
+          trim() { return this.stdout.trim(); },
+          includes(searchString: string) { return this.stdout.includes(searchString); }
+        };
+      },
+      readFile: async path => fs.readFile(path, "utf-8"),
+      mkdtemp: async prefix => fs.mkdtemp(prefix),
+      rm: async path => fs.rm(path, { recursive: true, force: true }),
+      readdir: async path => fs.readdir(path),
+      stat: async path => fs.stat(path),
+      tmpdir,
+      logger: fakeLogger,
+      hostControl
+    });
+
+    const hash = await inspector.getInstalledAppBundleHash(
+      "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+      `${bundleId}.XCTestServiceApp`,
+      true
+    );
+
+    expect(hash).toBeNull();
+    expect(fakeLogger.warnMessages).toEqual([]);
+    expect(fakeLogger.debugMessages).toHaveLength(1);
+    expect(fakeLogger.debugMessages[0]).toContain("Failed to read simulator app bundle");
+    expect(fakeLogger.debugMessages[0]).toContain(`${bundleId}.XCTestServiceApp`);
+    expect(fakeLogger.debugMessages[0]).toContain("No such file or directory");
+  });
+
+  test("keeps real simulator app bundle lookup failures at warn", async () => {
+    const hostControl = new FakeHostControlDeviceAppInspector();
+    const fakeLogger = createFakeLogger();
+    const inspector = new DeviceAppInspector({
+      platform: () => "darwin",
+      exec: async command => {
+        if (command.includes("simctl get_app_container")) {
+          throw new Error("Invalid device: simulator is not booted");
+        }
+        return {
+          stdout: "",
+          stderr: "",
+          toString() { return this.stdout; },
+          trim() { return this.stdout.trim(); },
+          includes(searchString: string) { return this.stdout.includes(searchString); }
+        };
+      },
+      readFile: async path => fs.readFile(path, "utf-8"),
+      mkdtemp: async prefix => fs.mkdtemp(prefix),
+      rm: async path => fs.rm(path, { recursive: true, force: true }),
+      readdir: async path => fs.readdir(path),
+      stat: async path => fs.stat(path),
+      tmpdir,
+      logger: fakeLogger,
+      hostControl
+    });
+
+    const hash = await inspector.getInstalledAppBundleHash(
+      "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+      bundleId,
+      true
+    );
+
+    expect(hash).toBeNull();
+    expect(fakeLogger.warnMessages).toHaveLength(1);
+    expect(fakeLogger.warnMessages[0]).toContain("Failed to read simulator app bundle");
+    expect(fakeLogger.warnMessages[0]).toContain(bundleId);
+    expect(fakeLogger.warnMessages[0]).toContain("Invalid device");
+    expect(fakeLogger.debugMessages).toEqual([]);
+  });
+
+  test("keeps physical device installed bundle lookup failures at warn", async () => {
+    const hostControl = new FakeHostControlDeviceAppInspector();
+    const fakeLogger = createFakeLogger();
+    const inspector = new DeviceAppInspector({
+      platform: () => "darwin",
+      exec: async command => {
+        if (command.includes("devicectl device info apps")) {
+          throw new Error("devicectl unavailable");
+        }
+        return {
+          stdout: "",
+          stderr: "",
+          toString() { return this.stdout; },
+          trim() { return this.stdout.trim(); },
+          includes(searchString: string) { return this.stdout.includes(searchString); }
+        };
+      },
+      readFile: async path => fs.readFile(path, "utf-8"),
+      mkdtemp: async prefix => fs.mkdtemp(prefix),
+      rm: async path => fs.rm(path, { recursive: true, force: true }),
+      readdir: async path => fs.readdir(path),
+      stat: async path => fs.stat(path),
+      tmpdir,
+      logger: fakeLogger,
+      hostControl
+    });
+
+    const hash = await inspector.getInstalledAppBundleHash("device-udid", bundleId);
+
+    expect(hash).toBeNull();
+    expect(fakeLogger.warnMessages).toHaveLength(1);
+    expect(fakeLogger.warnMessages[0]).toContain("Failed to read installed app bundle");
+    expect(fakeLogger.debugMessages).toEqual([]);
+  });
+
+  test("keeps simulator app bundle hashing failures at warn", async () => {
+    const hostControl = new FakeHostControlDeviceAppInspector();
+    const fakeLogger = createFakeLogger();
+    const inspector = new DeviceAppInspector({
+      platform: () => "darwin",
+      exec: async command => {
+        if (command.includes("simctl get_app_container")) {
+          return {
+            stdout: "/tmp/missing/ExistingApp.app\n",
+            stderr: "",
+            toString() { return this.stdout; },
+            trim() { return this.stdout.trim(); },
+            includes(searchString: string) { return this.stdout.includes(searchString); }
+          };
+        }
+        return {
+          stdout: "",
+          stderr: "",
+          toString() { return this.stdout; },
+          trim() { return this.stdout.trim(); },
+          includes(searchString: string) { return this.stdout.includes(searchString); }
+        };
+      },
+      readFile: async path => fs.readFile(path, "utf-8"),
+      mkdtemp: async prefix => fs.mkdtemp(prefix),
+      rm: async path => fs.rm(path, { recursive: true, force: true }),
+      readdir: async path => fs.readdir(path),
+      stat: async path => fs.stat(path),
+      tmpdir,
+      logger: fakeLogger,
+      hostControl
+    });
+
+    const hash = await inspector.getInstalledAppBundleHash(
+      "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+      bundleId,
+      true
+    );
+
+    expect(hash).toBeNull();
+    expect(fakeLogger.warnMessages).toHaveLength(1);
+    expect(fakeLogger.warnMessages[0]).toContain("Failed to hash simulator app bundle");
+    expect(fakeLogger.debugMessages).toEqual([]);
   });
 
   test("uninstallApp uses simctl for simulators", async () => {
@@ -175,6 +355,7 @@ describe("DeviceAppInspector", () => {
       readdir: async path => fs.readdir(path),
       stat: async path => fs.stat(path),
       tmpdir,
+      logger: createFakeLogger(),
       hostControl
     });
 
@@ -208,6 +389,7 @@ describe("DeviceAppInspector", () => {
       readdir: async path => fs.readdir(path),
       stat: async path => fs.stat(path),
       tmpdir,
+      logger: createFakeLogger(),
       hostControl
     });
 
@@ -258,6 +440,7 @@ describe("DeviceAppInspector", () => {
       readdir: async path => fs.readdir(path),
       stat: async path => fs.stat(path),
       tmpdir,
+      logger: createFakeLogger(),
       hostControl
     });
 
@@ -295,6 +478,7 @@ describe("DeviceAppInspector", () => {
       readdir: async path => fs.readdir(path),
       stat: async path => fs.stat(path),
       tmpdir,
+      logger: createFakeLogger(),
       hostControl
     });
 
@@ -325,6 +509,7 @@ describe("DeviceAppInspector", () => {
       readdir: async path => fs.readdir(path),
       stat: async path => fs.stat(path),
       tmpdir,
+      logger: createFakeLogger(),
       hostControl
     });
 
@@ -379,6 +564,7 @@ describe("DeviceAppInspector", () => {
       readdir: async path => fs.readdir(path),
       stat: async path => fs.stat(path),
       tmpdir,
+      logger: createFakeLogger(),
       hostControl
     });
 

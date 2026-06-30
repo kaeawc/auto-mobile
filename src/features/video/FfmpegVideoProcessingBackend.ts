@@ -26,7 +26,7 @@ interface ProcessExitState {
   endedAt?: string;
 }
 
-interface ProcessTracker {
+export interface ProcessTracker {
   process: ChildProcessWithoutNullStreams;
   exitState: ProcessExitState;
   exitPromise: Promise<void>;
@@ -171,17 +171,22 @@ async function waitForProcessCompletion(
   await exitPromise;
 }
 
-async function waitForStderrMessage(
+function hasStderrMessage(tracker: Pick<ProcessTracker, "stderr">, message: string): boolean {
+  return tracker.stderr.join("").includes(message);
+}
+
+export async function waitForStderrMessage(
   tracker: ProcessTracker,
   message: string,
   timeoutMs: number
 ): Promise<void> {
-  if (tracker.stderr.join("").includes(message)) {
+  if (hasStderrMessage(tracker, message)) {
     return;
   }
 
   let timeoutId: NodeJS.Timeout | undefined;
   await new Promise<void>((resolve, reject) => {
+    let settled = false;
     const cleanup = () => {
       tracker.process.stderr.off("data", onData);
       tracker.process.off("exit", onExit);
@@ -190,27 +195,36 @@ async function waitForStderrMessage(
         clearTimeout(timeoutId);
       }
     };
+    const complete = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      callback();
+    };
     const onData = () => {
-      if (tracker.stderr.join("").includes(message)) {
-        cleanup();
-        resolve();
+      if (hasStderrMessage(tracker, message)) {
+        complete(resolve);
       }
     };
     const onExit = () => {
-      cleanup();
-      reject(new Error(`Process exited before ${message}`));
+      complete(() => reject(new Error(`Process exited before ${message}`)));
     };
     const onError = (error: Error) => {
-      cleanup();
-      reject(error);
+      complete(() => reject(error));
     };
 
     tracker.process.stderr.on("data", onData);
     tracker.process.once("exit", onExit);
     tracker.process.once("error", onError);
+    onData();
     timeoutId = defaultTimer.setTimeout(() => {
-      cleanup();
-      reject(new Error(`Timed out waiting for ${message}`));
+      if (hasStderrMessage(tracker, message)) {
+        complete(resolve);
+        return;
+      }
+      complete(() => reject(new Error(`Timed out waiting for ${message}`)));
     }, timeoutMs);
   });
 }

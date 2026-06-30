@@ -77,6 +77,9 @@ describe("IOSCtrlProxyClient", function() {
     };
   };
 
+  const createConnectionTimeoutWebSocketFactory = (timer: FakeTimer): (url: string) => FakeWebSocket =>
+    url => new FakeWebSocket(url, "timeout", 60000, timer);
+
   const waitForSocketOpen = async (socket: FakeWebSocket | null): Promise<void> => {
     if (!socket) {
       return;
@@ -360,6 +363,41 @@ describe("IOSCtrlProxyClient", function() {
         await testClient.ensureConnected();
         await testClient.ensureConnected();
         await testClient.ensureConnected();
+
+        expect(testClient.getReconnectStatus()).toEqual({
+          state: "cooldown",
+          retryAfterMs: 2000,
+          retryAfterSeconds: 2,
+          connectionAttempts: 3,
+          maxConnectionAttempts: 3,
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("keeps reconnect cooldown active after iOS WebSocket connection timeouts", async function() {
+      const testTimer = new FakeTimer();
+
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createConnectionTimeoutWebSocketFactory(testTimer),
+        testTimer
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      const failAfterConnectionTimeout = async (): Promise<void> => {
+        const resultPromise = testClient.ensureConnected();
+        await flushPromises();
+        testTimer.advanceTime(5000);
+        expect(await resultPromise).toBe(false);
+      };
+
+      try {
+        await failAfterConnectionTimeout();
+        await failAfterConnectionTimeout();
+        await failAfterConnectionTimeout();
 
         expect(testClient.getReconnectStatus()).toEqual({
           state: "cooldown",

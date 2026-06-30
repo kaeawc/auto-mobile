@@ -375,6 +375,7 @@ export abstract class DeviceServiceClient {
       }));
     } catch (error) {
       this.isConnecting = false;
+      this.lastConnectionAttempt = this.timer.now();
       logger.warn(`[${this.logTag}] Failed to connect to WebSocket: ${error}`);
       return false;
     }

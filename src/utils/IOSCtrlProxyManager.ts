@@ -1473,7 +1473,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (!processInfo) {
         return false;
       }
-      if (IOSCtrlProxyManager.hasDeviceIdentity(processInfo.command, this.device.deviceId)) {
+      if (
+        IOSCtrlProxyManager.hasDeviceIdentity(processInfo.command, this.device.deviceId) ||
+        processInfo.command.includes(this.device.deviceId)
+      ) {
         return true;
       }
       parentPid = processInfo.ppid;

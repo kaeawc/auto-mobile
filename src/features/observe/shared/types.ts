@@ -10,6 +10,7 @@ import type WebSocket from "ws";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnectStatus";
 
 // =============================================================================
 // Performance Timing
@@ -72,6 +73,8 @@ export interface DelegateContext {
   timer: Timer;
   /** Ensure the WebSocket connection is established */
   ensureConnected(perf?: PerformanceTracker): Promise<boolean>;
+  /** Return reconnect cooldown metadata when connection attempts are temporarily suppressed. */
+  getReconnectStatus?(): CtrlProxyReconnectStatus | null;
   /** Return false when a connected service advertises that it cannot handle this wire command. */
   isCommandSupported?(messageType: string): boolean;
   /** Build a user-facing error for an advertised unsupported wire command. */

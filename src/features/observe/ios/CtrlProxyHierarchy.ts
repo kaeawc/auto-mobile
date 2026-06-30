@@ -124,7 +124,10 @@ export class CtrlProxyHierarchy {
           perfTiming: result.perfTiming
         };
       }
+
     }
+
+    const reconnectStatus = this.context.getReconnectStatus?.();
 
     // Return cached (stale) data if available
     if (cachedHierarchy) {
@@ -139,11 +142,28 @@ export class CtrlProxyHierarchy {
         hierarchy: cachedHierarchy.hierarchy,
         fresh: false,
         updatedAt: cachedHierarchy.hierarchy.updatedAt,
-        perfTiming: cachedHierarchy.perfTiming
+        perfTiming: cachedHierarchy.perfTiming,
+        reconnectStatus,
+        reconnectMessage: reconnectStatus
+          ? this.buildReconnectMessage(reconnectStatus.retryAfterSeconds)
+          : undefined
+      };
+    }
+
+    if (reconnectStatus) {
+      return {
+        hierarchy: null,
+        fresh: false,
+        reconnectStatus,
+        reconnectMessage: this.buildReconnectMessage(reconnectStatus.retryAfterSeconds)
       };
     }
 
     return { hierarchy: null, fresh: false };
+  }
+
+  private buildReconnectMessage(retryAfterSeconds: number): string {
+    return `CtrlProxy reconnecting, retry in ${retryAfterSeconds}s`;
   }
 
   /**

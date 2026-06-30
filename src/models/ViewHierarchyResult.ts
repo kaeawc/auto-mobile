@@ -1,5 +1,6 @@
 import { ElementBounds } from "./ElementBounds";
 import { RecompositionMetrics, RecompositionNodeInfo } from "./Recomposition";
+import type { CtrlProxyReconnectStatus } from "./CtrlProxyReconnectStatus";
 
 /**
  * Hierarchy data sources that contributed to the result
@@ -57,6 +58,8 @@ export interface ViewHierarchyResult {
   deviceModel?: string;
   /** Whether running on an emulator (Android only, from accessibility service) */
   isEmulator?: boolean;
+  /** Present when CtrlProxy is reconnecting and the hierarchy is temporarily unavailable. */
+  ctrlProxyReconnect?: CtrlProxyReconnectStatus;
 }
 
 export interface ContentHiddenRegion {

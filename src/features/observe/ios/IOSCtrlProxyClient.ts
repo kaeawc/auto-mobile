@@ -368,6 +368,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private consecutiveConnectionFailures: number = 0;
   private isRequestingServiceRestart: boolean = false;
   private static readonly MAX_FAILURES_BEFORE_RESTART = 3;
+  private static readonly CONNECTION_RESET_MS = 2000;
 
   // Auto-setup on connection failure
   private readonly serviceManagerFactory: ServiceManagerFactory;
@@ -384,7 +385,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     bootedDeviceLister: BootedDeviceLister = defaultBootedDeviceLister,
     deviceConnectionLostNotifier: DeviceConnectionLostNotifier = observationStreamDeviceConnectionLostNotifier
   ) {
-    super(timer, wsFactory);
+    super(timer, wsFactory, { connectionResetMs: IOSCtrlProxyClient.CONNECTION_RESET_MS });
     this.device = device;
     this.port = port;
     this.serviceManagerFactory = serviceManagerFactory;
@@ -527,6 +528,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return true;
     }
 
+    if (this.getReconnectStatus()) {
+      return false;
+    }
+
     // Prevent re-entry during auto-setup
     if (this.isAttemptingAutoSetup) {
       return false;
@@ -614,6 +619,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       requestManager: this.requestManager,
       timer: this.timer,
       ensureConnected: perf => this.ensureConnected(perf),
+      getReconnectStatus: () => this.getReconnectStatus(),
       isCommandSupported: messageType => this.isCommandSupported(messageType),
       unsupportedCommandError: messageType => this.buildUnsupportedCommandError(messageType),
       cancelScreenshotBackoff: () => this.cancelScreenshotBackoff(),

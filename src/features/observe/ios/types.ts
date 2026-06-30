@@ -6,6 +6,7 @@
  */
 
 import type { ViewHierarchyWindowInfo } from "../../../models";
+import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnectStatus";
 import type { HighlightOperationResult } from "../../../models";
 import type {
   PerfTiming,
@@ -241,6 +242,8 @@ export interface CtrlProxyHierarchyResponse {
   fresh: boolean;
   updatedAt?: number;
   perfTiming?: CtrlProxyPerfTiming;
+  reconnectStatus?: CtrlProxyReconnectStatus;
+  reconnectMessage?: string;
 }
 
 /**

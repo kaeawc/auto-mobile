@@ -19,6 +19,10 @@ import type {
 const PROCESS_EXIT_TIMEOUT_MS = 5000;
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
 const IOS_RECORDING_START_TIMEOUT_MS = 30000;
+const IOS_RECORDING_START_MESSAGES = [
+  "Recording started",
+  "Defaulting to display:",
+];
 
 interface ProcessExitState {
   exitCode?: number | null;
@@ -171,12 +175,18 @@ async function waitForProcessCompletion(
   await exitPromise;
 }
 
+export function containsIosRecordingStartMessage(stderr: string): boolean {
+  return IOS_RECORDING_START_MESSAGES.some(message => stderr.includes(message));
+}
+
 async function waitForStderrMessage(
   tracker: ProcessTracker,
-  message: string,
+  messages: string[],
   timeoutMs: number
 ): Promise<void> {
-  if (tracker.stderr.join("").includes(message)) {
+  const includesMessage = () => messages.some(message => tracker.stderr.join("").includes(message));
+
+  if (includesMessage()) {
     return;
   }
 
@@ -191,14 +201,14 @@ async function waitForStderrMessage(
       }
     };
     const onData = () => {
-      if (tracker.stderr.join("").includes(message)) {
+      if (includesMessage()) {
         cleanup();
         resolve();
       }
     };
     const onExit = () => {
       cleanup();
-      reject(new Error(`Process exited before ${message}`));
+      reject(new Error(`Process exited before ${messages.join(" or ")}`));
     };
     const onError = (error: Error) => {
       cleanup();
@@ -210,7 +220,7 @@ async function waitForStderrMessage(
     tracker.process.once("error", onError);
     timeoutId = defaultTimer.setTimeout(() => {
       cleanup();
-      reject(new Error(`Timed out waiting for ${message}`));
+      reject(new Error(`Timed out waiting for ${messages.join(" or ")}`));
     }, timeoutMs);
   });
 }
@@ -401,7 +411,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     try {
       await waitForStderrMessage(
         captureTracker,
-        "Recording started",
+        IOS_RECORDING_START_MESSAGES,
         IOS_RECORDING_START_TIMEOUT_MS
       );
     } catch (error) {

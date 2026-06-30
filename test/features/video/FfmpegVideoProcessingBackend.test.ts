@@ -3,7 +3,10 @@ import { spawn, spawnSync } from "node:child_process";
 import { promises as fsPromises } from "node:fs";
 import os, { platform } from "node:os";
 import path from "node:path";
-import { FfmpegVideoProcessingBackend } from "../../../src/features/video/FfmpegVideoProcessingBackend";
+import {
+  containsIosRecordingStartMessage,
+  FfmpegVideoProcessingBackend,
+} from "../../../src/features/video/FfmpegVideoProcessingBackend";
 import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
 
@@ -348,6 +351,14 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
   });
 
   describe("FFmpeg Diagnostics", function() {
+    test("should treat simctl display selection as iOS recording startup", function() {
+      expect(containsIosRecordingStartMessage(
+        "Note: No display specified. Defaulting to display: 4FCB34AC-FD7C-4A7E-9A19-CB10950490D8 (screenID: 1, name: LCD)\n"
+      )).toBe(true);
+      expect(containsIosRecordingStartMessage("Recording started\n")).toBe(true);
+      expect(containsIosRecordingStartMessage("Unable to boot simulator\n")).toBe(false);
+    });
+
     test("should include command, stderr, and missing output path for opaque post-processing failures", function() {
       const message = (backend as any).buildFfmpegFailureMessage(
         "FFmpeg output file missing",

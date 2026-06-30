@@ -1182,7 +1182,7 @@ describe("IOSCtrlProxyManager", function() {
       });
     });
 
-    test("start() terminates a direct runner whose parent belongs to the current simulator", async function() {
+    test("start() adopts a direct runner for the current simulator while it is still starting", async function() {
       const runnerProcess: FakeListeningProcess = {
         pid: 2223,
         port: 8765,
@@ -1198,27 +1198,38 @@ describe("IOSCtrlProxyManager", function() {
         alive: true,
       };
       installListeningProcessFakes(fakeExecutor, [runnerProcess, parentProcess]);
-      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
-      fakeExecutor.setCommandHandler("curl -s", () =>
-        createExecResult(fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "", "")
-      );
-      fakeTimer.enableAutoAdvance();
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor
-      );
-
-      await manager.start();
-
-      expect(runnerProcess.alive).toBe(false);
-      expect(fakeExecutor.wasCommandExecuted("kill -TERM 2223")).toBe(true);
-      expect(manager.getServicePort()).toBe(8765);
-      expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
-        CTRL_PROXY_IOS_PORT: "8765",
-        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8765",
+      PortManager.setPortAvailabilityCheckerForTesting({
+        isPortAvailable: port => port !== 8765,
       });
+      try {
+        fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
+        fakeExecutor.setCommandResponse("http://localhost:8766/health", createExecResult("", ""));
+        fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
+        fakeTimer.enableAutoAdvance();
+        const fakeBuilder = {
+          getXctestrunPath: async () => {
+            throw new Error("should not build when an external direct runner is reused");
+          },
+          getRunnerBinaryPath: async () => null,
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeTimer,
+          fakeBuilder,
+          fakeExecutor
+        );
+
+        await expect(manager.start()).rejects.toThrow("CtrlProxy failed to start within timeout");
+
+        expect(runnerProcess.alive).toBe(true);
+        expect(fakeExecutor.wasCommandExecuted("kill -TERM 2223")).toBe(false);
+        expect(fakeExecutor.wasCommandExecuted("kill -KILL 2223")).toBe(false);
+        expect(manager.getServicePort()).toBe(8765);
+        expect(PortManager.getPort(testDevice.deviceId)).toBe(8765);
+        expect(fakeExecutor.getSpawnedProcesses()).toEqual([]);
+      } finally {
+        PortManager.setPortAvailabilityCheckerForTesting(null);
+      }
     });
 
     test("start() reallocates when the intended port is held by a foreign process", async function() {

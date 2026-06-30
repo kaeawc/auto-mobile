@@ -1274,15 +1274,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
-   * Check if an externally-managed xcodebuild process (e.g. from hot-reload)
-   * is already running CtrlProxy tests. Uses `pgrep -x xcodebuild` (exact
-   * binary name match to avoid self-matching shell wrappers) then verifies
-   * CtrlProxy appears in the process args.
+   * Check if an externally-managed CtrlProxy process (e.g. from hot-reload)
+   * is already running CtrlProxy tests. xcodebuild runners expose the simulator
+   * id in args; direct simctl-spawned runners are matched by listener port and
+   * launchd_sim ancestry.
    */
   private async findExternalCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
     if (this.useHostControl()) {
-      return null; // Host-control environments don't have external xcodebuild
+      return null; // Host-control environments don't have external local runners.
     }
+    const externalXcodebuildProcess = await this.findExternalXcodebuildCtrlProxyProcess();
+    if (externalXcodebuildProcess) {
+      return externalXcodebuildProcess;
+    }
+    return this.findExternalDirectCtrlProxyProcess();
+  }
+
+  private async findExternalXcodebuildCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
     try {
       // pgrep -x matches only processes whose binary name is exactly "xcodebuild"
       const { stdout: pgrepOut } = await this.processExecutor.exec(
@@ -1320,6 +1328,29 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // pgrep exits 1 when no process matches
       return null;
     }
+  }
+
+  private async findExternalDirectCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
+    const candidatePorts = new Set([
+      this.servicePort,
+      IOSCtrlProxyManager.DEFAULT_PORT,
+    ]);
+
+    for (const port of candidatePorts) {
+      const listeningProcesses = await this.findListeningProcessesOnPort(port);
+      for (const process of listeningProcesses) {
+        if (!IOSCtrlProxyManager.isDirectCtrlProxyRunnerCommand(process.command)) {
+          continue;
+        }
+        if (!await this.processAncestryContainsDeviceId(process)) {
+          continue;
+        }
+        logger.info(`[IOSCtrlProxy] Found external direct CtrlProxy runner: ${process.pid}`);
+        return { pid: process.pid, port };
+      }
+    }
+
+    return null;
   }
 
   private parseCtrlProxyPortFromProcessArgs(args: string): number | null {

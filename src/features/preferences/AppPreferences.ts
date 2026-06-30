@@ -179,10 +179,14 @@ export class AppPreferences {
 
     const domain = iosDefaultsDomain(input);
     try {
-      const result = await this.getSimctl().executeCommand(
-        `spawn ${shellQuote(this.device.deviceId)} defaults read ${shellQuote(domain)} ${shellQuote(input.key)}`,
-        IOS_DEFAULTS_TIMEOUT_MS
-      );
+      const result = await this.getSimctl().executeCommandArgs([
+        "spawn",
+        this.device.deviceId,
+        "defaults",
+        "read",
+        domain,
+        input.key,
+      ], IOS_DEFAULTS_TIMEOUT_MS);
       const type = await this.readIosDefaultsType(input);
       return this.result(input, true, parseIosDefaultsValue(result.stdout, type), type ?? "string");
     } catch (error) {
@@ -215,10 +219,14 @@ export class AppPreferences {
   private async readIosDefaultsType(input: GetPreferenceInput): Promise<PreferenceValueType | undefined> {
     const domain = iosDefaultsDomain(input);
     try {
-      const result = await this.getSimctl().executeCommand(
-        `spawn ${shellQuote(this.device.deviceId)} defaults read-type ${shellQuote(domain)} ${shellQuote(input.key)}`,
-        IOS_DEFAULTS_TIMEOUT_MS
-      );
+      const result = await this.getSimctl().executeCommandArgs([
+        "spawn",
+        this.device.deviceId,
+        "defaults",
+        "read-type",
+        domain,
+        input.key,
+      ], IOS_DEFAULTS_TIMEOUT_MS);
       return parseIosDefaultsType(result.stdout);
     } catch {
       return undefined;
@@ -423,11 +431,20 @@ function parsePreferenceValue(value: string, type: PreferenceValueType): Prefere
 }
 
 function parseIosDefaultsValue(value: string, type: PreferenceValueType | undefined): PreferenceValue {
-  const trimmed = value.trim();
-  if (type) {
-    return parsePreferenceValue(trimmed, type);
+  if (type === undefined || type === "string") {
+    return removeOneTrailingLineEnding(value);
   }
-  return trimmed;
+  return parsePreferenceValue(value, type);
+}
+
+function removeOneTrailingLineEnding(value: string): string {
+  if (value.endsWith("\r\n")) {
+    return value.slice(0, -2);
+  }
+  if (value.endsWith("\n") || value.endsWith("\r")) {
+    return value.slice(0, -1);
+  }
+  return value;
 }
 
 function parseIosDefaultsType(value: string): PreferenceValueType | undefined {

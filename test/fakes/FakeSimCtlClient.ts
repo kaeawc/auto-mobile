@@ -97,6 +97,17 @@ export class FakeSimCtlClient {
 
   async executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult> {
     this.recordCall("executeCommandArgs", { args, timeoutMs });
+    const command = args.join(" ");
+    const commandError = this.commandErrors.get(command);
+    if (commandError) {
+      throw commandError;
+    }
+
+    const commandResult = this.commandResults.get(command);
+    if (commandResult) {
+      return commandResult;
+    }
+
     return buildExecResult("");
   }
 

@@ -296,14 +296,26 @@ describe("AppPreferences", () => {
         ],
         timeoutMs: 5000,
       },
-    ]);
-    expect(simctl.getMethodCalls("executeCommand")).toEqual([
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app onboardingComplete",
+        args: [
+          "spawn",
+          "12345678-1234-1234-1234-123456789ABC",
+          "defaults",
+          "read",
+          "com.example.app",
+          "onboardingComplete",
+        ],
         timeoutMs: 5000,
       },
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app onboardingComplete",
+        args: [
+          "spawn",
+          "12345678-1234-1234-1234-123456789ABC",
+          "defaults",
+          "read-type",
+          "com.example.app",
+          "onboardingComplete",
+        ],
         timeoutMs: 5000,
       },
     ]);
@@ -336,17 +348,92 @@ describe("AppPreferences", () => {
       type: "string",
     });
 
+    const argvCalls = simctl.getMethodCalls("executeCommandArgs");
+    expect(argvCalls).toContainEqual({
+      args: [
+        "spawn",
+        "12345678-1234-1234-1234-123456789ABC",
+        "defaults",
+        "write",
+        "com.example.app",
+        "windowsPath",
+        "-string",
+        "C:\\tmp",
+      ],
+      timeoutMs: 5000,
+    });
+    expect(argvCalls).toContainEqual({
+      args: [
+        "spawn",
+        "12345678-1234-1234-1234-123456789ABC",
+        "defaults",
+        "write",
+        "com.example.app",
+        "emptyString",
+        "-string",
+        "",
+      ],
+      timeoutMs: 5000,
+    });
+  });
+
+  test("preserves whitespace in iOS simulator string defaults while removing the command newline", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app paddedString",
+      "  padded value  \n"
+    );
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app paddedString",
+      "Type is string\n"
+    );
+
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+    const result = await preferences.setPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "paddedString",
+      value: "  padded value  ",
+      type: "string",
+    });
+
+    expect(result).toMatchObject({
+      found: true,
+      value: "  padded value  ",
+      type: "string",
+      verified: true,
+    });
+  });
+
+  test("reads iOS simulator UserDefaults through argv-preserving defaults arguments", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read group\\com.example path\\key",
+      "C:\\tmp\n"
+    );
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type group\\com.example path\\key",
+      "Type is string\n"
+    );
+
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+    const result = await preferences.getPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      suite: "group\\com.example",
+      key: "path\\key",
+    });
+
+    expect(result.value).toBe("C:\\tmp");
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       {
         args: [
           "spawn",
           "12345678-1234-1234-1234-123456789ABC",
           "defaults",
-          "write",
-          "com.example.app",
-          "windowsPath",
-          "-string",
-          "C:\\tmp",
+          "read",
+          "group\\com.example",
+          "path\\key",
         ],
         timeoutMs: 5000,
       },
@@ -355,11 +442,9 @@ describe("AppPreferences", () => {
           "spawn",
           "12345678-1234-1234-1234-123456789ABC",
           "defaults",
-          "write",
-          "com.example.app",
-          "emptyString",
-          "-string",
-          "",
+          "read-type",
+          "group\\com.example",
+          "path\\key",
         ],
         timeoutMs: 5000,
       },
@@ -413,13 +498,27 @@ describe("AppPreferences", () => {
       value: true,
       type: "bool",
     });
-    expect(simctl.getMethodCalls("executeCommand")).toEqual([
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app onboardingComplete",
+        args: [
+          "spawn",
+          "12345678-1234-1234-1234-123456789ABC",
+          "defaults",
+          "read",
+          "com.example.app",
+          "onboardingComplete",
+        ],
         timeoutMs: 5000,
       },
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app onboardingComplete",
+        args: [
+          "spawn",
+          "12345678-1234-1234-1234-123456789ABC",
+          "defaults",
+          "read-type",
+          "com.example.app",
+          "onboardingComplete",
+        ],
         timeoutMs: 5000,
       },
     ]);

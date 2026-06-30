@@ -443,6 +443,49 @@ describe("IOSCtrlProxyClient", function() {
         await testClient.close();
       }
     });
+
+    test("preserves stale hierarchy while reporting reconnecting metadata during cooldown", async function() {
+      const testTimer = new FakeTimer();
+      const cachedHierarchy: CtrlProxyHierarchy = {
+        updatedAt: 1750934585218,
+        packageName: "com.example.cached",
+        hierarchy: { text: "Cached screen" },
+      };
+
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+      (testClient as any).autoReconnectEnabled = false;
+      (testClient as any).cachedHierarchy = {
+        hierarchy: cachedHierarchy,
+        receivedAt: 0,
+        fresh: false,
+      };
+      (testClient as any).connectionAttempts = 3;
+      (testClient as any).lastConnectionAttempt = 1000;
+      testTimer.advanceTime(1000);
+
+      try {
+        const result = await testClient.getLatestHierarchy(true, 100);
+
+        expect(result.hierarchy).toBe(cachedHierarchy);
+        expect(result.fresh).toBe(false);
+        expect(result.updatedAt).toBe(1750934585218);
+        expect(result.reconnectStatus).toEqual({
+          state: "cooldown",
+          retryAfterMs: 2000,
+          retryAfterSeconds: 2,
+          connectionAttempts: 3,
+          maxConnectionAttempts: 3,
+        });
+        expect(result.reconnectMessage).toBe("CtrlProxy reconnecting, retry in 2s");
+      } finally {
+        await testClient.close();
+      }
+    });
   });
 
   describe("requestSwipe", function() {

@@ -1329,17 +1329,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           continue;
         }
         try {
-          const { stdout: argsOut } = await this.processExecutor.exec(
-            `ps -p ${pid} -o args= 2>/dev/null`
-          );
+          const processInfo = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, pid);
+          const argsOut = processInfo?.command ?? "";
           if (argsOut.includes("CtrlProxy")) {
-            if (IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommand(argsOut)) {
+            if (IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommand(argsOut, processInfo)) {
               continue;
             }
-            if (!argsOut.includes(`id=${this.device.deviceId}`)) {
+            const identityText = `${argsOut} ${processInfo?.environment ?? ""}`;
+            if (!IOSCtrlProxyManager.hasDeviceIdentity(identityText, this.device.deviceId)) {
               continue;
             }
-            const port = this.parseCtrlProxyPortFromProcessArgs(argsOut) ?? IOSCtrlProxyManager.DEFAULT_PORT;
+            const port = this.parseCtrlProxyPortFromProcessArgs(argsOut) ??
+              this.parseCtrlProxyPortFromProcessArgs(processInfo?.environment ?? "") ??
+              IOSCtrlProxyManager.DEFAULT_PORT;
             logger.info(`[IOSCtrlProxy] Found external xcodebuild CtrlProxy process: ${pid}`);
             return { pid, port };
           }
@@ -1571,14 +1573,25 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       text.includes(`SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=${deviceId}`);
   }
 
-  private static isDaemonManagedSimulatorXcodebuildCommand(command: string): boolean {
+  private static isDaemonManagedSimulatorXcodebuildCommand(
+    command: string,
+    processInfo?: { ppid?: number; environment?: string } | null
+  ): boolean {
+    const environment = processInfo?.environment ?? "";
     return command.includes("xcodebuild") &&
       command.includes("test-without-building") &&
       command.includes("-xctestrun") &&
       command.includes("platform=iOS Simulator") &&
       command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") &&
       !command.includes("CTRL_PROXY_IOS_PORT=") &&
-      !command.includes("AUTOMOBILE_DEVICE_ID=");
+      !command.includes("AUTOMOBILE_DEVICE_ID=") &&
+      (processInfo?.ppid === 1 || !IOSCtrlProxyManager.hasExternalXcodebuildIdentity(environment));
+  }
+
+  private static hasExternalXcodebuildIdentity(environment: string): boolean {
+    return environment.includes("CTRL_PROXY_IOS_PORT=") ||
+      environment.includes("AUTOMOBILE_DEVICE_ID=") ||
+      environment.includes("SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=");
   }
 
   private static isCtrlProxyRunnerCommand(command: string): boolean {

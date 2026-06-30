@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import {
   DEFAULT_HEAP_GROWTH_LIMIT_MB,
   buildLeakReport,
@@ -49,7 +50,7 @@ describe("sanitizeSnapshotLabel / buildSnapshotPath", () => {
 
   test("builds a deterministic snapshot path with .heapsnapshot extension", () => {
     const p = buildSnapshotPath("/snaps", "threshold", 1700000000000);
-    expect(p).toBe("/snaps/heap-threshold-1700000000000.heapsnapshot");
+    expect(p).toBe(path.join("/snaps", "heap-threshold-1700000000000.heapsnapshot"));
   });
 });
 
@@ -79,10 +80,11 @@ describe("writeHeapSnapshotSafe", () => {
 
   test("writes via the injected node:v8 writeHeapSnapshot and returns the path", async () => {
     const ctx = deps();
+    const expectedPath = path.join("/snaps", "heap-threshold-42.heapsnapshot");
     const result = await writeHeapSnapshotSafe(ctx.deps, "/snaps", "threshold");
-    expect(result).toBe("/snaps/heap-threshold-42.heapsnapshot");
+    expect(result).toBe(expectedPath);
     expect(ctx.mkdirCalls).toEqual(["/snaps"]);
-    expect(ctx.snapshotCalls).toEqual(["/snaps/heap-threshold-42.heapsnapshot"]);
+    expect(ctx.snapshotCalls).toEqual([expectedPath]);
     expect(ctx.errors.some(e => e.includes("Heap snapshot saved"))).toBe(true);
   });
 

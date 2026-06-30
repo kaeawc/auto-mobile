@@ -288,6 +288,126 @@ describe("IOSCtrlProxyManager", function() {
     });
   });
 
+  describe("getReportedRunnerPort", function() {
+    let fakeExecutor: FakeProcessExecutor;
+
+    beforeEach(function() {
+      fakeExecutor = new FakeProcessExecutor();
+    });
+
+    // Map each candidate /health port to a body the runner would return.
+    const installHealthFakes = (bodyByPort: Record<number, string>): void => {
+      fakeExecutor.setCommandHandler("curl -s", command => {
+        const port = Number(command.match(/localhost:(\d+)\/health/)?.[1]);
+        return createExecResult(bodyByPort[port] ?? "", "");
+      });
+    };
+
+    test("returns the bound port the runner reports on the service port", async function() {
+      installHealthFakes({
+        8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 8765 })
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+
+      expect(await manager.getReportedRunnerPort()).toBe(8765);
+    });
+
+    test("discovers the runner on the default port when the service port is silent (#2731)", async function() {
+      installHealthFakes({
+        8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 8765 })
+        // 8767 (service port) returns nothing — the runner bound the default instead.
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+      (manager as unknown as { servicePort: number }).servicePort = 8767;
+
+      expect(await manager.getReportedRunnerPort()).toBe(8765);
+    });
+
+    test("ignores a health response from a different device on a shared port", async function() {
+      installHealthFakes({
+        8765: JSON.stringify({ status: "ok", deviceId: "SOME-OTHER-DEVICE", port: 8765 })
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+      (manager as unknown as { servicePort: number }).servicePort = 8767;
+
+      expect(await manager.getReportedRunnerPort()).toBeNull();
+    });
+
+    test("ignores a port reported without a matching device id (false-adoption guard)", async function() {
+      // The #2731 env-propagation failure that drops the port var can also drop
+      // the runner's device-id var, so a sibling simulator's runner on the shared
+      // default port could answer with a port but no device id. It must not be
+      // adopted as ours.
+      installHealthFakes({
+        8765: JSON.stringify({ status: "ok", port: 8765 })
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+      (manager as unknown as { servicePort: number }).servicePort = 8767;
+
+      expect(await manager.getReportedRunnerPort()).toBeNull();
+    });
+
+    test("ignores an out-of-range reported port", async function() {
+      installHealthFakes({
+        8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 70000 })
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+
+      expect(await manager.getReportedRunnerPort()).toBeNull();
+    });
+
+    test("returns null when the runner reports no port (older runner)", async function() {
+      installHealthFakes({
+        8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId })
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+
+      expect(await manager.getReportedRunnerPort()).toBeNull();
+    });
+
+    test("returns null when no runner answers the health endpoint", async function() {
+      installHealthFakes({});
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+
+      expect(await manager.getReportedRunnerPort()).toBeNull();
+    });
+  });
+
   describe("getCapabilities", function() {
     test("should identify simulator device type for UUID format deviceId", async function() {
       const manager = IOSCtrlProxyManager.createForTesting(testDevice, fakeTimer);

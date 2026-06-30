@@ -95,6 +95,13 @@ interface IosRunnerManager {
   isInstalled(): Promise<boolean>;
   isRunning(): Promise<boolean>;
   getServicePort(): number;
+  /**
+   * The port the runner self-reports it is actually bound to (via /health), or
+   * null when no matching runner answers. Lets the round-trip check compare the
+   * runner's real port against the client port instead of comparing the service
+   * port to itself (issue #2735).
+   */
+  getReportedRunnerPort(): Promise<number | null>;
 }
 
 /**
@@ -250,8 +257,15 @@ export function createIosObserveRoundTripInspector(
           source: simulator.source,
         };
         const manager = hooks.getManager(device);
-        const runnerPort = manager.getServicePort();
-        let clientPort = runnerPort;
+        const servicePort = manager.getServicePort();
+        // The runner's *actual* bound port, read from its /health self-report, so
+        // a runner that bound the wrong port surfaces as a real mismatch instead
+        // of the service port being compared to itself (issue #2735). Falls back
+        // to the service port when no runner reports a port (older or unreachable
+        // runner) so a healthy runner is never falsely flagged.
+        const reportedRunnerPort = await manager.getReportedRunnerPort();
+        const runnerPort = reportedRunnerPort ?? servicePort;
+        let clientPort = servicePort;
         let connected = false;
         let screenSize = { width: 0, height: 0 };
         let hierarchyError: string | null = null;
@@ -261,7 +275,17 @@ export function createIosObserveRoundTripInspector(
           const installed = await manager.isInstalled();
           const running = installed ? await manager.isRunning() : false;
           if (!installed || !running) {
-            hierarchyError = installed ? "iOS CtrlProxy runner is not running" : "iOS CtrlProxy runner is not installed";
+            if (!installed) {
+              hierarchyError = "iOS CtrlProxy runner is not installed";
+            } else if (reportedRunnerPort !== null && reportedRunnerPort !== servicePort) {
+              // The runner is alive but bound to a different port than the client
+              // expects — the #2731 failure mode. Surface it explicitly rather
+              // than the misleading "not running".
+              hierarchyError =
+                `iOS CtrlProxy runner is bound to port ${reportedRunnerPort} but the client expects port ${servicePort}`;
+            } else {
+              hierarchyError = "iOS CtrlProxy runner is not running";
+            }
           } else {
             const existing = hooks.getExistingClient(device.deviceId);
             const client = existing ?? hooks.createClient(device, runnerPort);

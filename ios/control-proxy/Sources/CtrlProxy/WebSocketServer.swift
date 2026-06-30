@@ -115,6 +115,7 @@ public class WebSocketServer: WebSocketServing {
             id: connectionId,
             connection: nwConnection,
             queue: queue,
+            boundPort: port,
             sdkHierarchyCache: sdkHierarchyCache
         ) { [weak self] message in
             self?.handleMessage(message, connectionId: connectionId)
@@ -329,12 +330,16 @@ class WebSocketConnection {
     private let onMessage: (Data) -> Void
     private let onClose: () -> Void
     private let sdkHierarchyCache: (any SdkHierarchyCaching)?
+    /// The port the server is actually bound to; echoed in /health so the daemon
+    /// can detect a runner/client port mismatch (issue #2735).
+    private let boundPort: UInt16
     private var isWebSocketUpgraded = false
 
     init(
         id: Int,
         connection: NWConnection,
         queue: DispatchQueue,
+        boundPort: UInt16,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
         onMessage: @escaping (Data) -> Void,
         onClose: @escaping () -> Void
@@ -342,6 +347,7 @@ class WebSocketConnection {
         self.id = id
         self.connection = connection
         self.queue = queue
+        self.boundPort = boundPort
         self.sdkHierarchyCache = sdkHierarchyCache
         self.onMessage = onMessage
         self.onClose = onClose
@@ -413,7 +419,7 @@ class WebSocketConnection {
     }
 
     private func handleHealthCheck() {
-        var payload: [String: String] = ["status": "ok"]
+        var payload: [String: Any] = ["status": "ok", "port": Int(boundPort)]
         if let deviceId = Self.currentDeviceId() {
             payload["deviceId"] = deviceId
         }

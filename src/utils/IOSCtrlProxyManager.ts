@@ -47,6 +47,7 @@ export interface CtrlProxyIosManager extends ProxyManager {
   start(): Promise<void>;
   stop(): Promise<void>;
   getServicePort(): number;
+  getReportedRunnerPort(): Promise<number | null>;
   setAutoRestart(enabled: boolean): void;
   isAutoRestartEnabled(): boolean;
   forceRestart(): Promise<void>;
@@ -1386,6 +1387,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return null;
   }
 
+  /** Single source of truth for "is this a usable TCP port number". */
+  private static isValidPort(value: unknown): value is number {
+    return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 65535;
+  }
+
   private parseCtrlProxyPortFromProcessArgs(args: string): number | null {
     const match = args.match(/(?:^|\s)(?:SIMCTL_CHILD_)?CTRL_PROXY_IOS_PORT=(\d+)(?:\s|$)/);
     if (!match) {
@@ -1393,7 +1399,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     const port = Number.parseInt(match[1], 10);
-    return Number.isNaN(port) || port <= 0 || port > 65535 ? null : port;
+    return IOSCtrlProxyManager.isValidPort(port) ? port : null;
   }
 
   private async ensureServicePortReadyForLaunch(): Promise<void> {
@@ -1888,6 +1894,62 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private async checkHealthEndpointOnPort(port: number): Promise<boolean> {
     const body = await this.readHealthEndpointBodyOnPort(port);
     return body !== null && (body.includes("ok") || body.includes("healthy"));
+  }
+
+  /**
+   * Ask the runner what port it is *actually* bound to, by reading the `port`
+   * field the runner self-reports in its `/health` payload. Probes the same
+   * candidate ports as runner discovery (the allocated service port plus the
+   * hardcoded default the runner falls back to).
+   *
+   * A reported port is only accepted when the runner's `/health` identifies this
+   * exact device. This matters because the daemon may probe a port that is
+   * answered by a *different* runner — a sibling iOS simulator's runner that fell
+   * back to the shared default port (the same #2731 env-propagation failure can
+   * also drop the runner's device-id env var), or, on the default port, the
+   * Android CtrlProxy reached through its `adb forward`. The Android runner is
+   * additionally excluded structurally: its `/health` returns the plain text
+   * `OK`, so `JSON.parse` / the strict `status === "ok"` object check rejects it
+   * before the device-id guard is even consulted.
+   *
+   * Returns null when no matching runner answers or when the runner is too old
+   * to report a port. Used by `doctor` to compare the runner's real bound port
+   * against the client port — a comparison that is meaningless if both are
+   * derived from `getServicePort()` (issue #2735).
+   */
+  public async getReportedRunnerPort(): Promise<number | null> {
+    const candidatePorts = new Set([this.servicePort, IOSCtrlProxyManager.DEFAULT_PORT]);
+    for (const port of candidatePorts) {
+      const reportedPort = await this.readReportedPortFromHealth(port);
+      if (reportedPort !== null) {
+        return reportedPort;
+      }
+    }
+    return null;
+  }
+
+  private async readReportedPortFromHealth(port: number): Promise<number | null> {
+    const body = await this.readHealthEndpointBodyOnPort(port);
+    if (body === null) {
+      return null;
+    }
+    try {
+      const health = JSON.parse(body) as { status?: unknown; deviceId?: unknown; port?: unknown };
+      if (health.status !== "ok") {
+        return null;
+      }
+      // Require a positive device match: a runner answering this port that does
+      // not identify as our device is some other runner and must not be adopted.
+      // A new runner reporting a port always reports its device id; a runner that
+      // omits it is too old to report a port anyway (caught below), so this loses
+      // no genuine coverage while closing the cross-device false-adoption hole.
+      if (health.deviceId !== this.device.deviceId) {
+        return null;
+      }
+      return IOSCtrlProxyManager.isValidPort(health.port) ? health.port : null;
+    } catch {
+      return null;
+    }
   }
 
   private async checkHealthEndpointOnPortForDevice(port: number, deviceId: string): Promise<boolean> {

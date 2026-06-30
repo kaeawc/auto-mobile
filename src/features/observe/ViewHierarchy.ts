@@ -132,6 +132,16 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       );
 
       if (!result || !result.hierarchy) {
+        if (result?.reconnectStatus) {
+          return {
+            hierarchy: {
+              error: result.reconnectMessage ?? `CtrlProxy reconnecting, retry in ${result.reconnectStatus.retryAfterSeconds}s`
+            },
+            ctrlProxyReconnect: result.reconnectStatus,
+            updatedAt: this.timer.now()
+          } as ViewHierarchyResult;
+        }
+
         return {
           hierarchy: {
             error: "Failed to retrieve iOS view hierarchy from CtrlProxy iOS"
@@ -140,7 +150,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       }
 
       // Convert XCTestHierarchy to ViewHierarchyResult format
-      return this.convertXCTestHierarchy(result.hierarchy, result.updatedAt);
+      return this.convertXCTestHierarchy(result.hierarchy, result.updatedAt, result.reconnectStatus);
     });
 
     perf.end();
@@ -153,11 +163,15 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   /**
    * Convert XCTestHierarchy to ViewHierarchyResult format
    */
-  private convertXCTestHierarchy(hierarchy: any, updatedAt?: number): ViewHierarchyResult {
-    return {
+  private convertXCTestHierarchy(hierarchy: any, updatedAt?: number, ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"]): ViewHierarchyResult {
+    const result = {
       ...hierarchy,
       updatedAt: updatedAt ?? hierarchy.updatedAt ?? this.timer.now()
     };
+    if (ctrlProxyReconnect) {
+      result.ctrlProxyReconnect = ctrlProxyReconnect;
+    }
+    return result;
   }
 
   /**

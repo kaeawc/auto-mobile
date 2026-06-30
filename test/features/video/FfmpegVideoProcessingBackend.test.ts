@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { promises as fsPromises } from "node:fs";
 import os, { platform } from "node:os";
 import path from "node:path";
 import {
   containsIosRecordingStartMessage,
   FfmpegVideoProcessingBackend,
+  waitForStderrMessage,
+  type ProcessTracker,
 } from "../../../src/features/video/FfmpegVideoProcessingBackend";
 import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
@@ -36,6 +39,21 @@ async function runCommand(command: string, args: string[]): Promise<{ stdout: st
       }
     });
   });
+}
+
+function createProcessTracker(stderr: string[] = []): ProcessTracker {
+  const process = new EventEmitter() as ProcessTracker["process"];
+  process.stderr = new EventEmitter() as ProcessTracker["process"]["stderr"];
+  process.exitCode = null;
+  process.killed = false;
+  process.kill = () => true;
+
+  return {
+    process,
+    exitState: {},
+    exitPromise: new Promise<void>(() => {}),
+    stderr,
+  };
 }
 
 const hasFfmpegTools = commandVersionAvailable("ffmpeg") && commandVersionAvailable("ffprobe");
@@ -357,6 +375,21 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       )).toBe(true);
       expect(containsIosRecordingStartMessage("Recording started\n")).toBe(true);
       expect(containsIosRecordingStartMessage("Unable to boot simulator\n")).toBe(false);
+    });
+
+    test("should resolve when stderr captured the expected message without another data event", async function() {
+      const tracker = createProcessTracker();
+      const wait = waitForStderrMessage(tracker, "Recording started", 1);
+      tracker.stderr.push("Note: No display specified\nRecording started\n");
+
+      await expect(wait).resolves.toBeUndefined();
+    });
+
+    test("should reject when expected stderr message never appears", async function() {
+      const tracker = createProcessTracker(["No display yet\n"]);
+
+      await expect(waitForStderrMessage(tracker, "Recording started", 1))
+        .rejects.toThrow(/Timed out waiting for Recording started/);
     });
 
     test("should include command, stderr, and missing output path for opaque post-processing failures", function() {

@@ -95,12 +95,18 @@ export class PortManager {
       return this.allocatedPorts.get(deviceId)!;
     }
 
+    if (this.allocatedPorts.size >= this.maxDevices) {
+      throw new Error(
+        `No available ports for device ${deviceId}. ` +
+        `The maximum of ${this.maxDevices} simultaneous device ports is already allocated.`
+      );
+    }
+
     // Find next available port
     const usedPorts = new Set(this.allocatedPorts.values());
     const reservedPorts = new Set(options.reservedPorts ?? []);
     const availabilityChecker = options.availabilityChecker ?? this.portAvailabilityChecker;
-    for (let i = 0; i < this.maxDevices; i++) {
-      const port = this.basePort + i;
+    for (let port = this.basePort; port <= 65535; port++) {
       if (usedPorts.has(port) || reservedPorts.has(port)) {
         continue;
       }
@@ -114,8 +120,15 @@ export class PortManager {
 
     throw new Error(
       `No available ports for device ${deviceId}. ` +
-      `All ${this.maxDevices} ports (${this.basePort}-${this.basePort + this.maxDevices - 1}) are in use or reserved.`
+      `No free host ports were found at or above ${this.basePort}.`
     );
+  }
+
+  /**
+   * Check whether a host port is currently free to bind.
+   */
+  public static isPortAvailable(port: number, checker: PortAvailabilityChecker = this.portAvailabilityChecker): boolean {
+    return checker.isPortAvailable(port);
   }
 
   /**

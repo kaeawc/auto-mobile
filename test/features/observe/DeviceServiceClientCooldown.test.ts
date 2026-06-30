@@ -69,7 +69,6 @@ describe("DeviceServiceClient connection cooldown", () => {
 
   test("enforces cooldown after max connection attempts", async () => {
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
     client = new TestDeviceServiceClient(
       timer,
       createInstantFailureWebSocketFactory(timer),
@@ -93,6 +92,41 @@ describe("DeviceServiceClient connection cooldown", () => {
     // Attempt 4 — should be rejected by cooldown (returns false without incrementing)
     const r4 = await client.ensureConnected(new NoOpPerformanceTracker());
     expect(r4).toBe(false);
+    expect(client.getConnectionAttempts()).toBe(3);
+    expect(client.getReconnectStatus()).toEqual({
+      state: "cooldown",
+      retryAfterMs: 10000,
+      retryAfterSeconds: 10,
+      connectionAttempts: 3,
+      maxConnectionAttempts: 3,
+    });
+  });
+
+  test("reports remaining cooldown without incrementing attempts", async () => {
+    const timer = new FakeTimer();
+    client = new TestDeviceServiceClient(
+      timer,
+      createInstantFailureWebSocketFactory(timer),
+      { maxConnectionAttempts: 3, connectionResetMs: 10000, reconnectDelayMs: 2000 }
+    );
+    client.disableAutoReconnect();
+
+    await client.ensureConnected(new NoOpPerformanceTracker());
+    await client.ensureConnected(new NoOpPerformanceTracker());
+    await client.ensureConnected(new NoOpPerformanceTracker());
+
+    timer.advanceTime(6500);
+
+    expect(client.getReconnectStatus()).toEqual({
+      state: "cooldown",
+      retryAfterMs: 3500,
+      retryAfterSeconds: 4,
+      connectionAttempts: 3,
+      maxConnectionAttempts: 3,
+    });
+
+    const blocked = await client.ensureConnected(new NoOpPerformanceTracker());
+    expect(blocked).toBe(false);
     expect(client.getConnectionAttempts()).toBe(3);
   });
 
@@ -240,7 +274,7 @@ describe("DeviceServiceClient connection cooldown", () => {
     expect(client.getConnectionAttempts()).toBe(3);
 
     // waitForConnection should also fail because cooldown is active
-    const connected = await client.waitForConnection(3, 100);
+    const connected = await client.waitForConnection(1, 1);
     expect(connected).toBe(false);
   });
 });

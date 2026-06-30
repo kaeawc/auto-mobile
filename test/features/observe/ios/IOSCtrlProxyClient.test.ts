@@ -77,6 +77,9 @@ describe("IOSCtrlProxyClient", function() {
     };
   };
 
+  const createConnectionTimeoutWebSocketFactory = (timer: FakeTimer): (url: string) => FakeWebSocket =>
+    url => new FakeWebSocket(url, "timeout", 60000, timer);
+
   const waitForSocketOpen = async (socket: FakeWebSocket | null): Promise<void> => {
     if (!socket) {
       return;
@@ -340,6 +343,183 @@ describe("IOSCtrlProxyClient", function() {
 
         expect(result.hierarchy).toBeNull();
         expect(result.fresh).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("uses a short reconnect cooldown for failed iOS CtrlProxy connections", async function() {
+      const testTimer = new FakeTimer();
+
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      try {
+        await testClient.ensureConnected();
+        await testClient.ensureConnected();
+        await testClient.ensureConnected();
+
+        expect(testClient.getReconnectStatus()).toEqual({
+          state: "cooldown",
+          retryAfterMs: 2000,
+          retryAfterSeconds: 2,
+          connectionAttempts: 3,
+          maxConnectionAttempts: 3,
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("keeps reconnect cooldown active after iOS WebSocket connection timeouts", async function() {
+      const testTimer = new FakeTimer();
+
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createConnectionTimeoutWebSocketFactory(testTimer),
+        testTimer
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      const failAfterConnectionTimeout = async (): Promise<void> => {
+        const resultPromise = testClient.ensureConnected();
+        await flushPromises();
+        testTimer.advanceTime(5000);
+        expect(await resultPromise).toBe(false);
+      };
+
+      try {
+        await failAfterConnectionTimeout();
+        await failAfterConnectionTimeout();
+        await failAfterConnectionTimeout();
+
+        expect(testClient.getReconnectStatus()).toEqual({
+          state: "cooldown",
+          retryAfterMs: 2000,
+          retryAfterSeconds: 2,
+          connectionAttempts: 3,
+          maxConnectionAttempts: 3,
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("returns reconnecting metadata instead of an ambiguous empty hierarchy during cooldown", async function() {
+      const testTimer = new FakeTimer();
+
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      try {
+        await testClient.ensureConnected();
+        await testClient.ensureConnected();
+        await testClient.ensureConnected();
+
+        const result = await testClient.getLatestHierarchy(false, 100);
+
+        expect(result.hierarchy).toBeNull();
+        expect(result.fresh).toBe(false);
+        expect(result.reconnectStatus).toEqual({
+          state: "cooldown",
+          retryAfterMs: 2000,
+          retryAfterSeconds: 2,
+          connectionAttempts: 3,
+          maxConnectionAttempts: 3,
+        });
+        expect(result.reconnectMessage).toBe("CtrlProxy reconnecting, retry in 2s");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("returns reconnecting metadata for default observe skip-wait hierarchy calls during cooldown", async function() {
+      const testTimer = new FakeTimer();
+
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      try {
+        await testClient.ensureConnected();
+        await testClient.ensureConnected();
+        await testClient.ensureConnected();
+
+        const result = await testClient.getLatestHierarchy(
+          false,
+          100,
+          undefined,
+          true
+        );
+
+        expect(result.hierarchy).toBeNull();
+        expect(result.fresh).toBe(false);
+        expect(result.reconnectStatus).toEqual({
+          state: "cooldown",
+          retryAfterMs: 2000,
+          retryAfterSeconds: 2,
+          connectionAttempts: 3,
+          maxConnectionAttempts: 3,
+        });
+        expect(result.reconnectMessage).toBe("CtrlProxy reconnecting, retry in 2s");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("preserves stale hierarchy while reporting reconnecting metadata during cooldown", async function() {
+      const testTimer = new FakeTimer();
+      const cachedHierarchy: CtrlProxyHierarchy = {
+        updatedAt: 1750934585218,
+        packageName: "com.example.cached",
+        hierarchy: { text: "Cached screen" },
+      };
+
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+      (testClient as any).autoReconnectEnabled = false;
+      (testClient as any).cachedHierarchy = {
+        hierarchy: cachedHierarchy,
+        receivedAt: 0,
+        fresh: false,
+      };
+      (testClient as any).connectionAttempts = 3;
+      (testClient as any).lastConnectionAttempt = 1000;
+      testTimer.advanceTime(1000);
+
+      try {
+        const result = await testClient.getLatestHierarchy(true, 100);
+
+        expect(result.hierarchy).toBe(cachedHierarchy);
+        expect(result.fresh).toBe(false);
+        expect(result.updatedAt).toBe(1750934585218);
+        expect(result.reconnectStatus).toEqual({
+          state: "cooldown",
+          retryAfterMs: 2000,
+          retryAfterSeconds: 2,
+          connectionAttempts: 3,
+          maxConnectionAttempts: 3,
+        });
+        expect(result.reconnectMessage).toBe("CtrlProxy reconnecting, retry in 2s");
       } finally {
         await testClient.close();
       }

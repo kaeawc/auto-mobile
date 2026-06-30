@@ -30,7 +30,7 @@ interface ProcessExitState {
   endedAt?: string;
 }
 
-interface ProcessTracker {
+export interface ProcessTracker {
   process: ChildProcessWithoutNullStreams;
   exitState: ProcessExitState;
   exitPromise: Promise<void>;
@@ -175,23 +175,34 @@ async function waitForProcessCompletion(
   await exitPromise;
 }
 
+function stderrMessages(messages: string | string[]): string[] {
+  return Array.isArray(messages) ? messages : [messages];
+}
+
+function hasStderrMessage(tracker: Pick<ProcessTracker, "stderr">, messages: string | string[]): boolean {
+  const stderr = tracker.stderr.join("");
+  return stderrMessages(messages).some(message => stderr.includes(message));
+}
+
 export function containsIosRecordingStartMessage(stderr: string): boolean {
   return IOS_RECORDING_START_MESSAGES.some(message => stderr.includes(message));
 }
 
-async function waitForStderrMessage(
+export async function waitForStderrMessage(
   tracker: ProcessTracker,
-  messages: string[],
+  messages: string | string[],
   timeoutMs: number
 ): Promise<void> {
-  const includesMessage = () => messages.some(message => tracker.stderr.join("").includes(message));
+  const expected = stderrMessages(messages);
+  const expectedDescription = expected.join(" or ");
 
-  if (includesMessage()) {
+  if (hasStderrMessage(tracker, expected)) {
     return;
   }
 
   let timeoutId: NodeJS.Timeout | undefined;
   await new Promise<void>((resolve, reject) => {
+    let settled = false;
     const cleanup = () => {
       tracker.process.stderr.off("data", onData);
       tracker.process.off("exit", onExit);
@@ -200,27 +211,36 @@ async function waitForStderrMessage(
         clearTimeout(timeoutId);
       }
     };
+    const complete = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      callback();
+    };
     const onData = () => {
-      if (includesMessage()) {
-        cleanup();
-        resolve();
+      if (hasStderrMessage(tracker, expected)) {
+        complete(resolve);
       }
     };
     const onExit = () => {
-      cleanup();
-      reject(new Error(`Process exited before ${messages.join(" or ")}`));
+      complete(() => reject(new Error(`Process exited before ${expectedDescription}`)));
     };
     const onError = (error: Error) => {
-      cleanup();
-      reject(error);
+      complete(() => reject(error));
     };
 
     tracker.process.stderr.on("data", onData);
     tracker.process.once("exit", onExit);
     tracker.process.once("error", onError);
+    onData();
     timeoutId = defaultTimer.setTimeout(() => {
-      cleanup();
-      reject(new Error(`Timed out waiting for ${messages.join(" or ")}`));
+      if (hasStderrMessage(tracker, expected)) {
+        complete(resolve);
+        return;
+      }
+      complete(() => reject(new Error(`Timed out waiting for ${expectedDescription}`)));
     }, timeoutMs);
   });
 }

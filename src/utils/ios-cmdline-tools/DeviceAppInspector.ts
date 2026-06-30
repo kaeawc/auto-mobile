@@ -6,6 +6,7 @@ import { hashAppBundle } from "./AppBundleHasher";
 import { logger } from "../logger";
 import { isRunningInDocker } from "../dockerEnv";
 import { getDeviceAppBundleHash, installDeviceApp, isHostControlAvailable, shouldUseHostControl, uninstallDeviceApp } from "../hostControlClient";
+import type { Logger } from "../logger";
 
 interface DeviceAppInspectorDependencies {
   platform: () => NodeJS.Platform;
@@ -16,6 +17,7 @@ interface DeviceAppInspectorDependencies {
   readdir: (path: string) => Promise<string[]>;
   stat: (path: string) => Promise<{ isDirectory: () => boolean }>;
   tmpdir: () => string;
+  logger: Pick<Logger, "debug" | "warn">;
   hostControl: {
     shouldUseHostControl: () => boolean;
     isRunningInDocker: () => boolean;
@@ -48,6 +50,7 @@ const defaultDependencies: DeviceAppInspectorDependencies = {
   readdir: async path => fs.readdir(path),
   stat: async path => fs.stat(path),
   tmpdir,
+  logger,
   hostControl: {
     shouldUseHostControl,
     isRunningInDocker,
@@ -147,6 +150,14 @@ const findAppBundleInDir = async (
   return null;
 };
 
+const getErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: string): boolean =>
+  bundleId.endsWith(".XCTestServiceApp") &&
+  (errorMessage.includes("No such file or directory") ||
+    errorMessage.includes("NSPOSIXErrorDomain, code=2"));
+
 export class DeviceAppInspector {
   private readonly deps: DeviceAppInspectorDependencies;
 
@@ -163,13 +174,13 @@ export class DeviceAppInspector {
     if (useHostControl) {
       const available = await this.deps.hostControl.isAvailable();
       if (!available) {
-        logger.warn("[DeviceAppInspector] Host control not available for devicectl");
+        this.deps.logger.warn("[DeviceAppInspector] Host control not available for devicectl");
         return null;
       }
 
       const result = await this.deps.hostControl.getAppBundleHash(deviceUdid, bundleId);
       if (!result.success) {
-        logger.warn(`[DeviceAppInspector] Host control devicectl failed: ${result.error || "Unknown error"}`);
+        this.deps.logger.warn(`[DeviceAppInspector] Host control devicectl failed: ${result.error || "Unknown error"}`);
         return null;
       }
       return result.data?.hash ?? null;
@@ -180,7 +191,7 @@ export class DeviceAppInspector {
     try {
       return await this.withInstalledAppBundle(deviceUdid, bundleId, bundlePath => hashAppBundle(bundlePath));
     } catch (error) {
-      logger.warn(`[DeviceAppInspector] Failed to hash installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+      this.deps.logger.warn(`[DeviceAppInspector] Failed to hash installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
@@ -283,7 +294,7 @@ export class DeviceAppInspector {
 
         bundleOnDisk = await findAppBundleInDir(copyDir, this.deps);
       } catch (error) {
-        logger.warn(`[DeviceAppInspector] Failed to read installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+        this.deps.logger.warn(`[DeviceAppInspector] Failed to read installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
         return null;
       }
 
@@ -309,7 +320,7 @@ export class DeviceAppInspector {
     if (useHostControl) {
       const available = await this.deps.hostControl.isAvailable();
       if (!available) {
-        logger.warn("[DeviceAppInspector] Host control not available for devicectl uninstall");
+        this.deps.logger.warn("[DeviceAppInspector] Host control not available for devicectl uninstall");
         return;
       }
 
@@ -341,7 +352,7 @@ export class DeviceAppInspector {
     if (useHostControl) {
       const available = await this.deps.hostControl.isAvailable();
       if (!available) {
-        logger.warn("[DeviceAppInspector] Host control not available for devicectl install");
+        this.deps.logger.warn("[DeviceAppInspector] Host control not available for devicectl install");
         throw new Error("Host control not available for physical device app installation");
       }
 
@@ -373,15 +384,29 @@ export class DeviceAppInspector {
       return null;
     }
 
+    let appPath: string;
     try {
       const result = await this.deps.exec(`xcrun simctl get_app_container ${quoteShell(deviceUdid)} ${quoteShell(bundleId)} app`);
-      const appPath = result.trim();
-      if (!appPath) {
-        return null;
+      appPath = result.trim();
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      const logMessage = `[DeviceAppInspector] Failed to read simulator app bundle for ${bundleId}: ${errorMessage}`;
+      if (isExpectedMissingLegacySimulatorApp(bundleId, errorMessage)) {
+        this.deps.logger.debug(logMessage);
+      } else {
+        this.deps.logger.warn(logMessage);
       }
+      return null;
+    }
+
+    if (!appPath) {
+      return null;
+    }
+
+    try {
       return await hashAppBundle(appPath);
     } catch (error) {
-      logger.warn(`[DeviceAppInspector] Failed to read simulator app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+      this.deps.logger.warn(`[DeviceAppInspector] Failed to hash simulator app bundle for ${bundleId}: ${getErrorMessage(error)}`);
       return null;
     }
   }

@@ -15,6 +15,9 @@ import { logger, type Logger } from "../../utils/logger";
 import { IOS_CTRL_PROXY_RELEASE_VERSION, resolveAssetVersion } from "../../constants/release";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyClient, IOS_RUNNER_FEATURE_COMMANDS } from "../../features/observe/ios/IOSCtrlProxyClient";
+import { ObserveElementsBuilder } from "../../features/observe/ObserveElementsBuilder";
+import type { CtrlProxyHierarchy } from "../../features/observe/ios/types";
+import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
 // set without reaching into the runner client module.
@@ -42,6 +45,23 @@ export interface IosCtrlProxyRunnerInspector {
   inspectBootedRunners(): Promise<IosRunnerInspection[]>;
 }
 
+/** Per-simulator result of a real iOS runner observe round trip. */
+export interface IosObserveRoundTripInspection {
+  deviceId: string;
+  name: string;
+  runnerPort: number;
+  clientPort: number;
+  connected: boolean;
+  screenSize: { width: number; height: number };
+  hierarchyError: string | null;
+  elementCount: number;
+}
+
+/** Source of booted-simulator iOS observe round trips (injectable for tests). */
+export interface IosObserveRoundTripInspector {
+  inspectBootedObserveRoundTrips(): Promise<IosObserveRoundTripInspection[]>;
+}
+
 type IosRunnerVersionStatus = "compatible" | "stale" | "unknown";
 
 /**
@@ -65,6 +85,7 @@ export interface IosDoctorDependencies {
   logger: Logger;
   createSimctlClient: () => SimCtl;
   runnerInspector: IosCtrlProxyRunnerInspector;
+  observeRoundTripInspector: IosObserveRoundTripInspector;
 }
 
 /**
@@ -73,6 +94,7 @@ export interface IosDoctorDependencies {
 interface IosRunnerManager {
   isInstalled(): Promise<boolean>;
   isRunning(): Promise<boolean>;
+  getServicePort(): number;
 }
 
 /**
@@ -81,6 +103,19 @@ interface IosRunnerManager {
  */
 interface IosRunnerProbeClient {
   getSupportedCommands(): Promise<string[] | null>;
+  close(): Promise<void>;
+}
+
+/** Minimal iOS runner client surface for the doctor observe round-trip check. */
+interface IosObserveRoundTripClient {
+  getConnectionPortForDiagnostics(): number;
+  requestHierarchySync(
+    perf?: unknown,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number
+  ): Promise<{ hierarchy: CtrlProxyHierarchy } | null>;
+  convertToViewHierarchyResult(hierarchy: CtrlProxyHierarchy): ViewHierarchyResult;
   close(): Promise<void>;
 }
 
@@ -94,12 +129,27 @@ export interface IosRunnerInspectorHooks {
   createClient(device: BootedDevice): IosRunnerProbeClient;
 }
 
+/** Injection seam for the iOS observe round-trip inspector. */
+export interface IosObserveRoundTripInspectorHooks {
+  getManager(device: BootedDevice): IosRunnerManager;
+  getExistingClient(deviceId: string): IosObserveRoundTripClient | null;
+  createClient(device: BootedDevice, port: number): IosObserveRoundTripClient;
+  elementsBuilder: ObserveElementsBuilder;
+}
+
 const defaultIosRunnerInspectorHooks: IosRunnerInspectorHooks = {
   getManager: device => IOSCtrlProxyManager.getInstance(device),
   getExistingClient: deviceId => IOSCtrlProxyClient.getExistingInstance(deviceId),
   // Detached (not singleton-registered) so closing it leaves nothing for a later
   // probe to rediscover and reconnect — see IOSCtrlProxyClient.createDetached.
   createClient: device => IOSCtrlProxyClient.createDetached(device),
+};
+
+const defaultIosObserveRoundTripInspectorHooks: IosObserveRoundTripInspectorHooks = {
+  getManager: device => IOSCtrlProxyManager.getInstance(device),
+  getExistingClient: deviceId => IOSCtrlProxyClient.getExistingInstance(deviceId),
+  createClient: device => IOSCtrlProxyClient.createDetached(device),
+  elementsBuilder: new ObserveElementsBuilder(),
 };
 
 /**
@@ -170,6 +220,105 @@ export function createIosCtrlProxyRunnerInspector(
   };
 }
 
+/**
+ * Real iOS observe round-trip inspector: for every booted simulator, verify the
+ * runner is installed/running, connect through the same client-side port path
+ * `observe` uses, compare that client port to the runner service port, request a
+ * fresh hierarchy, and summarize the same non-degenerate signals users see in
+ * `observe`.
+ */
+export function createIosObserveRoundTripInspector(
+  createSimctlClient: () => SimCtl,
+  log: Logger,
+  hooks: IosObserveRoundTripInspectorHooks = defaultIosObserveRoundTripInspectorHooks
+): IosObserveRoundTripInspector {
+  return {
+    async inspectBootedObserveRoundTrips(): Promise<IosObserveRoundTripInspection[]> {
+      const simctl = createSimctlClient();
+      if (!(await simctl.isAvailable())) {
+        return [];
+      }
+
+      const simulators = await simctl.getBootedSimulators();
+      const inspections: IosObserveRoundTripInspection[] = [];
+
+      for (const simulator of simulators) {
+        const device: BootedDevice = {
+          name: simulator.name,
+          platform: "ios",
+          deviceId: simulator.deviceId,
+          source: simulator.source,
+        };
+        const manager = hooks.getManager(device);
+        const runnerPort = manager.getServicePort();
+        let clientPort = runnerPort;
+        let connected = false;
+        let screenSize = { width: 0, height: 0 };
+        let hierarchyError: string | null = null;
+        let elementCount = 0;
+
+        try {
+          const installed = await manager.isInstalled();
+          const running = installed ? await manager.isRunning() : false;
+          if (!installed || !running) {
+            hierarchyError = installed ? "iOS CtrlProxy runner is not running" : "iOS CtrlProxy runner is not installed";
+          } else {
+            const existing = hooks.getExistingClient(device.deviceId);
+            const client = existing ?? hooks.createClient(device, runnerPort);
+            try {
+              clientPort = client.getConnectionPortForDiagnostics();
+              const response = await client.requestHierarchySync(undefined, false, undefined, 5000);
+              clientPort = client.getConnectionPortForDiagnostics();
+              connected = response !== null;
+              if (!response?.hierarchy) {
+                hierarchyError = "No iOS hierarchy returned from CtrlProxy runner";
+              } else if (response.hierarchy.error) {
+                hierarchyError = response.hierarchy.error;
+              } else {
+                const viewHierarchy = client.convertToViewHierarchyResult(response.hierarchy);
+                hierarchyError = viewHierarchy.hierarchy.error ?? null;
+                screenSize = {
+                  width: viewHierarchy.screenWidth ?? response.hierarchy.screenWidth ?? 0,
+                  height: viewHierarchy.screenHeight ?? response.hierarchy.screenHeight ?? 0,
+                };
+                const elements = hooks.elementsBuilder.build(viewHierarchy, "ios");
+                elementCount =
+                  elements.clickable.length +
+                  elements.scrollable.length +
+                  elements.text.length +
+                  elements.media.length;
+              }
+            } finally {
+              if (existing === null) {
+                await client.close();
+              }
+            }
+          }
+        } catch (error) {
+          hierarchyError = normalizeErrorMessage(error);
+          log.warn(
+            `iOS observe round-trip failed for ${simulator.deviceId}: ${hierarchyError}`,
+            error
+          );
+        }
+
+        inspections.push({
+          deviceId: simulator.deviceId,
+          name: simulator.name,
+          runnerPort,
+          clientPort,
+          connected,
+          screenSize,
+          hierarchyError,
+          elementCount,
+        });
+      }
+
+      return inspections;
+    },
+  };
+}
+
 const createExecResult = (stdout: string, stderr: string): ExecResult => ({
   stdout,
   stderr,
@@ -200,7 +349,8 @@ const createIosDoctorDependencies = (): IosDoctorDependencies => ({
   homedir,
   logger,
   createSimctlClient: () => new SimCtlClient(),
-  runnerInspector: createIosCtrlProxyRunnerInspector(() => new SimCtlClient(), logger)
+  runnerInspector: createIosCtrlProxyRunnerInspector(() => new SimCtlClient(), logger),
+  observeRoundTripInspector: createIosObserveRoundTripInspector(() => new SimCtlClient(), logger)
 });
 
 function parseXcodeVersion(output: string): string | null {
@@ -752,6 +902,43 @@ function classifyRunner(
   return { status, missingCommands, line: parts.join("; ") };
 }
 
+interface IosObserveRoundTripClassification {
+  failed: boolean;
+  line: string;
+}
+
+function classifyObserveRoundTrip(
+  inspection: IosObserveRoundTripInspection
+): IosObserveRoundTripClassification {
+  const hasPortMismatch = inspection.runnerPort !== inspection.clientPort;
+  const hasDegenerateScreen =
+    inspection.screenSize.width <= 0 || inspection.screenSize.height <= 0;
+  const hasHierarchyError = inspection.hierarchyError !== null && inspection.hierarchyError.trim().length > 0;
+  const hasNoElements = inspection.elementCount < 1;
+  const failed =
+    !inspection.connected ||
+    hasPortMismatch ||
+    hasDegenerateScreen ||
+    hasHierarchyError ||
+    hasNoElements;
+
+  const parts = [
+    "platform=ios",
+    `device=${inspection.deviceId}`,
+    `runnerPort=${inspection.runnerPort}`,
+    `clientPort=${inspection.clientPort}`,
+    `connected=${inspection.connected}`,
+    `screenSize=${inspection.screenSize.width}x${inspection.screenSize.height}`,
+    `elementCount=${inspection.elementCount}`,
+    `hierarchyStatus=${hasHierarchyError ? "error" : "ok"}`,
+  ];
+  if (inspection.hierarchyError) {
+    parts.push(`hierarchyError=${inspection.hierarchyError}`);
+  }
+
+  return { failed, line: parts.join("; ") };
+}
+
 /**
  * Check the iOS CtrlProxy runner on each booted simulator, mirroring the Android
  * CtrlProxy check. Reports installed/running, the expected pinned runner version,
@@ -826,6 +1013,68 @@ export async function checkIosCtrlProxyRunner(
 }
 
 /**
+ * Exercise the daemon/client-to-runner path that `observe` depends on. This is a
+ * hard failure when a booted iOS simulator cannot return a non-degenerate
+ * hierarchy, because otherwise doctor reports green for the exact broken state
+ * users need it to diagnose.
+ */
+export async function checkIosObserveRoundTrip(
+  dependencies = createIosDoctorDependencies()
+): Promise<CheckResult> {
+  const name = "iOS Observe Round Trip";
+
+  if (dependencies.platform() !== "darwin") {
+    return {
+      name,
+      status: "skip",
+      message: "iOS simulators only available on macOS",
+    };
+  }
+
+  try {
+    const inspections = await dependencies.observeRoundTripInspector.inspectBootedObserveRoundTrips();
+
+    if (inspections.length === 0) {
+      return {
+        name,
+        status: "skip",
+        message: "No booted simulators to check",
+      };
+    }
+
+    const classifications = inspections.map(classifyObserveRoundTrip);
+    const message = classifications.map(classification => classification.line).join(" | ");
+    const hasFailure = classifications.some(classification => classification.failed);
+
+    if (hasFailure) {
+      return {
+        name,
+        status: "fail",
+        message,
+        recommendation:
+          "Restart the AutoMobile daemon and iOS CtrlProxy runner, then verify the runner WebSocket port " +
+          "matches the client port and re-run: auto-mobile --doctor --ios.",
+      };
+    }
+
+    return {
+      name,
+      status: "pass",
+      message,
+    };
+  } catch (error) {
+    dependencies.logger.warn(`iOS observe round-trip check failed: ${normalizeErrorMessage(error)}`, error);
+    return {
+      name,
+      status: "fail",
+      message: `Could not check iOS observe round trip: ${normalizeErrorMessage(error)}`,
+      recommendation:
+        "Restart the AutoMobile daemon and iOS CtrlProxy runner, then re-run: auto-mobile --doctor --ios.",
+    };
+  }
+}
+
+/**
  * Run all iOS checks
  */
 export async function runIosChecks(
@@ -844,6 +1093,7 @@ export async function runIosChecks(
   results.push(await checkProvisioningProfiles(dependencies));
   results.push(await checkBootedSimulators(dependencies));
   results.push(await checkIosCtrlProxyRunner(dependencies));
+  results.push(await checkIosObserveRoundTrip(dependencies));
 
   return results;
 }

@@ -55,7 +55,8 @@ single writer in its own tree.
 | `${TMPDIR}/auto-mobile/cache/screen-size` | N | `md5(deviceId).json` — per-device, content is stable; concurrent writes are idempotent. (No longer CWD-relative.) |
 | daemon control socket / PID / lock | 1 (daemon) | discovered by clients via env — see §2. |
 | auxiliary sockets (video, snapshot, …) | 1 (daemon) | path depends on `AUTOMOBILE_EMULATOR_EXTERNAL`. |
-| `${TMPDIR}/auto-mobile/logs/server-<pid>.log` | 1 each | per-process file; pruning only trims this pid's files + sweeps stale others by mtime. |
+| `${TMPDIR}/auto-mobile/logs/daemon.log` | 1 daemon | stable daemon log; rotated files are `daemon-<timestamp>.log`. |
+| `${TMPDIR}/auto-mobile/logs/stdio-<pid>.log` | 1 each | per-stdio-client file; pruning only trims this pid's files + sweeps stale others by mtime. |
 | `${TMPDIR}/auto-mobile/tool_logs` (`LOG_DIR`) | N | routed through `tempDir` (honors `TMPDIR`). |
 | `mkdtemp(...)` APK / prefetch / per-start daemon log dirs | per-call unique | **already safe** (random suffix). |
 
@@ -168,9 +169,10 @@ those are explicitly pinned, single-writer, and not derived from `TMPDIR`.
 If you instead run all agents under a **shared `TMPDIR`**, the code still avoids
 cross-agent data loss as defense-in-depth:
 
-- **Logs** are per-pid (`server-<pid>.log`); pruning only trims this pid's files
-  plus others already **stale by mtime** — never another live process's current
-  file (`logPruner.ts`).
+- **Logs** are role-scoped (`daemon.log` for the daemon, `stdio-<pid>.log` for
+  client processes); pruning only trims this process's files plus stdio logs
+  whose owner PID has exited and whose mtime is stale — never another live
+  process's current file (`logPruner.ts`).
 - **Screenshots** are evicted oldest-first only when over the size cap, and the
   eviction is **age-gated** (`screenshotCacheEviction.ts`) so a peer's recent /
   in-flight frame is never deleted.

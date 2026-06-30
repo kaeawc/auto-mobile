@@ -8,6 +8,7 @@ import { FakeChildProcess } from "./FakeChildProcess";
  */
 export class FakeProcessExecutor implements ProcessExecutor {
   private commandResponses: Map<string, ExecResult> = new Map();
+  private commandHandlers: Array<{ pattern: string; handler: (command: string) => ExecResult | Promise<ExecResult> }> = [];
   private defaultResponse: ExecResult = this.createExecResult("", "");
   private executedCommands: string[] = [];
   private spawnResponses: Array<{ command: string; args: string[]; options?: SpawnOptions; process: ChildProcess }> = [];
@@ -15,6 +16,10 @@ export class FakeProcessExecutor implements ProcessExecutor {
 
   setCommandResponse(commandPattern: string, response: ExecResult): void {
     this.commandResponses.set(commandPattern, this.ensureExecResultMethods(response));
+  }
+
+  setCommandHandler(commandPattern: string, handler: (command: string) => ExecResult | Promise<ExecResult>): void {
+    this.commandHandlers.push({ pattern: commandPattern, handler });
   }
 
   setDefaultResponse(response: ExecResult): void {
@@ -39,6 +44,11 @@ export class FakeProcessExecutor implements ProcessExecutor {
 
   async exec(command: string, _options?: ProcessExecOptions): Promise<ExecResult> {
     this.executedCommands.push(command);
+    for (const { pattern, handler } of this.commandHandlers) {
+      if (command.includes(pattern)) {
+        return this.ensureExecResultMethods(await handler(command));
+      }
+    }
     for (const [pattern, response] of this.commandResponses.entries()) {
       if (command.includes(pattern)) {
         return response;

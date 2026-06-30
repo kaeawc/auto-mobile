@@ -4,7 +4,7 @@ import { readdirAsync, statAsync, unlinkAsync } from "./io";
 export interface LogPruneOptions {
   /** Directory containing the `.log` files. */
   dir: string;
-  /** Prefix identifying the current process's files, e.g. `server-12345` (no trailing `.`/`-`). */
+  /** Prefix identifying the current process's files, e.g. `stdio-12345` or `daemon` (no trailing `.`/`-`). */
   ownPrefix: string;
   /** Cap on the number of this process's own files to retain. */
   maxOwnFiles: number;
@@ -28,16 +28,16 @@ function defaultIsProcessAlive(pid: number): boolean {
 
 /**
  * Whether `file` belongs to `ownPrefix`, matched on an exact PID boundary so
- * `server-12` never claims `server-123`'s files. Filenames are `server-<pid>.log`
- * (active) and `server-<pid>-<ts>.log` (rotated).
+ * `stdio-12` never claims `stdio-123`'s files. Filenames are
+ * `<prefix>.log` (active) and `<prefix>-<ts>.log` (rotated).
  */
 function isOwnedBy(file: string, ownPrefix: string): boolean {
   return file === `${ownPrefix}.log` || file.startsWith(`${ownPrefix}-`);
 }
 
-/** Parse the owning PID from `server-<pid>.log` / `server-<pid>-<ts>.log`. */
+/** Parse the owning PID from `stdio-<pid>.log` / `stdio-<pid>-<ts>.log`. */
 function ownerPid(file: string): number | undefined {
-  const match = /^server-(\d+)(?:-.*)?\.log$/.exec(file);
+  const match = /^(?:stdio|server)-(\d+)(?:-.*)?\.log$/.exec(file);
   return match ? Number(match[1]) : undefined;
 }
 
@@ -51,7 +51,7 @@ function ownerPid(file: string): number | undefined {
  *      alive AND the file is stale by mtime.
  *
  * (b)'s liveness gate is essential: a still-running process can have a quiet
- * `server-<pid>.log` whose mtime is hours old, and the writer keeps appending to
+ * `stdio-<pid>.log` whose mtime is hours old, and the writer keeps appending to
  * the open fd. Deleting it by mtime alone would silently drop that live process's
  * diagnostics. So a peer's log is only removed once its process has exited.
  */
@@ -81,7 +81,10 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
       continue;
     }
     const pid = ownerPid(file);
-    if (pid !== undefined && isAlive(pid)) {
+    if (pid === undefined) {
+      continue;
+    }
+    if (isAlive(pid)) {
       continue; // live peer — never touch its log, even if its mtime is old.
     }
     const full = path.join(opts.dir, file);

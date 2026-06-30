@@ -22,6 +22,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { RequestManager } from "../../utils/RequestManager";
 import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExecutor";
+import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
 
 /**
  * Factory function type for creating WebSocket instances.
@@ -161,6 +162,28 @@ export abstract class DeviceServiceClient {
     perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<boolean> {
     return this.connectWebSocket(perf);
+  }
+
+  public getReconnectStatus(): CtrlProxyReconnectStatus | null {
+    if (this.isConnected() || this.connectionAttempts < this.config.maxConnectionAttempts) {
+      return null;
+    }
+
+    const retryAfterMs = Math.max(
+      0,
+      this.config.connectionResetMs - (this.timer.now() - this.lastConnectionAttempt)
+    );
+    if (retryAfterMs <= 0) {
+      return null;
+    }
+
+    return {
+      state: "cooldown",
+      retryAfterMs,
+      retryAfterSeconds: Math.ceil(retryAfterMs / 1000),
+      connectionAttempts: this.connectionAttempts,
+      maxConnectionAttempts: this.config.maxConnectionAttempts,
+    };
   }
 
   /**

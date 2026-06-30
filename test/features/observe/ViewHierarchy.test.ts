@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 
 // Note: the previous version of this file patched fs-extra's readFile to mock
 // screenshot reads. That dependency has been removed from production code, so
@@ -212,6 +213,46 @@ describe("ViewHierarchy", function() {
       expect(result).toBeDefined();
       expect(result.hierarchy).toBeDefined();
       expect(result.hierarchy).toHaveProperty("error");
+    });
+
+    test("surfaces iOS CtrlProxy reconnect cooldown as retry metadata", async function() {
+      const iosDevice: BootedDevice = {
+        deviceId: "test-ios-device",
+        name: "Test iPhone",
+        platform: "ios"
+      };
+      const fakeIosClient = {
+        getLatestHierarchy: async () => ({
+          hierarchy: null,
+          fresh: false,
+          reconnectStatus: {
+            state: "cooldown",
+            retryAfterMs: 1800,
+            retryAfterSeconds: 2,
+            connectionAttempts: 3,
+            maxConnectionAttempts: 3,
+          },
+          reconnectMessage: "CtrlProxy reconnecting, retry in 2s",
+        }),
+      };
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+
+      try {
+        const viewHierarchyWithMocks = new ViewHierarchy(iosDevice, fakeAdb, mockCtrlProxyClient);
+
+        const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
+
+        expect(result.hierarchy.error).toBe("CtrlProxy reconnecting, retry in 2s");
+        expect(result.ctrlProxyReconnect).toEqual({
+          state: "cooldown",
+          retryAfterMs: 1800,
+          retryAfterSeconds: 2,
+          connectionAttempts: 3,
+          maxConnectionAttempts: 3,
+        });
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
     });
   });
 

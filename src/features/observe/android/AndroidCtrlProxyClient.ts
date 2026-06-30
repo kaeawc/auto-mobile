@@ -1845,6 +1845,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Private Methods
   // ===========================================================================
 
+  private ensureLocalPortAvailableForForwarding(): void {
+    const currentAllocation = PortManager.getPort(this.device.deviceId);
+    const currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
+    if (currentAllocation === this.localPort && currentPortIsAvailable) {
+      return;
+    }
+
+    const additionalReservedPorts = currentPortIsAvailable ? [] : [this.localPort];
+    PortManager.release(this.device.deviceId);
+    const nextPort = PortManager.allocate(this.device.deviceId, {
+      reservedPorts: additionalReservedPorts,
+    });
+    if (nextPort !== this.localPort) {
+      logger.info(
+        `[CTRL_PROXY] Reallocated local port from ${this.localPort} to ${nextPort} before adb forward`
+      );
+      this.localPort = nextPort;
+    }
+  }
+
   private async setupPortForwarding(perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<void> {
     // Verify port forwarding is still active even if we think it's set up
     // Port forwarding can be lost if ADB server restarts or emulator restarts
@@ -1859,11 +1879,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     try {
-      logger.debug(`[CTRL_PROXY] Setting up port forwarding for WebSocket: localhost:${this.localPort} → device:${PortManager.DEVICE_PORT} (device: ${this.device.deviceId})`);
-
+      const previousLocalPort = this.localPort;
       await perf.track("clearPortForward", () =>
         this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {})
       );
+
+      this.ensureLocalPortAvailableForForwarding();
+      logger.debug(`[CTRL_PROXY] Setting up port forwarding for WebSocket: localhost:${this.localPort} → device:${PortManager.DEVICE_PORT} (device: ${this.device.deviceId})`);
+
+      if (this.localPort !== previousLocalPort) {
+        await perf.track("clearReallocatedPortForward", () =>
+          this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {})
+        );
+      }
 
       await perf.track("setupPortForward", () =>
         this.adb.executeCommand(`forward tcp:${this.localPort} tcp:${PortManager.DEVICE_PORT}`)

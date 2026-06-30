@@ -849,6 +849,25 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     });
   }
 
+  private ensureLocalServicePortAllocatedAndAvailable(): void {
+    const currentAllocation = PortManager.getPort(this.device.deviceId);
+    const currentPortIsAvailable = PortManager.isPortAvailable(this.servicePort);
+    if (currentAllocation === this.servicePort && currentPortIsAvailable) {
+      return;
+    }
+
+    const additionalReservedPorts = currentPortIsAvailable ? [] : [this.servicePort];
+    PortManager.release(this.device.deviceId);
+    const nextPort = this.allocateServicePort(additionalReservedPorts);
+    if (nextPort !== this.servicePort) {
+      logger.info(
+        `[IOSCtrlProxy] Reallocated service port from ${this.servicePort} to ${nextPort} before runner launch`
+      );
+      this.servicePort = nextPort;
+      this.clearCaches();
+    }
+  }
+
   private adoptServicePort(port: number): void {
     if (PortManager.getPort(this.device.deviceId) !== port) {
       PortManager.reserve(this.device.deviceId, port);
@@ -951,6 +970,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     const timeout = process.env.CTRL_PROXY_IOS_TIMEOUT || "86400";
     const bundleId = this.resolveTargetBundleId();
+    this.ensureLocalServicePortAllocatedAndAvailable();
 
     // Pass env vars via exec env option to avoid shell interpolation of user-controlled values.
     // SIMCTL_CHILD_* prefixed vars are forwarded by simctl (which xcodebuild uses internally
@@ -1360,6 +1380,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       throw new Error("CtrlProxy xctestrun not found for device. Download the CtrlProxy bundle before starting.");
     }
 
+    this.ensureLocalServicePortAllocatedAndAvailable();
     await this.startIproxyTunnel();
     await this.verifyInstalledAppBundle();
 

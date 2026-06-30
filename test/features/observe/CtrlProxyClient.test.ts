@@ -14,6 +14,7 @@ import {
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { DeviceConnectionLostNotifier } from "../../../src/features/observe/DeviceConnectionLostNotifier";
+import { PortManager } from "../../../src/utils/PortManager";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -132,6 +133,44 @@ describe("AndroidCtrlProxyClient", function() {
       await new Promise(resolve => setImmediate(resolve));
     }
   };
+
+  test("setupPortForwarding reallocates when the current local port becomes busy before adb forward", async function() {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    PortManager.reset();
+
+    const unavailablePorts = new Set<number>();
+    const checkedPorts: number[] = [];
+    PortManager.setPortAvailabilityCheckerForTesting({
+      isPortAvailable: (port: number) => {
+        checkedPorts.push(port);
+        return !unavailablePorts.has(port);
+      },
+    });
+    try {
+      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createSuccessWebSocketFactory(),
+        fakeTimer
+      );
+      unavailablePorts.add(8765);
+
+      await (accessibilityServiceClient as unknown as {
+        setupPortForwarding: () => Promise<void>;
+        getWebSocketUrl: () => string;
+      }).setupPortForwarding();
+
+      expect(checkedPorts).toEqual([8765, 8765, 8766]);
+      expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:8766");
+      expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8766 tcp:8765");
+      expect((accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }).getWebSocketUrl()).toBe(
+        "ws://localhost:8766/ws"
+      );
+    } finally {
+      PortManager.setPortAvailabilityCheckerForTesting(null);
+    }
+  });
 
   describe("connection lifecycle", function() {
     test("notifies the observation stream when the WebSocket connection closes", function() {

@@ -189,8 +189,9 @@ export class Daemon {
    * Start the daemon
    */
   async start(): Promise<void> {
-    // Enable stdout logging in daemon mode so logs appear in daemon.log file
-    // (daemon's stdout/stderr are redirected to /tmp/auto-mobile-daemon-XXXXXX/daemon.log)
+    // Mirror structured daemon logs to stdout/stderr capture as well. The
+    // primary stable log is `${TMPDIR}/auto-mobile/logs/daemon.log`; the
+    // daemon manager also redirects stdout/stderr to a per-start capture file.
     logger.enableStdoutLogging();
     const stableWorkingDirectory = resolveStableDaemonWorkingDirectory();
     process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd(stableWorkingDirectory);

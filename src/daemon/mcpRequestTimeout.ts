@@ -29,11 +29,15 @@ export const MIN_LAUNCH_APP_MCP_TIMEOUT_MS = 90_000;
 
 /**
  * Floor for `openLink` — deep links can trigger sign-in, onboarding, data sync,
- * or other post-open navigation before the final observation settles. Keep the
- * default at the standard request timeout, while allowing deployments with slow
- * deeplinks to raise it without changing callers.
+ * or other post-open navigation before the final observation settles. A sign-in
+ * deeplink that launches the app and performs a backend token exchange was
+ * observed taking ~45s end to end (issue #2723), exceeding the 30s standard
+ * timeout and aborting a link-open that actually succeeded on screen. Default to
+ * the same 90s window as `launchApp` (openLink frequently launches the app too),
+ * while allowing deployments with even slower deeplinks to raise it via env var
+ * without changing callers.
  */
-export const DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS = DEFAULT_MCP_REQUEST_TIMEOUT_MS;
+export const DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS = 90_000;
 export const OPEN_LINK_MCP_TIMEOUT_ENV_VAR = "AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS";
 export const LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS";
 

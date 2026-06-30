@@ -150,6 +150,15 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(resolveMcpRequestTimeoutMs(request)).toBe(300_000);
   });
 
+  test("default openLink floor is higher than the standard request timeout", () => {
+    // A deeplink that launches the app and performs a login/network round-trip can
+    // take ~45s end to end, exceeding the 30s standard timeout (issue #2723). The
+    // default floor must give those calls room to finish rather than aborting a
+    // link-open that actually succeeds on screen.
+    expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBe(90_000);
+    expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
   test("applies default openLink floor when client omits timeoutMs", () => {
     const request: DaemonRequest = {
       id: "1",

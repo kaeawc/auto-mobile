@@ -22,6 +22,7 @@ import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getMcpRecorder } from "./mcpRecordingManager";
+import { formatToolResultLog } from "./toolResultLog";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 
 // Re-exported for backward compatibility; the implementation now lives in
@@ -383,7 +384,16 @@ class ToolRegistryClass {
             ? String(unwrapped.error || "")
             : null;
           if (unwrapped && typeof unwrapped === "object" && "success" in unwrapped) {
-            logger.info(`[ToolRegistry] ${name} result: success=${unwrapped.success}${unwrapped.success === false ? `, error=${unwrapped.error || "unknown"}` : ""}`);
+            // If the caller's request already timed out (signal aborted), the late
+            // result contradicts the timeout they received — surface it as a warning
+            // rather than a bare success=true. See issue #2723.
+            const resultLog = formatToolResultLog({
+              toolName: name,
+              success: unwrapped.success !== false,
+              error: unwrapped.error,
+              callerTimedOut: signal?.aborted ?? false,
+            });
+            logger[resultLog.level](resultLog.message);
           }
 
           // Emit tool call telemetry

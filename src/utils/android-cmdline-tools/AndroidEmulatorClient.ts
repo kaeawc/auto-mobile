@@ -92,6 +92,47 @@ export function inferAndroidFormFactor(deviceName?: string): FormFactor | undefi
   return undefined;
 }
 
+/**
+ * Decide whether the emulator should launch headless (`-no-window`).
+ *
+ * Resolution order:
+ * 1. `AUTOMOBILE_EMULATOR_HEADLESS=true`  → always headless.
+ * 2. `AUTOMOBILE_EMULATOR_HEADLESS=false` → always windowed (honor the explicit
+ *    opt-out even on a Linux host with no display).
+ * 3. Linux with no usable display server (`DISPLAY`/`WAYLAND_DISPLAY` unset or
+ *    blank) → headless, because a windowed launch aborts on the Qt `xcb`
+ *    platform plugin (see issue #2722).
+ * 4. Otherwise → windowed (macOS/Windows have a native display; Linux has one).
+ *
+ * @param platform - `process.platform` value
+ * @param env - environment variables to read
+ * @returns the resolved mode plus a human-readable reason for logging
+ */
+export function resolveHeadlessMode(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv
+): { headless: boolean; reason: string } {
+  const explicit = env.AUTOMOBILE_EMULATOR_HEADLESS;
+  if (explicit === "true") {
+    return { headless: true, reason: "AUTOMOBILE_EMULATOR_HEADLESS=true" };
+  }
+  if (explicit === "false") {
+    return { headless: false, reason: "AUTOMOBILE_EMULATOR_HEADLESS=false (windowed forced)" };
+  }
+
+  if (platform === "linux") {
+    const hasDisplay = Boolean((env.DISPLAY && env.DISPLAY.trim()) || (env.WAYLAND_DISPLAY && env.WAYLAND_DISPLAY.trim()));
+    if (!hasDisplay) {
+      return {
+        headless: true,
+        reason: "no DISPLAY/WAYLAND_DISPLAY detected on Linux; defaulting to -no-window",
+      };
+    }
+  }
+
+  return { headless: false, reason: "usable display detected" };
+}
+
 const execAsync = async (command: string): Promise<ExecResult> => {
   const result = await promisify(exec)(command);
 
@@ -487,6 +528,35 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   /**
+   * Detect display / Qt platform-plugin errors in emulator output.
+   *
+   * On a headless host a windowed emulator cannot connect to the X display,
+   * fails to load the Qt `xcb` platform plugin, and is killed by signal — which
+   * Node reports as `code: null`. This surfaces that root cause instead of the
+   * opaque "exited with code: null" (see issue #2722).
+   */
+  detectDisplayError(output: string): {
+    isDisplayError: boolean;
+    message?: string;
+    suggestion?: string;
+  } {
+    const noDisplay = /could not connect to display/i.test(output);
+    const qtPlugin = /could not load the Qt platform plugin/i.test(output);
+
+    if (noDisplay || qtPlugin) {
+      return {
+        isDisplayError: true,
+        message: "Emulator could not connect to a display (Qt 'xcb' platform plugin failed to load)",
+        suggestion:
+          "Run the emulator headless by setting AUTOMOBILE_EMULATOR_HEADLESS=true " +
+          "(adds -no-window -no-audio), or start an X server / export DISPLAY before launching.",
+      };
+    }
+
+    return { isDisplayError: false };
+  }
+
+  /**
    * Execute an emulator command
    * @param command - The command to execute
    * @param timeoutMs - Optional timeout in milliseconds
@@ -825,8 +895,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
 
     const args = ["-avd", avdName];
-    const headless = process.env.AUTOMOBILE_EMULATOR_HEADLESS === "true";
-    if (headless) {
+    const headlessMode = resolveHeadlessMode(process.platform, process.env);
+    logger.info(`Emulator display mode: ${headlessMode.headless ? "headless" : "windowed"} (${headlessMode.reason})`);
+    if (headlessMode.headless) {
       args.push("-no-window", "-no-audio");
     }
     const extraArgsRaw = process.env.AUTOMOBILE_EMULATOR_ARGS;
@@ -900,6 +971,28 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           let errorMessage = `Emulator failed to start: ${corruptResult.message}`;
           if (corruptResult.suggestion) {
             errorMessage += `\n\nSuggestion: ${corruptResult.suggestion}`;
+          }
+
+          if (!child.killed) {
+            child.kill();
+          }
+
+          if (!startupValidationComplete) {
+            startupValidationComplete = true;
+            perf.endOperation("panicDetection");
+            reject(new ActionableError(errorMessage));
+          }
+          return;
+        }
+
+        // Check for display / Qt platform-plugin failure (windowed launch on a headless host)
+        const displayResult = this.detectDisplayError(initialOutput);
+        if (displayResult.isDisplayError) {
+          logger.error(`Emulator display error detected: ${displayResult.message}`);
+
+          let errorMessage = `Emulator failed to start: ${displayResult.message}`;
+          if (displayResult.suggestion) {
+            errorMessage += `\n\nSuggestion: ${displayResult.suggestion}`;
           }
 
           if (!child.killed) {
@@ -990,6 +1083,23 @@ export class AndroidEmulatorClient implements AndroidEmulator {
               }
               reject(new ActionableError(errorMessage));
             }
+            return;
+          }
+
+          // Check if exit was due to a display / Qt platform-plugin failure.
+          // Signal death (e.g. SIGABRT from the failed xcb plugin) arrives as code === null.
+          const displayResult = this.detectDisplayError(initialOutput);
+          if (displayResult.isDisplayError) {
+            logger.error(`Exit was due to display error: ${displayResult.message}`);
+            if (!startupValidationComplete) {
+              startupValidationComplete = true;
+              perf.endOperation("panicDetection");
+              let errorMessage = `Emulator failed to start: ${displayResult.message}`;
+              if (displayResult.suggestion) {
+                errorMessage += `\n\nSuggestion: ${displayResult.suggestion}`;
+              }
+              reject(new ActionableError(errorMessage));
+            }
           } else if (!startupValidationComplete) {
             startupValidationComplete = true;
             perf.endOperation("panicDetection");
@@ -1061,16 +1171,25 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       childProcess.stdout?.on("data", captureOutput);
       childProcess.stderr?.on("data", captureOutput);
       childProcess.on("exit", code => {
-        if (code !== null && code !== 0) {
+        // A null code means the process was killed by signal (e.g. SIGABRT from a
+        // failed Qt xcb plugin on a headless host) — treat that as a failure too.
+        if (code !== 0) {
           processExited = true;
           const combinedOutput = processOutput.join("");
 
           // Check for known error patterns
           const corruptResult = this.detectCorruptImage(combinedOutput);
+          const displayResult = this.detectDisplayError(combinedOutput);
           if (corruptResult.isCorrupt) {
             let msg = `Emulator failed to start: ${corruptResult.message}`;
             if (corruptResult.suggestion) {
               msg += `\n\nSuggestion: ${corruptResult.suggestion}`;
+            }
+            processExitError = new ActionableError(msg);
+          } else if (displayResult.isDisplayError) {
+            let msg = `Emulator failed to start: ${displayResult.message}`;
+            if (displayResult.suggestion) {
+              msg += `\n\nSuggestion: ${displayResult.suggestion}`;
             }
             processExitError = new ActionableError(msg);
           } else {

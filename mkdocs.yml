@@ -136,6 +136,7 @@ nav:
             - 'Overview': design-docs/plat/android/index.md
             - 'Observe': design-docs/plat/android/observe.md
             - 'Screen Streaming': design-docs/plat/android/screen-streaming.md
+            - 'Emulator Startup': design-docs/plat/android/emulator-startup.md
             - 'CtrlProxy': design-docs/plat/android/control-proxy.md
             - 'AutoMobile SDK': design-docs/plat/android/auto-mobile-sdk.md
             - 'JUnitRunner':

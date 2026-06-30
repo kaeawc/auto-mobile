@@ -11,6 +11,7 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
   private availableState: boolean = false;
   private executedOperations: string[] = [];
   private servicePort: number = 8765;
+  private reportedRunnerPort: number | null = null;
   private shouldStartFail: boolean = false;
   private shouldStopFail: boolean = false;
   private shouldSetupFail: boolean = false;
@@ -43,6 +44,13 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   setServicePort(port: number): void {
     this.servicePort = port;
+  }
+
+  /**
+   * Set the port the runner reports it is bound to (via /health)
+   */
+  setReportedRunnerPort(port: number | null): void {
+    this.reportedRunnerPort = port;
   }
 
   /**
@@ -116,6 +124,11 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
   getServicePort(): number {
     this.executedOperations.push("getServicePort");
     return this.servicePort;
+  }
+
+  async getReportedRunnerPort(): Promise<number | null> {
+    this.executedOperations.push("getReportedRunnerPort");
+    return this.reportedRunnerPort;
   }
 
   async start(): Promise<void> {

@@ -47,6 +47,7 @@ export interface CtrlProxyIosManager extends ProxyManager {
   start(): Promise<void>;
   stop(): Promise<void>;
   getServicePort(): number;
+  getReportedRunnerPort(): Promise<number | null>;
   setAutoRestart(enabled: boolean): void;
   isAutoRestartEnabled(): boolean;
   forceRestart(): Promise<void>;
@@ -1867,6 +1868,50 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private async checkHealthEndpointOnPort(port: number): Promise<boolean> {
     const body = await this.readHealthEndpointBodyOnPort(port);
     return body !== null && (body.includes("ok") || body.includes("healthy"));
+  }
+
+  /**
+   * Ask the runner what port it is *actually* bound to, by reading the `port`
+   * field the runner self-reports in its `/health` payload. Probes the same
+   * candidate ports as runner discovery (the allocated service port plus the
+   * hardcoded default the runner falls back to), filtered to this device so a
+   * sibling runner sharing the default port is never mistaken for ours.
+   *
+   * Returns null when no matching runner answers or when the runner is too old
+   * to report a port. Used by `doctor` to compare the runner's real bound port
+   * against the client port — a comparison that is meaningless if both are
+   * derived from `getServicePort()` (issue #2735).
+   */
+  public async getReportedRunnerPort(): Promise<number | null> {
+    const candidatePorts = new Set([this.servicePort, IOSCtrlProxyManager.DEFAULT_PORT]);
+    for (const port of candidatePorts) {
+      const reportedPort = await this.readReportedPortFromHealth(port);
+      if (reportedPort !== null) {
+        return reportedPort;
+      }
+    }
+    return null;
+  }
+
+  private async readReportedPortFromHealth(port: number): Promise<number | null> {
+    const body = await this.readHealthEndpointBodyOnPort(port);
+    if (body === null) {
+      return null;
+    }
+    try {
+      const health = JSON.parse(body) as { status?: unknown; deviceId?: unknown; port?: unknown };
+      if (health.status !== "ok") {
+        return null;
+      }
+      // A runner that reports a deviceId must match ours; one that omits it
+      // (older runner) is accepted on the ports we already scope to this device.
+      if (health.deviceId !== undefined && health.deviceId !== this.device.deviceId) {
+        return null;
+      }
+      return typeof health.port === "number" ? health.port : null;
+    } catch {
+      return null;
+    }
   }
 
   private async checkHealthEndpointOnPortForDevice(port: number, deviceId: string): Promise<boolean> {

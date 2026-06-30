@@ -847,7 +847,12 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     getBootedSimulators: async () => devices.map(d => ({ name: d.name, platform: "ios" as const, deviceId: d.deviceId }))
   });
 
-  const runningManager = { isInstalled: async () => true, isRunning: async () => true, getServicePort: () => 8765 };
+  const runningManager = {
+    isInstalled: async () => true,
+    isRunning: async () => true,
+    getServicePort: () => 8765,
+    getReportedRunnerPort: async () => 8765
+  };
 
   test("closes a probe client it created (no pre-existing client)", async () => {
     let closes = 0;
@@ -927,7 +932,12 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     getBootedSimulators: async () => devices.map(d => ({ name: d.name, platform: "ios" as const, deviceId: d.deviceId }))
   });
 
-  const runningManager = { isInstalled: async () => true, isRunning: async () => true, getServicePort: () => 8790 };
+  const runningManager = {
+    isInstalled: async () => true,
+    isRunning: async () => true,
+    getServicePort: () => 8790,
+    getReportedRunnerPort: async () => 8790
+  };
   const viewHierarchy = {
     hierarchy: { node: { $: { text: "Home" } } },
     screenWidth: 390,
@@ -1047,7 +1057,8 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
       getManager: () => ({
         isInstalled: async () => true,
         isRunning: async () => false,
-        getServicePort: () => 8790
+        getServicePort: () => 8790,
+        getReportedRunnerPort: async () => null
       }),
       getExistingClient: () => null,
       createClient: () => {
@@ -1067,5 +1078,98 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     expect(created).toBe(false);
     expect(inspections[0].connected).toBe(false);
     expect(inspections[0].hierarchyError).toBe("iOS CtrlProxy runner is not running");
+  });
+
+  test("reports the runner's actual bound port from the manager, not the client port (#2735)", async () => {
+    // #2731 failure mode: the runner binds 8765 while the client/daemon expects
+    // 8767. isRunning() probes the client port (8767) and finds nothing, but the
+    // runner reports its real bound port (8765) via /health.
+    const hooks: IosObserveRoundTripInspectorHooks = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        isRunning: async () => false,
+        getServicePort: () => 8767,
+        getReportedRunnerPort: async () => 8765
+      }),
+      getExistingClient: () => null,
+      createClient: () => {
+        throw new Error("should not create client when runner unreachable on client port");
+      },
+      elementsBuilder
+    };
+
+    const inspector = createIosObserveRoundTripInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks
+    );
+    const inspections = await inspector.inspectBootedObserveRoundTrips();
+
+    // runnerPort must reflect the runner's reported bound port, decoupled from
+    // the client port, so classifyObserveRoundTrip can detect the mismatch.
+    expect(inspections[0].runnerPort).toBe(8765);
+    expect(inspections[0].clientPort).toBe(8767);
+    expect(inspections[0].connected).toBe(false);
+  });
+
+  test("surfaces an actionable mismatch error when the runner is bound to a different port (#2735)", async () => {
+    const hooks: IosObserveRoundTripInspectorHooks = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        isRunning: async () => false,
+        getServicePort: () => 8767,
+        getReportedRunnerPort: async () => 8765
+      }),
+      getExistingClient: () => null,
+      createClient: () => {
+        throw new Error("should not create client when runner unreachable on client port");
+      },
+      elementsBuilder
+    };
+
+    const inspector = createIosObserveRoundTripInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks
+    );
+    const inspections = await inspector.inspectBootedObserveRoundTrips();
+
+    expect(inspections[0].hierarchyError).toContain("8765");
+    expect(inspections[0].hierarchyError).toContain("8767");
+    // The misleading "not running" must not be reported when the runner is alive
+    // on another port.
+    expect(inspections[0].hierarchyError).not.toBe("iOS CtrlProxy runner is not running");
+  });
+
+  test("falls back to the service port when the runner reports no bound port", async () => {
+    const hooks: IosObserveRoundTripInspectorHooks = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        isRunning: async () => true,
+        getServicePort: () => 8790,
+        getReportedRunnerPort: async () => null
+      }),
+      getExistingClient: () => null,
+      createClient: (_device, port) => ({
+        getConnectionPortForDiagnostics: () => port,
+        requestHierarchySync: async () => ({ hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any }),
+        convertToViewHierarchyResult: () => viewHierarchy as any,
+        close: async () => {}
+      }),
+      elementsBuilder
+    };
+
+    const inspector = createIosObserveRoundTripInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks
+    );
+    const inspections = await inspector.inspectBootedObserveRoundTrips();
+
+    // No reported port → runnerPort falls back to the service port so a healthy
+    // runner is not falsely flagged as a mismatch.
+    expect(inspections[0].runnerPort).toBe(8790);
+    expect(inspections[0].clientPort).toBe(8790);
+    expect(inspections[0].connected).toBe(true);
   });
 });

@@ -92,6 +92,7 @@ class NoOpIOSCtrlProxyManager implements CtrlProxyIosManager {
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
   getServicePort(): number { return 0; }
+  async getReportedRunnerPort(): Promise<number | null> { return null; }
   setAutoRestart(): void {}
   isAutoRestartEnabled(): boolean { return false; }
   async forceRestart(): Promise<void> {}

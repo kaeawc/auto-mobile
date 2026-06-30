@@ -358,6 +358,8 @@ export class SimCtlClient implements SimCtl {
   private timer: Timer;
   private platform: NodeJS.Platform;
   private readonly usesInjectedExecAsync: boolean;
+  // Cached result of the launchctl headless-session probe (null = not yet probed)
+  private headlessSessionCache: boolean | null = null;
 
   // Static cache for device list
   private static deviceListCache: { devices: DeviceInfo[], timestamp: number } | null = null;
@@ -597,20 +599,13 @@ export class SimCtlClient implements SimCtl {
     await this.executeCommand(`boot ${udid}`);
     perf.endOperation("simctlBoot");
 
-    // Open Simulator.app focused on this specific device
+    // Open Simulator.app focused on this specific device (no-op on headless hosts)
     try {
       perf.startOperation("openSimulatorApp");
       await this.openSimulatorApp(udid);
       perf.endOperation("openSimulatorApp");
     } catch {
       perf.endOperation("openSimulatorApp");
-      logger.debug("Could not open Simulator.app (non-fatal)");
-    }
-
-    // Open Simulator.app focused on this specific device
-    try {
-      await this.openSimulatorApp(udid);
-    } catch {
       logger.debug("Could not open Simulator.app (non-fatal)");
     }
 
@@ -1110,6 +1105,15 @@ export class SimCtlClient implements SimCtl {
   }
 
   async openSimulatorApp(udid?: string): Promise<void> {
+    // On a headless macOS host (no Aqua GUI session, e.g. a launchd daemon or
+    // SSH context) `open -a Simulator` fails with OSLaunchdErrorDomain Code=125
+    // after a slow retry, wasting wall-clock against the daemon-start budget.
+    // The booted simulator + CtrlProxy work without the GUI, so skip the launch.
+    if (await this.isHeadlessSession()) {
+      logger.debug("Skipping open -a Simulator: headless session (no Aqua GUI)");
+      return;
+    }
+
     // Ensure Simulator.app is open (creates windows for all booted devices)
     await this.execAsync("open", ["-a", "Simulator"]);
     // If a specific device is requested, focus it by switching to it
@@ -1119,6 +1123,50 @@ export class SimCtlClient implements SimCtl {
       try {
         await this.execAsync("osascript", ["-e", 'tell application "Simulator" to activate']);
       } catch { /* non-fatal */ }
+    }
+  }
+
+  /**
+   * Determine whether the current host can launch the Simulator GUI.
+   *
+   * Resolution order:
+   *  1. `AUTOMOBILE_IOS_HEADLESS` env override (`true`/`1` => headless,
+   *     `false`/`0` => force GUI launch).
+   *  2. Non-darwin platforms are always headless (Simulator.app is macOS-only).
+   *  3. Auto-detect via `launchctl managername`: an `Aqua` manager means a GUI
+   *     login session; anything else (`System`/`Background`) is a daemon/SSH
+   *     context with no GUI domain.
+   *
+   * If detection itself fails we assume a GUI session to preserve the prior
+   * behavior. The result is cached so launchctl is probed at most once.
+   */
+  private async isHeadlessSession(): Promise<boolean> {
+    const override = process.env.AUTOMOBILE_IOS_HEADLESS;
+    if (override !== undefined) {
+      return override === "true" || override === "1";
+    }
+
+    if (this.platform !== "darwin") {
+      return true;
+    }
+
+    if (this.headlessSessionCache === null) {
+      this.headlessSessionCache = await this.detectHeadlessSession();
+    }
+    return this.headlessSessionCache;
+  }
+
+  private async detectHeadlessSession(): Promise<boolean> {
+    try {
+      const result = await this.execAsync("launchctl", ["managername"]);
+      const managerName = (result.stdout || "").trim();
+      // "Aqua" is the GUI login session manager; "System"/"Background" are not.
+      return managerName !== "Aqua";
+    } catch (error) {
+      // Can't determine the session type; assume a GUI session so we preserve
+      // the historical behavior rather than silently suppressing the launch.
+      logger.debug(`launchctl managername probe failed, assuming GUI session: ${error}`);
+      return false;
     }
   }
 }

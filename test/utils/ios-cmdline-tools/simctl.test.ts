@@ -457,4 +457,105 @@ describe("Simctl", function() {
       await expect(simctl.getDeviceTypes()).rejects.toThrow();
     });
   });
+
+  describe("openSimulatorApp headless detection", function() {
+    const HEADLESS_ENV = "AUTOMOBILE_IOS_HEADLESS";
+    let savedEnv: string | undefined;
+    let calls: Array<{ file: string; args: string[] }>;
+
+    function recordingExec(managerName: string | Error = "Aqua"): typeof mockExecAsync {
+      return async (file: string, args: string[]): Promise<ExecResult> => {
+        calls.push({ file, args });
+        if (file === "launchctl" && args[0] === "managername") {
+          if (managerName instanceof Error) {
+            throw managerName;
+          }
+          return createExecResult(`${managerName}\n`, "");
+        }
+        return createExecResult("", "");
+      };
+    }
+
+    function openCalls(): Array<{ file: string; args: string[] }> {
+      return calls.filter(c => c.file === "open" && c.args[0] === "-a" && c.args[1] === "Simulator");
+    }
+
+    function launchctlCalls(): Array<{ file: string; args: string[] }> {
+      return calls.filter(c => c.file === "launchctl" && c.args[0] === "managername");
+    }
+
+    beforeEach(function() {
+      savedEnv = process.env[HEADLESS_ENV];
+      delete process.env[HEADLESS_ENV];
+      calls = [];
+    });
+
+    function restoreEnv(): void {
+      if (savedEnv === undefined) {
+        delete process.env[HEADLESS_ENV];
+      } else {
+        process.env[HEADLESS_ENV] = savedEnv;
+      }
+    }
+
+    test("skips open -a Simulator when AUTOMOBILE_IOS_HEADLESS=true (no launchctl probe)", async function() {
+      process.env[HEADLESS_ENV] = "true";
+      try {
+        simctl = new Simctl(null, recordingExec("Aqua"), null, new FakeTimer(), "darwin");
+        await simctl.openSimulatorApp();
+        expect(openCalls()).toHaveLength(0);
+        expect(launchctlCalls()).toHaveLength(0);
+      } finally {
+        restoreEnv();
+      }
+    });
+
+    test("forces open -a Simulator when AUTOMOBILE_IOS_HEADLESS=false even if session is non-Aqua", async function() {
+      process.env[HEADLESS_ENV] = "false";
+      try {
+        simctl = new Simctl(null, recordingExec("System"), null, new FakeTimer(), "darwin");
+        await simctl.openSimulatorApp();
+        expect(openCalls()).toHaveLength(1);
+        expect(launchctlCalls()).toHaveLength(0);
+      } finally {
+        restoreEnv();
+      }
+    });
+
+    test("calls open -a Simulator when launchctl reports an Aqua GUI session", async function() {
+      simctl = new Simctl(null, recordingExec("Aqua"), null, new FakeTimer(), "darwin");
+      await simctl.openSimulatorApp();
+      expect(launchctlCalls()).toHaveLength(1);
+      expect(openCalls()).toHaveLength(1);
+    });
+
+    test("skips open -a Simulator when launchctl reports a non-Aqua (headless) session", async function() {
+      simctl = new Simctl(null, recordingExec("System"), null, new FakeTimer(), "darwin");
+      await simctl.openSimulatorApp();
+      expect(launchctlCalls()).toHaveLength(1);
+      expect(openCalls()).toHaveLength(0);
+    });
+
+    test("skips open -a Simulator on non-darwin platforms without any exec", async function() {
+      simctl = new Simctl(null, recordingExec("Aqua"), null, new FakeTimer(), "linux");
+      await simctl.openSimulatorApp();
+      expect(calls).toHaveLength(0);
+    });
+
+    test("attempts open -a Simulator when launchctl probe fails (safe fallback)", async function() {
+      simctl = new Simctl(null, recordingExec(new Error("launchctl unavailable")), null, new FakeTimer(), "darwin");
+      await simctl.openSimulatorApp();
+      expect(launchctlCalls()).toHaveLength(1);
+      expect(openCalls()).toHaveLength(1);
+    });
+
+    test("caches the headless detection so launchctl is probed at most once", async function() {
+      simctl = new Simctl(null, recordingExec("Aqua"), null, new FakeTimer(), "darwin");
+      await simctl.openSimulatorApp();
+      await simctl.openSimulatorApp();
+      await simctl.openSimulatorApp();
+      expect(launchctlCalls()).toHaveLength(1);
+      expect(openCalls()).toHaveLength(3);
+    });
+  });
 });

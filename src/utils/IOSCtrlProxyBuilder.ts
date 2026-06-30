@@ -19,6 +19,13 @@ import {
 } from "./IOSCtrlProxyBundleDownloader";
 import { hashAppBundle } from "./ios-cmdline-tools/AppBundleHasher";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
+import {
+  buildPlist,
+  injectUITestEnvironment,
+  parsePlist,
+  type PlistValue
+} from "./ios-cmdline-tools/XctestrunPlist";
+import { toActionableError } from "../models/ActionableError";
 
 /**
  * Result of CtrlProxy download/install
@@ -60,6 +67,12 @@ type IOSCtrlProxyBundleMetadata = {
  * Handles release bundle download and extraction for CtrlProxy
  */
 export class IOSCtrlProxyBuilder {
+  /**
+   * Filename prefix for the per-launch xctestrun copies written by
+   * {@link writeRunnerEnvironment}. Distinct from the build-products xctestrun so
+   * the copies are excluded from source discovery/cleanup globs.
+   */
+  private static readonly RUNNER_XCTESTRUN_PREFIX = "automobile-runner-";
   private static readonly DEFAULT_PROJECT_ROOT = process.cwd();
   private static readonly DEFAULT_DERIVED_DATA_PATH = "/tmp/automobile-ctrl-proxy";
   private static readonly DEFAULT_SCHEME = "CtrlProxyApp";
@@ -202,7 +215,10 @@ export class IOSCtrlProxyBuilder {
     const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
     try {
       const files = await fs.readdir(productsDir);
-      const xctestrunFiles = files.filter(file => file.endsWith(".xctestrun"));
+      const xctestrunFiles = files.filter(
+        file => file.endsWith(".xctestrun") &&
+          !file.startsWith(IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX)
+      );
       if (xctestrunFiles.length === 0) {
         return null;
       }
@@ -241,13 +257,73 @@ export class IOSCtrlProxyBuilder {
   }
 
   /**
+   * Inject runner environment variables into a copy of the xctestrun so they
+   * reach the in-simulator / on-device XCUITest runner process.
+   *
+   * `xcodebuild test-without-building` does NOT forward the host process
+   * environment (or `SIMCTL_CHILD_*`) into the runner — the only channel that
+   * reaches it is the xctestrun's per-target `EnvironmentVariables` dict, which
+   * xcodebuild injects into the test host (the runner app). Without this the
+   * runner never sees the allocated `CTRL_PROXY_IOS_PORT` and falls back to its
+   * hardcoded `defaultPort` (8765), breaking multi-device setups where the
+   * daemon allocated a non-default port (issue #2731).
+   *
+   * The injected variables are written to a per-launch copy in the SAME
+   * directory as the source xctestrun (so `__TESTROOT__` still resolves to the
+   * build products dir). The copy's name intentionally omits the platform token
+   * so it is ignored by {@link getXctestrunPath}/{@link cleanStaleXctestrunFiles}
+   * and so concurrent devices don't race on a shared file.
+   *
+   * @returns the path to the per-launch xctestrun copy to pass to `xcodebuild`.
+   */
+  public async writeRunnerEnvironment(
+    xctestrunPath: string,
+    env: Record<string, string>,
+    deviceId: string
+  ): Promise<string> {
+    try {
+      const xml = await fs.readFile(xctestrunPath, "utf-8");
+      const root = await parsePlist(xml);
+      if (!(root instanceof Map)) {
+        throw new Error("xctestrun root is not a plist dictionary");
+      }
+
+      const injected = injectUITestEnvironment(root as Map<string, PlistValue>, env);
+      if (injected === 0) {
+        throw new Error(
+          "xctestrun contains no UI-test bundle (IsUITestBundle) to receive the runner environment"
+        );
+      }
+
+      const safeDeviceId = deviceId.replace(/[^A-Za-z0-9._-]/g, "_") || "device";
+      const outputPath = path.join(
+        path.dirname(xctestrunPath),
+        `${IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX}${safeDeviceId}.xctestrun`
+      );
+      await fs.writeFile(outputPath, buildPlist(root), "utf-8");
+      logger.info(
+        `[IOSCtrlProxyBuilder] Wrote runner xctestrun with injected environment to ${outputPath}`
+      );
+      return outputPath;
+    } catch (error) {
+      throw toActionableError(
+        error,
+        `Failed to inject runner environment into xctestrun at ${xctestrunPath}`
+      );
+    }
+  }
+
+  /**
    * Remove stale xctestrun files, keeping only the newest per platform.
    */
   public async cleanStaleXctestrunFiles(): Promise<void> {
     const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
     try {
       const files = await fs.readdir(productsDir);
-      const xctestrunFiles = files.filter(file => file.endsWith(".xctestrun"));
+      const xctestrunFiles = files.filter(
+        file => file.endsWith(".xctestrun") &&
+          !file.startsWith(IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX)
+      );
       if (xctestrunFiles.length <= 1) {
         return;
       }

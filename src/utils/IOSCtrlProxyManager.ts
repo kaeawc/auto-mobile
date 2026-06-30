@@ -1380,6 +1380,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return null;
   }
 
+  /** Single source of truth for "is this a usable TCP port number". */
+  private static isValidPort(value: unknown): value is number {
+    return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 65535;
+  }
+
   private parseCtrlProxyPortFromProcessArgs(args: string): number | null {
     const match = args.match(/(?:^|\s)(?:SIMCTL_CHILD_)?CTRL_PROXY_IOS_PORT=(\d+)(?:\s|$)/);
     if (!match) {
@@ -1387,7 +1392,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     const port = Number.parseInt(match[1], 10);
-    return Number.isNaN(port) || port <= 0 || port > 65535 ? null : port;
+    return IOSCtrlProxyManager.isValidPort(port) ? port : null;
   }
 
   private async ensureServicePortReadyForLaunch(): Promise<void> {
@@ -1920,11 +1925,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (health.deviceId !== this.device.deviceId) {
         return null;
       }
-      if (typeof health.port !== "number" || !Number.isInteger(health.port) ||
-          health.port <= 0 || health.port > 65535) {
-        return null;
-      }
-      return health.port;
+      return IOSCtrlProxyManager.isValidPort(health.port) ? health.port : null;
     } catch {
       return null;
     }

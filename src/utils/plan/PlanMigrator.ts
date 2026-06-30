@@ -1,4 +1,4 @@
-import { getMcpServerVersion } from "../mcpVersion";
+import { getMcpServerVersion, releaseVersion } from "../mcpVersion";
 
 type MigrationWarning = {
   message: string;
@@ -18,7 +18,11 @@ const parseVersion = (version: string | undefined): number[] | null => {
   if (!version || version === "unknown" || version === "latest") {
     return null;
   }
-  const numericParts = version.split(".").map(part => parseInt(part.replace(/\D/g, ""), 10));
+  // Dev builds stamp a git SHA as semver build metadata (`0.0.39+g<sha>[.dirty]`).
+  // Strip it before parsing — otherwise the SHA's hex digits corrupt the patch
+  // number and a `.dirty` suffix parses to NaN (→ always-outdated). Migration
+  // only cares about the release portion.
+  const numericParts = releaseVersion(version).split(".").map(part => parseInt(part.replace(/\D/g, ""), 10));
   if (numericParts.some(part => Number.isNaN(part))) {
     return null;
   }

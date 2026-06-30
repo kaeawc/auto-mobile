@@ -18,6 +18,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
  * PID is guaranteed to be alive for the duration of the test. The test stubs
  * the spawn/restart side via a wrapper so no real daemon child is forked.
  */
+// Pinned plain client version: DAEMON_VERSION is git-SHA-stamped (non-numeric)
+// in a source checkout, but this suite exercises the numeric release-version
+// comparison path, so the proxy's client version is injected explicitly.
+const CLIENT_VERSION = "0.0.39";
+
 describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", () => {
   let tempDir: string;
   let pidFilePath: string;
@@ -74,7 +79,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       async restart(options?: DaemonOptions) {
         restartCalled = true;
         restartOptions = options;
-        writePidFile({ version: DAEMON_VERSION, startedAt: fakeTimer.now() });
+        writePidFile({ version: CLIENT_VERSION, startedAt: fakeTimer.now() });
       },
       async waitForReady() {
         return tracker.waitForReadyResult;
@@ -91,6 +96,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       daemonManager: tracked,
       autoStartDaemon: true,
       timer: fakeTimer,
+      clientVersion: CLIENT_VERSION,
     });
     try {
       await proxy.listTools();
@@ -109,6 +115,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       daemonManager: tracked,
       autoStartDaemon: true,
       timer: fakeTimer,
+      clientVersion: CLIENT_VERSION,
     });
     try {
       await expect(proxy.listTools()).rejects.toThrow(DaemonVersionMismatchError);
@@ -120,13 +127,14 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
   });
 
   test("real PID file with matching version does not trigger restart", async () => {
-    writePidFile({ version: DAEMON_VERSION, startedAt: 1 });
+    writePidFile({ version: CLIENT_VERSION, startedAt: 1 });
     const tracked = makeTracked();
     const proxy = new DaemonMcpProxy({
       clientFactory: () => new FakeDaemonClient(),
       daemonManager: tracked,
       autoStartDaemon: true,
       timer: fakeTimer,
+      clientVersion: CLIENT_VERSION,
     });
     try {
       await proxy.listTools();
@@ -148,6 +156,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       daemonManager: tracked,
       autoStartDaemon: true,
       timer: fakeTimer,
+      clientVersion: CLIENT_VERSION,
     });
     try {
       await expect(proxy.listTools()).rejects.toThrow(DaemonVersionMismatchError);
@@ -172,6 +181,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       daemonManager: tracked,
       autoStartDaemon: true,
       timer: fakeTimer,
+      clientVersion: CLIENT_VERSION,
     });
     try {
       await proxy.listTools();
@@ -227,6 +237,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       daemonManager: tracked,
       autoStartDaemon: true,
       timer: fakeTimer,
+      clientVersion: CLIENT_VERSION,
     });
     try {
       await proxy.listTools();

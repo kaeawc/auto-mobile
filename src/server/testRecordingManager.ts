@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import * as yaml from "js-yaml";
 import { BootedDevice, Plan, PlanStep } from "../models";
 import { logger } from "../utils/logger";
-import { getMcpServerVersion } from "../utils/mcpVersion";
+import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import { PlanValidator } from "../utils/plan/PlanValidator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { DualTrackRecorder } from "../features/record/android";
@@ -79,7 +79,9 @@ const buildPlanFromSteps = (
     name: planName,
     description: `Recorded plan with ${steps.length} interaction(s).`,
     steps,
-    mcpVersion: getMcpServerVersion(),
+    // Release portion only — recorded plans are schema-validated (`^\d+\.\d+\.\d+$`)
+    // before migration, so a dev build's `+g<sha>` stamp would make them unusable.
+    mcpVersion: releaseVersion(getMcpServerVersion()),
     metadata: {
       createdAt: new Date(stoppedAt).toISOString(),
       version: "1.0.0",

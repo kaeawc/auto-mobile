@@ -5,7 +5,7 @@ import { Plan, PlanStep } from "../../models/Plan";
 import { logger } from "../logger";
 import { PlanNormalizer } from "./PlanNormalizer";
 import { migratePlan } from "./PlanMigrator";
-import { getMcpServerVersion } from "../mcpVersion";
+import { getMcpServerVersion, releaseVersion } from "../mcpVersion";
 import { PlanValidator } from "./PlanValidator";
 import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
 
@@ -163,8 +163,11 @@ export class YamlPlanSerializer implements PlanSerializer {
         }
       }
 
-      // Create the plan
-      const mcpVersion = getMcpServerVersion();
+      // Create the plan. Persist the release portion only: the test-plan schema
+      // requires `^\d+\.\d+\.\d+$`, and plan files are schema-validated before
+      // migration runs, so a dev build's `+g<sha>` stamp would be rejected. The
+      // stamp's purpose (daemon skew detection, diagnostics) is unrelated to plans.
+      const mcpVersion = releaseVersion(getMcpServerVersion());
       const plan: Plan = {
         name: planName,
         description: `Exported plan with ${planSteps.length} steps`,

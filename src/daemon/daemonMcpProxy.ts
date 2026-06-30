@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "./constants";
 import type { DaemonOptions } from "./types";
 import { compareVersions } from "../server/deviceMatcher";
+import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   type BuildIdentity,
@@ -42,8 +43,11 @@ export class DaemonVersionMismatchError extends DaemonUnavailableError {
     detail: string;
     retryAfterMs?: number;
   }) {
-    const restartCommand = params.clientVersion.length > 0 && params.clientVersion !== "unknown"
-      ? `bunx @kaeawc/auto-mobile@${params.clientVersion} --daemon restart`
+    // The git-SHA build metadata on dev builds is not an installable npm tag,
+    // so the bunx hint must point at the plain published version.
+    const installableVersion = releaseVersion(params.clientVersion);
+    const restartCommand = installableVersion.length > 0 && installableVersion !== "unknown"
+      ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
       : "the same installed auto-mobile package";
     const retryGuidance = params.retryAfterMs !== undefined
       ? ` Retry after ${params.retryAfterMs}ms or restart the daemon with: ${restartCommand}`
@@ -149,6 +153,8 @@ export interface DaemonMcpProxyConfig {
   timer?: Pick<Timer, "now">;
   /** This client's build identity (for testing; defaults to the current process build) */
   buildIdentity?: BuildIdentity;
+  /** This client's version for the daemon version gate (defaults to DAEMON_VERSION; injectable for testing) */
+  clientVersion?: string;
 }
 
 /**
@@ -197,6 +203,7 @@ export class DaemonMcpProxy {
   private clientFactory: DaemonClientFactory;
   private readonly timer: Pick<Timer, "now">;
   private readonly buildIdentity: BuildIdentity;
+  private readonly clientVersion: string;
   private connecting: Promise<void> | null = null;
   private connected: boolean = false;
 
@@ -219,6 +226,7 @@ export class DaemonMcpProxy {
     ));
     this.timer = config.timer ?? defaultTimer;
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
+    this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
   }
 
   /**
@@ -283,39 +291,56 @@ export class DaemonMcpProxy {
     }
 
     const runningVersion = status.version?.trim() ?? "";
-    if (runningVersion === DAEMON_VERSION) {
+    if (runningVersion === this.clientVersion) {
       return;
     }
 
-    const cmp = runningVersion.length > 0
-      ? compareVersions(DAEMON_VERSION, runningVersion)
-      : Number.POSITIVE_INFINITY;
+    // The release portions (before the `+g<sha>` dev stamp) drive the
+    // newer/older decision. Equal release + differing full strings means two
+    // source checkouts at the same release but different commits (dev-skew).
+    const runningBase = releaseVersion(runningVersion);
+    const clientBase = releaseVersion(this.clientVersion);
+    const sameRelease = runningBase === clientBase;
 
     if (!this.config.autoStartDaemon) {
       throw this.versionMismatchError(runningVersion, "autoStartDisabled", "auto-start is disabled");
     }
 
-    if (runningVersion.length > 0 && !Number.isFinite(cmp)) {
-      throw this.versionMismatchError(
-        runningVersion,
-        "nonNumeric",
-        "version comparison is not numeric"
-      );
+    if (!sameRelease) {
+      const cmp = runningBase.length > 0
+        ? compareVersions(clientBase, runningBase)
+        : Number.POSITIVE_INFINITY;
+
+      if (runningBase.length > 0 && !Number.isFinite(cmp)) {
+        throw this.versionMismatchError(
+          runningVersion,
+          "nonNumeric",
+          "version comparison is not numeric"
+        );
+      }
+
+      if (cmp <= 0) {
+        throw this.versionMismatchError(
+          runningVersion,
+          "daemonNewer",
+          "the running daemon is newer than this client"
+        );
+      }
     }
 
-    if (cmp <= 0) {
-      throw this.versionMismatchError(
-        runningVersion,
-        "daemonNewer",
-        "the running daemon is newer than this client"
-      );
-    }
+    // Reach here when the client is strictly newer OR the daemon is a same-release
+    // dev-skew (different git stamp). Both reconcile by restarting the daemon from
+    // this client's build. Same-release dev-skew must be handled HERE rather than
+    // deferred to ensureBuildMatches: the build-identity hash covers only the entry
+    // script (process.argv[1]), so in unbundled source-mode runs (`bun src/index.ts`)
+    // it is blind to commits that change non-entry files — the git stamp is the only
+    // signal. The restart is cooldown-bounded below so two checkouts cannot thrash.
 
     if (status.startedAt) {
       const daemonAgeMs = this.timer.now() - status.startedAt;
       if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
         logger.warn(
-          `[DaemonMcpProxy] Skipping version-mismatch restart due to cooldown: daemon ${runningVersion || "unknown"} is ${daemonAgeMs}ms old, client version is ${DAEMON_VERSION}`
+          `[DaemonMcpProxy] Skipping version-mismatch restart due to cooldown: daemon ${runningVersion || "unknown"} is ${daemonAgeMs}ms old, client version is ${this.clientVersion}`
         );
         throw this.versionMismatchError(
           runningVersion,
@@ -327,7 +352,7 @@ export class DaemonMcpProxy {
     }
 
     logger.info(
-      `[DaemonMcpProxy] Daemon version ${runningVersion || "unknown"} differs from MCP server ${DAEMON_VERSION}, restarting daemon`
+      `[DaemonMcpProxy] Daemon version ${runningVersion || "unknown"} differs from MCP server ${this.clientVersion}, restarting daemon`
     );
     await this.daemonManager.restart(this.config.daemonOptions ?? {});
     // The replacement daemon may expose a different tool set; drop the cache so we
@@ -342,7 +367,7 @@ export class DaemonMcpProxy {
 
     const restartedStatus = await this.daemonManager.status();
     const restartedVersion = restartedStatus.version?.trim() ?? "";
-    if (!restartedStatus.running || restartedVersion !== DAEMON_VERSION) {
+    if (!restartedStatus.running || restartedVersion !== this.clientVersion) {
       throw this.versionMismatchError(
         restartedVersion,
         "restartMismatch",
@@ -358,7 +383,7 @@ export class DaemonMcpProxy {
     retryAfterMs?: number,
   ): DaemonVersionMismatchError {
     const daemonVersion = runningVersion.length > 0 ? runningVersion : "unknown";
-    const clientVersion = DAEMON_VERSION.trim();
+    const clientVersion = this.clientVersion.trim();
     return new DaemonVersionMismatchError({
       clientVersion,
       daemonVersion,

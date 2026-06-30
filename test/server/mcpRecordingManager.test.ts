@@ -134,6 +134,23 @@ describe("mcpRecordingManager", () => {
       expect(result.planContent).toContain("generatedFromToolCalls: true");
     });
 
+    test("records a schema-valid mcpVersion (release portion only, even on a dev build)", () => {
+      // Recorded plans are schema-validated (`^\d+\.\d+\.\d+$`) before migration,
+      // so a dev build's git-SHA stamp must be stripped or replay is unusable.
+      const timer = new FakeTimer();
+      timer.setCurrentTime(1000);
+      startMcpRecording(timer);
+      getMcpRecorder()!.record("tapOn", { text: "Login" });
+
+      const stopTimer = new FakeTimer();
+      stopTimer.setCurrentTime(5000);
+      const result = stopMcpRecording("schema-test", stopTimer);
+
+      const mcpVersion = result.planContent.match(/mcpVersion:\s*(\S+)/)?.[1];
+      expect(mcpVersion).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(result.planContent).not.toContain("+g");
+    });
+
     test("strips internal params from plan content", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);

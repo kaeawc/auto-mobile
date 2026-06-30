@@ -3,6 +3,7 @@ import { open, readFile, unlink } from "node:fs/promises";
 import { existsSync, openSync, closeSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { logger } from "../utils/logger";
+import { releaseVersion } from "../utils/mcpVersion";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
 import { ActionableError } from "../models";
 import {
@@ -155,7 +156,11 @@ function hasProcessLivenessChecker(value: unknown): value is DaemonProcessLivene
 const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 
 function resolvePackageSpecifier(version: string): string {
-  const trimmedVersion = version.trim();
+  // Strip any dev build metadata (`0.0.39+g<sha>.dirty`): a stamped version is
+  // not an installable npm tag, so bunx must pin the published release. This
+  // mirrors the DaemonVersionMismatchError restart hint, which also installs the
+  // release portion (a dev SHA cannot be fetched from npm regardless).
+  const trimmedVersion = releaseVersion(version.trim());
   if (trimmedVersion.length === 0 || trimmedVersion === "unknown") {
     throw new ActionableError(
       "Cannot spawn AutoMobile daemon via bunx because the current package version is unknown. Run from an installed auto-mobile binary or set MCP_SERVER_VERSION."

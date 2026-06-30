@@ -97,6 +97,10 @@ export function parseAutomobileLogLevel(value: string | undefined): LogLevel | n
   }
 }
 
+export function resolveProcessLogPrefix(argv: readonly string[], pid: number): string {
+  return argv.includes("--daemon-mode") ? "daemon" : `stdio-${pid}`;
+}
+
 // Default to INFO level in production, can be overridden
 let currentLogLevel: LogLevel = LogLevel.INFO;
 
@@ -114,12 +118,10 @@ ensureDirExists(logsDir).catch(err => {
   console.error("Failed to create logs directory:", err);
 });
 
-// Per-process log file. On a shared host many auto-mobile processes (one stdio
-// proxy per agent + the daemon) run in parallel and previously all appended to a
-// single `server.log`, interleaving and corrupting each other's output and
-// racing on rotation. Keying the filename by PID gives each process its own file
-// and clean per-process attribution.
-const ownLogPrefix = `server-${process.pid}`;
+// The daemon is single-owner, so keep its stable log name easy to document and
+// tail. Stdio/client processes remain PID-scoped because several can run in
+// parallel on the same host.
+const ownLogPrefix = resolveProcessLogPrefix(process.argv, process.pid);
 const logFilePath = path.join(logsDir, `${ownLogPrefix}.log`);
 let logStream = fs.createWriteStream(logFilePath, { flags: "a" });
 

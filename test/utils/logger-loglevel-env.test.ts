@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LogLevel, parseAutomobileLogLevel } from "../../src/utils/logger";
+import { LogLevel, parseAutomobileLogLevel, resolveProcessLogPrefix } from "../../src/utils/logger";
 
 describe("parseAutomobileLogLevel", () => {
   test("returns null for unset or blank", () => {
@@ -21,5 +21,15 @@ describe("parseAutomobileLogLevel", () => {
   test("returns null for garbage", () => {
     expect(parseAutomobileLogLevel("verbose")).toBeNull();
     expect(parseAutomobileLogLevel("infoo")).toBeNull();
+  });
+});
+
+describe("resolveProcessLogPrefix", () => {
+  test("uses stable daemon prefix in daemon mode", () => {
+    expect(resolveProcessLogPrefix(["auto-mobile", "--daemon-mode"], 123)).toBe("daemon");
+  });
+
+  test("uses pid-scoped stdio prefix outside daemon mode", () => {
+    expect(resolveProcessLogPrefix(["auto-mobile"], 123)).toBe("stdio-123");
   });
 });

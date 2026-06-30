@@ -66,6 +66,10 @@ export interface DaemonStatus {
   startedAt?: number;
   /** Daemon version */
   version?: string;
+  /** Absolute path to the daemon's entry script (build identity) */
+  entryScript?: string;
+  /** Content hash of the daemon's entry script (build identity) */
+  buildId?: string;
   /** Options used to start the daemon */
   options?: DaemonOptions;
 }
@@ -86,6 +90,10 @@ export interface PidFileData {
   startedAt: number;
   /** Daemon version */
   version: string;
+  /** Absolute path to the daemon's entry script (build identity) */
+  entryScript?: string;
+  /** Content hash of the daemon's entry script (build identity) */
+  buildId?: string;
   /** Options used to start the daemon */
   options?: DaemonOptions;
 }

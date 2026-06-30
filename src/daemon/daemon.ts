@@ -19,6 +19,7 @@ import { DaemonOptions, PidFileData } from "./types";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
+import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
 import { closeDatabase, getDatabase } from "../db";
@@ -603,6 +604,7 @@ export class Daemon {
    * Write PID file with daemon metadata
    */
   private async writePidFile(): Promise<void> {
+    const buildIdentity = getCurrentBuildIdentity();
     const pidData: PidFileData = {
       pid: process.pid,
       socketPath: SOCKET_PATH,
@@ -610,6 +612,8 @@ export class Daemon {
       port: this.port,
       startedAt: this.timer.now(),
       version: DAEMON_VERSION,
+      entryScript: buildIdentity.entryScript,
+      buildId: buildIdentity.buildId,
       options: this.options,
     };
 

@@ -1874,8 +1874,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Ask the runner what port it is *actually* bound to, by reading the `port`
    * field the runner self-reports in its `/health` payload. Probes the same
    * candidate ports as runner discovery (the allocated service port plus the
-   * hardcoded default the runner falls back to), filtered to this device so a
-   * sibling runner sharing the default port is never mistaken for ours.
+   * hardcoded default the runner falls back to).
+   *
+   * A reported port is only accepted when the runner's `/health` identifies this
+   * exact device. This matters because the daemon may probe a port that is
+   * answered by a *different* runner — a sibling iOS simulator's runner that fell
+   * back to the shared default port (the same #2731 env-propagation failure can
+   * also drop the runner's device-id env var), or, on the default port, the
+   * Android CtrlProxy reached through its `adb forward`. The Android runner is
+   * additionally excluded structurally: its `/health` returns the plain text
+   * `OK`, so `JSON.parse` / the strict `status === "ok"` object check rejects it
+   * before the device-id guard is even consulted.
    *
    * Returns null when no matching runner answers or when the runner is too old
    * to report a port. Used by `doctor` to compare the runner's real bound port
@@ -1903,12 +1912,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (health.status !== "ok") {
         return null;
       }
-      // A runner that reports a deviceId must match ours; one that omits it
-      // (older runner) is accepted on the ports we already scope to this device.
-      if (health.deviceId !== undefined && health.deviceId !== this.device.deviceId) {
+      // Require a positive device match: a runner answering this port that does
+      // not identify as our device is some other runner and must not be adopted.
+      // A new runner reporting a port always reports its device id; a runner that
+      // omits it is too old to report a port anyway (caught below), so this loses
+      // no genuine coverage while closing the cross-device false-adoption hole.
+      if (health.deviceId !== this.device.deviceId) {
         return null;
       }
-      return typeof health.port === "number" ? health.port : null;
+      if (typeof health.port !== "number" || !Number.isInteger(health.port) ||
+          health.port <= 0 || health.port > 65535) {
+        return null;
+      }
+      return health.port;
     } catch {
       return null;
     }

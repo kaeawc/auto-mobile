@@ -303,6 +303,39 @@ describe("IOSCtrlProxyManager", function() {
       expect(await manager.getReportedRunnerPort()).toBeNull();
     });
 
+    test("ignores a port reported without a matching device id (false-adoption guard)", async function() {
+      // The #2731 env-propagation failure that drops the port var can also drop
+      // the runner's device-id var, so a sibling simulator's runner on the shared
+      // default port could answer with a port but no device id. It must not be
+      // adopted as ours.
+      installHealthFakes({
+        8765: JSON.stringify({ status: "ok", port: 8765 })
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+      (manager as unknown as { servicePort: number }).servicePort = 8767;
+
+      expect(await manager.getReportedRunnerPort()).toBeNull();
+    });
+
+    test("ignores an out-of-range reported port", async function() {
+      installHealthFakes({
+        8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 70000 })
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+
+      expect(await manager.getReportedRunnerPort()).toBeNull();
+    });
+
     test("returns null when the runner reports no port (older runner)", async function() {
       installHealthFakes({
         8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId })

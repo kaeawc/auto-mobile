@@ -28,6 +28,28 @@ export class DaemonUnavailableError extends Error {
   }
 }
 
+/**
+ * Normalize a socket-level transport failure into a `DaemonUnavailableError`.
+ *
+ * When a daemon restart/crash tears down the connection, an in-flight request's
+ * socket emits a raw transport error (`ECONNRESET` / `EPIPE` / "socket hang up")
+ * with no daemon-level meaning. Surfacing that raw error verbatim wedges every
+ * other connected session (#2599): the proxy only treats `DaemonUnavailableError`
+ * and the daemon's own `Session not found` as recoverable, so a raw `ECONNRESET`
+ * is not retried (#2737). Typing it here — at the layer that knows it is a socket
+ * failure — keeps the recoverability signal in one place: the proxy reconnects via
+ * its existing `instanceof DaemonUnavailableError` branch, and a *daemon-returned*
+ * application error that merely mentions a transport code (e.g. a tool reporting a
+ * downstream `connect ECONNREFUSED`) stays an `ActionableError` and is correctly
+ * not retried. Already-typed `DaemonUnavailableError`s pass through unchanged.
+ */
+export function toDaemonTransportError(error: Error): DaemonUnavailableError {
+  if (error instanceof DaemonUnavailableError) {
+    return error;
+  }
+  return new DaemonUnavailableError(`Daemon socket connection lost: ${error.message}`);
+}
+
 export interface DaemonClientRecoveryOptions extends StaleDaemonFileCleanupOptions {
   /**
    * When true, `isAvailable()` performs an observation-only probe and never
@@ -181,10 +203,14 @@ export class DaemonClient {
           this.socket.destroy();
           this.socket = null;
         }
-        rejectPendingRequests(error);
+        // Type the transport failure so the proxy can recover sibling sessions
+        // wedged by a daemon restart (#2599/#2737) instead of surfacing a raw
+        // ECONNRESET/EPIPE/"socket hang up" that its recovery does not match.
+        const failure = toDaemonTransportError(error);
+        rejectPendingRequests(failure);
         if (!settled) {
           settled = true;
-          reject(error);
+          reject(failure);
         }
       };
 
@@ -217,7 +243,20 @@ export class DaemonClient {
 
       this.socket.on("close", () => {
         this.connected = false;
+        this.socket = null;
         logger.info("Daemon socket connection closed");
+        // A daemon restart/crash closes the socket. Over a Unix domain socket
+        // (no TCP RST) a dying daemon delivers EOF -> "close" with no "error"
+        // event, so any in-flight request would otherwise hang until its request
+        // timeout. Reject pending requests with a recoverable transport error so
+        // the proxy reconnects to the restarted daemon and retries (#2599/#2737).
+        // After fail() the pending map is already cleared, so this is a no-op on
+        // the error path.
+        if (this.pendingRequests.size > 0) {
+          rejectPendingRequests(
+            new DaemonUnavailableError("Daemon socket connection lost: connection closed")
+          );
+        }
       });
     });
   }

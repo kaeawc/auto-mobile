@@ -6,6 +6,7 @@ import {
   DaemonToolUnavailableError,
 } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike } from "../../src/daemon/client";
+import { ActionableError } from "../../src/models";
 import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -763,6 +764,128 @@ describe("DaemonMcpProxy", () => {
         expect(staleClient.readResourceCalls).toEqual(["automobile:devices/booted"]);
         expect(freshClient.connectCallCount).toBe(1);
         expect(freshClient.readResourceCalls).toEqual(["automobile:devices/booted"]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+  });
+
+  describe("sibling-session recovery after daemon restart (#2737)", () => {
+    // A daemon restart (build-mismatch #2733, version-mismatch, env change, or
+    // crash recovery) tears down every other connected session's live socket.
+    // DaemonClient now types that transport failure as DaemonUnavailableError
+    // (see daemonTransportError.test.ts), so the sibling's next forwarded call
+    // is recoverable here and reconnects+retries once instead of wedging (#2599).
+    // Critically, a *daemon-returned application error* that merely mentions a
+    // transport code (e.g. a tool reporting a downstream `connect ECONNREFUSED`)
+    // stays an ActionableError and must NOT be retried.
+
+    test("callTool recovers when a sibling's socket dropped (DaemonUnavailableError)", async () => {
+      const recoveredResult = { content: [{ type: "text", text: "sibling recovered" }] };
+      const staleClient = new ScriptedDaemonClient({
+        toolError: new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
+      });
+      const freshClient = new ScriptedDaemonClient({ toolResult: recoveredResult });
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        autoStartDaemon: false,
+      });
+
+      try {
+        const result = await proxy.callTool("observe", { deviceId: "device-1" });
+
+        expect(result).toEqual(recoveredResult);
+        expect(staleClient.closeCallCount).toBe(1);
+        expect(staleClient.callToolCalls).toHaveLength(1);
+        expect(freshClient.connectCallCount).toBe(1);
+        expect(freshClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { deviceId: "device-1" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("readResource recovers when a sibling's socket dropped", async () => {
+      const recoveredResult = { contents: [{ uri: "automobile:devices/booted", text: "[]" }] };
+      const staleClient = new ScriptedDaemonClient({
+        resourceError: new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
+      });
+      const freshClient = new ScriptedDaemonClient({ resourceResult: recoveredResult });
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        autoStartDaemon: false,
+      });
+
+      try {
+        const result = await proxy.readResource("automobile:devices/booted");
+
+        expect(result).toEqual(recoveredResult);
+        expect(staleClient.closeCallCount).toBe(1);
+        expect(freshClient.readResourceCalls).toEqual(["automobile:devices/booted"]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("caps sibling recovery at one retry", async () => {
+      const firstClient = new ScriptedDaemonClient({
+        toolError: new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
+      });
+      const secondClient = new ScriptedDaemonClient({
+        toolError: new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
+      });
+      const clients = [firstClient, secondClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(proxy.callTool("observe", {})).rejects.toBeInstanceOf(DaemonUnavailableError);
+        expect(firstClient.closeCallCount).toBe(1);
+        expect(firstClient.callToolCalls).toHaveLength(1);
+        expect(secondClient.callToolCalls).toHaveLength(1);
+        expect(clients).toHaveLength(0);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does NOT retry a daemon-returned tool error that mentions a transport code", async () => {
+      // Regression guard: a tool whose *downstream* connection fails surfaces the
+      // raw errno in its message (e.g. EmulatorConsoleClient: sendSms over the
+      // emulator console). That ActionableError reaches the proxy as a normal tool
+      // failure — retrying it would re-run a non-idempotent action and mask the
+      // real cause. It must be surfaced, not classified as a recoverable session.
+      const client = new ScriptedDaemonClient({
+        toolError: new ActionableError(
+          "Emulator console connection to 127.0.0.1:5554 failed: connect ECONNREFUSED 127.0.0.1:5554"
+        ),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(proxy.callTool("sendSms", {})).rejects.toThrow("ECONNREFUSED");
+        expect(client.callToolCalls).toHaveLength(1);
+        expect(client.closeCallCount).toBe(0);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

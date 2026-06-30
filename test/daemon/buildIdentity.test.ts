@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import {
   computeBuildIdentity,
   buildIdentitiesMatch,
@@ -17,7 +18,9 @@ describe("buildIdentity", () => {
 
     test("resolves the entry script to an absolute path", () => {
       const identity = computeBuildIdentity("/repo/dist/src/index.js", () => "abc123");
-      expect(identity.entryScript).toBe("/repo/dist/src/index.js");
+      // resolve() is platform-dependent (Windows prefixes a drive letter), so
+      // compare against resolve() of the same input rather than a POSIX literal.
+      expect(identity.entryScript).toBe(resolve("/repo/dist/src/index.js"));
     });
 
     test("returns different buildIds for different file contents", () => {
@@ -35,7 +38,7 @@ describe("buildIdentity", () => {
       const identity = computeBuildIdentity("/does/not/exist.js", () => {
         throw new Error("ENOENT");
       });
-      expect(identity.entryScript).toBe("/does/not/exist.js");
+      expect(identity.entryScript).toBe(resolve("/does/not/exist.js"));
       expect(identity.buildId).toBe("unknown");
     });
   });

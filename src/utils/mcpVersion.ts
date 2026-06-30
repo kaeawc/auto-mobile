@@ -105,7 +105,9 @@ export const readGitVersion = (
   run: GitRunner = runGit,
   readName: (dir: string) => string | null = readPackageName,
 ): GitVersionInfo | null => {
-  if (cwd.split(path.sep).includes("node_modules")) {
+  // Split on both separators — Windows paths use `\`, but git/bun can emit `/`
+  // even there, so a single `path.sep` split would miss the node_modules segment.
+  if (cwd.split(/[\\/]/).includes("node_modules")) {
     return null;
   }
   const toplevel = run(cwd, ["rev-parse", "--show-toplevel"]);

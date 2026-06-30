@@ -39,6 +39,13 @@ AutoMobile daemon via HTTP, stdio, or socket transport.
 
 See [Desktop App](desktop-app.md) for full details.
 
+## Emulator Startup
+
+AutoMobile cold-starts Android emulators on demand and auto-detects whether the host
+has a usable display, defaulting to headless (`-no-window`) on headless Linux hosts
+such as CI runners. See [Emulator Startup & Headless Hosts](emulator-startup.md) for
+the display-mode rules and the `AUTOMOBILE_EMULATOR_*` environment variables.
+
 ## Batteries Included
 
 AutoMobile includes tooling to minimize setup for required platform dependencies.

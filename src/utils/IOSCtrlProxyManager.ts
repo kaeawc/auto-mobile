@@ -1332,7 +1332,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           const processInfo = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, pid);
           const argsOut = processInfo?.command ?? "";
           if (argsOut.includes("CtrlProxy")) {
-            if (IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommand(argsOut, processInfo)) {
+            if (await this.isDaemonManagedSimulatorXcodebuildProcess(argsOut, processInfo)) {
               continue;
             }
             const identityText = `${argsOut} ${processInfo?.environment ?? ""}`;
@@ -1573,19 +1573,47 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       text.includes(`SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=${deviceId}`);
   }
 
-  private static isDaemonManagedSimulatorXcodebuildCommand(
+  private async isDaemonManagedSimulatorXcodebuildProcess(
     command: string,
     processInfo?: { ppid?: number; environment?: string } | null
-  ): boolean {
+  ): Promise<boolean> {
     const environment = processInfo?.environment ?? "";
+    if (!IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(command)) {
+      return false;
+    }
+    if (processInfo?.ppid === 1) {
+      return true;
+    }
+    if (await this.hasOrphanedDaemonManagedShellParent(processInfo?.ppid)) {
+      return true;
+    }
+    return !IOSCtrlProxyManager.hasExternalXcodebuildIdentity(environment);
+  }
+
+  private async hasOrphanedDaemonManagedShellParent(parentPid: number | undefined): Promise<boolean> {
+    if (parentPid === undefined || parentPid <= 1) {
+      return false;
+    }
+    const parentInfo = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, parentPid);
+    if (!parentInfo || parentInfo.ppid !== 1) {
+      return false;
+    }
+    return IOSCtrlProxyManager.isShellCommand(parentInfo.command) &&
+      IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command);
+  }
+
+  private static isDaemonManagedSimulatorXcodebuildCommandShape(command: string): boolean {
     return command.includes("xcodebuild") &&
       command.includes("test-without-building") &&
       command.includes("-xctestrun") &&
       command.includes("platform=iOS Simulator") &&
       command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") &&
       !command.includes("CTRL_PROXY_IOS_PORT=") &&
-      !command.includes("AUTOMOBILE_DEVICE_ID=") &&
-      (processInfo?.ppid === 1 || !IOSCtrlProxyManager.hasExternalXcodebuildIdentity(environment));
+      !command.includes("AUTOMOBILE_DEVICE_ID=");
+  }
+
+  private static isShellCommand(command: string): boolean {
+    return /(?:^|\/)(?:ba|z|c|t?c|k)?sh(?:\s|$)/.test(command);
   }
 
   private static hasExternalXcodebuildIdentity(environment: string): boolean {

@@ -1397,6 +1397,49 @@ describe("IOSCtrlProxyManager", function() {
       });
     });
 
+    test("start() reclaims a stale daemon-owned xcodebuild with an orphaned shell parent", async function() {
+      const staleProcess: FakeListeningProcess = {
+        pid: 2225,
+        port: 8765,
+        ppid: 2224,
+        command: `xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=${testDevice.deviceId} -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+        environment: `CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+        ignoreTerm: true,
+      };
+      const orphanedShellProcess: FakeListeningProcess = {
+        pid: 2224,
+        port: 0,
+        ppid: 1,
+        command: `/bin/sh -c ${staleProcess.command} 2>&1`,
+        environment: staleProcess.environment,
+        alive: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [staleProcess, orphanedShellProcess]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2225\n", ""));
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "", "")
+      );
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      await manager.start();
+
+      expect(staleProcess.alive).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 2225")).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL 2225")).toBe(true);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+      expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
+        CTRL_PROXY_IOS_PORT: "8765",
+        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8765",
+      });
+    });
+
     test("start() reallocates when the intended port is held by a foreign process", async function() {
       const foreignProcess: FakeListeningProcess = {
         pid: 3333,

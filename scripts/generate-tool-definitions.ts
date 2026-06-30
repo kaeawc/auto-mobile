@@ -27,6 +27,7 @@ import { registerTelephonyTools } from "../src/server/telephonyTools";
 import { registerHighlightTools } from "../src/server/highlightTools";
 import { registerDatabaseTools } from "../src/server/databaseTools";
 import { registerStorageTools } from "../src/server/storageTools";
+import { registerPreferenceTools } from "../src/server/preferenceTools";
 import { registerAppFileTools } from "../src/server/appFileTools";
 import { registerFormTools } from "../src/server/formTools";
 import { registerAccessibilityTools } from "../src/server/accessibilityTools";
@@ -55,6 +56,7 @@ function registerAllTools(): void {
   registerHighlightTools();
   registerDatabaseTools();
   registerStorageTools();
+  registerPreferenceTools();
   registerAppFileTools();
   registerFormTools();
   registerAccessibilityTools();

@@ -37,6 +37,7 @@ import { registerTelephonyTools } from "./telephonyTools";
 import { registerHighlightTools } from "./highlightTools";
 import { registerDatabaseTools } from "./databaseTools";
 import { registerStorageTools } from "./storageTools";
+import { registerPreferenceTools } from "./preferenceTools";
 import { registerAppFileTools } from "./appFileTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
@@ -185,6 +186,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerHighlightTools();
   registerDatabaseTools();
   registerStorageTools();
+  registerPreferenceTools();
   registerAppFileTools();
   registerFormTools();
   registerAccessibilityTools();

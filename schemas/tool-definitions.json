@@ -1735,6 +1735,64 @@
     }
   },
   {
+    "name": "getPreference",
+    "description": "Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "systemProperty",
+            "sharedPreferences",
+            "userDefaults"
+          ],
+          "description": "Preference scope"
+        },
+        "appId": {
+          "description": "App package or bundle id",
+          "type": "string"
+        },
+        "suite": {
+          "description": "SharedPreferences file name or UserDefaults suite/app group",
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Preference key or Android system property name"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope",
+        "key"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "highlight",
     "description": "Draw a visual highlight around a UI element.",
     "inputSchema": {
@@ -4181,6 +4239,90 @@
       "required": [
         "appId",
         "policyAccess"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "setPreference",
+    "description": "Write an Android system property, Android SharedPreferences key, or iOS UserDefaults key and return read-back verification.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "systemProperty",
+            "sharedPreferences",
+            "userDefaults"
+          ],
+          "description": "Preference scope"
+        },
+        "appId": {
+          "description": "App package or bundle id",
+          "type": "string"
+        },
+        "suite": {
+          "description": "SharedPreferences file name or UserDefaults suite/app group",
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Preference key or Android system property name"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "Value to write"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "string",
+            "bool",
+            "int",
+            "float"
+          ],
+          "description": "Value type for typed preference stores"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope",
+        "key",
+        "value",
+        "type"
       ],
       "additionalProperties": false
     }

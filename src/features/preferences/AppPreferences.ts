@@ -136,7 +136,7 @@ export class AppPreferences {
 
   private async getAndroidSystemProperty(input: GetPreferenceInput): Promise<PreferenceResult> {
     const result = await this.adb().executeCommand(`shell getprop ${shellQuote(input.key)}`);
-    const value = result.stdout.trim();
+    const value = removeOneTrailingLineEnding(result.stdout);
     if (value.length > 0) {
       return this.result(input, true, value, "string");
     }
@@ -590,7 +590,10 @@ function shellQuote(value: string): string {
 
 function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /No such file|not found|does not exist/i.test(message);
+  if (!/No such file|not found|does not exist/i.test(message)) {
+    return false;
+  }
+  return /shared_prefs\/[^/\s]+\.xml/i.test(message);
 }
 
 function looksLikeMissingIosDefault(error: unknown): boolean {

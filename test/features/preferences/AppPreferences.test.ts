@@ -131,6 +131,28 @@ describe("AppPreferences", () => {
     });
   });
 
+  test("preserves whitespace in Android system property strings", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell setprop debug.example.token '  token  '", createExecResult("", ""));
+    adb.setCommandResponse("shell getprop debug.example.token", createExecResult("  token  \n", ""));
+
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+    const result = await preferences.setPreference({
+      scope: "systemProperty",
+      key: "debug.example.token",
+      value: "  token  ",
+      type: "string",
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      found: true,
+      value: "  token  ",
+      type: "string",
+      verified: true,
+    });
+  });
+
   test("rejects non-integral int preference values instead of truncating them", async () => {
     const adb = new FakeAdbExecutor();
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
@@ -229,6 +251,45 @@ describe("AppPreferences", () => {
       found: true,
       type: "stringSet",
       value: ["first", "second"],
+    });
+  });
+
+  test("surfaces Android SharedPreferences run-as app lookup failures", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError(
+      "shell run-as com.missing.app cat shared_prefs/settings.xml",
+      new Error("run-as: package not found: com.missing.app")
+    );
+
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+    await expect(preferences.getPreference({
+      scope: "sharedPreferences",
+      appId: "com.missing.app",
+      suite: "settings",
+      key: "host",
+    })).rejects.toThrow("run-as");
+  });
+
+  test("treats a missing Android SharedPreferences XML file as an empty map", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError(
+      "shell run-as com.example.app cat shared_prefs/settings.xml",
+      new Error("cat: shared_prefs/settings.xml: No such file or directory")
+    );
+
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+    const result = await preferences.getPreference({
+      scope: "sharedPreferences",
+      appId: "com.example.app",
+      suite: "settings",
+      key: "host",
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      found: false,
+      value: null,
     });
   });
 

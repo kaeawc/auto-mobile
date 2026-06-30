@@ -34,7 +34,7 @@ All messages are newline-delimited JSON sent over the Unix socket. Each request 
 | `type` | `"mcp_request" \| "daemon_request"` | Yes | Request category |
 | `method` | `string` | Yes | Endpoint name (e.g. `ide/ping`, `daemon/availableDevices`) |
 | `params` | `object` | Yes | Method-specific parameters; pass `{}` when none are needed |
-| `timeoutMs` | `number` | No | Per-request timeout in milliseconds (default: 30 000). Long-running `tools/call` requests may be raised to a tool-specific minimum timeout by the daemon. `openLink` can be configured with `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS` (legacy alias: `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`), defaulting to 30 000 ms. |
+| `timeoutMs` | `number` | No | Per-request timeout in milliseconds (default: 30 000). Long-running `tools/call` requests may be raised to a tool-specific minimum timeout by the daemon (see [Tool-specific timeout floors](#tool-specific-timeout-floors)). |
 
 **Response**
 
@@ -281,6 +281,35 @@ Calls a registered MCP tool by name.
 | `arguments` | `object` | Yes | Tool-specific arguments |
 
 **Result:** standard MCP `CallToolResult`.
+
+#### Tool-specific timeout floors
+
+Some `tools/call` operations routinely run longer than the 30 000 ms default. For
+these, the daemon raises the effective timeout to a per-tool **floor** — the
+request still uses `max(timeoutMs, floor)`, so a caller-supplied `timeoutMs` above
+the floor is preserved, but a shorter one (or none) is lifted to the floor rather
+than aborting work that is still in progress.
+
+| Tool | Default floor | Override |
+|---|---|---|
+| `executePlan` | 600 000 ms | — |
+| `startDevice` | 180 000 ms | — |
+| `launchApp` | 90 000 ms | — |
+| `openLink` | 90 000 ms | `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS` (legacy alias: `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`) |
+
+`openLink`'s floor is configurable because a deeplink can launch the app and then
+block on a backend round-trip (sign-in / token exchange). Set
+`AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS` to a higher millisecond value on the daemon
+process for deployments with even slower deeplinks; values at or below the 90 000 ms
+default, or non-numeric values, are ignored.
+
+> **Post-timeout semantics.** A request that exceeds its (possibly raised) timeout
+> returns `MCP error -32001: Request timed out` to the caller. The underlying tool
+> may still finish afterward; when it does, the daemon logs the late result at
+> `WARN` noting it "completed after the caller's request already timed out" rather
+> than emitting a contradictory `success=true`. Treat the `-32001` timeout as the
+> authoritative outcome for that call and re-`observe` to confirm device state if
+> needed.
 
 ---
 

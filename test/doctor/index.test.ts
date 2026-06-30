@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { runDoctor } from "../../src/doctor";
+import { applyClientBuildIdentity, runDoctor } from "../../src/doctor";
 import { formatConsoleOutput, formatJsonOutput } from "../../src/doctor/formatter";
 import type { DoctorReport, CheckResult, DoctorSummary } from "../../src/doctor/types";
 
@@ -413,5 +413,69 @@ describe("runDoctor", () => {
       expect(report.ios?.checks.length).toBeGreaterThan(0);
       expect(report.ios?.checks.every(check => check.status === "skip")).toBe(true);
     });
+  });
+});
+
+describe("applyClientBuildIdentity", () => {
+  test("replaces the daemon's self-comparison with the client-side skew verdict and recounts", async () => {
+    const report = makeReport({
+      system: { checks: [makeCheck({ name: "Node.js", status: "pass" })] },
+      autoMobile: {
+        checks: [
+          makeCheck({ name: "AutoMobile Daemon Version", status: "pass" }),
+          // What the daemon produced by comparing itself to itself:
+          makeCheck({ name: "Daemon Build Identity", status: "pass", message: "Build aaaa (/daemon)" }),
+        ],
+      },
+    });
+    expect(report.summary.passed).toBe(3);
+    expect(report.summary.warnings).toBe(0);
+
+    const clientVerdict: CheckResult = {
+      name: "Daemon Build Identity",
+      status: "warn",
+      message: "Build skew: daemon aaaa (/daemon), client bbbb (/wt)",
+      recommendation: "Restart the daemon from THIS checkout.",
+    };
+
+    const result = await applyClientBuildIdentity(report, async () => clientVerdict);
+
+    const entry = result.autoMobile.checks.find(c => c.name === "Daemon Build Identity");
+    expect(entry?.status).toBe("warn");
+    expect(entry?.message).toContain("Build skew");
+    // Recounted: one of the three passes became a warn.
+    expect(result.summary.warnings).toBe(1);
+    expect(result.summary.passed).toBe(2);
+    expect(result.recommendations.some(r => r.includes("Restart the daemon from THIS checkout"))).toBe(true);
+  });
+
+  test("appends the client verdict when the daemon report lacks the check (older daemon)", async () => {
+    const report = makeReport({
+      autoMobile: { checks: [makeCheck({ name: "AutoMobile Daemon Version", status: "pass" })] },
+    });
+
+    const clientVerdict: CheckResult = {
+      name: "Daemon Build Identity",
+      status: "warn",
+      message: "Build skew",
+    };
+
+    const result = await applyClientBuildIdentity(report, async () => clientVerdict);
+
+    expect(result.autoMobile.checks.filter(c => c.name === "Daemon Build Identity")).toHaveLength(1);
+    expect(result.summary.warnings).toBe(1);
+  });
+
+  test("is a no-op when the report has no AutoMobile section", async () => {
+    let ran = false;
+    const malformed = { summary: { failed: 0 } } as any;
+
+    const result = await applyClientBuildIdentity(malformed, async () => {
+      ran = true;
+      return { name: "Daemon Build Identity", status: "warn", message: "x" };
+    });
+
+    expect(ran).toBe(false);
+    expect(result).toBe(malformed);
   });
 });

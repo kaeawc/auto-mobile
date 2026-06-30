@@ -1087,7 +1087,7 @@ export function daemonBuildIdentityStatusLines(
       "\n⚠️  WARNING: the running daemon is a different build than this checkout:",
       `  daemon build=${describeBuildIdentity(daemon)}`,
       `  client build=${describeBuildIdentity(client)}`,
-      "\nRun 'bunx @kaeawc/auto-mobile@latest --daemon restart' to align them."
+      "\nRestart the daemon from this checkout (run `--daemon restart` with this same CLI) to align them."
     );
   }
 

@@ -201,8 +201,10 @@ export async function checkDaemonBuildIdentity(
       status: "warn",
       message: `Build skew: daemon ${describeBuildIdentity(daemon)}, client ${describeBuildIdentity(client)}`,
       recommendation:
-        "The running daemon is a different build than this checkout. Restart it from here: " +
-        "bunx @kaeawc/auto-mobile@latest --daemon restart",
+        "The running daemon is a different build than this checkout. Restart the daemon " +
+        "from THIS checkout so it matches — run `--daemon restart` with the same auto-mobile " +
+        "CLI you invoked here. Avoid `@latest`, which starts the published build and may not " +
+        "match this checkout.",
     };
   } catch (error) {
     // Diagnostic path: log the underlying error before returning a typed failure

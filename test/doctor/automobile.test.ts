@@ -131,7 +131,9 @@ describe("checkDaemonBuildIdentity", () => {
     });
 
     expect(result.status).toBe("pass");
-    expect(result.value).toBe("1111111111111111");
+    // No `value`: the console formatter renders `value` instead of `message`, so
+    // both buildId and entryScript are carried in the message to stay visible.
+    expect(result.value).toBeUndefined();
     expect(result.message).toContain("1111111111111111");
     expect(result.message).toContain("/wt/dist/src/index.js");
     expect(result.recommendation).toBeUndefined();

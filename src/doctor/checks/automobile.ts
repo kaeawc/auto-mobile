@@ -188,11 +188,13 @@ export async function checkDaemonBuildIdentity(
     const client = (dependencies.getClientBuildIdentity ?? getCurrentBuildIdentity)();
 
     if (buildIdentitiesMatch(client, daemon)) {
+      // No `value`: the console formatter renders `value` *instead of* `message`,
+      // and we want both the buildId and the entryScript visible — so carry them
+      // in the message.
       return {
         name: "Daemon Build Identity",
         status: "pass",
         message: `Build ${describeBuildIdentity(daemon)}`,
-        value: daemon.buildId,
       };
     }
 

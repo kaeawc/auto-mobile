@@ -75,6 +75,9 @@ describe("DaemonManager readiness", () => {
   function createPaths(): { dir: string; lockPath: string; pidPath: string; socketPath: string } {
     const dir = mkdtempSync(join(tmpdir(), "daemon-readiness-test-"));
     tempDirs.push(dir);
+    // Keep the daemon launch log inside this test's temp dir instead of the real
+    // `~/.auto-mobile/logs` default (see tempDir.resolveAutoMobileBaseDir).
+    process.env.AUTOMOBILE_DATA_DIR = dir;
     return {
       dir,
       lockPath: join(dir, "daemon.lock"),
@@ -104,6 +107,7 @@ describe("DaemonManager readiness", () => {
       rmSync(dir, { recursive: true, force: true });
     }
     tempDirs.length = 0;
+    delete process.env.AUTOMOBILE_DATA_DIR;
   });
 
   test("reports ready only after the daemon socket accepts a connection", async () => {
@@ -299,7 +303,7 @@ describe("DaemonManager readiness", () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       expect(message).toMatch(
-        /Daemon failed to start within \d+ms[\s\S]*Logs: .*daemon\.log[\s\S]*SQLiteError: database is locked/
+        /Daemon failed to start within \d+ms[\s\S]*Logs: .*daemon-launch-\d+\.log[\s\S]*SQLiteError: database is locked/
       );
       expect(message).not.toContain("OLD_LOG_START");
     } finally {

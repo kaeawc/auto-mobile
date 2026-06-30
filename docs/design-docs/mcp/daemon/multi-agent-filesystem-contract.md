@@ -2,7 +2,18 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** The filesystem isolation described here is implemented and covered by tests — per-pid logs with multi-process-safe pruning, age-gated screenshot eviction, and temp-tree cache paths. The operational guidance (per-agent `TMPDIR` + shared-daemon discovery) is a deployment recommendation. See the [Status Glossary](../../status-glossary.md) for chip definitions and [Daemon Overview](index.md) for architecture context.
+> **Current state:** The filesystem isolation described here is implemented and covered by tests — per-pid logs with multi-process-safe pruning, age-gated screenshot eviction, and data-dir cache paths. The operational guidance (per-agent `AUTOMOBILE_DATA_DIR` + shared-daemon discovery) is a deployment recommendation. See the [Status Glossary](../../status-glossary.md) for chip definitions and [Daemon Overview](index.md) for architecture context.
+
+> **Stable base dir (issue #2724):** All auto-mobile on-disk state resolves under a
+> **stable, non-ephemeral base directory**, not `os.tmpdir()`. The base is
+> resolved by `resolveAutoMobileBaseDir()` (`src/utils/tempDir.ts`):
+> `AUTOMOBILE_DATA_DIR` / `AUTO_MOBILE_DATA_DIR` if set → else `~/.auto-mobile` →
+> else `os.tmpdir()/auto-mobile` only when no home dir is resolvable. The base is
+> deliberately **not** derived from `TMPDIR`/`TMP`/`TEMP`, because `bunx` can point
+> those at an extraction tree it later reaps while the daemon still holds open
+> fds — the cause of the 0-byte logs and `ENOENT` cache writes in #2724.
+> Paths written `${TMPDIR}/auto-mobile/...` below are historical; read them as
+> `${AUTOMOBILE_DATA_DIR:-~/.auto-mobile}/...`.
 
 ## Overview
 
@@ -31,22 +42,24 @@ The rule that follows from the production shape:
 > **shared-directory cleanup**: a size/age sweep run by one process iterating the
 > whole directory can delete another process's files.
 
-**The recommended production isolation is a per-agent `TMPDIR`** (see §4): give
-each agent process its own temp tree so device caches never share a directory at
-all, while the shared daemon is still found via the explicit
-`AUTOMOBILE_DAEMON_*` paths (which are independent of `TMPDIR`). The code also
-applies defense-in-depth so cleanup can't delete a peer's in-flight file even
-when `TMPDIR` is shared (see §1 notes).
+**The recommended production isolation is a per-agent `AUTOMOBILE_DATA_DIR`**
+(see §4): give each agent process its own auto-mobile base dir so device caches
+never share a directory at all, while the shared daemon is still found via the
+explicit `AUTOMOBILE_DAEMON_*` paths (which are independent of the data dir). The
+code also applies defense-in-depth so cleanup can't delete a peer's in-flight
+file even when the data dir is shared (see §1 notes).
 
 ---
 
 ## 1. Ownership model
 
-Writer counts below are for **production (direct mode)** with a **shared
-`TMPDIR`**. With a per-agent `TMPDIR` (§4) every per-client row collapses to a
-single writer in its own tree.
+Writer counts below are for **production (direct mode)** with a **shared base
+dir**. With a per-agent `AUTOMOBILE_DATA_DIR` (§4) every per-client row collapses
+to a single writer in its own tree. Paths are written `${TMPDIR}/auto-mobile/...`
+for historical continuity; resolve them as
+`${AUTOMOBILE_DATA_DIR:-~/.auto-mobile}/...` (see the stable-base-dir note above).
 
-| Path / resource | Writers (shared TMPDIR) | Collision risk & mitigation |
+| Path / resource | Writers (shared base dir) | Collision risk & mitigation |
 |---|---|---|
 | `${TMPDIR}/auto-mobile/screenshots` | N (every client) | filenames are timestamp-only (not device/pid keyed). Size eviction is **age-gated** (`screenshotCacheEviction.ts`, `SCREENSHOT_MIN_EVICT_AGE_MS`) so it never deletes a peer's recent/in-flight frame. |
 | `${TMPDIR}/auto-mobile/observe_results` | N | `observe_<deviceId>_*.json`. Per-device cleanup (`clear(deviceId)`) only touches that agent's own device. `clear()` with **no** deviceId is host-wide — avoid on a shared host, or isolate TMPDIR. |
@@ -57,8 +70,9 @@ single writer in its own tree.
 | auxiliary sockets (video, snapshot, …) | 1 (daemon) | path depends on `AUTOMOBILE_EMULATOR_EXTERNAL`. |
 | `${TMPDIR}/auto-mobile/logs/daemon.log` | 1 daemon | stable daemon log; rotated files are `daemon-<timestamp>.log`. |
 | `${TMPDIR}/auto-mobile/logs/stdio-<pid>.log` | 1 each | per-stdio-client file; pruning only trims this pid's files + sweeps stale others by mtime. |
-| `${TMPDIR}/auto-mobile/tool_logs` (`LOG_DIR`) | N | routed through `tempDir` (honors `TMPDIR`). |
-| `mkdtemp(...)` APK / prefetch / per-start daemon log dirs | per-call unique | **already safe** (random suffix). |
+| `${TMPDIR}/auto-mobile/tool_logs` (`LOG_DIR`) | N | routed through `tempDir` (honors `AUTOMOBILE_DATA_DIR`, not `TMPDIR`). |
+| `…/auto-mobile/logs/daemon-launch-<pid>.log` | 1 per manager | daemon stdout/stderr launch capture, in the **stable** logs dir (was an ephemeral `mkdtemp(tmpdir())` — issue #2724); truncated per launch. |
+| `mkdtemp(...)` APK / prefetch dirs | per-call unique | **already safe** (random suffix). |
 
 The daemon enforces exactly one daemon per host per user (single-daemon policy in
 `manager.ts` `startUnlocked`, plus per-UID socket/PID/lock paths), so daemon-owned
@@ -75,10 +89,10 @@ single biggest source of "client can't find the daemon" failures.
 ### Required to be identical across all processes
 
 ```bash
-# TMPDIR should be PER-AGENT (see §4), NOT shared — it scopes each agent's
-# device caches. Daemon discovery does NOT depend on TMPDIR, so isolating it is
-# free.
-#   export TMPDIR=/run/auto-mobile/agent-$AGENT_ID
+# AUTOMOBILE_DATA_DIR should be PER-AGENT (see §4), NOT shared — it scopes each
+# agent's logs and device caches to a stable, non-ephemeral tree. Daemon
+# discovery does NOT depend on it, so isolating it is free.
+#   export AUTOMOBILE_DATA_DIR=/run/auto-mobile/agent-$AGENT_ID
 
 # Daemon discovery — MUST match between clients and the daemon, or clients
 # resolve a different socket/PID/lock than the daemon created.
@@ -97,11 +111,14 @@ export AUTOMOBILE_LOG_LEVEL=warn           # quieter shared log in prod
 
 ### Why each matters
 
-- **`TMPDIR`** — `tempDir.ts` builds `os.tmpdir()/auto-mobile`. In production
-  every client writes the device caches, so a **per-agent `TMPDIR`** (§4) is the
-  recommended isolation. If you keep a shared `TMPDIR` instead, the code's
-  defense-in-depth (age-gated screenshot eviction, per-pid logs, per-device cache
-  cleanup) keeps agents from deleting each other's files.
+- **`AUTOMOBILE_DATA_DIR`** — `tempDir.ts` (`resolveAutoMobileBaseDir`) anchors
+  the base on `AUTOMOBILE_DATA_DIR` → else `~/.auto-mobile` → else
+  `os.tmpdir()/auto-mobile`, and never on `TMPDIR` (which `bunx` may make
+  ephemeral — issue #2724). In production every client writes the device caches,
+  so a **per-agent `AUTOMOBILE_DATA_DIR`** (§4) is the recommended isolation. If
+  you keep a shared base instead, the code's defense-in-depth (age-gated
+  screenshot eviction, per-pid logs, per-device cache cleanup) keeps agents from
+  deleting each other's files.
 - **`AUTOMOBILE_DAEMON_*` paths** — `daemon/constants.ts` resolves these at
   module load. Default is `/tmp/auto-mobile-daemon-<uid>.{sock,pid,lock}`. If
   you override them, override them for **both** sides. The daemon already
@@ -149,14 +166,16 @@ run **one daemon per user** (each gets its own `<uid>` paths automatically).
 ## 4. Per-agent isolation (the primary production recommendation)
 
 Because every agent executes tools in its own process, the robust setup is to
-give **each agent its own `TMPDIR`** and point them all at the **same daemon**:
+give **each agent its own `AUTOMOBILE_DATA_DIR`** and point them all at the
+**same daemon**:
 
 ```bash
-# Per agent: isolated scratch (device caches, logs never share a directory).
-export TMPDIR=/run/auto-mobile/agent-$AGENT_ID
+# Per agent: isolated, STABLE base dir (device caches, logs never share a
+# directory, and survive bunx temp-dir cleanup — issue #2724).
+export AUTOMOBILE_DATA_DIR=/run/auto-mobile/agent-$AGENT_ID
 
 # Same on every agent: the shared daemon is discovered via explicit paths that
-# are INDEPENDENT of TMPDIR, so isolating TMPDIR does not fragment the daemon.
+# are INDEPENDENT of the data dir, so isolating it does not fragment the daemon.
 export AUTOMOBILE_DAEMON_SOCKET_PATH=/run/auto-mobile/daemon.sock
 export AUTOMOBILE_DAEMON_PID_FILE_PATH=/run/auto-mobile/daemon.pid
 export AUTOMOBILE_DAEMON_LOCK_FILE_PATH=/run/auto-mobile/daemon.lock
@@ -164,9 +183,9 @@ export AUTOMOBILE_EMULATOR_EXTERNAL=...   # identical everywhere (see §2)
 ```
 
 With this, the only shared filesystem state is the daemon's socket/PID/lock — and
-those are explicitly pinned, single-writer, and not derived from `TMPDIR`.
+those are explicitly pinned, single-writer, and not derived from the data dir.
 
-If you instead run all agents under a **shared `TMPDIR`**, the code still avoids
+If you instead run all agents under a **shared base dir**, the code still avoids
 cross-agent data loss as defense-in-depth:
 
 - **Logs** are role-scoped (`daemon.log` for the daemon, `stdio-<pid>.log` for
@@ -179,15 +198,15 @@ cross-agent data loss as defense-in-depth:
 - **observe_results / window / dumpsys / screen-size** are keyed by `deviceId`,
   and the pool hands each session a distinct device, so routine per-device
   cleanup only touches that agent's own files. (Avoid the host-wide `clear()`
-  with no deviceId on a shared `TMPDIR`.)
+  with no deviceId on a shared base dir.)
 
 ---
 
 ## 5. Quick checklist
 
 - [ ] All clients + daemon run as the **same OS user**.
-- [ ] **Per-agent `TMPDIR`** (preferred), with explicit `AUTOMOBILE_DAEMON_*`
-      paths pointing every agent at the one shared daemon.
+- [ ] **Per-agent `AUTOMOBILE_DATA_DIR`** (preferred), with explicit
+      `AUTOMOBILE_DAEMON_*` paths pointing every agent at the one shared daemon.
 - [ ] `AUTOMOBILE_EMULATOR_EXTERNAL` is the **same** value everywhere.
 - [ ] If overriding `AUTOMOBILE_DAEMON_{SOCKET,PID,LOCK}_FILE_PATH`, set them
       everywhere.

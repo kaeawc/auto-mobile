@@ -11,6 +11,9 @@ describe("DaemonManager file lock", () => {
   function createTempLockPath(): string {
     const dir = mkdtempSync(join(tmpdir(), "daemon-lock-test-"));
     tempDirs.push(dir);
+    // Keep any daemon launch log inside this test's temp tree, not the real
+    // `~/.auto-mobile/logs` default (see tempDir.resolveAutoMobileBaseDir).
+    process.env.AUTOMOBILE_DATA_DIR = dir;
     return join(dir, "daemon.lock");
   }
 
@@ -22,6 +25,7 @@ describe("DaemonManager file lock", () => {
       } catch { /* ignore */ }
     }
     tempDirs.length = 0;
+    delete process.env.AUTOMOBILE_DATA_DIR;
   });
 
   describe("acquireLock", () => {

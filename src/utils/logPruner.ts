@@ -35,9 +35,15 @@ function isOwnedBy(file: string, ownPrefix: string): boolean {
   return file === `${ownPrefix}.log` || file.startsWith(`${ownPrefix}-`);
 }
 
-/** Parse the owning PID from `stdio-<pid>.log` / `stdio-<pid>-<ts>.log`. */
+/**
+ * Parse the owning PID from a process-scoped log filename:
+ * `stdio-<pid>.log` / `stdio-<pid>-<ts>.log`, or the daemon launch-capture log
+ * `daemon-launch-<pid>.log` (PID is the spawning manager process). Letting the
+ * sweep recognize the launch log keeps it from leaking in the now-stable logs
+ * dir once its owner has exited (issue #2724).
+ */
 function ownerPid(file: string): number | undefined {
-  const match = /^(?:stdio|server)-(\d+)(?:-.*)?\.log$/.exec(file);
+  const match = /^(?:stdio|server|daemon-launch)-(\d+)(?:-.*)?\.log$/.exec(file);
   return match ? Number(match[1]) : undefined;
 }
 

@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -93,6 +93,13 @@ describe("resolveDaemonLaunchCommand", () => {
 });
 
 describe("Daemon manager process detection", () => {
+  // Tests that reach manager.start() open a daemon launch log; keep it inside the
+  // per-test temp dir (set via AUTOMOBILE_DATA_DIR) rather than the real
+  // `~/.auto-mobile/logs` default (see tempDir.resolveAutoMobileBaseDir).
+  afterEach(() => {
+    delete process.env.AUTOMOBILE_DATA_DIR;
+  });
+
   test("parses daemon processes from ps pid ppid command output", () => {
     const records = parseDaemonProcessTable(`
       10     1 /usr/bin/unrelated --daemon-mode
@@ -312,6 +319,7 @@ describe("Daemon manager process detection", () => {
 
   test("start takeover escalates to SIGKILL when another live daemon is not the PID-file owner", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-takeover-test-"));
+    process.env.AUTOMOBILE_DATA_DIR = dir;
     const pidFilePath = join(dir, "daemon.pid");
     writeDaemonPidFile(pidFilePath, 201);
     const fakeTimer = new FakeTimer();
@@ -374,6 +382,7 @@ describe("Daemon manager process detection", () => {
 
   test("start takeover does not SIGKILL when daemon identity is no longer confirmed", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-takeover-revalidate-test-"));
+    process.env.AUTOMOBILE_DATA_DIR = dir;
     const pidFilePath = join(dir, "daemon.pid");
     writeDaemonPidFile(pidFilePath, 301);
     const fakeTimer = new FakeTimer();
@@ -445,6 +454,7 @@ describe("Daemon manager process detection", () => {
 
   test("start takeover does not signal transient daemon-mode candidates that are gone by liveness re-check", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-transient-takeover-test-"));
+    process.env.AUTOMOBILE_DATA_DIR = dir;
     const pidFilePath = join(dir, "daemon.pid");
     writeDaemonPidFile(pidFilePath, 201);
     const fakeTimer = new FakeTimer();

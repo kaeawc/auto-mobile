@@ -159,6 +159,39 @@ describe("pruneLogFiles", () => {
     expect(remaining).toContain("daemon.log");
   });
 
+  test("sweeps an exited manager's stale daemon-launch-<pid>.log (issue #2724)", async () => {
+    const logsDir = createTempLogsDir();
+    // Launch-capture log owned by a now-exited spawning manager (pid 222).
+    writeFileSync(join(logsDir, "daemon-launch-222.log"), "old bootstrap output");
+
+    await pruneLogFiles({
+      dir: logsDir,
+      ownPrefix: "stdio-111",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 1_000,
+      now: Date.now() + 1e9, // far future → mtime looks ancient
+      isProcessAlive: dead,
+    });
+
+    expect(readdirSync(logsDir)).not.toContain("daemon-launch-222.log");
+  });
+
+  test("never sweeps a LIVE manager's daemon-launch-<pid>.log even when stale", async () => {
+    const logsDir = createTempLogsDir();
+    writeFileSync(join(logsDir, "daemon-launch-222.log"), "in-flight bootstrap output");
+
+    await pruneLogFiles({
+      dir: logsDir,
+      ownPrefix: "stdio-111",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 1_000,
+      now: Date.now() + 1e9,
+      isProcessAlive: pid => pid === 222, // spawning manager still running
+    });
+
+    expect(readdirSync(logsDir)).toContain("daemon-launch-222.log");
+  });
+
   test("no-op when own count is at or below the cap", async () => {
     const logsDir = createTempLogsDir();
     for (let i = 0; i < 10; i++) {

@@ -137,7 +137,18 @@ export class AppPreferences {
   private async getAndroidSystemProperty(input: GetPreferenceInput): Promise<PreferenceResult> {
     const result = await this.adb().executeCommand(`shell getprop ${shellQuote(input.key)}`);
     const value = result.stdout.trim();
-    return this.result(input, value.length > 0, value.length > 0 ? value : null, "string");
+    if (value.length > 0) {
+      return this.result(input, true, value, "string");
+    }
+
+    const existingEmptyValue = await this.readEmptyAndroidSystemProperty(input.key);
+    return this.result(input, existingEmptyValue, existingEmptyValue ? "" : null, "string");
+  }
+
+  private async readEmptyAndroidSystemProperty(key: string): Promise<boolean> {
+    const result = await this.adb().executeCommand("shell getprop");
+    const prefix = `[${key}]: [`;
+    return result.stdout.split(/\r?\n/).some(line => line.startsWith(prefix) && line.endsWith("]"));
   }
 
   private async getAndroidSharedPreference(input: GetPreferenceInput): Promise<PreferenceResult> {
@@ -418,6 +429,9 @@ function assertAndroidSharedPreferencesInt(value: PreferenceValue): void {
 }
 
 function iosDefaultsDomain(input: GetPreferenceInput): string {
+  if (!input.suite || input.suite.trim() === "" || input.suite === "Standard") {
+    return input.appId!;
+  }
   return input.suite ?? input.appId!;
 }
 
@@ -454,6 +468,9 @@ function parsePreferenceValue(value: string, type: PreferenceValueType): Prefere
 function parseIosDefaultsValue(value: string, type: PreferenceValueType | undefined): PreferenceValue {
   if (type === undefined || type === "string") {
     return removeOneTrailingLineEnding(value);
+  }
+  if (type === "int") {
+    return parseIosInteger(value);
   }
   return parsePreferenceValue(value, type);
 }
@@ -502,10 +519,22 @@ function parseInteger(value: string): number {
     throw new ActionableError(`Expected int preference value, got '${value}'.`);
   }
   const parsed = Number.parseInt(trimmed, 10);
-  if (!Number.isInteger(parsed)) {
-    throw new ActionableError(`Expected int preference value, got '${value}'.`);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new ActionableError(`Expected int preference value within JavaScript's safe integer range, got '${value}'.`);
   }
   return parsed;
+}
+
+function parseIosInteger(value: string): number | string {
+  const trimmed = value.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    throw new ActionableError(`Expected int preference value, got '${value}'.`);
+  }
+  const parsed = BigInt(trimmed);
+  if (parsed < BigInt(Number.MIN_SAFE_INTEGER) || parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return trimmed;
+  }
+  return Number(parsed);
 }
 
 function parseLongValue(value: string): string | number {

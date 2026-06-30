@@ -103,6 +103,34 @@ describe("AppPreferences", () => {
     ]);
   });
 
+  test("verifies Android system properties set to an empty string", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell setprop debug.example.empty ''", createExecResult("", ""));
+    adb.setCommandResponse("shell getprop debug.example.empty", createExecResult("\n", ""));
+    adb.setCommandResponse(
+      "shell getprop",
+      createExecResult("[debug.example.empty]: []\n[debug.example.enabled]: [true]\n", "")
+    );
+
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+    const result = await preferences.setPreference({
+      scope: "systemProperty",
+      key: "debug.example.empty",
+      value: "",
+      type: "string",
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      scope: "systemProperty",
+      key: "debug.example.empty",
+      value: "",
+      type: "string",
+      found: true,
+      verified: true,
+    });
+  });
+
   test("rejects non-integral int preference values instead of truncating them", async () => {
     const adb = new FakeAdbExecutor();
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
@@ -529,6 +557,45 @@ describe("AppPreferences", () => {
     });
   });
 
+  test("maps the iOS Standard suite to the app defaults domain", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app defaultHost",
+      "dev.example.com\n"
+    );
+
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+    const result = await preferences.getPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      suite: "Standard",
+      key: "defaultHost",
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      suite: "Standard",
+      value: "dev.example.com",
+      type: "string",
+    });
+    expect(simctl.getMethodCalls("executeCommandArgs")[0].args).toContain("com.example.app");
+  });
+
+  test("rejects unsafe iOS integer writes instead of rounding", async () => {
+    const simctl = new FakeSimCtlClient();
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+
+    await expect(preferences.setPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "unsafeInteger",
+      value: "9007199254740993",
+      type: "int",
+    })).rejects.toThrow("safe integer");
+
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
   test("infers typed iOS simulator UserDefaults values with defaults read-type", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
@@ -577,6 +644,32 @@ describe("AppPreferences", () => {
         timeoutMs: 5000,
       },
     ]);
+  });
+
+  test("returns unsafe iOS integer defaults as strings instead of rounded numbers", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app unsafeInteger",
+      "9007199254740993\n"
+    );
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app unsafeInteger",
+      "Type is integer\n"
+    );
+
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+    const result = await preferences.getPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "unsafeInteger",
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      found: true,
+      value: "9007199254740993",
+      type: "int",
+    });
   });
 
   test("returns a not-found result when iOS defaults reports a missing key", async () => {

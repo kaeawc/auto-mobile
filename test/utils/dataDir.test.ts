@@ -8,12 +8,12 @@ describe("resolveAutoMobileBaseDir", () => {
 
   test("prefers AUTOMOBILE_DATA_DIR override, resolved to absolute", () => {
     expect(resolveAutoMobileBaseDir({ AUTOMOBILE_DATA_DIR: "/srv/automobile" }, home))
-      .toBe("/srv/automobile");
+      .toBe(path.resolve("/srv/automobile"));
   });
 
   test("honors AUTO_MOBILE_DATA_DIR alias", () => {
     expect(resolveAutoMobileBaseDir({ AUTO_MOBILE_DATA_DIR: "/srv/alias" }, home))
-      .toBe("/srv/alias");
+      .toBe(path.resolve("/srv/alias"));
   });
 
   test("AUTOMOBILE_DATA_DIR wins over the alias", () => {
@@ -22,7 +22,7 @@ describe("resolveAutoMobileBaseDir", () => {
         { AUTOMOBILE_DATA_DIR: "/primary", AUTO_MOBILE_DATA_DIR: "/alias" },
         home
       )
-    ).toBe("/primary");
+    ).toBe(path.resolve("/primary"));
   });
 
   test("resolves a relative override against cwd", () => {

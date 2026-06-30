@@ -576,6 +576,9 @@ function preferenceWriteWarning(platform: "android" | "ios", scope: PreferenceSc
   if (platform === "android" && scope === "systemProperty") {
     return "Android system properties are global and generally reset on reboot.";
   }
+  if (platform === "android" && scope === "sharedPreferences") {
+    return "SharedPreferences writes edit the XML file on disk; a running app that cached the value may need a cold relaunch to observe the change.";
+  }
   return undefined;
 }
 

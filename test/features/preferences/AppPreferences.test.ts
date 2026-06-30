@@ -238,6 +238,7 @@ describe("AppPreferences", () => {
       value: 3,
       type: "int",
     });
+    expect(result.warning).toContain("cold relaunch");
     const commands = adb.getExecutedCommands();
     expect(commands[0]).toBe("shell run-as com.example.app cat shared_prefs/settings.xml");
     expect(commands[2]).toBe("shell run-as com.example.app cat shared_prefs/settings.xml");

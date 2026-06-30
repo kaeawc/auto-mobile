@@ -8,6 +8,8 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,
+  buildIdentityFromStatus,
+  describeBuildIdentity,
   getCurrentBuildIdentity,
 } from "./buildIdentity";
 
@@ -79,15 +81,13 @@ export class DaemonBuildMismatchError extends DaemonUnavailableError {
     detail: string;
     retryAfterMs?: number;
   }) {
-    const daemonScript = params.daemon.entryScript || "unknown";
-    const clientScript = params.client.entryScript || "unknown";
     const retryGuidance = params.retryAfterMs !== undefined
       ? ` Retry after ${params.retryAfterMs}ms.`
       : "";
     super(
       `AutoMobile daemon build mismatch: the running daemon is a different build than this client ` +
-      `(${params.detail}). daemon build=${params.daemon.buildId} (${daemonScript}), ` +
-      `client build=${params.client.buildId} (${clientScript}).${retryGuidance}`
+      `(${params.detail}). daemon build=${describeBuildIdentity(params.daemon)}, ` +
+      `client build=${describeBuildIdentity(params.client)}.${retryGuidance}`
     );
     this.name = "DaemonBuildMismatchError";
     this.clientBuildId = params.client.buildId;
@@ -114,14 +114,12 @@ export class DaemonToolUnavailableError extends Error {
     client: BuildIdentity;
     daemon: BuildIdentity;
   }) {
-    const daemonScript = params.daemon.entryScript || "unknown";
-    const clientScript = params.client.entryScript || "unknown";
     super(
       `Tool "${params.toolName}" is advertised by this AutoMobile client but the connected daemon ` +
       `does not provide it, even after restarting and refreshing the tool list. This usually means a ` +
       `wrong-build daemon is serving this frontend. ` +
-      `client build=${params.client.buildId} (${clientScript}), ` +
-      `daemon build=${params.daemon.buildId} (${daemonScript}). ` +
+      `client build=${describeBuildIdentity(params.client)}, ` +
+      `daemon build=${describeBuildIdentity(params.daemon)}. ` +
       `Restart the daemon from this checkout to resolve the skew.`
     );
     this.name = "DaemonToolUnavailableError";
@@ -384,10 +382,7 @@ export class DaemonMcpProxy {
       return;
     }
 
-    const daemonIdentity: BuildIdentity = {
-      entryScript: status.entryScript ?? "",
-      buildId: status.buildId ?? "unknown",
-    };
+    const daemonIdentity = buildIdentityFromStatus(status);
     if (buildIdentitiesMatch(this.buildIdentity, daemonIdentity)) {
       return;
     }
@@ -426,10 +421,7 @@ export class DaemonMcpProxy {
     }
 
     const restartedStatus = await this.daemonManager.status();
-    const restartedIdentity: BuildIdentity = {
-      entryScript: restartedStatus.entryScript ?? "",
-      buildId: restartedStatus.buildId ?? "unknown",
-    };
+    const restartedIdentity = buildIdentityFromStatus(restartedStatus);
     if (!restartedStatus.running || !buildIdentitiesMatch(this.buildIdentity, restartedIdentity)) {
       throw this.buildMismatchError(
         restartedIdentity,
@@ -617,10 +609,7 @@ export class DaemonMcpProxy {
     let daemonIdentity: BuildIdentity = { entryScript: "", buildId: "unknown" };
     try {
       const status = await this.daemonManager.status();
-      daemonIdentity = {
-        entryScript: status.entryScript ?? "",
-        buildId: status.buildId ?? "unknown",
-      };
+      daemonIdentity = buildIdentityFromStatus(status);
     } catch (error) {
       logger.warn(`[DaemonMcpProxy] Failed to read daemon status for tool-unavailable error: ${error}`);
     }

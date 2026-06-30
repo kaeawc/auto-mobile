@@ -25,6 +25,7 @@ import {
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
 import {
   buildIdentitiesMatch,
+  buildIdentityFromStatus,
   describeBuildIdentity,
   getCurrentBuildIdentity,
   type BuildIdentity,
@@ -1075,10 +1076,7 @@ export function daemonBuildIdentityStatusLines(
   status: DaemonStatus,
   client: BuildIdentity
 ): string[] {
-  const daemon: BuildIdentity = {
-    entryScript: status.entryScript ?? "",
-    buildId: status.buildId ?? "unknown",
-  };
+  const daemon = buildIdentityFromStatus(status);
   const lines = [
     `  Build ID: ${daemon.buildId || "unknown"}`,
     `  Entry Script: ${daemon.entryScript || "unknown"}`,

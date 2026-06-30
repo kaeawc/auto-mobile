@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import {
   computeBuildIdentity,
   buildIdentitiesMatch,
+  buildIdentityFromStatus,
   describeBuildIdentity,
   type BuildIdentity,
 } from "../../src/daemon/buildIdentity";
@@ -81,6 +82,23 @@ describe("buildIdentity", () => {
     test("falls back to 'unknown' entry script when it is empty", () => {
       const id: BuildIdentity = { entryScript: "", buildId: "unknown" };
       expect(describeBuildIdentity(id)).toBe("unknown (unknown)");
+    });
+  });
+
+  describe("buildIdentityFromStatus", () => {
+    test("projects populated status fields verbatim", () => {
+      expect(
+        buildIdentityFromStatus({ entryScript: "/wt/dist/index.js", buildId: "aaaa" })
+      ).toEqual({ entryScript: "/wt/dist/index.js", buildId: "aaaa" });
+    });
+
+    test("normalizes missing fields to '' / 'unknown' (legacy daemon)", () => {
+      expect(buildIdentityFromStatus({})).toEqual({ entryScript: "", buildId: "unknown" });
+    });
+
+    test("a legacy projection matches any client (no false skew)", () => {
+      const client: BuildIdentity = { entryScript: "/wt/dist/index.js", buildId: "aaaa" };
+      expect(buildIdentitiesMatch(client, buildIdentityFromStatus({}))).toBe(true);
     });
   });
 });

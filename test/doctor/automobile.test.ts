@@ -162,6 +162,20 @@ describe("checkDaemonBuildIdentity", () => {
     expect(result.recommendation).toContain("restart");
   });
 
+  test("warns (does not throw) when reading daemon status fails", async () => {
+    const result = await checkDaemonBuildIdentity({
+      daemonManager: {
+        status: async () => {
+          throw new Error("PID file unreadable");
+        },
+      },
+      getClientBuildIdentity: () => client,
+    });
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("PID file unreadable");
+  });
+
   test("does not report a false skew for a legacy daemon without build identity", async () => {
     const result = await checkDaemonBuildIdentity({
       daemonManager: {

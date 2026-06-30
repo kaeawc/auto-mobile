@@ -99,3 +99,24 @@ export function buildIdentitiesMatch(a: BuildIdentity, b: BuildIdentity): boolea
 export function describeBuildIdentity(identity: BuildIdentity): string {
   return `${identity.buildId} (${identity.entryScript || "unknown"})`;
 }
+
+/**
+ * Project the build fields carried on a daemon status / PID-file record into a
+ * {@link BuildIdentity}, normalizing the optional wire fields (a missing
+ * `entryScript` becomes `""`, a missing `buildId` becomes the unknown sentinel).
+ *
+ * Centralizes the `DaemonStatus`/`PidFileData` → `BuildIdentity` mapping that
+ * `doctor`, the `--daemon status` CLI, and the MCP proxy all need, so they agree
+ * on how an unidentified (legacy) daemon is represented. Accepts a structural
+ * shape rather than importing `DaemonStatus` to avoid a module cycle and to keep
+ * the surface narrow.
+ */
+export function buildIdentityFromStatus(record: {
+  entryScript?: string;
+  buildId?: string;
+}): BuildIdentity {
+  return {
+    entryScript: record.entryScript ?? "",
+    buildId: record.buildId ?? UNKNOWN_BUILD_ID,
+  };
+}

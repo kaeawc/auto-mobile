@@ -11,6 +11,7 @@ import type { DaemonHealthReport } from "../../daemon/debugTools";
 import type { DaemonStatus } from "../../daemon/types";
 import {
   buildIdentitiesMatch,
+  buildIdentityFromStatus,
   describeBuildIdentity,
   getCurrentBuildIdentity,
 } from "../../daemon/buildIdentity";
@@ -181,10 +182,7 @@ export async function checkDaemonBuildIdentity(
       };
     }
 
-    const daemon: BuildIdentity = {
-      entryScript: status.entryScript ?? "",
-      buildId: status.buildId ?? "unknown",
-    };
+    const daemon = buildIdentityFromStatus(status);
     const client = (dependencies.getClientBuildIdentity ?? getCurrentBuildIdentity)();
 
     if (buildIdentitiesMatch(client, daemon)) {
@@ -207,6 +205,13 @@ export async function checkDaemonBuildIdentity(
         "bunx @kaeawc/auto-mobile@latest --daemon restart",
     };
   } catch (error) {
+    // Diagnostic path: log the underlying error before returning a typed failure
+    // so there is a trace even though the user only sees the summarized message
+    // (CLAUDE.md error-handling convention #2).
+    logger.warn(
+      `Daemon build identity check failed: ${error instanceof Error ? error.message : String(error)}`,
+      error
+    );
     return {
       name: "Daemon Build Identity",
       status: "warn",

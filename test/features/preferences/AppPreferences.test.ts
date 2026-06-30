@@ -257,10 +257,6 @@ describe("AppPreferences", () => {
   test("writes iOS simulator UserDefaults through defaults daemon and verifies read-back", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC defaults write com.example.app onboardingComplete -bool true",
-      ""
-    );
-    simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app onboardingComplete",
       "1\n"
     );
@@ -286,17 +282,85 @@ describe("AppPreferences", () => {
       verified: true,
     });
     expect(result.warning).toContain("cold relaunch");
-    expect(simctl.getMethodCalls("executeCommand")).toEqual([
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC defaults write com.example.app onboardingComplete -bool true",
+        args: [
+          "spawn",
+          "12345678-1234-1234-1234-123456789ABC",
+          "defaults",
+          "write",
+          "com.example.app",
+          "onboardingComplete",
+          "-bool",
+          "true",
+        ],
         timeoutMs: 5000,
       },
+    ]);
+    expect(simctl.getMethodCalls("executeCommand")).toEqual([
       {
         command: "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app onboardingComplete",
         timeoutMs: 5000,
       },
       {
         command: "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app onboardingComplete",
+        timeoutMs: 5000,
+      },
+    ]);
+  });
+
+  test("writes literal iOS simulator string values through argv-preserving defaults arguments", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app windowsPath",
+      "C:\\tmp\n"
+    );
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app emptyString",
+      "\n"
+    );
+
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+    await preferences.setPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "windowsPath",
+      value: "C:\\tmp",
+      type: "string",
+    });
+    await preferences.setPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "emptyString",
+      value: "",
+      type: "string",
+    });
+
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
+      {
+        args: [
+          "spawn",
+          "12345678-1234-1234-1234-123456789ABC",
+          "defaults",
+          "write",
+          "com.example.app",
+          "windowsPath",
+          "-string",
+          "C:\\tmp",
+        ],
+        timeoutMs: 5000,
+      },
+      {
+        args: [
+          "spawn",
+          "12345678-1234-1234-1234-123456789ABC",
+          "defaults",
+          "write",
+          "com.example.app",
+          "emptyString",
+          "-string",
+          "",
+        ],
         timeoutMs: 5000,
       },
     ]);

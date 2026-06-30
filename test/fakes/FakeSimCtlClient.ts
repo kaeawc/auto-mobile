@@ -95,6 +95,11 @@ export class FakeSimCtlClient {
     return buildExecResult("");
   }
 
+  async executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult> {
+    this.recordCall("executeCommandArgs", { args, timeoutMs });
+    return buildExecResult("");
+  }
+
   async getDeviceInfo(udid: string): Promise<AppleDevice | null> {
     this.recordCall("getDeviceInfo", { udid });
     return this.deviceInfo.get(udid) ?? null;

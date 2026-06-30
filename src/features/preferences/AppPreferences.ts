@@ -39,6 +39,7 @@ export interface PreferenceResult {
 
 interface IosSimulatorPreferenceClient {
   executeCommand(command: string, timeoutMs?: number): Promise<{ stdout: string; stderr: string }>;
+  executeCommandArgs(args: string[], timeoutMs?: number): Promise<{ stdout: string; stderr: string }>;
 }
 
 export interface AppPreferencesDependencies {
@@ -199,10 +200,16 @@ export class AppPreferences {
 
     const domain = iosDefaultsDomain(input);
     const typeFlag = iosDefaultsTypeFlag(input.type);
-    await this.getSimctl().executeCommand(
-      `spawn ${shellQuote(this.device.deviceId)} defaults write ${shellQuote(domain)} ${shellQuote(input.key)} ${typeFlag} ${shellQuote(stringValue(input.value))}`,
-      IOS_DEFAULTS_TIMEOUT_MS
-    );
+    await this.getSimctl().executeCommandArgs([
+      "spawn",
+      this.device.deviceId,
+      "defaults",
+      "write",
+      domain,
+      input.key,
+      typeFlag,
+      stringValue(input.value),
+    ], IOS_DEFAULTS_TIMEOUT_MS);
   }
 
   private async readIosDefaultsType(input: GetPreferenceInput): Promise<PreferenceValueType | undefined> {

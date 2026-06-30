@@ -571,6 +571,10 @@ class FakeSimCtl implements SimCtl {
     return { stdout: "", stderr: "" };
   }
 
+  async executeCommandArgs(args: string[]): Promise<ExecResult> {
+    return this.executeCommand(args.join(" "));
+  }
+
   // Implement other SimCtl methods as no-ops for testing
   setDevice(): void {}
   async isAvailable(): Promise<boolean> { return true; }

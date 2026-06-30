@@ -73,6 +73,15 @@ export interface SimCtl {
   executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
 
   /**
+   * Execute a simctl command from pre-split arguments. Use this for literal user
+   * values that must preserve empty strings, backslashes, or shell metacharacters.
+   * @param args - Arguments after the `simctl` executable name
+   * @param timeoutMs - Optional timeout in milliseconds
+   * @returns Promise with command output
+   */
+  executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult>;
+
+  /**
    * Check if simctl is available
    * @returns Promise with boolean indicating availability
    */
@@ -404,6 +413,19 @@ export class SimCtlClient implements SimCtl {
    */
   async executeCommand(command: string, timeoutMs?: number): Promise<ExecResult> {
     const hostArgs = splitCommandArgs(command);
+    return this.executeCommandArgv(hostArgs, timeoutMs, command);
+  }
+
+  async executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult> {
+    return this.executeCommandArgv(args, timeoutMs, args.map(arg => JSON.stringify(arg)).join(" "));
+  }
+
+  private async executeCommandArgv(args: string[], timeoutMs?: number, displayCommand?: string): Promise<ExecResult> {
+    if (args.length === 0) {
+      throw new Error("Command cannot be empty");
+    }
+    const command = displayCommand ?? args.map(arg => JSON.stringify(arg)).join(" ");
+    const hostArgs = args;
     const localArgs = ["simctl", ...hostArgs];
 
     // Driving the iOS simulator from inside Docker (host-control mode) is

@@ -384,6 +384,7 @@ async function main() {
   const { serverConfig } = await import("./utils/ServerConfig");
   const { AndroidCtrlProxyManager } = await import("./utils/CtrlProxyManager");
   const { IOSCtrlProxyBuilder } = await import("./utils/IOSCtrlProxyBuilder");
+  const { IOSCtrlProxyManager } = await import("./utils/IOSCtrlProxyManager");
 
   startupBenchmark.mark("processEntry");
 
@@ -460,6 +461,9 @@ async function main() {
     // Start iOS CtrlProxy iOS build prefetch (macOS only)
     // This runs asynchronously and will be ready when first iOS device connects
     if (process.platform === "darwin") {
+      IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup().catch(error => {
+        logger.debug(`[IOSCtrlProxy] Startup orphan sweep failed: ${error}`);
+      });
       IOSCtrlProxyBuilder.prefetchBuild();
     }
 

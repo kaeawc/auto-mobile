@@ -254,6 +254,48 @@ describe("ViewHierarchy", function() {
         getInstanceSpy.mockRestore();
       }
     });
+
+    test("preserves iOS CtrlProxy reconnect metadata on stale cached hierarchy", async function() {
+      const iosDevice: BootedDevice = {
+        deviceId: "test-ios-device",
+        name: "Test iPhone",
+        platform: "ios"
+      };
+      const staleHierarchy = {
+        updatedAt: 1750934585218,
+        packageName: "com.example.cached",
+        hierarchy: { node: { $: { text: "Cached screen" } } },
+      };
+      const reconnectStatus = {
+        state: "cooldown",
+        retryAfterMs: 1800,
+        retryAfterSeconds: 2,
+        connectionAttempts: 3,
+        maxConnectionAttempts: 3,
+      };
+      const fakeIosClient = {
+        getLatestHierarchy: async () => ({
+          hierarchy: staleHierarchy,
+          fresh: false,
+          updatedAt: 1750934585218,
+          reconnectStatus,
+          reconnectMessage: "CtrlProxy reconnecting, retry in 2s",
+        }),
+      };
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+
+      try {
+        const viewHierarchyWithMocks = new ViewHierarchy(iosDevice, fakeAdb, mockCtrlProxyClient);
+
+        const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
+
+        expect(result.hierarchy).toEqual(staleHierarchy.hierarchy);
+        expect(result.updatedAt).toBe(1750934585218);
+        expect(result.ctrlProxyReconnect).toEqual(reconnectStatus);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
   });
 
   describe("FilterViewHierarchy Tests", function() {

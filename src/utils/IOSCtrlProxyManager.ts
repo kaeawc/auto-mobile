@@ -1344,9 +1344,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return;
       }
 
-      const ownedProcesses = listeningProcesses.filter(process =>
-        this.isOwnedCtrlProxyRunnerProcess(process.command)
-      );
+      const ownedProcesses: ListeningProcess[] = [];
+      for (const process of listeningProcesses) {
+        if (await this.isOwnedCtrlProxyRunnerProcess(process)) {
+          ownedProcesses.push(process);
+        }
+      }
       if (ownedProcesses.length > 0) {
         for (const process of ownedProcesses) {
           logger.warn(
@@ -1359,7 +1362,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         if (remainingProcesses.length === 0) {
           return;
         }
-        if (remainingProcesses.some(process => this.isOwnedCtrlProxyRunnerProcess(process.command))) {
+        let ownedProcessStillHoldingPort = false;
+        for (const process of remainingProcesses) {
+          if (await this.isOwnedCtrlProxyRunnerProcess(process)) {
+            ownedProcessStillHoldingPort = true;
+            break;
+          }
+        }
+        if (ownedProcessStillHoldingPort) {
           throw new Error(
             `CtrlProxy recovery failed, port ${this.servicePort} still held by ` +
             this.formatListeningProcesses(remainingProcesses)
@@ -1400,11 +1410,36 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private isOwnedCtrlProxyRunnerProcess(command: string): boolean {
-    if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(command)) {
+  private async isOwnedCtrlProxyRunnerProcess(process: ListeningProcess): Promise<boolean> {
+    if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(process.command)) {
       return false;
     }
-    return command.includes(this.device.deviceId);
+    if (process.command.includes(this.device.deviceId)) {
+      return true;
+    }
+    if (!IOSCtrlProxyManager.isDirectCtrlProxyRunnerCommand(process.command)) {
+      return false;
+    }
+    return this.processAncestryContainsDeviceId(process);
+  }
+
+  private async processAncestryContainsDeviceId(process: ListeningProcess): Promise<boolean> {
+    let parentPid = process.ppid;
+    const visitedPids = new Set<number>();
+
+    while (parentPid !== undefined && parentPid > 1 && !visitedPids.has(parentPid)) {
+      visitedPids.add(parentPid);
+      const processInfo = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, parentPid);
+      if (!processInfo) {
+        return false;
+      }
+      if (processInfo.command.includes(this.device.deviceId)) {
+        return true;
+      }
+      parentPid = processInfo.ppid;
+    }
+
+    return false;
   }
 
   private formatListeningProcesses(processes: ListeningProcess[]): string {
@@ -1480,6 +1515,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         command.includes("CtrlProxyUITests-Runner") ||
         command.includes(".xctestrun")
       );
+  }
+
+  private static isDirectCtrlProxyRunnerCommand(command: string): boolean {
+    return command.includes("CtrlProxyUITests-Runner");
   }
 
   private static async terminateProcess(

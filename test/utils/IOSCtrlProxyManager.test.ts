@@ -1182,6 +1182,45 @@ describe("IOSCtrlProxyManager", function() {
       });
     });
 
+    test("start() terminates a direct runner whose parent belongs to the current simulator", async function() {
+      const runnerProcess: FakeListeningProcess = {
+        pid: 2223,
+        port: 8765,
+        ppid: 2222,
+        command: "/tmp/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests-Runner",
+        alive: true,
+      };
+      const parentProcess: FakeListeningProcess = {
+        pid: 2222,
+        port: 0,
+        ppid: 1,
+        command: `launchd_sim ${testDevice.deviceId}`,
+        alive: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [runnerProcess, parentProcess]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "", "")
+      );
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      await manager.start();
+
+      expect(runnerProcess.alive).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 2223")).toBe(true);
+      expect(manager.getServicePort()).toBe(8765);
+      expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
+        CTRL_PROXY_IOS_PORT: "8765",
+        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8765",
+      });
+    });
+
     test("start() reallocates when the intended port is held by a foreign process", async function() {
       const foreignProcess: FakeListeningProcess = {
         pid: 3333,
@@ -1239,6 +1278,48 @@ describe("IOSCtrlProxyManager", function() {
 
       expect(otherSimulatorProcess.alive).toBe(true);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 3334")).toBe(false);
+      expect(manager.getServicePort()).toBe(8767);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
+      expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
+        CTRL_PROXY_IOS_PORT: "8767",
+        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8767",
+      });
+    });
+
+    test("start() reallocates instead of killing another simulator's direct runner on the intended port", async function() {
+      const otherSimulatorProcess: FakeListeningProcess = {
+        pid: 3335,
+        port: 8765,
+        ppid: 3334,
+        command: "/tmp/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests-Runner",
+        alive: true,
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      const otherSimulatorParent: FakeListeningProcess = {
+        pid: 3334,
+        port: 0,
+        ppid: 1,
+        command: "launchd_sim OTHER-SIMULATOR",
+        alive: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [otherSimulatorProcess, otherSimulatorParent]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "", "")
+      );
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      await manager.start();
+
+      expect(otherSimulatorProcess.alive).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 3335")).toBe(false);
       expect(manager.getServicePort()).toBe(8767);
       expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
       expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({

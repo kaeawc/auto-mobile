@@ -150,6 +150,14 @@ const findAppBundleInDir = async (
   return null;
 };
 
+const getErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: string): boolean =>
+  bundleId.endsWith(".XCTestServiceApp") &&
+  (errorMessage.includes("No such file or directory") ||
+    errorMessage.includes("NSPOSIXErrorDomain, code=2"));
+
 export class DeviceAppInspector {
   private readonly deps: DeviceAppInspectorDependencies;
 
@@ -381,7 +389,13 @@ export class DeviceAppInspector {
       const result = await this.deps.exec(`xcrun simctl get_app_container ${quoteShell(deviceUdid)} ${quoteShell(bundleId)} app`);
       appPath = result.trim();
     } catch (error) {
-      this.deps.logger.debug(`[DeviceAppInspector] Failed to read simulator app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+      const errorMessage = getErrorMessage(error);
+      const logMessage = `[DeviceAppInspector] Failed to read simulator app bundle for ${bundleId}: ${errorMessage}`;
+      if (isExpectedMissingLegacySimulatorApp(bundleId, errorMessage)) {
+        this.deps.logger.debug(logMessage);
+      } else {
+        this.deps.logger.warn(logMessage);
+      }
       return null;
     }
 
@@ -392,7 +406,7 @@ export class DeviceAppInspector {
     try {
       return await hashAppBundle(appPath);
     } catch (error) {
-      this.deps.logger.warn(`[DeviceAppInspector] Failed to hash simulator app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+      this.deps.logger.warn(`[DeviceAppInspector] Failed to hash simulator app bundle for ${bundleId}: ${getErrorMessage(error)}`);
       return null;
     }
   }

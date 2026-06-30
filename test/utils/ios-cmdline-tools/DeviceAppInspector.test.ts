@@ -211,6 +211,47 @@ describe("DeviceAppInspector", () => {
     expect(fakeLogger.debugMessages[0]).toContain("No such file or directory");
   });
 
+  test("keeps real simulator app bundle lookup failures at warn", async () => {
+    const hostControl = new FakeHostControlDeviceAppInspector();
+    const fakeLogger = createFakeLogger();
+    const inspector = new DeviceAppInspector({
+      platform: () => "darwin",
+      exec: async command => {
+        if (command.includes("simctl get_app_container")) {
+          throw new Error("Invalid device: simulator is not booted");
+        }
+        return {
+          stdout: "",
+          stderr: "",
+          toString() { return this.stdout; },
+          trim() { return this.stdout.trim(); },
+          includes(searchString: string) { return this.stdout.includes(searchString); }
+        };
+      },
+      readFile: async path => fs.readFile(path, "utf-8"),
+      mkdtemp: async prefix => fs.mkdtemp(prefix),
+      rm: async path => fs.rm(path, { recursive: true, force: true }),
+      readdir: async path => fs.readdir(path),
+      stat: async path => fs.stat(path),
+      tmpdir,
+      logger: fakeLogger,
+      hostControl
+    });
+
+    const hash = await inspector.getInstalledAppBundleHash(
+      "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+      bundleId,
+      true
+    );
+
+    expect(hash).toBeNull();
+    expect(fakeLogger.warnMessages).toHaveLength(1);
+    expect(fakeLogger.warnMessages[0]).toContain("Failed to read simulator app bundle");
+    expect(fakeLogger.warnMessages[0]).toContain(bundleId);
+    expect(fakeLogger.warnMessages[0]).toContain("Invalid device");
+    expect(fakeLogger.debugMessages).toEqual([]);
+  });
+
   test("keeps physical device installed bundle lookup failures at warn", async () => {
     const hostControl = new FakeHostControlDeviceAppInspector();
     const fakeLogger = createFakeLogger();

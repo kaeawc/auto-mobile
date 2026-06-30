@@ -445,6 +445,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   /**
+   * Diagnostic accessor for doctor: reports the host port this client will use
+   * for the runner WebSocket without opening any additional connection.
+   */
+  public getConnectionPortForDiagnostics(): number {
+    return this.port;
+  }
+
+  /**
    * Bind this client to a session for multi-agent NavigationGraphManager isolation.
    */
   public bindSession(sessionId: string): void {

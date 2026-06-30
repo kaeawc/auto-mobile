@@ -5,17 +5,24 @@ import {
   checkBootedSimulators,
   checkCodeSigning,
   checkIosCtrlProxyRunner,
+  checkIosObserveRoundTrip,
   checkProvisioningProfiles,
   checkSimctlAvailable,
   checkSimulatorRuntimes,
   checkXcodeCommandLineTools,
   checkXcodeInstallation,
   checkXcrunAvailable,
+  createIosObserveRoundTripInspector,
   createIosCtrlProxyRunnerInspector,
   IOS_RUNNER_FEATURE_COMMANDS,
   runIosChecks
 } from "../../src/doctor/checks/ios";
-import type { IosRunnerInspection, IosRunnerInspectorHooks } from "../../src/doctor/checks/ios";
+import type {
+  IosObserveRoundTripInspection,
+  IosObserveRoundTripInspectorHooks,
+  IosRunnerInspection,
+  IosRunnerInspectorHooks
+} from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLogger } from "../fakes/FakeLogger";
@@ -65,6 +72,9 @@ const baseDependencies: IosDoctorDependencies = {
   }),
   runnerInspector: {
     inspectBootedRunners: async () => []
+  },
+  observeRoundTripInspector: {
+    inspectBootedObserveRoundTrips: async () => []
   }
 };
 
@@ -711,6 +721,125 @@ describe("checkIosCtrlProxyRunner", () => {
   });
 });
 
+describe("checkIosObserveRoundTrip", () => {
+  const inspection = (
+    over: Partial<IosObserveRoundTripInspection> = {}
+  ): IosObserveRoundTripInspection => ({
+    deviceId: "SIM-1",
+    name: "iPhone 15",
+    runnerPort: 8765,
+    clientPort: 8765,
+    connected: true,
+    screenSize: { width: 390, height: 844 },
+    hierarchyError: null,
+    elementCount: 7,
+    ...over
+  });
+
+  const withRoundTrips = (inspections: IosObserveRoundTripInspection[]) => ({
+    ...baseDependencies,
+    observeRoundTripInspector: {
+      inspectBootedObserveRoundTrips: async () => inspections
+    }
+  });
+
+  test("passes when the client port matches the runner port and observe returns a usable hierarchy", async () => {
+    const result = await checkIosObserveRoundTrip(withRoundTrips([inspection()]));
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("device=SIM-1");
+    expect(result.message).toContain("runnerPort=8765");
+    expect(result.message).toContain("clientPort=8765");
+    expect(result.message).toContain("screenSize=390x844");
+    expect(result.message).toContain("elementCount=7");
+  });
+
+  test("fails when the client port diverges from the runner serving port", async () => {
+    const result = await checkIosObserveRoundTrip(
+      withRoundTrips([inspection({ runnerPort: 8765, clientPort: 8766 })])
+    );
+
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("runnerPort=8765");
+    expect(result.message).toContain("clientPort=8766");
+    expect(result.recommendation).toContain("CtrlProxy");
+  });
+
+  test("fails when the runner WebSocket cannot return a hierarchy", async () => {
+    const result = await checkIosObserveRoundTrip(
+      withRoundTrips([
+        inspection({
+          connected: false,
+          screenSize: { width: 0, height: 0 },
+          hierarchyError: "Failed to retrieve iOS view hierarchy from CtrlProxy iOS",
+          elementCount: 0
+        })
+      ])
+    );
+
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("connected=false");
+    expect(result.message).toContain("hierarchyStatus=error");
+    expect(result.message).toContain("Failed to retrieve iOS view hierarchy");
+  });
+
+  test("fails for a degenerate observe result with zero screen size", async () => {
+    const result = await checkIosObserveRoundTrip(
+      withRoundTrips([inspection({ screenSize: { width: 0, height: 0 } })])
+    );
+
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("screenSize=0x0");
+  });
+
+  test("fails when observe returns no elements from the known simulator screen", async () => {
+    const result = await checkIosObserveRoundTrip(
+      withRoundTrips([inspection({ elementCount: 0 })])
+    );
+
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("elementCount=0");
+  });
+
+  test("skips when no simulators are booted", async () => {
+    const result = await checkIosObserveRoundTrip(withRoundTrips([]));
+
+    expect(result.status).toBe("skip");
+  });
+
+  test("skips on non-macOS platforms", async () => {
+    const result = await checkIosObserveRoundTrip({
+      ...baseDependencies,
+      platform: () => "linux"
+    });
+
+    expect(result.status).toBe("skip");
+  });
+
+  test("logs and fails when the round-trip inspector throws", async () => {
+    const logger = new FakeLogger();
+    const result = await checkIosObserveRoundTrip({
+      ...baseDependencies,
+      logger,
+      observeRoundTripInspector: {
+        inspectBootedObserveRoundTrips: async () => {
+          throw new Error("round trip failed");
+        }
+      }
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("round trip failed");
+    expect(logger.at("warn").length).toBeGreaterThan(0);
+  });
+
+  test("runIosChecks includes the iOS observe round-trip check", async () => {
+    const results = await runIosChecks({}, baseDependencies);
+    const names = results.map(check => check.name);
+    expect(names).toContain("iOS Observe Round Trip");
+  });
+});
+
 describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
   const simctlReturning = (devices: { name: string; deviceId: string }[]) => ({
     ...baseDependencies.createSimctlClient(),
@@ -718,7 +847,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     getBootedSimulators: async () => devices.map(d => ({ name: d.name, platform: "ios" as const, deviceId: d.deviceId }))
   });
 
-  const runningManager = { isInstalled: async () => true, isRunning: async () => true };
+  const runningManager = { isInstalled: async () => true, isRunning: async () => true, getServicePort: () => 8765 };
 
   test("closes a probe client it created (no pre-existing client)", async () => {
     let closes = 0;
@@ -788,5 +917,155 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
 
     expect(inspections[0].supportedCommands).toBeNull();
     expect(closes).toBe(1);
+  });
+});
+
+describe("createIosObserveRoundTripInspector lifecycle", () => {
+  const simctlReturning = (devices: { name: string; deviceId: string }[]) => ({
+    ...baseDependencies.createSimctlClient(),
+    isAvailable: async () => true,
+    getBootedSimulators: async () => devices.map(d => ({ name: d.name, platform: "ios" as const, deviceId: d.deviceId }))
+  });
+
+  const runningManager = { isInstalled: async () => true, isRunning: async () => true, getServicePort: () => 8790 };
+  const viewHierarchy = {
+    hierarchy: { node: { $: { text: "Home" } } },
+    screenWidth: 390,
+    screenHeight: 844
+  };
+  const elementsBuilder = {
+    build: () => ({
+      clickable: [{ index: 0 }],
+      scrollable: [],
+      text: [{ index: 1 }],
+      media: []
+    })
+  } as any;
+
+  test("passes the manager service port to the probe factory and closes the probe", async () => {
+    let closes = 0;
+    const requestedPorts: number[] = [];
+    const hooks: IosObserveRoundTripInspectorHooks = {
+      getManager: () => runningManager,
+      getExistingClient: () => null,
+      createClient: (_device, port) => {
+        requestedPorts.push(port);
+        return {
+          getConnectionPortForDiagnostics: () => port,
+          requestHierarchySync: async () => ({ hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any }),
+          convertToViewHierarchyResult: () => viewHierarchy as any,
+          close: async () => { closes += 1; }
+        };
+      },
+      elementsBuilder
+    };
+
+    const inspector = createIosObserveRoundTripInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks
+    );
+    const inspections = await inspector.inspectBootedObserveRoundTrips();
+
+    expect(requestedPorts).toEqual([8790]);
+    expect(closes).toBe(1);
+    expect(inspections[0]).toEqual({
+      deviceId: "SIM-1",
+      name: "iPhone 15",
+      runnerPort: 8790,
+      clientPort: 8790,
+      connected: true,
+      screenSize: { width: 390, height: 844 },
+      hierarchyError: null,
+      elementCount: 2
+    });
+  });
+
+  test("does not close a pre-existing client and reports its actual client port", async () => {
+    let closes = 0;
+    let created = false;
+    const existing = {
+      getConnectionPortForDiagnostics: () => 8765,
+      requestHierarchySync: async () => ({ hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any }),
+      convertToViewHierarchyResult: () => viewHierarchy as any,
+      close: async () => { closes += 1; }
+    };
+    const hooks: IosObserveRoundTripInspectorHooks = {
+      getManager: () => runningManager,
+      getExistingClient: () => existing,
+      createClient: () => {
+        created = true;
+        return existing;
+      },
+      elementsBuilder
+    };
+
+    const inspector = createIosObserveRoundTripInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks
+    );
+    const inspections = await inspector.inspectBootedObserveRoundTrips();
+
+    expect(created).toBe(false);
+    expect(closes).toBe(0);
+    expect(inspections[0].runnerPort).toBe(8790);
+    expect(inspections[0].clientPort).toBe(8765);
+  });
+
+  test("reports the client port after the hierarchy request can resync it", async () => {
+    let currentClientPort = 8765;
+    const existing = {
+      getConnectionPortForDiagnostics: () => currentClientPort,
+      requestHierarchySync: async () => {
+        currentClientPort = 8790;
+        return { hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any };
+      },
+      convertToViewHierarchyResult: () => viewHierarchy as any,
+      close: async () => {}
+    };
+    const hooks: IosObserveRoundTripInspectorHooks = {
+      getManager: () => runningManager,
+      getExistingClient: () => existing,
+      createClient: () => existing,
+      elementsBuilder
+    };
+
+    const inspector = createIosObserveRoundTripInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks
+    );
+    const inspections = await inspector.inspectBootedObserveRoundTrips();
+
+    expect(inspections[0].clientPort).toBe(8790);
+  });
+
+  test("does not create a client when the runner is not running", async () => {
+    let created = false;
+    const hooks: IosObserveRoundTripInspectorHooks = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        isRunning: async () => false,
+        getServicePort: () => 8790
+      }),
+      getExistingClient: () => null,
+      createClient: () => {
+        created = true;
+        throw new Error("should not create client for stopped runner");
+      },
+      elementsBuilder
+    };
+
+    const inspector = createIosObserveRoundTripInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks
+    );
+    const inspections = await inspector.inspectBootedObserveRoundTrips();
+
+    expect(created).toBe(false);
+    expect(inspections[0].connected).toBe(false);
+    expect(inspections[0].hierarchyError).toBe("iOS CtrlProxy runner is not running");
   });
 });

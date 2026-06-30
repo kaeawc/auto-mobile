@@ -80,15 +80,51 @@ describe("formatMcpServerVersion + the daemon version gate", () => {
   });
 });
 
-describe("readGitVersion (release-install detection)", () => {
-  test("returns null for a node_modules location without consulting git (release install)", () => {
-    // A published package nested under a host project's git repo must not be
-    // stamped with the host's commit.
-    expect(readGitVersion("/some/host/project/node_modules/@kaeawc/auto-mobile/dist")).toBeNull();
+describe("readGitVersion", () => {
+  // Fake git runner: maps each git invocation (keyed by first arg) to canned
+  // stdout. Keeps these tests pure — no spawn, no real repo. `readName` is
+  // injected too so the ownership check needs no filesystem.
+  const OWN = "@kaeawc/auto-mobile";
+  const fakeRun = (responses: Record<string, string | null>) =>
+    (_cwd: string, args: string[]): string | null => {
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {return responses.toplevel ?? null;}
+      if (args[0] === "rev-parse" && args[1] === "--short=12") {return responses.sha ?? null;}
+      if (args[0] === "status") {return responses.status ?? null;}
+      return null;
+    };
+  const ownsRepo = () => OWN;
+
+  test("returns null for a node_modules location without consulting git (dependency install)", () => {
+    let called = false;
+    const run = (_c: string, _a: string[]) => { called = true; return null; };
+    expect(readGitVersion("/host/node_modules/@kaeawc/auto-mobile/dist", run, ownsRepo)).toBeNull();
+    expect(called).toBe(false);
   });
 
-  test("returns null when the cwd is not a git checkout", () => {
-    expect(readGitVersion("/")).toBeNull();
+  test("returns null when not inside a git work tree (release install)", () => {
+    expect(readGitVersion("/opt/app", fakeRun({ toplevel: null }), ownsRepo)).toBeNull();
+  });
+
+  test("returns null when the enclosing repo is a different project (vendored release install)", () => {
+    // git rev-parse walks upward; a copy nested in a host repo must not be
+    // stamped with the host's commit.
+    const run = fakeRun({ toplevel: "/host/repo", sha: "deadbeefcafe" });
+    expect(readGitVersion("/host/repo/vendor/auto-mobile", run, () => "some-host-app")).toBeNull();
+  });
+
+  test("returns null when HEAD has no resolvable short SHA", () => {
+    const run = fakeRun({ toplevel: "/src/auto-mobile", sha: null });
+    expect(readGitVersion("/src/auto-mobile", run, ownsRepo)).toBeNull();
+  });
+
+  test("stamps a clean checkout of AutoMobile's own repo", () => {
+    const run = fakeRun({ toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: "" });
+    expect(readGitVersion("/src/auto-mobile", run, ownsRepo)).toEqual({ shortSha: "1a2b3c4d5e6f", dirty: false });
+  });
+
+  test("marks the checkout dirty when there are tracked changes", () => {
+    const run = fakeRun({ toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: " M src/index.ts" });
+    expect(readGitVersion("/src/auto-mobile", run, ownsRepo)).toEqual({ shortSha: "1a2b3c4d5e6f", dirty: true });
   });
 });
 

@@ -42,6 +42,19 @@ const findPackageJson = (startDir: string): string | null => {
 
 const moduleDir = (): string => path.dirname(fileURLToPath(import.meta.url));
 
+/** The npm package name; used to confirm a git checkout is AutoMobile's own source repo. */
+const PACKAGE_NAME = "@kaeawc/auto-mobile";
+
+const readPackageName = (dir: string): string | null => {
+  try {
+    const raw = fs.readFileSync(path.join(dir, "package.json"), "utf-8");
+    return (JSON.parse(raw) as { name?: string }).name ?? null;
+  } catch {
+    // No/unreadable package.json at the repo root — treat as not-ours.
+    return null;
+  }
+};
+
 const readPackageVersionFromDisk = (): string | null => {
   const packagePath = findPackageJson(moduleDir()) ?? findPackageJson(process.cwd());
   if (!packagePath) {
@@ -57,7 +70,10 @@ const readPackageVersionFromDisk = (): string | null => {
   }
 };
 
-const runGit = (cwd: string, args: string[]): string | null => {
+/** Runs a git subcommand in `cwd` and returns trimmed stdout, or null on any failure. */
+export type GitRunner = (cwd: string, args: string[]) => string | null;
+
+const runGit: GitRunner = (cwd, args) => {
   try {
     const result = spawnSync("git", args, { cwd, encoding: "utf-8", timeout: 2000 });
     if (result.status !== 0 || result.error) {
@@ -72,25 +88,37 @@ const runGit = (cwd: string, args: string[]): string | null => {
 
 /**
  * Read the current git commit identity from the package's checkout. Returns
- * null when git is unavailable or the package is not inside a working tree
+ * null when git is unavailable or this is not AutoMobile's own source checkout
  * (i.e. a published/release install), which keeps release versions unstamped.
  *
- * A published package lives under `node_modules`; `git rev-parse` searches
- * upward and would otherwise report the *host project's* commit, wrongly
- * stamping a release build. Treat any node_modules location as a release
- * install and skip git entirely.
+ * `git rev-parse` searches *upward* from the package directory, so a release
+ * install vendored inside an unrelated git repo (or a `bunx`/global-cache layout
+ * with no `node_modules` segment) would otherwise be stamped with the *host*
+ * repo's commit. Two guards prevent that:
+ *  1. Any `node_modules` location is a dependency install → skip.
+ *  2. The enclosing repo's top-level `package.json` must be this package — i.e.
+ *     the checkout is AutoMobile's source repo, not a host project that merely
+ *     contains a copy.
  */
-export const readGitVersion = (cwd: string = moduleDir()): GitVersionInfo | null => {
+export const readGitVersion = (
+  cwd: string = moduleDir(),
+  run: GitRunner = runGit,
+  readName: (dir: string) => string | null = readPackageName,
+): GitVersionInfo | null => {
   if (cwd.split(path.sep).includes("node_modules")) {
     return null;
   }
-  const shortSha = runGit(cwd, ["rev-parse", "--short=12", "HEAD"]);
+  const toplevel = run(cwd, ["rev-parse", "--show-toplevel"]);
+  if (!toplevel || readName(toplevel) !== PACKAGE_NAME) {
+    return null;
+  }
+  const shortSha = run(cwd, ["rev-parse", "--short=12", "HEAD"]);
   if (!shortSha) {
     return null;
   }
   // --untracked-files=no: only tracked changes alter the built code; untracked
   // scratch files should not flip a checkout to "dirty".
-  const status = runGit(cwd, ["status", "--porcelain", "--untracked-files=no"]);
+  const status = run(cwd, ["status", "--porcelain", "--untracked-files=no"]);
   return { shortSha, dirty: status !== null && status.length > 0 };
 };
 

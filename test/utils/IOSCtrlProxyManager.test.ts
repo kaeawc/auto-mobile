@@ -7,6 +7,50 @@ import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import type { ExecResult } from "../../src/models";
 import { PortManager } from "../../src/utils/PortManager";
+import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
+import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
+import type { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/XcodeSigning";
+import * as fs from "fs/promises";
+import * as path from "path";
+import os from "os";
+
+/**
+ * A minimal format-version-1 xctestrun with a single UI-test bundle, used by the
+ * boundary test to model what the in-simulator runner actually reads.
+ */
+const BOUNDARY_XCTESTRUN = [
+  "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+  "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
+  "<plist version=\"1.0\">",
+  "<dict>",
+  "\t<key>CtrlProxyUITests</key>",
+  "\t<dict>",
+  "\t\t<key>EnvironmentVariables</key>",
+  "\t\t<dict>",
+  "\t\t\t<key>TERM</key>",
+  "\t\t\t<string>dumb</string>",
+  "\t\t</dict>",
+  "\t\t<key>IsUITestBundle</key>",
+  "\t\t<true/>",
+  "\t</dict>",
+  "</dict>",
+  "</plist>"
+].join("\n");
+
+/**
+ * Default fake for IOSCtrlProxyBuilder.writeRunnerEnvironment: returns a
+ * deterministic per-launch xctestrun path (in the source's directory, without a
+ * platform token) so the manager's spawn path can run without touching disk.
+ */
+async function fakeWriteRunnerEnvironment(
+  xctestrunPath: string,
+  _env: Record<string, string>,
+  deviceId: string
+): Promise<string> {
+  const dir = xctestrunPath.includes("/") ? xctestrunPath.slice(0, xctestrunPath.lastIndexOf("/")) : ".";
+  const safeDeviceId = deviceId.replace(/[^A-Za-z0-9._-]/g, "_") || "device";
+  return `${dir}/automobile-runner-${safeDeviceId}.xctestrun`;
+}
 
 class FakeHostPortAvailabilityChecker implements HostPortAvailabilityChecker {
   public readonly calls: { host: string; port: number }[] = [];
@@ -182,6 +226,7 @@ function createFakeBuilder(xctestrunPath = "/tmp/CtrlProxy.xctestrun") {
   return {
     getXctestrunPath: async () => xctestrunPath,
     getRunnerBinaryPath: async () => null,
+    writeRunnerEnvironment: fakeWriteRunnerEnvironment,
     needsRebuild: async () => false,
     build: async () => ({ success: true, message: "built" }),
     getExpectedAppHash: () => null,
@@ -435,6 +480,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an existing host-control process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         getExpectedAppHash: () => null,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const { runner, starts, iproxyStarts } = createHostControlRunner({
@@ -472,6 +518,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an existing host-control process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         getExpectedAppHash: () => null,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const { runner, iproxyStarts } = createHostControlRunner({
@@ -521,6 +568,7 @@ describe("IOSCtrlProxyManager", function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         getExpectedAppHash: () => null,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const { runner, iproxyStarts, starts } = createHostControlRunner({
@@ -633,6 +681,7 @@ describe("IOSCtrlProxyManager", function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         getExpectedAppHash: () => null,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const { runner, starts, stops, iproxyStarts } = createHostControlRunner({
@@ -679,6 +728,7 @@ describe("IOSCtrlProxyManager", function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         getExpectedAppHash: () => null,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const { runner, starts, stops, iproxyStarts } = createHostControlRunner({
@@ -828,6 +878,7 @@ describe("IOSCtrlProxyManager", function() {
       const fakeBuilder = {
         getXctestrunPath: async () => null,
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
 
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -850,6 +901,7 @@ describe("IOSCtrlProxyManager", function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
 
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -879,6 +931,7 @@ describe("IOSCtrlProxyManager", function() {
             throw new Error("should not build when an external CtrlProxy process is reused");
           },
           getRunnerBinaryPath: async () => null,
+          writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
@@ -914,6 +967,7 @@ describe("IOSCtrlProxyManager", function() {
         const fakeBuilder = {
           getXctestrunPath: async () => "/tmp/test.xctestrun",
           getRunnerBinaryPath: async () => null,
+          writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
@@ -949,6 +1003,7 @@ describe("IOSCtrlProxyManager", function() {
         const fakeBuilder = {
           getXctestrunPath: async () => "/tmp/test.xctestrun",
           getRunnerBinaryPath: async () => null,
+          writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
@@ -977,6 +1032,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an external CtrlProxy process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
@@ -1016,6 +1072,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an external CtrlProxy process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
@@ -1055,6 +1112,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an external CtrlProxy process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
@@ -1096,6 +1154,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an external CtrlProxy process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
@@ -1127,6 +1186,7 @@ describe("IOSCtrlProxyManager", function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
@@ -1149,14 +1209,19 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
     });
 
-    test("startOnSimulator() keeps the reallocated simulator port when spawning", async function() {
+    test("startOnSimulator() delivers the reallocated port to the runner via the xctestrun (EC5)", async function() {
       PortManager.setPortAvailabilityCheckerForTesting({
         isPortAvailable: (port: number) => port !== 8765,
       });
       try {
+        const writeCalls: { xctestrunPath: string; env: Record<string, string>; deviceId: string }[] = [];
         const fakeBuilder = {
           getXctestrunPath: async () => "/tmp/test.xctestrun",
           getRunnerBinaryPath: async () => null,
+          writeRunnerEnvironment: async (xctestrunPath: string, env: Record<string, string>, deviceId: string) => {
+            writeCalls.push({ xctestrunPath, env, deviceId });
+            return "/tmp/automobile-runner-SIM.xctestrun";
+          },
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
@@ -1169,10 +1234,25 @@ describe("IOSCtrlProxyManager", function() {
 
         const spawn = fakeExecutor.getSpawnedProcesses()[0];
         expect(manager.getServicePort()).toBe(8767);
+
+        // The allocated port is injected into the xctestrun (the only channel the
+        // in-simulator runner can read) — keyed off the cached source xctestrun.
+        expect(writeCalls).toHaveLength(1);
+        expect(writeCalls[0].xctestrunPath).toBe("/tmp/test.xctestrun");
+        expect(writeCalls[0].env.CTRL_PROXY_IOS_PORT).toBe("8767");
+        expect(writeCalls[0].deviceId).toBe(testDevice.deviceId);
+
+        // xcodebuild is pointed at the per-launch copy, not the cached source.
+        expect(spawn.command).toContain("-xctestrun \"/tmp/automobile-runner-SIM.xctestrun\"");
+        expect(spawn.command).not.toContain("-xctestrun \"/tmp/test.xctestrun\"");
+
+        // Host env still carries the identity vars used for daemon-side process
+        // discovery/ownership — but NOT the dead SIMCTL_CHILD_* prefixes.
         expect(spawn.options?.env).toMatchObject({
           CTRL_PROXY_IOS_PORT: "8767",
-          SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8767",
+          AUTOMOBILE_DEVICE_ID: testDevice.deviceId,
         });
+        expect(Object.keys(spawn.options?.env ?? {}).some(key => key.startsWith("SIMCTL_CHILD_"))).toBe(false);
       } finally {
         PortManager.setPortAvailabilityCheckerForTesting(null);
       }
@@ -1191,6 +1271,7 @@ describe("IOSCtrlProxyManager", function() {
         const fakeBuilder = {
           getXctestrunPath: async () => "/tmp/test.xctestrun",
           getRunnerBinaryPath: async () => null,
+          writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
@@ -1210,7 +1291,120 @@ describe("IOSCtrlProxyManager", function() {
         expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
         expect(spawn.options?.env).toMatchObject({
           CTRL_PROXY_IOS_PORT: "8767",
-          SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8767",
+        });
+      } finally {
+        PortManager.setPortAvailabilityCheckerForTesting(null);
+      }
+    });
+
+    test("the port the runner reads from the spawned xctestrun equals the client service port (EC6 boundary)", async function() {
+      // Boundary model of the simulator process boundary: the daemon (client) and
+      // the in-simulator runner agree on the port ONLY if the allocated port is
+      // carried in the xctestrun the runner reads. This is the assertion that
+      // would have caught #2731 (runner bound 8765 while the client used 8767).
+      const productsDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrlproxy-boundary-"));
+      const sourceXctestrun = path.join(
+        productsDir,
+        "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun"
+      );
+      await fs.writeFile(sourceXctestrun, BOUNDARY_XCTESTRUN);
+
+      // Use the REAL writeRunnerEnvironment so a real per-launch xctestrun is produced.
+      const realBuilder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: productsDir });
+      PortManager.setPortAvailabilityCheckerForTesting({
+        isPortAvailable: (port: number) => port !== 8765,
+      });
+      try {
+        const fakeBuilder = {
+          getXctestrunPath: async () => sourceXctestrun,
+          getRunnerBinaryPath: async () => null,
+          writeRunnerEnvironment: (p: string, env: Record<string, string>, id: string) =>
+            realBuilder.writeRunnerEnvironment(p, env, id),
+        } as unknown as IOSCtrlProxyBuilder;
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeTimer,
+          fakeBuilder,
+          fakeExecutor
+        );
+
+        await (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator();
+
+        // Read back the port the runner WILL read from its own ProcessInfo.environment.
+        const spawnCommand = fakeExecutor.getSpawnedProcesses()[0].command;
+        const match = spawnCommand.match(/-xctestrun "([^"]+)"/);
+        expect(match).not.toBeNull();
+        const runnerXctestrunPath = match![1];
+        const root = await parsePlist(await fs.readFile(runnerXctestrunPath, "utf-8")) as Map<string, unknown>;
+        const uiTarget = root.get("CtrlProxyUITests") as Map<string, unknown>;
+        const env = uiTarget.get("EnvironmentVariables") as Map<string, unknown>;
+        const runnerPort = Number(env.get("CTRL_PROXY_IOS_PORT"));
+
+        expect(runnerPort).toBe(8767);
+        expect(runnerPort).toBe(manager.getServicePort());
+      } finally {
+        PortManager.setPortAvailabilityCheckerForTesting(null);
+        await fs.rm(productsDir, { recursive: true, force: true });
+      }
+    });
+
+    test("startOnDevice() delivers the allocated port via the xctestrun, not a build setting (EC7)", async function() {
+      const physicalDevice: BootedDevice = {
+        deviceId: "00008030001E28C11E",
+        platform: "ios",
+        name: "iPhone"
+      };
+      PortManager.setPortAvailabilityCheckerForTesting({
+        isPortAvailable: (port: number) => port !== 8765,
+      });
+      try {
+        const writeCalls: { env: Record<string, string>; deviceId: string }[] = [];
+        const fakeBuilder = {
+          getXctestrunPath: async () => "/tmp/device.xctestrun",
+          getRunnerBinaryPath: async () => null,
+          writeRunnerEnvironment: async (_p: string, env: Record<string, string>, deviceId: string) => {
+            writeCalls.push({ env, deviceId });
+            return "/tmp/automobile-runner-DEV.xctestrun";
+          },
+        } as unknown as IOSCtrlProxyBuilder;
+        const fakeSigning = {
+          resolveSigningForDevice: async () => ({
+            buildSettings: [],
+            allowProvisioningUpdates: false,
+            warnings: []
+          }),
+        } as unknown as XcodeSigningManager;
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          physicalDevice,
+          fakeTimer,
+          fakeBuilder,
+          fakeExecutor,
+          fakeSigning
+        );
+        const internal = manager as unknown as {
+          verifyInstalledAppBundle: () => Promise<void>;
+          startIproxyTunnel: () => Promise<void>;
+          startOnDevice: () => Promise<void>;
+        };
+        // Bypass tunnel/install verification — not under test here.
+        internal.verifyInstalledAppBundle = async () => {};
+        internal.startIproxyTunnel = async () => {};
+
+        await internal.startOnDevice();
+
+        const spawn = fakeExecutor.getSpawnedProcesses()[0];
+        expect(writeCalls).toHaveLength(1);
+        expect(writeCalls[0].env.CTRL_PROXY_IOS_PORT).toBe("8767");
+        expect(writeCalls[0].deviceId).toBe(physicalDevice.deviceId);
+
+        // xcodebuild points at the per-launch copy; the bare build-setting token is gone.
+        expect(spawn.command).toContain("-xctestrun \"/tmp/automobile-runner-DEV.xctestrun\"");
+        expect(spawn.command).not.toMatch(/(?:^|\s)CTRL_PROXY_IOS_PORT=/);
+
+        // Host env still carries identity vars for daemon-side process discovery.
+        expect(spawn.options?.env).toMatchObject({
+          CTRL_PROXY_IOS_PORT: "8767",
+          AUTOMOBILE_DEVICE_ID: physicalDevice.deviceId,
         });
       } finally {
         PortManager.setPortAvailabilityCheckerForTesting(null);
@@ -1221,6 +1415,7 @@ describe("IOSCtrlProxyManager", function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const { runner, starts } = createHostControlRunner();
       const checker = new FakeHostPortAvailabilityChecker(new Set([8765]));
@@ -1251,6 +1446,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an existing host-control process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const { runner, starts } = createHostControlRunner({
         runningCtrlProxyProcesses: [{
@@ -1309,7 +1505,6 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
       expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
         CTRL_PROXY_IOS_PORT: "8765",
-        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8765",
       });
     });
 
@@ -1342,6 +1537,7 @@ describe("IOSCtrlProxyManager", function() {
             throw new Error("should not build when an external direct runner is reused");
           },
           getRunnerBinaryPath: async () => null,
+          writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
@@ -1393,7 +1589,6 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
       expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
         CTRL_PROXY_IOS_PORT: "8765",
-        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8765",
       });
     });
 
@@ -1436,7 +1631,6 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
       expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
         CTRL_PROXY_IOS_PORT: "8765",
-        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8765",
       });
     });
 
@@ -1467,7 +1661,6 @@ describe("IOSCtrlProxyManager", function() {
       expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
       expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
         CTRL_PROXY_IOS_PORT: "8767",
-        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8767",
       });
     });
 
@@ -1501,7 +1694,6 @@ describe("IOSCtrlProxyManager", function() {
       expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
       expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
         CTRL_PROXY_IOS_PORT: "8767",
-        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8767",
       });
     });
 
@@ -1543,7 +1735,6 @@ describe("IOSCtrlProxyManager", function() {
       expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
       expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
         CTRL_PROXY_IOS_PORT: "8767",
-        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8767",
       });
     });
 
@@ -1577,7 +1768,6 @@ describe("IOSCtrlProxyManager", function() {
       expect(manager.getServicePort()).toBe(8765);
       expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
         CTRL_PROXY_IOS_PORT: "8765",
-        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8765",
       });
     });
 
@@ -1612,7 +1802,6 @@ describe("IOSCtrlProxyManager", function() {
       expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
       expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
         CTRL_PROXY_IOS_PORT: "8767",
-        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8767",
       });
     });
 

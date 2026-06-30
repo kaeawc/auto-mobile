@@ -5,6 +5,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
+import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
 
 describe("IOSCtrlProxyBuilder", function() {
   let originalProjectRoot: string | undefined;
@@ -277,6 +278,113 @@ describe("IOSCtrlProxyBuilder", function() {
       const result = await builder.getXctestrunPath("simulator");
 
       expect(result).toBe(newFile);
+    });
+  });
+
+  describe("writeRunnerEnvironment", function() {
+    const SAMPLE_XCTESTRUN = [
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+      "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
+      "<plist version=\"1.0\">",
+      "<dict>",
+      "\t<key>CtrlProxyUITests</key>",
+      "\t<dict>",
+      "\t\t<key>EnvironmentVariables</key>",
+      "\t\t<dict>",
+      "\t\t\t<key>TERM</key>",
+      "\t\t\t<string>dumb</string>",
+      "\t\t</dict>",
+      "\t\t<key>IsUITestBundle</key>",
+      "\t\t<true/>",
+      "\t</dict>",
+      "</dict>",
+      "</plist>"
+    ].join("\n");
+
+    async function readUiTestEnv(xctestrunPath: string): Promise<Map<string, unknown>> {
+      const xml = await fs.readFile(xctestrunPath, "utf-8");
+      const root = await parsePlist(xml) as Map<string, unknown>;
+      const uiTarget = root.get("CtrlProxyUITests") as Map<string, unknown>;
+      return uiTarget.get("EnvironmentVariables") as Map<string, unknown>;
+    }
+
+    test("writes a per-launch copy carrying the injected port without mutating the source (EC3)", async function() {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun");
+      await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
+
+      const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+      const outputPath = await builder.writeRunnerEnvironment(
+        sourcePath,
+        { CTRL_PROXY_IOS_PORT: "8767", AUTOMOBILE_DEVICE_ID: "SIM-UUID" },
+        "SIM-UUID"
+      );
+
+      // New file, same directory, platform-token-free name.
+      expect(outputPath).not.toBe(sourcePath);
+      expect(path.dirname(outputPath)).toBe(productsDir);
+      const baseName = path.basename(outputPath);
+      expect(baseName).toBe("automobile-runner-SIM-UUID.xctestrun");
+      expect(baseName.includes("iphonesimulator")).toBe(false);
+
+      // Source untouched.
+      expect(await fs.readFile(sourcePath, "utf-8")).toBe(SAMPLE_XCTESTRUN);
+
+      // Per-launch copy carries the injected env plus the original entries.
+      const env = await readUiTestEnv(outputPath);
+      expect(env.get("CTRL_PROXY_IOS_PORT")).toBe("8767");
+      expect(env.get("AUTOMOBILE_DEVICE_ID")).toBe("SIM-UUID");
+      expect(env.get("TERM")).toBe("dumb");
+    });
+
+    test("per-launch copy is excluded from getXctestrunPath candidate globs", async function() {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun");
+      await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
+
+      const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+      await builder.writeRunnerEnvironment(sourcePath, { CTRL_PROXY_IOS_PORT: "8767" }, "SIM-UUID");
+
+      // The runner copy must not be re-selected as the source xctestrun.
+      const resolved = await builder.getXctestrunPath("simulator");
+      expect(resolved).toBe(sourcePath);
+    });
+
+    test("sanitizes the device id used in the copy filename", async function() {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphoneos.xctestrun");
+      await fs.writeFile(sourcePath, SAMPLE_XCTESTRUN);
+
+      const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+      const outputPath = await builder.writeRunnerEnvironment(
+        sourcePath,
+        { CTRL_PROXY_IOS_PORT: "8767" },
+        "00008030-001E/28C1 1E"
+      );
+      expect(path.basename(outputPath)).toBe("automobile-runner-00008030-001E_28C1_1E.xctestrun");
+    });
+
+    test("throws an actionable error when the xctestrun has no UI-test bundle (EC4)", async function() {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+      const sourcePath = path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun");
+      await fs.writeFile(sourcePath, [
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<plist version=\"1.0\">",
+        "<dict>",
+        "\t<key>CtrlProxyTests</key>",
+        "\t<dict><key>IsUITestBundle</key><false/></dict>",
+        "</dict>",
+        "</plist>"
+      ].join("\n"));
+
+      const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+      await expect(
+        builder.writeRunnerEnvironment(sourcePath, { CTRL_PROXY_IOS_PORT: "8767" }, "SIM")
+      ).rejects.toThrow("no UI-test bundle");
     });
   });
 

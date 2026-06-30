@@ -1021,27 +1021,31 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const bundleId = this.resolveTargetBundleId();
     this.ensureLocalServicePortAllocatedAndAvailable();
 
-    // Pass env vars via exec env option to avoid shell interpolation of user-controlled values.
-    // SIMCTL_CHILD_* prefixed vars are forwarded by simctl (which xcodebuild uses internally
-    // on simulators) to the XCUITest runner process after stripping the prefix.
-    // Keep unprefixed vars for potential physical device support.
-    const childEnv: Record<string, string> = {
+    // The runner reads CTRL_PROXY_IOS_PORT from its OWN ProcessInfo.environment.
+    // `xcodebuild test-without-building` does not forward the host process env
+    // (or SIMCTL_CHILD_*) into the in-simulator runner — the only channel that
+    // reaches it is the xctestrun's per-target EnvironmentVariables dict. Inject
+    // there so the runner binds the allocated port instead of its hardcoded
+    // default 8765 (issue #2731).
+    const runnerEnv: Record<string, string> = {
       CTRL_PROXY_IOS_PORT: String(this.servicePort),
       CTRL_PROXY_IOS_TIMEOUT: timeout,
       AUTOMOBILE_DEVICE_ID: this.device.deviceId,
-      SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: String(this.servicePort),
-      SIMCTL_CHILD_CTRL_PROXY_IOS_TIMEOUT: timeout,
-      SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID: this.device.deviceId,
     };
     if (bundleId) {
-      childEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
-      childEnv.SIMCTL_CHILD_CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
-      logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to xcodebuild`);
+      runnerEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
+      logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to runner via xctestrun`);
     }
+    const runnerXctestrunPath = await this.builder.writeRunnerEnvironment(
+      xctestrunPath,
+      runnerEnv,
+      this.device.deviceId
+    );
+
     const command = [
       "xcodebuild",
       "test-without-building",
-      `-xctestrun "${xctestrunPath}"`,
+      `-xctestrun "${runnerXctestrunPath}"`,
       `-destination "platform=iOS Simulator,id=${this.device.deviceId}"`,
       "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
       "2>&1"
@@ -1049,12 +1053,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     logger.info("[IOSCtrlProxy] Using xcodebuild test-without-building to start runner on simulator");
 
-    // Start in background with env vars passed via spawn options (not interpolated into the command).
     // Uses spawn with shell:true instead of exec() to avoid the default 1MB maxBuffer limit.
     // xcodebuild outputs verbose hierarchy dumps that easily exceed 1MB, causing
     // "stdout maxBuffer length exceeded" crashes when using exec().
+    // runnerEnv is ALSO set on the host xcodebuild process env — not for the runner
+    // (it can't see host env) but so the daemon can later discover, own, and recover
+    // this process by reading its env via `ps eww` (see findExternalXcodebuildCtrlProxyProcess
+    // / isDaemonManagedSimulatorXcodebuildProcess).
     // Routed through the injected processExecutor so tests can observe/control the process.
-    const child = this.processExecutor.spawn(command, [], { shell: true, env: { ...process.env, ...childEnv }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = this.processExecutor.spawn(command, [], { shell: true, env: { ...process.env, ...runnerEnv }, stdio: ["ignore", "pipe", "pipe"] });
 
     child.on("error", error => {
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);
@@ -1772,28 +1779,42 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     const bundleId = this.resolveTargetBundleId();
-    const envSettings = [
-      `CTRL_PROXY_IOS_PORT=${this.servicePort}`,
-    ];
+
+    // Deliver the allocated port to the on-device runner via the xctestrun's
+    // EnvironmentVariables. A bare `CTRL_PROXY_IOS_PORT=...` xcodebuild token is
+    // a BUILD SETTING, not a runner env var, so it never reaches the runner —
+    // which then falls back to its default 8765 (issue #2731).
+    const runnerEnv: Record<string, string> = {
+      CTRL_PROXY_IOS_PORT: String(this.servicePort),
+      CTRL_PROXY_IOS_TIMEOUT: process.env.CTRL_PROXY_IOS_TIMEOUT || "86400",
+      AUTOMOBILE_DEVICE_ID: this.device.deviceId,
+    };
     if (bundleId) {
-      envSettings.push(`CTRL_PROXY_IOS_BUNDLE_ID=${bundleId}`);
-      logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to xcodebuild`);
+      runnerEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
+      logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to runner via xctestrun`);
     }
+    const runnerXctestrunPath = await this.builder.writeRunnerEnvironment(
+      xctestrunPath,
+      runnerEnv,
+      this.device.deviceId
+    );
+
     const command = [
       "xcodebuild",
       "test-without-building",
-      `-xctestrun "${xctestrunPath}"`,
+      `-xctestrun "${runnerXctestrunPath}"`,
       "-destination", `id=${this.device.deviceId}`,
       "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
-      ...envSettings,
       ...signingArgs,
       "2>&1"
     ].join(" ");
 
     // Start in background using spawn with shell:true to avoid the default 1MB maxBuffer limit.
     // xcodebuild outputs verbose hierarchy dumps that easily exceed 1MB.
+    // The runner env is ALSO set on the host xcodebuild process env so the daemon
+    // can later discover/own/recover this process by reading its env via `ps eww`.
     // Routed through the injected processExecutor so tests can observe/control the process.
-    const child = this.processExecutor.spawn(command, [], { shell: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = this.processExecutor.spawn(command, [], { shell: true, env: { ...process.env, ...runnerEnv }, stdio: ["ignore", "pipe", "pipe"] });
 
     child.on("error", error => {
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);

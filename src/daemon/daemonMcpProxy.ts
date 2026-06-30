@@ -297,40 +297,46 @@ export class DaemonMcpProxy {
       return;
     }
 
-    // Compare only the release portion. Two dev builds that share a release
-    // version but differ by git commit (`0.0.39+gAAA` vs `0.0.39+gBBB`) are
-    // reconciled by the build-identity gate (ensureBuildMatches, which restarts
-    // to the correct build on a content-hash mismatch). The version gate must
-    // defer here rather than hard-throw, or it would defeat that self-heal.
+    // The release portions (before the `+g<sha>` dev stamp) drive the
+    // newer/older decision. Equal release + differing full strings means two
+    // source checkouts at the same release but different commits (dev-skew).
     const runningBase = releaseVersion(runningVersion);
     const clientBase = releaseVersion(this.clientVersion);
-    if (runningBase === clientBase) {
-      return;
-    }
-
-    const cmp = runningBase.length > 0
-      ? compareVersions(clientBase, runningBase)
-      : Number.POSITIVE_INFINITY;
+    const sameRelease = runningBase === clientBase;
 
     if (!this.config.autoStartDaemon) {
       throw this.versionMismatchError(runningVersion, "autoStartDisabled", "auto-start is disabled");
     }
 
-    if (runningBase.length > 0 && !Number.isFinite(cmp)) {
-      throw this.versionMismatchError(
-        runningVersion,
-        "nonNumeric",
-        "version comparison is not numeric"
-      );
+    if (!sameRelease) {
+      const cmp = runningBase.length > 0
+        ? compareVersions(clientBase, runningBase)
+        : Number.POSITIVE_INFINITY;
+
+      if (runningBase.length > 0 && !Number.isFinite(cmp)) {
+        throw this.versionMismatchError(
+          runningVersion,
+          "nonNumeric",
+          "version comparison is not numeric"
+        );
+      }
+
+      if (cmp <= 0) {
+        throw this.versionMismatchError(
+          runningVersion,
+          "daemonNewer",
+          "the running daemon is newer than this client"
+        );
+      }
     }
 
-    if (cmp <= 0) {
-      throw this.versionMismatchError(
-        runningVersion,
-        "daemonNewer",
-        "the running daemon is newer than this client"
-      );
-    }
+    // Reach here when the client is strictly newer OR the daemon is a same-release
+    // dev-skew (different git stamp). Both reconcile by restarting the daemon from
+    // this client's build. Same-release dev-skew must be handled HERE rather than
+    // deferred to ensureBuildMatches: the build-identity hash covers only the entry
+    // script (process.argv[1]), so in unbundled source-mode runs (`bun src/index.ts`)
+    // it is blind to commits that change non-entry files — the git stamp is the only
+    // signal. The restart is cooldown-bounded below so two checkouts cannot thrash.
 
     if (status.startedAt) {
       const daemonAgeMs = this.timer.now() - status.startedAt;

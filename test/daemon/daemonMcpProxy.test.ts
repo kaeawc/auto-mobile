@@ -246,20 +246,41 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
-      test("defers dev-build skew (same release version, different git stamp) to the build-identity gate", async () => {
-        // Two checkouts at different commits both report release 0.0.39 but carry
-        // different git build metadata. The version gate must NOT hard-throw on the
-        // non-numeric difference — that would defeat the build-identity gate's
-        // self-heal. With matching (absent) build identity it connects cleanly.
+      test("self-heals same-release dev-build skew by restarting to this client's build", async () => {
+        // Two checkouts at the same release (0.0.39) but different commits carry
+        // different git stamps. The version gate must NOT hard-throw on the
+        // non-numeric difference, and must NOT silently attach (the build-identity
+        // hash is blind to non-entry-file changes in source mode) — it reconciles
+        // by restarting the daemon to this client's build.
         const { fakeManager, isAvailableSpy, proxy } = makeProxy({
           clientVersion: "0.0.39+gaaaaaaaaaaaa",
           runningVersion: "0.0.39+gbbbbbbbbbbbb",
+          statusAfterRestartVersion: "0.0.39+gaaaaaaaaaaaa",
           startedAt: ANCIENT_TIMESTAMP,
         });
         try {
           await proxy.listTools();
-          expect(fakeManager.restartCalled).toBe(false);
+          expect(fakeManager.restartCalled).toBe(true);
         } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("throws cooldown (no restart) for same-release dev-skew within the cooldown window", async () => {
+        const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+        const { fakeClient, fakeManager, isAvailableSpy, proxy } = makeProxy({
+          clientVersion: "0.0.39+gaaaaaaaaaaaa",
+          runningVersion: "0.0.39+gbbbbbbbbbbbb",
+          startedAt: 100_000 - Math.floor(DAEMON_VERSION_RESTART_COOLDOWN_MS / 2),
+        });
+        try {
+          const error = await expectVersionMismatch(proxy.listTools());
+          expect(error.reason).toBe("cooldown");
+          expect(fakeManager.restartCalled).toBe(false);
+          expect(fakeClient.isConnected()).toBe(false);
+        } finally {
+          warnSpy.mockRestore();
           isAvailableSpy.mockRestore();
           await proxy.close();
         }
@@ -847,11 +868,6 @@ describe("DaemonMcpProxy", () => {
       startedAt?: number;
       autoStartDaemon?: boolean;
       waitForReadyResult?: boolean;
-      // Version strings — default to a matched DAEMON_VERSION on both sides so
-      // only the build differs. Override to exercise the same-release/different-
-      // stamp dev-skew path that defers from the version gate to the build gate.
-      clientVersion?: string;
-      daemonVersion?: string;
     } = {}) {
       const timer = new FakeTimer();
       timer.advanceTime(100_000);
@@ -865,21 +881,20 @@ describe("DaemonMcpProxy", () => {
         pid: 1234,
         port: 3000,
         socketPath: "/tmp/test.sock",
-        version: opts.daemonVersion ?? DAEMON_VERSION,
+        version: DAEMON_VERSION, // versions match so only the build differs
         startedAt: opts.startedAt ?? ANCIENT_TIMESTAMP,
         ...(opts.daemonBuildId === null ? {} : { buildId: opts.daemonBuildId ?? DAEMON_BUILD.buildId }),
         ...(opts.daemonEntryScript === null ? {} : { entryScript: opts.daemonEntryScript ?? DAEMON_BUILD.entryScript }),
       };
       const restartedStatus = {
         ...mismatchStatus,
-        version: opts.clientVersion ?? mismatchStatus.version,
         buildId: opts.restartedBuildId ?? CLIENT_BUILD.buildId,
         entryScript: opts.restartedEntryScript ?? CLIENT_BUILD.entryScript,
         startedAt: timer.now(),
       };
 
-      // ensureVersionMatches consumes one status() (versions match/defer → returns),
-      // then ensureBuildMatches consumes one to detect the mismatch. Both return the
+      // ensureVersionMatches consumes one status() (versions match → returns), then
+      // ensureBuildMatches consumes one to detect the mismatch. Both return the
       // mismatch status; the fallback statusResult is the post-restart identity.
       fakeManager.statusResult = restartedStatus;
       fakeManager.statusResults = [mismatchStatus, mismatchStatus];
@@ -894,7 +909,6 @@ describe("DaemonMcpProxy", () => {
         autoStartDaemon: opts.autoStartDaemon ?? true,
         timer,
         buildIdentity: { ...CLIENT_BUILD },
-        ...(opts.clientVersion !== undefined ? { clientVersion: opts.clientVersion } : {}),
       });
       return { fakeClient, fakeManager, isAvailableSpy, proxy };
     }
@@ -911,30 +925,6 @@ describe("DaemonMcpProxy", () => {
 
     test("restarts daemon and invalidates cache when build differs", async () => {
       const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy();
-      const invalidateSpy = spyOn(proxy, "invalidateCache");
-      try {
-        await proxy.listTools();
-        expect(fakeManager.restartCalled).toBe(true);
-        expect(invalidateSpy).toHaveBeenCalled();
-      } finally {
-        invalidateSpy.mockRestore();
-        isAvailableSpy.mockRestore();
-        await proxy.close();
-      }
-    });
-
-    test("self-heals two dev checkouts: same release version, different git stamp AND different build", async () => {
-      // The end-to-end #2738 scenario: two checkouts both at release 0.0.39 with
-      // different git stamps and different builds share one socket. The version
-      // gate sees differing stamped strings, defers (same release portion), and
-      // the build-identity gate restarts to this client's build — self-heal, not
-      // a hard version-mismatch throw.
-      const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy({
-        clientVersion: "0.0.39+gaaaaaaaaaaaa",
-        daemonVersion: "0.0.39+gbbbbbbbbbbbb",
-        daemonBuildId: DAEMON_BUILD.buildId,
-        daemonEntryScript: DAEMON_BUILD.entryScript,
-      });
       const invalidateSpy = spyOn(proxy, "invalidateCache");
       try {
         await proxy.listTools();

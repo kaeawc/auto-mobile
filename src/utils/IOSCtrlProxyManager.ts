@@ -1333,6 +1333,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             `ps -p ${pid} -o args= 2>/dev/null`
           );
           if (argsOut.includes("CtrlProxy")) {
+            if (IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommand(argsOut)) {
+              continue;
+            }
             if (!argsOut.includes(`id=${this.device.deviceId}`)) {
               continue;
             }
@@ -1563,6 +1566,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return text.includes(`id=${deviceId}`) ||
       text.includes(`AUTOMOBILE_DEVICE_ID=${deviceId}`) ||
       text.includes(`SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=${deviceId}`);
+  }
+
+  private static isDaemonManagedSimulatorXcodebuildCommand(command: string): boolean {
+    return command.includes("xcodebuild") &&
+      command.includes("test-without-building") &&
+      command.includes("-xctestrun") &&
+      command.includes("platform=iOS Simulator") &&
+      command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") &&
+      !command.includes("CTRL_PROXY_IOS_PORT=") &&
+      !command.includes("AUTOMOBILE_DEVICE_ID=");
   }
 
   private static isCtrlProxyRunnerCommand(command: string): boolean {

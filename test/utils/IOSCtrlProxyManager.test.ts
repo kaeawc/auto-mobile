@@ -1040,6 +1040,45 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses()).toEqual([]);
     });
 
+    test("start() preserves an externally managed test-without-building runner with inline identity", async function() {
+      const externalProcess: FakeListeningProcess = {
+        pid: 2471,
+        port: 8765,
+        command: `xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination id=${testDevice.deviceId} -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [externalProcess]);
+      const fakeBuilder = {
+        getXctestrunPath: async () => {
+          throw new Error("should not build when an external CtrlProxy process is reused");
+        },
+        getRunnerBinaryPath: async () => null,
+      } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        fakeBuilder,
+        fakeExecutor
+      );
+
+      fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2471\n", ""));
+      fakeExecutor.setCommandResponse(
+        "ps -p 2471",
+        createExecResult(externalProcess.command, "")
+      );
+      fakeTimer.enableAutoAdvance();
+
+      await expect(manager.start()).rejects.toThrow("CtrlProxy failed to start within timeout");
+
+      expect(externalProcess.alive).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 2471")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL 2471")).toBe(false);
+      expect(fakeExecutor.getSpawnedProcesses()).toEqual([]);
+    });
+
     test("start() ignores xcodebuild CtrlProxy processes for other simulators", async function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",
@@ -1278,6 +1317,39 @@ describe("IOSCtrlProxyManager", function() {
       } finally {
         PortManager.setPortAvailabilityCheckerForTesting(null);
       }
+    });
+
+    test("start() reclaims a stale daemon-owned xcodebuild even when pgrep finds it", async function() {
+      const staleProcess: FakeListeningProcess = {
+        pid: 2223,
+        port: 8765,
+        command: `xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=${testDevice.deviceId} -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+        alive: true,
+        ignoreTerm: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [staleProcess]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2223\n", ""));
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "", "")
+      );
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      await manager.start();
+
+      expect(staleProcess.alive).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 2223")).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL 2223")).toBe(true);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+      expect(fakeExecutor.getSpawnedProcesses()[0].options?.env).toMatchObject({
+        CTRL_PROXY_IOS_PORT: "8765",
+        SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8765",
+      });
     });
 
     test("start() reallocates when the intended port is held by a foreign process", async function() {

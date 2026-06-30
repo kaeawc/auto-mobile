@@ -1,5 +1,31 @@
 # Changelog
 
+## [v0.0.40] - 2026-06-30
+### Added
+- Cross-platform tool to read/write app preferences (adb prop / SharedPreferences / iOS UserDefaults) ([#2714](https://github.com/kaeawc/auto-mobile/issues/2714))
+- install.sh should detect and help install the required Android SDK platform (compileSdk) ([#2680](https://github.com/kaeawc/auto-mobile/issues/2680))
+### Fixed
+- doctor reports all-green while iOS observe is broken (no client↔runner round-trip check) ([#2693](https://github.com/kaeawc/auto-mobile/issues/2693))
+- iOS CtrlProxy forced-restart recovery should use PortManager to clear processes bound to the target port ([#2692](https://github.com/kaeawc/auto-mobile/issues/2692))
+- iOS CtrlProxy port management collides with adb; client and runner ports diverge ([#2691](https://github.com/kaeawc/auto-mobile/issues/2691))
+### Other
+- Stamp git SHA into pre-release daemon version so the version gate distinguishes dev builds ([#2738](https://github.com/kaeawc/auto-mobile/issues/2738))
+- Verify build-mismatch daemon restart doesn't worsen the #2599 session-wedge for sibling MCP sessions ([#2737](https://github.com/kaeawc/auto-mobile/issues/2737))
+- doctor: surface daemon build identity (entryScript / buildId) to spot wrong-build skew ([#2736](https://github.com/kaeawc/auto-mobile/issues/2736))
+- doctor: iOS round-trip check can't detect runner/client port mismatch ([#2735](https://github.com/kaeawc/auto-mobile/issues/2735))
+- fix(ios): simulator runner ignores allocated port (binds 8765) when Android is connected → client/runner port mismatch, all iOS ops fail ([#2731](https://github.com/kaeawc/auto-mobile/issues/2731))
+- Daemon log file is unlinked by bunx temp-dir cleanup; on-disk logs end up empty ([#2724](https://github.com/kaeawc/auto-mobile/issues/2724))
+- openLink times out at 30s on slow deeplinks, then logs success=true after the timeout ([#2723](https://github.com/kaeawc/auto-mobile/issues/2723))
+- Emulator launches windowed by default; aborts with opaque "code: null" on headless hosts ([#2722](https://github.com/kaeawc/auto-mobile/issues/2722))
+- Headless daemon start fails 10s budget: open -a Simulator → OSLaunchdErrorDomain Code=125 in no-GUI launchd session ([#2721](https://github.com/kaeawc/auto-mobile/issues/2721))
+- Remove heapdump native addon dependency for Node 26 compatibility ([#2719](https://github.com/kaeawc/auto-mobile/issues/2719))
+- iOS CtrlProxy reconnect cooldown is very long (~137s) and observe gives no 'reconnecting' signal ([#2695](https://github.com/kaeawc/auto-mobile/issues/2695))
+- Demote/clarify WARN: 'Failed to read simulator app bundle for ...XCTestServiceApp' during iOS setup ([#2694](https://github.com/kaeawc/auto-mobile/issues/2694))
+- iOS CtrlProxy runner reports 320x480 screen (missing launch screen) instead of real device size ([#2683](https://github.com/kaeawc/auto-mobile/issues/2683))
+- iOS highlight (SDK path): verify/fix coordinate scaling so highlights land on the correct element ([#2682](https://github.com/kaeawc/auto-mobile/issues/2682))
+- iOS highlight: remove non-SDK runner-overlay fallback and report honestly that it requires the AutoMobile SDK ([#2681](https://github.com/kaeawc/auto-mobile/issues/2681))
+- doctor: add iOS CtrlProxy runner check so iOS gives the same certain feedback as Android ([#2678](https://github.com/kaeawc/auto-mobile/issues/2678))
+
 ## [Unreleased]
 ### Fixed
 - iOS `highlight`: remove the non-functional runner-overlay fallback and report honestly that highlighting requires the in-app AutoMobile SDK ([#2681](https://github.com/kaeawc/auto-mobile/issues/2681)) (ios)

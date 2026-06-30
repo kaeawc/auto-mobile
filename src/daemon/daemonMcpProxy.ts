@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "./constants";
 import type { DaemonOptions } from "./types";
 import { compareVersions } from "../server/deviceMatcher";
+import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   type BuildIdentity,
@@ -17,18 +18,6 @@ export type VersionMismatchReason =
   | "daemonNewer"
   | "nonNumeric"
   | "restartMismatch";
-
-/**
- * Strip semver build metadata (everything after the first `+`) from a version.
- *
- * Dev/non-release builds stamp a git short SHA as build metadata (e.g.
- * `0.0.39+g1a2b3c4.dirty`, see `getMcpServerVersion`). The numeric version gate
- * compares only the release portion; reconciling two builds that share a release
- * version but differ by commit is the build-identity gate's job, not the version
- * gate's. The metadata is also not an installable npm tag, so the restart hint
- * uses the stripped version too.
- */
-export const baseVersion = (version: string): string => version.split("+")[0];
 
 export type BuildMismatchReason =
   | "autoStartDisabled"
@@ -54,7 +43,7 @@ export class DaemonVersionMismatchError extends DaemonUnavailableError {
   }) {
     // The git-SHA build metadata on dev builds is not an installable npm tag,
     // so the bunx hint must point at the plain published version.
-    const installableVersion = baseVersion(params.clientVersion);
+    const installableVersion = releaseVersion(params.clientVersion);
     const restartCommand = installableVersion.length > 0 && installableVersion !== "unknown"
       ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
       : "the same installed auto-mobile package";
@@ -313,8 +302,8 @@ export class DaemonMcpProxy {
     // reconciled by the build-identity gate (ensureBuildMatches, which restarts
     // to the correct build on a content-hash mismatch). The version gate must
     // defer here rather than hard-throw, or it would defeat that self-heal.
-    const runningBase = baseVersion(runningVersion);
-    const clientBase = baseVersion(this.clientVersion);
+    const runningBase = releaseVersion(runningVersion);
+    const clientBase = releaseVersion(this.clientVersion);
     if (runningBase === clientBase) {
       return;
     }

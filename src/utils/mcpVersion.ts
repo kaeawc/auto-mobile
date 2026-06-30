@@ -95,13 +95,22 @@ export const readGitVersion = (cwd: string = moduleDir()): GitVersionInfo | null
 };
 
 /**
+ * The release portion of a version string — everything before the first `+`
+ * (semver build metadata). Dev/non-release builds carry a `+g<sha>[.dirty]`
+ * stamp; consumers that compare or parse versions numerically (the daemon
+ * version gate, plan migration) must strip it first. This is the one canonical
+ * place that knows the stamp format.
+ */
+export const releaseVersion = (version: string): string => version.split("+")[0];
+
+/**
  * Stamp a git short SHA (and dirty marker) onto a base version as semver build
  * metadata. Release builds (no git info) are returned unchanged.
  *
- * The `+` build-metadata separator is deliberate: the daemon version gate's
- * numeric `compareVersions` yields a non-finite result for two different
- * stamped versions, which the gate already treats as a mismatch — so two dev
- * checkouts at different commits stop sharing a daemon silently.
+ * The `+` separator keeps the release portion (before `+`) intact so numeric
+ * comparisons still work once {@link releaseVersion} strips the metadata, while
+ * the full string still varies per commit for diagnostics (doctor, logs,
+ * `DaemonVersionMismatchError`).
  */
 export const formatMcpServerVersion = (baseVersion: string, git: GitVersionInfo | null): string => {
   if (!git || git.shortSha.length === 0) {

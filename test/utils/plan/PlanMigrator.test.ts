@@ -1,7 +1,41 @@
 import { describe, expect, test } from "bun:test";
 import { migratePlan } from "../../../src/utils/plan/PlanMigrator";
+import { getMcpServerVersion, releaseVersion } from "../../../src/utils/mcpVersion";
 
 describe("PlanMigrator", () => {
+  describe("version metadata (dev-build SHA stamp)", () => {
+    // Regression: dev builds report a git-SHA-stamped version (`0.0.39+g<sha>[.dirty]`).
+    // The runtime target version is stamped, and PlanSerializer persists the same
+    // stamped string into a plan's mcpVersion. parseVersion must strip the metadata
+    // or the SHA's hex digits corrupt the patch number and `.dirty` → NaN → the plan
+    // is falsely reported outdated.
+    test("a plan at the current release is not falsely reported outdated under a dev-stamped runtime", () => {
+      const currentRelease = releaseVersion(getMcpServerVersion());
+      const { report } = migratePlan({
+        mcpVersion: currentRelease,
+        steps: [{ tool: "observe", params: {} }],
+      });
+      expect(report.outdated).toBe(false);
+    });
+
+    test("a plan written by a dev build (stamped mcpVersion) at the current release is not outdated", () => {
+      const currentRelease = releaseVersion(getMcpServerVersion());
+      const { report } = migratePlan({
+        mcpVersion: `${currentRelease}+g1a2b3c4d5e6f.dirty`,
+        steps: [{ tool: "observe", params: {} }],
+      });
+      expect(report.outdated).toBe(false);
+    });
+
+    test("a genuinely older release version is still reported outdated", () => {
+      const { report } = migratePlan({
+        mcpVersion: "0.0.1",
+        steps: [{ tool: "observe", params: {} }],
+      });
+      expect(report.outdated).toBe(true);
+    });
+  });
+
   describe("migratePlan", () => {
     test("throws for non-object input", () => {
       expect(() => migratePlan("not an object")).toThrow("Plan is not a valid object");

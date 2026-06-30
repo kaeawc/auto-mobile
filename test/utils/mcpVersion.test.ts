@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   formatMcpServerVersion,
   readGitVersion,
+  releaseVersion,
   resolveMcpServerVersion,
   type GitVersionInfo,
   type McpVersionDeps,
@@ -9,6 +10,20 @@ import {
 import { compareVersions } from "../../src/server/deviceMatcher";
 
 const git = (shortSha: string, dirty = false): GitVersionInfo => ({ shortSha, dirty });
+
+describe("releaseVersion", () => {
+  test("returns the version unchanged when there is no build metadata", () => {
+    expect(releaseVersion("0.0.39")).toBe("0.0.39");
+  });
+
+  test("strips the git-SHA build metadata", () => {
+    expect(releaseVersion("0.0.39+g1a2b3c4d5e6f")).toBe("0.0.39");
+  });
+
+  test("strips the dirty marker too", () => {
+    expect(releaseVersion("0.0.39+g1a2b3c4d5e6f.dirty")).toBe("0.0.39");
+  });
+});
 
 describe("formatMcpServerVersion", () => {
   test("returns the base version unchanged when there is no git info (release build)", () => {

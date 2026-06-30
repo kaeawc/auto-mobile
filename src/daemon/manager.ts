@@ -1,9 +1,9 @@
 import { spawn as nodeSpawn, execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { open, readFile, unlink } from "node:fs/promises";
-import { existsSync, openSync, closeSync, mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, openSync, closeSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { logger } from "../utils/logger";
+import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
 import { ActionableError } from "../models";
 import {
   PID_FILE_PATH,
@@ -555,10 +555,18 @@ export class DaemonManager implements DaemonManagerLike {
       args.push("--mcp-recording");
     }
 
-    // Create secure temp directory with random suffix to prevent symlink attacks
-    const tempDir = mkdtempSync(join(tmpdir(), "auto-mobile-daemon-"));
-    const logPath = join(tempDir, "daemon.log");
-    // Open with restricted permissions (0o600 = owner read/write only)
+    // Redirect the detached daemon's stdout/stderr into the STABLE logs dir
+    // (`~/.auto-mobile/logs` by default) rather than an ephemeral
+    // `mkdtemp(tmpdir())` directory. Under bunx the temp tree is reaped while the
+    // daemon keeps this fd open, which previously left the on-disk log unlinked
+    // and post-hoc debugging impossible (issue #2724). The logs dir is created
+    // owner-only (0o700) by ensureSecureTempDirSync, so a fixed, predictable
+    // filename inside it is not exposed to other users.
+    const logsDir = ensureSecureTempDirSync(TEMP_SUBDIRS.LOGS);
+    const logPath = join(logsDir, `daemon-launch-${process.pid}.log`);
+    // Open with restricted permissions (0o600 = owner read/write only).
+    // Truncate per launch so a single manager's bootstrap captures don't grow
+    // unbounded across restarts.
     const logFd = openSync(logPath, "w", 0o600);
 
     // Propagate any non-default file paths to the child so its constants module

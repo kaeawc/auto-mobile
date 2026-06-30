@@ -1,8 +1,14 @@
 /**
- * Secure temporary directory utilities.
+ * Auto-mobile working directory utilities.
  *
- * Provides consistent, secure temp directory creation with restrictive permissions.
- * Uses os.tmpdir() as the base for portability across platforms.
+ * Provides consistent, secure working directory creation with restrictive
+ * permissions. The base resolves to a STABLE, non-ephemeral location so that
+ * long-lived state (daemon logs, persistent caches) survives package-runner
+ * temp-dir cleanup. When AutoMobile is launched via `bunx`, `os.tmpdir()` can
+ * point into an extraction tree that bunx later reaps while the daemon still
+ * holds open file descriptors — leaving on-disk logs at 0 bytes and cache
+ * writes failing with ENOENT (issue #2724). Anchoring on the user's home dir
+ * (`~/.auto-mobile`) avoids that lifecycle entirely.
  */
 
 import fs from "node:fs";
@@ -10,26 +16,59 @@ import os from "os";
 import path from "path";
 
 /**
- * Base directory for all auto-mobile temp files.
- * Uses os.tmpdir() for portability (works on macOS, Linux, Windows).
- */
-const AUTO_MOBILE_TEMP_BASE = path.join(os.tmpdir(), "auto-mobile");
-
-/**
  * Restrictive directory permissions (owner read/write/execute only).
- * Prevents other users from accessing temp files.
+ * Prevents other users from accessing auto-mobile files.
  */
 const SECURE_DIR_MODE = 0o700;
 
 /**
- * Get a secure temp directory path for a given subdirectory.
- * Does NOT create the directory - use ensureSecureTempDir for that.
+ * Resolve the stable base directory for all auto-mobile on-disk state.
  *
- * @param subdirectory - Subdirectory name under auto-mobile temp base
- * @returns Full path to the temp directory
+ * Resolution order:
+ * 1. `AUTOMOBILE_DATA_DIR` / `AUTO_MOBILE_DATA_DIR` — explicit, configurable
+ *    override (also the per-agent isolation knob on shared hosts). Resolved to
+ *    an absolute path.
+ * 2. `~/.auto-mobile` — stable, per-user default. Matches the existing
+ *    `.auto-mobile` convention used for daemon sockets, and is never reaped by
+ *    a package runner's temp-dir cleanup.
+ * 3. `os.tmpdir()/auto-mobile` — last-resort fallback for locked-down
+ *    environments where no home directory is resolvable.
+ *
+ * Deliberately does NOT derive the base from `TMPDIR`/`TMP`/`TEMP`: bunx may set
+ * those to an ephemeral extraction dir, which is the root cause of issue #2724.
+ *
+ * @param env - Environment to read overrides from (injectable for tests)
+ * @param homeDir - Home directory to anchor the default on (injectable for tests)
+ * @returns Absolute path to the auto-mobile base directory
+ */
+export function resolveAutoMobileBaseDir(
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir: string = os.homedir()
+): string {
+  const override = (env.AUTOMOBILE_DATA_DIR ?? env.AUTO_MOBILE_DATA_DIR)?.trim();
+  if (override && override.length > 0) {
+    return path.resolve(override);
+  }
+
+  if (homeDir && homeDir.length > 0) {
+    return path.join(homeDir, ".auto-mobile");
+  }
+
+  return path.join(os.tmpdir(), "auto-mobile");
+}
+
+/**
+ * Get a secure auto-mobile directory path for a given subdirectory.
+ * Does NOT create the directory - use ensureSecureTempDirSync for that.
+ *
+ * Resolved lazily on each call so an `AUTOMOBILE_DATA_DIR` override set after
+ * module load (and tests) is honored.
+ *
+ * @param subdirectory - Subdirectory name under the auto-mobile base
+ * @returns Full path to the directory
  */
 export function getTempDir(subdirectory: string): string {
-  return path.join(AUTO_MOBILE_TEMP_BASE, subdirectory);
+  return path.join(resolveAutoMobileBaseDir(), subdirectory);
 }
 
 /**

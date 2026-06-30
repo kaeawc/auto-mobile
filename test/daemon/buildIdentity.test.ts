@@ -1,0 +1,70 @@
+import { describe, expect, test } from "bun:test";
+import {
+  computeBuildIdentity,
+  buildIdentitiesMatch,
+  type BuildIdentity,
+} from "../../src/daemon/buildIdentity";
+
+describe("buildIdentity", () => {
+  describe("computeBuildIdentity", () => {
+    test("returns a stable hash for identical contents", () => {
+      const hashFile = () => "deadbeefcafef00d";
+      const a = computeBuildIdentity("/a/dist/index.js", hashFile);
+      const b = computeBuildIdentity("/a/dist/index.js", hashFile);
+      expect(a.buildId).toBe(b.buildId);
+      expect(a.buildId).toBe("deadbeefcafef00d");
+    });
+
+    test("resolves the entry script to an absolute path", () => {
+      const identity = computeBuildIdentity("/repo/dist/src/index.js", () => "abc123");
+      expect(identity.entryScript).toBe("/repo/dist/src/index.js");
+    });
+
+    test("returns different buildIds for different file contents", () => {
+      const worktree = computeBuildIdentity("/wt/dist/index.js", () => "1111111111111111");
+      const main = computeBuildIdentity("/main/dist/index.js", () => "2222222222222222");
+      expect(worktree.buildId).not.toBe(main.buildId);
+    });
+
+    test("missing entry script yields an unknown identity without throwing", () => {
+      const identity = computeBuildIdentity(undefined);
+      expect(identity).toEqual({ entryScript: "", buildId: "unknown" });
+    });
+
+    test("unreadable entry script yields buildId 'unknown'", () => {
+      const identity = computeBuildIdentity("/does/not/exist.js", () => {
+        throw new Error("ENOENT");
+      });
+      expect(identity.entryScript).toBe("/does/not/exist.js");
+      expect(identity.buildId).toBe("unknown");
+    });
+  });
+
+  describe("buildIdentitiesMatch", () => {
+    const wt: BuildIdentity = { entryScript: "/wt/dist/index.js", buildId: "aaaa" };
+    const wt2: BuildIdentity = { entryScript: "/wt/dist/index.js", buildId: "aaaa" };
+    const main: BuildIdentity = { entryScript: "/main/dist/index.js", buildId: "bbbb" };
+
+    test("same known buildId matches", () => {
+      expect(buildIdentitiesMatch(wt, wt2)).toBe(true);
+    });
+
+    test("different known buildId does not match", () => {
+      expect(buildIdentitiesMatch(wt, main)).toBe(false);
+    });
+
+    test("falls back to entryScript when one buildId is unknown", () => {
+      const sameScriptUnknown: BuildIdentity = { entryScript: "/wt/dist/index.js", buildId: "unknown" };
+      expect(buildIdentitiesMatch(wt, sameScriptUnknown)).toBe(true);
+
+      const otherScriptUnknown: BuildIdentity = { entryScript: "/main/dist/index.js", buildId: "unknown" };
+      expect(buildIdentitiesMatch(wt, otherScriptUnknown)).toBe(false);
+    });
+
+    test("missing identity on either side is treated as a match (backward compatible)", () => {
+      const legacy: BuildIdentity = { entryScript: "", buildId: "unknown" };
+      expect(buildIdentitiesMatch(wt, legacy)).toBe(true);
+      expect(buildIdentitiesMatch(legacy, main)).toBe(true);
+    });
+  });
+});

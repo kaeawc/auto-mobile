@@ -1,5 +1,10 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonMcpProxy,
+  DaemonVersionMismatchError,
+  DaemonBuildMismatchError,
+  DaemonToolUnavailableError,
+} from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike } from "../../src/daemon/client";
 import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
@@ -383,9 +388,10 @@ describe("DaemonMcpProxy", () => {
         });
         const fakeManager = new FakeDaemonManager();
         fakeManager.statusResults = [
-          runningStatus({ embeddedSdk: false }),
-          runningStatus({ embeddedSdk: false }),
-          runningStatus({ embeddedSdk: true }),
+          runningStatus({ embeddedSdk: false }), // ensureVersionMatches
+          runningStatus({ embeddedSdk: false }), // ensureBuildMatches
+          runningStatus({ embeddedSdk: false }), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ embeddedSdk: true }), // post-restart verify
         ];
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
         const proxy = new DaemonMcpProxy({
@@ -410,8 +416,9 @@ describe("DaemonMcpProxy", () => {
         });
         const fakeManager = new FakeDaemonManager();
         fakeManager.statusResults = [
-          runningStatus({ embeddedSdk: true }),
-          runningStatus({ embeddedSdk: true }),
+          runningStatus({ embeddedSdk: true }), // ensureVersionMatches
+          runningStatus({ embeddedSdk: true }), // ensureBuildMatches
+          runningStatus({ embeddedSdk: true }), // ensureStartupOptionsMatch
         ];
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
         const proxy = new DaemonMcpProxy({
@@ -435,8 +442,9 @@ describe("DaemonMcpProxy", () => {
         });
         const fakeManager = new FakeDaemonManager();
         fakeManager.statusResults = [
-          runningStatus({ embeddedSdk: false }),
-          runningStatus({ embeddedSdk: false }),
+          runningStatus({ embeddedSdk: false }), // ensureVersionMatches
+          runningStatus({ embeddedSdk: false }), // ensureBuildMatches
+          runningStatus({ embeddedSdk: false }), // ensureStartupOptionsMatch
         ];
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
         const proxy = new DaemonMcpProxy({
@@ -792,6 +800,282 @@ describe("DaemonMcpProxy", () => {
         await proxy.listResources();
 
         expect(fakeClient.callDaemonMethodCalls.length).toBe(4);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+  });
+
+  describe("build-identity handshake", () => {
+    const CLIENT_BUILD = { entryScript: "/client/dist/index.js", buildId: "clientbuild" };
+    const DAEMON_BUILD = { entryScript: "/daemon/dist/index.js", buildId: "daemonbuild" };
+
+    function makeBuildProxy(opts: {
+      // Identity reported by the running daemon before any restart.
+      daemonBuildId?: string | null;
+      daemonEntryScript?: string | null;
+      // Identity reported after a restart (defaults to the client's identity = match).
+      restartedBuildId?: string;
+      restartedEntryScript?: string;
+      startedAt?: number;
+      autoStartDaemon?: boolean;
+      waitForReadyResult?: boolean;
+    } = {}) {
+      const timer = new FakeTimer();
+      timer.advanceTime(100_000);
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      });
+      const fakeManager = new FakeDaemonManager();
+
+      const mismatchStatus = {
+        running: true,
+        pid: 1234,
+        port: 3000,
+        socketPath: "/tmp/test.sock",
+        version: DAEMON_VERSION, // versions match so only the build differs
+        startedAt: opts.startedAt ?? ANCIENT_TIMESTAMP,
+        ...(opts.daemonBuildId === null ? {} : { buildId: opts.daemonBuildId ?? DAEMON_BUILD.buildId }),
+        ...(opts.daemonEntryScript === null ? {} : { entryScript: opts.daemonEntryScript ?? DAEMON_BUILD.entryScript }),
+      };
+      const restartedStatus = {
+        ...mismatchStatus,
+        buildId: opts.restartedBuildId ?? CLIENT_BUILD.buildId,
+        entryScript: opts.restartedEntryScript ?? CLIENT_BUILD.entryScript,
+        startedAt: timer.now(),
+      };
+
+      // ensureVersionMatches consumes one status() (versions match → returns), then
+      // ensureBuildMatches consumes one to detect the mismatch. Both return the
+      // mismatch status; the fallback statusResult is the post-restart identity.
+      fakeManager.statusResult = restartedStatus;
+      fakeManager.statusResults = [mismatchStatus, mismatchStatus];
+      if (opts.waitForReadyResult !== undefined) {
+        fakeManager.waitForReadyResult = opts.waitForReadyResult;
+      }
+
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: fakeManager,
+        autoStartDaemon: opts.autoStartDaemon ?? true,
+        timer,
+        buildIdentity: { ...CLIENT_BUILD },
+      });
+      return { fakeClient, fakeManager, isAvailableSpy, proxy };
+    }
+
+    async function expectBuildMismatch(promise: Promise<unknown>): Promise<DaemonBuildMismatchError> {
+      try {
+        await promise;
+      } catch (error) {
+        expect(error).toBeInstanceOf(DaemonBuildMismatchError);
+        return error as DaemonBuildMismatchError;
+      }
+      throw new Error("Expected DaemonBuildMismatchError");
+    }
+
+    test("restarts daemon and invalidates cache when build differs", async () => {
+      const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy();
+      const invalidateSpy = spyOn(proxy, "invalidateCache");
+      try {
+        await proxy.listTools();
+        expect(fakeManager.restartCalled).toBe(true);
+        expect(invalidateSpy).toHaveBeenCalled();
+      } finally {
+        invalidateSpy.mockRestore();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does not restart when build identity matches", async () => {
+      const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy({
+        daemonBuildId: CLIENT_BUILD.buildId,
+        daemonEntryScript: CLIENT_BUILD.entryScript,
+      });
+      try {
+        await proxy.listTools();
+        expect(fakeManager.restartCalled).toBe(false);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("treats a daemon with no build identity as a match (backward compatible)", async () => {
+      const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy({
+        daemonBuildId: null,
+        daemonEntryScript: null,
+      });
+      try {
+        await proxy.listTools();
+        expect(fakeManager.restartCalled).toBe(false);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("throws DaemonBuildMismatchError without restarting when auto-start is disabled", async () => {
+      const { fakeClient, fakeManager, isAvailableSpy, proxy } = makeBuildProxy({
+        autoStartDaemon: false,
+      });
+      try {
+        const error = await expectBuildMismatch(proxy.listTools());
+        expect(error.reason).toBe("autoStartDisabled");
+        expect(error.daemonBuildId).toBe(DAEMON_BUILD.buildId);
+        expect(error.clientBuildId).toBe(CLIENT_BUILD.buildId);
+        expect(fakeManager.restartCalled).toBe(false);
+        expect(fakeClient.isConnected()).toBe(false);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("throws with cooldown reason when the daemon is too young to replace", async () => {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy({
+        startedAt: 100_000 - Math.floor(DAEMON_VERSION_RESTART_COOLDOWN_MS / 2),
+      });
+      try {
+        const error = await expectBuildMismatch(proxy.listTools());
+        expect(error.reason).toBe("cooldown");
+        expect(error.retryAfterMs).toBe(Math.floor(DAEMON_VERSION_RESTART_COOLDOWN_MS / 2));
+        expect(fakeManager.restartCalled).toBe(false);
+      } finally {
+        warnSpy.mockRestore();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("throws restartMismatch when restarted daemon build still differs", async () => {
+      const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy({
+        restartedBuildId: DAEMON_BUILD.buildId,
+        restartedEntryScript: DAEMON_BUILD.entryScript,
+      });
+      try {
+        const error = await expectBuildMismatch(proxy.listTools());
+        expect(error.reason).toBe("restartMismatch");
+        expect(fakeManager.restartCalled).toBe(true);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("throws when restarted daemon fails to become ready", async () => {
+      const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy({
+        waitForReadyResult: false,
+      });
+      try {
+        await expect(proxy.listTools()).rejects.toThrow(DaemonUnavailableError);
+        expect(fakeManager.restartCalled).toBe(true);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+  });
+
+  describe("unknown-tool self-heal", () => {
+    test("reconnects and retries once when daemon reports an advertised tool as unknown", async () => {
+      const recoveredResult = { content: [{ type: "text", text: "set after reconnect" }] };
+      const staleClient = new ScriptedDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [{ name: "setPreference", inputSchema: {} }] }]]),
+        toolError: new Error("MCP error -32603: Unknown tool: setPreference"),
+      });
+      const freshClient = new ScriptedDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [{ name: "setPreference", inputSchema: {} }] }]]),
+        toolResult: recoveredResult,
+      });
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        autoStartDaemon: false,
+      });
+
+      try {
+        // Prime the cache so we can prove it gets invalidated on recovery.
+        await proxy.listTools();
+        const result = await proxy.callTool("setPreference", { key: "k", value: "v" });
+
+        expect(result).toEqual(recoveredResult);
+        expect(staleClient.closeCallCount).toBe(1);
+        expect(staleClient.callToolCalls).toHaveLength(1);
+        expect(freshClient.callToolCalls).toEqual([
+          { toolName: "setPreference", params: { key: "k", value: "v" } },
+        ]);
+        // Recovery invalidated the cache, so a subsequent listTools re-queries the
+        // fresh (post-recovery) client instead of returning the stale tool list.
+        await proxy.listTools();
+        expect(freshClient.callDaemonMethodCalls).toEqual([{ method: "tools/list", params: {} }]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("throws an actionable DaemonToolUnavailableError naming both builds when the tool stays unknown", async () => {
+      const firstClient = new ScriptedDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolError: new Error("MCP error -32603: Unknown tool: setPreference"),
+      });
+      const secondClient = new ScriptedDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolError: new Error("MCP error -32603: Unknown tool: setPreference"),
+      });
+      const clients = [firstClient, secondClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        autoStartDaemon: false,
+        buildIdentity: { entryScript: "/client/dist/index.js", buildId: "clientbuild" },
+      });
+
+      try {
+        let caught: unknown;
+        try {
+          await proxy.callTool("setPreference", { key: "k" });
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(DaemonToolUnavailableError);
+        const err = caught as DaemonToolUnavailableError;
+        expect(err.toolName).toBe("setPreference");
+        expect(err.message).toContain("setPreference");
+        expect(err.message).toContain("clientbuild");
+        // Capped at one retry: exactly two clients consumed.
+        expect(clients).toHaveLength(0);
+        expect(firstClient.callToolCalls).toHaveLength(1);
+        expect(secondClient.callToolCalls).toHaveLength(1);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does not retry on a non-recoverable daemon error", async () => {
+      const client = new ScriptedDaemonClient({
+        toolError: new Error("Permission denied"),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(proxy.callTool("observe", {})).rejects.toThrow("Permission denied");
+        expect(client.callToolCalls).toHaveLength(1);
+        expect(client.closeCallCount).toBe(0);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

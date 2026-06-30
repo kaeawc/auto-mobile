@@ -795,6 +795,8 @@ export class DaemonManager implements DaemonManagerLike {
         sockets: pidData.sockets,
         startedAt: pidData.startedAt,
         version: pidData.version,
+        entryScript: pidData.entryScript,
+        buildId: pidData.buildId,
         options: pidData.options,
       };
     } catch (error) {

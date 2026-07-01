@@ -3,13 +3,14 @@ import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor
 import { logger } from "./logger";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { BootedDevice } from "../models";
+import { ActionableError, BootedDevice } from "../models";
 import { requireBootedDevice } from "./requireBootedDevice";
 import {
-  APK_SHA256_CHECKSUM,
-  APK_URL,
-  RELEASE_VERSION,
-  resolveChecksum
+  isExplicitPin,
+  isPinnedVersionKnown,
+  resolveApkChecksum,
+  resolveApkUrl,
+  resolvePinnedVersion
 } from "../constants/release";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
@@ -83,7 +84,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   public static readonly ACTIVITY = "dev.jasonpearson.automobile.ctrlproxy.MainActivity";
   /** Package name used before the rename to CtrlProxy — uninstalled opportunistically on device setup */
   private static readonly LEGACY_PACKAGE = "dev.jasonpearson.automobile.accessibilityservice";
-  private static readonly APK_URL = APK_URL;
 
   // Static cache for service availability
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
@@ -231,13 +231,25 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Internal prefetch implementation
    */
   private static async doPrefetch(): Promise<string | null> {
+    // Fail closed before touching the network: don't background-download and cache
+    // an unverifiable APK for an unknown explicit pin (#2746). Skipping (not
+    // throwing) keeps daemon startup alive; the install path still fails closed.
+    if (AndroidCtrlProxyManager.isPinnedVersionUnverifiable()) {
+      logger.warn(
+        `[CTRL_PROXY] Prefetch skipped: AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the ` +
+        `release checksum registry, so the APK cannot be integrity-verified`
+      );
+      return null;
+    }
+
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-prefetch-"));
     const apkPath = path.join(tempDir, "control-proxy.apk");
 
     try {
-      // Download the APK
-      logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: APK_URL, destination: apkPath });
-      await AndroidCtrlProxyManager.defaultFileDownloader.download(APK_URL, apkPath);
+      // Download the APK (URL honors AUTOMOBILE_VERSION + AUTOMOBILE_ASSET_BASE_URL)
+      const apkUrl = resolveApkUrl();
+      logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: apkUrl, destination: apkPath });
+      await AndroidCtrlProxyManager.defaultFileDownloader.download(apkUrl, apkPath);
 
       // Verify the file exists and has reasonable size
       const stats = await fs.stat(apkPath);
@@ -249,7 +261,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       AndroidCtrlProxyManager.verifyApkIntegrityStatic(apkPath);
 
       // Verify checksum if provided
-      const expectedChecksum = AndroidCtrlProxyManager.expectedChecksumOverride ?? APK_SHA256_CHECKSUM;
+      const expectedChecksum = AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveApkChecksum();
       if (expectedChecksum.length > 0) {
         const { checksum: actualChecksum } = await AndroidCtrlProxyManager.defaultChecksumCalculator.computeFileSha256(apkPath);
         if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
@@ -573,6 +585,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   async ensureCompatibleVersion(options: AccessibilityVersionCheckOptions = {}): Promise<AccessibilityVersionCheckResult> {
     const perf = createGlobalPerformanceTracker();
 
+    // Fail closed before any readiness shortcut (skipped/acceptedPreinstalled) can
+    // accept an unverifiable APK for an unknown explicit pin (#2746).
+    this.assertPinnedVersionVerifiable();
+
     if (!options.bypassVersionCheckCache && !options.allowDownloadWhenInstalled) {
       const cachedResult = this.getCachedVersionCheckResult();
       if (cachedResult) {
@@ -802,6 +818,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Download APK
    */
   async downloadApk(): Promise<string> {
+    // Defense-in-depth for direct callers: fail closed on an unverifiable pin
+    // before touching the filesystem or network (#2746).
+    this.assertPinnedVersionVerifiable();
     const perf = createGlobalPerformanceTracker();
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-"));
     const apkPath = path.join(tempDir, "control-proxy.apk");
@@ -822,8 +841,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         if (usedPrefetch) {
           logger.info("Using prefetched accessibility service APK", { path: apkPath });
         } else {
-          logger.info("Downloading APK", { url: AndroidCtrlProxyManager.APK_URL, destination: apkPath });
-          await this.fileDownloader.download(AndroidCtrlProxyManager.APK_URL, apkPath);
+          const apkUrl = resolveApkUrl();
+          logger.info("Downloading APK", { url: apkUrl, destination: apkPath });
+          await this.fileDownloader.download(apkUrl, apkPath);
         }
       }
       perf.endOperation("httpDownload");
@@ -856,7 +876,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         perf.endOperation("checksumVerify");
       } else {
         logger.warn("APK checksum verification SKIPPED - no checksum provided (development mode)", {
-          apkUrl: AndroidCtrlProxyManager.APK_URL
+          apkUrl: resolveApkUrl()
         });
       }
 
@@ -1494,7 +1514,24 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.shouldSkipChecksum()) {
       return "";
     }
-    return AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveChecksum(RELEASE_VERSION, "android");
+    return AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveApkChecksum();
+  }
+
+  /**
+   * Fail closed when a concrete `AUTOMOBILE_VERSION` is pinned to a version absent
+   * from the baked checksum registry: the APK cannot be integrity-verified, so
+   * silently downloading it — or accepting an already-installed APK of unknown
+   * provenance — defeats the point of pinning (#2746). `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM`
+   * (or a local APK path override) is the explicit escape hatch.
+   */
+  private assertPinnedVersionVerifiable(): void {
+    if (AndroidCtrlProxyManager.isPinnedVersionUnverifiable()) {
+      throw new ActionableError(
+        `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
+        `checksum registry, so the CtrlProxy APK cannot be integrity-verified. ` +
+        `Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.`
+      );
+    }
   }
 
   private getCachedVersionCheckResult(): AccessibilityVersionCheckResult | null {
@@ -1563,13 +1600,39 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private shouldSkipChecksum(): boolean {
+    return AndroidCtrlProxyManager.isChecksumSkipConfigured();
+  }
+
+  /**
+   * Env-only view of the checksum-skip escape hatches, usable from the static
+   * prefetch path (which has no instance). Mirrors {@link shouldSkipChecksum}.
+   */
+  private static isChecksumSkipConfigured(): boolean {
     // @deprecated AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK - use AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM instead
     const explicitSkip = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM ??
       process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
     if (explicitSkip && (explicitSkip === "1" || explicitSkip.toLowerCase() === "true")) {
       return true;
     }
-    return this.getApkPathOverride() !== null;
+    const apkPathOverride = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH?.trim();
+    return Boolean(apkPathOverride && apkPathOverride.length > 0);
+  }
+
+  /**
+   * Single source of truth for the fail-closed decision: `AUTOMOBILE_VERSION` names
+   * a concrete version absent from the checksum registry, with no escape hatch set,
+   * so the APK cannot be integrity-verified (#2746). Consumed by the download/readiness
+   * guards, the startup prefetch, `doctor`, and the booted-device compatibility check
+   * so they can't drift apart.
+   */
+  static isPinnedVersionUnverifiable(): boolean {
+    if (AndroidCtrlProxyManager.expectedChecksumOverride !== null) {
+      return false;
+    }
+    if (AndroidCtrlProxyManager.isChecksumSkipConfigured()) {
+      return false;
+    }
+    return isExplicitPin() && !isPinnedVersionKnown();
   }
 
   private shouldSkipDownloadIfInstalled(): boolean {

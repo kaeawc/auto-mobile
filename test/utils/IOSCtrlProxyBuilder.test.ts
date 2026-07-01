@@ -144,6 +144,43 @@ describe("IOSCtrlProxyBuilder", function() {
     });
   });
 
+  describe("isPinnedVersionUnverifiable", function() {
+    const withVersion = (value: string | undefined, fn: () => void) => {
+      const prev = process.env.AUTOMOBILE_VERSION;
+      if (value === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = value;
+      }
+      try {
+        fn();
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prev;
+        }
+      }
+    };
+
+    test("false when no explicit pin (latest)", function() {
+      withVersion(undefined, () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false));
+    });
+
+    test("false for a known explicit pin", function() {
+      withVersion("0.0.18", () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false));
+    });
+
+    test("true for an unknown explicit pin", function() {
+      withVersion("99.99.99", () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(true));
+    });
+
+    test("false for an unknown pin when a vendored IPA path is set", function() {
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = "/opt/automobile/control-proxy.ipa";
+      withVersion("99.99.99", () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false));
+    });
+  });
+
   describe("needsRebuild", function() {
     test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD is true", async function() {
       process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD = "true";
@@ -202,6 +239,71 @@ describe("IOSCtrlProxyBuilder", function() {
 
       const result = await builder.needsRebuild("simulator");
       expect(result).toBe(false);
+    });
+
+    test("fails closed on an unknown pin instead of reusing a cached bundle (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      try {
+        // A cached bundle + metadata exist, so without the guard needsRebuild would
+        // return false and setup would silently reuse the cached (wrong-version) runner.
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const productsDir = path.join(derivedDataPath, "Build", "Products");
+        await fs.mkdir(productsDir, { recursive: true });
+        await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+        const cacheDir = path.join(tempDir, "cache");
+        await fs.mkdir(cacheDir, { recursive: true });
+        await fs.writeFile(
+          path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
+          JSON.stringify({ checksum: "stale", version: "latest", extractedAt: new Date().toISOString() })
+        );
+
+        IOSCtrlProxyBuilder.resetInstances();
+        const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath, bundleCacheDir: cacheDir });
+
+        await expect(builder.needsRebuild("simulator")).rejects.toThrow("not in the AutoMobile release");
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
+    test("a vendored IPA path forces extraction even with a cached bundle on an unknown pin (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = path.join(tempDir, "vendored.ipa");
+      try {
+        // A cached bundle + metadata already exist (reused CI host): without the
+        // override-forces-rebuild rule, needsRebuild() would return false and the
+        // vendored IPA would be silently ignored in favor of the stale runner.
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const productsDir = path.join(derivedDataPath, "Build", "Products");
+        await fs.mkdir(productsDir, { recursive: true });
+        await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+        const cacheDir = path.join(tempDir, "cache");
+        await fs.mkdir(cacheDir, { recursive: true });
+        await fs.writeFile(
+          path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
+          JSON.stringify({ checksum: "stale", version: "latest", extractedAt: new Date().toISOString() })
+        );
+
+        IOSCtrlProxyBuilder.resetInstances();
+        const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath, bundleCacheDir: cacheDir });
+
+        // No throw (vendored is the trusted escape hatch) AND forces a rebuild so
+        // the vendored IPA is actually consumed.
+        const result = await builder.needsRebuild("simulator");
+        expect(result).toBe(true);
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
     });
   });
 
@@ -514,6 +616,34 @@ describe("IOSCtrlProxyBuilder", function() {
 
       expect(result.success).toBe(true);
       expect(buildProducts).toBe(path.join(derivedDataPath, "Build", "Products", "Debug-iphonesimulator"));
+    });
+
+    test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function() {
+      const prev = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      try {
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const cacheDir = path.join(tempDir, "cache");
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        downloader.checksum = "actual-checksum-from-download";
+        // No expected-checksum override and no vendored IPA path: the pinned
+        // version has no registry checksum, so the download is unverifiable.
+        const builder = IOSCtrlProxyBuilder.getInstance(
+          { derivedDataPath, bundleCacheDir: cacheDir },
+          { downloader }
+        );
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("not in the AutoMobile release");
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prev;
+        }
+      }
     });
 
     test("should reject build when checksum does not match", async function() {

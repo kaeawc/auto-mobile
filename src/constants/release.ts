@@ -150,11 +150,13 @@ export function resolveChecksum(
  * Version of the latest validated release in the registry.
  * Used to construct download URLs for pinned releases.
  */
-export function resolveLatestVersion(): string {
-  if (RELEASE_CHECKSUM_REGISTRY.length === 0) {
+export function resolveLatestVersion(
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  if (registry.length === 0) {
     return LATEST_RELEASE_VERSION;
   }
-  return RELEASE_CHECKSUM_REGISTRY[0].version;
+  return registry[0].version;
 }
 
 // --- Backward-compatible exports derived from RELEASE_VERSION ---
@@ -166,28 +168,159 @@ export const RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
  * (URLs, on-disk metadata, doctor checks) want a concrete version like
  * "0.0.30", never the placeholder "latest".
  */
-export function resolveAssetVersion(version: string): string {
+export function resolveAssetVersion(
+  version: string,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
   if (version === LATEST_RELEASE_VERSION) {
-    return resolveLatestVersion();
+    return resolveLatestVersion(registry);
   }
   return version;
 }
 
-function buildReleaseAssetUrl(filename: string, version: string): string {
-  const assetVersion = resolveAssetVersion(version);
-  if (assetVersion === LATEST_RELEASE_VERSION) {
-    // Degenerate case: empty registry. Fall back to GitHub's redirecting
-    // /latest/download/ endpoint.
-    return `https://github.com/kaeawc/auto-mobile/releases/latest/download/${filename}`;
+// --- Hermetic single-version pinning knobs (issue #2746) ---
+//
+// External CI consumers need one coherent way to pin every AutoMobile component
+// to a single version and, optionally, to mirror the release assets off GitHub.
+// These pure, env-injectable resolvers are the daemon-side source of truth that
+// the Android/iOS clients delegate to (via `ide/status` + the CtrlProxy managers).
+
+/** npm package name of the daemon. */
+export const DAEMON_PACKAGE_NAME = "@kaeawc/auto-mobile";
+
+/** Environment variable that pins daemon + APK + IPA to one coherent version. */
+export const AUTOMOBILE_VERSION_ENV = "AUTOMOBILE_VERSION";
+
+/** Environment variable that mirrors the APK/IPA download host for offline CI. */
+export const AUTOMOBILE_ASSET_BASE_URL_ENV = "AUTOMOBILE_ASSET_BASE_URL";
+
+/** Default GitHub Releases base for versioned asset downloads. */
+export const DEFAULT_ASSET_BASE_URL = "https://github.com/kaeawc/auto-mobile/releases/download";
+
+type EnvLike = Record<string, string | undefined>;
+
+/**
+ * Resolve the pinned version from `AUTOMOBILE_VERSION`. Returns the trimmed value
+ * when set, otherwise the `"latest"` placeholder (which downstream resolvers turn
+ * into the concrete newest registry entry). The `latest` sentinel is normalized to
+ * lower-case so every sink agrees — `resolveChecksum` matches `latest`
+ * case-insensitively but `resolveAssetVersion`/URL building use a strict `===`
+ * compare, so an un-normalized `LATEST` would otherwise resolve to a valid checksum
+ * yet a 404 URL (an incoherent triple).
+ */
+export function resolvePinnedVersion(env: EnvLike = process.env): string {
+  const trimmed = env[AUTOMOBILE_VERSION_ENV]?.trim();
+  if (!trimmed || trimmed.length === 0) {
+    return LATEST_RELEASE_VERSION;
   }
-  return `https://github.com/kaeawc/auto-mobile/releases/download/${assetVersion}/${filename}`;
+  return trimmed.toLowerCase() === LATEST_RELEASE_VERSION ? LATEST_RELEASE_VERSION : trimmed;
 }
 
-export const APK_URL: string = buildReleaseAssetUrl("control-proxy-debug.apk", RELEASE_VERSION);
-export const APK_SHA256_CHECKSUM: string = resolveChecksum(RELEASE_VERSION, "android");
+/**
+ * True when `AUTOMOBILE_VERSION` names a concrete version (not unset, not the
+ * `latest` sentinel). Used to decide whether an unverifiable download should
+ * fail closed.
+ */
+export function isExplicitPin(env: EnvLike = process.env): boolean {
+  return resolvePinnedVersion(env) !== LATEST_RELEASE_VERSION;
+}
+
+/**
+ * True when the effective pin resolves to a checksum-bearing registry entry.
+ * A `latest` pin is known iff the registry is non-empty; a concrete pin is known
+ * iff the registry contains it. A pinned-but-unknown version cannot be
+ * integrity-verified — see the fail-closed guards in the CtrlProxy managers.
+ */
+export function isPinnedVersionKnown(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): boolean {
+  const pinned = resolvePinnedVersion(env);
+  if (pinned === LATEST_RELEASE_VERSION) {
+    return registry.length > 0;
+  }
+  return registry.some(entry => entry.version === pinned);
+}
+
+/**
+ * Resolve the asset download base URL. Returns `AUTOMOBILE_ASSET_BASE_URL`
+ * (trimmed, trailing slashes stripped) when set, otherwise the GitHub default.
+ */
+export function resolveAssetBaseUrl(env: EnvLike = process.env): string {
+  const trimmed = env[AUTOMOBILE_ASSET_BASE_URL_ENV]?.trim();
+  if (trimmed && trimmed.length > 0) {
+    return trimmed.replace(/\/+$/, "");
+  }
+  return DEFAULT_ASSET_BASE_URL;
+}
+
+function buildReleaseAssetUrl(
+  filename: string,
+  version: string,
+  baseUrl: string = DEFAULT_ASSET_BASE_URL,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  const assetVersion = resolveAssetVersion(version, registry);
+  if (assetVersion === LATEST_RELEASE_VERSION) {
+    // Degenerate case: empty registry, no concrete version to key off.
+    if (baseUrl === DEFAULT_ASSET_BASE_URL) {
+      // Fall back to GitHub's redirecting /latest/download/ endpoint.
+      return `https://github.com/kaeawc/auto-mobile/releases/latest/download/${filename}`;
+    }
+    // A mirror has no redirecting endpoint; use a conventional /latest/ path.
+    return `${baseUrl}/latest/${filename}`;
+  }
+  return `${baseUrl}/${assetVersion}/${filename}`;
+}
+
+/** APK download URL honoring `AUTOMOBILE_VERSION` + `AUTOMOBILE_ASSET_BASE_URL`. */
+export function resolveApkUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  return buildReleaseAssetUrl("control-proxy-debug.apk", resolvePinnedVersion(env), resolveAssetBaseUrl(env), registry);
+}
+
+/** iOS IPA download URL honoring `AUTOMOBILE_VERSION` + `AUTOMOBILE_ASSET_BASE_URL`. */
+export function resolveIpaUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  return buildReleaseAssetUrl("control-proxy.ipa", resolvePinnedVersion(env), resolveAssetBaseUrl(env), registry);
+}
+
+/** Expected APK SHA-256 for the pinned version (empty string if unknown). */
+export function resolveApkChecksum(env: EnvLike = process.env): string {
+  return resolveChecksum(resolvePinnedVersion(env), "android");
+}
+
+/** Expected iOS IPA SHA-256 for the pinned version (empty string if unknown). */
+export function resolveIpaChecksum(env: EnvLike = process.env): string {
+  return resolveChecksum(resolvePinnedVersion(env), "ios");
+}
+
+/**
+ * Concrete `@kaeawc/auto-mobile@<version>` install specifier for user-facing
+ * advice. Never yields the floating `@latest` tag (which causes silent version
+ * drift between a human-started daemon and a pinned runner, #2746) — it resolves
+ * `AUTOMOBILE_VERSION`, falling back to the concrete newest registry entry.
+ */
+export function resolveDaemonInstallSpecifier(env: EnvLike = process.env): string {
+  return `${DAEMON_PACKAGE_NAME}@${resolveAssetVersion(resolvePinnedVersion(env))}`;
+}
+
+export const APK_URL: string = resolveApkUrl();
+export const APK_SHA256_CHECKSUM: string = resolveApkChecksum();
 
 export const IOS_CTRL_PROXY_RELEASE_VERSION: string = RELEASE_VERSION;
-export const IOS_CTRL_PROXY_IPA_URL: string = buildReleaseAssetUrl("control-proxy.ipa", IOS_CTRL_PROXY_RELEASE_VERSION);
-export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveChecksum(IOS_CTRL_PROXY_RELEASE_VERSION, "ios");
+export const IOS_CTRL_PROXY_IPA_URL: string = resolveIpaUrl();
+export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveIpaChecksum();
 export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (device build), empty = skip verification
-export const IOS_CTRL_PROXY_RUNNER_SHA256: string = ""; // SHA256 of runner binary (CtrlProxyUITests-Runner), empty = skip verification
+// SHA256 of the simulator runner binary (CtrlProxyUITests-Runner), empty = skip
+// verification. This is a single global scalar, valid only for the runner inside
+// the *latest* IPA (registry[0]) — the runner lives inside that IPA, so its
+// integrity is transitively covered by registry[0].ipaSha256. If pinned-older
+// iOS downloads are ever wired (resolveChecksum(<pinned>, "ios")), move this to a
+// per-entry ReleaseChecksumEntry.runnerSha256 or the check would compare the
+// newest runner sha against an older IPA and reject a valid bundle.
+export const IOS_CTRL_PROXY_RUNNER_SHA256: string = "";

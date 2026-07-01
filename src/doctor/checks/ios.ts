@@ -12,7 +12,8 @@ import type { BootedDevice, ExecResult } from "../../models";
 import { CheckResult, DoctorOptions } from "../types";
 import { SimCtl, SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger, type Logger } from "../../utils/logger";
-import { IOS_CTRL_PROXY_RELEASE_VERSION, resolveAssetVersion } from "../../constants/release";
+import { resolveAssetVersion, resolvePinnedVersion } from "../../constants/release";
+import { IOSCtrlProxyBuilder } from "../../utils/IOSCtrlProxyBuilder";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyClient, IOS_RUNNER_FEATURE_COMMANDS } from "../../features/observe/ios/IOSCtrlProxyClient";
 import { ObserveElementsBuilder } from "../../features/observe/ObserveElementsBuilder";
@@ -994,7 +995,21 @@ export async function checkIosCtrlProxyRunner(
       };
     }
 
-    const expectedVersion = resolveAssetVersion(IOS_CTRL_PROXY_RELEASE_VERSION);
+    // An unverifiable explicit pin is a hard configuration failure — classifyRunner
+    // only checks the advertised command set, so without this a running runner would
+    // still report `pass` and leave the `doctor --ios` hermetic gate green (#2746).
+    if (IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
+      return {
+        name,
+        status: "fail",
+        message: `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the release checksum registry`,
+        recommendation: "The pinned CtrlProxy bundle cannot be integrity-verified. Pin a released version, or vendor a trusted bundle via AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH.",
+      };
+    }
+
+    // Honor AUTOMOBILE_VERSION so a pinned runner is not falsely flagged "stale"
+    // against the newest registry entry (#2746).
+    const expectedVersion = resolveAssetVersion(resolvePinnedVersion());
     const classifications = inspections.map(inspection => classifyRunner(inspection, expectedVersion));
 
     const message = classifications.map(classification => classification.line).join(" | ");

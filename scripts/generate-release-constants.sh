@@ -104,35 +104,39 @@ if [ -n "$release_version" ]; then
   fi
 
   if grep -q "version: \"${release_version}\"" "$constants_path"; then
-    echo "INFO: Version ${release_version} already exists in registry — skipping"
-    exit 0
-  fi
-
-  new_entry="  {
+    # Version already registered — do NOT duplicate the entry, but fall through
+    # to the scalar-constant updates below (app hash / runner sha). The release
+    # job re-runs this after prepare-release already added the entry; skipping
+    # entirely would leave IOS_CTRL_PROXY_RUNNER_SHA256 empty (verification
+    # disabled) whenever prepare-release predates the runner-sha wiring.
+    echo "INFO: Version ${release_version} already in registry — refreshing scalar constants only"
+  else
+    new_entry="  {
     version: \"${release_version}\",
     apkSha256: \"${apk_checksum}\",
     ipaSha256: \"${ios_checksum}\",
   },"
 
-  # Prepend new entry after the opening bracket of RELEASE_CHECKSUM_REGISTRY
-  prepend_registry_entry "$tmp_file" "$new_entry"
+    # Prepend new entry after the opening bracket of RELEASE_CHECKSUM_REGISTRY
+    prepend_registry_entry "$tmp_file" "$new_entry"
 
-  # Cap registry at max_registry_entries
-  entry_count=$(grep -c 'version: "' "$tmp_file" || true)
-  if [ "$entry_count" -gt "$max_registry_entries" ]; then
-    excess=$((entry_count - max_registry_entries))
-    for ((i = 0; i < excess; i++)); do
-      last_version_line=$(grep -n 'version: "' "$tmp_file" | tail -1 | cut -d: -f1)
-      start_line=$((last_version_line - 1))
-      end_line=$((last_version_line + 3))
-      sed_inplace "${start_line},${end_line}d" "$tmp_file"
-    done
+    # Cap registry at max_registry_entries
+    entry_count=$(grep -c 'version: "' "$tmp_file" || true)
+    if [ "$entry_count" -gt "$max_registry_entries" ]; then
+      excess=$((entry_count - max_registry_entries))
+      for ((i = 0; i < excess; i++)); do
+        last_version_line=$(grep -n 'version: "' "$tmp_file" | tail -1 | cut -d: -f1)
+        start_line=$((last_version_line - 1))
+        end_line=$((last_version_line + 3))
+        sed_inplace "${start_line},${end_line}d" "$tmp_file"
+      done
+    fi
+
+    echo "Updated release constants:"
+    echo "   Added registry entry for version: ${release_version}"
+    echo "   APK checksum: ${apk_checksum}"
+    echo "   iOS checksum: ${ios_checksum}"
   fi
-
-  echo "Updated release constants:"
-  echo "   Added registry entry for version: ${release_version}"
-  echo "   APK checksum: ${apk_checksum}"
-  echo "   iOS checksum: ${ios_checksum}"
 else
   # Mode: update registry[0] checksums in place (nightly/checksum-only)
   if [ -n "$apk_checksum" ]; then

@@ -4,6 +4,7 @@ import { requireBootedDevice } from "./requireBootedDevice";
 import { NoOpPerformanceTracker, createGlobalPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { IOSCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IOSCtrlProxyBuilder";
+import { resolvePinnedVersion } from "../constants/release";
 import { type ChildProcess } from "child_process";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "./PortManager";
 import { DefaultProcessExecutor, type ProcessExecutor } from "./ProcessExecutor";
@@ -783,6 +784,20 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<CtrlProxyIosSetupResult> {
     perf.serial("xcTestServiceSetup");
+
+    // Fail closed before any reuse/short-circuit (already-running, already-attempted)
+    // can serve an unverifiable pinned runner (#2746).
+    if (IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
+      perf.end();
+      return {
+        success: false,
+        message:
+          `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
+          `checksum registry, so the CtrlProxy bundle cannot be integrity-verified. ` +
+          `Pin a released version, or vendor a trusted bundle via AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH.`,
+        perfTiming: perf.getTimings()
+      };
+    }
 
     await this.uninstallLegacyAppIfPresent();
 

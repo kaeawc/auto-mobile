@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonUnavailableError } from "../daemon/client";
 import { DaemonMcpProxy } from "../daemon/daemonMcpProxy";
+import { resolveDaemonInstallSpecifier } from "../constants/release";
 
 // Import all tool registration functions
 import { registerObserveTools } from "../server/observeTools";
@@ -112,7 +113,7 @@ async function runToolViaDaemon(
     if (result === null) {
       throw new ActionableError(
         "Daemon returned null result. This may indicate a daemon connectivity issue. " +
-        "Try: bunx @kaeawc/auto-mobile@latest --daemon restart"
+        `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`
       );
     }
     return result;
@@ -334,21 +335,24 @@ export async function runCliCommand(args: string[]): Promise<void> {
 // Show general help
 function showHelp(): void {
   const tools = ToolRegistry.getAllTools();
+  // Concrete pinned specifier (honors AUTOMOBILE_VERSION), never the floating
+  // @latest tag — help output should be reproducible (#2746).
+  const installSpecifier = resolveDaemonInstallSpecifier();
 
   console.log(`
 AutoMobile CLI - Android Device Automation
 
 Usage:
-  bunx @kaeawc/auto-mobile@latest --cli [--session-uuid <uuid>] <tool-name> [--param value ...]
-  bunx @kaeawc/auto-mobile@latest --cli help [tool-name]
+  bunx ${installSpecifier} --cli [--session-uuid <uuid>] <tool-name> [--param value ...]
+  bunx ${installSpecifier} --cli help [tool-name]
 
 Examples:
-  bunx @kaeawc/auto-mobile@latest --cli listDeviceImages
-  bunx @kaeawc/auto-mobile@latest --cli observe
-  bunx @kaeawc/auto-mobile@latest --cli tapOn --text "Submit"
-  bunx @kaeawc/auto-mobile@latest --cli startDevice --avdName "pixel_7_api_34"
-  bunx @kaeawc/auto-mobile@latest --cli --session-uuid abc-123-uuid observe
-  bunx @kaeawc/auto-mobile@latest --cli --session-uuid $SESSION_UUID tapOn --text "Submit"
+  bunx ${installSpecifier} --cli listDeviceImages
+  bunx ${installSpecifier} --cli observe
+  bunx ${installSpecifier} --cli tapOn --text "Submit"
+  bunx ${installSpecifier} --cli startDevice --avdName "pixel_7_api_34"
+  bunx ${installSpecifier} --cli --session-uuid abc-123-uuid observe
+  bunx ${installSpecifier} --cli --session-uuid $SESSION_UUID tapOn --text "Submit"
 
 Options:
   help [tool-name]              Show help for a specific tool
@@ -419,15 +423,16 @@ Session-based Execution:
   });
 
   console.log(`\nTotal: ${tools.length} tools available`);
-  console.log("\nUse 'bunx @kaeawc/auto-mobile@latest --cli help <tool-name>' for detailed information about a specific tool.");
+  console.log(`\nUse 'bunx ${installSpecifier} --cli help <tool-name>' for detailed information about a specific tool.`);
 }
 
 // Show help for a specific tool
 function showToolHelp(toolName: string): void {
+  const installSpecifier = resolveDaemonInstallSpecifier();
   const tool = ToolRegistry.getTool(toolName);
   if (!tool) {
     console.error(`Unknown tool: ${toolName}`);
-    console.log("\nUse 'bunx @kaeawc/auto-mobile@latest --cli help' to see available tools.");
+    console.log(`\nUse 'bunx ${installSpecifier} --cli help' to see available tools.`);
     return;
   }
 
@@ -462,7 +467,7 @@ function showToolHelp(toolName: string): void {
   }
 
   console.log(`\nExample usage:`);
-  console.log(`  bunx @kaeawc/auto-mobile@latest --cli ${toolName} [parameters...]`);
+  console.log(`  bunx ${installSpecifier} --cli ${toolName} [parameters...]`);
 }
 
 export function getCliHelpSchemaShape(schema: any): CliHelpSchemaShape {

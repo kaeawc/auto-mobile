@@ -8,9 +8,12 @@
  * on the wire stays byte-identical and the device decodes it without change.
  *
  * Sends are constructed via the {@link ctrlProxyRequests} builders — each returns a typed
- * {@link CtrlProxyRequest} — and serialized through {@link serializeCtrlProxyRequest}. Routing
- * every Android send through this layer means the client can no longer emit a misspelled `type`
- * or a malformed field set; both are compile errors.
+ * {@link CtrlProxyRequest} — and serialized through {@link serializeCtrlProxyRequest}. When a send
+ * is built this way, a misspelled `type` or a malformed field set is a compile error rather than a
+ * runtime failure on-device. This is a module-level convention, not a transport-level lock: the
+ * underlying `ws.send(string)` still accepts any string, so a raw `JSON.stringify` could bypass the
+ * layer. Enforcing it with a typed `sendRequest(request: CtrlProxyRequest)` transport chokepoint is
+ * a possible follow-up (it would need to unify the delegates' differing not-connected semantics).
  *
  * SCOPE — Android control-proxy only.
  * - The gesture/text commands (`request_tap_coordinates`, `request_swipe`, `request_drag`,
@@ -19,7 +22,8 @@
  *   `src/features/observe/DeviceServiceUtils.ts`. They are typed here for contract completeness
  *   (drift cross-check) but intentionally NOT re-routed, to avoid coupling the shared iOS client
  *   to the Android contract. Unifying that path is a possible follow-up.
- * - `request_hit_test` is device-supported but has no TS sender yet; typed here for completeness.
+ * - `request_hit_test` is device-supported but has no TS sender yet; typed here to keep the union
+ *   equal to the device `@SerialName` set (the drift guard depends on that equality).
  * - The iOS client (`src/features/observe/ios/`) has its own hand-built sends that could get the
  *   same treatment separately.
  */
@@ -534,8 +538,14 @@ export type CtrlProxyRequestType = CtrlProxyRequest["type"];
  * Every `@SerialName` accepted by `WebSocketRequest.kt`, transcribed by hand. The
  * `Record<CtrlProxyRequestType, true>` type forces this map to list exactly the union's
  * discriminators: adding a request type to the union without listing it here (or vice versa) is a
- * compile error, and a test asserts these keys equal the device's `@SerialName` set. Together they
- * are the drift tripwire between this file and the Kotlin contract.
+ * compile error, and a test asserts these keys equal the device's `@SerialName` set — read directly
+ * from `WebSocketRequest.kt` (see ctrlProxyProtocol.test.ts), so a request type renamed/added on the
+ * device fails the test rather than drifting silently.
+ *
+ * NOTE: this guards the request-type *set* (a type added/removed/renamed). It does NOT guard
+ * per-field drift (a field renamed, or its optionality changed) — that fidelity is covered by the
+ * byte-identical serialization assertions in ctrlProxyProtocol.test.ts. A future improvement is to
+ * generate this contract from the Kotlin source so there is a single source of truth.
  */
 const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_hierarchy: true,

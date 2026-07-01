@@ -8,6 +8,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "fs";
+import { resolve } from "path";
 import type { HighlightBoxShape } from "../../../../src/models/VisualHighlight";
 import type { NetworkMockRuleSync } from "../../../../src/server/networkMockRules";
 import {
@@ -75,6 +77,28 @@ describe("ctrlProxyProtocol — Kotlin contract coverage", () => {
   test("no duplicate discriminators", () => {
     expect(new Set(KNOWN_REQUEST_TYPES).size).toBe(KNOWN_REQUEST_TYPES.length);
   });
+
+  // Authoritative cross-language guard: read the actual @SerialName set out of the Kotlin contract
+  // and assert it equals ours. Unlike the hand-maintained KOTLIN_SERIAL_NAMES list above, this
+  // catches a request type renamed/added/removed on the device — the drift the module exists to
+  // prevent — instead of trusting a transcription. Skipped only if the Kotlin file isn't reachable
+  // (e.g. running outside the monorepo), which never happens in CI.
+  const KOTLIN_CONTRACT_PATH = resolve(
+    import.meta.dir,
+    "../../../../android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/WebSocketRequest.kt"
+  );
+
+  test.skipIf(!existsSync(KOTLIN_CONTRACT_PATH))(
+    "KNOWN_REQUEST_TYPES matches the @SerialName set read from WebSocketRequest.kt",
+    () => {
+      const source = readFileSync(KOTLIN_CONTRACT_PATH, "utf8");
+      const serialNames = [...source.matchAll(/@SerialName\("([^"]+)"\)/g)].map(m => m[1]);
+      expect(serialNames.length).toBeGreaterThan(0);
+      expect([...new Set(serialNames)].sort()).toEqual([...KNOWN_REQUEST_TYPES].sort());
+      // The transcribed list must also match the source, so it can't rot independently.
+      expect([...new Set(serialNames)].sort()).toEqual([...KOTLIN_SERIAL_NAMES].sort());
+    }
+  );
 });
 
 describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
@@ -172,12 +196,30 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       .toBe('{"type":"get_traversal_order","requestId":"to-1"}');
   });
 
-  test("add_highlight — id/shape included when present, both omitted when absent", () => {
+  test("add_highlight — id/shape included, omitted, and mixed (independent guards)", () => {
     const shape: HighlightBoxShape = { type: "box", bounds: { x: 1, y: 2, width: 3, height: 4 } };
+    const shapeJson = '{"type":"box","bounds":{"x":1,"y":2,"width":3,"height":4}}';
+    // both present
     expect(serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-1", id: "hi", shape })))
-      .toBe('{"type":"add_highlight","requestId":"h-1","id":"hi","shape":{"type":"box","bounds":{"x":1,"y":2,"width":3,"height":4}}}');
+      .toBe(`{"type":"add_highlight","requestId":"h-1","id":"hi","shape":${shapeJson}}`);
+    // both absent
     expect(serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-2" })))
       .toBe('{"type":"add_highlight","requestId":"h-2"}');
+    // id only (shape undefined) — guard must drop shape without disturbing key order
+    expect(serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-3", id: "hi" })))
+      .toBe('{"type":"add_highlight","requestId":"h-3","id":"hi"}');
+    // shape only (id undefined)
+    expect(serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-4", shape })))
+      .toBe(`{"type":"add_highlight","requestId":"h-4","shape":${shapeJson}}`);
+  });
+
+  test("empty strings are sent (not omitted) — matches the unconditional legacy send", () => {
+    // resourceId/text are assigned unconditionally by the builder, so "" serializes as "" (only
+    // `undefined` is omitted). This mirrors the pre-migration JSON.stringify send sites.
+    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestAction({ requestId: "a-3", action: "x", resourceId: "" })))
+      .toBe('{"type":"request_action","requestId":"a-3","action":"x","resourceId":""}');
+    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestClipboard({ requestId: "c-3", action: "copy", text: "" })))
+      .toBe('{"type":"request_clipboard","requestId":"c-3","action":"copy","text":""}');
   });
 
   test("list_preference_files", () => {

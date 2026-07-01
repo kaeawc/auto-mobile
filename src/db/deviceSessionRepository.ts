@@ -168,32 +168,37 @@ export class DeviceSessionRepository {
     }
   }
 
+  /**
+   * Expire stale active sessions left by previous daemon runs. Called once during
+   * daemon startup (`Daemon.initializeDatabase()`). Errors PROPAGATE rather than
+   * being swallowed: a failure here means the `device_sessions` table is
+   * missing/malformed (a broken DB), which the startup circuit breaker must treat
+   * as fatal so the daemon exits/backs off instead of starting with broken
+   * session state (issue #2784). Do not add a local catch — the caller owns the
+   * fatal/backoff decision.
+   */
   async markStaleActiveSessionsExpired(
     currentDaemonSessionId: string,
     releasedAtMs: number,
     reason: string = "daemon-restart"
   ): Promise<void> {
-    try {
-      const db = await this.getDb();
-      await db
-        .updateTable("device_sessions")
-        .set({
-          status: "expired",
-          released_at_ms: releasedAtMs,
-          release_reason: reason,
-          updated_at: new Date().toISOString(),
-        })
-        .where("status", "=", "active")
-        .where(eb =>
-          eb.or([
-            eb("daemon_session_id", "is", null),
-            eb("daemon_session_id", "!=", currentDaemonSessionId),
-          ])
-        )
-        .execute();
-    } catch (error) {
-      logger.warn(`[DeviceSessionRepository] Failed to expire stale active sessions: ${error}`);
-    }
+    const db = await this.getDb();
+    await db
+      .updateTable("device_sessions")
+      .set({
+        status: "expired",
+        released_at_ms: releasedAtMs,
+        release_reason: reason,
+        updated_at: new Date().toISOString(),
+      })
+      .where("status", "=", "active")
+      .where(eb =>
+        eb.or([
+          eb("daemon_session_id", "is", null),
+          eb("daemon_session_id", "!=", currentDaemonSessionId),
+        ])
+      )
+      .execute();
   }
 
   async getSession(sessionUuid: string): Promise<DeviceSession | undefined> {

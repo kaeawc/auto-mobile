@@ -44,9 +44,19 @@ class AppearanceSyncScheduler {
       return this.pending;
     }
 
-    this.pending = this.tick().finally(() => {
-      this.pending = null;
-    });
+    // Best-effort background sync: swallow all errors here so a failed appearance
+    // read (a transient DB error, or a missing/malformed appearance_configs row)
+    // never floats an unhandledRejection from the fire-and-forget callers
+    // (`void this.trigger()` in the interval and Daemon.start()). A host-
+    // appearance-sync hiccup must not crash an otherwise-healthy daemon into a
+    // restart loop (issue #2784).
+    this.pending = this.tick()
+      .catch(error => {
+        logger.warn(`[Appearance] Host sync tick failed: ${error}`);
+      })
+      .finally(() => {
+        this.pending = null;
+      });
 
     return this.pending;
   }

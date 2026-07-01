@@ -92,8 +92,15 @@ function resolveDbPath(): string {
 let dbInstance: Kysely<DatabaseSchema> | null = null;
 let migrationsRun = false;
 let migrationsPromise: Promise<void> | null = null;
+// Cached startup-migration failure. When migrations fail, `migrationsPromise`
+// RESOLVES (never floats a rejection — that would trip `unhandledRejection`
+// before the daemon's fatal path runs) and the error is cached here so every
+// awaiter (queries via `waitForMigrationsBeforeQuery`, startup via
+// `ensureMigrations`) can re-check and rethrow it. The failure is sticky: we
+// never null `migrationsPromise` to auto-retry (see issues #2784/#2786/#2796).
+let migrationsError: Error | null = null;
 
-const DATABASE_STARTUP_MIGRATION_FAILURE =
+export const DATABASE_STARTUP_MIGRATION_FAILURE =
   "Database startup migrations failed; refusing to run queries until the daemon restarts.";
 
 function createStartupMigrationError(cause: unknown): Error {
@@ -102,11 +109,17 @@ function createStartupMigrationError(cause: unknown): Error {
 }
 
 async function waitForMigrationsBeforeQuery(): Promise<void> {
-  if (migrationsRun || !migrationsPromise) {
+  if (migrationsRun) {
     return;
   }
 
-  await migrationsPromise;
+  if (migrationsPromise) {
+    await migrationsPromise;
+  }
+
+  if (migrationsError) {
+    throw migrationsError;
+  }
 }
 
 function createSqliteKysely<T>(
@@ -144,9 +157,16 @@ async function startMigrations(dbPath: string): Promise<void> {
 
 function ensureMigrationsStarted(dbPath: string): void {
   if (!migrationsRun && !migrationsPromise) {
-    migrationsPromise = startMigrations(dbPath).catch(error => {
-      throw createStartupMigrationError(error);
-    });
+    // Resolve (never reject) so a failed migration does not float an unhandled
+    // rejection; cache the error for synchronous re-checking by awaiters.
+    migrationsPromise = startMigrations(dbPath).then(
+      () => {
+        migrationsError = null;
+      },
+      error => {
+        migrationsError = createStartupMigrationError(error);
+      }
+    );
   }
 }
 
@@ -190,6 +210,22 @@ export async function ensureMigrations(): Promise<void> {
   ensureMigrationsStarted(resolveDbPath());
 
   await migrationsPromise;
+
+  // Under the resolved-promise model the await above never rejects; re-check the
+  // cached error so a startup migration failure stays fatal for callers that
+  // await migrations at startup (e.g. Daemon.initializeDatabase — issue #2784).
+  if (migrationsError) {
+    throw migrationsError;
+  }
+}
+
+/**
+ * The cached startup-migration failure, or null if migrations succeeded or have
+ * not yet failed. Used by the daemon health/liveness path to detect a query-dead
+ * DB without floating a rejection.
+ */
+export function getMigrationsError(): Error | null {
+  return migrationsError;
 }
 
 /**

@@ -530,6 +530,14 @@ jobs:
         with:
           lfs: false
 
+      # Pin the JDK so the ktfmt check formats deterministically (project targets
+      # Java 21) instead of relying on the runner image's default JDK.
+      - name: "Set up JDK"
+        uses: actions/setup-java@v5
+        with:
+          distribution: "zulu"
+          java-version: "21"
+
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Install fast validation dependencies"

@@ -132,18 +132,30 @@ install_manual() {
 
     echo -e "${GREEN}Downloading ktfmt JAR from GitHub Releases...${NC}"
 
+    # -f/--fail makes curl exit non-zero (and not write the response body) on an
+    # HTTP error, so a wrong tag or transient outage fails loudly instead of
+    # silently saving a "Not Found" HTML page as the jar. wget fails on HTTP
+    # errors by default. In both cases, drop the partial file on failure so the
+    # "-f" existence check below cannot pass on a bogus download.
+    download_ok=true
     if command_exists curl; then
-        curl -L -o "$install_dir/$jar_file" "$jar_url"
+        curl -fL --retry 3 -o "$install_dir/$jar_file" "$jar_url" || download_ok=false
     elif command_exists wget; then
-        wget -O "$install_dir/$jar_file" "$jar_url"
+        wget -O "$install_dir/$jar_file" "$jar_url" || download_ok=false
     else
         echo -e "${RED}Neither curl nor wget found. Please install one of them or download manually from:${NC}"
         echo "$jar_url"
         return 1
     fi
 
+    if [[ "$download_ok" != "true" ]]; then
+        rm -f "$install_dir/$jar_file"
+        echo -e "${RED}Failed to download ktfmt JAR from $jar_url${NC}"
+        return 1
+    fi
+
     # Verify the JAR file was downloaded correctly
-    if [[ -f "$install_dir/$jar_file" ]]; then
+    if [[ -s "$install_dir/$jar_file" ]]; then
         echo -e "${GREEN}ktfmt JAR downloaded successfully to $install_dir${NC}"
     else
         echo -e "${RED}Failed to download ktfmt JAR${NC}"

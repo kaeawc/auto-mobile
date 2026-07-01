@@ -147,8 +147,10 @@ printf '%s\n' "${files_to_process[@]}" > "$temp_file"
 echo -e "${YELLOW}Applying ktfmt formatting...${NC}"
 
 if [[ -s "$temp_file" ]]; then
-    # Apply ktfmt formatting and capture output, filtering out "Done formatting" messages
-    ktfmt_output=$(xargs ktfmt 2>&1 < "$temp_file" | grep -v "Done formatting" | grep -v "^$")
+    # Apply ktfmt formatting and capture output, filtering out "Done formatting" messages.
+    # --meta-style is ktfmt's default; passing it explicitly pins the style so a
+    # future ktfmt default change can't silently reformat the whole tree.
+    ktfmt_output=$(xargs ktfmt --meta-style 2>&1 < "$temp_file" | grep -v "Done formatting" | grep -v "^$")
 
     # Check if the output contains actual errors vs just informational messages
     if echo "$ktfmt_output" | grep -E "(error|Error|ERROR|failed|Failed|FAILED)" >/dev/null 2>&1; then

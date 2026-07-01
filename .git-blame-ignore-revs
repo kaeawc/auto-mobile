@@ -1,0 +1,9 @@
+# Revisions to ignore in `git blame` (bulk formatting / mechanical changes only).
+#
+# GitHub's web blame honors this file automatically. For local clones, run:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Only add commits that are PURE reformatting / whitespace with no logic changes.
+
+# chore(android): reformat Kotlin tree with ktfmt 0.64 (meta/default style)
+ee27580b48ed94298139e974b71d840acf8b85ea

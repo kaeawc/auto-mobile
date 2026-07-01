@@ -207,8 +207,9 @@ if [[ -s "$temp_file" ]]; then
                 temp_file_path="$temp_dir/$(basename "$file")"
                 cp "$file" "$temp_file_path"
 
-                # Format the temp file
-                ktfmt "$temp_file_path" >/dev/null 2>&1
+                # Format the temp file. --meta-style is ktfmt's default; passing
+                # it explicitly pins the style the tree was formatted with.
+                ktfmt --meta-style "$temp_file_path" >/dev/null 2>&1
 
                 # Compare original and formatted versions
                 if ! diff -q "$file" "$temp_file_path" >/dev/null 2>&1; then

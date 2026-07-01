@@ -29,10 +29,10 @@ import dev.jasonpearson.automobile.protocol.RequestPackageInfo
 import dev.jasonpearson.automobile.protocol.RequestPinch
 import dev.jasonpearson.automobile.protocol.RequestScreenshot
 import dev.jasonpearson.automobile.protocol.RequestSelectAll
+import dev.jasonpearson.automobile.protocol.RequestSetText
 import dev.jasonpearson.automobile.protocol.RequestSettingsGet
 import dev.jasonpearson.automobile.protocol.RequestSettingsList
 import dev.jasonpearson.automobile.protocol.RequestSettingsPut
-import dev.jasonpearson.automobile.protocol.RequestSetText
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
@@ -53,9 +53,9 @@ import kotlinx.serialization.json.Json
 
 /**
  * Typed [WebSocketMessageHandler] that dispatches each sealed [WebSocketRequest] to the matching
- * [CtrlProxyActions] method. This replaces the legacy flat-DTO + 43-case `when(type: String)` decode
- * path in [WebSocketServer]: the `when (request)` below is exhaustive over the sealed hierarchy, so
- * the compiler fails the build if a new request type is added without a branch here.
+ * [CtrlProxyActions] method. This replaces the legacy flat-DTO + 43-case `when(type: String)`
+ * decode path in [WebSocketServer]: the `when (request)` below is exhaustive over the sealed
+ * hierarchy, so the compiler fails the build if a new request type is added without a branch here.
  *
  * The handler performs no Android I/O — it only decodes fields and calls [actions] — so it can be
  * unit-tested without Robolectric. Every current command is fire-and-forget (the action broadcasts
@@ -138,7 +138,9 @@ class CtrlProxyMessageHandler(
       is RequestHitTest ->
           // Ahead-of-need: no TS client sends this and no device action is wired. Log loudly so a
           // future hit-test implementation notices the gap rather than silently dropping it.
-          log("request_hit_test received (requestId=${request.requestId}) but no device handler is wired; ignoring")
+          log(
+              "request_hit_test received (requestId=${request.requestId}) but no device handler is wired; ignoring"
+          )
       is RequestClipboard ->
           actions.requestClipboard(request.requestId, request.action, request.text)
       is InstallCaCert ->
@@ -199,8 +201,10 @@ class CtrlProxyMessageHandler(
           packageName != null && fileName != null ->
               actions.unsubscribeStorage(request.requestId, packageName, fileName)
           // Real TS traffic sends only `subscriptionId`, formatted as "packageName:fileName" by
-          // StorageSubscriptionManager.subscribe(). Package names never contain ':', so split on the
-          // FIRST ':' to recover packageName/fileName (a file name could theoretically contain ':').
+          // StorageSubscriptionManager.subscribe(). Package names never contain ':', so split on
+          // the
+          // FIRST ':' to recover packageName/fileName (a file name could theoretically contain
+          // ':').
           subscriptionId != null -> {
             val separator = subscriptionId.indexOf(':')
             if (separator > 0 && separator < subscriptionId.length - 1) {
@@ -213,7 +217,10 @@ class CtrlProxyMessageHandler(
               log("unsubscribe_storage received malformed subscriptionId=$subscriptionId; ignoring")
             }
           }
-          else -> log("unsubscribe_storage received without subscriptionId or packageName/fileName; ignoring")
+          else ->
+              log(
+                  "unsubscribe_storage received without subscriptionId or packageName/fileName; ignoring"
+              )
         }
       }
       is GetPreference ->

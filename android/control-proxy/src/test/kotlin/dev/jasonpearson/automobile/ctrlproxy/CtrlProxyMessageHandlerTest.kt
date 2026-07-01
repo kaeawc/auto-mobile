@@ -353,7 +353,8 @@ class CtrlProxyMessageHandlerTest {
 
   @Test
   fun `unsubscribe_storage with only subscriptionId resolves packageName and fileName`() = runTest {
-    // Real TS traffic sends only the subscriptionId ("packageName:fileName"). The handler must split
+    // Real TS traffic sends only the subscriptionId ("packageName:fileName"). The handler must
+    // split
     // it and dispatch the unsubscribe so the device actually tears down the subscription.
     dispatch(
         """{"type":"unsubscribe_storage","requestId":"unsub1","subscriptionId":"com.example:settings.xml"}"""
@@ -367,7 +368,8 @@ class CtrlProxyMessageHandlerTest {
 
   @Test
   fun `unsubscribe_storage splits subscriptionId on the first colon only`() = runTest {
-    // subscriptionId = "packageName:fileName"; a file name may itself contain ':', so only the first
+    // subscriptionId = "packageName:fileName"; a file name may itself contain ':', so only the
+    // first
     // ':' delimits packageName from fileName.
     dispatch(
         """{"type":"unsubscribe_storage","requestId":"unsub3","subscriptionId":"com.example:weird:name.xml"}"""

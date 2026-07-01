@@ -289,7 +289,8 @@ class CtrlProxyMessageHandlerTest {
   fun `install_ca_cert with blank certificate is ignored`() = runTest {
     dispatch("""{"type":"install_ca_cert","requestId":"cc2","certificate":""}""")
     assertTrue("no callback should fire", calls.isEmpty())
-    assertTrue("a diagnostic should be logged", logs.isNotEmpty())
+    assertEquals(1, logs.size)
+    assertTrue(logs[0], logs[0].contains("install_ca_cert missing certificate"))
   }
 
   @Test
@@ -304,16 +305,42 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `install_ca_cert_from_path with blank devicePath is ignored`() = runTest {
+    dispatch("""{"type":"install_ca_cert_from_path","requestId":"cp2","devicePath":""}""")
+    assertTrue("no callback should fire", calls.isEmpty())
+    assertEquals(1, logs.size)
+    assertTrue(logs[0], logs[0].contains("install_ca_cert_from_path missing devicePath"))
+  }
+
+  @Test
   fun `dispatches remove_ca_cert with alias only`() = runTest {
     dispatch("""{"type":"remove_ca_cert","requestId":"rc1","alias":"myalias"}""")
     assertEquals("onRequestRemoveCaCert" to listOf<Any?>("rc1", "myalias", null), lastCall)
   }
 
   @Test
+  fun `dispatches remove_ca_cert with certificate only`() = runTest {
+    dispatch("""{"type":"remove_ca_cert","requestId":"rc3","certificate":"cert-pem"}""")
+    assertEquals("onRequestRemoveCaCert" to listOf<Any?>("rc3", null, "cert-pem"), lastCall)
+  }
+
+  @Test
+  fun `dispatches remove_ca_cert with both alias and certificate`() = runTest {
+    dispatch(
+        """{"type":"remove_ca_cert","requestId":"rc4","alias":"myalias","certificate":"cert-pem"}"""
+    )
+    assertEquals(
+        "onRequestRemoveCaCert" to listOf<Any?>("rc4", "myalias", "cert-pem"),
+        lastCall,
+    )
+  }
+
+  @Test
   fun `remove_ca_cert with neither alias nor certificate is ignored`() = runTest {
     dispatch("""{"type":"remove_ca_cert","requestId":"rc2"}""")
     assertTrue(calls.isEmpty())
-    assertTrue(logs.isNotEmpty())
+    assertEquals(1, logs.size)
+    assertTrue(logs[0], logs[0].contains("remove_ca_cert missing alias and certificate"))
   }
 
   @Test
@@ -466,7 +493,9 @@ class CtrlProxyMessageHandlerTest {
         """{"type":"unsubscribe_storage","requestId":"unsub1","subscriptionId":"com.example:settings.xml"}"""
     )
     assertTrue("no callback should fire without packageName/fileName", calls.isEmpty())
-    assertTrue("a diagnostic should be logged", logs.isNotEmpty())
+    assertEquals(1, logs.size)
+    assertTrue(logs[0], logs[0].contains("unsubscribe_storage"))
+    assertTrue(logs[0], logs[0].contains("subscriptionId=com.example:settings.xml"))
   }
 
   @Test
@@ -613,17 +642,52 @@ class CtrlProxyMessageHandlerTest {
   fun `request_hit_test is decoded but not dispatched to any callback`() = runTest {
     dispatch("""{"type":"request_hit_test","requestId":"ht1","x":320,"y":720}""")
     assertTrue("no callback should fire for the ahead-of-need type", calls.isEmpty())
-    assertTrue("the unhandled request should be logged", logs.isNotEmpty())
+    assertEquals(1, logs.size)
+    assertTrue(logs[0], logs[0].contains("request_hit_test received"))
+    assertTrue(logs[0], logs[0].contains("requestId=ht1"))
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fire-and-forget contract + partial construction
+  // ---------------------------------------------------------------------------
+
+  @Test
+  fun `handleMessage returns null for every command (fire-and-forget)`() = runTest {
+    // A spread across categories, including the branches that do extra work: shape conversion,
+    // rule re-encoding, the ahead-of-need type, recording, and the storage no-op.
+    val messages =
+        listOf(
+            """{"type":"request_screenshot","requestId":"s1"}""",
+            """{"type":"request_tap_coordinates","requestId":"t1","x":1,"y":2}""",
+            """{"type":"add_highlight","requestId":"h1","id":"x","shape":{"type":"box","bounds":{"x":0,"y":0,"width":1,"height":1}}}""",
+            """{"type":"set_network_mock_rules","rules":[]}""",
+            """{"type":"request_hit_test","requestId":"ht","x":1,"y":2}""",
+            """{"type":"start_recording"}""",
+            """{"type":"unsubscribe_storage","requestId":"u","subscriptionId":"a:b"}""",
+        )
+    for (message in messages) {
+      val response = handler.handleMessage(json.decodeFromString<WebSocketRequest>(message))
+      assertEquals("null expected for $message", null, response)
+    }
   }
 
   @Test
-  fun `handleMessage returns null for fire-and-forget commands`() = runTest {
-    val response =
-        handler.handleMessage(
-            json.decodeFromString<WebSocketRequest>(
-                """{"type":"request_screenshot","requestId":"s1"}"""
-            )
+  fun `handler with no callbacks wired ignores commands without crashing`() = runTest {
+    // Every callback defaults to null, so partial construction (e.g. lifecycle-only callers) must
+    // not throw — the dispatcher guards every invocation with `?.invoke`.
+    val minimal = CtrlProxyMessageHandler(log = { logs.add(it) })
+    val messages =
+        listOf(
+            """{"type":"request_screenshot","requestId":"s1"}""",
+            """{"type":"request_swipe","requestId":"sw1","x1":0,"y1":0,"x2":1,"y2":1}""",
+            """{"type":"add_highlight","requestId":"h1","id":"x","shape":{"type":"box","bounds":{"x":0,"y":0,"width":1,"height":1}}}""",
+            """{"type":"set_network_mock_rules","rules":[]}""",
+            """{"type":"start_recording"}""",
         )
-    assertEquals(null, response)
+    for (message in messages) {
+      val response = minimal.handleMessage(json.decodeFromString<WebSocketRequest>(message))
+      assertEquals(null, response)
+    }
+    assertTrue("no recording callbacks are wired on this handler", calls.isEmpty())
   }
 }

@@ -56,6 +56,17 @@ for cmd in find xargs git; do
     fi
 done
 
+# Ensure the ktfmt on PATH understands --meta-style (introduced in ktfmt 0.51;
+# this repo pins 0.64). If an older ktfmt is already on PATH, INSTALL_KTFMT_WHEN_MISSING
+# won't replace it, the format calls below would reject the flag, and their
+# swallowed exit status would leave files unformatted and silently "pass". Fail
+# fast with an actionable message instead.
+if ! printf 'fun probe() {}\n' | ktfmt --meta-style - >/dev/null 2>&1; then
+    echo -e "${RED}The ktfmt on PATH does not support --meta-style (need >= 0.51; this repo pins 0.64).${NC}"
+    echo -e "${RED}Update ktfmt ('brew upgrade ktfmt' or re-run scripts/ktfmt/install_ktfmt.sh) and retry.${NC}"
+    exit 1
+fi
+
 # Start the timer
 if [[ -f "$PROJECT_ROOT/scripts/utils/get_timestamp.sh" ]]; then
     start_time=$(bash "$PROJECT_ROOT/scripts/utils/get_timestamp.sh")
@@ -208,8 +219,13 @@ if [[ -s "$temp_file" ]]; then
                 cp "$file" "$temp_file_path"
 
                 # Format the temp file. --meta-style is ktfmt's default; passing
-                # it explicitly pins the style the tree was formatted with.
-                ktfmt --meta-style "$temp_file_path" >/dev/null 2>&1
+                # it explicitly pins the style the tree was formatted with. Treat a
+                # non-zero ktfmt exit as a failure rather than silently diffing an
+                # unformatted copy (which would falsely report the file as clean).
+                if ! ktfmt --meta-style "$temp_file_path" >/dev/null 2>&1; then
+                    errors="${errors}${file}: ktfmt failed to run (non-zero exit)\n"
+                    continue
+                fi
 
                 # Compare original and formatted versions
                 if ! diff -q "$file" "$temp_file_path" >/dev/null 2>&1; then

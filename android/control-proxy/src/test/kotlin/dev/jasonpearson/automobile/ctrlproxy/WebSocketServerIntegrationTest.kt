@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
+import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import io.ktor.client.HttpClient
@@ -56,15 +57,24 @@ class WebSocketServerIntegrationTest {
         WebSocketServer(
             port = 0,
             scope = testScope,
-            onAddHighlight = { requestId, highlightId, shape ->
-              val error =
-                  when {
-                    highlightId.isNullOrBlank() -> "Missing highlight id"
-                    shape == null -> "Missing highlight shape"
-                    else -> null
-                  }
-              enqueueHighlightResponse(requestId, error == null, error)
-            },
+            messageHandler =
+                CtrlProxyMessageHandler(
+                    object : NoOpCtrlProxyActions() {
+                      override fun addHighlight(
+                          requestId: String?,
+                          highlightId: String?,
+                          shape: HighlightShape?,
+                      ) {
+                        val error =
+                            when {
+                              highlightId.isNullOrBlank() -> "Missing highlight id"
+                              shape == null -> "Missing highlight shape"
+                              else -> null
+                            }
+                        enqueueHighlightResponse(requestId, error == null, error)
+                      }
+                    }
+                ),
         )
   }
 
@@ -430,6 +440,55 @@ class WebSocketServerIntegrationTest {
         assertEquals("false", responseJson["success"]?.jsonPrimitive?.content)
         assertEquals("Missing highlight id", responseJson["error"]?.jsonPrimitive?.content)
       }
+    }
+  }
+
+  @Test
+  fun `commands dispatch in wire order`() = runBlocking {
+    // Regression guard for message ordering: two synchronous commands sent back-to-back must run
+    // in the order they arrive on the wire. This holds only because the server dispatches inline on
+    // the read loop; if dispatch were launched into a background scope, these could reorder.
+    val order = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val orderedServer =
+        WebSocketServer(
+            port = 0,
+            scope = testScope,
+            messageHandler =
+                CtrlProxyMessageHandler(
+                    object : NoOpCtrlProxyActions() {
+                      override fun setRecompositionTracking(enabled: Boolean) {
+                        order.add("flags")
+                      }
+
+                      override fun requestScreenshot(requestId: String?) {
+                        order.add("screenshot")
+                      }
+                    }
+                ),
+        )
+    orderedServer.start()
+    try {
+      val client = HttpClient(CIO) { install(WebSockets) }
+      client.use { c ->
+        c.webSocket(
+            method = HttpMethod.Get,
+            host = "localhost",
+            port = orderedServer.getActualPort() ?: error("Server not running"),
+            path = "/ws",
+        ) {
+          incoming.receive() // connection greeting
+          send(Frame.Text("""{"type":"set_recomposition_tracking","enabled":true}"""))
+          send(Frame.Text("""{"type":"request_screenshot","requestId":"s1"}"""))
+          withTimeout(1000) {
+            while (order.size < 2) {
+              delay(10)
+            }
+          }
+          assertEquals(listOf("flags", "screenshot"), order.toList())
+        }
+      }
+    } finally {
+      orderedServer.stop()
     }
   }
 }

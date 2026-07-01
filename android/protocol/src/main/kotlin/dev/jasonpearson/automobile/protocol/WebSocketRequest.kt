@@ -309,8 +309,13 @@ data class SubscribeStorage(
 @SerialName("unsubscribe_storage")
 data class UnsubscribeStorage(
   override val requestId: String? = null,
-  val packageName: String,
-  val fileName: String,
+  // The TS client sends only `subscriptionId` (formatted as "packageName:fileName"); packageName
+  // and fileName are kept nullable so the real wire message decodes without throwing. The device
+  // handler needs packageName/fileName, so when only subscriptionId is present the request is a
+  // no-op (matching the pre-migration behavior). See CtrlProxyMessageHandler for details.
+  val subscriptionId: String? = null,
+  val packageName: String? = null,
+  val fileName: String? = null,
 ) : WebSocketRequest()
 
 @Serializable
@@ -383,6 +388,15 @@ data class SetRecompositionTracking(
 ) : WebSocketRequest()
 
 @Serializable
+@SerialName("set_accessibility_flags")
+data class SetAccessibilityFlags(
+  override val requestId: String? = null,
+  val includeNotImportantViews: Boolean = true,
+  val reportViewIds: Boolean = true,
+  val retrieveInteractiveWindows: Boolean = true,
+) : WebSocketRequest()
+
+@Serializable
 @SerialName("set_network_mock_rules")
 data class SetNetworkMockRules(
   override val requestId: String? = null,
@@ -438,4 +452,20 @@ data class RequestPackageInfo(
 data class RequestLaunchIntent(
   override val requestId: String? = null,
   val packageName: String,
+) : WebSocketRequest()
+
+// =============================================================================
+// Recording Requests
+// =============================================================================
+
+@Serializable
+@SerialName("start_recording")
+data class StartRecording(
+  override val requestId: String? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("stop_recording")
+data class StopRecording(
+  override val requestId: String? = null,
 ) : WebSocketRequest()

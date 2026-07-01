@@ -303,7 +303,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
   test("extended budget is not reset by a later non-loading hierarchy", async () => {
     // Spinner on the first poll extends the budget; subsequent plain hierarchies must
     // not shrink it back (the target appears past the base budget's reach).
-    const { tap, timer } = createTapOnElement();
+    const { tap } = createTapOnElement();
     let call = 0;
     (tap as any).refreshViewHierarchy = async () => {
       call++;

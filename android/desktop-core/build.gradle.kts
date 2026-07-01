@@ -18,9 +18,12 @@ java {
 }
 
 // Stamp the package version into the jar manifest so the desktop daemon socket client can declare
-// its build to the daemon's version handshake gate (#2744), mirroring the JUnit runner.
+// its build to the daemon's version handshake gate (#2744), mirroring the JUnit runner. Resolve the
+// repo-root package.json relative to THIS project's dir (android/desktop-core), not the root
+// project's — desktop-core is also built inside the standalone android/ide-plugin Gradle build,
+// whose root would otherwise resolve to a nonexistent android/package.json and fail configuration.
 val npmPackageVersion =
-    providers.fileContents(rootProject.layout.projectDirectory.file("../package.json")).asText.map { packageJson ->
+    providers.fileContents(layout.projectDirectory.file("../../package.json")).asText.map { packageJson ->
       (JsonSlurper().parseText(packageJson) as Map<*, *>)["version"].toString()
     }
 

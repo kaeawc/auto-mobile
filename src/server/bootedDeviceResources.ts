@@ -404,8 +404,12 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
         manager.getInstalledApkSha256(),
       ]);
       const expectedSha256 = resolveApkChecksum();
-      const isCompatible = expectedSha256.length === 0 ||
-        (installedSha256 !== null && installedSha256.toLowerCase() === expectedSha256.toLowerCase());
+      // An explicit pin absent from the registry yields an empty expected checksum,
+      // which must NOT read as "compatible" — the installed APK is unverifiable (#2746).
+      const isCompatible = !AndroidCtrlProxyManager.isPinnedVersionUnverifiable() && (
+        expectedSha256.length === 0 ||
+        (installedSha256 !== null && installedSha256.toLowerCase() === expectedSha256.toLowerCase())
+      );
       return {
         installed,
         enabled,

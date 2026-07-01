@@ -262,6 +262,33 @@ describe("checkCtrlProxy", () => {
     expect(result.message).toBe("No Android devices connected");
   });
 
+  test("fails (not skips) when AUTOMOBILE_VERSION pins an unverifiable version (#2746)", async () => {
+    const prevVersion = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "99.99.99";
+    try {
+      fakeAdb.setDevices([{
+        deviceId: "emulator-5554",
+        platform: "android",
+        isEmulator: true,
+        name: "Pixel"
+      }]);
+
+      const result = await checkCtrlProxy(fakeFactory);
+
+      // Must be `fail` so the `--cli doctor` CI gate blocks — a thrown guard would
+      // otherwise be caught and downgraded to `skip`, which doesn't count as a failure.
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain("99.99.99");
+      expect(result.recommendation).toContain("AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM");
+    } finally {
+      if (prevVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = prevVersion;
+      }
+    }
+  });
+
   test("warns when installed and enabled CtrlProxy is stale but accepted for readiness", async () => {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
     const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;

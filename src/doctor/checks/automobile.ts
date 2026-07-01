@@ -248,6 +248,19 @@ export async function checkCtrlProxy(
 
     // Check first connected device
     const device = devices[0];
+
+    // An unverifiable explicit pin is a hard configuration failure — surface it as
+    // `fail` (not the `skip` the thrown guard would otherwise become in the catch),
+    // so the documented `--cli doctor` CI gate actually blocks (#2746).
+    if (AndroidCtrlProxyManager.isPinnedVersionUnverifiable()) {
+      return {
+        name: "CtrlProxy",
+        status: "fail",
+        message: `platform=${device.platform}; device=${device.deviceId}; AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the release checksum registry`,
+        recommendation: "The pinned CtrlProxy APK cannot be integrity-verified. Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.",
+      };
+    }
+
     // Reset cached instances to ensure fresh ADB reads for doctor diagnostics
     // (getInstance memoizes isInstalled/isEnabled for 30 minutes which can report stale state)
     AndroidCtrlProxyManager.resetInstances();

@@ -234,12 +234,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     // Fail closed before touching the network: don't background-download and cache
     // an unverifiable APK for an unknown explicit pin (#2746). Skipping (not
     // throwing) keeps daemon startup alive; the install path still fails closed.
-    if (
-      isExplicitPin() &&
-      !isPinnedVersionKnown() &&
-      AndroidCtrlProxyManager.expectedChecksumOverride === null &&
-      !AndroidCtrlProxyManager.isChecksumSkipConfigured()
-    ) {
+    if (AndroidCtrlProxyManager.isPinnedVersionUnverifiable()) {
       logger.warn(
         `[CTRL_PROXY] Prefetch skipped: AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the ` +
         `release checksum registry, so the APK cannot be integrity-verified`
@@ -1530,7 +1525,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * (or a local APK path override) is the explicit escape hatch.
    */
   private assertPinnedVersionVerifiable(): void {
-    if (isExplicitPin() && !isPinnedVersionKnown() && !this.shouldSkipChecksum()) {
+    if (AndroidCtrlProxyManager.isPinnedVersionUnverifiable()) {
       throw new ActionableError(
         `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
         `checksum registry, so the CtrlProxy APK cannot be integrity-verified. ` +
@@ -1621,6 +1616,23 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
     const apkPathOverride = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH?.trim();
     return Boolean(apkPathOverride && apkPathOverride.length > 0);
+  }
+
+  /**
+   * Single source of truth for the fail-closed decision: `AUTOMOBILE_VERSION` names
+   * a concrete version absent from the checksum registry, with no escape hatch set,
+   * so the APK cannot be integrity-verified (#2746). Consumed by the download/readiness
+   * guards, the startup prefetch, `doctor`, and the booted-device compatibility check
+   * so they can't drift apart.
+   */
+  static isPinnedVersionUnverifiable(): boolean {
+    if (AndroidCtrlProxyManager.expectedChecksumOverride !== null) {
+      return false;
+    }
+    if (AndroidCtrlProxyManager.isChecksumSkipConfigured()) {
+      return false;
+    }
+    return isExplicitPin() && !isPinnedVersionKnown();
   }
 
   private shouldSkipDownloadIfInstalled(): boolean {

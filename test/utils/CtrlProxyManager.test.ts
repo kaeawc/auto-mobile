@@ -828,6 +828,43 @@ describe("CtrlProxyManager", function() {
     });
   });
 
+  describe("isPinnedVersionUnverifiable", () => {
+    const withVersion = (value: string | undefined, fn: () => void) => {
+      const prev = process.env.AUTOMOBILE_VERSION;
+      if (value === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = value;
+      }
+      try {
+        fn();
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prev;
+        }
+      }
+    };
+
+    test("false when no explicit pin (latest)", () => {
+      withVersion(undefined, () => expect(AndroidCtrlProxyManager.isPinnedVersionUnverifiable()).toBe(false));
+    });
+
+    test("false for a known explicit pin", () => {
+      withVersion("0.0.18", () => expect(AndroidCtrlProxyManager.isPinnedVersionUnverifiable()).toBe(false));
+    });
+
+    test("true for an unknown explicit pin", () => {
+      withVersion("99.99.99", () => expect(AndroidCtrlProxyManager.isPinnedVersionUnverifiable()).toBe(true));
+    });
+
+    test("false for an unknown pin when checksum skip is configured", () => {
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+      withVersion("99.99.99", () => expect(AndroidCtrlProxyManager.isPinnedVersionUnverifiable()).toBe(false));
+    });
+  });
+
   describe("downloadApk", () => {
     test("should copy from local APK override when provided", async function() {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-test-apk-"));

@@ -375,6 +375,7 @@ class McpDaemonClient(
               type = "mcp_request",
               method = method,
               params = params,
+              clientVersion = DaemonSocketPaths.resolveClientVersion(),
           )
 
       writer.write(json.encodeToString(request))
@@ -409,6 +410,22 @@ object DaemonSocketPaths {
     return "/tmp/auto-mobile-daemon-$userId.sock"
   }
 
+  /**
+   * Version this desktop client declares to the daemon for the server-side version handshake
+   * gate (#2744), so the desktop UI can't silently execute against a wrong-build daemon on the
+   * shared socket. Prefers explicit env overrides, then the jar `Implementation-Version` stamped
+   * from `package.json`. Null when unidentifiable (a legacy, ungated client).
+   */
+  fun resolveClientVersion(): String? {
+    val daemonPackageEnv = System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION")?.trim().orEmpty()
+    if (daemonPackageEnv.isNotEmpty()) return daemonPackageEnv
+
+    val automobileVersionEnv = System.getenv("AUTOMOBILE_VERSION")?.trim().orEmpty()
+    if (automobileVersionEnv.isNotEmpty()) return automobileVersionEnv
+
+    return DaemonSocketPaths::class.java.`package`?.implementationVersion?.trim()?.takeIf { it.isNotEmpty() }
+  }
+
   private fun getUserId(): String {
     val userName = System.getProperty("user.name", "default").ifBlank { "default" }
     val osName = System.getProperty("os.name", "").lowercase()
@@ -432,11 +449,14 @@ object DaemonSocketPaths {
 }
 
 @Serializable
-private data class DaemonRequest(
+internal data class DaemonRequest(
     val id: String,
     val type: String,
     val method: String,
     val params: JsonObject,
+    // Declared for the daemon's server-side version handshake gate (#2744). Null on clients that
+    // cannot identify their build; the daemon allows those through as legacy.
+    val clientVersion: String? = null,
 )
 
 @Serializable

@@ -1,3 +1,5 @@
+import groovy.json.JsonSlurper
+
 plugins {
   kotlin("jvm")
   alias(libs.plugins.kotlin.serialization)
@@ -13,6 +15,17 @@ repositories {
 
 java {
   toolchain { languageVersion.set(JavaLanguageVersion.of(libs.versions.build.java.target.get())) }
+}
+
+// Stamp the package version into the jar manifest so the desktop daemon socket client can declare
+// its build to the daemon's version handshake gate (#2744), mirroring the JUnit runner.
+val npmPackageVersion =
+    providers.fileContents(rootProject.layout.projectDirectory.file("../package.json")).asText.map { packageJson ->
+      (JsonSlurper().parseText(packageJson) as Map<*, *>)["version"].toString()
+    }
+
+tasks.named<Jar>("jar") {
+  manifest { attributes("Implementation-Version" to npmPackageVersion.get()) }
 }
 
 sourceSets {

@@ -190,4 +190,11 @@ export const IOS_CTRL_PROXY_RELEASE_VERSION: string = RELEASE_VERSION;
 export const IOS_CTRL_PROXY_IPA_URL: string = buildReleaseAssetUrl("control-proxy.ipa", IOS_CTRL_PROXY_RELEASE_VERSION);
 export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveChecksum(IOS_CTRL_PROXY_RELEASE_VERSION, "ios");
 export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (device build), empty = skip verification
-export const IOS_CTRL_PROXY_RUNNER_SHA256: string = ""; // SHA256 of runner binary (CtrlProxyUITests-Runner), empty = skip verification
+// SHA256 of the simulator runner binary (CtrlProxyUITests-Runner), empty = skip
+// verification. This is a single global scalar, valid only for the runner inside
+// the *latest* IPA (registry[0]) — the runner lives inside that IPA, so its
+// integrity is transitively covered by registry[0].ipaSha256. If pinned-older
+// iOS downloads are ever wired (resolveChecksum(<pinned>, "ios")), move this to a
+// per-entry ReleaseChecksumEntry.runnerSha256 or the check would compare the
+// newest runner sha against an older IPA and reject a valid bundle.
+export const IOS_CTRL_PROXY_RUNNER_SHA256: string = "";

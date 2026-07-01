@@ -47,28 +47,45 @@ check() {
   fi
 }
 
+# Extract a JSON field, failing the whole gate loudly (clean message, no python
+# traceback) if the file is malformed or the field is missing — a swallowed
+# extraction would otherwise surface only as a confusing "expected X, got ''".
 json_field() {
   # $1 = file, $2 = python expression evaluated against `d` (parsed JSON)
-  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$1" "$2"
+  python3 -c 'import json,sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print(eval(sys.argv[2]))
+except Exception as exc:
+    sys.stderr.write(f"failed to read {sys.argv[2]} from {sys.argv[1]}: {exc}\n")
+    sys.exit(1)' "$1" "$2"
 }
 
-check "package.json version" "$(json_field "$PACKAGE_JSON" 'd["version"]')"
-check ".claude-plugin/plugin.json version" "$(json_field "$PLUGIN_JSON" 'd["version"]')"
-check ".claude-plugin/marketplace.json plugins[0].version" \
-  "$(json_field "$MARKETPLACE_JSON" 'd["plugins"][0]["version"]')"
-check "server.json version" "$(json_field "$SERVER_JSON" 'd["version"]')"
+pkg_version="$(json_field "$PACKAGE_JSON" 'd["version"]')" || exit 1
+check "package.json version" "$pkg_version"
+plugin_version="$(json_field "$PLUGIN_JSON" 'd["version"]')" || exit 1
+check ".claude-plugin/plugin.json version" "$plugin_version"
+marketplace_version="$(json_field "$MARKETPLACE_JSON" 'd["plugins"][0]["version"]')" || exit 1
+check ".claude-plugin/marketplace.json plugins[0].version" "$marketplace_version"
+server_version="$(json_field "$SERVER_JSON" 'd["version"]')" || exit 1
+check "server.json version" "$server_version"
 
-while IFS= read -r pkg_version; do
-  check "server.json packages[].version" "$pkg_version"
-done < <(python3 -c 'import json,sys
-d=json.load(open(sys.argv[1]))
-for p in d.get("packages", []):
-    print(p["version"])' "$SERVER_JSON")
+server_packages="$(python3 -c 'import json,sys
+try:
+    d = json.load(open(sys.argv[1]))
+    for p in d.get("packages", []):
+        print(p["version"])
+except Exception as exc:
+    sys.stderr.write(f"failed to read packages from {sys.argv[1]}: {exc}\n")
+    sys.exit(1)' "$SERVER_JSON")" || exit 1
+while IFS= read -r pkg_ver; do
+  [ -n "$pkg_ver" ] && check "server.json packages[].version" "$pkg_ver"
+done <<< "$server_packages"
 
 # gradle.properties keeps a -SNAPSHOT suffix for dev/Maven coordinates; the
 # release coordinate is overridden with -PVERSION_NAME at publish. Only the base
-# version participates in equality.
-gradle_version="$(grep -E '^VERSION_NAME=' "$GRADLE_PROPS" | head -1 | cut -d= -f2)"
+# version participates in equality. (tr strips a stray CR from CRLF checkouts.)
+gradle_version="$(grep -E '^VERSION_NAME=' "$GRADLE_PROPS" | head -1 | cut -d= -f2 | tr -d '\r')"
 check "android/gradle.properties VERSION_NAME (base)" "${gradle_version%-SNAPSHOT}"
 
 registry_version="$(grep -m1 -E '^[[:space:]]+version: "' "$RELEASE_TS" \

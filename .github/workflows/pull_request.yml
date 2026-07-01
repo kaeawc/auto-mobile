@@ -1224,6 +1224,12 @@ jobs:
       - name: "Ensure AutoMobile daemon ready"
         run: ./scripts/ci/ensure-daemon-ready.sh
 
+      # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)
+      # so the test's first `observe` doesn't pay that cost inside its short
+      # waitFor window and time out (#2730 follow-up).
+      - name: "Warm up iOS CtrlProxy"
+        run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+
       - name: "Run Reminders integration tests (Xcode 26.2)"
         timeout-minutes: 10
         env:
@@ -1252,6 +1258,14 @@ jobs:
         run: |
           brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
           ./scripts/ios/video-recording-start-stop-integration.sh
+
+      # This is a freshly-booted sim, so re-confirm the daemon and warm CtrlProxy
+      # again before the second Reminders run (same rationale as the 26.2 block).
+      - name: "Ensure AutoMobile daemon ready (Xcode 26.3)"
+        run: ./scripts/ci/ensure-daemon-ready.sh
+
+      - name: "Warm up iOS CtrlProxy (Xcode 26.3)"
+        run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
       - name: "Run Reminders integration tests (Xcode 26.3)"
         timeout-minutes: 10

@@ -1,11 +1,8 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of an open URL operation
  */
-export interface OpenURLResult {
-  success: boolean;
+export interface OpenURLResult extends BaseActionResult {
   url: string;
-  observation?: ObserveResult;
-  error?: string;
 }

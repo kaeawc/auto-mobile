@@ -15,6 +15,7 @@ export interface DeviceAppUninstaller {
 
 export class UninstallApp {
   private device: BootedDevice;
+  private adbFactory: AdbClientFactory;
   private adb: AdbExecutor;
   private simctl: SimCtlClient;
   private deviceAppUninstaller: DeviceAppUninstaller;
@@ -26,6 +27,7 @@ export class UninstallApp {
     deviceAppUninstaller: DeviceAppUninstaller | null = null
   ) {
     this.device = device;
+    this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.simctl = simctl || new SimCtlClient(device);
     this.deviceAppUninstaller = deviceAppUninstaller || new DeviceAppInspector();
@@ -80,8 +82,10 @@ export class UninstallApp {
     try {
       const simulator = this.isSimulator();
 
-      // Check if app is installed
-      const listApps = new ListInstalledApps(this.device, null, this.simctl);
+      // Check if app is installed. Keep the cache disabled so the pre-uninstall
+      // check always reflects live device state (the previous executor-arg path
+      // left caching off; passing the default factory would silently enable it).
+      const listApps = new ListInstalledApps(this.device, this.adbFactory, this.simctl, { cacheEnabled: false });
       const installed = (await listApps.execute()).find(app => app === bundleId) !== undefined;
 
       if (!installed) {
@@ -165,8 +169,10 @@ export class UninstallApp {
         }
       }
 
-      // Check if app is installed
-      const listApps = new ListInstalledApps(this.device, this.adb);
+      // Check if app is installed. Keep the cache disabled so the pre-uninstall
+      // check always reflects live device state (the previous executor-arg path
+      // left caching off; passing the default factory would silently enable it).
+      const listApps = new ListInstalledApps(this.device, this.adbFactory, null, { cacheEnabled: false });
 
       const installed = (await listApps.execute()).find(app => app === packageName) !== undefined;
 

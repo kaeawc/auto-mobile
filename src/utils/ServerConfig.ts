@@ -35,6 +35,11 @@ class ServerConfig {
   private _a11yReportViewIds: boolean = true;
   private _a11yRetrieveInteractiveWindows: boolean = true;
   private _planExecutionActive: boolean = false;
+  private _observeResultDropElements: boolean = false;
+  private _observeResultCompact: boolean = false;
+  private _toolResultsNoStructuredContent: boolean = false;
+  private _actionsDiffObserve: boolean = false;
+  private _actionsNoObserve: boolean = false;
 
   private constructor() {}
 
@@ -203,6 +208,48 @@ class ServerConfig {
 
   isPlanExecutionActive(): boolean {
     return this._planExecutionActive;
+  }
+
+  // --- Output-size reduction flags (issue #2756) ---
+
+  setObserveResultDropElementsEnabled(enabled: boolean): void {
+    this._observeResultDropElements = enabled;
+  }
+
+  isObserveResultDropElementsEnabled(): boolean {
+    return this._observeResultDropElements;
+  }
+
+  setObserveResultCompactEnabled(enabled: boolean): void {
+    this._observeResultCompact = enabled;
+  }
+
+  isObserveResultCompactEnabled(): boolean {
+    return this._observeResultCompact;
+  }
+
+  setToolResultsNoStructuredContentEnabled(enabled: boolean): void {
+    this._toolResultsNoStructuredContent = enabled;
+  }
+
+  isToolResultsNoStructuredContentEnabled(): boolean {
+    return this._toolResultsNoStructuredContent;
+  }
+
+  setActionsDiffObserveEnabled(enabled: boolean): void {
+    this._actionsDiffObserve = enabled;
+  }
+
+  isActionsDiffObserveEnabled(): boolean {
+    return this._actionsDiffObserve;
+  }
+
+  setActionsNoObserveEnabled(enabled: boolean): void {
+    this._actionsNoObserve = enabled;
+  }
+
+  isActionsNoObserveEnabled(): boolean {
+    return this._actionsNoObserve;
   }
 
 }

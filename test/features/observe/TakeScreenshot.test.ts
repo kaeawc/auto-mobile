@@ -4,7 +4,7 @@ import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 describe("TakeScreenshot", function() {
   describe("Unit Tests for Extracted Methods", function() {
@@ -22,7 +22,7 @@ describe("TakeScreenshot", function() {
 
       // Create a simple fake ADB for unit testing
       fakeAdb = new FakeAdbExecutor();
-      const fakeFactory: AdbClientFactory = { create: () => fakeAdb };
+      const fakeFactory = new FakeAdbClientFactory(fakeAdb);
       takeScreenshot = new TakeScreenshot(mockDevice, fakeFactory);
     });
 
@@ -72,7 +72,7 @@ describe("TakeScreenshot", function() {
       fakeFileSystem.setExists("/tmp/auto-mobile/screenshots", true);
 
       // Create factory that returns testFakeAdb
-      const testFactory: AdbClientFactory = { create: () => testFakeAdb };
+      const testFactory = new FakeAdbClientFactory(testFakeAdb);
       const takeScreenshot = new TakeScreenshot(mockDevice, testFactory);
 
       // Mock the window dependency to avoid additional ADB calls

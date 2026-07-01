@@ -5,6 +5,11 @@ import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { ActionableError, type BootedDevice } from "../../models";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import {
+  exponentialBackoff,
+  normalizeBackoff,
+  type BackoffInput,
+} from "../../utils/Backoff";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -24,6 +29,15 @@ export const PROCESS_EXIT_TIMEOUT_MS = 5000;
 // the generic 5s window, so the iOS stop path waits much longer before escalating
 // to SIGKILL. In the normal case simctl exits within ~1s and we return immediately.
 export const IOS_RECORDING_STOP_TIMEOUT_MS = 30000;
+// Even after the `simctl recordVideo` process has fully exited, the raw `.mov`
+// can lag behind on a loaded CI runner: the moov-atom flush and the filesystem
+// write are not guaranteed to be visible the instant the process exits, so a
+// single `stat` immediately after `waitForExit` can momentarily see the file
+// missing or 0 bytes and hard-fail. We poll (bounded, with backoff) for the file
+// to exist, be non-empty, and have a stable size before handing it to ffmpeg.
+export const IOS_RECORDING_FILE_READY_TIMEOUT_MS = 15000;
+const IOS_RECORDING_FILE_READY_INITIAL_BACKOFF_MS = 100;
+const IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS = 1000;
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
 const IOS_RECORDING_START_TIMEOUT_MS = 30000;
 const IOS_RECORDING_START_MESSAGES = [
@@ -170,6 +184,91 @@ export async function waitForExit(
   }
 
   await exitPromise;
+}
+
+/**
+ * Minimal filesystem surface for probing a recording file's size. Returns the
+ * size in bytes, or `null` when the file does not yet exist. Narrowed so the
+ * readiness poll can be unit-tested with a fake instead of a real `stat`.
+ */
+export interface RecordingFileProbe {
+  size(filePath: string): Promise<number | null>;
+}
+
+const defaultRecordingFileProbe: RecordingFileProbe = {
+  async size(filePath: string): Promise<number | null> {
+    try {
+      const stats = await fsPromises.stat(filePath);
+      return stats.size;
+    } catch {
+      // Missing file (ENOENT) is the expected "not ready yet" state during the poll.
+      return null;
+    }
+  },
+};
+
+export interface WaitForRecordingFileOptions {
+  probe?: RecordingFileProbe;
+  timeoutMs?: number;
+  backoff?: BackoffInput;
+  timer?: Timer;
+}
+
+/**
+ * Wait for a `simctl recordVideo` raw capture file to fully materialize after the
+ * recorder process has exited. Polls with backoff until the file exists, is
+ * non-empty, and its size has stopped changing between two consecutive probes
+ * (so we never hand a still-flushing/truncated file to ffmpeg). Throws a
+ * diagnostic error on timeout describing what was actually observed
+ * (never appeared / stayed empty / never stabilized) instead of failing on the
+ * first missing-file glance.
+ */
+export async function waitForRecordingFileReady(
+  filePath: string,
+  options: WaitForRecordingFileOptions = {}
+): Promise<number> {
+  const probe = options.probe ?? defaultRecordingFileProbe;
+  const timer = options.timer ?? defaultTimer;
+  const timeoutMs = options.timeoutMs ?? IOS_RECORDING_FILE_READY_TIMEOUT_MS;
+  const backoff = normalizeBackoff(
+    options.backoff ?? exponentialBackoff({
+      initialDelayMs: IOS_RECORDING_FILE_READY_INITIAL_BACKOFF_MS,
+      maxDelayMs: IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS,
+    })
+  );
+
+  const deadline = timer.now() + timeoutMs;
+  let attempt = 0;
+  let everExisted = false;
+  let previousSize: number | null = null;
+
+  for (;;) {
+    attempt++;
+    const size = await probe.size(filePath);
+    if (size !== null) {
+      everExisted = true;
+      // A non-empty file whose size matches the previous probe has finished flushing.
+      if (size > 0 && size === previousSize) {
+        return size;
+      }
+    }
+    previousSize = size;
+
+    if (timer.now() >= deadline) {
+      const observed = !everExisted
+        ? "never appeared"
+        : previousSize === null
+          ? "disappeared after appearing"
+          : previousSize === 0
+            ? "stayed empty (0 bytes)"
+            : `stopped at ${previousSize} bytes but never stabilized`;
+      throw new Error(
+        `iOS recording file not ready at ${filePath} after ${timeoutMs}ms (${attempt} probes): ${observed}`
+      );
+    }
+
+    await timer.sleep(backoff.delayForAttempt(attempt));
+  }
 }
 
 async function waitForProcessCompletion(
@@ -507,11 +606,16 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       throw new ActionableError("Missing iOS capture path for FFmpeg processing.");
     }
 
-    const exists = await pathExists(capturePath);
-    if (!exists) {
+    // simctl finalizes the moov atom on SIGINT, but the flush + filesystem write
+    // can lag behind process exit on a loaded runner. Poll for a stable, non-empty
+    // file before failing, so a momentarily-missing file is not a hard error (#2730).
+    try {
+      await waitForRecordingFileReady(capturePath);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
       throw new ActionableError(
         this.buildProcessFailureMessage(
-          `iOS recording file missing at ${capturePath}`,
+          `iOS recording file missing at ${capturePath}: ${reason}`,
           "xcrun",
           [
             "simctl",

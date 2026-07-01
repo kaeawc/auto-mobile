@@ -1,12 +1,9 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of a send text operation
  */
-export interface SendTextResult {
-  success: boolean;
+export interface SendTextResult extends BaseActionResult {
   text: string;
   imeAction?: string;
-  observation?: ObserveResult;
-  error?: string;
 }

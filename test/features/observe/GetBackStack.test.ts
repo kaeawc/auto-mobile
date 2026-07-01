@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { GetBackStack } from "../../../src/features/observe/GetBackStack";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { ExecResult, BootedDevice } from "../../../src/models";
-import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 
 describe("GetBackStack", function() {
   let fakeAdb: FakeAdbExecutor;
-  let fakeAdbFactory: AdbClientFactory;
+  let fakeAdbFactory: FakeAdbClientFactory;
   let getBackStack: GetBackStack;
   let mockDevice: BootedDevice;
 
@@ -21,10 +21,10 @@ describe("GetBackStack", function() {
     fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandResponse("dumpsys activity activities", mockDumpsysOutput());
 
-    // Create a factory that returns our fake
-    fakeAdbFactory = { create: () => fakeAdb };
+    // Wrap the configured fake in a factory
+    fakeAdbFactory = new FakeAdbClientFactory(fakeAdb);
 
-    getBackStack = new GetBackStack(fakeAdbFactory, mockDevice);
+    getBackStack = new GetBackStack(mockDevice, fakeAdbFactory);
   });
 
   test("should parse activities from dumpsys output", async function() {
@@ -73,8 +73,8 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
 
     const testFakeAdb = new FakeAdbExecutor();
     testFakeAdb.setCommandResponse("dumpsys activity activities", { stdout, stderr: "" });
-    const testFactory: AdbClientFactory = { create: () => testFakeAdb };
-    getBackStack = new GetBackStack(testFactory, mockDevice);
+    const testFactory = new FakeAdbClientFactory(testFakeAdb);
+    getBackStack = new GetBackStack(mockDevice, testFactory);
 
     const result = await getBackStack.execute();
 
@@ -93,8 +93,8 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
     // Mock empty output
     const emptyFakeAdb = new FakeAdbExecutor();
     emptyFakeAdb.setCommandResponse("dumpsys activity activities", { stdout: "", stderr: "" });
-    const emptyFactory: AdbClientFactory = { create: () => emptyFakeAdb };
-    getBackStack = new GetBackStack(emptyFactory, mockDevice);
+    const emptyFactory = new FakeAdbClientFactory(emptyFakeAdb);
+    getBackStack = new GetBackStack(mockDevice, emptyFactory);
 
     const result = await getBackStack.execute();
 
@@ -106,8 +106,8 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
     // Mock error by setting default response and letting the error handling work
     const errorFakeAdb = new FakeAdbExecutor();
     // Don't set any response - the error will come from the parsing logic
-    const errorFactory: AdbClientFactory = { create: () => errorFakeAdb };
-    getBackStack = new GetBackStack(errorFactory, mockDevice);
+    const errorFactory = new FakeAdbClientFactory(errorFakeAdb);
+    getBackStack = new GetBackStack(mockDevice, errorFactory);
 
     const result = await getBackStack.execute();
 

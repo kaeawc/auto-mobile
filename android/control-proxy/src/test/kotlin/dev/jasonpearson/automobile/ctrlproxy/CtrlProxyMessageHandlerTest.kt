@@ -352,14 +352,38 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
-  fun `unsubscribe_storage with only subscriptionId is a no-op matching the TS wire`() = runTest {
+  fun `unsubscribe_storage with only subscriptionId resolves packageName and fileName`() = runTest {
+    // Real TS traffic sends only the subscriptionId ("packageName:fileName"). The handler must split
+    // it and dispatch the unsubscribe so the device actually tears down the subscription.
     dispatch(
         """{"type":"unsubscribe_storage","requestId":"unsub1","subscriptionId":"com.example:settings.xml"}"""
     )
-    assertTrue("no action should fire without packageName/fileName", calls.isEmpty())
+    assertEquals(
+        "unsubscribeStorage" to listOf<Any?>("unsub1", "com.example", "settings.xml"),
+        lastCall,
+    )
+    assertTrue("no diagnostic log expected for a resolvable subscriptionId", logs.isEmpty())
+  }
+
+  @Test
+  fun `unsubscribe_storage splits subscriptionId on the first colon only`() = runTest {
+    // subscriptionId = "packageName:fileName"; a file name may itself contain ':', so only the first
+    // ':' delimits packageName from fileName.
+    dispatch(
+        """{"type":"unsubscribe_storage","requestId":"unsub3","subscriptionId":"com.example:weird:name.xml"}"""
+    )
+    assertEquals(
+        "unsubscribeStorage" to listOf<Any?>("unsub3", "com.example", "weird:name.xml"),
+        lastCall,
+    )
+  }
+
+  @Test
+  fun `unsubscribe_storage with a malformed subscriptionId is a logged no-op`() = runTest {
+    dispatch("""{"type":"unsubscribe_storage","requestId":"unsub4","subscriptionId":"nocolon"}""")
+    assertTrue("no action should fire for an unsplittable subscriptionId", calls.isEmpty())
     assertEquals(1, logs.size)
-    assertTrue(logs[0], logs[0].contains("unsubscribe_storage"))
-    assertTrue(logs[0], logs[0].contains("subscriptionId=com.example:settings.xml"))
+    assertTrue(logs[0], logs[0].contains("malformed subscriptionId=nocolon"))
   }
 
   @Test
@@ -509,7 +533,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `handleMessage returns null for every command (fire-and-forget)`() = runTest {
     // A spread across categories, including the branches that do extra work: shape conversion,
-    // rule re-encoding, the ahead-of-need type, recording, and the storage no-op.
+    // rule re-encoding, the ahead-of-need type, recording, and the subscriptionId-only unsubscribe.
     val messages =
         listOf(
             """{"type":"request_screenshot","requestId":"s1"}""",

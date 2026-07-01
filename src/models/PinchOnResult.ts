@@ -1,7 +1,6 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
-export interface PinchOnResult {
-  success: boolean;
+export interface PinchOnResult extends BaseActionResult {
   direction: "in" | "out";
   distanceStart: number;
   distanceEnd: number;
@@ -16,8 +15,6 @@ export interface PinchOnResult {
     text?: string;
   };
   warning?: string;
-  observation?: ObserveResult;
-  error?: string;
   a11yTotalTimeMs?: number;
   a11yGestureTimeMs?: number;
 }

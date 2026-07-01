@@ -7,11 +7,14 @@ import path from "node:path";
 import {
   containsIosRecordingStartMessage,
   FfmpegVideoProcessingBackend,
+  IOS_RECORDING_FILE_READY_TIMEOUT_MS,
   IOS_RECORDING_STOP_TIMEOUT_MS,
   PROCESS_EXIT_TIMEOUT_MS,
   waitForExit,
+  waitForRecordingFileReady,
   waitForStderrMessage,
   type ProcessTracker,
+  type RecordingFileProbe,
   type StoppableProcess,
 } from "../../../src/features/video/FfmpegVideoProcessingBackend";
 import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
@@ -603,5 +606,131 @@ describe("waitForExit - graceful capture stop", function() {
   test("iOS stop window is generous enough for a moov-atom flush under load", function() {
     expect(IOS_RECORDING_STOP_TIMEOUT_MS).toBeGreaterThan(PROCESS_EXIT_TIMEOUT_MS);
     expect(IOS_RECORDING_STOP_TIMEOUT_MS).toBeGreaterThanOrEqual(30000);
+  });
+});
+
+/**
+ * A fake filesystem probe that replays a scripted sequence of observed sizes.
+ * `null` models a not-yet-visible file; once the script is exhausted the last
+ * value repeats. Mirrors a real `simctl recordVideo` output that appears late
+ * and grows before its moov-atom flush finalizes it on a loaded runner.
+ */
+function scriptedProbe(sizes: Array<number | null>): { probe: RecordingFileProbe; calls: () => number } {
+  let index = 0;
+  const probe: RecordingFileProbe = {
+    async size(): Promise<number | null> {
+      const value = sizes[Math.min(index, sizes.length - 1)];
+      index++;
+      return value ?? null;
+    },
+  };
+  return { probe, calls: () => index };
+}
+
+describe("waitForRecordingFileReady - post-exit file finalization", function() {
+  test("returns the size once a late file appears and stabilizes", async function() {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    // Missing for the first two probes (flush lag), then a stable non-empty file.
+    const { probe, calls } = scriptedProbe([null, null, 2048, 2048]);
+
+    const size = await waitForRecordingFileReady("/tmp/rec-raw.mov", {
+      probe,
+      timer,
+      timeoutMs: 5000,
+      backoff: 100,
+    });
+
+    expect(size).toBe(2048);
+    expect(calls()).toBe(4);
+  });
+
+  test("waits for a growing file to stop changing before returning", async function() {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    // File appears then grows across probes; only the stabilized size is accepted.
+    const { probe } = scriptedProbe([512, 4096, 4096]);
+
+    const size = await waitForRecordingFileReady("/tmp/rec-raw.mov", {
+      probe,
+      timer,
+      timeoutMs: 5000,
+      backoff: 100,
+    });
+
+    // Never returns the intermediate 512-byte read.
+    expect(size).toBe(4096);
+  });
+
+  test("throws a 'never appeared' diagnostic when the file is always missing", async function() {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const { probe, calls } = scriptedProbe([null]);
+
+    let thrown: unknown;
+    try {
+      await waitForRecordingFileReady("/tmp/rec-raw.mov", {
+        probe,
+        timer,
+        timeoutMs: 1000,
+        backoff: 100,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("never appeared");
+    expect((thrown as Error).message).toContain("/tmp/rec-raw.mov");
+    // Bounded: it stopped polling instead of hanging.
+    expect(calls()).toBeGreaterThan(0);
+  });
+
+  test("throws a 'disappeared after appearing' diagnostic when a file vanishes and never returns", async function() {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    // File shows up with bytes, then vanishes (e.g. simctl cleanup on error) and never comes back.
+    const { probe } = scriptedProbe([1024, null]);
+
+    let thrown: unknown;
+    try {
+      await waitForRecordingFileReady("/tmp/rec-raw.mov", {
+        probe,
+        timer,
+        timeoutMs: 1000,
+        backoff: 100,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("disappeared after appearing");
+  });
+
+  test("throws a 'stayed empty' diagnostic when the file never gets bytes", async function() {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const { probe } = scriptedProbe([0]);
+
+    let thrown: unknown;
+    try {
+      await waitForRecordingFileReady("/tmp/rec-raw.mov", {
+        probe,
+        timer,
+        timeoutMs: 1000,
+        backoff: 100,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("stayed empty (0 bytes)");
+  });
+
+  test("the readiness window is generous but not unbounded", function() {
+    expect(IOS_RECORDING_FILE_READY_TIMEOUT_MS).toBeGreaterThanOrEqual(5000);
+    expect(IOS_RECORDING_FILE_READY_TIMEOUT_MS).toBeLessThanOrEqual(IOS_RECORDING_STOP_TIMEOUT_MS);
   });
 });

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeScreenshotStateStore } from "../../fakes/FakeScreenshotStateStore";
@@ -82,7 +83,7 @@ function createObserveScreen() {
   const fakeScreenshotRecorder = new FakeScreenshotRecorder();
   const fakeDeviceStateCollector = new FakeDeviceStateCollector();
 
-  const observeScreen = new RealObserveScreen(device, new FakeAdbExecutor(), {
+  const observeScreen = new RealObserveScreen(device, new FakeAdbClientFactory(new FakeAdbExecutor()), {
     cacheStore: new FakeObserveCacheStore(fakeTimer),
     screenshotStateStore: new FakeScreenshotStateStore(),
     screenshotRecorder: fakeScreenshotRecorder,

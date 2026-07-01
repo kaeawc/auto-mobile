@@ -1,5 +1,4 @@
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { BootedDevice } from "../../models";
 import { Element } from "../../models";
@@ -38,30 +37,18 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   /**
    * Create a ViewHierarchy instance
    * @param device - Device to get view hierarchy from
-   * @param adbFactoryOrExecutor - Factory for creating AdbClient instances, or an AdbExecutor for testing
+   * @param adbFactory - Factory for creating AdbClient instances
    * @param accessibilityServiceClient - Optional AndroidCtrlProxyClient instance for testing
    */
   constructor(
     device: BootedDevice,
-    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
     accessibilityServiceClient: AndroidCtrlProxyClient | null = null,
     timer: Timer = defaultTimer,
   ) {
     this.device = device;
     this.parser = new DefaultElementParser();
     this.geometry = new DefaultElementGeometry();
-
-    // Detect if the argument is a factory (has create method) or an executor
-    let adbFactory: AdbClientFactory;
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
-      adbFactory = adbFactoryOrExecutor as AdbClientFactory;
-    } else if (adbFactoryOrExecutor) {
-      // Legacy path: wrap the executor in a factory for downstream dependencies
-      const executor = adbFactoryOrExecutor as AdbExecutor;
-      adbFactory = { create: () => executor };
-    } else {
-      adbFactory = defaultAdbClientFactory;
-    }
 
     this.accessibilityServiceClient = accessibilityServiceClient || AndroidCtrlProxyClient.getInstance(device, adbFactory);
     this.timer = timer;

@@ -1,12 +1,9 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of a tap operation
  */
-export interface TapResult {
-  success: boolean;
+export interface TapResult extends BaseActionResult {
   x: number;
   y: number;
-  observation?: ObserveResult;
-  error?: string;
 }

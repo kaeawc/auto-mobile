@@ -1,4 +1,4 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 import { ElementSelector } from "./SetUIStateOptions";
 
 /**
@@ -29,15 +29,9 @@ export interface FieldResult {
 /**
  * Result of the setUIState operation
  */
-export interface SetUIStateResult {
-  /** Whether all fields were set successfully */
-  success: boolean;
+export interface SetUIStateResult extends BaseActionResult {
   /** Results for each field */
   fields: FieldResult[];
   /** Total attempts across all fields */
   totalAttempts: number;
-  /** Final observation after all operations */
-  observation?: ObserveResult;
-  /** Error message if the operation failed */
-  error?: string;
 }

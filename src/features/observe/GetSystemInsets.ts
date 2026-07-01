@@ -11,20 +11,13 @@ export class GetSystemInsets implements SystemInsets {
   /**
    * Create a GetSystemInsets instance
    * @param device - Device to get system insets for
-   * @param adbFactoryOrExecutor - Factory for creating AdbClient instances, or an AdbExecutor for testing
+   * @param adbFactory - Factory for creating AdbClient instances
    */
   constructor(
     device: BootedDevice,
-    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory
+    adbFactory: AdbClientFactory = defaultAdbClientFactory
   ) {
-    // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
-      this.adb = (adbFactoryOrExecutor as AdbClientFactory).create(device);
-    } else if (adbFactoryOrExecutor) {
-      this.adb = adbFactoryOrExecutor as AdbExecutor;
-    } else {
-      this.adb = defaultAdbClientFactory.create(device);
-    }
+    this.adb = adbFactory.create(device);
   }
 
   /**

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 const device = {
   name: "test-device",
@@ -9,7 +10,7 @@ const device = {
 
 describe("ViewHierarchy filtering", () => {
   test("preserves action-only interactive nodes", () => {
-    const viewHierarchy = new ViewHierarchy(device, null);
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
     const result = viewHierarchy.filterViewHierarchy({
       hierarchy: {
         node: {

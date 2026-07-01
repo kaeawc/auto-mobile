@@ -1,12 +1,9 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of a shake operation
  */
-export interface ShakeResult {
-    success: boolean;
+export interface ShakeResult extends BaseActionResult {
     duration: number;
     intensity: number;
-    observation?: ObserveResult;
-    error?: string;
 }

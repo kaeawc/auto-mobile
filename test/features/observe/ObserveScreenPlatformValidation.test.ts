@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
@@ -48,7 +49,7 @@ describe("ObserveScreen.execute cross-platform hierarchy rejection", () => {
   });
 
   const buildScreen = (cacheStore: FakeObserveCacheStore) =>
-    new RealObserveScreen(androidDevice, new FakeAdbExecutor(), {
+    new RealObserveScreen(androidDevice, new FakeAdbClientFactory(new FakeAdbExecutor()), {
       hierarchyCollector: iosHierarchyCollector() as never,
       cacheStore,
       performanceAuditor: { run: async () => undefined } as never,
@@ -89,7 +90,7 @@ describe("ObserveScreen.execute cross-platform hierarchy rejection", () => {
 
   test("raw-mode append is skipped when the primary hierarchy was rejected", async () => {
     let collectRawCalled = false;
-    const screen = new RealObserveScreen(androidDevice, new FakeAdbExecutor(), {
+    const screen = new RealObserveScreen(androidDevice, new FakeAdbClientFactory(new FakeAdbExecutor()), {
       hierarchyCollector: {
         ...iosHierarchyCollector(),
         collectRaw: async (result: ObserveResult) => {

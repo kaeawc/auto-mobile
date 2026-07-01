@@ -1,10 +1,6 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of a clear text operation
  */
-export interface ClearTextResult {
-  success: boolean;
-  observation?: ObserveResult;
-  error?: string;
-}
+export type ClearTextResult = BaseActionResult;

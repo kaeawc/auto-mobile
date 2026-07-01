@@ -18,6 +18,11 @@ process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd();
 import type { DaemonOptions } from "./daemon/types";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
 import type { PlanExecutionLockScope } from "./utils/ServerConfig";
+import {
+  parseOutputReductionFlags,
+  OUTPUT_REDUCTION_FLAG_SPECS,
+  type OutputReductionFlags,
+} from "./utils/outputReductionFlags";
 import type { VideoRecordingConfigInput } from "./models";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
@@ -99,6 +104,7 @@ function parseArgs(log: ParseLogger): {
   noA11yIncludeNotImportantViews: boolean;
   noA11yReportViewIds: boolean;
   noA11yRetrieveInteractiveWindows: boolean;
+  outputReduction: OutputReductionFlags;
   } {
   const args = process.argv.slice(2);
 
@@ -161,6 +167,9 @@ function parseArgs(log: ParseLogger): {
   const noA11yIncludeNotImportantViews = args.includes("--no-include-not-important-views");
   const noA11yReportViewIds = args.includes("--no-report-view-ids");
   const noA11yRetrieveInteractiveWindows = args.includes("--no-retrieve-interactive-windows");
+  // Output-size reduction flags (issue #2756): each parses from CLI OR its
+  // AUTOMOBILE_* env var, CLI winning via ||.
+  const outputReduction = parseOutputReductionFlags(args, process.env);
   let planExecutionLockScope: PlanExecutionLockScope = "session";
   const videoRecordingDefaults: VideoRecordingConfigInput = {};
 
@@ -362,6 +371,7 @@ function parseArgs(log: ParseLogger): {
     noA11yIncludeNotImportantViews,
     noA11yReportViewIds,
     noA11yRetrieveInteractiveWindows,
+    outputReduction,
   };
 }
 
@@ -442,6 +452,7 @@ async function main() {
       noA11yIncludeNotImportantViews,
       noA11yReportViewIds,
       noA11yRetrieveInteractiveWindows,
+      outputReduction,
     } = parseArgs(logger);
 
     serverConfig.setPlanExecutionLockScope(planExecutionLockScope);
@@ -487,6 +498,15 @@ async function main() {
       ["predictive-ui", predictiveUi, "--predictive/--predictive-ui"],
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
       ["mcp-recording", mcpRecording, "--mcp-recording"],
+      ...OUTPUT_REDUCTION_FLAG_SPECS.map(
+        spec =>
+          [spec.featureFlagKey, outputReduction[spec.field], spec.label, undefined] as [
+            FeatureFlagKey,
+            boolean,
+            string,
+            Record<string, unknown> | null | undefined
+          ]
+      ),
     ];
 
     for (const [key, enabled, flagLabel, config] of cliOverrides) {
@@ -556,6 +576,8 @@ async function main() {
         noA11yIncludeNotImportantViews,
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,
+        // OutputReductionFlags field names match these DaemonOptions fields 1:1.
+        ...outputReduction,
       });
       return;
     }
@@ -614,6 +636,8 @@ async function main() {
         noA11yIncludeNotImportantViews,
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,
+        // OutputReductionFlags field names match these DaemonOptions fields 1:1.
+        ...outputReduction,
       };
 
       if (useProxyMode) {

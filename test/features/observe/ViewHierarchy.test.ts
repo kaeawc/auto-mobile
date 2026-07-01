@@ -183,7 +183,7 @@ describe("ViewHierarchy", function() {
         getAccessibilityHierarchy: async () => null
       } as unknown as AndroidCtrlProxyClient;
 
-      viewHierarchy = new ViewHierarchy(mockDevice, fakeAdb, mockCtrlProxyClient);
+      viewHierarchy = new ViewHierarchy(mockDevice, new FakeAdbClientFactory(fakeAdb), mockCtrlProxyClient);
       setupReadFileMock();
     });
 
@@ -206,7 +206,7 @@ describe("ViewHierarchy", function() {
         getAccessibilityHierarchy: async () => { throw new Error("Accessibility service error"); }
       } as unknown as AndroidCtrlProxyClient;
 
-      const viewHierarchyWithMocks = new ViewHierarchy(mockDevice, fakeAdb, mockCtrlProxyClientError);
+      const viewHierarchyWithMocks = new ViewHierarchy(mockDevice, new FakeAdbClientFactory(fakeAdb), mockCtrlProxyClientError);
 
       const result = await viewHierarchyWithMocks.getAndroidViewHierarchy();
 
@@ -238,7 +238,7 @@ describe("ViewHierarchy", function() {
       const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
 
       try {
-        const viewHierarchyWithMocks = new ViewHierarchy(iosDevice, fakeAdb, mockCtrlProxyClient);
+        const viewHierarchyWithMocks = new ViewHierarchy(iosDevice, new FakeAdbClientFactory(fakeAdb), mockCtrlProxyClient);
 
         const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
 
@@ -285,7 +285,7 @@ describe("ViewHierarchy", function() {
       const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
 
       try {
-        const viewHierarchyWithMocks = new ViewHierarchy(iosDevice, fakeAdb, mockCtrlProxyClient);
+        const viewHierarchyWithMocks = new ViewHierarchy(iosDevice, new FakeAdbClientFactory(fakeAdb), mockCtrlProxyClient);
 
         const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
 
@@ -319,7 +319,7 @@ describe("ViewHierarchy", function() {
         getAccessibilityHierarchy: async () => null
       } as unknown as AndroidCtrlProxyClient;
 
-      viewHierarchy = new ViewHierarchy(mockDevice, fakeAdb, mockCtrlProxyClient);
+      viewHierarchy = new ViewHierarchy(mockDevice, new FakeAdbClientFactory(fakeAdb), mockCtrlProxyClient);
     });
 
     test("should handle empty hierarchy", function() {
@@ -380,7 +380,7 @@ describe("ViewHierarchy", function() {
         getAccessibilityHierarchy: async () => null
       } as unknown as AndroidCtrlProxyClient;
 
-      viewHierarchy = new ViewHierarchy(mockDevice, fakeAdb, mockCtrlProxyClient);
+      viewHierarchy = new ViewHierarchy(mockDevice, new FakeAdbClientFactory(fakeAdb), mockCtrlProxyClient);
     });
 
     test("should handle node with empty children array", function() {
@@ -560,7 +560,7 @@ describe("findFocusedElement", function() {
       platform: "android"
     };
 
-    viewHierarchy = new ViewHierarchy(mockDevice, new FakeAdbExecutor() as any, null);
+    viewHierarchy = new ViewHierarchy(mockDevice, new FakeAdbClientFactory(new FakeAdbExecutor()), null);
   });
 
   test("should find focused element in simple hierarchy", function() {
@@ -771,7 +771,7 @@ describe("Offscreen Node Filtering", function() {
       platform: "android"
     };
     fakeAdb = new FakeAdbExecutor();
-    viewHierarchy = new ViewHierarchy(mockDevice, fakeAdb);
+    viewHierarchy = new ViewHierarchy(mockDevice, new FakeAdbClientFactory(fakeAdb));
   });
 
   test("should filter out nodes completely below the screen", function() {

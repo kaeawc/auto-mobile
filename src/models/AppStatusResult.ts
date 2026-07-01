@@ -1,13 +1,10 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of checking comprehensive app status
  */
-export interface AppStatusResult {
-  success: boolean;
+export interface AppStatusResult extends BaseActionResult {
   packageName: string;
   isInstalled: boolean;
   isRunning: boolean;
-  observation?: ObserveResult;
-  error?: string;
 }

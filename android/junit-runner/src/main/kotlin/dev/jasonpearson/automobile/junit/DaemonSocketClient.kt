@@ -419,10 +419,21 @@ internal object DaemonSocketPaths {
    */
   internal fun resolveClientVersion(): String? {
     val localProjectRoot = resolveLocalDaemonProjectRoot()
-    if (localProjectRoot != null) {
-      return resolveLocalPackageVersion(localProjectRoot)
+    val resolved =
+        if (localProjectRoot != null) {
+          resolveLocalPackageVersion(localProjectRoot)
+        } else {
+          resolveDaemonPackageVersion()
+        }
+    val trimmed = resolved?.trim().orEmpty()
+    // Aliases like `latest`/`unknown` are not real versions — resolveDaemonPackageSpecifier()
+    // already treats them as unpinnable and starts bare `auto-mobile`. Declaring one as
+    // clientVersion would make the gate (and the post-start skew check) compare e.g. `latest`
+    // against `0.0.40` and reject, so behave as an unversioned (legacy, ungated) client instead.
+    if (trimmed.isEmpty() || ignoredPackageVersions.contains(trimmed.lowercase())) {
+      return null
     }
-    return resolveDaemonPackageVersion()
+    return trimmed
   }
 
   /**

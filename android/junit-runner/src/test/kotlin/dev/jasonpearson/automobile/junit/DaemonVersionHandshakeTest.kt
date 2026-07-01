@@ -16,15 +16,18 @@ class DaemonVersionHandshakeTest {
 
   private val json = Json { ignoreUnknownKeys = true }
 
+  private val managedProperties =
+      listOf("automobile.daemon.local.project.path", "automobile.daemon.package.version")
+
   @Before
   fun setUp() {
-    System.clearProperty("automobile.daemon.local.project.path")
+    managedProperties.forEach { System.clearProperty(it) }
     SystemPropertyCache.clear()
   }
 
   @After
   fun tearDown() {
-    System.clearProperty("automobile.daemon.local.project.path")
+    managedProperties.forEach { System.clearProperty(it) }
     SystemPropertyCache.clear()
   }
 
@@ -154,6 +157,24 @@ class DaemonVersionHandshakeTest {
     } finally {
       projectRoot.deleteRecursively()
     }
+  }
+
+  @Test
+  fun `resolveClientVersion returns configured version from system property`() {
+    System.setProperty("automobile.daemon.package.version", " 0.0.32 ")
+    SystemPropertyCache.clear()
+    assertEquals("0.0.32", DaemonSocketPaths.resolveClientVersion())
+  }
+
+  @Test
+  fun `resolveClientVersion omits ignored alias versions`() {
+    System.setProperty("automobile.daemon.package.version", "latest")
+    SystemPropertyCache.clear()
+    assertNull("latest is not a real version", DaemonSocketPaths.resolveClientVersion())
+
+    System.setProperty("automobile.daemon.package.version", "UNKNOWN")
+    SystemPropertyCache.clear()
+    assertNull("unknown is not a real version", DaemonSocketPaths.resolveClientVersion())
   }
 
   @Test

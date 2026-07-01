@@ -220,4 +220,15 @@ describe("DeviceSessionRepository", () => {
       sessionManager.stopCleanupTimer();
     }
   });
+
+  test("markStaleActiveSessionsExpired propagates DB errors (startup fatal, not swallowed)", async () => {
+    // A missing/malformed device_sessions table means a broken DB; the startup
+    // path relies on this rejecting so the circuit breaker can go fatal + back
+    // off (issue #2784) rather than starting with broken session state.
+    await db.schema.dropTable("device_sessions").execute();
+
+    await expect(
+      repo.markStaleActiveSessionsExpired("current-daemon", 5000, "daemon-restart")
+    ).rejects.toThrow();
+  });
 });

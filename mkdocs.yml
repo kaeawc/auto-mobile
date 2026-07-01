@@ -107,6 +107,7 @@ nav:
              - 'Vision Fallback': design-docs/mcp/observe/vision-fallback.md
              - 'Visual Highlighting': design-docs/mcp/observe/visual-highlighting.md
           - 'Interaction Loop': design-docs/mcp/interaction-loop.md
+          - 'Loading-State Awareness': design-docs/mcp/loading-awareness.md
           - 'Daemon':
              - 'Overview': design-docs/mcp/daemon/index.md
              - 'Critical Section': design-docs/mcp/daemon/critical-section.md

@@ -345,7 +345,7 @@ open class AutoMobileTestCase: XCTestCase {
             try client.initialize(timeout: timeoutSeconds)
         } catch {
             if allowDaemonStart {
-                try startDaemon()
+                try recoverDaemonForRetry()
                 return try fetchBootedDevicesResource(timeoutSeconds: timeoutSeconds, allowDaemonStart: false)
             }
             throw AutoMobileTestCaseError.devicePoolUnavailable(
@@ -358,7 +358,7 @@ open class AutoMobileTestCase: XCTestCase {
             response = try client.readResource(uri: "automobile:devices/booted/ios", timeout: timeoutSeconds)
         } catch {
             if allowDaemonStart {
-                try startDaemon()
+                try recoverDaemonForRetry()
                 return try fetchBootedDevicesResource(timeoutSeconds: timeoutSeconds, allowDaemonStart: false)
             }
             throw AutoMobileTestCaseError.devicePoolUnavailable(
@@ -384,6 +384,19 @@ open class AutoMobileTestCase: XCTestCase {
         } catch {
             throw AutoMobileTestCaseError.devicePoolUnavailable(
                 "Failed to parse booted device resource: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    /// Recover before retrying a request that failed to reach a usable daemon. A bare
+    /// `--daemon start` leaves an already-running wrong-version daemon in place, so its handshake
+    /// (#2744) would keep rejecting the retry. Route through the version-matched ensure path, which
+    /// restarts a version-skewed daemon and confirms the running version matches this runner.
+    private func recoverDaemonForRetry() throws {
+        guard DaemonManager.ensureDaemonRunning() else {
+            throw AutoMobileTestCaseError.devicePoolUnavailable(
+                "AutoMobile daemon is unavailable or a different build than this runner on the "
+                    + "shared socket; restart it from the same @kaeawc/auto-mobile version."
             )
         }
     }

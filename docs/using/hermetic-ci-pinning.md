@@ -29,12 +29,18 @@ resolves all four from one value, so there is no way for them to disagree.
 export AUTOMOBILE_VERSION=0.0.40
 ```
 
-- Unset (or `latest`) resolves to the newest entry in the daemon's baked release registry
-  — a **concrete** version, never the floating `@latest` tag.
-- An unknown version resolves to an empty checksum (download proceeds unverified only if
-  you have also opted into a checksum-skip override — see below).
-- The Android Kotlin runner already reads `AUTOMOBILE_VERSION` as a fallback for the
-  daemon package version, so the same env var lines up the runner-spawned daemon too.
+- Unset (or `latest`, case-insensitive) resolves to the newest entry in the daemon's
+  baked release registry — a **concrete** version, never the floating `@latest` tag.
+- A version **in** the daemon's baked registry is downloaded and its SHA-256 is verified.
+- A version **not** in the registry (a typo, or a real release newer than the daemon's
+  baked registry) has no checksum to verify against, so the download **fails closed** —
+  the daemon refuses to install an unverifiable asset. To use a not-yet-baked release,
+  either upgrade the daemon to one whose registry includes it, or take the explicit
+  escape hatch: `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1` (Android) / vendor a trusted
+  bundle via `AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH` (iOS).
+- The Android Kotlin runner reads `AUTOMOBILE_VERSION` as a fallback for the daemon
+  package version, so a daemon **this runner spawns** lines up. A **pre-existing** shared
+  daemon does not re-read it — see [Shared daemon caveat](#shared-daemon-caveat).
 
 ### `AUTOMOBILE_ASSET_BASE_URL` — the mirror knob
 
@@ -55,8 +61,11 @@ https://artifacts.internal/automobile/
     control-proxy.ipa
 ```
 
-Checksums are still verified against the daemon's baked registry, so a mirror cannot
-serve a tampered asset for a pinned version.
+For any version in the daemon's baked registry, the downloaded asset's SHA-256 is
+verified against that registry, so a mirror **cannot** serve a tampered asset for a
+registry-known version. For a version **not** in the registry there is nothing to verify
+against, so the download fails closed (see the `AUTOMOBILE_VERSION` notes above) — a
+mirror can only serve unverified assets if you deliberately opt out of verification.
 
 ## Android hermetic recipe
 
@@ -87,17 +96,38 @@ serve a tampered asset for a pinned version.
    ```bash
    export AUTOMOBILE_VERSION=0.0.40
    ```
-   Pin the XCTestRunner SPM dependency to the matching git tag.
+   Pin the XCTestRunner SPM dependency to the matching git tag. Note: the iOS
+   XCTestRunner autostart currently spawns a bare-PATH `auto-mobile --daemon start`
+   (`AutoMobileEnvironment.swift`) — it does **not** yet pin the daemon package version
+   itself. Pin it by installing the exact `@kaeawc/auto-mobile@0.0.40` on the runner's
+   PATH, or start the daemon yourself before the test job. (Baking the pin into the
+   Swift runner is tracked as follow-up work for #2746.)
 2. **Vendor the IPA and skip the build** so nothing is fetched or compiled at test time:
    ```bash
    export AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH=/opt/automobile/control-proxy.ipa
    export AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD=1
    ```
-   (or set `AUTOMOBILE_ASSET_BASE_URL` to your mirror for a checksummed download).
+   (or set `AUTOMOBILE_ASSET_BASE_URL` to your mirror for a checksummed download of a
+   registry-known version).
 3. **Gate the job** on doctor:
    ```bash
    bunx @kaeawc/auto-mobile@0.0.40 --cli doctor --ios
    ```
+
+## Shared daemon caveat
+
+The pin is a property of **the daemon's launch environment**, resolved where the download
+happens. AutoMobile runs **one daemon per UID**, shared across worktrees via a single
+socket + PID file, and runners **reuse an already-running daemon** rather than restart it.
+So if a daemon is already up with a different `AUTOMOBILE_VERSION` (or none), a second job
+that exports a new pin will silently be served by the **existing** daemon — the pin is
+ignored until the daemon is restarted.
+
+For hermetic CI, force a clean daemon so the pin actually takes effect:
+
+- **Android:** `-Dautomobile.daemon.force.restart=true` (already in the recipe above).
+- **Any platform:** `bunx @kaeawc/auto-mobile@<version> --daemon restart` before the job,
+  then confirm via `ide/status` (below) that `releaseVersion` matches your pin.
 
 ## Verifying the pin
 
@@ -123,4 +153,6 @@ Ask the running daemon what it will actually fetch — the `ide/status` handler 
 ```
 
 If `releaseVersion` is anything other than the version you pinned, the environment is not
-hermetic — check that `AUTOMOBILE_VERSION` is exported into the daemon's process.
+hermetic — either `AUTOMOBILE_VERSION` was not exported into the daemon's process, or a
+pre-existing daemon with a different pin is still serving (see
+[Shared daemon caveat](#shared-daemon-caveat)). Restart the daemon and re-check.

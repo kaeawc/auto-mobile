@@ -3,11 +3,14 @@ import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor
 import { logger } from "./logger";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { BootedDevice } from "../models";
+import { ActionableError, BootedDevice } from "../models";
 import { requireBootedDevice } from "./requireBootedDevice";
 import {
+  isExplicitPin,
+  isPinnedVersionKnown,
   resolveApkChecksum,
-  resolveApkUrl
+  resolveApkUrl,
+  resolvePinnedVersion
 } from "../constants/release";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
@@ -853,6 +856,16 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
         logger.info("APK checksum verified successfully", { checksum: normalizedActual, source });
         perf.endOperation("checksumVerify");
+      } else if (isExplicitPin() && !isPinnedVersionKnown() && !this.shouldSkipChecksum()) {
+        // Fail closed: an explicitly-pinned version with no registry checksum cannot
+        // be integrity-verified. Silently downloading it (esp. from a mirror) would
+        // defeat the point of pinning (#2746). The skip override remains the escape
+        // hatch for a real-but-not-yet-baked release.
+        throw new ActionableError(
+          `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
+          `checksum registry, so the downloaded CtrlProxy APK cannot be integrity-verified. ` +
+          `Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.`
+        );
       } else {
         logger.warn("APK checksum verification SKIPPED - no checksum provided (development mode)", {
           apkUrl: resolveApkUrl()

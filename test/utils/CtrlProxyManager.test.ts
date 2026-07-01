@@ -833,6 +833,67 @@ describe("CtrlProxyManager", function() {
       await accessibilityServiceClient.cleanupApk(apkPath);
     });
 
+    test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      try {
+        const zip = new AdmZip();
+        zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+        zip.addFile("classes.dex", crypto.randomBytes(15000));
+        const payload = zip.toBuffer();
+
+        // No expected-checksum override and no APK-path/skip override: the pinned
+        // version has no registry checksum, so the download is unverifiable and
+        // must fail closed rather than install an unchecked APK (esp. from a mirror).
+        (accessibilityServiceClient as any).fileDownloader = {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          }
+        };
+
+        await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
+          "not in the AutoMobile release"
+        );
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
+    test("installs when the pinned version's checksum override is set (skip escape hatch, #2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+      try {
+        const zip = new AdmZip();
+        zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+        zip.addFile("classes.dex", crypto.randomBytes(15000));
+        const payload = zip.toBuffer();
+
+        (accessibilityServiceClient as any).fileDownloader = {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          }
+        };
+
+        const apkPath = await accessibilityServiceClient.downloadApk();
+        const stats = await fs.stat(apkPath);
+        expect(stats.size).toBe(payload.length);
+        await accessibilityServiceClient.cleanupApk(apkPath);
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
     test("should fail when checksum does not match", async function() {
       // Create a valid APK structure (ZIP with AndroidManifest.xml)
       const zip = new AdmZip();

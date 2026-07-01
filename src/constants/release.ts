@@ -150,11 +150,13 @@ export function resolveChecksum(
  * Version of the latest validated release in the registry.
  * Used to construct download URLs for pinned releases.
  */
-export function resolveLatestVersion(): string {
-  if (RELEASE_CHECKSUM_REGISTRY.length === 0) {
+export function resolveLatestVersion(
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  if (registry.length === 0) {
     return LATEST_RELEASE_VERSION;
   }
-  return RELEASE_CHECKSUM_REGISTRY[0].version;
+  return registry[0].version;
 }
 
 // --- Backward-compatible exports derived from RELEASE_VERSION ---
@@ -166,9 +168,12 @@ export const RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
  * (URLs, on-disk metadata, doctor checks) want a concrete version like
  * "0.0.30", never the placeholder "latest".
  */
-export function resolveAssetVersion(version: string): string {
+export function resolveAssetVersion(
+  version: string,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
   if (version === LATEST_RELEASE_VERSION) {
-    return resolveLatestVersion();
+    return resolveLatestVersion(registry);
   }
   return version;
 }
@@ -197,11 +202,44 @@ type EnvLike = Record<string, string | undefined>;
 /**
  * Resolve the pinned version from `AUTOMOBILE_VERSION`. Returns the trimmed value
  * when set, otherwise the `"latest"` placeholder (which downstream resolvers turn
- * into the concrete newest registry entry).
+ * into the concrete newest registry entry). The `latest` sentinel is normalized to
+ * lower-case so every sink agrees — `resolveChecksum` matches `latest`
+ * case-insensitively but `resolveAssetVersion`/URL building use a strict `===`
+ * compare, so an un-normalized `LATEST` would otherwise resolve to a valid checksum
+ * yet a 404 URL (an incoherent triple).
  */
 export function resolvePinnedVersion(env: EnvLike = process.env): string {
   const trimmed = env[AUTOMOBILE_VERSION_ENV]?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : LATEST_RELEASE_VERSION;
+  if (!trimmed || trimmed.length === 0) {
+    return LATEST_RELEASE_VERSION;
+  }
+  return trimmed.toLowerCase() === LATEST_RELEASE_VERSION ? LATEST_RELEASE_VERSION : trimmed;
+}
+
+/**
+ * True when `AUTOMOBILE_VERSION` names a concrete version (not unset, not the
+ * `latest` sentinel). Used to decide whether an unverifiable download should
+ * fail closed.
+ */
+export function isExplicitPin(env: EnvLike = process.env): boolean {
+  return resolvePinnedVersion(env) !== LATEST_RELEASE_VERSION;
+}
+
+/**
+ * True when the effective pin resolves to a checksum-bearing registry entry.
+ * A `latest` pin is known iff the registry is non-empty; a concrete pin is known
+ * iff the registry contains it. A pinned-but-unknown version cannot be
+ * integrity-verified — see the fail-closed guards in the CtrlProxy managers.
+ */
+export function isPinnedVersionKnown(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): boolean {
+  const pinned = resolvePinnedVersion(env);
+  if (pinned === LATEST_RELEASE_VERSION) {
+    return registry.length > 0;
+  }
+  return registry.some(entry => entry.version === pinned);
 }
 
 /**
@@ -219,9 +257,10 @@ export function resolveAssetBaseUrl(env: EnvLike = process.env): string {
 function buildReleaseAssetUrl(
   filename: string,
   version: string,
-  baseUrl: string = DEFAULT_ASSET_BASE_URL
+  baseUrl: string = DEFAULT_ASSET_BASE_URL,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
 ): string {
-  const assetVersion = resolveAssetVersion(version);
+  const assetVersion = resolveAssetVersion(version, registry);
   if (assetVersion === LATEST_RELEASE_VERSION) {
     // Degenerate case: empty registry, no concrete version to key off.
     if (baseUrl === DEFAULT_ASSET_BASE_URL) {
@@ -235,13 +274,19 @@ function buildReleaseAssetUrl(
 }
 
 /** APK download URL honoring `AUTOMOBILE_VERSION` + `AUTOMOBILE_ASSET_BASE_URL`. */
-export function resolveApkUrl(env: EnvLike = process.env): string {
-  return buildReleaseAssetUrl("control-proxy-debug.apk", resolvePinnedVersion(env), resolveAssetBaseUrl(env));
+export function resolveApkUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  return buildReleaseAssetUrl("control-proxy-debug.apk", resolvePinnedVersion(env), resolveAssetBaseUrl(env), registry);
 }
 
 /** iOS IPA download URL honoring `AUTOMOBILE_VERSION` + `AUTOMOBILE_ASSET_BASE_URL`. */
-export function resolveIpaUrl(env: EnvLike = process.env): string {
-  return buildReleaseAssetUrl("control-proxy.ipa", resolvePinnedVersion(env), resolveAssetBaseUrl(env));
+export function resolveIpaUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  return buildReleaseAssetUrl("control-proxy.ipa", resolvePinnedVersion(env), resolveAssetBaseUrl(env), registry);
 }
 
 /** Expected APK SHA-256 for the pinned version (empty string if unknown). */

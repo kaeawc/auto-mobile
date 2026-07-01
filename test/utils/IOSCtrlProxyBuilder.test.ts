@@ -516,6 +516,34 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(buildProducts).toBe(path.join(derivedDataPath, "Build", "Products", "Debug-iphonesimulator"));
     });
 
+    test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function() {
+      const prev = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      try {
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const cacheDir = path.join(tempDir, "cache");
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        downloader.checksum = "actual-checksum-from-download";
+        // No expected-checksum override and no vendored IPA path: the pinned
+        // version has no registry checksum, so the download is unverifiable.
+        const builder = IOSCtrlProxyBuilder.getInstance(
+          { derivedDataPath, bundleCacheDir: cacheDir },
+          { downloader }
+        );
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("not in the AutoMobile release");
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prev;
+        }
+      }
+    });
+
     test("should reject build when checksum does not match", async function() {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");

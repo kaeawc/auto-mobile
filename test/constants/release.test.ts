@@ -7,6 +7,8 @@ import {
   IOS_CTRL_PROXY_IPA_URL,
   IOS_CTRL_PROXY_SHA256_CHECKSUM,
   RELEASE_CHECKSUM_REGISTRY,
+  isExplicitPin,
+  isPinnedVersionKnown,
   resolveApkChecksum,
   resolveApkUrl,
   resolveAssetBaseUrl,
@@ -217,5 +219,82 @@ describe("resolveDaemonInstallSpecifier (EC5)", function() {
   test("honors AUTOMOBILE_VERSION", function() {
     expect(resolveDaemonInstallSpecifier({ AUTOMOBILE_VERSION: "0.0.18" }))
       .toBe(`${DAEMON_PACKAGE_NAME}@0.0.18`);
+  });
+});
+
+// --- Review feedback: mixed-case `latest` normalization (Priya) ---
+
+describe("resolvePinnedVersion normalizes the 'latest' sentinel", function() {
+  const newest = RELEASE_CHECKSUM_REGISTRY[0];
+
+  test("upper/mixed-case latest collapses to the canonical 'latest'", function() {
+    expect(resolvePinnedVersion({ AUTOMOBILE_VERSION: "LATEST" })).toBe("latest");
+    expect(resolvePinnedVersion({ AUTOMOBILE_VERSION: " Latest " })).toBe("latest");
+  });
+
+  test("mixed-case latest yields a coherent url + checksum + specifier (no /LATEST/ 404)", function() {
+    const env = { AUTOMOBILE_VERSION: "LATEST" };
+    expect(resolveApkUrl(env)).toBe(`${DEFAULT_ASSET_BASE_URL}/${newest.version}/control-proxy-debug.apk`);
+    expect(resolveIpaUrl(env)).toBe(`${DEFAULT_ASSET_BASE_URL}/${newest.version}/control-proxy.ipa`);
+    expect(resolveApkChecksum(env)).toBe(newest.apkSha256);
+    expect(resolveDaemonInstallSpecifier(env)).toBe(`${DAEMON_PACKAGE_NAME}@${newest.version}`);
+    // The bug: an un-normalized "LATEST" produced a real SHA but a .../LATEST/... URL.
+    expect(resolveApkUrl(env)).not.toContain("/LATEST/");
+  });
+
+  test("a concrete version keeps its exact casing (registry keys are exact)", function() {
+    expect(resolvePinnedVersion({ AUTOMOBILE_VERSION: "0.0.18" })).toBe("0.0.18");
+  });
+});
+
+// --- Review feedback: fail-closed predicates (Sofia) ---
+
+describe("isExplicitPin", function() {
+  test("false when unset or the latest sentinel (any case)", function() {
+    expect(isExplicitPin({})).toBe(false);
+    expect(isExplicitPin({ AUTOMOBILE_VERSION: "  " })).toBe(false);
+    expect(isExplicitPin({ AUTOMOBILE_VERSION: "latest" })).toBe(false);
+    expect(isExplicitPin({ AUTOMOBILE_VERSION: "LATEST" })).toBe(false);
+  });
+
+  test("true for a concrete pin, known or unknown", function() {
+    expect(isExplicitPin({ AUTOMOBILE_VERSION: "0.0.18" })).toBe(true);
+    expect(isExplicitPin({ AUTOMOBILE_VERSION: "99.99.99" })).toBe(true);
+  });
+});
+
+describe("isPinnedVersionKnown", function() {
+  test("latest/unset is known iff the registry is non-empty", function() {
+    expect(isPinnedVersionKnown({})).toBe(true);
+    expect(isPinnedVersionKnown({}, [])).toBe(false);
+  });
+
+  test("a concrete pin is known iff it is in the registry", function() {
+    expect(isPinnedVersionKnown({ AUTOMOBILE_VERSION: "0.0.18" })).toBe(true);
+    expect(isPinnedVersionKnown({ AUTOMOBILE_VERSION: "99.99.99" })).toBe(false);
+  });
+});
+
+// --- Review feedback: degenerate empty-registry URL branch is now testable (Priya) ---
+
+describe("resolveApkUrl / resolveIpaUrl with an injected registry", function() {
+  const registry: ReleaseChecksumEntry[] = [
+    { version: "0.0.20", apkSha256: "apk20", ipaSha256: "ipa20" },
+  ];
+
+  test("uses the injected registry's newest version", function() {
+    expect(resolveApkUrl({}, registry)).toBe(`${DEFAULT_ASSET_BASE_URL}/0.0.20/control-proxy-debug.apk`);
+  });
+
+  test("empty registry + default host falls back to GitHub's /latest/download redirect", function() {
+    expect(resolveApkUrl({}, [])).toBe(
+      "https://github.com/kaeawc/auto-mobile/releases/latest/download/control-proxy-debug.apk"
+    );
+  });
+
+  test("empty registry + mirror falls back to a conventional /latest/ path", function() {
+    expect(resolveIpaUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am" }, [])).toBe(
+      "https://mirror.test/am/latest/control-proxy.ipa"
+    );
   });
 });

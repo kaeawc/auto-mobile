@@ -12,27 +12,37 @@ import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
  * handler could record the failure or back off — re-spawning in a tight loop.
  */
 describe("guardDatabaseStartup", () => {
-  test("resolves and resets the tracker when the database comes up cleanly", async () => {
+  test("resolves without resetting the tracker when the early DB work succeeds", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const initializer = new FakeDatabaseInitializer();
     const tracker = new FakeStartupFailureTracker();
 
-    await guardDatabaseStartup(initializer, tracker, timer);
+    await guardDatabaseStartup(async () => {
+      await initializer.initialize();
+    }, tracker, timer);
 
     expect(initializer.initializeCalls).toBe(1);
-    expect(tracker.resetCalls).toBe(1);
+    // Reset must NOT happen here — only after the ENTIRE daemon startup DB path
+    // (Daemon.initializeDatabase cleanup) succeeds, or a later recorded permanent
+    // failure would be erased by the next launch's preflight success.
+    expect(tracker.resetCalls).toBe(0);
     expect(tracker.recorded).toHaveLength(0);
   });
 
-  test("rethrows an ActionableError (fatal) when the early DB touch fails", async () => {
+  test("rethrows an ActionableError (fatal) when any guarded DB work fails", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const initializer = new FakeDatabaseInitializer(new Error("database disk image is malformed"));
     const tracker = new FakeStartupFailureTracker();
     tracker.setCounts([1]);
 
-    await expect(guardDatabaseStartup(initializer, tracker, timer)).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      guardDatabaseStartup(async () => {
+        // Simulates a migrated-but-malformed feature_flags table query failing
+        // during FeatureFlagService.initialize(), not just a migration failure.
+        throw new Error("database disk image is malformed");
+      }, tracker, timer)
+    ).rejects.toBeInstanceOf(ActionableError);
     expect(tracker.recorded[0]!.kind).toBe("permanent");
     expect(tracker.resetCalls).toBe(0);
   });

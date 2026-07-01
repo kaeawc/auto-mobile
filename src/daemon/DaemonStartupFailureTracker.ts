@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import { getDatabasePath } from "../db";
 import { logger } from "../utils/logger";
+import { getTempDir, TEMP_SUBDIRS } from "../utils/tempDir";
 import type { DatabaseFailureKind } from "../db/databaseFailureClassification";
 
 /**
@@ -45,7 +45,15 @@ export class DefaultStartupFailureTracker implements StartupFailureTracker {
   recordFailure(kind: DatabaseFailureKind, now: number): number {
     const records = this.read().filter(record => now - record.at < this.windowMs);
     records.push({ at: now, kind });
-    this.write(records);
+    const persisted = this.write(records);
+    if (!persisted) {
+      // Persistence failure itself throttles: if we can't record the escalation
+      // across respawns (e.g. the state dir is unwritable — the same class of
+      // permanent failure that would otherwise hot-loop), report at least the
+      // second tier so the permanent-failure backoff still engages instead of
+      // spinning at count 1 forever.
+      return Math.max(records.length, 2);
+    }
     return records.length;
   }
 
@@ -81,16 +89,22 @@ export class DefaultStartupFailureTracker implements StartupFailureTracker {
     }
   }
 
-  private write(records: StartupFailureRecord[]): void {
+  private write(records: StartupFailureRecord[]): boolean {
     try {
       fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
       fs.writeFileSync(this.filePath, JSON.stringify(records), { mode: 0o600 });
+      return true;
     } catch (error) {
       logger.debug(`Failed to persist startup failure tracker file: ${error}`);
+      return false;
     }
   }
 }
 
 function defaultTrackerFilePath(): string {
-  return path.join(path.dirname(getDatabasePath()), "daemon-startup-failures.json");
+  // Stored under the auto-mobile data dir (AUTOMOBILE_DATA_DIR / ~/.auto-mobile),
+  // NOT the DB directory: a custom, unwritable AUTOMOBILE_DB_DIR is itself a
+  // permanent startup failure, and putting the breaker there would leave every
+  // respawn unable to read prior records — so it could never escalate to backoff.
+  return path.join(getTempDir(TEMP_SUBDIRS.STATE), "daemon-startup-failures.json");
 }

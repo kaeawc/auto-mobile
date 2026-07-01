@@ -93,4 +93,5 @@ export const TEMP_SUBDIRS = {
   OBSERVE_RESULTS: "observe_results",
   WINDOW: "window",
   CACHE: "cache",
+  STATE: "state",
 } as const;

@@ -4,7 +4,6 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { exponentialBackoff } from "../utils/Backoff";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import { classifyDatabaseFailure } from "../db/databaseFailureClassification";
-import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
 import {
   StartupFailureTracker,
   DefaultStartupFailureTracker,
@@ -49,26 +48,29 @@ export async function handleFatalDatabaseStartupFailure(
 }
 
 /**
- * Pre-flight the database under the startup circuit breaker BEFORE any DB-backed
- * service touches it.
+ * Run early `--daemon-mode` database startup `work` under the circuit breaker,
+ * BEFORE `Daemon.start()`.
  *
- * In `--daemon-mode` the first DB touch is `FeatureFlagService.initialize()` in
- * `main()`, which runs before `Daemon.start()`. Without this guard a permanent
- * DB failure surfaces there and exits via `main().catch` before the daemon's
- * own fatal handler can record the failure or back off — re-spawning in a tight
- * loop. Running the guard first funnels that early failure through the same
- * classify/record/backoff/rethrow path.
+ * The first DB touches in `main()` — migrations and `FeatureFlagService`'s
+ * `ensureFlags`/`listFlags` queries — run before `Daemon.start()`. Without this
+ * guard a permanent DB failure there (failed migration, or a migrated-but-
+ * missing/malformed `feature_flags` table) surfaces via `main().catch` and exits
+ * before the daemon's own fatal handler can record it or back off — re-spawning
+ * in a tight loop. Wrapping ALL of that DB `work` here funnels every early
+ * failure through the same classify/record/backoff/rethrow path.
  *
- * On success the failure tracker is reset (a healthy DB start clears the breaker).
+ * Does NOT reset the tracker on success: reset must happen only after the ENTIRE
+ * daemon startup DB path (including `Daemon.initializeDatabase()`'s cleanup
+ * queries) succeeds, otherwise a later permanent failure recorded by the daemon
+ * would be erased by the next launch's preflight success and never escalate.
  */
 export async function guardDatabaseStartup(
-  initializer: DatabaseInitializer = new DefaultDatabaseInitializer(),
+  work: () => Promise<void>,
   tracker: StartupFailureTracker = new DefaultStartupFailureTracker(),
   timer: Timer = defaultTimer
 ): Promise<void> {
   try {
-    await initializer.initialize();
-    tracker.reset();
+    await work();
   } catch (error) {
     await handleFatalDatabaseStartupFailure(error, tracker, timer);
   }

@@ -375,6 +375,7 @@ async function main() {
   const { runDaemonCommand } = await import("./daemon/manager");
   const { startDaemon } = await import("./daemon/daemon");
   const { guardDatabaseStartup } = await import("./daemon/daemonStartupGuard");
+  const { DefaultDatabaseInitializer } = await import("./db/DatabaseInitializer");
   const videoRecordingSocketServer = await import("./daemon/videoRecordingSocketServer");
   const testRecordingSocketServer = await import("./daemon/testRecordingSocketServer");
   const deviceSnapshotSocketServer = await import("./daemon/deviceSnapshotSocketServer");
@@ -466,16 +467,21 @@ async function main() {
       IOSCtrlProxyBuilder.prefetchBuild();
     }
 
-    if (daemonMode) {
-      // Pre-flight the database under the startup circuit breaker BEFORE any
-      // DB-backed service (feature flags below) touches it. Otherwise a permanent
-      // DB/migration failure surfaces in FeatureFlagService.initialize() and exits
-      // via main().catch before the daemon's own fatal handler can record it or
-      // back off — re-spawning in a tight loop (issue #2784).
-      await guardDatabaseStartup();
-    }
-
     const featureFlagService = FeatureFlagService.getInstance();
+    if (daemonMode) {
+      // Run ALL early DB-backed startup work under the circuit breaker BEFORE
+      // Daemon.start(): both migrations AND FeatureFlagService's ensureFlags/
+      // listFlags queries. Otherwise a permanent DB failure (failed migration, or
+      // a migrated-but-missing/malformed feature_flags table) surfaces via
+      // main().catch and exits before the daemon's own fatal handler can record
+      // it or back off — re-spawning in a tight loop (issue #2784).
+      await guardDatabaseStartup(async () => {
+        await new DefaultDatabaseInitializer().initialize();
+        await featureFlagService.initialize();
+      });
+    }
+    // Idempotent: a no-op in daemon mode (already initialized inside the guard),
+    // and the real initialization for the stdio MCP-server path.
     await featureFlagService.initialize();
 
     const accessibilityConfig = a11yAuditMode

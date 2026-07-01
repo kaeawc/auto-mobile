@@ -12,8 +12,9 @@ describe("classifyDatabaseFailure", () => {
     expect(classifyDatabaseFailure(new Error("EAGAIN: resource temporarily unavailable"))).toBe("transient");
   });
 
-  test("classifies a temporarily full disk as transient", () => {
-    expect(classifyDatabaseFailure(new Error("ENOSPC: no space left on device"))).toBe("transient");
+  test("classifies a full disk as permanent (ENOSPC needs external cleanup, reproduces on respawn)", () => {
+    expect(classifyDatabaseFailure(new Error("ENOSPC: no space left on device"))).toBe("permanent");
+    expect(classifyDatabaseFailure(new Error("SQLITE_FULL: database or disk is full"))).toBe("permanent");
   });
 
   test("classifies a corrupt/malformed database as permanent", () => {

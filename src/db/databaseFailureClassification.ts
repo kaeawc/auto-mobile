@@ -1,12 +1,13 @@
 /**
  * Classification of a database bring-up / migration failure.
  *
- * - `transient`: expected to clear on its own (a locked/busy file, a temporarily
- *   full disk, EBUSY/EAGAIN contention from another tool). A fast restart is the
- *   right response — the next attempt may well succeed.
- * - `permanent`: deterministic (corrupt/malformed DB, a migration that always
- *   throws). Restarting immediately reproduces the failure, so the daemon must
- *   back off to avoid a restart hot-loop (issue #2784).
+ * - `transient`: expected to clear on its own within seconds (a locked/busy file,
+ *   EBUSY/EAGAIN contention from another tool briefly holding the sqlite file). A
+ *   fast restart is the right response — the next attempt may well succeed.
+ * - `permanent`: does NOT clear without external intervention and reproduces on
+ *   every respawn (corrupt/malformed DB, a migration that always throws, or a
+ *   full disk — ENOSPC needs a human to free space). The daemon must back off to
+ *   avoid a restart hot-loop (issue #2784).
  *
  * Defaults to `permanent` for unrecognized failures: treating an unknown failure
  * as permanent means it gets backoff protection, which is the fail-safe choice
@@ -20,8 +21,6 @@ const TRANSIENT_PATTERNS: RegExp[] = [
   /database table is locked/i,
   /\bebusy\b/i,
   /\beagain\b/i,
-  /\benospc\b/i,
-  /no space left on device/i,
   /resource (?:busy|temporarily unavailable)/i,
 ];
 

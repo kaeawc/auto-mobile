@@ -25,6 +25,20 @@ export interface StartupFailureTracker {
   reset(): void;
 }
 
+/**
+ * Persistence backend for the failure tracker. Injected so the throttle-on-
+ * persistence-failure path is testable deterministically and cross-platform,
+ * rather than depending on an OS-specific unwritable path.
+ */
+export interface StartupFailureStore {
+  /** The raw persisted contents, or null if nothing is stored yet. */
+  read(): string | null;
+  /** Persist the contents. MUST throw if the write does not durably succeed. */
+  write(data: string): void;
+  /** Best-effort removal of any persisted contents. */
+  clear(): void;
+}
+
 interface StartupFailureRecord {
   at: number;
   kind: DatabaseFailureKind;
@@ -33,31 +47,26 @@ interface StartupFailureRecord {
 /** Failures older than this fall out of the rolling window. */
 export const STARTUP_FAILURE_WINDOW_MS = 5 * 60 * 1000;
 
-export class DefaultStartupFailureTracker implements StartupFailureTracker {
-  private readonly filePath: string;
-  private readonly windowMs: number;
+/** File-backed store under a directory independent of the DB directory. */
+export class FileStartupFailureStore implements StartupFailureStore {
+  constructor(private readonly filePath: string = defaultTrackerFilePath()) {}
 
-  constructor(filePath: string = defaultTrackerFilePath(), windowMs: number = STARTUP_FAILURE_WINDOW_MS) {
-    this.filePath = filePath;
-    this.windowMs = windowMs;
-  }
-
-  recordFailure(kind: DatabaseFailureKind, now: number): number {
-    const records = this.read().filter(record => now - record.at < this.windowMs);
-    records.push({ at: now, kind });
-    const persisted = this.write(records);
-    if (!persisted) {
-      // Persistence failure itself throttles: if we can't record the escalation
-      // across respawns (e.g. the state dir is unwritable — the same class of
-      // permanent failure that would otherwise hot-loop), report at least the
-      // second tier so the permanent-failure backoff still engages instead of
-      // spinning at count 1 forever.
-      return Math.max(records.length, 2);
+  read(): string | null {
+    try {
+      return fs.existsSync(this.filePath) ? fs.readFileSync(this.filePath, "utf8") : null;
+    } catch (error) {
+      logger.debug(`Failed to read startup failure tracker file: ${error}`);
+      return null;
     }
-    return records.length;
   }
 
-  reset(): void {
+  write(data: string): void {
+    // No try/catch: a failed write must propagate so recordFailure() can throttle.
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+    fs.writeFileSync(this.filePath, data, { mode: 0o600 });
+  }
+
+  clear(): void {
     try {
       if (fs.existsSync(this.filePath)) {
         fs.rmSync(this.filePath, { force: true });
@@ -67,13 +76,50 @@ export class DefaultStartupFailureTracker implements StartupFailureTracker {
       logger.debug(`Failed to clear startup failure tracker file: ${error}`);
     }
   }
+}
+
+export class DefaultStartupFailureTracker implements StartupFailureTracker {
+  private readonly store: StartupFailureStore;
+  private readonly windowMs: number;
+
+  constructor(
+    store: StartupFailureStore = new FileStartupFailureStore(),
+    windowMs: number = STARTUP_FAILURE_WINDOW_MS
+  ) {
+    this.store = store;
+    this.windowMs = windowMs;
+  }
+
+  recordFailure(kind: DatabaseFailureKind, now: number): number {
+    const records = this.read().filter(record => now - record.at < this.windowMs);
+    records.push({ at: now, kind });
+
+    try {
+      this.store.write(JSON.stringify(records));
+    } catch (error) {
+      // Persistence failure itself throttles: if we can't record the escalation
+      // across respawns (e.g. the state dir is unwritable — the same class of
+      // permanent failure that would otherwise hot-loop), report at least the
+      // second tier so the permanent-failure backoff still engages instead of
+      // spinning at count 1 forever.
+      logger.debug(`Failed to persist startup failure tracker: ${error}`);
+      return Math.max(records.length, 2);
+    }
+
+    return records.length;
+  }
+
+  reset(): void {
+    this.store.clear();
+  }
 
   private read(): StartupFailureRecord[] {
+    const raw = this.store.read();
+    if (raw === null) {
+      return [];
+    }
     try {
-      if (!fs.existsSync(this.filePath)) {
-        return [];
-      }
-      const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
+      const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) {
         return [];
       }
@@ -84,19 +130,8 @@ export class DefaultStartupFailureTracker implements StartupFailureTracker {
     } catch (error) {
       // A corrupt/unreadable tracker file must not itself break startup — treat
       // it as "no prior failures" so we still exit fatally but without backoff.
-      logger.debug(`Failed to read startup failure tracker file: ${error}`);
+      logger.debug(`Failed to parse startup failure tracker contents: ${error}`);
       return [];
-    }
-  }
-
-  private write(records: StartupFailureRecord[]): boolean {
-    try {
-      fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-      fs.writeFileSync(this.filePath, JSON.stringify(records), { mode: 0o600 });
-      return true;
-    } catch (error) {
-      logger.debug(`Failed to persist startup failure tracker file: ${error}`);
-      return false;
     }
   }
 }

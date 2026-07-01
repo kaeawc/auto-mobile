@@ -375,7 +375,10 @@ interface WsSubscribeStorageResultMessage extends WsMessageBase {
   type: "subscribe_storage_result";
   requestId: string;
   success?: boolean;
-  subscription?: StorageSubscription;
+  // The device sends the subscription as flat fields, not a nested `subscription` object.
+  packageName?: string;
+  fileName?: string;
+  subscriptionId?: string;
   totalTimeMs?: number;
 }
 
@@ -2222,8 +2225,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       if (message.type === "subscribe_storage_result" && message.requestId) {
+        // Android sends flat packageName/fileName/subscriptionId fields, not a nested `subscription`
+        // object (like preference_files/preferences above). Rebuild the subscription from them so
+        // the awaiting subscribeStorage() promise gets a usable StorageSubscription.
+        const subscription =
+          message.success && message.subscriptionId
+            ? {
+              packageName: message.packageName ?? "",
+              fileName: message.fileName ?? "",
+              subscriptionId: message.subscriptionId
+            }
+            : undefined;
         this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false, subscription: message.subscription,
+          success: message.success ?? false, subscription,
           totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }

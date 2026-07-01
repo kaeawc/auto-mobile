@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscription
 import dev.jasonpearson.automobile.protocol.AddHighlight
 import dev.jasonpearson.automobile.protocol.ClearPreferences
 import dev.jasonpearson.automobile.protocol.GetCurrentFocus
@@ -198,17 +199,13 @@ class CtrlProxyMessageHandler(
         when {
           packageName != null && fileName != null ->
               actions.unsubscribeStorage(request.requestId, packageName, fileName)
-          // Real TS traffic sends only `subscriptionId`, formatted as "packageName:fileName" by
-          // StorageSubscriptionManager.subscribe(). Package names never contain ':', so split on the
-          // FIRST ':' to recover packageName/fileName (a file name could theoretically contain ':').
+          // Real TS traffic sends only `subscriptionId` (formatted "packageName:fileName" by
+          // StorageSubscriptionManager.subscribe()). StorageSubscription.parseId is the single
+          // canonical inverse of that format — see its doc for the first-colon rationale.
           subscriptionId != null -> {
-            val separator = subscriptionId.indexOf(':')
-            if (separator > 0 && separator < subscriptionId.length - 1) {
-              actions.unsubscribeStorage(
-                  request.requestId,
-                  subscriptionId.substring(0, separator),
-                  subscriptionId.substring(separator + 1),
-              )
+            val parts = StorageSubscription.parseId(subscriptionId)
+            if (parts != null) {
+              actions.unsubscribeStorage(request.requestId, parts.first, parts.second)
             } else {
               log("unsubscribe_storage received malformed subscriptionId=$subscriptionId; ignoring")
             }

@@ -80,7 +80,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     expect(tracker.resetCalls).toBe(0);
   });
 
-  test("successful startup resolves, runs cache cleanup, and resets the failure tracker", async () => {
+  test("successful DB bring-up resolves and runs cache cleanup without resetting the breaker", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const initializer = new FakeDatabaseInitializer();
@@ -92,7 +92,10 @@ describe("Daemon.initializeDatabase fatality", () => {
     expect(initializer.initializeCalls).toBe(1);
     expect(deviceSessionRepository.markStaleCalls).toBe(1);
     expect(tracker.recorded).toHaveLength(0);
-    expect(tracker.resetCalls).toBe(1);
+    // Reset happens only at the END of start() (after all startup DB reads),
+    // not here — a later permanent failure recorded before its fatal exit must
+    // not be erased by a bring-up that merely got past migrations (issue #2784).
+    expect(tracker.resetCalls).toBe(0);
   });
 
   test("permanent failures back off with increasing delay to avoid a restart hot-loop", async () => {

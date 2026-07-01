@@ -290,6 +290,12 @@ export class Daemon {
     logger.info(
       `Daemon started: PID ${process.pid}, socket ${SOCKET_PATH}, HTTP port ${this.port}`
     );
+
+    // Startup fully succeeded — DB brought up AND every startup DB-backed step
+    // completed. Only now clear the crash-loop circuit breaker, so a permanent
+    // failure in any later startup step (recorded before its fatal exit) isn't
+    // erased by a preflight that merely got past migrations (issue #2784).
+    this.startupFailureTracker.reset();
   }
 
   /**
@@ -1143,7 +1149,6 @@ export class Daemon {
         "daemon-restart"
       );
       logger.info(`[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`);
-      this.startupFailureTracker.reset();
     } catch (error) {
       // Delegate to the shared startup guard so this path and the earlier
       // feature-flag DB touch (guarded in main() before start()) funnel through

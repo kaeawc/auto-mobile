@@ -4,10 +4,23 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { exponentialBackoff } from "../utils/Backoff";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import { classifyDatabaseFailure } from "../db/databaseFailureClassification";
+import { DAEMON_STARTUP_TIMEOUT_MS } from "./constants";
 import {
   StartupFailureTracker,
   DefaultStartupFailureTracker,
 } from "./DaemonStartupFailureTracker";
+
+/**
+ * Cap the backoff strictly below the manager's startup timeout. The daemon
+ * sleeps here *before* `process.exit(1)`, but `DaemonManager.waitForDaemonStartup()`
+ * reports failure after `DAEMON_STARTUP_TIMEOUT_MS` and the next spawn SIGTERMs
+ * any live `--daemon-mode` process — so a sleep >= that timeout would be
+ * truncated (the sleeper is killed) and never actually throttle. Staying under
+ * it (with headroom for the exit to be observed) lets the backoff complete, so
+ * the effective respawn cadence really does converge to this bound. Floored at
+ * 1s so an aggressively-low override can't disable throttling entirely.
+ */
+export const MAX_STARTUP_BACKOFF_MS = Math.max(1000, DAEMON_STARTUP_TIMEOUT_MS - 2000);
 
 /**
  * Convert a fatal database startup/bring-up failure into a rethrown
@@ -36,7 +49,7 @@ export async function handleFatalDatabaseStartupFailure(
     const backoffMs = exponentialBackoff({
       initialDelayMs: 1000,
       multiplier: 2,
-      maxDelayMs: 60_000,
+      maxDelayMs: MAX_STARTUP_BACKOFF_MS,
     }).delayForAttempt(recentFailures - 1);
     logger.error(
       `Database initialization has failed ${recentFailures} times; backing off ${backoffMs}ms before exit to avoid a restart hot-loop.`

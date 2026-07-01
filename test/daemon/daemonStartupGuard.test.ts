@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../src/models/ActionableError";
-import { guardDatabaseStartup, handleFatalDatabaseStartupFailure } from "../../src/daemon/daemonStartupGuard";
+import {
+  guardDatabaseStartup,
+  handleFatalDatabaseStartupFailure,
+  MAX_STARTUP_BACKOFF_MS,
+} from "../../src/daemon/daemonStartupGuard";
+import { DAEMON_STARTUP_TIMEOUT_MS } from "../../src/daemon/constants";
+import { DefaultStartupFailureTracker } from "../../src/daemon/DaemonStartupFailureTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
@@ -58,7 +64,10 @@ describe("guardDatabaseStartup", () => {
     ).rejects.toBeInstanceOf(ActionableError);
     expect(timer.getSleepHistory()).toEqual([]);
 
-    // Later permanent failures park with a strictly increasing delay.
+    // Later permanent failures park with the concrete exponentialBackoff tiers
+    // (1000ms * 2^(attempt-1)): count 2 -> 1000ms, count 3 -> 2000ms. Asserting
+    // the exact values catches an accidental multiplier/initial-delay change that
+    // a "strictly increasing" check would miss.
     tracker.setCounts([2, 3]);
     await expect(
       handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer)
@@ -69,9 +78,46 @@ describe("guardDatabaseStartup", () => {
     ).rejects.toBeInstanceOf(ActionableError);
     const afterThird = [...timer.getSleepHistory()];
 
-    expect(afterSecond).toHaveLength(1);
-    expect(afterThird).toHaveLength(2);
-    expect(afterThird[1]!).toBeGreaterThan(afterThird[0]!);
+    expect(afterSecond).toEqual([1000]);
+    expect(afterThird).toEqual([1000, 2000]);
+  });
+
+  test("backoff is capped strictly below the daemon startup timeout", async () => {
+    // A sleep >= DAEMON_STARTUP_TIMEOUT_MS would be truncated: DaemonManager
+    // reports startup failure at that timeout and the next spawn SIGTERMs the
+    // still-sleeping child, so the backoff would never actually throttle.
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const tracker = new FakeStartupFailureTracker();
+    tracker.setCounts([50]); // far past the cap tier
+
+    await expect(
+      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer)
+    ).rejects.toBeInstanceOf(ActionableError);
+
+    const [delay] = timer.getSleepHistory();
+    expect(delay).toBe(MAX_STARTUP_BACKOFF_MS);
+    expect(delay!).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
+  });
+
+  test("an unpersistable permanent failure still parks (throttle wiring end-to-end)", async () => {
+    // Real tracker + a store whose writes fail: recordFailure() must return a
+    // backoff-triggering count so the handler actually sleeps, not just return >=2.
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const tracker = new DefaultStartupFailureTracker({
+      read: () => null,
+      write: () => {
+        throw new Error("EACCES: permission denied");
+      },
+      clear: () => {},
+    });
+
+    await expect(
+      handleFatalDatabaseStartupFailure(new Error("file is not a database"), tracker, timer)
+    ).rejects.toBeInstanceOf(ActionableError);
+
+    expect(timer.getSleepHistory()).toEqual([1000]);
   });
 
   test("transient failures never park (fast restart to clear a locked file)", async () => {

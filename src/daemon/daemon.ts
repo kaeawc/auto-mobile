@@ -22,7 +22,7 @@ import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
-import { closeDatabase, getMigrationsError } from "../db";
+import { closeDatabase } from "../db";
 import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 import { handleFatalDatabaseStartupFailure } from "./daemonStartupGuard";
@@ -791,14 +791,6 @@ export class Daemon {
           // Check if socket server is active
           if (!this.socketServer || !this.socketServer.isListening()) {
             logger.warn("Health check failed: Socket server not listening");
-            failedCheckCount++;
-          } else if (getMigrationsError() !== null) {
-            // DB-liveness probe (issue #2784): a query-dead DB otherwise leaves
-            // the daemon reporting healthy while every DB-backed feature fails.
-            // Read the cached migration error only — no query, so this stays
-            // read-only, non-transactional, and never blocks behind an in-flight
-            // graph-write transaction on the single shared connection.
-            logger.warn(`Health check failed: database is not query-ready: ${getMigrationsError()?.message}`);
             failedCheckCount++;
           } else {
             // Health check passed

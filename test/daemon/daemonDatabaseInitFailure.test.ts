@@ -117,12 +117,11 @@ describe("Daemon.initializeDatabase fatality", () => {
     await expect((daemon as unknown as DaemonInternals).initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
     const afterThird = [...timer.getSleepHistory()];
 
-    // First failure did not park.
+    // First failure did not park; subsequent failures park with the concrete
+    // exponentialBackoff tiers (count 2 -> 1000ms, count 3 -> 2000ms).
     expect(afterFirst).toEqual([]);
-    // Subsequent failures parked, with the delay strictly increasing (bounded loop).
-    expect(afterSecond.length).toBe(1);
-    expect(afterThird.length).toBe(2);
-    expect(afterThird[1]!).toBeGreaterThan(afterThird[0]!);
+    expect(afterSecond).toEqual([1000]);
+    expect(afterThird).toEqual([1000, 2000]);
   });
 
   test("transient failures do not park (fast restart to clear a locked file)", async () => {

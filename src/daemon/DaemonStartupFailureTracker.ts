@@ -62,8 +62,15 @@ export class FileStartupFailureStore implements StartupFailureStore {
 
   write(data: string): void {
     // No try/catch: a failed write must propagate so recordFailure() can throttle.
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    fs.writeFileSync(this.filePath, data, { mode: 0o600 });
+    // Write to a per-process temp file then atomically rename, so a crash or a
+    // racing daemon launch can never leave a torn/partial file that read() would
+    // fail to parse (which would silently reset the failure count to zero and
+    // defeat backoff escalation).
+    const dir = path.dirname(this.filePath);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmpPath = path.join(dir, `.${path.basename(this.filePath)}.${process.pid}.tmp`);
+    fs.writeFileSync(tmpPath, data, { mode: 0o600 });
+    fs.renameSync(tmpPath, this.filePath);
   }
 
   clear(): void {
@@ -91,7 +98,7 @@ export class DefaultStartupFailureTracker implements StartupFailureTracker {
   }
 
   recordFailure(kind: DatabaseFailureKind, now: number): number {
-    const records = this.read().filter(record => now - record.at < this.windowMs);
+    const records = this.read().filter(record => now - record.at <= this.windowMs);
     records.push({ at: now, kind });
 
     try {

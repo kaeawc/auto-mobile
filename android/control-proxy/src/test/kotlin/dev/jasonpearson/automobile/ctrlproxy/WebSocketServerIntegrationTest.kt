@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
+import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import io.ktor.client.HttpClient
@@ -58,15 +59,21 @@ class WebSocketServerIntegrationTest {
             scope = testScope,
             messageHandler =
                 CtrlProxyMessageHandler(
-                    onAddHighlight = { requestId, highlightId, shape ->
-                      val error =
-                          when {
-                            highlightId.isNullOrBlank() -> "Missing highlight id"
-                            shape == null -> "Missing highlight shape"
-                            else -> null
-                          }
-                      enqueueHighlightResponse(requestId, error == null, error)
-                    },
+                    object : NoOpCtrlProxyActions() {
+                      override fun addHighlight(
+                          requestId: String?,
+                          highlightId: String?,
+                          shape: HighlightShape?,
+                      ) {
+                        val error =
+                            when {
+                              highlightId.isNullOrBlank() -> "Missing highlight id"
+                              shape == null -> "Missing highlight shape"
+                              else -> null
+                            }
+                        enqueueHighlightResponse(requestId, error == null, error)
+                      }
+                    }
                 ),
         )
   }
@@ -448,8 +455,15 @@ class WebSocketServerIntegrationTest {
             scope = testScope,
             messageHandler =
                 CtrlProxyMessageHandler(
-                    onSetRecompositionTracking = { order.add("flags") },
-                    onRequestScreenshot = { order.add("screenshot") },
+                    object : NoOpCtrlProxyActions() {
+                      override fun setRecompositionTracking(enabled: Boolean) {
+                        order.add("flags")
+                      }
+
+                      override fun requestScreenshot(requestId: String?) {
+                        order.add("screenshot")
+                      }
+                    }
                 ),
         )
     orderedServer.start()

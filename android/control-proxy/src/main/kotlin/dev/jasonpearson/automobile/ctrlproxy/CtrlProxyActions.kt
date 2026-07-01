@@ -1,0 +1,150 @@
+package dev.jasonpearson.automobile.ctrlproxy
+
+import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
+
+/**
+ * The device actions a decoded [dev.jasonpearson.automobile.protocol.WebSocketRequest] can trigger.
+ *
+ * [CtrlProxyMessageHandler] dispatches each sealed request to exactly one of these methods. The
+ * on-device [CtrlProxy] service implements them (mostly by delegating to its `perform*`/`handle*`
+ * methods); tests provide a recording fake. Every method is abstract and non-null so the compiler
+ * guarantees each action is wired — replacing the previous bag of ~43 nullable callback lambdas.
+ *
+ * `add_highlight` takes the Android render-model [HighlightShape]; the handler converts the wire
+ * type before calling it. `set_network_mock_rules` receives pre-encoded JSON because the SDK store
+ * consumes a JSON string.
+ */
+interface CtrlProxyActions {
+  fun requestHierarchy(disableAllFiltering: Boolean)
+
+  fun requestHierarchyIfStale(sinceTimestamp: Long)
+
+  fun requestScreenshot(requestId: String?)
+
+  fun requestSwipe(requestId: String?, x1: Int, y1: Int, x2: Int, y2: Int, duration: Long)
+
+  fun requestTapCoordinates(requestId: String?, x: Int, y: Int, duration: Long)
+
+  fun requestTwoFingerSwipe(
+      requestId: String?,
+      x1: Int,
+      y1: Int,
+      x2: Int,
+      y2: Int,
+      duration: Long,
+      offset: Int,
+  )
+
+  fun requestDrag(
+      requestId: String?,
+      x1: Int,
+      y1: Int,
+      x2: Int,
+      y2: Int,
+      pressDurationMs: Long,
+      dragDurationMs: Long,
+      holdDurationMs: Long,
+  )
+
+  fun requestPinch(
+      requestId: String?,
+      centerX: Int,
+      centerY: Int,
+      distanceStart: Int,
+      distanceEnd: Int,
+      rotationDegrees: Float,
+      duration: Long,
+  )
+
+  fun requestSetText(requestId: String?, text: String, resourceId: String?, dismissKeyboard: Boolean)
+
+  fun requestImeAction(requestId: String?, action: String)
+
+  fun requestSelectAll(requestId: String?)
+
+  fun requestAction(requestId: String?, action: String, resourceId: String?)
+
+  fun requestClipboard(requestId: String?, action: String, text: String?)
+
+  fun installCaCert(requestId: String?, certificate: String)
+
+  fun installCaCertFromPath(requestId: String?, devicePath: String)
+
+  fun removeCaCert(requestId: String?, alias: String?, certificate: String?)
+
+  fun requestGlobalAction(requestId: String?, action: String)
+
+  fun requestDeviceInfo(requestId: String?)
+
+  fun getDeviceOwnerStatus(requestId: String?)
+
+  fun getPermission(requestId: String?, permission: String?, requestPermission: Boolean?)
+
+  fun setRecompositionTracking(enabled: Boolean)
+
+  fun setAccessibilityFlags(
+      includeNotImportantViews: Boolean,
+      reportViewIds: Boolean,
+      retrieveInteractiveWindows: Boolean,
+  )
+
+  fun setNetworkMockRules(rulesJson: String)
+
+  fun setNetworkErrorSimulation(
+      enabled: Boolean,
+      errorType: String?,
+      limit: Int?,
+      expiresAtEpochMs: Long?,
+  )
+
+  fun getCurrentFocus(requestId: String?)
+
+  fun getTraversalOrder(requestId: String?)
+
+  fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?)
+
+  fun listPreferenceFiles(requestId: String?, packageName: String)
+
+  fun getPreferences(requestId: String?, packageName: String, fileName: String)
+
+  fun subscribeStorage(requestId: String?, packageName: String, fileName: String)
+
+  fun unsubscribeStorage(requestId: String?, packageName: String, fileName: String)
+
+  fun getPreference(requestId: String?, packageName: String, fileName: String, key: String)
+
+  fun setPreference(
+      requestId: String?,
+      packageName: String,
+      fileName: String,
+      key: String,
+      value: String?,
+      type: String,
+  )
+
+  fun removePreference(requestId: String?, packageName: String, fileName: String, key: String)
+
+  fun clearPreferences(requestId: String?, packageName: String, fileName: String)
+
+  fun startRecording()
+
+  fun stopRecording()
+
+  fun requestSettingsGet(requestId: String?, namespace: String, key: String)
+
+  fun requestSettingsPut(
+      requestId: String?,
+      namespace: String,
+      key: String,
+      value: String?,
+      valueType: String,
+  )
+
+  fun requestSettingsList(requestId: String?, namespace: String)
+
+  fun requestInstalledPackages(requestId: String?, includeSystem: Boolean, userId: Int?)
+
+  fun requestPackageInfo(requestId: String?, packageName: String, includePermissions: Boolean)
+
+  fun requestLaunchIntent(requestId: String?, packageName: String)
+}

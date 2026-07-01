@@ -96,7 +96,7 @@ import kotlinx.serialization.json.Json
  * Main AutoMobile Accessibility Service that provides view hierarchy extraction capabilities for
  * automated testing and UI interaction.
  */
-class CtrlProxy : AccessibilityService() {
+class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   companion object {
     private const val TAG = "CtrlProxy"
@@ -791,173 +791,16 @@ class CtrlProxy : AccessibilityService() {
               }
               .launchIn(serviceScope)
 
-      // Start WebSocket server with hierarchy, screenshot, swipe, text input, IME action,
-      // clipboard, and storage callbacks
+      // Start the WebSocket server. This service implements CtrlProxyActions, so inbound requests
+      // are dispatched straight to its perform*/handle* methods via CtrlProxyMessageHandler.
       webSocketServer =
           WebSocketServer(
               port = 8765,
               scope = serviceScope,
               messageHandler =
                   CtrlProxyMessageHandler(
+                      actions = this,
                       log = { message -> Log.w(TAG, message) },
-                      onRequestHierarchy = { disableAllFiltering ->
-                        extractHierarchyNow(disableAllFiltering)
-                      },
-                      onRequestHierarchyIfStale = { sinceTimestamp ->
-                        hierarchyDebouncer.extractIfStale(sinceTimestamp)
-                      },
-                      onRequestScreenshot = { requestId -> broadcastScreenshot(requestId) },
-                      onRequestSwipe = { requestId, x1, y1, x2, y2, duration ->
-                        performSwipe(requestId, x1, y1, x2, y2, duration)
-                      },
-                      onRequestTapCoordinates = { requestId, x, y, duration ->
-                        performTapCoordinates(requestId, x, y, duration)
-                      },
-                      onRequestTwoFingerSwipe = { requestId, x1, y1, x2, y2, duration, offset ->
-                        performTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset)
-                      },
-                      onRequestDrag = {
-                          requestId,
-                          x1,
-                          y1,
-                          x2,
-                          y2,
-                          pressDurationMs,
-                          dragDurationMs,
-                          holdDurationMs ->
-                        performDrag(
-                            requestId,
-                            x1,
-                            y1,
-                            x2,
-                            y2,
-                            pressDurationMs,
-                            dragDurationMs,
-                            holdDurationMs,
-                        )
-                      },
-                      onRequestPinch = {
-                          requestId,
-                          centerX,
-                          centerY,
-                          distanceStart,
-                          distanceEnd,
-                          rotationDegrees,
-                          duration ->
-                        performPinch(
-                            requestId,
-                            centerX,
-                            centerY,
-                            distanceStart,
-                            distanceEnd,
-                            rotationDegrees,
-                            duration,
-                        )
-                      },
-                      onRequestSetText = { requestId, text, resourceId, dismissKeyboard ->
-                        performSetText(requestId, text, resourceId, dismissKeyboard)
-                      },
-                      onRequestImeAction = { requestId, action ->
-                        performImeAction(requestId, action)
-                      },
-                      onRequestSelectAll = { requestId -> performSelectAll(requestId) },
-                      onRequestAction = { requestId, action, resourceId ->
-                        performNodeAction(requestId, action, resourceId)
-                      },
-                      onRequestClipboard = { requestId, action, text ->
-                        performClipboard(requestId, action, text)
-                      },
-                      onRequestInstallCaCert = { requestId, certificate ->
-                        performInstallCaCertificate(requestId, certificate)
-                      },
-                      onRequestInstallCaCertFromPath = { requestId, devicePath ->
-                        performInstallCaCertificateFromPath(requestId, devicePath)
-                      },
-                      onRequestRemoveCaCert = { requestId, alias, certificate ->
-                        performRemoveCaCertificate(requestId, alias, certificate)
-                      },
-                      onGetDeviceOwnerStatus = { requestId ->
-                        performGetDeviceOwnerStatus(requestId)
-                      },
-                      onGetPermission = { requestId, permission, requestPermission ->
-                        handleGetPermission(requestId, permission, requestPermission)
-                      },
-                      onRequestGlobalAction = { requestId, action ->
-                        performGlobalActionRequest(requestId, action)
-                      },
-                      onRequestDeviceInfo = { requestId -> performDeviceInfoRequest(requestId) },
-                      onSetRecompositionTracking = { enabled ->
-                        setRecompositionTrackingEnabled(enabled)
-                      },
-                      onSetAccessibilityFlags = {
-                          includeNotImportant,
-                          reportViewIds,
-                          retrieveInteractive ->
-                        applyAccessibilityFlags(
-                            includeNotImportantViews = includeNotImportant,
-                            reportViewIds = reportViewIds,
-                            retrieveInteractiveWindows = retrieveInteractive,
-                        )
-                      },
-                      onSetNetworkMockRules = { rulesJson -> broadcastNetworkMockRules(rulesJson) },
-                      onSetNetworkErrorSimulation = { enabled, errorType, limit, expiresAt ->
-                        broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAt)
-                      },
-                      onGetCurrentFocus = { requestId -> handleGetCurrentFocus(requestId) },
-                      onGetTraversalOrder = { requestId -> handleGetTraversalOrder(requestId) },
-                      onAddHighlight = { requestId, highlightId, shape ->
-                        handleAddHighlight(requestId, highlightId, shape)
-                      },
-                      onListPreferenceFiles = { requestId, packageName ->
-                        handleListPreferenceFiles(requestId, packageName)
-                      },
-                      onGetPreferences = { requestId, packageName, fileName ->
-                        handleGetPreferences(requestId, packageName, fileName)
-                      },
-                      onSubscribeStorage = { requestId, packageName, fileName ->
-                        handleSubscribeStorage(requestId, packageName, fileName)
-                      },
-                      onUnsubscribeStorage = { requestId, packageName, fileName ->
-                        handleUnsubscribeStorage(requestId, packageName, fileName)
-                      },
-                      onGetPreference = { requestId, packageName, fileName, key ->
-                        handleGetPreference(requestId, packageName, fileName, key)
-                      },
-                      onSetPreference = { requestId, packageName, fileName, key, value, type ->
-                        handleSetPreference(requestId, packageName, fileName, key, value, type)
-                      },
-                      onRemovePreference = { requestId, packageName, fileName, key ->
-                        handleRemovePreference(requestId, packageName, fileName, key)
-                      },
-                      onClearPreferences = { requestId, packageName, fileName ->
-                        handleClearPreferences(requestId, packageName, fileName)
-                      },
-                      onStartRecording = {
-                        isRecording = true
-                        Log.d(TAG, "Recording started")
-                      },
-                      onStopRecording = {
-                        isRecording = false
-                        Log.d(TAG, "Recording stopped")
-                      },
-                      onRequestSettingsGet = { requestId, namespace, key ->
-                        performSettingsRead(requestId, namespace, key)
-                      },
-                      onRequestSettingsPut = { requestId, namespace, key, value, valueType ->
-                        performSettingsWrite(requestId, namespace, key, value, valueType)
-                      },
-                      onRequestSettingsList = { requestId, namespace ->
-                        performSettingsList(requestId, namespace)
-                      },
-                      onRequestInstalledPackages = { requestId, includeSystem, userId ->
-                        performInstalledPackages(requestId, includeSystem, userId)
-                      },
-                      onRequestPackageInfo = { requestId, packageName, includePermissions ->
-                        performPackageInfo(requestId, packageName, includePermissions)
-                      },
-                      onRequestLaunchIntent = { requestId, packageName ->
-                        performLaunchIntent(requestId, packageName)
-                      },
                   ),
           )
       webSocketServer.start()
@@ -1075,6 +918,205 @@ class CtrlProxy : AccessibilityService() {
     Log.d(TAG, "AutoMobile Accessibility Service destroyed")
     serviceScope.cancel()
   }
+
+  // ===========================================================================
+  // CtrlProxyActions — inbound WebSocket commands dispatched by CtrlProxyMessageHandler.
+  // Each method delegates to the corresponding perform*/handle* implementation below.
+  // ===========================================================================
+
+  override fun requestHierarchy(disableAllFiltering: Boolean) =
+      extractHierarchyNow(disableAllFiltering)
+
+  override fun requestHierarchyIfStale(sinceTimestamp: Long) =
+      hierarchyDebouncer.extractIfStale(sinceTimestamp)
+
+  override fun requestScreenshot(requestId: String?) = broadcastScreenshot(requestId)
+
+  override fun requestSwipe(
+      requestId: String?,
+      x1: Int,
+      y1: Int,
+      x2: Int,
+      y2: Int,
+      duration: Long,
+  ) = performSwipe(requestId, x1, y1, x2, y2, duration)
+
+  override fun requestTapCoordinates(requestId: String?, x: Int, y: Int, duration: Long) =
+      performTapCoordinates(requestId, x, y, duration)
+
+  override fun requestTwoFingerSwipe(
+      requestId: String?,
+      x1: Int,
+      y1: Int,
+      x2: Int,
+      y2: Int,
+      duration: Long,
+      offset: Int,
+  ) = performTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset)
+
+  override fun requestDrag(
+      requestId: String?,
+      x1: Int,
+      y1: Int,
+      x2: Int,
+      y2: Int,
+      pressDurationMs: Long,
+      dragDurationMs: Long,
+      holdDurationMs: Long,
+  ) = performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+
+  override fun requestPinch(
+      requestId: String?,
+      centerX: Int,
+      centerY: Int,
+      distanceStart: Int,
+      distanceEnd: Int,
+      rotationDegrees: Float,
+      duration: Long,
+  ) = performPinch(requestId, centerX, centerY, distanceStart, distanceEnd, rotationDegrees, duration)
+
+  override fun requestSetText(
+      requestId: String?,
+      text: String,
+      resourceId: String?,
+      dismissKeyboard: Boolean,
+  ) = performSetText(requestId, text, resourceId, dismissKeyboard)
+
+  override fun requestImeAction(requestId: String?, action: String) =
+      performImeAction(requestId, action)
+
+  override fun requestSelectAll(requestId: String?) = performSelectAll(requestId)
+
+  override fun requestAction(requestId: String?, action: String, resourceId: String?) =
+      performNodeAction(requestId, action, resourceId)
+
+  override fun requestClipboard(requestId: String?, action: String, text: String?) =
+      performClipboard(requestId, action, text)
+
+  override fun installCaCert(requestId: String?, certificate: String) =
+      performInstallCaCertificate(requestId, certificate)
+
+  override fun installCaCertFromPath(requestId: String?, devicePath: String) =
+      performInstallCaCertificateFromPath(requestId, devicePath)
+
+  override fun removeCaCert(requestId: String?, alias: String?, certificate: String?) =
+      performRemoveCaCertificate(requestId, alias, certificate)
+
+  override fun requestGlobalAction(requestId: String?, action: String) =
+      performGlobalActionRequest(requestId, action)
+
+  override fun requestDeviceInfo(requestId: String?) = performDeviceInfoRequest(requestId)
+
+  override fun getDeviceOwnerStatus(requestId: String?) = performGetDeviceOwnerStatus(requestId)
+
+  override fun getPermission(
+      requestId: String?,
+      permission: String?,
+      requestPermission: Boolean?,
+  ) = handleGetPermission(requestId, permission, requestPermission)
+
+  override fun setRecompositionTracking(enabled: Boolean) = setRecompositionTrackingEnabled(enabled)
+
+  override fun setAccessibilityFlags(
+      includeNotImportantViews: Boolean,
+      reportViewIds: Boolean,
+      retrieveInteractiveWindows: Boolean,
+  ) =
+      applyAccessibilityFlags(
+          includeNotImportantViews = includeNotImportantViews,
+          reportViewIds = reportViewIds,
+          retrieveInteractiveWindows = retrieveInteractiveWindows,
+      )
+
+  override fun setNetworkMockRules(rulesJson: String) = broadcastNetworkMockRules(rulesJson)
+
+  override fun setNetworkErrorSimulation(
+      enabled: Boolean,
+      errorType: String?,
+      limit: Int?,
+      expiresAtEpochMs: Long?,
+  ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs)
+
+  override fun getCurrentFocus(requestId: String?) = handleGetCurrentFocus(requestId)
+
+  override fun getTraversalOrder(requestId: String?) = handleGetTraversalOrder(requestId)
+
+  override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
+      handleAddHighlight(requestId, highlightId, shape)
+
+  override fun listPreferenceFiles(requestId: String?, packageName: String) =
+      handleListPreferenceFiles(requestId, packageName)
+
+  override fun getPreferences(requestId: String?, packageName: String, fileName: String) =
+      handleGetPreferences(requestId, packageName, fileName)
+
+  override fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
+      handleSubscribeStorage(requestId, packageName, fileName)
+
+  override fun unsubscribeStorage(requestId: String?, packageName: String, fileName: String) =
+      handleUnsubscribeStorage(requestId, packageName, fileName)
+
+  override fun getPreference(
+      requestId: String?,
+      packageName: String,
+      fileName: String,
+      key: String,
+  ) = handleGetPreference(requestId, packageName, fileName, key)
+
+  override fun setPreference(
+      requestId: String?,
+      packageName: String,
+      fileName: String,
+      key: String,
+      value: String?,
+      type: String,
+  ) = handleSetPreference(requestId, packageName, fileName, key, value, type)
+
+  override fun removePreference(
+      requestId: String?,
+      packageName: String,
+      fileName: String,
+      key: String,
+  ) = handleRemovePreference(requestId, packageName, fileName, key)
+
+  override fun clearPreferences(requestId: String?, packageName: String, fileName: String) =
+      handleClearPreferences(requestId, packageName, fileName)
+
+  override fun startRecording() {
+    isRecording = true
+    Log.d(TAG, "Recording started")
+  }
+
+  override fun stopRecording() {
+    isRecording = false
+    Log.d(TAG, "Recording stopped")
+  }
+
+  override fun requestSettingsGet(requestId: String?, namespace: String, key: String) =
+      performSettingsRead(requestId, namespace, key)
+
+  override fun requestSettingsPut(
+      requestId: String?,
+      namespace: String,
+      key: String,
+      value: String?,
+      valueType: String,
+  ) = performSettingsWrite(requestId, namespace, key, value, valueType)
+
+  override fun requestSettingsList(requestId: String?, namespace: String) =
+      performSettingsList(requestId, namespace)
+
+  override fun requestInstalledPackages(requestId: String?, includeSystem: Boolean, userId: Int?) =
+      performInstalledPackages(requestId, includeSystem, userId)
+
+  override fun requestPackageInfo(
+      requestId: String?,
+      packageName: String,
+      includePermissions: Boolean,
+  ) = performPackageInfo(requestId, packageName, includePermissions)
+
+  override fun requestLaunchIntent(requestId: String?, packageName: String) =
+      performLaunchIntent(requestId, packageName)
 
   private fun setRecompositionTrackingEnabled(enabled: Boolean) {
     recompositionStore.setEnabled(enabled)

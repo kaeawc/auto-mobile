@@ -10,3 +10,6 @@ ee27580b48ed94298139e974b71d840acf8b85ea
 
 # chore(android): ktfmt the files merged from main (meta/default style)
 6be486769c1fbcb2f1ac7456bc2fe044faf5f688
+
+# chore(android): reformat Kotlin tree with ktfmt 0.64 (google style)
+ab75ad54ebeeb533b3d7cd0ffa1af5329cc045b7

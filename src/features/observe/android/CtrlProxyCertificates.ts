@@ -19,6 +19,7 @@ import type {
   A11yPermissionResult,
 } from "./types";
 import { generateSecureId, quoteForAdbArg } from "./types";
+import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 
 /** Directory on device for pushing certificate files */
 const DEVICE_CERT_DIR = "/sdcard/Download/automobile/ca_certs";
@@ -90,11 +91,9 @@ export class CtrlProxyCertificates {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({
-          type: "install_ca_cert",
-          requestId,
-          certificate: trimmed
-        });
+        const message = serializeCtrlProxyRequest(
+          ctrlProxyRequests.installCaCert({ requestId, certificate: trimmed })
+        );
         ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent CA cert install request (requestId: ${requestId})`);
       });
@@ -197,11 +196,9 @@ export class CtrlProxyCertificates {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({
-          type: "install_ca_cert_from_path",
-          requestId,
-          devicePath
-        });
+        const message = serializeCtrlProxyRequest(
+          ctrlProxyRequests.installCaCertFromPath({ requestId, devicePath })
+        );
         ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent CA cert install request (requestId: ${requestId}, devicePath: ${devicePath})`);
       });
@@ -284,11 +281,9 @@ export class CtrlProxyCertificates {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({
-          type: "remove_ca_cert",
-          requestId,
-          alias: trimmedAlias
-        });
+        const message = serializeCtrlProxyRequest(
+          ctrlProxyRequests.removeCaCert({ requestId, alias: trimmedAlias })
+        );
         ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent CA cert removal request (requestId: ${requestId}, alias: ${trimmedAlias})`);
       });
@@ -358,10 +353,9 @@ export class CtrlProxyCertificates {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({
-          type: "get_device_owner_status",
-          requestId
-        });
+        const message = serializeCtrlProxyRequest(
+          ctrlProxyRequests.getDeviceOwnerStatus({ requestId })
+        );
         ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent device owner status request (requestId: ${requestId})`);
       });
@@ -454,12 +448,9 @@ export class CtrlProxyCertificates {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({
-          type: "get_permission",
-          requestId,
-          permission: trimmedPermission,
-          requestPermission
-        });
+        const message = serializeCtrlProxyRequest(
+          ctrlProxyRequests.getPermission({ requestId, permission: trimmedPermission, requestPermission })
+        );
         ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent permission request (requestId: ${requestId}, permission: ${trimmedPermission})`);
       });

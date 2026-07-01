@@ -22,6 +22,7 @@ import type {
   AndroidPerfTiming,
 } from "./types";
 import { generateSecureId } from "./types";
+import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 
 /** Cooldown after a WebSocket timeout before retrying fresh-data waits.
  *  Keep short: a long cooldown (e.g. 5s) turns a single slow response into
@@ -611,11 +612,9 @@ export class CtrlProxyHierarchy {
 
     try {
       const requestId = `req_${this.context.timer.now()}_${generateSecureId()}`;
-      const message = JSON.stringify({
-        type: "request_hierarchy",
-        requestId,
-        disableAllFiltering
-      });
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestHierarchy({ requestId, disableAllFiltering })
+      );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent hierarchy request via WebSocket (requestId: ${requestId}, disableAllFiltering: ${disableAllFiltering})`);
       return true;
@@ -637,11 +636,9 @@ export class CtrlProxyHierarchy {
 
     try {
       const requestId = `stale_${this.context.timer.now()}_${generateSecureId()}`;
-      const message = JSON.stringify({
-        type: "request_hierarchy_if_stale",
-        requestId,
-        sinceTimestamp
-      });
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestHierarchyIfStale({ requestId, sinceTimestamp })
+      );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent hierarchy_if_stale request (requestId: ${requestId}, sinceTimestamp: ${sinceTimestamp})`);
       return true;
@@ -663,7 +660,9 @@ export class CtrlProxyHierarchy {
 
     try {
       const requestId = `recomp_${this.context.timer.now()}_${generateSecureId()}`;
-      const message = JSON.stringify({ type: "set_recomposition_tracking", requestId, enabled });
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.setRecompositionTracking({ requestId, enabled })
+      );
       ws.send(message);
       return true;
     } catch (error) {

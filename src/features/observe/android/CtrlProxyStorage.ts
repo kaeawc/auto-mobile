@@ -9,6 +9,7 @@ import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
 import type { DelegateContext } from "./types";
 import { generateSecureId } from "./types";
+import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import type {
   PreferenceFile,
   KeyValueEntry,
@@ -79,11 +80,9 @@ export class CtrlProxyStorage {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      const message = JSON.stringify({
-        type: "list_preference_files",
-        requestId,
-        packageName
-      });
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.listPreferenceFiles({ requestId, packageName })
+      );
       logger.info(`[CTRL_PROXY] Sending list_preference_files request (requestId: ${requestId}, packageName: ${packageName}, wsReadyState: ${ws.readyState})`);
       ws.send(message);
       logger.info(`[CTRL_PROXY] Sent list_preference_files request successfully`);
@@ -145,12 +144,9 @@ export class CtrlProxyStorage {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      const message = JSON.stringify({
-        type: "get_preferences",
-        requestId,
-        packageName,
-        fileName
-      });
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.getPreferences({ requestId, packageName, fileName })
+      );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent get_preferences request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`);
 
@@ -212,12 +208,9 @@ export class CtrlProxyStorage {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      const message = JSON.stringify({
-        type: "subscribe_storage",
-        requestId,
-        packageName,
-        fileName
-      });
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.subscribeStorage({ requestId, packageName, fileName })
+      );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent subscribe_storage request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`);
 
@@ -276,11 +269,12 @@ export class CtrlProxyStorage {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      const message = JSON.stringify({
-        type: "unsubscribe_storage",
-        requestId,
-        subscriptionId
-      });
+      // NOTE: only subscriptionId is sent — the device handler needs packageName/fileName, so this
+      // currently no-ops on device and the request times out. Typed accurately in
+      // ctrlProxyProtocol (UnsubscribeStorageMessage); fixing the payload is a device-side follow-up.
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.unsubscribeStorage({ requestId, subscriptionId })
+      );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent unsubscribe_storage request (requestId: ${requestId}, subscriptionId: ${subscriptionId})`);
 
@@ -372,13 +366,9 @@ export class CtrlProxyStorage {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      const message = JSON.stringify({
-        type: "get_preference",
-        requestId,
-        packageName,
-        fileName,
-        key
-      });
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.getPreference({ requestId, packageName, fileName, key })
+      );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent get_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`);
 
@@ -444,15 +434,9 @@ export class CtrlProxyStorage {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      const message = JSON.stringify({
-        type: "set_preference",
-        requestId,
-        packageName,
-        fileName,
-        key,
-        value,
-        valueType: type
-      });
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.setPreference({ requestId, packageName, fileName, key, value, valueType: type })
+      );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent set_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`);
 
@@ -514,13 +498,9 @@ export class CtrlProxyStorage {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      const message = JSON.stringify({
-        type: "remove_preference",
-        requestId,
-        packageName,
-        fileName,
-        key
-      });
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.removePreference({ requestId, packageName, fileName, key })
+      );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent remove_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`);
 
@@ -580,12 +560,9 @@ export class CtrlProxyStorage {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      const message = JSON.stringify({
-        type: "clear_preferences",
-        requestId,
-        packageName,
-        fileName
-      });
+      const message = serializeCtrlProxyRequest(
+        ctrlProxyRequests.clearPreferences({ requestId, packageName, fileName })
+      );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent clear_preferences request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`);
 

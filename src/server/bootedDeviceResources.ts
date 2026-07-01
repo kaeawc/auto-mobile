@@ -8,6 +8,7 @@ import type { Session } from "../daemon/sessionManager";
 import type { DevicePool } from "../daemon/devicePool";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
 import { IOSCtrlProxyClient, IOS_RUNNER_FEATURE_COMMANDS } from "../features/observe/ios/IOSCtrlProxyClient";
 import {
   resolveApkChecksum,
@@ -442,8 +443,10 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
       // Only claim compatibility we can actually verify. isCompatible is true
       // *only* when the runner's advertised command set is known complete; a stale
       // runner (incomplete) or an unknown one (no cached handshake yet) is reported
-      // not-compatible rather than the previous always-true reassurance.
-      const isCompatible = supportedCommandsComplete === true;
+      // not-compatible rather than the previous always-true reassurance. An
+      // unverifiable explicit pin is never compatible (#2746).
+      const isCompatible = supportedCommandsComplete === true &&
+        !IOSCtrlProxyBuilder.isPinnedVersionUnverifiable();
 
       return {
         installed,

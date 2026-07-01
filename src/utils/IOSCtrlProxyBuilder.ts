@@ -790,18 +790,32 @@ export class IOSCtrlProxyBuilder {
    * override is the trusted escape hatch.
    */
   private assertPinnedVersionVerifiable(): void {
-    if (
-      isExplicitPin() &&
-      !isPinnedVersionKnown() &&
-      IOSCtrlProxyBuilder.expectedChecksumOverride === null &&
-      this.getBundlePathOverride() === null
-    ) {
+    if (IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
       throw new ActionableError(
         `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
         `checksum registry, so the CtrlProxy bundle cannot be integrity-verified. ` +
         `Pin a released version, or vendor a trusted bundle via AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH.`
       );
     }
+  }
+
+  /**
+   * Single source of truth for the iOS fail-closed decision: `AUTOMOBILE_VERSION`
+   * names a concrete version absent from the checksum registry, with no escape hatch
+   * (vendored IPA/bundle path or explicit checksum override), so the CtrlProxy bundle
+   * cannot be integrity-verified (#2746). Reused by the build/reuse guards,
+   * `IOSCtrlProxyManager.setup()`, `doctor --ios`, and the booted-device compat check.
+   */
+  static isPinnedVersionUnverifiable(): boolean {
+    if (IOSCtrlProxyBuilder.expectedChecksumOverride !== null) {
+      return false;
+    }
+    const ipaPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
+    const bundlePath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
+    if ((ipaPath && ipaPath.length > 0) || (bundlePath && bundlePath.length > 0)) {
+      return false;
+    }
+    return isExplicitPin() && !isPinnedVersionKnown();
   }
 
   private async extractBundle(bundlePath: string): Promise<void> {

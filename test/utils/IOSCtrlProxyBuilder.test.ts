@@ -144,6 +144,43 @@ describe("IOSCtrlProxyBuilder", function() {
     });
   });
 
+  describe("isPinnedVersionUnverifiable", function() {
+    const withVersion = (value: string | undefined, fn: () => void) => {
+      const prev = process.env.AUTOMOBILE_VERSION;
+      if (value === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = value;
+      }
+      try {
+        fn();
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prev;
+        }
+      }
+    };
+
+    test("false when no explicit pin (latest)", function() {
+      withVersion(undefined, () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false));
+    });
+
+    test("false for a known explicit pin", function() {
+      withVersion("0.0.18", () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false));
+    });
+
+    test("true for an unknown explicit pin", function() {
+      withVersion("99.99.99", () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(true));
+    });
+
+    test("false for an unknown pin when a vendored IPA path is set", function() {
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = "/opt/automobile/control-proxy.ipa";
+      withVersion("99.99.99", () => expect(IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()).toBe(false));
+    });
+  });
+
   describe("needsRebuild", function() {
     test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD is true", async function() {
       process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD = "true";

@@ -6,6 +6,7 @@ import { logger } from "../utils/logger";
 import { releaseVersion } from "../utils/mcpVersion";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
+import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
 import { ActionableError } from "../models";
 import {
   PID_FILE_PATH,
@@ -567,6 +568,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.mcpRecording) {
       args.push("--mcp-recording");
     }
+    // Output-reduction flags (issue #2756): serialized off the shared specs so
+    // they can't drift from the daemon-side parse in parseDaemonArgs.
+    args.push(...outputReductionFlagsToArgs(options));
 
     // Redirect the detached daemon's stdout/stderr into the STABLE logs dir
     // (`~/.auto-mobile/logs` by default) rather than an ephemeral
@@ -982,7 +986,7 @@ export class DaemonManager implements DaemonManagerLike {
   }
 }
 
-function parseDaemonArgs(args: string[]): DaemonOptions {
+export function parseDaemonArgs(args: string[]): DaemonOptions {
   const options: DaemonOptions = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") {
@@ -1057,6 +1061,16 @@ function parseDaemonArgs(args: string[]): DaemonOptions {
       options.skipCtrlProxyDownload = true;
     } else if (args[i] === "--mcp-recording") {
       options.mcpRecording = true;
+    } else if (args[i] === "--observe-result-drop-elements") {
+      options.observeResultDropElements = true;
+    } else if (args[i] === "--observe-result-compact") {
+      options.observeResultCompact = true;
+    } else if (args[i] === "--tool-results-no-structured-content") {
+      options.toolResultsNoStructuredContent = true;
+    } else if (args[i] === "--actions-diff-observe") {
+      options.actionsDiffObserve = true;
+    } else if (args[i] === "--actions-no-observe") {
+      options.actionsNoObserve = true;
     }
   }
   return options;

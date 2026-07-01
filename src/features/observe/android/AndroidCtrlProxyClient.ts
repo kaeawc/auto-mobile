@@ -62,6 +62,7 @@ import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import type { StackTraceElement } from "../../../server/failuresResources";
 import { NetworkState } from "../../../server/NetworkState";
 import { buildNetworkMockRules } from "../../../server/networkMockRules";
+import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import type {
   PreferenceFile,
   KeyValueEntry,
@@ -1070,18 +1071,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Sending an empty list clears stale rules that may linger from a
       // previous connection.
       const rules = buildNetworkMockRules(state);
-      this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
+      this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules })));
 
       // Always re-sync error simulation state (including disabled) so the
       // device doesn't keep stale simulation config from a previous connection
       const sim = state.simulation;
-      this.sendMessage(JSON.stringify({
-        type: "set_network_error_simulation",
+      this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkErrorSimulation({
         enabled: sim !== null,
-        errorType: sim?.errorType ?? null,
-        limit: sim?.limit ?? null,
-        expiresAtEpochMs: sim?.expiresAt ?? null,
-      }));
+        errorType: sim?.errorType,
+        limit: sim?.limit,
+        expiresAtEpochMs: sim?.expiresAt,
+      })));
     } catch (e) {
       logger.debug(`[AndroidCtrlProxyClient] Failed to sync network state on reconnect: ${e}`);
     }
@@ -1102,12 +1102,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         `reportViewIds=${flags.reportViewIds}, ` +
         `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}`
       );
-      this.sendMessage(JSON.stringify({
-        type: "set_accessibility_flags",
+      this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setAccessibilityFlags({
         includeNotImportantViews: flags.includeNotImportantViews,
         reportViewIds: flags.reportViewIds,
         retrieveInteractiveWindows: flags.retrieveInteractiveWindows,
-      }));
+      })));
     } catch (e) {
       logger.debug(`[AndroidCtrlProxyClient] Failed to sync accessibility flags on reconnect: ${e}`);
     }
@@ -1407,7 +1406,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({ type: "request_action", requestId, action, resourceId });
+        const message = serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestAction({ requestId, action, resourceId })
+        );
         this.ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`);
       });
@@ -1456,7 +1457,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({ type: "request_clipboard", requestId, action, text });
+        const message = serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestClipboard({ requestId, action, text })
+        );
         this.ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent clipboard request (requestId: ${requestId}, action: ${action})`);
       });
@@ -1500,7 +1503,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        this.ws.send(JSON.stringify({ type: "request_settings_get", requestId, namespace, key }));
+        this.ws.send(serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestSettingsGet({ requestId, namespace, key })
+        ));
       });
 
       const result = await perf.track("waitForSettingsGet", () => promise);
@@ -1536,7 +1541,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        this.ws.send(JSON.stringify({ type: "request_settings_put", requestId, namespace, key, value, valueType }));
+        this.ws.send(serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestSettingsPut({ requestId, namespace, key, value, valueType })
+        ));
       });
 
       const result = await perf.track("waitForSettingsPut", () => promise);
@@ -1569,7 +1576,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        this.ws.send(JSON.stringify({ type: "request_settings_list", requestId, namespace }));
+        this.ws.send(serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestSettingsList({ requestId, namespace })
+        ));
       });
 
       const result = await perf.track("waitForSettingsList", () => promise);
@@ -1606,7 +1615,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      this.ws.send(JSON.stringify({ type: "request_global_action", requestId, action }));
+      this.ws.send(serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestGlobalAction({ requestId, action })
+      ));
       logger.debug(`[CTRL_PROXY] Sent global action request (requestId: ${requestId}, action: ${action})`);
 
       return await promise;
@@ -1643,7 +1654,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      this.ws.send(JSON.stringify({ type: "request_device_info", requestId }));
+      this.ws.send(serializeCtrlProxyRequest(ctrlProxyRequests.requestDeviceInfo({ requestId })));
       logger.debug(`[CTRL_PROXY] Sent device info request (requestId: ${requestId})`);
 
       return await promise;
@@ -1682,7 +1693,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({ type: "request_screenshot", requestId });
+        const message = serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId }));
         this.ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent screenshot request (requestId: ${requestId})`);
       });
@@ -1764,12 +1775,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   /** Tell the Kotlin service that recording has started (enables interaction event emission). */
   notifyRecordingStarted(): void {
-    this.sendMessage(JSON.stringify({ type: "start_recording" }));
+    this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.startRecording()));
   }
 
   /** Tell the Kotlin service that recording has stopped (disables interaction event emission). */
   notifyRecordingStopped(): void {
-    this.sendMessage(JSON.stringify({ type: "stop_recording" }));
+    this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording()));
   }
 
   // ===========================================================================
@@ -2696,7 +2707,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     const requestId = this.requestManager.generateId("screenshot-backoff");
-    const message = JSON.stringify({ type: "request_screenshot", requestId });
+    const message = serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId }));
 
     try {
       const screenshotPromise = this.requestManager.register<ScreenshotResult>(

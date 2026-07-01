@@ -10,6 +10,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { HighlightOperationResult, HighlightShape } from "../../../models";
 import type { DelegateContext, NormalizedHighlightBounds } from "./types";
+import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 
 /**
  * Delegate class for handling visual highlight overlay operations.
@@ -78,19 +79,13 @@ export class CtrlProxyHighlights {
           throw new Error("WebSocket not connected");
         }
 
-        const messagePayload: Record<string, unknown> = {
-          type,
-          requestId
-        };
+        const request = ctrlProxyRequests.addHighlight({
+          requestId,
+          id: payload.id,
+          shape: payload.shape ? this.normalizeHighlightShape(payload.shape) : undefined,
+        });
 
-        if (payload.id) {
-          messagePayload.id = payload.id;
-        }
-        if (payload.shape) {
-          messagePayload.shape = this.normalizeHighlightShape(payload.shape);
-        }
-
-        ws.send(JSON.stringify(messagePayload));
+        ws.send(serializeCtrlProxyRequest(request));
         logger.debug(`[CTRL_PROXY] Sent highlight request (${type}, requestId: ${requestId})`);
       });
 

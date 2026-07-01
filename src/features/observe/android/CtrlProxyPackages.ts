@@ -13,6 +13,7 @@ import type {
   A11yPackageInfoResult,
   A11yLaunchIntentResult,
 } from "./types";
+import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 
 export interface PackageInfoOptions {
   includePermissions?: boolean;
@@ -66,12 +67,9 @@ export class CtrlProxyPackages {
         throw new Error("WebSocket not connected");
       }
       ws.send(
-        JSON.stringify({
-          type: "request_installed_packages",
-          requestId,
-          includeSystem,
-          userId: userId ?? null,
-        })
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestInstalledPackages({ requestId, includeSystem, userId })
+        )
       );
 
       return await resultPromise;
@@ -131,12 +129,13 @@ export class CtrlProxyPackages {
         throw new Error("WebSocket not connected");
       }
       ws.send(
-        JSON.stringify({
-          type: "request_package_info",
-          requestId,
-          packageName,
-          includePermissions: options.includePermissions ?? true,
-        })
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestPackageInfo({
+            requestId,
+            packageName,
+            includePermissions: options.includePermissions ?? true,
+          })
+        )
       );
 
       return await resultPromise;
@@ -191,11 +190,7 @@ export class CtrlProxyPackages {
         throw new Error("WebSocket not connected");
       }
       ws.send(
-        JSON.stringify({
-          type: "request_launch_intent",
-          requestId,
-          packageName,
-        })
+        serializeCtrlProxyRequest(ctrlProxyRequests.requestLaunchIntent({ requestId, packageName }))
       );
 
       return await resultPromise;

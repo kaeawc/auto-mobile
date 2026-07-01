@@ -85,14 +85,17 @@ export class DaemonClient {
   private buffer: string = "";
   private connected: boolean = false;
   private recoveryOptions: DaemonClientRecoveryOptions;
-  private readonly clientIdentity: { version: string; build: BuildIdentity };
+  private readonly clientIdentity: { version: string; build: BuildIdentity } | null;
 
   constructor(
     socketPath: string = SOCKET_PATH,
     connectionTimeout: number = CONNECTION_TIMEOUT_MS,
     timer: Timer = defaultTimer,
     recoveryOptions: DaemonClientRecoveryOptions = {},
-    clientIdentity: { version: string; build: BuildIdentity } = {
+    // `null` opts out of the handshake so the daemon treats this client as legacy and never gates
+    // it — used by diagnostics (doctor) that must reach even a wrong-build daemon to report it,
+    // without triggering a restart. Defaults to this process's real version/build identity.
+    clientIdentity: { version: string; build: BuildIdentity } | null = {
       version: DAEMON_VERSION,
       build: getCurrentBuildIdentity(),
     },
@@ -107,8 +110,12 @@ export class DaemonClient {
   /**
    * The version/build-identity fields every outbound request carries so the
    * daemon's server-side handshake gate (#2744) can reject a wrong-build client.
+   * Empty when {@link clientIdentity} is null (a deliberately ungated diagnostic client).
    */
   private handshakeFields(): Pick<DaemonRequest, "clientVersion" | "clientBuildId" | "clientEntryScript"> {
+    if (!this.clientIdentity) {
+      return {};
+    }
     return {
       clientVersion: this.clientIdentity.version,
       clientBuildId: this.clientIdentity.build.buildId,

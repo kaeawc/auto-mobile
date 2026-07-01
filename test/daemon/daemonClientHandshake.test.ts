@@ -96,4 +96,20 @@ function startCapturingServer(socketPath: string): { server: Server; firstReques
     expect(request.clientBuildId).toBe("clientbuild123");
     await client.close();
   });
+
+  test("omits handshake fields when identity is null (ungated diagnostic client)", async () => {
+    const capture = startCapturingServer(socketPath);
+    server = capture.server;
+    await new Promise<void>(resolve => server.listen(socketPath, resolve));
+
+    const client = new DaemonClient(socketPath, 5000, undefined, {}, null);
+    await client.connect();
+    await client.callTool("doctor", {});
+
+    const request = await capture.firstRequest;
+    expect(request.clientVersion).toBeUndefined();
+    expect(request.clientBuildId).toBeUndefined();
+    expect(request.clientEntryScript).toBeUndefined();
+    await client.close();
+  });
 });

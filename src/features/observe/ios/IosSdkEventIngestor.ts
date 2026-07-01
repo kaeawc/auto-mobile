@@ -20,7 +20,7 @@ import { serverConfig } from "../../../utils/ServerConfig";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import type { NavigationEvent } from "../../../utils/interfaces/NavigationGraph";
 import type { ViewHierarchyResult } from "../../../models";
-import type { SdkEvent, SdkEventIngestor } from "../SdkEventIngestor";
+import type { SdkEvent, SdkEventIngestor } from "../interfaces/SdkEventIngestor";
 import type { CtrlProxyScreenshotResult } from "./types";
 
 /**

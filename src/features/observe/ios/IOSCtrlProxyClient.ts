@@ -395,6 +395,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.serviceManagerFactory = serviceManagerFactory;
     this.bootedDeviceLister = bootedDeviceLister;
     this.deviceConnectionLostNotifier = deviceConnectionLostNotifier;
+    // Constructed eagerly (unlike the lazy delegate getters): DefaultIosSdkEventIngestor's
+    // constructor only stores these session-bound closures — it does no I/O and does not
+    // resolve the telemetry/failure singletons (those resolve per-call), so eager
+    // construction is free even for throwaway probe clients.
     this.sdkEventIngestor = sdkEventIngestor ?? new DefaultIosSdkEventIngestor({
       deviceId: this.device.deviceId,
       getNavigationGraphManager: () => this.getNavigationGraphManager(),

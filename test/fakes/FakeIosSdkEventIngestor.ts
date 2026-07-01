@@ -1,4 +1,4 @@
-import type { SdkEvent } from "../../src/features/observe/SdkEventIngestor";
+import type { SdkEvent } from "../../src/features/observe/interfaces/SdkEventIngestor";
 import type { IosSdkEventIngestor } from "../../src/features/observe/ios/IosSdkEventIngestor";
 import type { ViewHierarchyResult } from "../../src/models";
 

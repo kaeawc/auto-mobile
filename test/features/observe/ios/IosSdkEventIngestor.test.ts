@@ -4,7 +4,7 @@ import {
   type IosTelemetryRecorder,
   type NavigationEventSink,
 } from "../../../../src/features/observe/ios/IosSdkEventIngestor";
-import type { SdkEvent } from "../../../../src/features/observe/SdkEventIngestor";
+import type { SdkEvent } from "../../../../src/features/observe/interfaces/SdkEventIngestor";
 import type { CtrlProxyScreenshotResult } from "../../../../src/features/observe/ios/types";
 import type { ViewHierarchyResult } from "../../../../src/models";
 import type { NavigationEvent } from "../../../../src/utils/interfaces/NavigationGraph";
@@ -169,13 +169,30 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect(recorder.navigation).toHaveLength(1);
   });
 
+  test("navigation with screenshots enabled but no screenshot data records telemetry without a screenshotUri", async () => {
+    // Exercises the navigationScreenshotsEnabled() branch: capture returns no data, so
+    // updateNodeScreenshot is skipped and the nav event still records with screenshotUri null.
+    const withScreenshots = buildIngestor({ navigationScreenshotsEnabled: () => true });
+    await withScreenshots.recordSdkEvent(event("navigation", { destination: "Home" }), "com.app");
+    expect(navSink.recorded).toHaveLength(1);
+    expect(navSink.screenshotUpdates).toHaveLength(0);
+    expect(recorder.navigation).toHaveLength(1);
+    expect((recorder.navigation[0].event as { screenshotUri: string | null }).screenshotUri).toBeNull();
+  });
+
   test("handled_exception routes to failure recorder as non-fatal", async () => {
     await ingestor.recordSdkEvent(event("handled_exception", {
       exceptionClass: "NSError", exceptionMessage: "bad", stackTrace: "frame1\nframe2",
     }), "com.app");
     const nonFatals = failureRecorder.getRecordedFailures().filter(f => f.type === "nonfatal");
     expect(nonFatals).toHaveLength(1);
-    expect((nonFatals[0].input as { exceptionType: string }).exceptionType).toBe("NSError");
+    const nonFatal = nonFatals[0].input as {
+      exceptionType: string;
+      stackTrace: Array<{ methodName: string; isAppCode: boolean }>;
+    };
+    expect(nonFatal.exceptionType).toBe("NSError");
+    // Stack string is split per newline into frames; app-code detection keys on applicationId.
+    expect(nonFatal.stackTrace.map(f => f.methodName)).toEqual(["frame1", "frame2"]);
   });
 
   test("crash routes to failure recorder as crash", async () => {

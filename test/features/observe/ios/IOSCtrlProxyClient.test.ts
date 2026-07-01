@@ -1806,5 +1806,53 @@ describe("IOSCtrlProxyClient", function() {
         await testClient.close();
       }
     });
+
+    test("forwards decoded SDK events from the /sdk-events poll to the ingestor", async function() {
+      const fakeIngestor = new FakeIosSdkEventIngestor();
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        fakeIngestor
+      );
+
+      // SDK envelopes carry a base64-encoded JSON payload; verify the client
+      // decodes the envelope (base64 → JSON, timestamp default, bundleId → applicationId)
+      // and forwards it to the ingestor.
+      const payload = { url: "https://x.test/a", method: "POST", timestamp: 4242 };
+      const encoded = Buffer.from(JSON.stringify(payload)).toString("base64");
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => [
+          { bundleId: "com.example.ios", events: [{ eventType: "network_request", payload: encoded }] },
+        ],
+      })) as unknown as typeof fetch;
+
+      try {
+        (testClient as unknown as { startSdkEventPolling(): void }).startSdkEventPolling();
+        // Auto-advance timer fires the interval via setImmediate; flush the async
+        // fetch → decode → recordSdkEvent chain.
+        await flushPromises(8);
+
+        expect(fakeIngestor.sdkEvents.length).toBe(1);
+        expect(fakeIngestor.sdkEvents[0].applicationId).toBe("com.example.ios");
+        expect(fakeIngestor.sdkEvents[0].event.type).toBe("network_request");
+        expect(fakeIngestor.sdkEvents[0].event.timestamp).toBe(4242);
+        expect(fakeIngestor.sdkEvents[0].event.payload).toMatchObject({
+          url: "https://x.test/a",
+          method: "POST",
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+        (testClient as unknown as { stopSdkEventPolling(): void }).stopSdkEventPolling();
+        await testClient.close();
+      }
+    });
   });
 });

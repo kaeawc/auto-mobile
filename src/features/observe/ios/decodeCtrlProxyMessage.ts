@@ -263,7 +263,10 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       break;
 
     default:
-      // Handle error responses
+      // Unrecognized message type carrying an error → reject the request with the
+      // rewritten error. Otherwise (unknown type, no error) resolve verbatim with the
+      // raw wire message, so a newer runner reply the daemon doesn't model yet still
+      // reaches its awaiter unchanged.
       if (message.error) {
         return {
           requestId,

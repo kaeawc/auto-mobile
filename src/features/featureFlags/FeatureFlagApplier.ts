@@ -55,19 +55,19 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
         serverConfig.setNavigationScreenshotsEnabled(enabled);
         break;
       case "observe-result-drop-elements":
-        serverConfig.setObserveResultDropElements(enabled);
+        serverConfig.setObserveResultDropElementsEnabled(enabled);
         break;
       case "observe-result-compact":
-        serverConfig.setObserveResultCompact(enabled);
+        serverConfig.setObserveResultCompactEnabled(enabled);
         break;
       case "tool-results-no-structured-content":
-        serverConfig.setToolResultsNoStructuredContent(enabled);
+        serverConfig.setToolResultsNoStructuredContentEnabled(enabled);
         break;
       case "actions-diff-observe":
-        serverConfig.setActionsDiffObserve(enabled);
+        serverConfig.setActionsDiffObserveEnabled(enabled);
         break;
       case "actions-no-observe":
-        serverConfig.setActionsNoObserve(enabled);
+        serverConfig.setActionsNoObserveEnabled(enabled);
         break;
     }
   }

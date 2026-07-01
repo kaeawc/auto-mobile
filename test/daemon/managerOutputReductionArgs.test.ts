@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { parseDaemonArgs } from "../../src/daemon/manager";
+import {
+  outputReductionFlagsToArgs,
+  OUTPUT_REDUCTION_FLAG_SPECS,
+} from "../../src/utils/outputReductionFlags";
 
 /**
  * EC5: the daemon child receives each output-reduction flag as a CLI arg and
@@ -49,5 +53,34 @@ describe("parseDaemonArgs output-reduction flags", () => {
     expect(options.toolResultsNoStructuredContent).toBe(true);
     expect(options.actionsDiffObserve).toBe(true);
     expect(options.actionsNoObserve).toBe(true);
+  });
+});
+
+/**
+ * The serialize (manager push) and parse (daemon read) halves of the relay are
+ * hand-adjacent flag strings; this round-trip guards them from drifting apart.
+ */
+describe("output-reduction daemon-arg round trip", () => {
+  test("outputReductionFlagsToArgs emits nothing when all flags are off", () => {
+    expect(outputReductionFlagsToArgs({})).toEqual([]);
+  });
+
+  test("each flag serializes to an arg that parses back to the same option", () => {
+    for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
+      const args = outputReductionFlagsToArgs({ [spec.field]: true });
+      expect(args).toEqual([spec.cli]);
+      const options = parseDaemonArgs(args);
+      expect(options[spec.field]).toBe(true);
+    }
+  });
+
+  test("all-on flags round-trip through serialize -> parse intact", () => {
+    const allOn = Object.fromEntries(
+      OUTPUT_REDUCTION_FLAG_SPECS.map(spec => [spec.field, true])
+    );
+    const options = parseDaemonArgs(outputReductionFlagsToArgs(allOn));
+    for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
+      expect(options[spec.field]).toBe(true);
+    }
   });
 });

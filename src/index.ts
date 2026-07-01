@@ -576,11 +576,8 @@ async function main() {
         noA11yIncludeNotImportantViews,
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,
-        observeResultDropElements: outputReduction.observeResultDropElements,
-        observeResultCompact: outputReduction.observeResultCompact,
-        toolResultsNoStructuredContent: outputReduction.toolResultsNoStructuredContent,
-        actionsDiffObserve: outputReduction.actionsDiffObserve,
-        actionsNoObserve: outputReduction.actionsNoObserve,
+        // OutputReductionFlags field names match these DaemonOptions fields 1:1.
+        ...outputReduction,
       });
       return;
     }
@@ -639,11 +636,8 @@ async function main() {
         noA11yIncludeNotImportantViews,
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,
-        observeResultDropElements: outputReduction.observeResultDropElements,
-        observeResultCompact: outputReduction.observeResultCompact,
-        toolResultsNoStructuredContent: outputReduction.toolResultsNoStructuredContent,
-        actionsDiffObserve: outputReduction.actionsDiffObserve,
-        actionsNoObserve: outputReduction.actionsNoObserve,
+        // OutputReductionFlags field names match these DaemonOptions fields 1:1.
+        ...outputReduction,
       };
 
       if (useProxyMode) {

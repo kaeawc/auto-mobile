@@ -79,11 +79,34 @@ export function parseOutputReductionFlags(
   const resolve = (spec: OutputReductionFlagSpec): boolean =>
     args.includes(spec.cli) || env[spec.env] === "1";
 
-  return {
-    observeResultDropElements: resolve(OUTPUT_REDUCTION_FLAG_SPECS[0]),
-    observeResultCompact: resolve(OUTPUT_REDUCTION_FLAG_SPECS[1]),
-    toolResultsNoStructuredContent: resolve(OUTPUT_REDUCTION_FLAG_SPECS[2]),
-    actionsDiffObserve: resolve(OUTPUT_REDUCTION_FLAG_SPECS[3]),
-    actionsNoObserve: resolve(OUTPUT_REDUCTION_FLAG_SPECS[4]),
+  // Default every field off, then let each spec set its own field. Driving the
+  // result off the spec list (rather than positional SPECS[0..4] access) means
+  // reordering or extending the list can never silently mis-map a field.
+  const flags: OutputReductionFlags = {
+    observeResultDropElements: false,
+    observeResultCompact: false,
+    toolResultsNoStructuredContent: false,
+    actionsDiffObserve: false,
+    actionsNoObserve: false,
   };
+  for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
+    flags[spec.field] = resolve(spec);
+  }
+  return flags;
+}
+
+/**
+ * Serialize the enabled output-reduction flags back to their CLI args for the
+ * MCP-process -> daemon-process relay. This is the inverse of the daemon-side
+ * parse in `parseDaemonArgs`; keeping both driven off the same specs (and
+ * round-trip tested) prevents the two hand-written flag strings from drifting.
+ */
+export function outputReductionFlagsToArgs(flags: Partial<OutputReductionFlags>): string[] {
+  const args: string[] = [];
+  for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
+    if (flags[spec.field]) {
+      args.push(spec.cli);
+    }
+  }
+  return args;
 }

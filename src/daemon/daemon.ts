@@ -185,19 +185,19 @@ export class Daemon {
       serverConfig.setA11yRetrieveInteractiveWindows(false);
     }
     if (options.observeResultDropElements) {
-      serverConfig.setObserveResultDropElements(true);
+      serverConfig.setObserveResultDropElementsEnabled(true);
     }
     if (options.observeResultCompact) {
-      serverConfig.setObserveResultCompact(true);
+      serverConfig.setObserveResultCompactEnabled(true);
     }
     if (options.toolResultsNoStructuredContent) {
-      serverConfig.setToolResultsNoStructuredContent(true);
+      serverConfig.setToolResultsNoStructuredContentEnabled(true);
     }
     if (options.actionsDiffObserve) {
-      serverConfig.setActionsDiffObserve(true);
+      serverConfig.setActionsDiffObserveEnabled(true);
     }
     if (options.actionsNoObserve) {
-      serverConfig.setActionsNoObserve(true);
+      serverConfig.setActionsNoObserveEnabled(true);
     }
   }
 

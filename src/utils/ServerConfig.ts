@@ -212,7 +212,7 @@ class ServerConfig {
 
   // --- Output-size reduction flags (issue #2756) ---
 
-  setObserveResultDropElements(enabled: boolean): void {
+  setObserveResultDropElementsEnabled(enabled: boolean): void {
     this._observeResultDropElements = enabled;
   }
 
@@ -220,7 +220,7 @@ class ServerConfig {
     return this._observeResultDropElements;
   }
 
-  setObserveResultCompact(enabled: boolean): void {
+  setObserveResultCompactEnabled(enabled: boolean): void {
     this._observeResultCompact = enabled;
   }
 
@@ -228,7 +228,7 @@ class ServerConfig {
     return this._observeResultCompact;
   }
 
-  setToolResultsNoStructuredContent(enabled: boolean): void {
+  setToolResultsNoStructuredContentEnabled(enabled: boolean): void {
     this._toolResultsNoStructuredContent = enabled;
   }
 
@@ -236,7 +236,7 @@ class ServerConfig {
     return this._toolResultsNoStructuredContent;
   }
 
-  setActionsDiffObserve(enabled: boolean): void {
+  setActionsDiffObserveEnabled(enabled: boolean): void {
     this._actionsDiffObserve = enabled;
   }
 
@@ -244,7 +244,7 @@ class ServerConfig {
     return this._actionsDiffObserve;
   }
 
-  setActionsNoObserve(enabled: boolean): void {
+  setActionsNoObserveEnabled(enabled: boolean): void {
     this._actionsNoObserve = enabled;
   }
 

@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -97,6 +98,8 @@ public enum DaemonManager {
         public let socketPath: String?
         public let startedAt: Int64?
         public let version: String?
+        public let entryScript: String?
+        public let buildId: String?
     }
 
     public static var pidFilePath: String {
@@ -129,17 +132,44 @@ public enum DaemonManager {
         return kill(Int32(pid), 0) == 0
     }
 
-    public static func startDaemon(repoRoot _: String? = nil) -> Bool {
-        PerfTimer.log("startDaemon: searching for auto-mobile executable")
-        guard let autoMobilePath = findExecutable("auto-mobile") else {
-            PerfTimer.log("startDaemon: ERROR - auto-mobile not found in PATH")
-            return false
+    public static func startDaemon(repoRoot: String? = nil) -> Bool {
+        return runDaemonSubcommand("start", repoRoot: repoRoot)
+    }
+
+    /// Restart the daemon in place — used to replace a stale different-build daemon that owns
+    /// the shared per-uid socket (#2744) so the runner self-heals instead of failing the
+    /// version handshake. Mirrors the Android runner's PID-file version-skew restart.
+    public static func restartDaemon(repoRoot: String? = nil) -> Bool {
+        return runDaemonSubcommand("restart", repoRoot: repoRoot)
+    }
+
+    private static func runDaemonSubcommand(_ subcommand: String, repoRoot: String? = nil) -> Bool {
+        // When a repo root with a built entrypoint is provided, launch *that* checkout's daemon
+        // (`<repoRoot>/dist/src/index.js`) rather than whatever `auto-mobile` is on PATH — so a
+        // caller that knows its source build gets a version/build-matched daemon (#2744) instead of
+        // a same-release-but-different-checkout PATH binary. Falls back to the PATH binary otherwise.
+        let executableURL: URL
+        let arguments: [String]
+        if let localEntry = resolveRepoRootDaemonEntryScript(repoRoot),
+           let runtime = findExecutable("bun") ?? findExecutable("node")
+        {
+            PerfTimer.log("runDaemonSubcommand(\(subcommand)): launching local build at \(localEntry)")
+            executableURL = URL(fileURLWithPath: runtime)
+            arguments = [localEntry, "--daemon", subcommand]
+        } else {
+            PerfTimer.log("runDaemonSubcommand(\(subcommand)): searching for auto-mobile executable")
+            guard let autoMobilePath = findExecutable("auto-mobile") else {
+                PerfTimer.log("runDaemonSubcommand: ERROR - auto-mobile not found in PATH")
+                return false
+            }
+            PerfTimer.log("runDaemonSubcommand: found auto-mobile at \(autoMobilePath)")
+            executableURL = URL(fileURLWithPath: autoMobilePath)
+            arguments = ["--daemon", subcommand]
         }
-        PerfTimer.log("startDaemon: found auto-mobile at \(autoMobilePath)")
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: autoMobilePath)
-        process.arguments = ["--daemon", "start"]
+        process.executableURL = executableURL
+        process.arguments = arguments
 
         // Inherit essential environment variables for device discovery
         var env = ProcessInfo.processInfo.environment
@@ -150,26 +180,142 @@ public enum DaemonManager {
         }
         process.environment = env
 
-        PerfTimer.log("startDaemon: launching process with args: \(process.arguments ?? [])")
+        PerfTimer.log("runDaemonSubcommand: launching process with args: \(process.arguments ?? [])")
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
-            PerfTimer.log("startDaemon: process launched, waiting for exit")
+            PerfTimer.log("runDaemonSubcommand: process launched, waiting for exit")
             process.waitUntilExit()
             let status = process.terminationStatus
-            PerfTimer.log("startDaemon: process exited with status \(status)")
+            PerfTimer.log("runDaemonSubcommand: process exited with status \(status)")
             return status == 0
         } catch {
-            PerfTimer.log("startDaemon: ERROR - failed to run process: \(error)")
+            PerfTimer.log("runDaemonSubcommand: ERROR - failed to run process: \(error)")
             return false
         }
+    }
+
+    /// The daemon's recorded version from its PID file, trimmed, or nil when absent/unreadable.
+    static func readDaemonVersionFromPidFile() -> String? {
+        guard let data = FileManager.default.contents(atPath: pidFilePath),
+              let pidData = try? JSONDecoder().decode(PidFileData.self, from: data),
+              let version = pidData.version?.trimmingCharacters(in: .whitespaces),
+              !version.isEmpty
+        else {
+            return nil
+        }
+        return version
+    }
+
+    /// The daemon's recorded entry-script path from its PID file, trimmed, or nil when absent.
+    static func readDaemonEntryScriptFromPidFile() -> String? {
+        guard let data = FileManager.default.contents(atPath: pidFilePath),
+              let pidData = try? JSONDecoder().decode(PidFileData.self, from: data),
+              let entryScript = pidData.entryScript?.trimmingCharacters(in: .whitespaces),
+              !entryScript.isEmpty
+        else {
+            return nil
+        }
+        return entryScript
+    }
+
+    /// The daemon's recorded build-identity hash from its PID file, trimmed, or nil when absent.
+    static func readDaemonBuildIdFromPidFile() -> String? {
+        guard let data = FileManager.default.contents(atPath: pidFilePath),
+              let pidData = try? JSONDecoder().decode(PidFileData.self, from: data),
+              let buildId = pidData.buildId?.trimmingCharacters(in: .whitespaces),
+              !buildId.isEmpty
+        else {
+            return nil
+        }
+        return buildId
+    }
+
+    /// Short content hash of an entry script (sha256, first 16 hex chars) — matches the daemon's
+    /// `computeBuildIdentity`, so the value compares equal to the daemon's own recorded build id.
+    static func computeBuildId(_ entryScript: String) -> String? {
+        guard let data = FileManager.default.contents(atPath: entryScript) else {
+            return nil
+        }
+        let hex = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        return String(hex.prefix(16))
+    }
+
+    /// When a caller supplies a repo root with a built entrypoint, whether the running daemon was
+    /// started from a *different* build (#2744). Prefers comparing the entry-script content hash
+    /// against the daemon's recorded `buildId` — this catches the same repoRoot path rebuilt or
+    /// checked out to another commit — and falls back to comparing entry-script paths when a hash is
+    /// unavailable. No-op without a repoRoot build or when neither signal is available.
+    static func requiresRepoRootBuildSkew(
+        daemonBuildId: String?,
+        daemonEntryScript: String?,
+        repoRoot: String?
+    )
+        -> Bool
+    {
+        guard let expectedEntry = resolveRepoRootDaemonEntryScript(repoRoot) else {
+            return false
+        }
+        let expectedHash = computeBuildId(expectedEntry)
+        let daemonHash = daemonBuildId?.trimmingCharacters(in: .whitespaces)
+        if let expectedHash = expectedHash,
+           let daemonHash = daemonHash, !daemonHash.isEmpty, daemonHash != "unknown"
+        {
+            return daemonHash != expectedHash
+        }
+        guard let daemonEntry = daemonEntryScript?.trimmingCharacters(in: .whitespaces), !daemonEntry.isEmpty else {
+            return false
+        }
+        return daemonEntry != expectedEntry
+    }
+
+    /// The release portion of a version string — everything before the `+g<sha>` dev stamp.
+    /// Mirrors the daemon's `releaseVersion`, so a git-stamped source-checkout daemon compares
+    /// equal to this runner's plain release.
+    static func releaseVersion(_ version: String) -> String {
+        return String(version.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)
+            .first ?? Substring(version))
+    }
+
+    /// Whether an already-running daemon must be restarted before reuse because its recorded
+    /// version does not match this runner's (#2744). Compares release portions; a blank/unknown
+    /// version on either side yields false so an unidentifiable daemon is not thrashed.
+    static func requiresVersionSkewRestart(daemonVersion: String?, clientVersion: String) -> Bool {
+        guard let daemonVersion = daemonVersion?.trimmingCharacters(in: .whitespaces), !daemonVersion.isEmpty else {
+            return false
+        }
+        let client = clientVersion.trimmingCharacters(in: .whitespaces)
+        if client.isEmpty {
+            return false
+        }
+        return releaseVersion(daemonVersion) != releaseVersion(client)
     }
 
     public static func ensureDaemonRunning(repoRoot: String? = nil, timeoutSeconds: TimeInterval = 15) -> Bool {
         PerfTimer.log("ensureDaemonRunning: checking isDaemonRunning")
         if isDaemonRunning() {
+            // A stale different-build daemon on the shared socket would reject this runner's
+            // version handshake (#2744). Restart it before reuse so we self-heal instead of
+            // failing, mirroring the Android/TS version-skew restart. When a repoRoot is supplied,
+            // also restart a same-release daemon started from a different checkout's entry script.
+            let versionSkew = requiresVersionSkewRestart(
+                daemonVersion: readDaemonVersionFromPidFile(),
+                clientVersion: AutoMobileVersion.current
+            )
+            if versionSkew || requiresRepoRootBuildSkew(
+                daemonBuildId: readDaemonBuildIdFromPidFile(),
+                daemonEntryScript: readDaemonEntryScriptFromPidFile(),
+                repoRoot: repoRoot
+            ) {
+                PerfTimer.log("ensureDaemonRunning: daemon version/build skew, restarting")
+                guard restartDaemon(repoRoot: repoRoot) else {
+                    PerfTimer.log("ensureDaemonRunning: restartDaemon failed")
+                    return false
+                }
+                return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds)
+            }
             PerfTimer.log("ensureDaemonRunning: daemon already running")
             return true
         }
@@ -180,8 +326,32 @@ public enum DaemonManager {
             return false
         }
 
+        return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds)
+    }
+
+    /// Wait for the daemon to become ready and confirm its recorded version matches this runner's.
+    /// `start`/`restart` launch whatever `auto-mobile` is on PATH — which may be a different version
+    /// than this runner's baked `AutoMobileVersion.current` — and `waitForDaemon` only checks
+    /// pid/socket liveness, so without this a wrong-version daemon would look "ready" while its
+    /// handshake gate (#2744) rejects every subsequent request. A daemon that records no version is
+    /// accepted (a skew cannot be proven), matching the gate's lenient stance.
+    private static func waitForVersionMatchedDaemon(repoRoot: String?, timeoutSeconds: TimeInterval) -> Bool {
         PerfTimer.log("ensureDaemonRunning: waiting for daemon")
-        return waitForDaemon(timeoutSeconds: timeoutSeconds)
+        guard waitForDaemon(timeoutSeconds: timeoutSeconds) else {
+            return false
+        }
+        if requiresVersionSkewRestart(
+            daemonVersion: readDaemonVersionFromPidFile(),
+            clientVersion: AutoMobileVersion.current
+        ) || requiresRepoRootBuildSkew(
+            daemonBuildId: readDaemonBuildIdFromPidFile(),
+            daemonEntryScript: readDaemonEntryScriptFromPidFile(),
+            repoRoot: repoRoot
+        ) {
+            PerfTimer.log("ensureDaemonRunning: daemon still differs from runner after launch")
+            return false
+        }
+        return true
     }
 
     public static func waitForDaemon(timeoutSeconds: TimeInterval) -> Bool {
@@ -200,19 +370,15 @@ public enum DaemonManager {
         return false
     }
 
-    private static func findRepoRoot() -> String? {
-        var current = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        for _ in 0 ..< 10 {
-            let packageJson = current.appendingPathComponent("package.json")
-            let srcIndex = current.appendingPathComponent("src/index.ts")
-            if FileManager.default.fileExists(atPath: packageJson.path),
-               FileManager.default.fileExists(atPath: srcIndex.path)
-            {
-                return current.path
-            }
-            current = current.deletingLastPathComponent()
+    /// Resolve the built daemon entrypoint under a caller-provided repo root, or nil when no root
+    /// is given or the build is absent (so the caller falls back to the PATH `auto-mobile`).
+    static func resolveRepoRootDaemonEntryScript(_ repoRoot: String?) -> String? {
+        guard let repoRoot = repoRoot, !repoRoot.isEmpty else {
+            return nil
         }
-        return nil
+        let entry = URL(fileURLWithPath: repoRoot)
+            .appendingPathComponent("dist/src/index.js").path
+        return FileManager.default.fileExists(atPath: entry) ? entry : nil
     }
 
     private static func findExecutable(_ name: String) -> String? {
@@ -268,6 +434,8 @@ public enum DaemonManager {
             "type": "daemon_request",
             "method": "daemon/releaseSession",
             "params": ["sessionId": sessionId],
+            // Declared for the daemon's server-side version handshake gate (#2744).
+            "clientVersion": AutoMobileVersion.current,
         ]
 
         guard let requestData = try? JSONSerialization.data(withJSONObject: request),
@@ -311,6 +479,8 @@ public enum DaemonManager {
             "type": "daemon_request",
             "method": "daemon/refreshDevices",
             "params": [String: Any](),
+            // Declared for the daemon's server-side version handshake gate (#2744).
+            "clientVersion": AutoMobileVersion.current,
         ]
 
         guard let requestData = try? JSONSerialization.data(withJSONObject: request),

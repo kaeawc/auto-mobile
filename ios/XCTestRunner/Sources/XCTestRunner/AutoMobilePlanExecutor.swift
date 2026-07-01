@@ -312,6 +312,8 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient {
             "method": method,
             "params": params,
             "timeoutMs": Int(timeout * 1000),
+            // Declared for the daemon's server-side version handshake gate (#2744).
+            "clientVersion": AutoMobileVersion.current,
         ]
 
         let data = try JSONSerialization.data(withJSONObject: request, options: [])
@@ -457,7 +459,7 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient {
             "capabilities": [:],
             "clientInfo": [
                 "name": "auto-mobile-xctest-runner",
-                "version": "0.1.0",
+                "version": AutoMobileVersion.current,
             ],
         ]
         _ = try sendRequest(method: "initialize", params: params, timeout: timeout)
@@ -807,6 +809,15 @@ public final class AutoMobilePlanExecutor {
     public func execute(testMetadata: TestMetadata? = nil) throws -> ExecutePlanResult {
         var lastError: Error?
 
+        // Preflight the daemon before the first attempt so a stale/version-skewed daemon on the
+        // shared socket is restarted even with the default retryCount of 0, which never enters the
+        // retry branch below (#2744). Only when the configured socket is the one DaemonManager
+        // manages (its env/default path) — a custom socket path is the caller's own daemon that
+        // DaemonManager can't target. No-op for HTTP transport.
+        if case let .daemonUnixSocket(path) = configuration.transport, path == DaemonManager.socketPath {
+            _ = DaemonManager.ensureDaemonRunning()
+        }
+
         for attempt in 0 ... configuration.retryCount {
             do {
                 if attempt > 0 {
@@ -818,6 +829,7 @@ public final class AutoMobilePlanExecutor {
                 let shouldRetry = shouldRetry(error: error, attempt: attempt)
                 logger.warn("Plan execution attempt \(attempt + 1) failed: \(error)")
                 if shouldRetry {
+                    recoverDaemonBeforeRetry()
                     timer.sleep(seconds: configuration.retryDelaySeconds)
                 } else {
                     break
@@ -829,6 +841,22 @@ public final class AutoMobilePlanExecutor {
             throw error
         }
         throw ExecutorError.executionFailed("Unknown failure")
+    }
+
+    /// Before retrying a failed plan execution over the daemon socket, restart a version-skewed
+    /// daemon via the version-matched ensure path (#2744) and drop the stale session, so a handshake
+    /// rejection self-heals instead of failing every retry against the same wrong-version daemon.
+    /// No-op for HTTP transport, which does not share the per-uid daemon socket.
+    private func recoverDaemonBeforeRetry() {
+        guard case let .daemonUnixSocket(path) = configuration.transport else {
+            return
+        }
+        // Only the DaemonManager-managed (env/default) socket can be restarted here; for a custom
+        // socket path (the caller's own daemon) just drop the session so the retry reconnects.
+        if path == DaemonManager.socketPath {
+            _ = DaemonManager.ensureDaemonRunning()
+        }
+        mcpClient.resetSession()
     }
 
     private func executeOnce(testMetadata: TestMetadata?) throws -> ExecutePlanResult {

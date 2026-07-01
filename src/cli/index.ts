@@ -2,7 +2,7 @@ import { ToolRegistry } from "../server/toolRegistry";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
-import { DaemonManager } from "../daemon/manager";
+import { DaemonMcpProxy } from "../daemon/daemonMcpProxy";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 
 // Import all tool registration functions
@@ -95,44 +95,21 @@ function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string;
 }
 
 /**
- * Ensure daemon is running, starting it if necessary
- * with a timeout for startup
- */
-async function ensureDaemonRunning(timeout: number = 10000): Promise<void> {
-  const available = await DaemonClient.isAvailable();
-  if (available) {
-    return; // Daemon already running and responsive
-  }
-
-  logger.debug("Daemon not available, attempting to start...");
-
-  const manager = new DaemonManager();
-  try {
-    await manager.start();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new ActionableError(
-      `Failed to start daemon: ${message}. ` +
-      `Try running: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`
-    );
-  }
-}
-
-/**
- * Execute tool via daemon (mandatory - no fallback)
- * Daemon must be available or this will throw
+ * Execute tool via daemon (mandatory - no fallback).
+ *
+ * Routes through {@link DaemonMcpProxy} rather than a raw `DaemonClient` so the
+ * daemon is auto-started AND its version/build identity is reconciled before the
+ * call (#2744): a stale different-version/build daemon on the shared socket is
+ * restarted to this CLI's build instead of rejecting the request with no self-heal.
  */
 async function runToolViaDaemon(
   toolName: string,
   params: Record<string, any>
 ): Promise<any> {
-  // Ensure daemon is running before attempting to call
-  await ensureDaemonRunning();
-
-  const client = new DaemonClient();
+  const proxy = new DaemonMcpProxy();
 
   try {
-    const result = await client.callTool(toolName, params);
+    const result = await proxy.callTool(toolName, params);
     if (result === null) {
       throw new ActionableError(
         "Daemon returned null result. This may indicate a daemon connectivity issue. " +
@@ -156,7 +133,33 @@ async function runToolViaDaemon(
       `Try: auto-mobile --daemon restart`
     );
   } finally {
-    // Always close the client connection to prevent connection leaks
+    // Always close the proxy connection to prevent connection leaks
+    await proxy.close();
+  }
+}
+
+/**
+ * Run `doctor` against the daemon as a diagnostic — deliberately NOT via {@link DaemonMcpProxy}.
+ *
+ * Doctor must *report* a wrong-version/build daemon, not silently restart it (which would defeat
+ * the diagnosis and wedge active sessions just because a user ran `--cli doctor`). It therefore
+ * uses a raw, non-reconciling `DaemonClient` with a null identity so the request bypasses the
+ * server handshake gate (#2744): even a skewed daemon answers, and the client-side
+ * {@link handleDoctorResult}/`applyClientBuildIdentity` step reports the mismatch. Throws (→ direct
+ * fallback) only when the daemon is unreachable.
+ */
+async function runDoctorViaDaemon(params: Record<string, any>): Promise<any> {
+  const client = new DaemonClient(undefined, undefined, undefined, {}, null);
+  try {
+    const result = await client.callTool("doctor", params);
+    if (result === null) {
+      throw new ActionableError(
+        "Daemon returned null result for doctor. " +
+        `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`
+      );
+    }
+    return result;
+  } finally {
     await client.close();
   }
 }
@@ -193,7 +196,7 @@ async function runDoctorCommand(params: Record<string, any>): Promise<void> {
   // Try daemon first
   try {
     logger.debug("Attempting to run doctor via daemon");
-    const daemonResult = await runToolViaDaemon("doctor", daemonParams);
+    const daemonResult = await runDoctorViaDaemon(daemonParams);
     await handleDoctorResult(daemonResult, jsonOutput);
     return;
   } catch (error) {

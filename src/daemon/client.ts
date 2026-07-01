@@ -8,7 +8,9 @@ import { DaemonRequest, DaemonResponse } from "./types";
 import {
   SOCKET_PATH,
   CONNECTION_TIMEOUT_MS,
+  DAEMON_VERSION,
 } from "./constants";
+import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
 import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
@@ -83,17 +85,42 @@ export class DaemonClient {
   private buffer: string = "";
   private connected: boolean = false;
   private recoveryOptions: DaemonClientRecoveryOptions;
+  private readonly clientIdentity: { version: string; build: BuildIdentity } | null;
 
   constructor(
     socketPath: string = SOCKET_PATH,
     connectionTimeout: number = CONNECTION_TIMEOUT_MS,
     timer: Timer = defaultTimer,
     recoveryOptions: DaemonClientRecoveryOptions = {},
+    // `null` opts out of the handshake so the daemon treats this client as legacy and never gates
+    // it — used by diagnostics (doctor) that must reach even a wrong-build daemon to report it,
+    // without triggering a restart. Defaults to this process's real version/build identity.
+    clientIdentity: { version: string; build: BuildIdentity } | null = {
+      version: DAEMON_VERSION,
+      build: getCurrentBuildIdentity(),
+    },
   ) {
     this.socketPath = socketPath;
     this.connectionTimeout = connectionTimeout;
     this.timer = timer;
     this.recoveryOptions = recoveryOptions;
+    this.clientIdentity = clientIdentity;
+  }
+
+  /**
+   * The version/build-identity fields every outbound request carries so the
+   * daemon's server-side handshake gate (#2744) can reject a wrong-build client.
+   * Empty when {@link clientIdentity} is null (a deliberately ungated diagnostic client).
+   */
+  private handshakeFields(): Pick<DaemonRequest, "clientVersion" | "clientBuildId" | "clientEntryScript"> {
+    if (!this.clientIdentity) {
+      return {};
+    }
+    return {
+      clientVersion: this.clientIdentity.version,
+      clientBuildId: this.clientIdentity.build.buildId,
+      clientEntryScript: this.clientIdentity.build.entryScript,
+    };
   }
 
   /**
@@ -349,6 +376,7 @@ export class DaemonClient {
       type: "mcp_request",
       method,
       params,
+      ...this.handshakeFields(),
     };
 
     const requestTimeoutMs = Math.max(resolveMcpRequestTimeoutMs(request), this.connectionTimeout);
@@ -405,6 +433,7 @@ export class DaemonClient {
       type: "daemon_request",
       method,
       params,
+      ...this.handshakeFields(),
     };
 
     return new Promise((resolve, reject) => {

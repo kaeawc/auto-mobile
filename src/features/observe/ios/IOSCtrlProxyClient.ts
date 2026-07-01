@@ -14,8 +14,6 @@
  */
 
 import WebSocket from "ws";
-import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
-import { getFailureRecorder } from "../../failures/FailureRecorder";
 import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
@@ -36,7 +34,6 @@ import { NavigationGraphManager } from "../../navigation/NavigationGraphManager"
 import { serverConfig } from "../../../utils/ServerConfig";
 import { NetworkState } from "../../../server/NetworkState";
 import { buildNetworkMockRules } from "../../../server/networkMockRules";
-import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import {
   HierarchyNavigationDetector,
   HierarchyNavigationUpdateMetrics
@@ -112,6 +109,8 @@ import { CtrlProxyVoiceOver } from "./CtrlProxyVoiceOver";
 import { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyDatabase } from "./CtrlProxyDatabase";
+import { decodeCtrlProxyMessage } from "./decodeCtrlProxyMessage";
+import { DefaultIosSdkEventIngestor, type IosSdkEventIngestor } from "./IosSdkEventIngestor";
 
 // Import types
 import type {
@@ -377,6 +376,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
   private isAttemptingAutoSetup: boolean = false;
 
+  // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
+  private readonly sdkEventIngestor: IosSdkEventIngestor;
+
   private constructor(
     device: BootedDevice,
     port: number = IOSCtrlProxyClient.DEFAULT_PORT,
@@ -384,7 +386,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timer: Timer = defaultTimer,
     serviceManagerFactory: ServiceManagerFactory = defaultServiceManagerFactory,
     bootedDeviceLister: BootedDeviceLister = defaultBootedDeviceLister,
-    deviceConnectionLostNotifier: DeviceConnectionLostNotifier = observationStreamDeviceConnectionLostNotifier
+    deviceConnectionLostNotifier: DeviceConnectionLostNotifier = observationStreamDeviceConnectionLostNotifier,
+    sdkEventIngestor?: IosSdkEventIngestor
   ) {
     super(timer, wsFactory, { connectionResetMs: IOSCtrlProxyClient.CONNECTION_RESET_MS });
     this.device = device;
@@ -392,6 +395,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.serviceManagerFactory = serviceManagerFactory;
     this.bootedDeviceLister = bootedDeviceLister;
     this.deviceConnectionLostNotifier = deviceConnectionLostNotifier;
+    this.sdkEventIngestor = sdkEventIngestor ?? new DefaultIosSdkEventIngestor({
+      deviceId: this.device.deviceId,
+      getNavigationGraphManager: () => this.getNavigationGraphManager(),
+      captureScreenshot: (timeoutMs: number) => this.requestScreenshot(timeoutMs),
+    });
   }
 
   /**
@@ -487,7 +495,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timer: Timer,
     serviceManagerFactory: ServiceManagerFactory = noOpServiceManagerFactory,
     bootedDeviceLister?: BootedDeviceLister,
-    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier
+    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
+    sdkEventIngestor?: IosSdkEventIngestor
   ): IOSCtrlProxyClient {
     // Default test lister always reports the device as booted so existing tests
     // are unaffected. Tests that verify boot-check behavior supply their own lister.
@@ -499,7 +508,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       timer,
       serviceManagerFactory,
       lister,
-      deviceConnectionLostNotifier
+      deviceConnectionLostNotifier,
+      sdkEventIngestor
     );
   }
 
@@ -814,7 +824,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
               const payloadJson = Buffer.from(envelope.payload, "base64").toString("utf-8");
               const payload = JSON.parse(payloadJson) as Record<string, unknown>;
               const timestamp = (payload.timestamp as number) ?? Date.now();
-              await this.recordSdkEvent(
+              await this.sdkEventIngestor.recordSdkEvent(
                 { type: envelope.eventType, timestamp, payload },
                 batch.bundleId ?? null,
               );
@@ -832,228 +842,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.timer.clearInterval(this.sdkEventPollInterval);
       this.sdkEventPollInterval = null;
     }
-  }
-
-  private async recordSdkEvent(event: { type: string; timestamp: number; payload: Record<string, unknown> }, applicationId: string | null): Promise<void> {
-    try {
-      const recorder = TelemetryRecorder.getInstance();
-      // Save and restore context to avoid race with Android device context
-      const prevContext = recorder.getContext();
-      recorder.setContext(this.device.deviceId, null);
-      const ts = event.timestamp;
-      const p = event.payload;
-
-      try {
-        switch (event.type) {
-          case "network_request":
-            await recorder.recordNetworkEvent({
-              timestamp: ts, applicationId,
-              url: (p.url as string) ?? "", method: (p.method as string) ?? "GET",
-              statusCode: (p.statusCode as number) ?? 0, durationMs: (p.durationMs as number) ?? 0,
-              requestBodySize: (p.requestBodySize as number) ?? -1, responseBodySize: (p.responseBodySize as number) ?? -1,
-              protocol: (p.protocol as string) ?? null, host: (p.host as string) ?? null,
-              path: (p.path as string) ?? null, error: (p.error as string) ?? null,
-              requestHeaders: (p.requestHeaders as Record<string, string>) ?? null,
-              responseHeaders: (p.responseHeaders as Record<string, string>) ?? null,
-              requestBody: (p.requestBody as string) ?? null, responseBody: (p.responseBody as string) ?? null,
-              contentType: (p.contentType as string) ?? null,
-            });
-            break;
-          case "log":
-            await recorder.recordLogEvent({
-              timestamp: ts, applicationId,
-              level: (p.level as number) ?? 0, tag: (p.tag as string) ?? "",
-              message: (p.message as string) ?? "", filterName: (p.filterName as string) ?? "",
-            });
-            break;
-          case "lifecycle":
-            await recorder.recordOsEvent({
-              timestamp: ts, applicationId,
-              category: "lifecycle", kind: (p.state as string) ?? "unknown",
-              details: { state: (p.state as string) ?? "", bundleId: (p.bundleId as string) ?? "" },
-            });
-            break;
-          case "navigation": {
-            const destination = (p.destination as string) ?? "unknown";
-            const navSource = (p.source as string) ?? null;
-            const navArgs = (p.arguments as Record<string, string>) ?? null;
-            const navMeta = (p.metadata as Record<string, string>) ?? null;
-            let screenshotUri: string | null = null;
-            if (applicationId && destination) {
-              await this.getNavigationGraphManager().recordNavigationEvent({
-                applicationId, destination, source: navSource,
-                arguments: navArgs ?? {}, metadata: navMeta ?? {},
-                triggeringInteraction: null,
-              });
-
-              if (serverConfig.isNavigationScreenshotsEnabled()) {
-                try {
-                  const path = await this.captureNavigationScreenshot(applicationId, destination);
-                  if (path) {
-                    await this.getNavigationGraphManager().updateNodeScreenshot(applicationId, destination, path);
-                    try {
-                      const { getDatabase } = await import("../../../db");
-                      const db = getDatabase();
-                      const node = await db
-                        .selectFrom("navigation_nodes")
-                        .select(["id"])
-                        .where("app_id", "=", applicationId)
-                        .where("screen_name", "=", destination)
-                        .executeTakeFirst();
-                      if (node) {
-                        screenshotUri = `automobile:navigation/nodes/${node.id}/screenshot`;
-                      }
-                    } catch { /* non-fatal */ }
-                  }
-                } catch { /* non-fatal */ }
-              }
-            }
-            await recorder.recordNavigationEvent({
-              timestamp: ts, applicationId,
-              destination, source: navSource, arguments: navArgs, metadata: navMeta,
-              screenshotUri,
-            });
-            break;
-          }
-          case "custom": {
-            // Custom events are merged into log events
-            const customName = (p.name as string) ?? "custom";
-            const customProps = (p.properties as Record<string, string>) ?? {};
-            const propsStr = Object.keys(customProps).length > 0 ? ` ${JSON.stringify(customProps)}` : "";
-            await recorder.recordLogEvent({
-              timestamp: ts, applicationId,
-              level: 4, tag: "CustomEvent", message: `${customName}${propsStr}`, filterName: "custom",
-            });
-            break;
-          }
-          case "handled_exception": {
-            const failureRecorder = getFailureRecorder();
-            const exType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
-            const exMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Handled exception";
-            const stackStr = (p.stackTrace as string) ?? "";
-            const stackFrames = stackStr.split("\n").filter(Boolean).map(line => ({
-              className: "", methodName: line.trim(), fileName: null as string | null, lineNumber: null as number | null,
-              isAppCode: line.includes(applicationId ?? ""),
-            }));
-            await failureRecorder.recordNonFatal({
-              exceptionType: exType, exceptionMessage: exMsg,
-              stackTrace: stackFrames,
-              customMessage: (p.customMessage as string) ?? undefined,
-              deviceId: this.device.deviceId,
-              deviceModel: "iOS Simulator", os: "iOS",
-              appVersion: "1.0", sessionId: `ios-${this.device.deviceId}-${ts}`,
-              currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
-            });
-            break;
-          }
-          case "crash": {
-            const crashRecorder = getFailureRecorder();
-            const crashType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
-            const crashMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Crash";
-            const crashStack = ((p.stackTrace as string) ?? "").split("\n").filter(Boolean).map(line => ({
-              className: "", methodName: line.trim(), fileName: null as string | null, lineNumber: null as number | null,
-              isAppCode: line.includes(applicationId ?? ""),
-            }));
-            await crashRecorder.recordCrash({
-              exceptionType: crashType, exceptionMessage: crashMsg,
-              stackTrace: crashStack,
-              deviceId: this.device.deviceId,
-              deviceModel: "iOS Simulator", os: "iOS",
-              appVersion: "1.0", sessionId: `ios-${this.device.deviceId}-${ts}`,
-              currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
-            });
-            break;
-          }
-          case "hang":
-            await recorder.recordOsEvent({
-              timestamp: ts, applicationId,
-              category: "hang", kind: `${(p.durationMs as number) ?? 0}ms`,
-              details: { durationMs: String((p.durationMs as number) ?? 0) },
-            });
-            break;
-          case "storage_changed":
-            await recorder.recordStorageEvent({
-              timestamp: ts, applicationId,
-              fileName: (p.suiteName as string) ?? "", key: (p.key as string) ?? "",
-              value: (p.value as string) ?? "", operation: (p.operation as string) ?? "write",
-            });
-            break;
-          default:
-          // Record unknown types as log events
-            await recorder.recordLogEvent({
-              timestamp: ts, applicationId,
-              level: 4, tag: "UnknownEvent", message: `${event.type}: ${JSON.stringify(p).substring(0, 1000)}`, filterName: "custom",
-            });
-        }
-      } finally {
-        // Restore previous context so Android events aren't affected
-        recorder.setContext(prevContext.deviceId, prevContext.sessionId);
-      }
-    } catch {
-      // Non-fatal
-    }
-  }
-
-  /** Capture and store a screenshot for an iOS navigation event. Returns the stored path or null. */
-  private async captureNavigationScreenshot(applicationId: string, destination: string): Promise<string | null> {
-    try {
-      const result = await this.requestScreenshot(3000);
-      if (result?.data) {
-        const screenshotManager = NavigationScreenshotManager.getInstance();
-        const bytes = Buffer.from(result.data, "base64");
-        return await screenshotManager.storeScreenshot(applicationId, destination, bytes, result.format ?? "png");
-      }
-    } catch (error) {
-      logger.debug(`[IOSCtrlProxyClient] iOS nav screenshot capture skipped: ${error}`);
-    }
-    return null;
-  }
-
-  /** Record a layout telemetry event from converted iOS hierarchy (ViewHierarchyResult format) */
-  private recordLayoutTelemetryEvent(hierarchy: ViewHierarchyResult): void {
-    try {
-      const recorder = TelemetryRecorder.getInstance();
-      const prevContext = recorder.getContext();
-      recorder.setContext(this.device.deviceId, null);
-      const nodeCount = this.countViewHierarchyNodes(hierarchy.hierarchy);
-      // Use the converted ViewHierarchyResult format — same data as the observation stream
-      const hierarchyJson = JSON.stringify({
-        nodeCount,
-        packageName: hierarchy.packageName,
-        hierarchy: hierarchy.hierarchy,
-        windows: hierarchy.windows,
-        updatedAt: hierarchy.updatedAt,
-      });
-      void recorder.recordLayoutEvent({
-        timestamp: Date.now(),
-        applicationId: hierarchy.packageName ?? null,
-        subType: "hierarchy_change",
-        composableName: null,
-        composableId: null,
-        recompositionCount: nodeCount,
-        durationMs: null,
-        likelyCause: null,
-        detailsJson: hierarchyJson.length < 200000 ? hierarchyJson : JSON.stringify({ nodeCount, truncated: true }),
-        screenName: hierarchy.packageName ?? null,
-      });
-      recorder.setContext(prevContext.deviceId, prevContext.sessionId);
-    } catch {
-      // Non-fatal — telemetry recording should never break observation
-    }
-  }
-
-  private countViewHierarchyNodes(node: unknown): number {
-    if (!node || typeof node !== "object") { return 0; }
-    const obj = node as Record<string, unknown>;
-    let count = 0;
-    if (obj["$"] || obj["node"]) { count = 1; }
-    const children = obj["node"];
-    if (Array.isArray(children)) {
-      for (const child of children) {
-        count += this.countViewHierarchyNodes(child);
-      }
-    }
-    return count;
   }
 
   /**
@@ -1125,7 +913,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.handleHierarchyUpdateForNavigation(message.data, message.perfTiming);
       // Record layout telemetry event using converted hierarchy (same format as observation stream)
       const converted = this.convertToViewHierarchyResult(message.data);
-      this.recordLayoutTelemetryEvent(converted);
+      this.sdkEventIngestor.recordLayoutTelemetryEvent(converted);
       // Only push to observation stream for request-response updates (with requestId).
       // Push messages (no requestId) are handled in the dedicated push-message branch below
       // to avoid duplicate hierarchy events.
@@ -1141,239 +929,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     // Handle request/response messages (with requestId) first
     if (requestId) {
-      // Build result based on message type
-      let result: unknown;
-
-      switch (type) {
-        case "hierarchy_update":
-          result = {
-            hierarchy: message.data,
-            perfTiming: message.perfTiming
-          };
-          break;
-
-        case "screenshot":
-          result = {
-            success: true,
-            data: message.data,
-            format: message.format ?? "png",
-            timestamp: message.timestamp
-          };
-          break;
-
-        case "tap_coordinates_result":
-        case "swipe_result":
-        case "drag_result":
-        case "pinch_result":
-        case "set_text_result":
-        case "clear_text_result":
-        case "select_all_result":
-        case "press_button_result":
-        case "press_home_result":
-        case "press_back_result":
-        case "recent_apps_result":
-        case "launch_app_result":
-          result = {
-            success: message.success ?? true,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-            perfTiming: message.perfTiming
-          };
-          break;
-
-        case "keyboard_result":
-          result = {
-            success: message.success ?? true,
-            open: message.open ?? false,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-            perfTiming: message.perfTiming
-          };
-          break;
-
-        case "rotate_result":
-          result = {
-            success: message.success ?? true,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-            perfTiming: message.perfTiming,
-            previousOrientation: message.previousOrientation ?? "",
-            currentOrientation: message.currentOrientation ?? "",
-            value: message.value ?? 0,
-            rotationPerformed: message.rotationPerformed ?? false,
-          };
-          break;
-
-        case "ime_action_result":
-        case "action_result":
-          result = {
-            success: message.success ?? true,
-            action: (message as { action?: string }).action,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-            perfTiming: message.perfTiming
-          };
-          break;
-
-        case "voiceover_state_result":
-          result = {
-            success: message.success ?? true,
-            enabled: (message as { enabled?: boolean }).enabled ?? false,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        case "voiceover_action_result":
-          result = {
-            success: message.success ?? true,
-            action: (message as { action?: string }).action,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        case "highlight_response":
-          result = {
-            success: message.success ?? false,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-            requestId,
-            timestamp: message.timestamp,
-          };
-          break;
-
-        case "multi_finger_swipe_result":
-          result = {
-            success: message.success ?? true,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-            perfTiming: message.perfTiming
-          };
-          break;
-
-        case "clipboard_result":
-          result = {
-            success: message.success ?? true,
-            action: (message as { action?: string }).action ?? "",
-            text: (message as { text?: string }).text,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        // Storage response types (matching Android wire protocol)
-        case "preference_files":
-          result = {
-            success: message.success ?? false,
-            files: (message as { files?: unknown[] }).files || [],
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        case "preferences":
-          result = {
-            success: message.success ?? false,
-            entries: (message as { entries?: unknown[] }).entries || [],
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        case "get_preference_result": {
-          const msg = message as { found?: boolean; key?: string; value?: string; valueType?: string };
-          const entry = msg.found && msg.key ? {
-            key: msg.key,
-            value: msg.value ?? null,
-            type: msg.valueType ?? "UNKNOWN",
-          } : undefined;
-          result = {
-            success: message.success ?? false,
-            found: msg.found ?? false,
-            entry,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
+      const decoded = decodeCtrlProxyMessage(message);
+      if (decoded) {
+        if (decoded.errorMessage !== undefined) {
+          this.requestManager.resolveError(decoded.requestId, decoded.errorMessage, decoded.totalTimeMs ?? 0);
+        } else {
+          this.requestManager.resolve(decoded.requestId, decoded.result);
         }
-
-        case "set_preference_result":
-        case "remove_preference_result":
-        case "clear_preferences_result":
-          result = {
-            success: message.success ?? false,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        case "execute_sql_result":
-          result = {
-            success: message.success ?? false,
-            queryType: (message as { queryType?: string }).queryType,
-            columns: (message as { columns?: string[] }).columns,
-            rows: (message as { rows?: unknown[][] }).rows,
-            rowsAffected: (message as { rowsAffected?: number }).rowsAffected,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        case "list_databases_result":
-          result = {
-            success: message.success ?? false,
-            databases: (message as { databases?: unknown[] }).databases ?? [],
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        case "list_tables_result":
-          result = {
-            success: message.success ?? false,
-            tables: (message as { tables?: string[] }).tables ?? [],
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        case "table_data_result":
-          result = {
-            success: message.success ?? false,
-            columns: (message as { columns?: string[] }).columns ?? [],
-            rows: (message as { rows?: unknown[][] }).rows ?? [],
-            total: (message as { total?: number }).total ?? 0,
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        case "table_structure_result":
-          result = {
-            success: message.success ?? false,
-            columns: (message as { columns?: unknown[] }).columns ?? [],
-            totalTimeMs: message.totalTimeMs ?? 0,
-            error: message.error,
-          };
-          break;
-
-        default:
-          // Handle error responses
-          if (message.error) {
-            this.requestManager.resolveError(
-              requestId,
-              this.rewriteUnknownCommandError(message.error),
-              message.totalTimeMs ?? 0
-            );
-            return;
-          } else {
-            result = message;
-          }
+        return;
       }
-
-      this.requestManager.resolve(requestId, result);
-      return;
     }
 
     // Handle push messages (no requestId)
@@ -1462,14 +1026,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private buildUnsupportedCommandError(messageType: string): string {
     return `iOS CtrlProxy runner does not support ${messageType}. The daemon and runner are out of sync; rebuild and redeploy the iOS CtrlProxy runner from this source checkout, or run the iOS hot-reload watcher with --manage-ios-runner.`;
-  }
-
-  private rewriteUnknownCommandError(error: string): string {
-    const match = /^Unknown command type: (.+)$/.exec(error);
-    if (!match) {
-      return error;
-    }
-    return `iOS CtrlProxy runner rejected ${match[1]} as unknown. The runner is likely older than this daemon; rebuild and redeploy the iOS CtrlProxy runner from this source checkout, or run the iOS hot-reload watcher with --manage-ios-runner.`;
   }
 
   /**

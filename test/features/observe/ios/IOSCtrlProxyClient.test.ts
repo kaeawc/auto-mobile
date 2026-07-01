@@ -12,6 +12,7 @@ import {
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
+import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
 
 describe("IOSCtrlProxyClient", function() {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -1761,6 +1762,46 @@ describe("IOSCtrlProxyClient", function() {
         const commands = await testClient.getSupportedCommands();
         expect(commands).toBeNull();
         expect(testClient.getCachedSupportedCommands()).toBeNull();
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("SDK event ingestor forwarding", function() {
+    test("forwards a hierarchy_update to the ingestor's recordLayoutTelemetryEvent", async function() {
+      const fakeIngestor = new FakeIosSdkEventIngestor();
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        fakeIngestor
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: Date.now(),
+          data: {
+            updatedAt: 1750934583218,
+            packageName: "com.example.ios",
+            hierarchy: { text: "Welcome" },
+          },
+        }));
+
+        await flushPromises();
+
+        expect(fakeIngestor.layoutEvents.length).toBe(1);
+        expect(fakeIngestor.layoutEvents[0].packageName).toBe("com.example.ios");
       } finally {
         await testClient.close();
       }

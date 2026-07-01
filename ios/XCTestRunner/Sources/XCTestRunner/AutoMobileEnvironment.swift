@@ -268,6 +268,8 @@ public enum DaemonManager {
             "type": "daemon_request",
             "method": "daemon/releaseSession",
             "params": ["sessionId": sessionId],
+            // Declared for the daemon's server-side version handshake gate (#2744).
+            "clientVersion": AutoMobileVersion.current,
         ]
 
         guard let requestData = try? JSONSerialization.data(withJSONObject: request),
@@ -311,6 +313,8 @@ public enum DaemonManager {
             "type": "daemon_request",
             "method": "daemon/refreshDevices",
             "params": [String: Any](),
+            // Declared for the daemon's server-side version handshake gate (#2744).
+            "clientVersion": AutoMobileVersion.current,
         ]
 
         guard let requestData = try? JSONSerialization.data(withJSONObject: request),

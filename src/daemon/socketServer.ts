@@ -15,7 +15,13 @@ import {
   DaemonResponse,
   SessionContext,
 } from "./types";
-import { SOCKET_PATH } from "./constants";
+import { SOCKET_PATH, DAEMON_HANDSHAKE_ENABLED, DAEMON_VERSION } from "./constants";
+import {
+  evaluateClientHandshake,
+  extractClientHandshake,
+  type DaemonSelfIdentity,
+} from "./daemonHandshake";
+import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
@@ -88,19 +94,27 @@ export class UnixSocketServer {
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
   private timer: Timer;
   private featureFlagService: FeatureFlagService | null;
+  private readonly handshakeEnforced: boolean;
+  private readonly daemonIdentity: DaemonSelfIdentity;
 
   constructor(
     socketPath: string = SOCKET_PATH,
     mcpEndpoint: string,
     daemonState: DaemonStateAccess = DaemonState.getInstance(),
     timer: Timer = defaultTimer,
-    featureFlagService: FeatureFlagService | null = null
+    featureFlagService: FeatureFlagService | null = null,
+    handshakeConfig: { identity?: DaemonSelfIdentity; enforce?: boolean } = {}
   ) {
     this.socketPath = socketPath;
     this.mcpEndpoint = mcpEndpoint;
     this.daemonState = daemonState;
     this.timer = timer;
     this.featureFlagService = featureFlagService;
+    this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
+    this.daemonIdentity = handshakeConfig.identity ?? {
+      version: DAEMON_VERSION,
+      build: getCurrentBuildIdentity(),
+    };
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
@@ -239,6 +253,11 @@ export class UnixSocketServer {
       };
     }
 
+    const handshakeError = this.rejectOnHandshakeMismatch(request);
+    if (handshakeError) {
+      return handshakeError;
+    }
+
     // Enqueue request to maintain order
     return this.enqueueRequest(session, async () => {
       try {
@@ -337,6 +356,32 @@ export class UnixSocketServer {
         };
       }
     });
+  }
+
+  /**
+   * Reject an inbound request whose declared version/build identity does not match
+   * this daemon (#2744). Returns an error response to short-circuit the request, or
+   * null to let it through. Clients that declare no handshake fields (legacy, or the
+   * gate disabled) always pass. This is the single, language-agnostic gate that
+   * extends the TS proxy's build-identity enforcement to the Kotlin/Swift clients.
+   */
+  private rejectOnHandshakeMismatch(request: DaemonRequest): DaemonResponse | null {
+    if (!this.handshakeEnforced) {
+      return null;
+    }
+    const evaluation = evaluateClientHandshake(this.daemonIdentity, extractClientHandshake(request));
+    if (evaluation.ok) {
+      return null;
+    }
+    logger.warn(
+      `Rejecting daemon client on handshake ${evaluation.reason} mismatch: ${evaluation.message}`
+    );
+    return {
+      id: request.id,
+      type: "mcp_response",
+      success: false,
+      error: evaluation.message,
+    };
   }
 
   /**

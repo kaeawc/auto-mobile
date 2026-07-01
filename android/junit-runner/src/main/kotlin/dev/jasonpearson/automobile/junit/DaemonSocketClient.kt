@@ -23,6 +23,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -86,18 +87,34 @@ internal object DaemonSocketClientManager {
 
   private fun ensureDaemonRunning() {
     val socketPath = DaemonSocketPaths.socketPath()
-    val forceRestart = SystemPropertyCache.getBoolean("automobile.daemon.force.restart", false)
-    if (!forceRestart && DaemonSocketClient.isAvailable(socketPath)) {
+    val forceRestart = DaemonSocketPaths.resolveForceRestart()
+    val daemonAvailable = DaemonSocketClient.isAvailable(socketPath)
+
+    // A daemon of a different build already owning the shared per-uid socket would
+    // silently serve the wrong tool set (#2744). Before reusing it, compare the version
+    // it recorded in its PID file against this runner's and restart on skew, mirroring
+    // the MCP proxy's ensureVersionMatches.
+    val versionSkew =
+        daemonAvailable &&
+            DaemonSocketPaths.requiresVersionSkewRestart(
+                DaemonSocketPaths.readDaemonVersionFromPidFile(DaemonSocketPaths.pidFilePath()),
+                DaemonSocketPaths.resolveClientVersion(),
+            )
+
+    if (!forceRestart && daemonAvailable && !versionSkew) {
       return
     }
 
     val startCommand =
-        if (forceRestart) {
+        if (forceRestart || versionSkew) {
           DaemonSocketPaths.buildDaemonRestartCommand()
         } else {
           DaemonSocketPaths.buildDaemonStartCommand()
         }
     val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
+    if (versionSkew && debugMode) {
+      println("Restarting AutoMobile daemon due to version skew with runner")
+    }
     if (debugMode) {
       println("Starting AutoMobile daemon with: ${startCommand.joinToString(" ")}")
     }
@@ -333,7 +350,7 @@ internal object DaemonSocketPaths {
     return "$DAEMON_PACKAGE_NAME@$trimmedVersion"
   }
 
-  private fun resolveDaemonPackageVersion(): String? {
+  internal fun resolveDaemonPackageVersion(): String? {
     val sysProp = SystemPropertyCache.get(DAEMON_PACKAGE_VERSION_PROPERTY, "").trim()
     if (sysProp.isNotEmpty()) return sysProp
 
@@ -344,6 +361,96 @@ internal object DaemonSocketPaths {
     if (automobileVersionEnv.isNotEmpty()) return automobileVersionEnv
 
     return DaemonSocketPaths::class.java.`package`?.implementationVersion?.trim()
+  }
+
+  /**
+   * Version this runner declares to the daemon for the server-side handshake gate (#2744).
+   * Same source as the pinned spawn version (jar `Implementation-Version`), so a reused
+   * daemon is measured against the exact version this runner would otherwise start.
+   */
+  internal fun resolveClientVersion(): String? = resolveDaemonPackageVersion()
+
+  /**
+   * Resolve whether to force a daemon restart before reuse. Explicit configuration wins
+   * (JVM property `automobile.daemon.force.restart` or env `AUTOMOBILE_DAEMON_FORCE_RESTART`);
+   * otherwise CI runs default to true so a stale daemon left by a previous job is replaced
+   * rather than silently reused (#2744 interim). See [shouldForceRestart] for the decision.
+   */
+  fun resolveForceRestart(): Boolean {
+    val property = SystemPropertyCache.get("automobile.daemon.force.restart", "").ifBlank { null }
+    val env = System.getenv("AUTOMOBILE_DAEMON_FORCE_RESTART")
+    val ci = System.getenv("CI")
+    return shouldForceRestart(property, env, ci)
+  }
+
+  /**
+   * Pure force-restart decision. Explicit property/env values (parsed as booleans) win in
+   * order; when neither is set, a truthy `CI` marker defaults to true. Unset/blank/unparseable
+   * values fall through, defaulting to false outside CI.
+   */
+  internal fun shouldForceRestart(
+      propertyValue: String?,
+      envValue: String?,
+      ciValue: String?,
+  ): Boolean {
+    parseBooleanFlag(propertyValue)?.let { return it }
+    parseBooleanFlag(envValue)?.let { return it }
+    return parseBooleanFlag(ciValue) ?: false
+  }
+
+  private fun parseBooleanFlag(value: String?): Boolean? {
+    val normalized = value?.trim()?.lowercase() ?: return null
+    return when (normalized) {
+      "1", "true", "yes", "y" -> true
+      "0", "false", "no", "n" -> false
+      else -> null
+    }
+  }
+
+  /** PID file the daemon writes its identity to. Mirrors [socketPath] (per-uid, /tmp). */
+  fun pidFilePath(): String {
+    val userId = getUserId()
+    return "/tmp/auto-mobile-daemon-$userId.pid"
+  }
+
+  /**
+   * The release portion of a version string — everything before the semver `+g<sha>` dev
+   * stamp. Mirrors the daemon's `releaseVersion`, so a git-stamped source-checkout daemon
+   * and a plain-versioned runner compare equal at the same release.
+   */
+  internal fun releaseVersion(version: String): String = version.substringBefore('+')
+
+  /** Read the daemon's recorded version from its PID file, or null if absent/unreadable. */
+  internal fun readDaemonVersionFromPidFile(path: String): String? {
+    return try {
+      val file = File(path)
+      if (!file.exists()) return null
+      val json = Json { ignoreUnknownKeys = true }
+      json
+          .parseToJsonElement(file.readText())
+          .jsonObject["version"]
+          ?.jsonPrimitive
+          ?.contentOrNull
+          ?.trim()
+          ?.takeIf { it.isNotEmpty() }
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  /**
+   * Whether an already-running daemon must be restarted before reuse because its recorded
+   * version does not match this runner's (#2744). Compares release portions (stripping the
+   * dev stamp), mirroring the MCP proxy's `ensureVersionMatches`. A blank/unknown version on
+   * either side yields false: without both versions the skew cannot be proven, and forcing a
+   * restart would thrash a daemon we cannot identify (matches the daemon gate's lenient
+   * "unknown => allow" stance).
+   */
+  internal fun requiresVersionSkewRestart(daemonVersion: String?, clientVersion: String?): Boolean {
+    val daemonBase = releaseVersion(daemonVersion?.trim().orEmpty())
+    val clientBase = releaseVersion(clientVersion?.trim().orEmpty())
+    if (daemonBase.isEmpty() || clientBase.isEmpty()) return false
+    return daemonBase != clientBase
   }
 
   /**
@@ -579,7 +686,10 @@ internal object DaemonSocketPaths {
   }
 }
 
-internal class DaemonSocketClient(private val socketPath: String) : Closeable, DaemonToolClient {
+internal class DaemonSocketClient(
+    private val socketPath: String,
+    private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
+) : Closeable, DaemonToolClient {
   private val json = Json { ignoreUnknownKeys = true }
   private val pending = ConcurrentHashMap<String, CompletableFuture<DaemonResponse>>()
   private val writeLock = Any()
@@ -621,6 +731,7 @@ internal class DaemonSocketClient(private val socketPath: String) : Closeable, D
             method = "tools/call",
             params = buildJsonParams(toolName, arguments),
             timeoutMs = timeoutMs,
+            clientVersion = clientVersion,
         )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
@@ -649,6 +760,7 @@ internal class DaemonSocketClient(private val socketPath: String) : Closeable, D
             method = "resources/read",
             params = JsonObject(mapOf("uri" to JsonPrimitive(uri))),
             timeoutMs = timeoutMs,
+            clientVersion = clientVersion,
         )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
@@ -680,6 +792,7 @@ internal class DaemonSocketClient(private val socketPath: String) : Closeable, D
             type = "daemon_request",
             method = method,
             params = params,
+            clientVersion = clientVersion,
         )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
@@ -805,6 +918,9 @@ internal data class DaemonRequest(
     val method: String,
     val params: JsonObject,
     val timeoutMs: Long? = null,
+    // Declared for the daemon's server-side version handshake gate (#2744). Null on
+    // legacy runners; the daemon allows those through.
+    val clientVersion: String? = null,
 )
 
 @Serializable

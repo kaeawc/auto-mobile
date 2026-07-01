@@ -12,6 +12,19 @@ export interface DaemonRequest {
   params: any;
   /** Request timeout in milliseconds (optional, defaults to MCP SDK default of 60000) */
   timeoutMs?: number;
+  /**
+   * Client's package/release version, declared for the server-side handshake
+   * gate (#2744). Optional so legacy clients that predate the gate still connect.
+   */
+  clientVersion?: string;
+  /**
+   * Content hash of the client's entry script (build identity). Only the
+   * TypeScript client can compute this; Kotlin/Swift omit it and are gated on
+   * {@link clientVersion} alone.
+   */
+  clientBuildId?: string;
+  /** Absolute path to the client's entry script (build-identity fallback). */
+  clientEntryScript?: string;
 }
 
 /**

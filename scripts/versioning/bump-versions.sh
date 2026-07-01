@@ -167,6 +167,15 @@ PY
 }
 update_marketplace_plugin_version ".claude-plugin/marketplace.json" "$new_version" "$dry_run"
 
+# Keep the iOS XCTestRunner's baked client version in sync (mirrors Android's jar
+# Implementation-Version). The daemon's version handshake compares the release portion,
+# so this carries the plain MAJOR.MINOR.PATCH with no SNAPSHOT suffix.
+replace_optional_single_match \
+  "ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift" \
+  'public static let current = "[^"]*"' \
+  "public static let current = \"${new_version}\"" \
+  "$dry_run"
+
 if ! command -v rg >/dev/null 2>&1; then
   echo "ripgrep (rg) is required for fast Gradle scanning." >&2
   exit 1

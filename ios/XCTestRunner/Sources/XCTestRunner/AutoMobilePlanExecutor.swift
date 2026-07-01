@@ -312,6 +312,8 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient {
             "method": method,
             "params": params,
             "timeoutMs": Int(timeout * 1000),
+            // Declared for the daemon's server-side version handshake gate (#2744).
+            "clientVersion": AutoMobileVersion.current,
         ]
 
         let data = try JSONSerialization.data(withJSONObject: request, options: [])
@@ -457,7 +459,7 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient {
             "capabilities": [:],
             "clientInfo": [
                 "name": "auto-mobile-xctest-runner",
-                "version": "0.1.0",
+                "version": AutoMobileVersion.current,
             ],
         ]
         _ = try sendRequest(method: "initialize", params: params, timeout: timeout)

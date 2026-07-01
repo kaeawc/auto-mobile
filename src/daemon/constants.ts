@@ -130,6 +130,26 @@ export const READINESS_PROBE_BACKOFF_MS = 150;
 export const MCP_STREAMABLE_PATH = "/auto-mobile/streamable";
 
 /**
+ * Whether the daemon enforces the inbound version/build-identity handshake
+ * (#2744). Enabled by default; set `AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE=1`
+ * (or `AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE=1`) as an escape hatch if a
+ * mismatched client must be allowed through during an incident. Clients that
+ * declare no handshake fields are always allowed regardless of this flag.
+ */
+const handshakeDisableOverride = (
+  process.env.AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE ??
+  process.env.AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE ??
+  ""
+)
+  .trim()
+  .toLowerCase();
+export const DAEMON_HANDSHAKE_ENABLED = !(
+  handshakeDisableOverride === "1" ||
+  handshakeDisableOverride === "true" ||
+  handshakeDisableOverride === "yes"
+);
+
+/**
  * Package version (read from package.json)
  * Used for version compatibility checks and PID file metadata
  */

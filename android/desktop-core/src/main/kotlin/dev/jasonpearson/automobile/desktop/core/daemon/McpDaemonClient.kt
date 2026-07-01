@@ -375,7 +375,6 @@ class McpDaemonClient(
               type = "mcp_request",
               method = method,
               params = params,
-              clientVersion = DaemonSocketPaths.resolveClientVersion(),
           )
 
       writer.write(json.encodeToString(request))
@@ -410,35 +409,6 @@ object DaemonSocketPaths {
     return "/tmp/auto-mobile-daemon-$userId.sock"
   }
 
-  private val ignoredVersions = setOf("latest", "unknown")
-
-  /**
-   * Version this desktop client declares to the daemon for the server-side version handshake
-   * gate (#2744), so the desktop UI can't silently execute against a wrong-build daemon on the
-   * shared socket. Prefers explicit env overrides, then the jar `Implementation-Version` stamped
-   * from `package.json`. Null when unidentifiable (a legacy, ungated client).
-   */
-  fun resolveClientVersion(): String? {
-    val raw =
-        System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION")?.takeIf { it.isNotBlank() }
-            ?: System.getenv("AUTOMOBILE_VERSION")?.takeIf { it.isNotBlank() }
-            ?: DaemonSocketPaths::class.java.`package`?.implementationVersion
-    return normalizeClientVersion(raw)
-  }
-
-  /**
-   * Trim a resolved version and drop non-versions. Aliases like `latest`/`unknown` are not real
-   * versions; declaring one would make the daemon gate compare e.g. `latest` vs `0.0.40` and
-   * reject, so treat them (and blanks) as an unversioned/legacy (ungated) client.
-   */
-  internal fun normalizeClientVersion(raw: String?): String? {
-    val trimmed = raw?.trim().orEmpty()
-    if (trimmed.isEmpty() || ignoredVersions.contains(trimmed.lowercase())) {
-      return null
-    }
-    return trimmed
-  }
-
   private fun getUserId(): String {
     val userName = System.getProperty("user.name", "default").ifBlank { "default" }
     val osName = System.getProperty("os.name", "").lowercase()
@@ -462,14 +432,11 @@ object DaemonSocketPaths {
 }
 
 @Serializable
-internal data class DaemonRequest(
+private data class DaemonRequest(
     val id: String,
     val type: String,
     val method: String,
     val params: JsonObject,
-    // Declared for the daemon's server-side version handshake gate (#2744). Null on clients that
-    // cannot identify their build; the daemon allows those through as legacy.
-    val clientVersion: String? = null,
 )
 
 @Serializable

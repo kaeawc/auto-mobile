@@ -414,6 +414,23 @@ describe("runDoctor", () => {
       expect(report.ios?.checks.every(check => check.status === "skip")).toBe(true);
     });
   });
+
+  test("report.version is a concrete pinned version, never the 'latest' literal (#2746)", async () => {
+    await withProcessPlatform("linux", async () => {
+      const prev = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "0.0.18";
+      try {
+        const report = await runDoctor({ ios: true });
+        expect(report.version).toBe("0.0.18");
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prev;
+        }
+      }
+    });
+  });
 });
 
 describe("applyClientBuildIdentity", () => {

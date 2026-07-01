@@ -12,7 +12,7 @@ import type { BootedDevice, ExecResult } from "../../models";
 import { CheckResult, DoctorOptions } from "../types";
 import { SimCtl, SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger, type Logger } from "../../utils/logger";
-import { IOS_CTRL_PROXY_RELEASE_VERSION, resolveAssetVersion } from "../../constants/release";
+import { resolveAssetVersion, resolvePinnedVersion } from "../../constants/release";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyClient, IOS_RUNNER_FEATURE_COMMANDS } from "../../features/observe/ios/IOSCtrlProxyClient";
 import { ObserveElementsBuilder } from "../../features/observe/ObserveElementsBuilder";
@@ -994,7 +994,9 @@ export async function checkIosCtrlProxyRunner(
       };
     }
 
-    const expectedVersion = resolveAssetVersion(IOS_CTRL_PROXY_RELEASE_VERSION);
+    // Honor AUTOMOBILE_VERSION so a pinned runner is not falsely flagged "stale"
+    // against the newest registry entry (#2746).
+    const expectedVersion = resolveAssetVersion(resolvePinnedVersion());
     const classifications = inspections.map(inspection => classifyRunner(inspection, expectedVersion));
 
     const message = classifications.map(classification => classification.line).join(" | ");

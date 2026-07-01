@@ -631,6 +631,21 @@ describe("checkIosCtrlProxyRunner", () => {
     expect(result.message).not.toContain("missingCommands");
   });
 
+  test("reports the pinned expectedVersion in the diagnostic line (#2746)", async () => {
+    const prev = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    try {
+      const result = await checkIosCtrlProxyRunner(withRunners([inspection()]));
+      expect(result.message).toContain("expectedVersion=0.0.18");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = prev;
+      }
+    }
+  });
+
   test("warns and lists missing commands when the runner is stale", async () => {
     const result = await checkIosCtrlProxyRunner(
       withRunners([inspection({ supportedCommands: [...STALE_COMMANDS] })])

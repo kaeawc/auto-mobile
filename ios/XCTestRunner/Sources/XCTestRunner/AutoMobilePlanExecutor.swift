@@ -811,8 +811,10 @@ public final class AutoMobilePlanExecutor {
 
         // Preflight the daemon before the first attempt so a stale/version-skewed daemon on the
         // shared socket is restarted even with the default retryCount of 0, which never enters the
-        // retry branch below (#2744). No-op for HTTP transport.
-        if case .daemonUnixSocket = configuration.transport {
+        // retry branch below (#2744). Only when the configured socket is the one DaemonManager
+        // manages (its env/default path) — a custom socket path is the caller's own daemon that
+        // DaemonManager can't target. No-op for HTTP transport.
+        if case let .daemonUnixSocket(path) = configuration.transport, path == DaemonManager.socketPath {
             _ = DaemonManager.ensureDaemonRunning()
         }
 
@@ -846,12 +848,15 @@ public final class AutoMobilePlanExecutor {
     /// rejection self-heals instead of failing every retry against the same wrong-version daemon.
     /// No-op for HTTP transport, which does not share the per-uid daemon socket.
     private func recoverDaemonBeforeRetry() {
-        guard case .daemonUnixSocket = configuration.transport else {
+        guard case let .daemonUnixSocket(path) = configuration.transport else {
             return
         }
-        if DaemonManager.ensureDaemonRunning() {
-            mcpClient.resetSession()
+        // Only the DaemonManager-managed (env/default) socket can be restarted here; for a custom
+        // socket path (the caller's own daemon) just drop the session so the retry reconnects.
+        if path == DaemonManager.socketPath {
+            _ = DaemonManager.ensureDaemonRunning()
         }
+        mcpClient.resetSession()
     }
 
     private func executeOnce(testMetadata: TestMetadata?) throws -> ExecutePlanResult {

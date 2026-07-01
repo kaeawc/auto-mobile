@@ -55,22 +55,22 @@ import kotlinx.coroutines.launch
 /** Main Failures dashboard showing crashes, ANRs, and tool call failures */
 @Composable
 fun FailuresDashboard(
-    onNavigateToScreen: (String) -> Unit = {},
-    onNavigateToTest: (String) -> Unit = {},
-    onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit = { _, _ -> },
-    onNewFailureNotification: ((FailureNotification) -> Unit)? = null,
-    initialSelectedFailureId: String? = null,
-    onFailureSelected: (() -> Unit)? = null,
-    initialDateRange: DateRange = DateRange.TwentyFourHours,
-    onDateRangeChanged: ((DateRange) -> Unit)? = null,
-    onFailureCountsChanged:
-        ((crashCount: Int, anrCount: Int, toolFailureCount: Int, nonFatalCount: Int) -> Unit)? =
-        null,
-    clientProvider: (() -> AutoMobileClient)? = null,
-    streamingDataSource: StreamingFailuresDataSourceInterface? = null,
-    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
-    modifier: Modifier = Modifier,
-    failuresPushClient: FailuresPushSocketClient? = null, // Shared client managed at app level
+  onNavigateToScreen: (String) -> Unit = {},
+  onNavigateToTest: (String) -> Unit = {},
+  onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit = { _, _ -> },
+  onNewFailureNotification: ((FailureNotification) -> Unit)? = null,
+  initialSelectedFailureId: String? = null,
+  onFailureSelected: (() -> Unit)? = null,
+  initialDateRange: DateRange = DateRange.TwentyFourHours,
+  onDateRangeChanged: ((DateRange) -> Unit)? = null,
+  onFailureCountsChanged:
+    ((crashCount: Int, anrCount: Int, toolFailureCount: Int, nonFatalCount: Int) -> Unit)? =
+    null,
+  clientProvider: (() -> AutoMobileClient)? = null,
+  streamingDataSource: StreamingFailuresDataSourceInterface? = null,
+  dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+  modifier: Modifier = Modifier,
+  failuresPushClient: FailuresPushSocketClient? = null, // Shared client managed at app level
 ) {
   val scope = rememberCoroutineScope()
 
@@ -80,31 +80,31 @@ fun FailuresDashboard(
   // For fake mode: track the FakeFailuresDataSource for trigger button
   // Key by dataSourceMode so it's recreated when mode toggles
   val fakeDataSource =
-      remember(dataSourceMode) {
-        if (dataSourceMode == DataSourceMode.Fake) FakeFailuresDataSource() else null
-      }
+    remember(dataSourceMode) {
+      if (dataSourceMode == DataSourceMode.Fake) FakeFailuresDataSource() else null
+    }
 
   // Create data sources
   val mockDataSource = remember { MockFailuresDataSource() }
   val mcpDataSource =
-      remember(clientProvider) {
-        clientProvider?.let { McpFailuresDataSource(it) }
-      }
+    remember(clientProvider) {
+      clientProvider?.let { McpFailuresDataSource(it) }
+    }
   val emptyDataSource = remember { EmptyFailuresDataSource() }
 
   val currentDataSource: FailuresDataSource =
-      when {
-        dataSourceMode == DataSourceMode.Fake -> fakeDataSource ?: mockDataSource
-        mcpDataSource != null -> mcpDataSource
-        else -> emptyDataSource // Show empty data in Real mode when MCP not available
-      }
+    when {
+      dataSourceMode == DataSourceMode.Fake -> fakeDataSource ?: mockDataSource
+      mcpDataSource != null -> mcpDataSource
+      else -> emptyDataSource // Show empty data in Real mode when MCP not available
+    }
 
   // Determine streaming source (fake or provided)
   val activeStreamingSource: StreamingFailuresDataSourceInterface? =
-      when {
-        dataSourceMode == DataSourceMode.Fake -> fakeDataSource
-        else -> streamingDataSource
-      }
+    when {
+      dataSourceMode == DataSourceMode.Fake -> fakeDataSource
+      else -> streamingDataSource
+    }
 
   // Data state
   var failureGroups by remember { mutableStateOf<List<FailureGroup>>(emptyList()) }
@@ -253,34 +253,34 @@ fun FailuresDashboard(
   Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
     if (selectedFailure != null) {
       FailureDetailView(
-          failure = selectedFailure!!,
-          onBack = { selectedFailure = null },
-          onNavigateToScreen = onNavigateToScreen,
-          onNavigateToTest = onNavigateToTest,
-          onNavigateToSource = onNavigateToSource,
+        failure = selectedFailure!!,
+        onBack = { selectedFailure = null },
+        onNavigateToScreen = onNavigateToScreen,
+        onNavigateToTest = onNavigateToTest,
+        onNavigateToSource = onNavigateToSource,
       )
     } else {
       FailureListView(
-          failures = failureGroups,
-          filterType = filterType,
-          onFilterChanged = { filterType = it },
-          onFailureSelected = { selectedFailure = it },
-          isLoading = isLoading,
-          errorMessage = errorMessage,
-          streamingError = streamingError,
-          onRetry = { retryCounter++ },
-          dataSource = currentDataSource,
-          dataSourceMode = dataSourceMode,
-          fakeDataSource = fakeDataSource,
-          onTriggerFakeFailure = {
-            scope.launch {
-              fakeDataSource?.triggerNewFailure()
-            }
-          },
-          pushClient = pushClient,
-          initialDateRange = initialDateRange,
-          onDateRangeChanged = onDateRangeChanged,
-          onFailureCountsChanged = onFailureCountsChanged,
+        failures = failureGroups,
+        filterType = filterType,
+        onFilterChanged = { filterType = it },
+        onFailureSelected = { selectedFailure = it },
+        isLoading = isLoading,
+        errorMessage = errorMessage,
+        streamingError = streamingError,
+        onRetry = { retryCounter++ },
+        dataSource = currentDataSource,
+        dataSourceMode = dataSourceMode,
+        fakeDataSource = fakeDataSource,
+        onTriggerFakeFailure = {
+          scope.launch {
+            fakeDataSource?.triggerNewFailure()
+          }
+        },
+        pushClient = pushClient,
+        initialDateRange = initialDateRange,
+        onDateRangeChanged = onDateRangeChanged,
+        onFailureCountsChanged = onFailureCountsChanged,
       )
     }
   }
@@ -322,32 +322,32 @@ private fun getBestAggregation(dateRange: DateRange, currentAgg: TimeAggregation
 
 @Composable
 private fun FailureListView(
-    failures: List<FailureGroup>,
-    filterType: FailureType?,
-    onFilterChanged: (FailureType?) -> Unit,
-    onFailureSelected: (FailureGroup) -> Unit,
-    isLoading: Boolean,
-    errorMessage: String?,
-    streamingError: String?,
-    onRetry: () -> Unit,
-    dataSource: FailuresDataSource,
-    dataSourceMode: DataSourceMode,
-    fakeDataSource: FakeFailuresDataSource?,
-    onTriggerFakeFailure: () -> Unit,
-    pushClient: FailuresPushSocketClient? = null,
-    initialDateRange: DateRange = DateRange.TwentyFourHours,
-    onDateRangeChanged: ((DateRange) -> Unit)? = null,
-    onFailureCountsChanged:
-        ((crashCount: Int, anrCount: Int, toolFailureCount: Int, nonFatalCount: Int) -> Unit)? =
-        null,
+  failures: List<FailureGroup>,
+  filterType: FailureType?,
+  onFilterChanged: (FailureType?) -> Unit,
+  onFailureSelected: (FailureGroup) -> Unit,
+  isLoading: Boolean,
+  errorMessage: String?,
+  streamingError: String?,
+  onRetry: () -> Unit,
+  dataSource: FailuresDataSource,
+  dataSourceMode: DataSourceMode,
+  fakeDataSource: FakeFailuresDataSource?,
+  onTriggerFakeFailure: () -> Unit,
+  pushClient: FailuresPushSocketClient? = null,
+  initialDateRange: DateRange = DateRange.TwentyFourHours,
+  onDateRangeChanged: ((DateRange) -> Unit)? = null,
+  onFailureCountsChanged:
+    ((crashCount: Int, anrCount: Int, toolFailureCount: Int, nonFatalCount: Int) -> Unit)? =
+    null,
 ) {
   val colors = SharedTheme.globalColors
   val filteredFailures =
-      if (filterType != null) {
-        failures.filter { it.type == filterType }
-      } else {
-        failures
-      }
+    if (filterType != null) {
+      failures.filter { it.type == filterType }
+    } else {
+      failures
+    }
 
   var dateRange by remember { mutableStateOf(initialDateRange) }
   var timeAggregation by remember { mutableStateOf(TimeAggregation.Hour) }
@@ -419,48 +419,42 @@ private fun FailureListView(
     }
   }
 
-  Column(
-      modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-  ) {
+  Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
     // Date range and aggregation selectors - stack when narrow
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
       val isNarrow = maxWidth < 400.dp
 
       if (isNarrow) {
         // Stack vertically when narrow
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
           // Date range selector
           Row(
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
-              modifier =
-                  Modifier.background(
-                          colors.text.normal.copy(alpha = 0.05f),
-                          RoundedCornerShape(6.dp),
-                      )
-                      .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier =
+              Modifier.background(
+                  colors.text.normal.copy(alpha = 0.05f),
+                  RoundedCornerShape(6.dp),
+                )
+                .padding(4.dp),
           ) {
             DateRange.entries.forEach { range ->
               val isSelected = range == dateRange
               Box(
-                  modifier =
-                      Modifier.background(
-                              if (isSelected) colors.text.normal.copy(alpha = 0.15f)
-                              else Color.Transparent,
-                              RoundedCornerShape(4.dp),
-                          )
-                          .clickable { dateRange = range }
-                          .pointerHoverIcon(PointerIcon.Hand)
-                          .padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier =
+                  Modifier.background(
+                      if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
+                      RoundedCornerShape(4.dp),
+                    )
+                    .clickable { dateRange = range }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
               ) {
                 Text(
-                    range.label,
-                    fontSize = 10.sp,
-                    color =
-                        if (isSelected) colors.text.normal
-                        else colors.text.normal.copy(alpha = 0.6f),
-                    maxLines = 1,
+                  range.label,
+                  fontSize = 10.sp,
+                  color =
+                    if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                  maxLines = 1,
                 )
               }
             }
@@ -468,44 +462,43 @@ private fun FailureListView(
 
           // Aggregation selector
           Row(
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
             Text(
-                "Group by:",
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-                maxLines = 1,
+              "Group by:",
+              fontSize = 10.sp,
+              color = colors.text.normal.copy(alpha = 0.5f),
+              maxLines = 1,
             )
             Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier =
-                    Modifier.background(
-                            colors.text.normal.copy(alpha = 0.05f),
-                            RoundedCornerShape(6.dp),
-                        )
-                        .padding(4.dp),
+              horizontalArrangement = Arrangement.spacedBy(4.dp),
+              modifier =
+                Modifier.background(
+                    colors.text.normal.copy(alpha = 0.05f),
+                    RoundedCornerShape(6.dp),
+                  )
+                  .padding(4.dp),
             ) {
               validAggregations.forEach { agg ->
                 val isSelected = agg == timeAggregation
                 Box(
-                    modifier =
-                        Modifier.background(
-                                if (isSelected) colors.text.normal.copy(alpha = 0.15f)
-                                else Color.Transparent,
-                                RoundedCornerShape(4.dp),
-                            )
-                            .clickable { timeAggregation = agg }
-                            .pointerHoverIcon(PointerIcon.Hand)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                  modifier =
+                    Modifier.background(
+                        if (isSelected) colors.text.normal.copy(alpha = 0.15f)
+                        else Color.Transparent,
+                        RoundedCornerShape(4.dp),
+                      )
+                      .clickable { timeAggregation = agg }
+                      .pointerHoverIcon(PointerIcon.Hand)
+                      .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                   Text(
-                      agg.label,
-                      fontSize = 10.sp,
-                      color =
-                          if (isSelected) colors.text.normal
-                          else colors.text.normal.copy(alpha = 0.6f),
-                      maxLines = 1,
+                    agg.label,
+                    fontSize = 10.sp,
+                    color =
+                      if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                    maxLines = 1,
                   )
                 }
               }
@@ -515,40 +508,38 @@ private fun FailureListView(
       } else {
         // Side by side when wide
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           // Date range selector
           Row(
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
-              modifier =
-                  Modifier.background(
-                          colors.text.normal.copy(alpha = 0.05f),
-                          RoundedCornerShape(6.dp),
-                      )
-                      .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier =
+              Modifier.background(
+                  colors.text.normal.copy(alpha = 0.05f),
+                  RoundedCornerShape(6.dp),
+                )
+                .padding(4.dp),
           ) {
             DateRange.entries.forEach { range ->
               val isSelected = range == dateRange
               Box(
-                  modifier =
-                      Modifier.background(
-                              if (isSelected) colors.text.normal.copy(alpha = 0.15f)
-                              else Color.Transparent,
-                              RoundedCornerShape(4.dp),
-                          )
-                          .clickable { dateRange = range }
-                          .pointerHoverIcon(PointerIcon.Hand)
-                          .padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier =
+                  Modifier.background(
+                      if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
+                      RoundedCornerShape(4.dp),
+                    )
+                    .clickable { dateRange = range }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
               ) {
                 Text(
-                    range.label,
-                    fontSize = 10.sp,
-                    color =
-                        if (isSelected) colors.text.normal
-                        else colors.text.normal.copy(alpha = 0.6f),
-                    maxLines = 1,
+                  range.label,
+                  fontSize = 10.sp,
+                  color =
+                    if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                  maxLines = 1,
                 )
               }
             }
@@ -556,44 +547,43 @@ private fun FailureListView(
 
           // Aggregation selector (only show valid options)
           Row(
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
             Text(
-                "Group by:",
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-                maxLines = 1,
+              "Group by:",
+              fontSize = 10.sp,
+              color = colors.text.normal.copy(alpha = 0.5f),
+              maxLines = 1,
             )
             Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier =
-                    Modifier.background(
-                            colors.text.normal.copy(alpha = 0.05f),
-                            RoundedCornerShape(6.dp),
-                        )
-                        .padding(4.dp),
+              horizontalArrangement = Arrangement.spacedBy(4.dp),
+              modifier =
+                Modifier.background(
+                    colors.text.normal.copy(alpha = 0.05f),
+                    RoundedCornerShape(6.dp),
+                  )
+                  .padding(4.dp),
             ) {
               validAggregations.forEach { agg ->
                 val isSelected = agg == timeAggregation
                 Box(
-                    modifier =
-                        Modifier.background(
-                                if (isSelected) colors.text.normal.copy(alpha = 0.15f)
-                                else Color.Transparent,
-                                RoundedCornerShape(4.dp),
-                            )
-                            .clickable { timeAggregation = agg }
-                            .pointerHoverIcon(PointerIcon.Hand)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                  modifier =
+                    Modifier.background(
+                        if (isSelected) colors.text.normal.copy(alpha = 0.15f)
+                        else Color.Transparent,
+                        RoundedCornerShape(4.dp),
+                      )
+                      .clickable { timeAggregation = agg }
+                      .pointerHoverIcon(PointerIcon.Hand)
+                      .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                   Text(
-                      agg.label,
-                      fontSize = 10.sp,
-                      color =
-                          if (isSelected) colors.text.normal
-                          else colors.text.normal.copy(alpha = 0.6f),
-                      maxLines = 1,
+                    agg.label,
+                    fontSize = 10.sp,
+                    color =
+                      if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                    maxLines = 1,
                   )
                 }
               }
@@ -608,38 +598,38 @@ private fun FailureListView(
     // Fake mode: Trigger failure button
     if (dataSourceMode == DataSourceMode.Fake && fakeDataSource != null) {
       Row(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .background(Color(0xFF4CAF50).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                  .padding(12.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween,
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(Color(0xFF4CAF50).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
       ) {
         Column {
           Text(
-              "Fake Mode",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.Medium,
-              color = Color(0xFF4CAF50),
+            "Fake Mode",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFF4CAF50),
           )
           Text(
-              "Trigger test failures to see real-time notifications",
-              fontSize = 10.sp,
-              color = colors.text.normal.copy(alpha = 0.6f),
+            "Trigger test failures to see real-time notifications",
+            fontSize = 10.sp,
+            color = colors.text.normal.copy(alpha = 0.6f),
           )
         }
         Box(
-            modifier =
-                Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(6.dp))
-                    .clickable(onClick = onTriggerFakeFailure)
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+          modifier =
+            Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(6.dp))
+              .clickable(onClick = onTriggerFakeFailure)
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
           Text(
-              "Trigger Failure",
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Medium,
-              color = Color.White,
+            "Trigger Failure",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color.White,
           )
         }
       }
@@ -649,34 +639,34 @@ private fun FailureListView(
     // Streaming error banner (non-fatal, shown as warning)
     if (streamingError != null && errorMessage == null) {
       Box(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .background(Color(0xFFFF9800).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                  .padding(12.dp),
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(Color(0xFFFF9800).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+            .padding(12.dp)
       ) {
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier.fillMaxWidth(),
         ) {
           Column(modifier = Modifier.weight(1f)) {
             Text(
-                "Streaming updates unavailable",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color(0xFFFF9800),
+              "Streaming updates unavailable",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Medium,
+              color = Color(0xFFFF9800),
             )
             Text(
-                streamingError,
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.6f),
+              streamingError,
+              fontSize = 10.sp,
+              color = colors.text.normal.copy(alpha = 0.6f),
             )
           }
           Text(
-              "Reconnecting...",
-              fontSize = 11.sp,
-              color = Color(0xFFFF9800).copy(alpha = 0.7f),
-              modifier = Modifier.padding(8.dp),
+            "Reconnecting...",
+            fontSize = 11.sp,
+            color = Color(0xFFFF9800).copy(alpha = 0.7f),
+            modifier = Modifier.padding(8.dp),
           )
         }
       }
@@ -686,37 +676,37 @@ private fun FailureListView(
     // Error banner
     if (errorMessage != null) {
       Box(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .background(Color(0xFFE53935).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                  .padding(12.dp),
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(Color(0xFFE53935).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+            .padding(12.dp)
       ) {
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier.fillMaxWidth(),
         ) {
           Column(modifier = Modifier.weight(1f)) {
             Text(
-                "Failed to load data",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color(0xFFE53935),
+              "Failed to load data",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Medium,
+              color = Color(0xFFE53935),
             )
             Text(
-                errorMessage,
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.6f),
+              errorMessage,
+              fontSize = 10.sp,
+              color = colors.text.normal.copy(alpha = 0.6f),
             )
           }
           Text(
-              "Retry",
-              fontSize = 11.sp,
-              color = Color(0xFF2196F3),
-              modifier =
-                  Modifier.clickable(onClick = onRetry)
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(8.dp),
+            "Retry",
+            fontSize = 11.sp,
+            color = Color(0xFF2196F3),
+            modifier =
+              Modifier.clickable(onClick = onRetry)
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(8.dp),
           )
         }
       }
@@ -728,32 +718,32 @@ private fun FailureListView(
     val currentTimelineData = timelineData
     if (currentTimelineData != null) {
       EventTrendsSection(
-          data = currentTimelineData,
-          dateRange = dateRange,
-          aggregation = timeAggregation,
-          onBarClick =
-              if (canDrillDown) {
-                {
-                  // Drill down to smaller time range
-                  val nextRange = getNextSmallerDateRange(dateRange)
-                  if (nextRange != null) {
-                    dateRange = nextRange
-                  }
-                }
-              } else null,
+        data = currentTimelineData,
+        dateRange = dateRange,
+        aggregation = timeAggregation,
+        onBarClick =
+          if (canDrillDown) {
+            {
+              // Drill down to smaller time range
+              val nextRange = getNextSmallerDateRange(dateRange)
+              if (nextRange != null) {
+                dateRange = nextRange
+              }
+            }
+          } else null,
       )
     } else if (timelineLoading) {
       Box(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .height(140.dp)
-                  .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp)),
-          contentAlignment = Alignment.Center,
+        modifier =
+          Modifier.fillMaxWidth()
+            .height(140.dp)
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center,
       ) {
         Text(
-            "Loading timeline...",
-            fontSize = 12.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
+          "Loading timeline...",
+          fontSize = 12.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
         )
       }
     }
@@ -761,26 +751,22 @@ private fun FailureListView(
     Spacer(Modifier.height(16.dp))
 
     // Filter chips - responsive to width
-    BoxWithConstraints(
-        modifier = Modifier.padding(bottom = 12.dp),
-    ) {
+    BoxWithConstraints(modifier = Modifier.padding(bottom = 12.dp)) {
       val showLabels = maxWidth > 300.dp
-      Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(
-            label = "All",
-            isSelected = filterType == null,
-            showLabel = true, // Always show "All"
-            onClick = { onFilterChanged(null) },
+          label = "All",
+          isSelected = filterType == null,
+          showLabel = true, // Always show "All"
+          onClick = { onFilterChanged(null) },
         )
         FailureType.entries.forEach { type ->
           FilterChip(
-              label = type.label,
-              icon = type.icon,
-              isSelected = filterType == type,
-              showLabel = showLabels,
-              onClick = { onFilterChanged(type) },
+            label = type.label,
+            icon = type.icon,
+            isSelected = filterType == type,
+            showLabel = showLabels,
+            onClick = { onFilterChanged(type) },
           )
         }
       }
@@ -788,56 +774,54 @@ private fun FailureListView(
 
     // Issues header
     Text(
-        if (isLoading) "Issues (loading...)" else "Issues (${filteredFailures.size})",
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        color = colors.text.normal.copy(alpha = 0.7f),
-        modifier = Modifier.padding(bottom = 8.dp),
+      if (isLoading) "Issues (loading...)" else "Issues (${filteredFailures.size})",
+      fontSize = 13.sp,
+      fontWeight = FontWeight.Medium,
+      color = colors.text.normal.copy(alpha = 0.7f),
+      modifier = Modifier.padding(bottom = 8.dp),
     )
 
     // Failure list
-    Column(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
       if (filteredFailures.isEmpty()) {
         Box(
-            modifier = Modifier.fillMaxWidth().padding(32.dp),
-            contentAlignment = Alignment.Center,
+          modifier = Modifier.fillMaxWidth().padding(32.dp),
+          contentAlignment = Alignment.Center,
         ) {
           if (dataSourceMode == DataSourceMode.Real && !isLoading) {
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
               Text(
-                  "No failures detected",
-                  fontSize = 13.sp,
-                  fontWeight = FontWeight.Medium,
-                  color = colors.text.normal.copy(alpha = 0.7f),
+                "No failures detected",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = colors.text.normal.copy(alpha = 0.7f),
               )
               Text(
-                  "AutoMobile tracks crashes and ANRs via logcat and tool failures directly.",
-                  fontSize = 11.sp,
-                  color = colors.text.normal.copy(alpha = 0.5f),
+                "AutoMobile tracks crashes and ANRs via logcat and tool failures directly.",
+                fontSize = 11.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
               )
               Text(
-                  "The SDK provides richer context and metadata but is not required.",
-                  fontSize = 11.sp,
-                  color = colors.text.normal.copy(alpha = 0.5f),
+                "The SDK provides richer context and metadata but is not required.",
+                fontSize = 11.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
               )
             }
           } else {
             Text(
-                "No failures found",
-                color = colors.text.normal.copy(alpha = 0.5f),
+              "No failures found",
+              color = colors.text.normal.copy(alpha = 0.5f),
             )
           }
         }
       } else {
         filteredFailures.forEach { failure ->
           FailureListItem(
-              failure = failure,
-              onClick = { onFailureSelected(failure) },
+            failure = failure,
+            onClick = { onFailureSelected(failure) },
           )
         }
       }
@@ -847,32 +831,31 @@ private fun FailureListView(
 
 @Composable
 private fun FilterChip(
-    label: String,
-    icon: String? = null,
-    isSelected: Boolean,
-    showLabel: Boolean = true,
-    onClick: () -> Unit,
+  label: String,
+  icon: String? = null,
+  isSelected: Boolean,
+  showLabel: Boolean = true,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val bgColor = if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent
   val borderColor =
-      if (isSelected) colors.text.normal.copy(alpha = 0.3f)
-      else colors.text.normal.copy(alpha = 0.2f)
+    if (isSelected) colors.text.normal.copy(alpha = 0.3f) else colors.text.normal.copy(alpha = 0.2f)
 
   val displayText =
-      when {
-        icon != null && showLabel -> "$icon $label"
-        icon != null -> icon
-        else -> label
-      }
+    when {
+      icon != null && showLabel -> "$icon $label"
+      icon != null -> icon
+      else -> label
+    }
 
   Box(
-      modifier =
-          Modifier.background(bgColor, RoundedCornerShape(4.dp))
-              .border(1.dp, borderColor, RoundedCornerShape(4.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 10.dp, vertical = 4.dp),
+    modifier =
+      Modifier.background(bgColor, RoundedCornerShape(4.dp))
+        .border(1.dp, borderColor, RoundedCornerShape(4.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 10.dp, vertical = 4.dp)
   ) {
     Text(displayText, fontSize = 11.sp, maxLines = 1)
   }
@@ -880,52 +863,52 @@ private fun FilterChip(
 
 @Composable
 private fun StatBox(
-    label: String,
-    value: String,
-    color: Color,
-    emoji: String? = null,
-    delta: String? = null,
-    deltaPositive: Boolean = false,
-    showLabel: Boolean = true,
+  label: String,
+  value: String,
+  color: Color,
+  emoji: String? = null,
+  delta: String? = null,
+  deltaPositive: Boolean = false,
+  showLabel: Boolean = true,
 ) {
   val colors = SharedTheme.globalColors
 
   // Auto-size font based on value length to prevent overflow
   val valueFontSize =
-      when {
-        value.length <= 3 -> 18.sp
-        value.length <= 5 -> 14.sp
-        else -> 12.sp
-      }
+    when {
+      value.length <= 3 -> 18.sp
+      value.length <= 5 -> 14.sp
+      else -> 12.sp
+    }
 
   Column(horizontalAlignment = Alignment.CenterHorizontally) {
     Text(
-        value,
-        fontSize = valueFontSize,
-        fontWeight = FontWeight.Bold,
-        color = color,
-        maxLines = 1,
+      value,
+      fontSize = valueFontSize,
+      fontWeight = FontWeight.Bold,
+      color = color,
+      maxLines = 1,
     )
     if (delta != null) {
       Text(
-          delta,
-          fontSize = 9.sp,
-          color = if (deltaPositive) Color(0xFF4CAF50) else Color(0xFFE53935),
-          maxLines = 1,
+        delta,
+        fontSize = 9.sp,
+        color = if (deltaPositive) Color(0xFF4CAF50) else Color(0xFFE53935),
+        maxLines = 1,
       )
     }
     if (showLabel) {
       Text(
-          if (emoji != null) "$emoji $label" else label,
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-          maxLines = 1,
+        if (emoji != null) "$emoji $label" else label,
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+        maxLines = 1,
       )
     } else if (emoji != null) {
       Text(
-          emoji,
-          fontSize = 10.sp,
-          maxLines = 1,
+        emoji,
+        fontSize = 10.sp,
+        maxLines = 1,
       )
     }
   }
@@ -933,10 +916,10 @@ private fun StatBox(
 
 @Composable
 private fun EventTrendsSection(
-    data: TimelineData,
-    dateRange: DateRange,
-    aggregation: TimeAggregation,
-    onBarClick: (() -> Unit)?,
+  data: TimelineData,
+  dateRange: DateRange,
+  aggregation: TimeAggregation,
+  onBarClick: (() -> Unit)?,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -949,61 +932,59 @@ private fun EventTrendsSection(
   // Use previous period totals from data source
   val previousPeriodTotals = data.previousPeriodTotals
   val crashDelta =
-      if (previousPeriodTotals.crashes > 0) {
-        ((totalCrashes - previousPeriodTotals.crashes) * 100 / previousPeriodTotals.crashes)
-      } else 0
+    if (previousPeriodTotals.crashes > 0) {
+      ((totalCrashes - previousPeriodTotals.crashes) * 100 / previousPeriodTotals.crashes)
+    } else 0
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
-              .padding(12.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
+        .padding(12.dp)
   ) {
     // Stats row - responsive to width
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-    ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
       val showLabels = maxWidth > 350.dp
       Row(
-          horizontalArrangement = Arrangement.SpaceEvenly,
-          modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        modifier = Modifier.fillMaxWidth(),
       ) {
         StatBox(
-            label = "Crashes",
-            value = formatNumber(totalCrashes),
-            color = FailureType.Crash.color,
-            emoji = FailureType.Crash.icon,
-            delta = if (crashDelta != 0) "${if (crashDelta > 0) "+" else ""}$crashDelta%" else null,
-            deltaPositive = crashDelta < 0,
-            showLabel = showLabels,
+          label = "Crashes",
+          value = formatNumber(totalCrashes),
+          color = FailureType.Crash.color,
+          emoji = FailureType.Crash.icon,
+          delta = if (crashDelta != 0) "${if (crashDelta > 0) "+" else ""}$crashDelta%" else null,
+          deltaPositive = crashDelta < 0,
+          showLabel = showLabels,
         )
         StatBox(
-            label = "ANRs",
-            value = formatNumber(totalAnrs),
-            color = FailureType.ANR.color,
-            emoji = FailureType.ANR.icon,
-            showLabel = showLabels,
+          label = "ANRs",
+          value = formatNumber(totalAnrs),
+          color = FailureType.ANR.color,
+          emoji = FailureType.ANR.icon,
+          showLabel = showLabels,
         )
         StatBox(
-            label = "Tool Errors",
-            value = formatNumber(totalToolFailures),
-            color = FailureType.ToolCallFailure.color,
-            emoji = FailureType.ToolCallFailure.icon,
-            showLabel = showLabels,
+          label = "Tool Errors",
+          value = formatNumber(totalToolFailures),
+          color = FailureType.ToolCallFailure.color,
+          emoji = FailureType.ToolCallFailure.icon,
+          showLabel = showLabels,
         )
         StatBox(
-            label = "Non-Fatal",
-            value = formatNumber(totalNonfatals),
-            color = FailureType.NonFatal.color,
-            emoji = FailureType.NonFatal.icon,
-            showLabel = showLabels,
+          label = "Non-Fatal",
+          value = formatNumber(totalNonfatals),
+          color = FailureType.NonFatal.color,
+          emoji = FailureType.NonFatal.icon,
+          showLabel = showLabels,
         )
         StatBox(
-            label = "Total",
-            value = formatNumber(totalCrashes + totalAnrs + totalToolFailures + totalNonfatals),
-            color = colors.text.normal,
-            emoji = "📊",
-            showLabel = showLabels,
+          label = "Total",
+          value = formatNumber(totalCrashes + totalAnrs + totalToolFailures + totalNonfatals),
+          color = colors.text.normal,
+          emoji = "📊",
+          showLabel = showLabels,
         )
       }
     }
@@ -1015,9 +996,9 @@ private fun EventTrendsSection(
 
 @Composable
 private fun FailureBarChart(
-    data: List<TimelineDataPoint>,
-    aggregation: TimeAggregation,
-    onBarClick: (() -> Unit)?,
+  data: List<TimelineDataPoint>,
+  aggregation: TimeAggregation,
+  onBarClick: (() -> Unit)?,
 ) {
   val colors = SharedTheme.globalColors
   val maxValue = data.maxOfOrNull { it.total } ?: 1
@@ -1026,24 +1007,23 @@ private fun FailureBarChart(
   Column {
     // Bars
     Row(
-        modifier = Modifier.fillMaxWidth().height(chartHeight),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.Bottom,
+      modifier = Modifier.fillMaxWidth().height(chartHeight),
+      horizontalArrangement = Arrangement.spacedBy(2.dp),
+      verticalAlignment = Alignment.Bottom,
     ) {
       data.forEach { point ->
         val barHeight = if (maxValue > 0) (point.total.toFloat() / maxValue) else 0f
 
         Column(
-            modifier =
-                Modifier.weight(1f)
-                    .height(chartHeight)
-                    .then(
-                        if (onBarClick != null) {
-                          Modifier.clickable(onClick = onBarClick)
-                              .pointerHoverIcon(PointerIcon.Hand)
-                        } else Modifier
-                    ),
-            verticalArrangement = Arrangement.Bottom,
+          modifier =
+            Modifier.weight(1f)
+              .height(chartHeight)
+              .then(
+                if (onBarClick != null) {
+                  Modifier.clickable(onClick = onBarClick).pointerHoverIcon(PointerIcon.Hand)
+                } else Modifier
+              ),
+          verticalArrangement = Arrangement.Bottom,
         ) {
           // Stacked bar: crashes (red) + ANRs (orange) + tool failures (purple) + nonfatals (blue)
           if (point.total > 0) {
@@ -1054,40 +1034,40 @@ private fun FailureBarChart(
 
             if (point.nonfatals > 0) {
               Box(
-                  modifier =
-                      Modifier.fillMaxWidth()
-                          .height((chartHeight.value * nonfatalHeight).dp)
-                          .background(
-                              FailureType.NonFatal.color.copy(alpha = 0.8f),
-                              RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp),
-                          ),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .height((chartHeight.value * nonfatalHeight).dp)
+                    .background(
+                      FailureType.NonFatal.color.copy(alpha = 0.8f),
+                      RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp),
+                    )
               )
             }
             if (point.toolFailures > 0) {
               Box(
-                  modifier =
-                      Modifier.fillMaxWidth()
-                          .height((chartHeight.value * toolHeight).dp)
-                          .background(FailureType.ToolCallFailure.color.copy(alpha = 0.8f)),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .height((chartHeight.value * toolHeight).dp)
+                    .background(FailureType.ToolCallFailure.color.copy(alpha = 0.8f))
               )
             }
             if (point.anrs > 0) {
               Box(
-                  modifier =
-                      Modifier.fillMaxWidth()
-                          .height((chartHeight.value * anrHeight).dp)
-                          .background(FailureType.ANR.color.copy(alpha = 0.8f)),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .height((chartHeight.value * anrHeight).dp)
+                    .background(FailureType.ANR.color.copy(alpha = 0.8f))
               )
             }
             if (point.crashes > 0) {
               Box(
-                  modifier =
-                      Modifier.fillMaxWidth()
-                          .height((chartHeight.value * crashHeight).dp)
-                          .background(
-                              FailureType.Crash.color.copy(alpha = 0.8f),
-                              RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp),
-                          ),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .height((chartHeight.value * crashHeight).dp)
+                    .background(
+                      FailureType.Crash.color.copy(alpha = 0.8f),
+                      RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp),
+                    )
               )
             }
           }
@@ -1096,45 +1076,43 @@ private fun FailureBarChart(
     }
 
     // X-axis labels (show every few labels to avoid crowding)
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-    ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
       // Dynamically adjust label density based on available width
       val labelStep =
-          when {
-            maxWidth < 200.dp ->
-                when {
-                  data.size <= 4 -> 1
-                  else -> data.size // Show only first and last
-                }
-            maxWidth < 300.dp ->
-                when {
-                  data.size <= 4 -> 1
-                  data.size <= 8 -> 2
-                  else -> 4
-                }
-            else ->
-                when {
-                  data.size <= 7 -> 1
-                  data.size <= 14 -> 2
-                  data.size <= 24 -> 4
-                  else -> 10
-                }
-          }
+        when {
+          maxWidth < 200.dp ->
+            when {
+              data.size <= 4 -> 1
+              else -> data.size // Show only first and last
+            }
+          maxWidth < 300.dp ->
+            when {
+              data.size <= 4 -> 1
+              data.size <= 8 -> 2
+              else -> 4
+            }
+          else ->
+            when {
+              data.size <= 7 -> 1
+              data.size <= 14 -> 2
+              data.size <= 24 -> 4
+              else -> 10
+            }
+        }
       Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
       ) {
         data
-            .filterIndexed { index, _ -> index % labelStep == 0 || index == data.lastIndex }
-            .forEach { point ->
-              Text(
-                  point.label,
-                  fontSize = 8.sp,
-                  color = colors.text.normal.copy(alpha = 0.4f),
-                  maxLines = 1,
-              )
-            }
+          .filterIndexed { index, _ -> index % labelStep == 0 || index == data.lastIndex }
+          .forEach { point ->
+            Text(
+              point.label,
+              fontSize = 8.sp,
+              color = colors.text.normal.copy(alpha = 0.4f),
+              maxLines = 1,
+            )
+          }
       }
     }
   }
@@ -1142,26 +1120,26 @@ private fun FailureBarChart(
 
 @Composable
 private fun FailureListItem(
-    failure: FailureGroup,
-    onClick: () -> Unit,
+  failure: FailureGroup,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(12.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(12.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     // Type icon and severity indicator
     Box(
-        modifier =
-            Modifier.size(36.dp)
-                .background(failure.type.color.copy(alpha = 0.15f), RoundedCornerShape(6.dp)),
-        contentAlignment = Alignment.Center,
+      modifier =
+        Modifier.size(36.dp)
+          .background(failure.type.color.copy(alpha = 0.15f), RoundedCornerShape(6.dp)),
+      contentAlignment = Alignment.Center,
     ) {
       Text(failure.type.icon, fontSize = 16.sp)
     }
@@ -1171,18 +1149,18 @@ private fun FailureListItem(
     // Failure info
     Column(modifier = Modifier.weight(1f)) {
       Text(
-          failure.title,
-          fontSize = 13.sp,
-          fontWeight = FontWeight.Medium,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
+        failure.title,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
       Text(
-          failure.signature,
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
+        failure.signature,
+        fontSize = 11.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
     }
 
@@ -1191,15 +1169,15 @@ private fun FailureListItem(
     // Count and severity
     Column(horizontalAlignment = Alignment.End) {
       Text(
-          "${failure.totalCount}x",
-          fontSize = 12.sp,
-          fontWeight = FontWeight.Medium,
-          color = failure.severity.color,
+        "${failure.totalCount}x",
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color = failure.severity.color,
       )
       Text(
-          failure.severity.label,
-          fontSize = 10.sp,
-          color = failure.severity.color.copy(alpha = 0.7f),
+        failure.severity.label,
+        fontSize = 10.sp,
+        color = failure.severity.color.copy(alpha = 0.7f),
       )
     }
   }
@@ -1208,58 +1186,56 @@ private fun FailureListItem(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FailureDetailView(
-    failure: FailureGroup,
-    onBack: () -> Unit,
-    onNavigateToScreen: (String) -> Unit,
-    onNavigateToTest: (String) -> Unit,
-    onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit,
+  failure: FailureGroup,
+  onBack: () -> Unit,
+  onNavigateToScreen: (String) -> Unit,
+  onNavigateToTest: (String) -> Unit,
+  onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
-  Column(
-      modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-  ) {
+  Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
     // Back button
     Text(
-        "← Back",
-        fontSize = 12.sp,
-        color = Color(0xFF2196F3),
-        modifier =
-            Modifier.clickable(onClick = onBack)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(bottom = 12.dp),
+      "← Back",
+      fontSize = 12.sp,
+      color = Color(0xFF2196F3),
+      modifier =
+        Modifier.clickable(onClick = onBack)
+          .pointerHoverIcon(PointerIcon.Hand)
+          .padding(bottom = 12.dp),
     )
 
     // Header with badges
     Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       Badge(failure.type.icon + " " + failure.type.label, failure.type.color)
       Badge(failure.severity.label, failure.severity.color)
     }
 
     Text(
-        failure.title,
-        fontSize = 16.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(top = 8.dp),
+      failure.title,
+      fontSize = 16.sp,
+      fontWeight = FontWeight.Medium,
+      modifier = Modifier.padding(top = 8.dp),
     )
 
     // Summary stats row
     Row(
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
+      horizontalArrangement = Arrangement.spacedBy(16.dp),
+      modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
     ) {
       Text(
-          "${failure.totalCount} occurrences",
-          fontSize = 12.sp,
-          color = colors.text.normal.copy(alpha = 0.6f),
+        "${failure.totalCount} occurrences",
+        fontSize = 12.sp,
+        color = colors.text.normal.copy(alpha = 0.6f),
       )
       Text(
-          "${failure.uniqueSessions} sessions",
-          fontSize = 12.sp,
-          color = colors.text.normal.copy(alpha = 0.6f),
+        "${failure.uniqueSessions} sessions",
+        fontSize = 12.sp,
+        color = colors.text.normal.copy(alpha = 0.6f),
       )
     }
 
@@ -1267,8 +1243,8 @@ private fun FailureDetailView(
     if (failure.recentCaptures.isNotEmpty()) {
       SectionHeader("Captures (${failure.recentCaptures.size})")
       Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
       ) {
         failure.recentCaptures.take(5).forEach { capture ->
           CaptureCard(capture = capture)
@@ -1285,16 +1261,16 @@ private fun FailureDetailView(
     // Error message
     SectionHeader("Error Message")
     Box(
-        modifier =
-            Modifier.fillMaxWidth()
-                .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-                .padding(12.dp),
+      modifier =
+        Modifier.fillMaxWidth()
+          .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+          .padding(12.dp)
     ) {
       Text(
-          failure.message,
-          fontSize = 12.sp,
-          fontFamily = FontFamily.Monospace,
-          color = Color(0xFFE53935),
+        failure.message,
+        fontSize = 12.sp,
+        fontFamily = FontFamily.Monospace,
+        color = Color(0xFFE53935),
       )
     }
 
@@ -1303,10 +1279,10 @@ private fun FailureDetailView(
       Spacer(Modifier.height(16.dp))
       SectionHeader("Stack Trace")
       Column(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-                  .padding(8.dp),
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+            .padding(8.dp)
       ) {
         failure.stackTraceElements.forEach { element ->
           StackTraceLine(element = element, onNavigateToSource = onNavigateToSource)
@@ -1327,9 +1303,9 @@ private fun FailureDetailView(
       Spacer(Modifier.height(16.dp))
       SectionHeader("Screens Visited (across ${failure.totalCount} occurrences)")
       ScreenBreakdownSection(
-          breakdown = failure.screenBreakdown.take(5),
-          failureScreens = failure.failureScreens,
-          onNavigateToScreen = onNavigateToScreen,
+        breakdown = failure.screenBreakdown.take(5),
+        failureScreens = failure.failureScreens,
+        onNavigateToScreen = onNavigateToScreen,
       )
       if (failure.screenBreakdown.size > 5) {
         ViewAllLink("View all ${failure.screenBreakdown.size} screens") {
@@ -1343,15 +1319,15 @@ private fun FailureDetailView(
       Spacer(Modifier.height(16.dp))
       SectionHeader("Devices (${failure.deviceBreakdown.size} models)")
       BreakdownList(
-          items =
-              failure.deviceBreakdown.take(5).map { device ->
-                BreakdownItem(
-                    label = device.deviceModel,
-                    sublabel = device.os,
-                    count = device.count,
-                    percentage = device.percentage,
-                )
-              },
+        items =
+          failure.deviceBreakdown.take(5).map { device ->
+            BreakdownItem(
+              label = device.deviceModel,
+              sublabel = device.os,
+              count = device.count,
+              percentage = device.percentage,
+            )
+          }
       )
       if (failure.deviceBreakdown.size > 5) {
         ViewAllLink("View all ${failure.deviceBreakdown.size} devices") {
@@ -1365,15 +1341,15 @@ private fun FailureDetailView(
       Spacer(Modifier.height(16.dp))
       SectionHeader("App Versions (${failure.versionBreakdown.size})")
       BreakdownList(
-          items =
-              failure.versionBreakdown.take(5).map { version ->
-                BreakdownItem(
-                    label = version.version,
-                    sublabel = null,
-                    count = version.count,
-                    percentage = version.percentage,
-                )
-              },
+        items =
+          failure.versionBreakdown.take(5).map { version ->
+            BreakdownItem(
+              label = version.version,
+              sublabel = null,
+              count = version.count,
+              percentage = version.percentage,
+            )
+          }
       )
       if (failure.versionBreakdown.size > 5) {
         ViewAllLink("View all ${failure.versionBreakdown.size} versions") {
@@ -1388,31 +1364,31 @@ private fun FailureDetailView(
       SectionHeader("Affected Tests (${failure.affectedTests.size})")
       Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         failure.affectedTests.entries
-            .sortedByDescending { it.value }
-            .take(5)
-            .forEach { (testName, count) ->
-              Row(
-                  modifier =
-                      Modifier.fillMaxWidth()
-                          .background(
-                              colors.text.normal.copy(alpha = 0.03f),
-                              RoundedCornerShape(6.dp),
-                          )
-                          .clickable { onNavigateToTest(testName) }
-                          .pointerHoverIcon(PointerIcon.Hand)
-                          .padding(10.dp),
-                  verticalAlignment = Alignment.CenterVertically,
-              ) {
-                Text(testName, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                Text(
-                    "${count}x",
-                    fontSize = 11.sp,
-                    color = colors.text.normal.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(end = 8.dp),
-                )
-                Text("View →", fontSize = 11.sp, color = Color(0xFF2196F3))
-              }
+          .sortedByDescending { it.value }
+          .take(5)
+          .forEach { (testName, count) ->
+            Row(
+              modifier =
+                Modifier.fillMaxWidth()
+                  .background(
+                    colors.text.normal.copy(alpha = 0.03f),
+                    RoundedCornerShape(6.dp),
+                  )
+                  .clickable { onNavigateToTest(testName) }
+                  .pointerHoverIcon(PointerIcon.Hand)
+                  .padding(10.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(testName, fontSize = 12.sp, modifier = Modifier.weight(1f))
+              Text(
+                "${count}x",
+                fontSize = 11.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
+                modifier = Modifier.padding(end = 8.dp),
+              )
+              Text("View →", fontSize = 11.sp, color = Color(0xFF2196F3))
             }
+          }
         if (failure.affectedTests.size > 5) {
           ViewAllLink("View all ${failure.affectedTests.size} tests") { /* TODO: Show all tests */ }
         }
@@ -1438,14 +1414,14 @@ private fun FailureDetailView(
     SectionHeader("Actions")
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
       Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
       ) {
         ActionCard(
-            "📋",
-            "Copy Logs",
-            "All ${failure.totalCount} occurrences",
-            Modifier.weight(1f),
+          "📋",
+          "Copy Logs",
+          "All ${failure.totalCount} occurrences",
+          Modifier.weight(1f),
         ) {}
         ActionCard("📦", "Export Bundle", "Debug data package", Modifier.weight(1f)) {}
       }
@@ -1459,9 +1435,9 @@ private fun FailureDetailView(
 @Composable
 private fun Badge(text: String, color: Color) {
   Box(
-      modifier =
-          Modifier.background(color.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-              .padding(horizontal = 8.dp, vertical = 4.dp),
+    modifier =
+      Modifier.background(color.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+        .padding(horizontal = 8.dp, vertical = 4.dp)
   ) {
     Text(text, fontSize = 11.sp, color = color)
   }
@@ -1473,30 +1449,30 @@ private fun CaptureCard(capture: FailureCapture) {
   val icon = if (capture.type == CaptureType.Video) "🎬" else "📸"
 
   Column(
-      horizontalAlignment = Alignment.CenterHorizontally,
-      modifier =
-          Modifier.width(100.dp)
-              .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-              .clickable { /* TODO: Open capture */ }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(8.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    modifier =
+      Modifier.width(100.dp)
+        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+        .clickable { /* TODO: Open capture */ }
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(8.dp),
   ) {
     Text(icon, fontSize = 24.sp)
     Text(
-        capture.deviceModel,
-        fontSize = 9.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.padding(top = 4.dp),
+      capture.deviceModel,
+      fontSize = 9.sp,
+      color = colors.text.normal.copy(alpha = 0.6f),
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+      modifier = Modifier.padding(top = 4.dp),
     )
   }
 }
 
 @Composable
 private fun StackTraceLine(
-    element: StackTraceElement,
-    onNavigateToSource: (String, Int) -> Unit,
+  element: StackTraceElement,
+  onNavigateToSource: (String, Int) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val lineText = buildString {
@@ -1508,21 +1484,21 @@ private fun StackTraceLine(
   val isClickable = element.isAppCode && element.fileName != null && element.lineNumber != null
 
   Text(
-      lineText,
-      fontSize = 11.sp,
-      fontFamily = FontFamily.Monospace,
-      color = if (element.isAppCode) Color(0xFF2196F3) else colors.text.normal.copy(alpha = 0.6f),
-      modifier =
-          Modifier.fillMaxWidth()
-              .then(
-                  if (isClickable)
-                      Modifier.clickable {
-                            onNavigateToSource(element.fileName!!, element.lineNumber!!)
-                          }
-                          .pointerHoverIcon(PointerIcon.Hand)
-                  else Modifier
-              )
-              .padding(vertical = 2.dp, horizontal = 4.dp),
+    lineText,
+    fontSize = 11.sp,
+    fontFamily = FontFamily.Monospace,
+    color = if (element.isAppCode) Color(0xFF2196F3) else colors.text.normal.copy(alpha = 0.6f),
+    modifier =
+      Modifier.fillMaxWidth()
+        .then(
+          if (isClickable)
+            Modifier.clickable {
+                onNavigateToSource(element.fileName!!, element.lineNumber!!)
+              }
+              .pointerHoverIcon(PointerIcon.Hand)
+          else Modifier
+        )
+        .padding(vertical = 2.dp, horizontal = 4.dp),
   )
 }
 
@@ -1531,11 +1507,11 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
   val colors = SharedTheme.globalColors
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-              .padding(12.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+        .padding(12.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     DetailRow("Tool", toolCallInfo.toolName)
 
@@ -1546,10 +1522,10 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
       sortedCodes.take(5).forEach { (code, count) ->
         Row(modifier = Modifier.padding(start = 8.dp)) {
           Text(
-              code,
-              fontSize = 11.sp,
-              fontFamily = FontFamily.Monospace,
-              modifier = Modifier.weight(1f),
+            code,
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.weight(1f),
           )
           Text("${count}x", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
         }
@@ -1564,8 +1540,8 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
     if (stats != null) {
       Text("Duration:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
       Row(
-          horizontalArrangement = Arrangement.SpaceEvenly,
-          modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        modifier = Modifier.fillMaxWidth(),
       ) {
         DurationStat("Min", stats.minMs)
         DurationStat("Avg", stats.avgMs)
@@ -1582,9 +1558,9 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
         Row(modifier = Modifier.padding(start = 8.dp)) {
           Text("$param: ", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.5f))
           Text(
-              if (values.size == 1) values.first() else "${values.size} variants",
-              fontSize = 11.sp,
-              fontFamily = FontFamily.Monospace,
+            if (values.size == 1) values.first() else "${values.size} variants",
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
           )
         }
       }
@@ -1606,81 +1582,79 @@ private fun DurationStat(label: String, ms: Long) {
 
 @Composable
 private fun ScreenBreakdownSection(
-    breakdown: List<ScreenBreakdown>,
-    failureScreens: Map<String, Int>,
-    onNavigateToScreen: (String) -> Unit,
+  breakdown: List<ScreenBreakdown>,
+  failureScreens: Map<String, Int>,
+  onNavigateToScreen: (String) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val maxVisits = breakdown.maxOfOrNull { it.visitCount } ?: 1
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-              .padding(12.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+        .padding(12.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     breakdown
-        .sortedByDescending { it.visitCount }
-        .forEach { screen ->
-          val failureCount = failureScreens[screen.screenName] ?: 0
-          val isFailureScreen = failureCount > 0
+      .sortedByDescending { it.visitCount }
+      .forEach { screen ->
+        val failureCount = failureScreens[screen.screenName] ?: 0
+        val isFailureScreen = failureCount > 0
 
-          Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier =
-                  Modifier.fillMaxWidth()
-                      .clickable { onNavigateToScreen(screen.screenName) }
-                      .pointerHoverIcon(PointerIcon.Hand),
-          ) {
-            // Screen name with failure indicator
-            Row(modifier = Modifier.width(100.dp)) {
-              if (isFailureScreen) {
-                Text("💥 ", fontSize = 10.sp)
-              }
-              Text(
-                  screen.screenName,
-                  fontSize = 11.sp,
-                  color = if (isFailureScreen) Color(0xFFE53935) else colors.text.normal,
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis,
-              )
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier =
+            Modifier.fillMaxWidth()
+              .clickable { onNavigateToScreen(screen.screenName) }
+              .pointerHoverIcon(PointerIcon.Hand),
+        ) {
+          // Screen name with failure indicator
+          Row(modifier = Modifier.width(100.dp)) {
+            if (isFailureScreen) {
+              Text("💥 ", fontSize = 10.sp)
             }
-
-            // Bar
-            Box(
-                modifier = Modifier.weight(1f).height(16.dp).padding(horizontal = 8.dp),
-            ) {
-              // Visit bar
-              Box(
-                  modifier =
-                      Modifier.fillMaxWidth(screen.visitCount.toFloat() / maxVisits)
-                          .height(16.dp)
-                          .background(
-                              if (isFailureScreen) Color(0xFFE53935).copy(alpha = 0.3f)
-                              else colors.text.normal.copy(alpha = 0.15f),
-                              RoundedCornerShape(2.dp),
-                          ),
-              )
-            }
-
-            // Count
             Text(
-                "${screen.visitCount}",
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.6f),
-                modifier = Modifier.width(40.dp),
+              screen.screenName,
+              fontSize = 11.sp,
+              color = if (isFailureScreen) Color(0xFFE53935) else colors.text.normal,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
             )
           }
+
+          // Bar
+          Box(modifier = Modifier.weight(1f).height(16.dp).padding(horizontal = 8.dp)) {
+            // Visit bar
+            Box(
+              modifier =
+                Modifier.fillMaxWidth(screen.visitCount.toFloat() / maxVisits)
+                  .height(16.dp)
+                  .background(
+                    if (isFailureScreen) Color(0xFFE53935).copy(alpha = 0.3f)
+                    else colors.text.normal.copy(alpha = 0.15f),
+                    RoundedCornerShape(2.dp),
+                  )
+            )
+          }
+
+          // Count
+          Text(
+            "${screen.visitCount}",
+            fontSize = 10.sp,
+            color = colors.text.normal.copy(alpha = 0.6f),
+            modifier = Modifier.width(40.dp),
+          )
         }
+      }
   }
 }
 
 private data class BreakdownItem(
-    val label: String,
-    val sublabel: String?,
-    val count: Int,
-    val percentage: Float,
+  val label: String,
+  val sublabel: String?,
+  val count: Int,
+  val percentage: Float,
 )
 
 @Composable
@@ -1688,52 +1662,50 @@ private fun BreakdownList(items: List<BreakdownItem>) {
   val colors = SharedTheme.globalColors
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-              .padding(12.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+        .padding(12.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     items
-        .sortedByDescending { it.count }
-        .forEach { item ->
-          Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier.fillMaxWidth(),
-          ) {
-            Column(modifier = Modifier.width(120.dp)) {
-              Text(item.label, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-              if (item.sublabel != null) {
-                Text(
-                    item.sublabel,
-                    fontSize = 9.sp,
-                    color = colors.text.normal.copy(alpha = 0.5f),
-                )
-              }
-            }
-
-            // Bar
-            Box(
-                modifier = Modifier.weight(1f).height(12.dp).padding(horizontal = 8.dp),
-            ) {
-              Box(
-                  modifier =
-                      Modifier.fillMaxWidth(item.percentage / 100f)
-                          .height(12.dp)
-                          .background(
-                              Color(0xFF2196F3).copy(alpha = 0.4f),
-                              RoundedCornerShape(2.dp),
-                          ),
+      .sortedByDescending { it.count }
+      .forEach { item ->
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(modifier = Modifier.width(120.dp)) {
+            Text(item.label, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (item.sublabel != null) {
+              Text(
+                item.sublabel,
+                fontSize = 9.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
               )
             }
+          }
 
-            Text(
-                "${item.count} (${item.percentage.toInt()}%)",
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.6f),
+          // Bar
+          Box(modifier = Modifier.weight(1f).height(12.dp).padding(horizontal = 8.dp)) {
+            Box(
+              modifier =
+                Modifier.fillMaxWidth(item.percentage / 100f)
+                  .height(12.dp)
+                  .background(
+                    Color(0xFF2196F3).copy(alpha = 0.4f),
+                    RoundedCornerShape(2.dp),
+                  )
             )
           }
+
+          Text(
+            "${item.count} (${item.percentage.toInt()}%)",
+            fontSize = 10.sp,
+            color = colors.text.normal.copy(alpha = 0.6f),
+          )
         }
+      }
   }
 }
 
@@ -1743,28 +1715,28 @@ private fun OccurrenceRow(occurrence: FailureOccurrence) {
   val timeAgo = formatTimeAgo(occurrence.timestamp)
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-              .clickable { /* TODO: Show occurrence detail */ }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(10.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+        .clickable { /* TODO: Show occurrence detail */ }
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(10.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Column(modifier = Modifier.weight(1f)) {
       Text(occurrence.deviceModel, fontSize = 11.sp)
       Text(
-          "${occurrence.appVersion} • ${occurrence.screenAtFailure ?: "Unknown screen"}",
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
+        "${occurrence.appVersion} • ${occurrence.screenAtFailure ?: "Unknown screen"}",
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
       )
     }
     Column(horizontalAlignment = Alignment.End) {
       Text(timeAgo, fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
       if (occurrence.capturePath != null) {
         Text(
-            if (occurrence.captureType == CaptureType.Video) "🎬" else "📸",
-            fontSize = 12.sp,
+          if (occurrence.captureType == CaptureType.Video) "🎬" else "📸",
+          fontSize = 12.sp,
         )
       }
     }
@@ -1772,11 +1744,11 @@ private fun OccurrenceRow(occurrence: FailureOccurrence) {
 }
 
 private fun formatNumber(value: Int): String =
-    when {
-      value >= 1_000_000 -> String.format("%.1f", value / 1_000_000.0).removeSuffix(".0") + "m"
-      value >= 1_000 -> String.format("%.1f", value / 1_000.0).removeSuffix(".0") + "k"
-      else -> value.toString()
-    }
+  when {
+    value >= 1_000_000 -> String.format("%.1f", value / 1_000_000.0).removeSuffix(".0") + "m"
+    value >= 1_000 -> String.format("%.1f", value / 1_000.0).removeSuffix(".0") + "k"
+    else -> value.toString()
+  }
 
 internal fun formatTimeAgo(timestamp: Long, clock: Clock = SystemClock): String {
   val diff = clock.nowMs() - timestamp
@@ -1792,27 +1764,27 @@ internal fun formatTimeAgo(timestamp: Long, clock: Clock = SystemClock): String 
 private fun SectionHeader(title: String) {
   val colors = SharedTheme.globalColors
   Text(
-      title,
-      fontSize = 13.sp,
-      fontWeight = FontWeight.Medium,
-      color = colors.text.normal.copy(alpha = 0.7f),
-      modifier = Modifier.padding(bottom = 8.dp),
+    title,
+    fontSize = 13.sp,
+    fontWeight = FontWeight.Medium,
+    color = colors.text.normal.copy(alpha = 0.7f),
+    modifier = Modifier.padding(bottom = 8.dp),
   )
 }
 
 @Composable
 private fun ViewAllLink(
-    text: String,
-    onClick: () -> Unit,
+  text: String,
+  onClick: () -> Unit,
 ) {
   Text(
-      "$text →",
-      fontSize = 11.sp,
-      color = Color(0xFF2196F3),
-      modifier =
-          Modifier.clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(top = 8.dp, bottom = 4.dp),
+    "$text →",
+    fontSize = 11.sp,
+    color = Color(0xFF2196F3),
+    modifier =
+      Modifier.clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(top = 8.dp, bottom = 4.dp),
   )
 }
 
@@ -1821,40 +1793,40 @@ private fun DetailRow(label: String, value: String) {
   val colors = SharedTheme.globalColors
   Row {
     Text(
-        "$label: ",
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = 0.5f),
+      "$label: ",
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = 0.5f),
     )
     Text(
-        value,
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = 0.9f),
+      value,
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = 0.9f),
     )
   }
 }
 
 @Composable
 private fun ScreenChip(
-    name: String,
-    isHighlighted: Boolean,
-    onClick: () -> Unit,
+  name: String,
+  isHighlighted: Boolean,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val bgColor =
-      if (isHighlighted) Color(0xFFE53935).copy(alpha = 0.15f)
-      else colors.text.normal.copy(alpha = 0.08f)
+    if (isHighlighted) Color(0xFFE53935).copy(alpha = 0.15f)
+    else colors.text.normal.copy(alpha = 0.08f)
   val borderColor =
-      if (isHighlighted) Color(0xFFE53935).copy(alpha = 0.5f)
-      else colors.text.normal.copy(alpha = 0.2f)
+    if (isHighlighted) Color(0xFFE53935).copy(alpha = 0.5f)
+    else colors.text.normal.copy(alpha = 0.2f)
   val textColor = if (isHighlighted) Color(0xFFE53935) else colors.text.normal
 
   Box(
-      modifier =
-          Modifier.background(bgColor, RoundedCornerShape(4.dp))
-              .border(1.dp, borderColor, RoundedCornerShape(4.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 10.dp, vertical = 6.dp),
+    modifier =
+      Modifier.background(bgColor, RoundedCornerShape(4.dp))
+        .border(1.dp, borderColor, RoundedCornerShape(4.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 10.dp, vertical = 6.dp)
   ) {
     Text(name, fontSize = 12.sp, color = textColor)
   }
@@ -1862,35 +1834,35 @@ private fun ScreenChip(
 
 @Composable
 private fun ActionCard(
-    icon: String,
-    title: String,
-    description: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
+  icon: String,
+  title: String,
+  description: String,
+  modifier: Modifier = Modifier,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier =
-          modifier
-              .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(12.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      modifier
+        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(12.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(icon, fontSize = 24.sp)
     Spacer(Modifier.width(12.dp))
     Column {
       Text(
-          title,
-          fontSize = 12.sp,
-          fontWeight = FontWeight.Medium,
+        title,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
       )
       Text(
-          description,
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
+        description,
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
       )
     }
   }

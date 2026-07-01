@@ -30,21 +30,21 @@ class FakeUnifiedSocketClient : UnifiedSocketClient {
 
   private val pushFlows = ConcurrentHashMap<String, MutableSharedFlow<UnifiedMessage>>()
   private val _allPushes =
-      MutableSharedFlow<UnifiedMessage>(
-          extraBufferCapacity = 100,
-          onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-      )
+    MutableSharedFlow<UnifiedMessage>(
+      extraBufferCapacity = 100,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
 
   data class RequestCall(
-      val domain: String,
-      val method: String,
-      val params: JsonElement?,
+    val domain: String,
+    val method: String,
+    val params: JsonElement?,
   )
 
   data class SubscribeCall(
-      val domain: String,
-      val event: String?,
-      val params: JsonElement?,
+    val domain: String,
+    val event: String?,
+    val params: JsonElement?,
   )
 
   /** Set a response for a specific domain/method combination. */
@@ -60,13 +60,13 @@ class FakeUnifiedSocketClient : UnifiedSocketClient {
   /** Emit a push event to subscribers. */
   suspend fun emitPush(domain: String, event: String, result: JsonElement) {
     val message =
-        UnifiedMessage(
-            type = MessageTypes.PUSH,
-            domain = domain,
-            event = event,
-            result = result,
-            timestamp = System.currentTimeMillis(),
-        )
+      UnifiedMessage(
+        type = MessageTypes.PUSH,
+        domain = domain,
+        event = event,
+        result = result,
+        timestamp = System.currentTimeMillis(),
+      )
     _allPushes.emit(message)
 
     for ((key, flow) in pushFlows) {
@@ -106,10 +106,10 @@ class FakeUnifiedSocketClient : UnifiedSocketClient {
 
   @Suppress("UNCHECKED_CAST")
   override suspend fun <T> request(
-      domain: String,
-      method: String,
-      params: JsonElement?,
-      timeout: Duration,
+    domain: String,
+    method: String,
+    params: JsonElement?,
+    timeout: Duration,
   ): T {
     requestCalls.add(RequestCall(domain, method, params))
 
@@ -120,28 +120,27 @@ class FakeUnifiedSocketClient : UnifiedSocketClient {
     }
 
     val response =
-        responses[key]
-            ?: throw RequestErrorException("NOT_FOUND", "No response configured for $key")
+      responses[key] ?: throw RequestErrorException("NOT_FOUND", "No response configured for $key")
 
     return response as T
   }
 
   override fun subscribe(
-      domain: String,
-      event: String?,
-      params: JsonElement?,
+    domain: String,
+    event: String?,
+    params: JsonElement?,
   ): Flow<UnifiedMessage> {
     subscribeCalls.add(SubscribeCall(domain, event, params))
 
     val key = "$domain:${event ?: ""}"
     val flow =
-        pushFlows.getOrPut(key) {
-          MutableSharedFlow(
-              replay = 1,
-              extraBufferCapacity = 50,
-              onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-          )
-        }
+      pushFlows.getOrPut(key) {
+        MutableSharedFlow(
+          replay = 1,
+          extraBufferCapacity = 50,
+          onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        )
+      }
 
     return flow.asSharedFlow()
   }

@@ -21,9 +21,9 @@ import kotlinx.coroutines.launch
  * Call [start] to begin polling and [stop] to cancel.
  */
 class MemoryPressureMonitor(
-    private val pollIntervalMs: Long = DEFAULT_POLL_INTERVAL_MS,
-    private val onWarning: (() -> Unit)? = null,
-    private val onTrimRequested: (() -> Unit)? = null,
+  private val pollIntervalMs: Long = DEFAULT_POLL_INTERVAL_MS,
+  private val onWarning: (() -> Unit)? = null,
+  private val onTrimRequested: (() -> Unit)? = null,
 ) {
   companion object {
     const val WARNING_THRESHOLD = 0.80f

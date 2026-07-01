@@ -92,8 +92,8 @@ object AutoMobileBiometrics {
   const val EXTRA_TTL_MS = "ttlMs"
 
   private data class PendingOverride(
-      val result: BiometricResult,
-      val expiryMs: Long,
+    val result: BiometricResult,
+    val expiryMs: Long,
   )
 
   private val pendingOverride = AtomicReference<PendingOverride?>(null)
@@ -208,46 +208,46 @@ object AutoMobileBiometrics {
   @VisibleForTesting
   internal fun handleBroadcastIntent(intent: Intent) {
     val resultStr =
-        intent.getStringExtra(EXTRA_RESULT)
-            ?: run {
-              AutoMobileSDK.logger.w(TAG) {
-                "Biometric override broadcast missing '$EXTRA_RESULT' extra"
-              }
-              return
-            }
+      intent.getStringExtra(EXTRA_RESULT)
+        ?: run {
+          AutoMobileSDK.logger.w(TAG) {
+            "Biometric override broadcast missing '$EXTRA_RESULT' extra"
+          }
+          return
+        }
     val ttlMs = intent.getLongExtra(EXTRA_TTL_MS, 5000L)
 
     val result: BiometricResult =
-        when (resultStr.uppercase()) {
-          "SUCCESS" -> BiometricResult.Success
-          "FAILURE" -> BiometricResult.Failure
-          "CANCEL" -> BiometricResult.Cancel
-          "ERROR" -> {
-            val errorCode =
-                if (intent.hasExtra(EXTRA_ERROR_CODE)) {
-                  intent.getIntExtra(EXTRA_ERROR_CODE, -1)
-                } else {
-                  AutoMobileSDK.logger.w(TAG) {
-                    "Biometric ERROR override broadcast missing '$EXTRA_ERROR_CODE' extra; " +
-                        "app will receive Error(-1) which is not a valid BiometricPrompt.ERROR_* constant (valid values start at 1)"
-                  }
-                  -1
-                }
-            BiometricResult.Error(errorCode)
-          }
-          else -> {
-            AutoMobileSDK.logger.w(TAG) { "Unknown biometric override result: '$resultStr'" }
-            return
-          }
+      when (resultStr.uppercase()) {
+        "SUCCESS" -> BiometricResult.Success
+        "FAILURE" -> BiometricResult.Failure
+        "CANCEL" -> BiometricResult.Cancel
+        "ERROR" -> {
+          val errorCode =
+            if (intent.hasExtra(EXTRA_ERROR_CODE)) {
+              intent.getIntExtra(EXTRA_ERROR_CODE, -1)
+            } else {
+              AutoMobileSDK.logger.w(TAG) {
+                "Biometric ERROR override broadcast missing '$EXTRA_ERROR_CODE' extra; " +
+                  "app will receive Error(-1) which is not a valid BiometricPrompt.ERROR_* constant (valid values start at 1)"
+              }
+              -1
+            }
+          BiometricResult.Error(errorCode)
         }
+        else -> {
+          AutoMobileSDK.logger.w(TAG) { "Unknown biometric override result: '$resultStr'" }
+          return
+        }
+      }
 
     overrideResult(result, ttlMs)
   }
 
   private val broadcastReceiver =
-      object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-          handleBroadcastIntent(intent)
-        }
+    object : BroadcastReceiver() {
+      override fun onReceive(context: Context, intent: Intent) {
+        handleBroadcastIntent(intent)
       }
+    }
 }

@@ -13,13 +13,13 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 @Composable
 fun InspectorEmptyState(modifier: Modifier = Modifier) {
   Box(
-      modifier = modifier.fillMaxSize(),
-      contentAlignment = Alignment.Center,
+    modifier = modifier.fillMaxSize(),
+    contentAlignment = Alignment.Center,
   ) {
     Text(
-        "Select an event to inspect",
-        fontSize = 12.sp,
-        color = SharedTheme.globalColors.text.normal.copy(alpha = 0.5f),
+      "Select an event to inspect",
+      fontSize = 12.sp,
+      color = SharedTheme.globalColors.text.normal.copy(alpha = 0.5f),
     )
   }
 }

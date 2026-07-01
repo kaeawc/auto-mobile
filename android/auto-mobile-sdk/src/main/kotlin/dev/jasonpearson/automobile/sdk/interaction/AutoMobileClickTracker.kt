@@ -56,30 +56,30 @@ internal object AutoMobileClickTracker {
     this.applicationId = appId
 
     val callbacks =
-        object : Application.ActivityLifecycleCallbacks {
-          override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+      object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
 
-          override fun onActivityStarted(activity: Activity) {}
+        override fun onActivityStarted(activity: Activity) {}
 
-          override fun onActivityResumed(activity: Activity) {
-            // Wrap on resumed, not created — ensures window is fully set up
-            // and that we wrap AFTER frameworks like AppCompat set their callback
-            if (wrappedActivities[activity] != true) {
-              wrapWindowCallback(activity)
-              wrappedActivities[activity] = true
-            }
-          }
-
-          override fun onActivityPaused(activity: Activity) {}
-
-          override fun onActivityStopped(activity: Activity) {}
-
-          override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
-
-          override fun onActivityDestroyed(activity: Activity) {
-            wrappedActivities.remove(activity)
+        override fun onActivityResumed(activity: Activity) {
+          // Wrap on resumed, not created — ensures window is fully set up
+          // and that we wrap AFTER frameworks like AppCompat set their callback
+          if (wrappedActivities[activity] != true) {
+            wrapWindowCallback(activity)
+            wrappedActivities[activity] = true
           }
         }
+
+        override fun onActivityPaused(activity: Activity) {}
+
+        override fun onActivityStopped(activity: Activity) {}
+
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+
+        override fun onActivityDestroyed(activity: Activity) {
+          wrappedActivities.remove(activity)
+        }
+      }
     lifecycleCallbacks = callbacks
     application.registerActivityLifecycleCallbacks(callbacks)
   }
@@ -126,8 +126,8 @@ internal object AutoMobileClickTracker {
    * unchanged via Kotlin's `by delegate`.
    */
   private class ClickTrackingCallback(
-      val delegate: Window.Callback,
-      private val window: Window,
+    val delegate: Window.Callback,
+    private val window: Window,
   ) : Window.Callback by delegate {
 
     private var downX = 0f
@@ -176,9 +176,9 @@ internal object AutoMobileClickTracker {
         if (info != null) {
           info.text?.toString()?.takeIf { it.isNotEmpty() }?.let { props["text"] = it }
           info.contentDescription
-              ?.toString()
-              ?.takeIf { it.isNotEmpty() }
-              ?.let { props["contentDesc"] = it }
+            ?.toString()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { props["contentDesc"] = it }
           info.viewIdResourceName?.let { props["resourceId"] = it }
           info.className?.toString()?.let { props["className"] = it }
           if (info.isClickable) props["clickable"] = "true"
@@ -198,11 +198,11 @@ internal object AutoMobileClickTracker {
      */
     private fun findDeepestNodeAt(view: View, x: Int, y: Int): AccessibilityNodeInfo? {
       val root =
-          try {
-            view.createAccessibilityNodeInfo()
-          } catch (_: Exception) {
-            null
-          } ?: return null
+        try {
+          view.createAccessibilityNodeInfo()
+        } catch (_: Exception) {
+          null
+        } ?: return null
       return findDeepest(root, x, y)
     }
 
@@ -216,11 +216,11 @@ internal object AutoMobileClickTracker {
       // Check children (last child = topmost in z-order)
       for (i in node.childCount - 1 downTo 0) {
         val child =
-            try {
-              node.getChild(i)
-            } catch (_: Exception) {
-              null
-            } ?: continue
+          try {
+            node.getChild(i)
+          } catch (_: Exception) {
+            null
+          } ?: continue
         val result = findDeepest(child, x, y)
         if (result != null) {
           node.recycle()

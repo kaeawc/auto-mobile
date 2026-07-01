@@ -70,10 +70,10 @@ class FakeScreenshotLoader : ScreenshotLoader {
  * avoid repeated MCP requests.
  */
 class NavigationScreenshotLoader(
-    private val clientProvider: (() -> AutoMobileClient)?,
-    private val maxCacheSize: Int = 50, // Maximum number of cached images
-    private val maxCacheBytes: Long = 100L * 1024 * 1024, // Maximum total byte size (100MB)
-    private val imageDecoder: ImageDecoder = SkiaImageDecoder,
+  private val clientProvider: (() -> AutoMobileClient)?,
+  private val maxCacheSize: Int = 50, // Maximum number of cached images
+  private val maxCacheBytes: Long = 100L * 1024 * 1024, // Maximum total byte size (100MB)
+  private val imageDecoder: ImageDecoder = SkiaImageDecoder,
 ) : ScreenshotLoader {
   private val cache = ConcurrentHashMap<String, ImageBitmap>()
   private val entrySizes = mutableMapOf<String, Long>()
@@ -145,8 +145,8 @@ class NavigationScreenshotLoader(
 
       // Evict oldest entries if count limit or byte limit exceeded
       while (
-          accessOrder.size >= maxCacheSize ||
-              (accessOrder.isNotEmpty() && totalBytes + estimatedBytes > maxCacheBytes)
+        accessOrder.size >= maxCacheSize ||
+          (accessOrder.isNotEmpty() && totalBytes + estimatedBytes > maxCacheBytes)
       ) {
         val oldest = accessOrder.removeFirstOrNull() ?: break
         cache.remove(oldest)

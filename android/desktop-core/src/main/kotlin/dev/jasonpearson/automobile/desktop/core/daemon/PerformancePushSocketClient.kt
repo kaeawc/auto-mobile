@@ -63,11 +63,11 @@ class PerformancePushSocketClient {
 
   // Flow for live performance data
   private val _performanceData =
-      MutableSharedFlow<LivePerformanceData>(
-          replay = 1,
-          extraBufferCapacity = 10,
-          onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-      )
+    MutableSharedFlow<LivePerformanceData>(
+      replay = 1,
+      extraBufferCapacity = 10,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
   val performanceData: SharedFlow<LivePerformanceData> = _performanceData.asSharedFlow()
 
   /**
@@ -98,13 +98,13 @@ class PerformancePushSocketClient {
       val address = UnixDomainSocketAddress.of(socketPath)
       channel = SocketChannel.open(address)
       reader =
-          BufferedReader(
-              InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
-          )
+        BufferedReader(
+          InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
+        )
       writer =
-          BufferedWriter(
-              OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
-          )
+        BufferedWriter(
+          OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
+        )
 
       _state.update { ConnectionState.Connected(subscribed = false) }
       log.info("Connected to performance push")
@@ -129,10 +129,10 @@ class PerformancePushSocketClient {
       val currentState = _state.value
       if (currentState is ConnectionState.Connected && currentState.subscribed) {
         val request =
-            PushRequest(
-                id = UUID.randomUUID().toString(),
-                command = "unsubscribe",
-            )
+          PushRequest(
+            id = UUID.randomUUID().toString(),
+            command = "unsubscribe",
+          )
         sendRequest(request)
       }
 
@@ -151,12 +151,12 @@ class PerformancePushSocketClient {
 
   private fun subscribe(deviceId: String?, packageName: String?) {
     val request =
-        PushRequest(
-            id = UUID.randomUUID().toString(),
-            command = "subscribe",
-            deviceId = deviceId,
-            packageName = packageName,
-        )
+      PushRequest(
+        id = UUID.randomUUID().toString(),
+        command = "subscribe",
+        deviceId = deviceId,
+        packageName = packageName,
+      )
 
     if (sendRequest(request)) {
       _state.update { current ->
@@ -167,7 +167,7 @@ class PerformancePushSocketClient {
         }
       }
       log.info(
-          "Subscribed to performance push (device: ${deviceId ?: "all"}, package: ${packageName ?: "all"})"
+        "Subscribed to performance push (device: ${deviceId ?: "all"}, package: ${packageName ?: "all"})"
       )
     }
   }
@@ -247,68 +247,68 @@ class PerformancePushSocketClient {
 
   private fun sendPong() {
     val request =
-        PushRequest(
-            id = UUID.randomUUID().toString(),
-            command = "pong",
-        )
+      PushRequest(
+        id = UUID.randomUUID().toString(),
+        command = "pong",
+      )
     sendRequest(request)
   }
 }
 
 @Serializable
 data class PushRequest(
-    val id: String,
-    val command: String,
-    val deviceId: String? = null,
-    val packageName: String? = null,
+  val id: String,
+  val command: String,
+  val deviceId: String? = null,
+  val packageName: String? = null,
 )
 
 @Serializable
 data class PushResponse(
-    val id: String? = null,
-    val type: String,
-    val success: Boolean? = null,
-    val error: String? = null,
-    val timestamp: Long? = null,
-    val data: LivePerformanceData? = null,
+  val id: String? = null,
+  val type: String,
+  val success: Boolean? = null,
+  val error: String? = null,
+  val timestamp: Long? = null,
+  val data: LivePerformanceData? = null,
 )
 
 @Serializable
 data class LivePerformanceData(
-    val deviceId: String,
-    val packageName: String,
-    val timestamp: Long,
-    val nodeId: Int? = null,
-    val screenName: String? = null,
-    val metrics: LivePerformanceMetrics,
-    val thresholds: PerformanceThresholds,
-    val health: String, // "healthy" | "warning" | "critical"
+  val deviceId: String,
+  val packageName: String,
+  val timestamp: Long,
+  val nodeId: Int? = null,
+  val screenName: String? = null,
+  val metrics: LivePerformanceMetrics,
+  val thresholds: PerformanceThresholds,
+  val health: String, // "healthy" | "warning" | "critical"
 )
 
 @Serializable
 data class LivePerformanceMetrics(
-    val fps: Float? = null,
-    val frameTimeMs: Float? = null,
-    val jankFrames: Int? = null,
-    val touchLatencyMs: Float? = null,
-    val ttffMs: Float? = null,
-    val ttiMs: Float? = null,
-    val cpuUsagePercent: Float? = null,
-    val memoryUsageMb: Float? = null,
+  val fps: Float? = null,
+  val frameTimeMs: Float? = null,
+  val jankFrames: Int? = null,
+  val touchLatencyMs: Float? = null,
+  val ttffMs: Float? = null,
+  val ttiMs: Float? = null,
+  val cpuUsagePercent: Float? = null,
+  val memoryUsageMb: Float? = null,
 )
 
 @Serializable
 data class PerformanceThresholds(
-    val fpsWarning: Float,
-    val fpsCritical: Float,
-    val frameTimeWarning: Float,
-    val frameTimeCritical: Float,
-    val jankWarning: Int,
-    val jankCritical: Int,
-    val touchLatencyWarning: Float,
-    val touchLatencyCritical: Float,
-    val ttffWarning: Float,
-    val ttffCritical: Float,
-    val ttiWarning: Float,
-    val ttiCritical: Float,
+  val fpsWarning: Float,
+  val fpsCritical: Float,
+  val frameTimeWarning: Float,
+  val frameTimeCritical: Float,
+  val jankWarning: Int,
+  val jankCritical: Int,
+  val touchLatencyWarning: Float,
+  val touchLatencyCritical: Float,
+  val ttffWarning: Float,
+  val ttffCritical: Float,
+  val ttiWarning: Float,
+  val ttiCritical: Float,
 )

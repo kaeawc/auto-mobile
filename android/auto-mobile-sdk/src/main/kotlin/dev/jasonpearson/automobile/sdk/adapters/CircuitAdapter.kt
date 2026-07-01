@@ -43,19 +43,19 @@ object CircuitAdapter : NavigationFrameworkAdapter {
    * @param metadata Optional metadata about the navigation
    */
   fun trackNavigation(
-      destination: String,
-      arguments: Map<String, Any?> = emptyMap(),
-      metadata: Map<String, String> = emptyMap(),
+    destination: String,
+    arguments: Map<String, Any?> = emptyMap(),
+    metadata: Map<String, String> = emptyMap(),
   ) {
     if (!isActive) return
 
     AutoMobileSDK.notifyNavigationEvent(
-        NavigationEvent(
-            destination = destination,
-            source = NavigationSource.CIRCUIT,
-            arguments = arguments,
-            metadata = metadata,
-        )
+      NavigationEvent(
+        destination = destination,
+        source = NavigationSource.CIRCUIT,
+        arguments = arguments,
+        metadata = metadata,
+      )
     )
   }
 }

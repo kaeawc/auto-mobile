@@ -37,18 +37,18 @@ import kotlinx.coroutines.withContext
 /** Section showing MCP server connection state with process detection and a data-source toggle. */
 @Composable
 fun McpConnectionSection(
-    dataSourceMode: DataSourceMode,
-    onDataSourceModeChanged: (DataSourceMode) -> Unit,
-    onProcessConnected: (McpProcess?) -> Unit,
-    modifier: Modifier = Modifier,
+  dataSourceMode: DataSourceMode,
+  onDataSourceModeChanged: (DataSourceMode) -> Unit,
+  onProcessConnected: (McpProcess?) -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   val useRealData = dataSourceMode == DataSourceMode.Real
 
   val detector =
-      remember(useRealData) {
-        if (useRealData) RealMcpProcessDetector() else FakeMcpProcessDetector()
-      }
+    remember(useRealData) {
+      if (useRealData) RealMcpProcessDetector() else FakeMcpProcessDetector()
+    }
 
   var refreshCounter by remember { mutableIntStateOf(0) }
   var processes by remember { mutableStateOf<List<McpProcess>>(emptyList()) }
@@ -85,53 +85,53 @@ fun McpConnectionSection(
   }
 
   Column(
-      modifier =
-          modifier
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-              .padding(12.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+    modifier =
+      modifier
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+        .padding(12.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     CollapsibleSectionHeader(
-        title = "MCP Servers",
-        expanded = expanded,
-        onToggle = { expanded = !expanded },
-        trailing = { StatusDot(connected = connectedProcess != null) },
+      title = "MCP Servers",
+      expanded = expanded,
+      onToggle = { expanded = !expanded },
+      trailing = { StatusDot(connected = connectedProcess != null) },
     )
 
     if (expanded) {
       // Data source toggle
       Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         Text(
-            "Real Data",
-            fontSize = 11.sp,
-            color = colors.text.normal.copy(alpha = 0.7f),
-            maxLines = 1,
-            softWrap = false,
+          "Real Data",
+          fontSize = 11.sp,
+          color = colors.text.normal.copy(alpha = 0.7f),
+          maxLines = 1,
+          softWrap = false,
         )
         Box(
-            modifier =
-                Modifier.background(
-                        if (useRealData) Color(0xFF4CAF50).copy(alpha = 0.2f)
-                        else colors.text.normal.copy(alpha = 0.1f),
-                        RoundedCornerShape(4.dp),
-                    )
-                    .clickable {
-                      onDataSourceModeChanged(
-                          if (useRealData) DataSourceMode.Fake else DataSourceMode.Real
-                      )
-                    }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
+          modifier =
+            Modifier.background(
+                if (useRealData) Color(0xFF4CAF50).copy(alpha = 0.2f)
+                else colors.text.normal.copy(alpha = 0.1f),
+                RoundedCornerShape(4.dp),
+              )
+              .clickable {
+                onDataSourceModeChanged(
+                  if (useRealData) DataSourceMode.Fake else DataSourceMode.Real
+                )
+              }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(horizontal = 8.dp, vertical = 2.dp)
         ) {
           Text(
-              if (useRealData) "ON" else "OFF",
-              fontSize = 10.sp,
-              fontWeight = FontWeight.Medium,
-              color = if (useRealData) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.5f),
+            if (useRealData) "ON" else "OFF",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (useRealData) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.5f),
           )
         }
       }
@@ -139,35 +139,35 @@ fun McpConnectionSection(
       if (connectedProcess != null) {
         val proc = connectedProcess!!
         Column(
-            modifier =
-                Modifier.fillMaxWidth()
-                    .background(Color(0xFF4CAF50).copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-                    .padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+          modifier =
+            Modifier.fillMaxWidth()
+              .background(Color(0xFF4CAF50).copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+              .padding(8.dp),
+          verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
           Text(
-              proc.name,
-              fontSize = 12.sp,
-              fontWeight = FontWeight.Medium,
-              color = colors.text.normal,
-              maxLines = 1,
-              softWrap = false,
+            proc.name,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = colors.text.normal,
+            maxLines = 1,
+            softWrap = false,
           )
           Text(
-              "PID ${proc.pid} \u00B7 ${proc.connectionType.label}",
-              fontSize = 11.sp,
-              color = colors.text.normal.copy(alpha = 0.6f),
-              maxLines = 1,
-              softWrap = false,
+            "PID ${proc.pid} \u00B7 ${proc.connectionType.label}",
+            fontSize = 11.sp,
+            color = colors.text.normal.copy(alpha = 0.6f),
+            maxLines = 1,
+            softWrap = false,
           )
         }
       }
 
       if (isLoading && processes.isEmpty()) {
         Text(
-            "Detecting servers...",
-            fontSize = 11.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
+          "Detecting servers...",
+          fontSize = 11.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
         )
       }
 
@@ -175,43 +175,43 @@ fun McpConnectionSection(
         processes.forEach { process ->
           val isConnected = connectedProcess?.pid == process.pid
           Row(
-              modifier =
-                  Modifier.fillMaxWidth()
-                      .background(
-                          if (isConnected) colors.outlines.focused.copy(alpha = 0.1f)
-                          else Color.Transparent,
-                          RoundedCornerShape(4.dp),
-                      )
-                      .clickable {
-                        connectedProcess = if (isConnected) null else process
-                      }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 4.dp),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically,
+            modifier =
+              Modifier.fillMaxWidth()
+                .background(
+                  if (isConnected) colors.outlines.focused.copy(alpha = 0.1f)
+                  else Color.Transparent,
+                  RoundedCornerShape(4.dp),
+                )
+                .clickable {
+                  connectedProcess = if (isConnected) null else process
+                }
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
           ) {
             Column(modifier = Modifier.weight(1f)) {
               Text(
-                  process.name,
-                  fontSize = 12.sp,
-                  color = colors.text.normal,
-                  maxLines = 1,
-                  softWrap = false,
+                process.name,
+                fontSize = 12.sp,
+                color = colors.text.normal,
+                maxLines = 1,
+                softWrap = false,
               )
               Text(
-                  "${process.connectionType.icon} ${process.connectionType.label}" +
-                      (process.socketPath?.let { " \u00B7 $it" } ?: "") +
-                      (process.port?.let { " :$it" } ?: ""),
-                  fontSize = 10.sp,
-                  color = colors.text.normal.copy(alpha = 0.5f),
-                  maxLines = 1,
-                  softWrap = false,
+                "${process.connectionType.icon} ${process.connectionType.label}" +
+                  (process.socketPath?.let { " \u00B7 $it" } ?: "") +
+                  (process.port?.let { " :$it" } ?: ""),
+                fontSize = 10.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
+                maxLines = 1,
+                softWrap = false,
               )
             }
             Text(
-                if (isConnected) "Disconnect" else "Connect",
-                fontSize = 10.sp,
-                color = if (isConnected) Color(0xFFE53935) else Color(0xFF4CAF50),
+              if (isConnected) "Disconnect" else "Connect",
+              fontSize = 10.sp,
+              color = if (isConnected) Color(0xFFE53935) else Color(0xFF4CAF50),
             )
           }
         }
@@ -219,10 +219,10 @@ fun McpConnectionSection(
 
       if (!isLoading) {
         Text(
-            "\u21BB Refresh",
-            fontSize = 10.sp,
-            color = Color(0xFF2196F3),
-            modifier = Modifier.clickable { refreshCounter++ }.pointerHoverIcon(PointerIcon.Hand),
+          "\u21BB Refresh",
+          fontSize = 10.sp,
+          color = Color(0xFF2196F3),
+          modifier = Modifier.clickable { refreshCounter++ }.pointerHoverIcon(PointerIcon.Hand),
         )
       }
     }

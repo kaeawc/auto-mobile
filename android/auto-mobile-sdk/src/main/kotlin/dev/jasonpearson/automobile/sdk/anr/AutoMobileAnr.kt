@@ -136,41 +136,41 @@ object AutoMobileAnr {
     try {
       // Read the trace from the input stream
       val trace =
-          try {
-            exitInfo.traceInputStream?.bufferedReader()?.use { it.readText() }
-          } catch (e: Exception) {
-            AutoMobileSDK.logger.w(TAG, e) { "Failed to read ANR trace" }
-            null
-          }
+        try {
+          exitInfo.traceInputStream?.bufferedReader()?.use { it.readText() }
+        } catch (e: Exception) {
+          AutoMobileSDK.logger.w(TAG, e) { "Failed to read ANR trace" }
+          null
+        }
 
       val event =
-          SdkAnrEvent(
-              timestamp = exitInfo.timestamp,
-              applicationId = context.packageName,
-              pid = exitInfo.pid,
-              processName = exitInfo.processName,
-              importance = getImportanceName(exitInfo.importance),
-              trace = trace,
-              reason = "Application Not Responding",
-              appVersion = getAppVersion(context),
-              deviceInfo =
-                  SdkDeviceInfo(
-                      model = Build.MODEL,
-                      manufacturer = Build.MANUFACTURER,
-                      osVersion = Build.VERSION.RELEASE,
-                      sdkInt = Build.VERSION.SDK_INT,
-                  ),
-          )
+        SdkAnrEvent(
+          timestamp = exitInfo.timestamp,
+          applicationId = context.packageName,
+          pid = exitInfo.pid,
+          processName = exitInfo.processName,
+          importance = getImportanceName(exitInfo.importance),
+          trace = trace,
+          reason = "Application Not Responding",
+          appVersion = getAppVersion(context),
+          deviceInfo =
+            SdkDeviceInfo(
+              model = Build.MODEL,
+              manufacturer = Build.MANUFACTURER,
+              osVersion = Build.VERSION.RELEASE,
+              sdkInt = Build.VERSION.SDK_INT,
+            ),
+        )
 
       val intent =
-          Intent(ACTION_ANR).apply {
-            // Scope broadcast to only the accessibility service
-            setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
+        Intent(ACTION_ANR).apply {
+          // Scope broadcast to only the accessibility service
+          setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
 
-            // Type-safe serialized event
-            putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(event))
-            putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.ANR)
-          }
+          // Type-safe serialized event
+          putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(event))
+          putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.ANR)
+        }
 
       context.sendBroadcast(intent)
       AutoMobileSDK.logger.i(TAG) {
@@ -182,31 +182,31 @@ object AutoMobileAnr {
   }
 
   private fun getImportanceName(importance: Int): String =
-      when (importance) {
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND -> "FOREGROUND"
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE -> "FOREGROUND_SERVICE"
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_TOP_SLEEPING -> "TOP_SLEEPING"
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE -> "VISIBLE"
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_PERCEPTIBLE -> "PERCEPTIBLE"
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_PERCEPTIBLE_PRE_26 -> "PERCEPTIBLE_PRE_26"
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_CANT_SAVE_STATE -> "CANT_SAVE_STATE"
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE -> "SERVICE"
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_CACHED -> "CACHED"
-        ActivityManager.RunningAppProcessInfo.IMPORTANCE_GONE -> "GONE"
-        else -> "UNKNOWN"
-      }
+    when (importance) {
+      ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND -> "FOREGROUND"
+      ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE -> "FOREGROUND_SERVICE"
+      ActivityManager.RunningAppProcessInfo.IMPORTANCE_TOP_SLEEPING -> "TOP_SLEEPING"
+      ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE -> "VISIBLE"
+      ActivityManager.RunningAppProcessInfo.IMPORTANCE_PERCEPTIBLE -> "PERCEPTIBLE"
+      ActivityManager.RunningAppProcessInfo.IMPORTANCE_PERCEPTIBLE_PRE_26 -> "PERCEPTIBLE_PRE_26"
+      ActivityManager.RunningAppProcessInfo.IMPORTANCE_CANT_SAVE_STATE -> "CANT_SAVE_STATE"
+      ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE -> "SERVICE"
+      ActivityManager.RunningAppProcessInfo.IMPORTANCE_CACHED -> "CACHED"
+      ActivityManager.RunningAppProcessInfo.IMPORTANCE_GONE -> "GONE"
+      else -> "UNKNOWN"
+    }
 
   private fun getAppVersion(context: Context): String? {
     return try {
       val packageInfo =
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.packageManager.getPackageInfo(
-                context.packageName,
-                PackageManager.PackageInfoFlags.of(0),
-            )
-          } else {
-            @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0)
-          }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.PackageInfoFlags.of(0),
+          )
+        } else {
+          @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0)
+        }
       packageInfo.versionName
     } catch (e: Exception) {
       AutoMobileSDK.logger.w(TAG, e) { "Failed to get app version" }

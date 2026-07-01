@@ -49,14 +49,14 @@ class DatabaseInspectorProvider : ContentProvider() {
     try {
       val driver = DatabaseInspector.getDriver()
       val response =
-          when (method) {
-            "listDatabases" -> handleListDatabases(driver)
-            "listTables" -> handleListTables(driver, extras)
-            "getTableData" -> handleGetTableData(driver, extras)
-            "getTableStructure" -> handleGetTableStructure(driver, extras)
-            "executeSQL" -> handleExecuteSQL(driver, extras)
-            else -> throw IllegalArgumentException("Unknown method: $method")
-          }
+        when (method) {
+          "listDatabases" -> handleListDatabases(driver)
+          "listTables" -> handleListTables(driver, extras)
+          "getTableData" -> handleGetTableData(driver, extras)
+          "getTableStructure" -> handleGetTableStructure(driver, extras)
+          "executeSQL" -> handleExecuteSQL(driver, extras)
+          else -> throw IllegalArgumentException("Unknown method: $method")
+        }
       result.putBoolean("success", true)
       result.putString("result", response.toString())
     } catch (e: DatabaseError) {
@@ -82,10 +82,10 @@ class DatabaseInspectorProvider : ContentProvider() {
 
     databases.forEach { db ->
       jsonArray.put(
-          JSONObject().apply {
-            put("name", db.name)
-            put("path", db.path)
-          }
+        JSONObject().apply {
+          put("name", db.name)
+          put("path", db.path)
+        }
       )
     }
 
@@ -94,7 +94,7 @@ class DatabaseInspectorProvider : ContentProvider() {
 
   private fun handleListTables(driver: DatabaseDriver, extras: Bundle?): JSONObject {
     val databasePath =
-        extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
+      extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
 
     val tables = driver.getTables(databasePath)
     val jsonArray = JSONArray()
@@ -105,7 +105,7 @@ class DatabaseInspectorProvider : ContentProvider() {
 
   private fun handleGetTableData(driver: DatabaseDriver, extras: Bundle?): JSONObject {
     val databasePath =
-        extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
+      extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
     val table = extras.getString("table") ?: throw IllegalArgumentException("table required")
     val limit = extras.getString("limit")?.toIntOrNull() ?: 50
     val offset = extras.getString("offset")?.toIntOrNull() ?: 0
@@ -131,7 +131,7 @@ class DatabaseInspectorProvider : ContentProvider() {
 
   private fun handleGetTableStructure(driver: DatabaseDriver, extras: Bundle?): JSONObject {
     val databasePath =
-        extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
+      extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
     val table = extras.getString("table") ?: throw IllegalArgumentException("table required")
 
     val structure = driver.getTableStructure(databasePath, table)
@@ -139,13 +139,13 @@ class DatabaseInspectorProvider : ContentProvider() {
     val columnsArray = JSONArray()
     structure.columns.forEach { col ->
       columnsArray.put(
-          JSONObject().apply {
-            put("name", col.name)
-            put("type", col.type)
-            put("nullable", col.nullable)
-            put("primaryKey", col.primaryKey)
-            put("defaultValue", col.defaultValue ?: JSONObject.NULL)
-          }
+        JSONObject().apply {
+          put("name", col.name)
+          put("type", col.type)
+          put("nullable", col.nullable)
+          put("primaryKey", col.primaryKey)
+          put("defaultValue", col.defaultValue ?: JSONObject.NULL)
+        }
       )
     }
 
@@ -154,7 +154,7 @@ class DatabaseInspectorProvider : ContentProvider() {
 
   private fun handleExecuteSQL(driver: DatabaseDriver, extras: Bundle?): JSONObject {
     val databasePath =
-        extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
+      extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
     val query = extras.getString("query") ?: throw IllegalArgumentException("query required")
 
     return when (val result = driver.executeSQL(databasePath, query)) {
@@ -186,11 +186,11 @@ class DatabaseInspectorProvider : ContentProvider() {
 
   // Required ContentProvider methods - not used for content call
   override fun query(
-      uri: Uri,
-      projection: Array<String>?,
-      selection: String?,
-      selectionArgs: Array<String>?,
-      sortOrder: String?,
+    uri: Uri,
+    projection: Array<String>?,
+    selection: String?,
+    selectionArgs: Array<String>?,
+    sortOrder: String?,
   ): Cursor? = null
 
   override fun getType(uri: Uri): String? = null
@@ -200,9 +200,9 @@ class DatabaseInspectorProvider : ContentProvider() {
   override fun delete(uri: Uri, selection: String?, selectionArgs: Array<String>?): Int = 0
 
   override fun update(
-      uri: Uri,
-      values: ContentValues?,
-      selection: String?,
-      selectionArgs: Array<String>?,
+    uri: Uri,
+    values: ContentValues?,
+    selection: String?,
+    selectionArgs: Array<String>?,
   ): Int = 0
 }

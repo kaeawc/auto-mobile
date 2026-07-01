@@ -28,8 +28,8 @@ object Domains {
 /** Error payload for error responses. */
 @Serializable
 data class ErrorPayload(
-    val code: String,
-    val message: String,
+  val code: String,
+  val message: String,
 )
 
 /**
@@ -46,22 +46,19 @@ data class ErrorPayload(
  */
 @Serializable
 data class UnifiedMessage(
-    val id: String? = null,
-    val type: String,
-    val domain: String? = null,
-    val method: String? = null,
-    val event: String? = null,
-    val params: JsonElement? = null,
-    val result: JsonElement? = null,
-    val error: ErrorPayload? = null,
-    val timestamp: Long = System.currentTimeMillis(),
+  val id: String? = null,
+  val type: String,
+  val domain: String? = null,
+  val method: String? = null,
+  val event: String? = null,
+  val params: JsonElement? = null,
+  val result: JsonElement? = null,
+  val error: ErrorPayload? = null,
+  val timestamp: Long = System.currentTimeMillis(),
 )
 
 /** Subscription result returned when subscribing. */
-@Serializable
-data class SubscriptionResult(
-    val subscriptionId: String,
-)
+@Serializable data class SubscriptionResult(val subscriptionId: String)
 
 /** Exception thrown when a request times out. */
 class RequestTimeoutException(message: String) : Exception(message)

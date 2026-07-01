@@ -27,12 +27,12 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun CodeSampleSlideItem(
-    code: String,
-    language: String,
-    title: String? = null, // Kept for API compatibility but not used
-    highlight: String? = null,
-    isDarkMode: Boolean = false,
-    modifier: Modifier = Modifier,
+  code: String,
+  language: String,
+  title: String? = null, // Kept for API compatibility but not used
+  highlight: String? = null,
+  isDarkMode: Boolean = false,
+  modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
   var showLoading by remember { mutableStateOf(true) }
@@ -49,25 +49,25 @@ fun CodeSampleSlideItem(
   Box(modifier = modifier.fillMaxSize().background(backgroundColor)) {
     // WebView with syntax highlighting
     AndroidView(
-        factory = { context ->
-          WebView(context).apply {
-            settings.javaScriptEnabled = true
-            settings.loadWithOverviewMode = true
-            settings.useWideViewPort = true
-            settings.setSupportZoom(false)
+      factory = { context ->
+        WebView(context).apply {
+          settings.javaScriptEnabled = true
+          settings.loadWithOverviewMode = true
+          settings.useWideViewPort = true
+          settings.setSupportZoom(false)
 
-            val htmlContent =
-                createHighlightedCodeHtml(
-                    code = code,
-                    language = language,
-                    highlight = highlight,
-                    isDarkMode = isDarkMode,
-                )
+          val htmlContent =
+            createHighlightedCodeHtml(
+              code = code,
+              language = language,
+              highlight = highlight,
+              isDarkMode = isDarkMode,
+            )
 
-            loadDataWithBaseURL("file:///android_asset/", htmlContent, "text/html", "UTF-8", null)
-          }
-        },
-        modifier = Modifier.fillMaxSize(),
+          loadDataWithBaseURL("file:///android_asset/", htmlContent, "text/html", "UTF-8", null)
+        }
+      },
+      modifier = Modifier.fillMaxSize(),
     )
 
     // Loading overlay
@@ -81,20 +81,20 @@ fun CodeSampleSlideItem(
 
 /** Creates HTML content with Prism.js syntax highlighting. */
 private fun createHighlightedCodeHtml(
-    code: String,
-    language: String,
-    isDarkMode: Boolean,
-    highlight: String? = null,
+  code: String,
+  language: String,
+  isDarkMode: Boolean,
+  highlight: String? = null,
 ): String {
   val themeFile = if (isDarkMode) "prism-dark.css" else "prism-light.css"
 
   // Process highlighting if provided
   val processedCode =
-      if (highlight != null) {
-        processCodeWithHighlighting(code, highlight, isDarkMode)
-      } else {
-        code.replace("<", "&lt;").replace(">", "&gt;")
-      }
+    if (highlight != null) {
+      processCodeWithHighlighting(code, highlight, isDarkMode)
+    } else {
+      code.replace("<", "&lt;").replace(">", "&gt;")
+    }
 
   return """
         <!DOCTYPE html>
@@ -142,14 +142,14 @@ private fun createHighlightedCodeHtml(
         </body>
         </html>
     """
-      .trimIndent()
+    .trimIndent()
 }
 
 /** Processes code to apply highlighting by wrapping lines in spans with appropriate CSS classes. */
 internal fun processCodeWithHighlighting(
-    code: String,
-    highlight: String,
-    isDarkMode: Boolean,
+  code: String,
+  highlight: String,
+  isDarkMode: Boolean,
 ): String {
   val codeLines = code.lines()
   val highlightLines = highlight.lines().map { it.trim() }.filter { it.isNotEmpty() }
@@ -173,28 +173,28 @@ internal fun processCodeWithHighlighting(
 fun CodeSampleSlideItemPreview() {
   MaterialTheme {
     CodeSampleSlideItem(
-        code =
-            """
-            @Test
-            fun testLoginFlow() {
-                // Launch the app
-                tapOn(text = "Login")
+      code =
+        """
+        @Test
+        fun testLoginFlow() {
+            // Launch the app
+            tapOn(text = "Login")
 
-                // Enter credentials
-                inputText("user@example.com")
-                tapOn(text = "Next")
-                inputText("password123")
+            // Enter credentials
+            inputText("user@example.com")
+            tapOn(text = "Next")
+            inputText("password123")
 
-                // Submit login
-                tapOn(text = "Sign In")
+            // Submit login
+            tapOn(text = "Sign In")
 
-                // Verify success
-                observe(waitFor = WaitFor(text = "Welcome"))
-            }
-            """
-                .trimIndent(),
-        language = "kotlin",
-        isDarkMode = false,
+            // Verify success
+            observe(waitFor = WaitFor(text = "Welcome"))
+        }
+        """
+          .trimIndent(),
+      language = "kotlin",
+      isDarkMode = false,
     )
   }
 }
@@ -204,28 +204,28 @@ fun CodeSampleSlideItemPreview() {
 fun CodeSampleSlideItemDarkPreview() {
   MaterialTheme {
     CodeSampleSlideItem(
-        code =
-            """
-            @Test
-            fun testLoginFlow() {
-                // Launch the app
-                tapOn(text = "Login")
+      code =
+        """
+        @Test
+        fun testLoginFlow() {
+            // Launch the app
+            tapOn(text = "Login")
 
-                // Enter credentials
-                inputText("user@example.com")
-                tapOn(text = "Next")
-                inputText("password123")
+            // Enter credentials
+            inputText("user@example.com")
+            tapOn(text = "Next")
+            inputText("password123")
 
-                // Submit login
-                tapOn(text = "Sign In")
+            // Submit login
+            tapOn(text = "Sign In")
 
-                // Verify success
-                observe(waitFor = WaitFor(text = "Welcome"))
-            }
-            """
-                .trimIndent(),
-        language = "kotlin",
-        isDarkMode = true,
+            // Verify success
+            observe(waitFor = WaitFor(text = "Welcome"))
+        }
+        """
+          .trimIndent(),
+      language = "kotlin",
+      isDarkMode = true,
     )
   }
 }
@@ -235,34 +235,34 @@ fun CodeSampleSlideItemDarkPreview() {
 fun CodeSampleSlideItemHighlightPreview() {
   MaterialTheme {
     CodeSampleSlideItem(
-        code =
-            """
-            keepClearAreas: restricted=[], unrestricted=[]
-            mPrepareSyncSeqId=0
+      code =
+        """
+        keepClearAreas: restricted=[], unrestricted=[]
+        mPrepareSyncSeqId=0
 
-            mGlobalConfiguration={1.0 310mcc260mnc [en_US] ldltr sw448dp w997dp h448dp 360dpi nrml long hdr widecg land finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2244, 1008) mAppBounds=Rect(0, 0 - 2244, 1008) mMaxBounds=Rect(0, 0 - 2244, 1008) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} s.6257 fontWeightAdjustment=0}
-            mHasPermanentDpad=false
-            mTopFocusedDisplayId=0
-            imeLayeringTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-            imeInputTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-            imeControlTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-            Minimum task size of display#0 220  mBlurEnabled=true
-            mLastDisplayFreezeDuration=0 due to new-config
-            mDisableSecureWindows=false
-            mHighResSnapshotScale=0.8
-            mSnapshotEnabled=true
-            SnapshotCache Task
-            """
-                .trimIndent(),
-        language = "shell",
-        highlight =
-            """
-            imeLayeringTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-            imeInputTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-            imeControlTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
-            """
-                .trimIndent(),
-        isDarkMode = true,
+        mGlobalConfiguration={1.0 310mcc260mnc [en_US] ldltr sw448dp w997dp h448dp 360dpi nrml long hdr widecg land finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2244, 1008) mAppBounds=Rect(0, 0 - 2244, 1008) mMaxBounds=Rect(0, 0 - 2244, 1008) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} s.6257 fontWeightAdjustment=0}
+        mHasPermanentDpad=false
+        mTopFocusedDisplayId=0
+        imeLayeringTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+        imeInputTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+        imeControlTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+        Minimum task size of display#0 220  mBlurEnabled=true
+        mLastDisplayFreezeDuration=0 due to new-config
+        mDisableSecureWindows=false
+        mHighResSnapshotScale=0.8
+        mSnapshotEnabled=true
+        SnapshotCache Task
+        """
+          .trimIndent(),
+      language = "shell",
+      highlight =
+        """
+        imeLayeringTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+        imeInputTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+        imeControlTarget in display# 0 Window{ea58714 u0 dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.MainActivity}
+        """
+          .trimIndent(),
+      isDarkMode = true,
     )
   }
 }

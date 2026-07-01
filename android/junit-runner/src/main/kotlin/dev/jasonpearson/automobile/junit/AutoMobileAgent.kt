@@ -28,12 +28,12 @@ import kotlinx.serialization.json.JsonObject
  * the AutoMobile MCP server with support for OpenAI, Anthropic, and Google models.
  */
 open class AutoMobileAgent(
-    private val configProvider: ConfigProvider = DefaultConfigProvider(),
-    private val fileSystemOperations: FileSystemOperations = DefaultFileSystemOperations(),
-    private val aiAgentFactory: AIAgentFactory = DefaultAIAgentFactory(),
-    private val timeProvider: TimeProvider = DefaultTimeProvider(),
-    private val mcpClient: MCPClient = DefaultMCPClient(),
-    internal val recoveryConfigProvider: RecoveryConfigProvider = DaemonRecoveryConfigProvider(),
+  private val configProvider: ConfigProvider = DefaultConfigProvider(),
+  private val fileSystemOperations: FileSystemOperations = DefaultFileSystemOperations(),
+  private val aiAgentFactory: AIAgentFactory = DefaultAIAgentFactory(),
+  private val timeProvider: TimeProvider = DefaultTimeProvider(),
+  private val mcpClient: MCPClient = DefaultMCPClient(),
+  internal val recoveryConfigProvider: RecoveryConfigProvider = DaemonRecoveryConfigProvider(),
 ) {
 
   /** Supported AI model providers */
@@ -45,17 +45,17 @@ open class AutoMobileAgent(
 
   /** Configuration for AI model selection */
   data class ModelConfig(
-      val provider: ModelProvider,
-      val apiKey: String,
-      val proxyEndpoint: String? = null,
+    val provider: ModelProvider,
+    val apiKey: String,
+    val proxyEndpoint: String? = null,
   )
 
   /** Generates a YAML test plan from a prompt using AI agent via Koog framework. */
   fun generatePlanFromPrompt(
-      prompt: String,
-      className: String,
-      methodName: String,
-      testResourcesDir: File,
+    prompt: String,
+    className: String,
+    methodName: String,
+    testResourcesDir: File,
   ): String {
     val generatedPlanName = "${className}_${methodName}.yaml"
     val generatedPlanPath = "test-plans/generated/$generatedPlanName"
@@ -69,8 +69,7 @@ open class AutoMobileAgent(
 
     // Check if plan already exists and is recent
     if (
-        fileSystemOperations.fileExists(generatedPlanFile) &&
-            !shouldRegeneratePlan(generatedPlanFile)
+      fileSystemOperations.fileExists(generatedPlanFile) && !shouldRegeneratePlan(generatedPlanFile)
     ) {
       println("Using existing generated plan: $generatedPlanPath")
       return generatedPlanPath
@@ -111,16 +110,16 @@ open class AutoMobileAgent(
       val aiAgent = aiAgentFactory.createAIAgentWithMCPTools(modelConfig, mcpClient, maxToolCalls)
 
       val succeededStepsSummary =
-          if (context.succeededSteps.isEmpty()) {
-            "  (none — the first step failed)"
-          } else {
-            context.succeededSteps.joinToString("\n") { step ->
-              "  - Step ${step.stepIndex + 1}: ${step.tool} (completed)"
-            }
+        if (context.succeededSteps.isEmpty()) {
+          "  (none — the first step failed)"
+        } else {
+          context.succeededSteps.joinToString("\n") { step ->
+            "  - Step ${step.stepIndex + 1}: ${step.tool} (completed)"
           }
+        }
 
       val recoveryPrompt =
-          """
+        """
         A test plan step failed. Here is the context:
 
         FAILED STEP: Step ${context.failedStepIndex + 1} using tool "${context.failedTool}"
@@ -146,12 +145,12 @@ open class AutoMobileAgent(
         - Wrong screen (navigate to the correct screen)
         - Timing issues (add appropriate waits)
       """
-              .trimIndent()
+          .trimIndent()
 
       val recoveryResult = runBlocking {
         try {
           println(
-              "Starting AI recovery for step ${context.failedStepIndex + 1} (${context.failedTool})..."
+            "Starting AI recovery for step ${context.failedStepIndex + 1} (${context.failedTool})..."
           )
 
           aiAgent.run(recoveryPrompt)
@@ -160,18 +159,18 @@ open class AutoMobileAgent(
 
           // Call observe ourselves to capture post-recovery state
           val observeResult =
-              try {
-                mcpClient.callTool("observe", mapOf("withViewHierarchy" to true))
-              } catch (e: Exception) {
-                println("Warning: Post-recovery observe failed: ${e.message}")
-                null
-              }
+            try {
+              mcpClient.callTool("observe", mapOf("withViewHierarchy" to true))
+            } catch (e: Exception) {
+              println("Warning: Post-recovery observe failed: ${e.message}")
+              null
+            }
 
           val recoveryTime = timeProvider.currentTimeMillis() - startTime
           RecoveryOutcome(
-              success = observeResult != null,
-              recoveryTimeMs = recoveryTime,
-              observeResultAfterRecovery = observeResult,
+            success = observeResult != null,
+            recoveryTimeMs = recoveryTime,
+            observeResultAfterRecovery = observeResult,
           )
         } catch (e: Exception) {
           println("AI recovery execution failed: ${e.message}")
@@ -210,7 +209,7 @@ open class AutoMobileAgent(
       val aiAgent = aiAgentFactory.createAIAgent(modelConfig)
 
       val planGenerationPrompt =
-          """
+        """
         Generate an AutoMobile YAML test plan for the following requirement:
 
         Test Class: $className
@@ -241,7 +240,7 @@ open class AutoMobileAgent(
 
         Make the plan specific and actionable for mobile automation.
       """
-              .trimIndent()
+          .trimIndent()
 
       return runBlocking {
         try {
@@ -315,9 +314,9 @@ open class AutoMobileAgent(
 
   @Serializable
   data class MCPToolDefinition(
-      val name: String,
-      val description: String,
-      val inputSchema: JsonElement,
+    val name: String,
+    val description: String,
+    val inputSchema: JsonElement,
   )
 
   @Serializable data class MCPListToolsResponse(val tools: List<MCPToolDefinition>)
@@ -362,21 +361,21 @@ open class AutoMobileAgent(
         paramsJsonBuilder.append("}")
 
         val requestJson =
-            """{"method":"tools/call","params":{"name":"$toolName","arguments":${paramsJsonBuilder}}}"""
+          """{"method":"tools/call","params":{"name":"$toolName","arguments":${paramsJsonBuilder}}}"""
 
         val request =
-            HttpRequest.newBuilder()
-                .uri(URI.create("$url/mcp"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(requestJson))
-                .timeout(Duration.ofSeconds(30))
-                .build()
+          HttpRequest.newBuilder()
+            .uri(URI.create("$url/mcp"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(requestJson))
+            .timeout(Duration.ofSeconds(30))
+            .build()
 
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
         if (response.statusCode() != 200) {
           throw RuntimeException(
-              "MCP server returned status ${response.statusCode()}: ${response.body()}"
+            "MCP server returned status ${response.statusCode()}: ${response.body()}"
           )
         }
 
@@ -399,18 +398,18 @@ open class AutoMobileAgent(
         val requestJson = """{"method":"tools/list","params":{}}"""
 
         val request =
-            HttpRequest.newBuilder()
-                .uri(URI.create("$url/mcp"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(requestJson))
-                .timeout(Duration.ofSeconds(10))
-                .build()
+          HttpRequest.newBuilder()
+            .uri(URI.create("$url/mcp"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(requestJson))
+            .timeout(Duration.ofSeconds(10))
+            .build()
 
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
         if (response.statusCode() != 200) {
           throw RuntimeException(
-              "MCP server returned status ${response.statusCode()}: ${response.body()}"
+            "MCP server returned status ${response.statusCode()}: ${response.body()}"
           )
         }
 
@@ -421,7 +420,7 @@ open class AutoMobileAgent(
         }
 
         val listResponse =
-            koogJson.decodeFromString<MCPListToolsResponse>(mcpResponse.result!!.toString())
+          koogJson.decodeFromString<MCPListToolsResponse>(mcpResponse.result!!.toString())
         return listResponse.tools
       } catch (e: Exception) {
         throw RuntimeException("Failed to list MCP tools: ${e.message}", e)
@@ -433,10 +432,10 @@ open class AutoMobileAgent(
 
       try {
         val request =
-            HttpRequest.newBuilder()
-                .uri(URI.create("$url/health"))
-                .timeout(Duration.ofSeconds(5))
-                .build()
+          HttpRequest.newBuilder()
+            .uri(URI.create("$url/health"))
+            .timeout(Duration.ofSeconds(5))
+            .build()
 
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
         return response.statusCode() == 200
@@ -451,39 +450,39 @@ open class AutoMobileAgent(
 
   /** Observe the current device state and UI hierarchy */
   class ObserveTool(private val mcpClient: MCPClient) :
-      SimpleTool<ObserveTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "observe",
-          description = "Observe the current device state and UI hierarchy",
-      ) {
+    SimpleTool<ObserveTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "observe",
+      description = "Observe the current device state and UI hierarchy",
+    ) {
 
     @Serializable
     data class Args(val withViewHierarchy: Boolean = true, val includeInvisible: Boolean = false)
 
     override suspend fun execute(args: Args): String {
       val parameters =
-          mapOf(
-              "withViewHierarchy" to args.withViewHierarchy,
-              "includeInvisible" to args.includeInvisible,
-          )
+        mapOf(
+          "withViewHierarchy" to args.withViewHierarchy,
+          "includeInvisible" to args.includeInvisible,
+        )
       return mcpClient.callTool("observe", parameters)
     }
   }
 
   /** Tap on UI elements by text, coordinates, or description */
   class TapOnTool(private val mcpClient: MCPClient) :
-      SimpleTool<TapOnTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "tapOn",
-          description = "Tap on UI elements by text, coordinates, or description",
-      ) {
+    SimpleTool<TapOnTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "tapOn",
+      description = "Tap on UI elements by text, coordinates, or description",
+    ) {
 
     @Serializable
     data class Args(
-        val text: String? = null,
-        val id: String? = null,
-        val x: Int? = null,
-        val y: Int? = null,
+      val text: String? = null,
+      val id: String? = null,
+      val x: Int? = null,
+      val y: Int? = null,
     )
 
     override suspend fun execute(args: Args): String {
@@ -503,11 +502,11 @@ open class AutoMobileAgent(
 
   /** Enter text into input fields or send text to the device */
   class TypeTextTool(private val mcpClient: MCPClient) :
-      SimpleTool<TypeTextTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "typeText",
-          description = "Enter text into input fields or send text to the device",
-      ) {
+    SimpleTool<TypeTextTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "typeText",
+      description = "Enter text into input fields or send text to the device",
+    ) {
 
     @Serializable data class Args(val text: String)
 
@@ -519,11 +518,11 @@ open class AutoMobileAgent(
 
   /** Input text with optional IME action */
   class InputTextTool(private val mcpClient: MCPClient) :
-      SimpleTool<InputTextTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "inputText",
-          description = "Input text with optional IME action",
-      ) {
+    SimpleTool<InputTextTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "inputText",
+      description = "Input text with optional IME action",
+    ) {
 
     @Serializable data class Args(val text: String, val imeAction: String? = null)
 
@@ -536,11 +535,11 @@ open class AutoMobileAgent(
 
   /** Perform swipe gestures for scrolling or navigation */
   class SwipeTool(private val mcpClient: MCPClient) :
-      SimpleTool<SwipeTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "swipe",
-          description = "Perform swipe gestures for scrolling or navigation",
-      ) {
+    SimpleTool<SwipeTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "swipe",
+      description = "Perform swipe gestures for scrolling or navigation",
+    ) {
 
     @Serializable
     data class Args(val direction: String = "up", val containerElementId: String? = null)
@@ -561,26 +560,26 @@ open class AutoMobileAgent(
 
   /** Scroll within a container element */
   class ScrollTool(private val mcpClient: MCPClient) :
-      SimpleTool<ScrollTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "scroll",
-          description = "Scroll within a container element",
-      ) {
+    SimpleTool<ScrollTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "scroll",
+      description = "Scroll within a container element",
+    ) {
 
     @Serializable
     data class Args(
-        val containerElementId: String,
-        val direction: String = "up",
-        val lookForText: String? = null,
-        val lookForElementId: String? = null,
+      val containerElementId: String,
+      val direction: String = "up",
+      val lookForText: String? = null,
+      val lookForElementId: String? = null,
     )
 
     override suspend fun execute(args: Args): String {
       val parameters =
-          mutableMapOf<String, Any>(
-              "containerElementId" to args.containerElementId,
-              "direction" to args.direction,
-          )
+        mutableMapOf<String, Any>(
+          "containerElementId" to args.containerElementId,
+          "direction" to args.direction,
+        )
 
       if (args.lookForText != null || args.lookForElementId != null) {
         val lookFor = mutableMapOf<String, Any>()
@@ -595,17 +594,17 @@ open class AutoMobileAgent(
 
   /** Wait for elements to appear or conditions to be met */
   class WaitForTool(private val mcpClient: MCPClient) :
-      SimpleTool<WaitForTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "waitFor",
-          description = "Wait for elements to appear or conditions to be met",
-      ) {
+    SimpleTool<WaitForTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "waitFor",
+      description = "Wait for elements to appear or conditions to be met",
+    ) {
 
     @Serializable
     data class Args(
-        val text: String? = null,
-        val elementId: String? = null,
-        val timeout: Int = 5000,
+      val text: String? = null,
+      val elementId: String? = null,
+      val timeout: Int = 5000,
     )
 
     override suspend fun execute(args: Args): String {
@@ -640,11 +639,11 @@ open class AutoMobileAgent(
 
   /** Navigate back in the app using the back button */
   class GoBackTool(private val mcpClient: MCPClient) :
-      SimpleTool<GoBackTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "goBack",
-          description = "Navigate back in the app using the back button",
-      ) {
+    SimpleTool<GoBackTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "goBack",
+      description = "Navigate back in the app using the back button",
+    ) {
 
     @Serializable class Args
 
@@ -656,11 +655,11 @@ open class AutoMobileAgent(
 
   /** Press a hardware button */
   class PressButtonTool(private val mcpClient: MCPClient) :
-      SimpleTool<PressButtonTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "pressButton",
-          description = "Press a hardware button",
-      ) {
+    SimpleTool<PressButtonTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "pressButton",
+      description = "Press a hardware button",
+    ) {
 
     @Serializable data class Args(val button: String)
 
@@ -672,11 +671,11 @@ open class AutoMobileAgent(
 
   /** Clear text from input fields */
   class ClearTextTool(private val mcpClient: MCPClient) :
-      SimpleTool<ClearTextTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "clearText",
-          description = "Clear text from input fields",
-      ) {
+    SimpleTool<ClearTextTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "clearText",
+      description = "Clear text from input fields",
+    ) {
 
     @Serializable class Args
 
@@ -687,11 +686,11 @@ open class AutoMobileAgent(
 
   /** Launch an app by package ID */
   class LaunchAppTool(private val mcpClient: MCPClient) :
-      SimpleTool<LaunchAppTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "launchApp",
-          description = "Launch an app by package ID",
-      ) {
+    SimpleTool<LaunchAppTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "launchApp",
+      description = "Launch an app by package ID",
+    ) {
 
     @Serializable data class Args(val appId: String)
 
@@ -703,11 +702,11 @@ open class AutoMobileAgent(
 
   /** Terminate an app by package ID */
   class TerminateAppTool(private val mcpClient: MCPClient) :
-      SimpleTool<TerminateAppTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "terminateApp",
-          description = "Terminate an app by package ID",
-      ) {
+    SimpleTool<TerminateAppTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "terminateApp",
+      description = "Terminate an app by package ID",
+    ) {
 
     @Serializable data class Args(val appId: String)
 
@@ -719,11 +718,11 @@ open class AutoMobileAgent(
 
   /** Double tap on coordinates */
   class DoubleTapOnTool(private val mcpClient: MCPClient) :
-      SimpleTool<DoubleTapOnTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "doubleTapOn",
-          description = "Double tap on coordinates",
-      ) {
+    SimpleTool<DoubleTapOnTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "doubleTapOn",
+      description = "Double tap on coordinates",
+    ) {
 
     @Serializable data class Args(val x: Int, val y: Int)
 
@@ -735,19 +734,19 @@ open class AutoMobileAgent(
 
   /** Long press on coordinates or elements */
   class LongPressOnTool(private val mcpClient: MCPClient) :
-      SimpleTool<LongPressOnTool.Args>(
-          argsType = typeToken<Args>(),
-          name = "longPressOn",
-          description = "Long press on coordinates or elements",
-      ) {
+    SimpleTool<LongPressOnTool.Args>(
+      argsType = typeToken<Args>(),
+      name = "longPressOn",
+      description = "Long press on coordinates or elements",
+    ) {
 
     @Serializable
     data class Args(
-        val text: String? = null,
-        val id: String? = null,
-        val x: Int? = null,
-        val y: Int? = null,
-        val duration: Int = 1000,
+      val text: String? = null,
+      val id: String? = null,
+      val x: Int? = null,
+      val y: Int? = null,
+      val duration: Int = 1000,
     )
 
     override suspend fun execute(args: Args): String {
@@ -768,22 +767,22 @@ open class AutoMobileAgent(
   /** Helper to create all MCP tools for an agent */
   class AutoMobileMCPToolFactory(private val mcpClient: MCPClient) {
     fun createAllTools(): List<SimpleTool<*>> =
-        listOf(
-            ObserveTool(mcpClient),
-            TapOnTool(mcpClient),
-            TypeTextTool(mcpClient),
-            InputTextTool(mcpClient),
-            SwipeTool(mcpClient),
-            ScrollTool(mcpClient),
-            WaitForTool(mcpClient),
-            GoBackTool(mcpClient),
-            PressButtonTool(mcpClient),
-            ClearTextTool(mcpClient),
-            LaunchAppTool(mcpClient),
-            TerminateAppTool(mcpClient),
-            DoubleTapOnTool(mcpClient),
-            LongPressOnTool(mcpClient),
-        )
+      listOf(
+        ObserveTool(mcpClient),
+        TapOnTool(mcpClient),
+        TypeTextTool(mcpClient),
+        InputTextTool(mcpClient),
+        SwipeTool(mcpClient),
+        ScrollTool(mcpClient),
+        WaitForTool(mcpClient),
+        GoBackTool(mcpClient),
+        PressButtonTool(mcpClient),
+        ClearTextTool(mcpClient),
+        LaunchAppTool(mcpClient),
+        TerminateAppTool(mcpClient),
+        DoubleTapOnTool(mcpClient),
+        LongPressOnTool(mcpClient),
+      )
   }
 
   // Dependency interfaces for better testability
@@ -811,9 +810,9 @@ open class AutoMobileAgent(
     fun createAIAgent(config: ModelConfig): AIAgent<String, String>
 
     fun createAIAgentWithMCPTools(
-        config: ModelConfig,
-        mcpClient: MCPClient,
-        maxToolCalls: Int = 5,
+      config: ModelConfig,
+      mcpClient: MCPClient,
+      maxToolCalls: Int = 5,
     ): AIAgent<String, String>
   }
 
@@ -826,36 +825,36 @@ open class AutoMobileAgent(
     override fun getModelConfig(): ModelConfig {
       // Check for model provider preference (default to OpenAI)
       val provider =
-          when (System.getProperty("automobile.ai.provider", "openai")?.lowercase()) {
-            "anthropic" -> ModelProvider.ANTHROPIC
-            "google" -> ModelProvider.GOOGLE
-            else -> ModelProvider.OPENAI
-          }
+        when (System.getProperty("automobile.ai.provider", "openai")?.lowercase()) {
+          "anthropic" -> ModelProvider.ANTHROPIC
+          "google" -> ModelProvider.GOOGLE
+          else -> ModelProvider.OPENAI
+        }
 
       // Get API key for the selected provider
       val apiKey =
-          when (provider) {
-            ModelProvider.OPENAI ->
-                System.getenv("OPENAI_API_KEY")
-                    ?: System.getProperty("automobile.openai.api.key")
-                    ?: throw RuntimeException(
-                        "OpenAI API key not found. Set OPENAI_API_KEY environment variable or automobile.openai.api.key system property"
-                    )
+        when (provider) {
+          ModelProvider.OPENAI ->
+            System.getenv("OPENAI_API_KEY")
+              ?: System.getProperty("automobile.openai.api.key")
+              ?: throw RuntimeException(
+                "OpenAI API key not found. Set OPENAI_API_KEY environment variable or automobile.openai.api.key system property"
+              )
 
-            ModelProvider.ANTHROPIC ->
-                System.getenv("ANTHROPIC_API_KEY")
-                    ?: System.getProperty("automobile.anthropic.api.key")
-                    ?: throw RuntimeException(
-                        "Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable or automobile.anthropic.api.key system property"
-                    )
+          ModelProvider.ANTHROPIC ->
+            System.getenv("ANTHROPIC_API_KEY")
+              ?: System.getProperty("automobile.anthropic.api.key")
+              ?: throw RuntimeException(
+                "Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable or automobile.anthropic.api.key system property"
+              )
 
-            ModelProvider.GOOGLE ->
-                System.getenv("GOOGLE_API_KEY")
-                    ?: System.getProperty("automobile.google.api.key")
-                    ?: throw RuntimeException(
-                        "Google API key not found. Set GOOGLE_API_KEY environment variable or automobile.google.api.key system property"
-                    )
-          }
+          ModelProvider.GOOGLE ->
+            System.getenv("GOOGLE_API_KEY")
+              ?: System.getProperty("automobile.google.api.key")
+              ?: throw RuntimeException(
+                "Google API key not found. Set GOOGLE_API_KEY environment variable or automobile.google.api.key system property"
+              )
+        }
 
       // Optional proxy endpoint
       val proxyEndpoint = System.getProperty("automobile.ai.proxy.endpoint")
@@ -898,33 +897,33 @@ open class AutoMobileAgent(
       val model = selectModel(config.provider)
 
       val systemPrompt =
-          """
-          You are an expert in mobile test automation using the AutoMobile framework.
-          You help generate YAML test plans and provide recovery suggestions for failed tests.
+        """
+        You are an expert in mobile test automation using the AutoMobile framework.
+        You help generate YAML test plans and provide recovery suggestions for failed tests.
 
-          Your responses should be:
-          - Specific and actionable
-          - Focused on mobile automation best practices
-          - Clear and concise
-          - Include proper YAML formatting when generating plans
+        Your responses should be:
+        - Specific and actionable
+        - Focused on mobile automation best practices
+        - Clear and concise
+        - Include proper YAML formatting when generating plans
 
-          When generating YAML plans, always include proper structure with name, description, and steps.
-          When providing recovery suggestions, focus on common mobile testing issues and practical solutions.
-          """
-              .trimIndent()
+        When generating YAML plans, always include proper structure with name, description, and steps.
+        When providing recovery suggestions, focus on common mobile testing issues and practical solutions.
+        """
+          .trimIndent()
 
       return AIAgent(
-          promptExecutor = executor,
-          llmModel = model,
-          toolRegistry = ToolRegistry.EMPTY,
-          systemPrompt = systemPrompt,
+        promptExecutor = executor,
+        llmModel = model,
+        toolRegistry = ToolRegistry.EMPTY,
+        systemPrompt = systemPrompt,
       )
     }
 
     override fun createAIAgentWithMCPTools(
-        config: ModelConfig,
-        mcpClient: MCPClient,
-        maxToolCalls: Int,
+      config: ModelConfig,
+      mcpClient: MCPClient,
+      maxToolCalls: Int,
     ): AIAgent<String, String> {
       val executor = createPromptExecutor(config)
       val model = selectModel(config.provider)
@@ -934,7 +933,7 @@ open class AutoMobileAgent(
       val toolRegistry = ToolRegistry { toolFactory.createAllTools().forEach { tool(it) } }
 
       val systemPrompt =
-          """
+        """
         You are an expert mobile test automation recovery agent using the AutoMobile framework.
 
         Your goal is to analyze test failures and take corrective actions using available tools.
@@ -962,33 +961,33 @@ open class AutoMobileAgent(
         Always be methodical: observe first, understand the problem, then take targeted actions.
         Use the most appropriate tool for each interaction based on what's available.
       """
-              .trimIndent()
+          .trimIndent()
 
       return AIAgent(
-          promptExecutor = executor,
-          llmModel = model,
-          toolRegistry = toolRegistry,
-          systemPrompt = systemPrompt,
+        promptExecutor = executor,
+        llmModel = model,
+        toolRegistry = toolRegistry,
+        systemPrompt = systemPrompt,
       )
     }
 
     private fun createPromptExecutor(config: ModelConfig): PromptExecutor =
-        when (config.provider) {
-          ModelProvider.OPENAI -> PromptExecutor.builder().openAI(config.apiKey).build()
-          ModelProvider.ANTHROPIC -> PromptExecutor.builder().anthropic(config.apiKey).build()
-          ModelProvider.GOOGLE -> unsupportedGoogleProvider()
-        }
+      when (config.provider) {
+        ModelProvider.OPENAI -> PromptExecutor.builder().openAI(config.apiKey).build()
+        ModelProvider.ANTHROPIC -> PromptExecutor.builder().anthropic(config.apiKey).build()
+        ModelProvider.GOOGLE -> unsupportedGoogleProvider()
+      }
 
     private fun selectModel(provider: ModelProvider): LLModel =
-        when (provider) {
-          ModelProvider.OPENAI -> OpenAIModels.Chat.GPT4o
-          ModelProvider.ANTHROPIC -> AnthropicModels.Sonnet_4
-          ModelProvider.GOOGLE -> unsupportedGoogleProvider()
-        }
+      when (provider) {
+        ModelProvider.OPENAI -> OpenAIModels.Chat.GPT4o
+        ModelProvider.ANTHROPIC -> AnthropicModels.Sonnet_4
+        ModelProvider.GOOGLE -> unsupportedGoogleProvider()
+      }
 
     private fun unsupportedGoogleProvider(): Nothing {
       throw UnsupportedOperationException(
-          "Koog 1.0.0 stable artifacts do not publish a Google prompt executor; use OpenAI or Anthropic."
+        "Koog 1.0.0 stable artifacts do not publish a Google prompt executor; use OpenAI or Anthropic."
       )
     }
   }

@@ -69,20 +69,20 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 @Composable
 fun TelemetryDetailPanel(
-    event: TelemetryDisplayEvent,
-    timeFormat: SimpleDateFormat,
-    textColor: Color,
-    onClose: () -> Unit,
-    onOpenSource: ((String, Int, String) -> Unit)? = null,
-    screenshotLoader: ScreenshotLoader? = null,
-    modifier: Modifier = Modifier,
+  event: TelemetryDisplayEvent,
+  timeFormat: SimpleDateFormat,
+  textColor: Color,
+  onClose: () -> Unit,
+  onOpenSource: ((String, Int, String) -> Unit)? = null,
+  screenshotLoader: ScreenshotLoader? = null,
+  modifier: Modifier = Modifier,
 ) {
   // Layout events with hierarchy need a split layout — scrollable metadata on top,
   // HierarchyTreeView (LazyColumn) filling remaining space below.
   val isLayoutWithHierarchy =
-      event is TelemetryDisplayEvent.Layout &&
-          event.subType == "hierarchy_change" &&
-          event.detailsJson != null
+    event is TelemetryDisplayEvent.Layout &&
+      event.subType == "hierarchy_change" &&
+      event.detailsJson != null
 
   val focusedBorderColor = SharedTheme.globalColors.outlines.focused
 
@@ -95,62 +95,60 @@ fun TelemetryDetailPanel(
     }
   }
 
-  Column(
-      modifier = modifier.fillMaxHeight().background(textColor.copy(alpha = 0.03f)),
-  ) {
+  Column(modifier = modifier.fillMaxHeight().background(textColor.copy(alpha = 0.03f))) {
     Column(
-        modifier =
-            Modifier.then(if (isLayoutWithHierarchy) Modifier else Modifier.weight(1f))
-                .verticalScroll(rememberScrollState())
-                .padding(12.dp),
+      modifier =
+        Modifier.then(if (isLayoutWithHierarchy) Modifier else Modifier.weight(1f))
+          .verticalScroll(rememberScrollState())
+          .padding(12.dp)
     ) {
       Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         Text(
-            detailTitle(event),
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = textColor,
-            modifier = Modifier.weight(1f),
+          detailTitle(event),
+          fontSize = 13.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = textColor,
+          modifier = Modifier.weight(1f),
         )
         Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           HeaderIconButton(
-              icon = "\u2197",
-              textColor = textColor,
-              focusedBorderColor = focusedBorderColor,
-              onClick = {
-                val jsonStr = serializeEventToJson(event)
-                val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                clipboard.setContents(java.awt.datatransfer.StringSelection(jsonStr), null)
-                showCopiedToast = true
-              },
+            icon = "\u2197",
+            textColor = textColor,
+            focusedBorderColor = focusedBorderColor,
+            onClick = {
+              val jsonStr = serializeEventToJson(event)
+              val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+              clipboard.setContents(java.awt.datatransfer.StringSelection(jsonStr), null)
+              showCopiedToast = true
+            },
           )
           HeaderIconButton(
-              icon = "\u2715",
-              textColor = textColor,
-              focusedBorderColor = focusedBorderColor,
-              onClick = onClose,
+            icon = "\u2715",
+            textColor = textColor,
+            focusedBorderColor = focusedBorderColor,
+            onClick = onClose,
           )
         }
       }
 
       if (showCopiedToast) {
         Box(
-            modifier =
-                Modifier.padding(top = 4.dp)
-                    .background(textColor.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
+          modifier =
+            Modifier.padding(top = 4.dp)
+              .background(textColor.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+              .padding(horizontal = 8.dp, vertical = 2.dp)
         ) {
           Text(
-              "Copied to clipboard",
-              fontSize = 9.sp,
-              color = textColor.copy(alpha = 0.6f),
+            "Copied to clipboard",
+            fontSize = 9.sp,
+            color = textColor.copy(alpha = 0.6f),
           )
         }
       }
@@ -166,9 +164,9 @@ fun TelemetryDetailPanel(
       // Type-specific detail — Network and Failure use tabbed sub-views
       when (event) {
         is TelemetryDisplayEvent.Network ->
-            NetworkTabbedDetail(event, textColor, focusedBorderColor)
+          NetworkTabbedDetail(event, textColor, focusedBorderColor)
         is TelemetryDisplayEvent.Failure ->
-            FailureTabbedDetail(event, textColor, onOpenSource, focusedBorderColor)
+          FailureTabbedDetail(event, textColor, onOpenSource, focusedBorderColor)
         is TelemetryDisplayEvent.Navigation -> NavigationDetail(event, textColor, screenshotLoader)
         is TelemetryDisplayEvent.Log -> LogDetail(event, textColor)
         is TelemetryDisplayEvent.Os -> OsDetail(event, textColor)
@@ -189,24 +187,24 @@ fun TelemetryDetailPanel(
 }
 
 private fun detailTitle(event: TelemetryDisplayEvent): String =
-    when (event) {
-      is TelemetryDisplayEvent.Network -> "Network Request"
-      is TelemetryDisplayEvent.Navigation -> "Navigation"
-      is TelemetryDisplayEvent.Log -> "Log Entry"
-      is TelemetryDisplayEvent.Os -> "OS Event"
-      is TelemetryDisplayEvent.Failure ->
-          when (event.type) {
-            "crash" -> "Crash"
-            "anr" -> "ANR"
-            else -> "Non-Fatal"
-          }
-      is TelemetryDisplayEvent.Storage -> "Storage Change"
-      is TelemetryDisplayEvent.Layout -> "Layout Event"
-      is TelemetryDisplayEvent.Performance -> "Performance"
-      is TelemetryDisplayEvent.Memory -> "Memory Audit"
-      is TelemetryDisplayEvent.ToolCall -> "Tool Call"
-      is TelemetryDisplayEvent.Accessibility -> "Accessibility"
-    }
+  when (event) {
+    is TelemetryDisplayEvent.Network -> "Network Request"
+    is TelemetryDisplayEvent.Navigation -> "Navigation"
+    is TelemetryDisplayEvent.Log -> "Log Entry"
+    is TelemetryDisplayEvent.Os -> "OS Event"
+    is TelemetryDisplayEvent.Failure ->
+      when (event.type) {
+        "crash" -> "Crash"
+        "anr" -> "ANR"
+        else -> "Non-Fatal"
+      }
+    is TelemetryDisplayEvent.Storage -> "Storage Change"
+    is TelemetryDisplayEvent.Layout -> "Layout Event"
+    is TelemetryDisplayEvent.Performance -> "Performance"
+    is TelemetryDisplayEvent.Memory -> "Memory Audit"
+    is TelemetryDisplayEvent.ToolCall -> "Tool Call"
+    is TelemetryDisplayEvent.Accessibility -> "Accessibility"
+  }
 
 @Composable
 private fun DetailRow(label: String, value: String, textColor: Color) {
@@ -214,33 +212,33 @@ private fun DetailRow(label: String, value: String, textColor: Color) {
   val isHovered by interactionSource.collectIsHoveredAsState()
 
   Row(
-      modifier = Modifier.fillMaxWidth().hoverable(interactionSource).padding(vertical = 2.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.fillMaxWidth().hoverable(interactionSource).padding(vertical = 2.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
-        label,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = textColor.copy(alpha = 0.5f),
-        modifier = Modifier.padding(end = 4.dp),
+      label,
+      fontSize = 10.sp,
+      fontWeight = FontWeight.SemiBold,
+      color = textColor.copy(alpha = 0.5f),
+      modifier = Modifier.padding(end = 4.dp),
     )
     Text(
-        value,
-        fontSize = 10.sp,
-        fontFamily = FontFamily.Monospace,
-        color = textColor.copy(alpha = 0.85f),
-        modifier = Modifier.weight(1f),
+      value,
+      fontSize = 10.sp,
+      fontFamily = FontFamily.Monospace,
+      color = textColor.copy(alpha = 0.85f),
+      modifier = Modifier.weight(1f),
     )
     if (isHovered) {
       Box(
-          modifier =
-              Modifier.clickable {
-                    val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                    clipboard.setContents(java.awt.datatransfer.StringSelection(value), null)
-                  }
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(2.dp),
+        modifier =
+          Modifier.clickable {
+              val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+              clipboard.setContents(java.awt.datatransfer.StringSelection(value), null)
+            }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(2.dp)
       ) {
         Text("\uD83D\uDCCB", fontSize = 9.sp) // 📋
       }
@@ -250,23 +248,23 @@ private fun DetailRow(label: String, value: String, textColor: Color) {
 
 @Composable
 private fun HeaderIconButton(
-    icon: String,
-    textColor: Color,
-    focusedBorderColor: Color,
-    onClick: () -> Unit,
+  icon: String,
+  textColor: Color,
+  focusedBorderColor: Color,
+  onClick: () -> Unit,
 ) {
   var isFocused by remember { mutableStateOf(false) }
   Box(
-      modifier =
-          Modifier.onFocusChanged { isFocused = it.isFocused }
-              .then(
-                  if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
-                  else Modifier
-              )
-              .background(textColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-              .clickable { onClick() }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 6.dp, vertical = 2.dp),
+    modifier =
+      Modifier.onFocusChanged { isFocused = it.isFocused }
+        .then(
+          if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
+          else Modifier
+        )
+        .background(textColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+        .clickable { onClick() }
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 6.dp, vertical = 2.dp)
   ) {
     Text(icon, fontSize = 11.sp, color = textColor.copy(alpha = 0.6f))
   }
@@ -291,31 +289,31 @@ private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
         event.contentType?.let { put("contentType", JsonPrimitive(it)) }
         event.requestHeaders?.let { headers ->
           put(
-              "requestHeaders",
-              buildJsonObject {
-                headers.forEach { (k, v) ->
-                  val redacted =
-                      if (
-                          k.equals("Authorization", ignoreCase = true) ||
-                              k.equals("Cookie", ignoreCase = true) ||
-                              k.equals("Set-Cookie", ignoreCase = true)
-                      )
-                          "[REDACTED]"
-                      else v
-                  put(k, JsonPrimitive(redacted))
-                }
-              },
+            "requestHeaders",
+            buildJsonObject {
+              headers.forEach { (k, v) ->
+                val redacted =
+                  if (
+                    k.equals("Authorization", ignoreCase = true) ||
+                      k.equals("Cookie", ignoreCase = true) ||
+                      k.equals("Set-Cookie", ignoreCase = true)
+                  )
+                    "[REDACTED]"
+                  else v
+                put(k, JsonPrimitive(redacted))
+              }
+            },
           )
         }
         event.responseHeaders?.let { headers ->
           put(
-              "responseHeaders",
-              buildJsonObject {
-                headers.forEach { (k, v) ->
-                  val redacted = if (k.equals("Set-Cookie", ignoreCase = true)) "[REDACTED]" else v
-                  put(k, JsonPrimitive(redacted))
-                }
-              },
+            "responseHeaders",
+            buildJsonObject {
+              headers.forEach { (k, v) ->
+                val redacted = if (k.equals("Set-Cookie", ignoreCase = true)) "[REDACTED]" else v
+                put(k, JsonPrimitive(redacted))
+              }
+            },
           )
         }
       }
@@ -328,20 +326,20 @@ private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
         event.screen?.let { put("screen", JsonPrimitive(it)) }
         event.stackTrace?.let { frames ->
           put(
-              "stackTrace",
-              buildJsonArray {
-                frames.forEach { f ->
-                  add(
-                      buildJsonObject {
-                        put("className", JsonPrimitive(f.className))
-                        put("methodName", JsonPrimitive(f.methodName))
-                        f.fileName?.let { put("fileName", JsonPrimitive(it)) }
-                        f.lineNumber?.let { put("lineNumber", JsonPrimitive(it)) }
-                        put("isAppCode", JsonPrimitive(f.isAppCode))
-                      }
-                  )
-                }
-              },
+            "stackTrace",
+            buildJsonArray {
+              frames.forEach { f ->
+                add(
+                  buildJsonObject {
+                    put("className", JsonPrimitive(f.className))
+                    put("methodName", JsonPrimitive(f.methodName))
+                    f.fileName?.let { put("fileName", JsonPrimitive(it)) }
+                    f.lineNumber?.let { put("lineNumber", JsonPrimitive(it)) }
+                    put("isAppCode", JsonPrimitive(f.isAppCode))
+                  }
+                )
+              }
+            },
           )
         }
       }
@@ -406,19 +404,19 @@ private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
         put("baselinedCount", JsonPrimitive(event.baselinedCount))
         if (event.violations.isNotEmpty()) {
           put(
-              "violations",
-              buildJsonArray {
-                event.violations.forEach { v ->
-                  add(
-                      buildJsonObject {
-                        put("type", JsonPrimitive(v.type))
-                        put("severity", JsonPrimitive(v.severity))
-                        put("criterion", JsonPrimitive(v.criterion))
-                        put("message", JsonPrimitive(v.message))
-                      }
-                  )
-                }
-              },
+            "violations",
+            buildJsonArray {
+              event.violations.forEach { v ->
+                add(
+                  buildJsonObject {
+                    put("type", JsonPrimitive(v.type))
+                    put("severity", JsonPrimitive(v.severity))
+                    put("criterion", JsonPrimitive(v.criterion))
+                    put("message", JsonPrimitive(v.message))
+                  }
+                )
+              }
+            },
           )
         }
       }
@@ -436,9 +434,9 @@ private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
  */
 @Composable
 private fun NetworkTabbedDetail(
-    event: TelemetryDisplayEvent.Network,
-    textColor: Color,
-    focusedBorderColor: Color,
+  event: TelemetryDisplayEvent.Network,
+  textColor: Color,
+  focusedBorderColor: Color,
 ) {
   val tabs = listOf("Overview", "Headers", "Request", "Response")
   var selectedTab by remember(event) { mutableStateOf(0) }
@@ -448,39 +446,39 @@ private fun NetworkTabbedDetail(
   var isRunning by remember(event) { mutableStateOf(false) }
 
   InspectorTabBar(
-      tabs = tabs,
-      selected = selectedTab,
-      onSelect = { selectedTab = it },
-      textColor = textColor,
-      focusedBorderColor = focusedBorderColor,
+    tabs = tabs,
+    selected = selectedTab,
+    onSelect = { selectedTab = it },
+    textColor = textColor,
+    focusedBorderColor = focusedBorderColor,
   )
 
   when (selectedTab) {
     0 ->
-        NetworkOverviewTab(
-            event = event,
-            textColor = textColor,
-            replayResult = replayResult,
-            isRunning = isRunning,
-            onRunReplay = {
-              isRunning = true
-              replayResult = null
-              Thread {
-                val result =
-                    NetworkRequestRunner.run(
-                        url = event.url,
-                        method = event.method,
-                        requestHeaders = event.requestHeaders,
-                        requestBody = event.requestBody,
-                    )
-                javax.swing.SwingUtilities.invokeLater {
-                  replayResult = result
-                  isRunning = false
-                }
-              }
-                  .start()
-            },
-        )
+      NetworkOverviewTab(
+        event = event,
+        textColor = textColor,
+        replayResult = replayResult,
+        isRunning = isRunning,
+        onRunReplay = {
+          isRunning = true
+          replayResult = null
+          Thread {
+            val result =
+              NetworkRequestRunner.run(
+                url = event.url,
+                method = event.method,
+                requestHeaders = event.requestHeaders,
+                requestBody = event.requestBody,
+              )
+            javax.swing.SwingUtilities.invokeLater {
+              replayResult = result
+              isRunning = false
+            }
+          }
+            .start()
+        },
+      )
     1 -> NetworkHeadersTab(event, textColor)
     2 -> NetworkRequestTab(event, textColor)
     3 -> NetworkResponseTab(event, textColor)
@@ -489,11 +487,11 @@ private fun NetworkTabbedDetail(
 
 @Composable
 private fun NetworkOverviewTab(
-    event: TelemetryDisplayEvent.Network,
-    textColor: Color,
-    replayResult: NetworkReplayResult?,
-    isRunning: Boolean,
-    onRunReplay: () -> Unit,
+  event: TelemetryDisplayEvent.Network,
+  textColor: Color,
+  replayResult: NetworkReplayResult?,
+  isRunning: Boolean,
+  onRunReplay: () -> Unit,
 ) {
   DetailRow("Method", event.method, textColor)
   DetailRow("Status", "${event.statusCode}", textColor)
@@ -526,22 +524,22 @@ private fun NetworkOverviewTab(
   if (result != null) {
     Spacer(Modifier.height(8.dp))
     Text(
-        "Replay Result",
-        fontSize = 10.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = textColor.copy(alpha = 0.7f),
+      "Replay Result",
+      fontSize = 10.sp,
+      fontWeight = FontWeight.SemiBold,
+      color = textColor.copy(alpha = 0.7f),
     )
     Spacer(Modifier.height(4.dp))
     DetailRow("Status", "${result.statusCode}", textColor)
     DetailRow("Duration", "${result.durationMs}ms", textColor)
     result.error?.let { DetailRow("Error", it, textColor) }
     val replayRespHeadersCopy =
-        result.responseHeaders.entries.joinToString("\n") { "${it.key}: ${it.value}" }
+      result.responseHeaders.entries.joinToString("\n") { "${it.key}: ${it.value}" }
     CollapsibleSection(
-        "Response Headers",
-        textColor,
-        defaultExpanded = false,
-        copyText = replayRespHeadersCopy,
+      "Response Headers",
+      textColor,
+      defaultExpanded = false,
+      copyText = replayRespHeadersCopy,
     ) {
       if (result.responseHeaders.isNotEmpty()) {
         HeaderDataTable(result.responseHeaders, textColor)
@@ -551,49 +549,47 @@ private fun NetworkOverviewTab(
     }
     CollapsibleSection("Response Body", textColor, copyText = result.responseBody) {
       val contentType =
-          result.responseHeaders.entries
-              .find { it.key.equals("content-type", ignoreCase = true) }
-              ?.value
+        result.responseHeaders.entries
+          .find { it.key.equals("content-type", ignoreCase = true) }
+          ?.value
       if (result.responseBodyBytes != null && contentType?.startsWith("image/") == true) {
         // Render image from raw bytes
         val bitmap =
-            remember(result.responseBodyBytes) {
-              try {
-                org.jetbrains.skia.Image.makeFromEncoded(result.responseBodyBytes)
-                    .toComposeImageBitmap()
-              } catch (_: Exception) {
-                null
-              }
+          remember(result.responseBodyBytes) {
+            try {
+              org.jetbrains.skia.Image.makeFromEncoded(result.responseBodyBytes)
+                .toComposeImageBitmap()
+            } catch (_: Exception) {
+              null
             }
+          }
         if (bitmap != null) {
           Box(
-              Modifier.fillMaxWidth()
-                  .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-                  .padding(8.dp)
+            Modifier.fillMaxWidth()
+              .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+              .padding(8.dp)
           ) {
             Image(
-                bitmap = bitmap,
-                contentDescription = "Response image",
-                modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
-                contentScale = ContentScale.Fit,
+              bitmap = bitmap,
+              contentDescription = "Response image",
+              modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
+              contentScale = ContentScale.Fit,
             )
           }
         } else {
           Text(
-              "Image (${contentType}, ${formatByteSize(result.responseBodyBytes.size.toLong())})",
-              fontSize = 9.sp,
-              color = textColor.copy(alpha = 0.4f),
+            "Image (${contentType}, ${formatByteSize(result.responseBodyBytes.size.toLong())})",
+            fontSize = 9.sp,
+            color = textColor.copy(alpha = 0.4f),
           )
         }
       } else {
         NetworkBodyContent(
-            body = result.responseBody,
-            contentType = contentType,
-            bodySize =
-                result.responseBody?.length?.toLong()
-                    ?: result.responseBodyBytes?.size?.toLong()
-                    ?: -1,
-            textColor = textColor,
+          body = result.responseBody,
+          contentType = contentType,
+          bodySize =
+            result.responseBody?.length?.toLong() ?: result.responseBodyBytes?.size?.toLong() ?: -1,
+          textColor = textColor,
         )
       }
     }
@@ -603,14 +599,14 @@ private fun NetworkOverviewTab(
 @Composable
 private fun NetworkHeadersTab(event: TelemetryDisplayEvent.Network, textColor: Color) {
   val reqHeadersCopy =
-      remember(event.requestHeaders) {
-        event.requestHeaders?.entries?.joinToString("\n") { "${it.key}: ${it.value}" }
-      }
+    remember(event.requestHeaders) {
+      event.requestHeaders?.entries?.joinToString("\n") { "${it.key}: ${it.value}" }
+    }
   CollapsibleSection(
-      "Request Headers",
-      textColor,
-      defaultExpanded = !event.requestHeaders.isNullOrEmpty(),
-      copyText = reqHeadersCopy,
+    "Request Headers",
+    textColor,
+    defaultExpanded = !event.requestHeaders.isNullOrEmpty(),
+    copyText = reqHeadersCopy,
   ) {
     val reqHeaders = event.requestHeaders
     if (!reqHeaders.isNullOrEmpty()) {
@@ -623,14 +619,14 @@ private fun NetworkHeadersTab(event: TelemetryDisplayEvent.Network, textColor: C
   Spacer(Modifier.height(8.dp))
 
   val respHeadersCopy =
-      remember(event.responseHeaders) {
-        event.responseHeaders?.entries?.joinToString("\n") { "${it.key}: ${it.value}" }
-      }
+    remember(event.responseHeaders) {
+      event.responseHeaders?.entries?.joinToString("\n") { "${it.key}: ${it.value}" }
+    }
   CollapsibleSection(
-      "Response Headers",
-      textColor,
-      defaultExpanded = !event.responseHeaders.isNullOrEmpty(),
-      copyText = respHeadersCopy,
+    "Response Headers",
+    textColor,
+    defaultExpanded = !event.responseHeaders.isNullOrEmpty(),
+    copyText = respHeadersCopy,
   ) {
     val respHeaders = event.responseHeaders
     if (!respHeaders.isNullOrEmpty()) {
@@ -645,16 +641,16 @@ private fun NetworkHeadersTab(event: TelemetryDisplayEvent.Network, textColor: C
 private fun NetworkRequestTab(event: TelemetryDisplayEvent.Network, textColor: Color) {
   val reqSize = (event.requestHeaders?.get("Content-Length")?.toLongOrNull()) ?: -1
   CollapsibleSection(
-      "Request Body",
-      textColor,
-      defaultExpanded = !event.requestBody.isNullOrBlank(),
-      copyText = event.requestBody,
+    "Request Body",
+    textColor,
+    defaultExpanded = !event.requestBody.isNullOrBlank(),
+    copyText = event.requestBody,
   ) {
     NetworkBodyContent(
-        body = event.requestBody,
-        contentType = event.requestHeaders?.get("Content-Type"),
-        bodySize = reqSize,
-        textColor = textColor,
+      body = event.requestBody,
+      contentType = event.requestHeaders?.get("Content-Type"),
+      bodySize = reqSize,
+      textColor = textColor,
     )
   }
 }
@@ -663,16 +659,16 @@ private fun NetworkRequestTab(event: TelemetryDisplayEvent.Network, textColor: C
 private fun NetworkResponseTab(event: TelemetryDisplayEvent.Network, textColor: Color) {
   val respSize = (event.responseHeaders?.get("Content-Length")?.toLongOrNull()) ?: -1
   CollapsibleSection(
-      "Response Body",
-      textColor,
-      defaultExpanded = !event.responseBody.isNullOrBlank(),
-      copyText = event.responseBody,
+    "Response Body",
+    textColor,
+    defaultExpanded = !event.responseBody.isNullOrBlank(),
+    copyText = event.responseBody,
   ) {
     NetworkBodyContent(
-        body = event.responseBody,
-        contentType = event.contentType,
-        bodySize = respSize,
-        textColor = textColor,
+      body = event.responseBody,
+      contentType = event.contentType,
+      bodySize = respSize,
+      textColor = textColor,
     )
   }
 }
@@ -680,20 +676,20 @@ private fun NetworkResponseTab(event: TelemetryDisplayEvent.Network, textColor: 
 /** Failure event detail with tabbed sub-views: Summary and Stack Trace. */
 @Composable
 private fun FailureTabbedDetail(
-    event: TelemetryDisplayEvent.Failure,
-    textColor: Color,
-    onOpenSource: ((String, Int, String) -> Unit)?,
-    focusedBorderColor: Color,
+  event: TelemetryDisplayEvent.Failure,
+  textColor: Color,
+  onOpenSource: ((String, Int, String) -> Unit)?,
+  focusedBorderColor: Color,
 ) {
   val tabs = listOf("Summary", "Stack Trace")
   var selectedTab by remember(event) { mutableStateOf(0) }
 
   InspectorTabBar(
-      tabs = tabs,
-      selected = selectedTab,
-      onSelect = { selectedTab = it },
-      textColor = textColor,
-      focusedBorderColor = focusedBorderColor,
+    tabs = tabs,
+    selected = selectedTab,
+    onSelect = { selectedTab = it },
+    textColor = textColor,
+    focusedBorderColor = focusedBorderColor,
   )
 
   when (selectedTab) {
@@ -705,28 +701,28 @@ private fun FailureTabbedDetail(
 @Composable
 private fun FailureSummaryTab(event: TelemetryDisplayEvent.Failure, textColor: Color) {
   val severityColor =
-      when (event.severity) {
-        "critical" -> Color(0xFFFF4040)
-        "high" -> Color(0xFFFF6B6B)
-        "medium" -> Color(0xFFE0C040)
-        else -> textColor.copy(alpha = 0.7f)
-      }
+    when (event.severity) {
+      "critical" -> Color(0xFFFF4040)
+      "high" -> Color(0xFFFF6B6B)
+      "medium" -> Color(0xFFE0C040)
+      else -> textColor.copy(alpha = 0.7f)
+    }
 
   Row(
-      modifier = Modifier.padding(vertical = 2.dp),
-      horizontalArrangement = Arrangement.spacedBy(4.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.padding(vertical = 2.dp),
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Box(
-        modifier =
-            Modifier.background(severityColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
-                .padding(horizontal = 6.dp, vertical = 1.dp),
+      modifier =
+        Modifier.background(severityColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+          .padding(horizontal = 6.dp, vertical = 1.dp)
     ) {
       Text(
-          event.severity.uppercase(),
-          fontSize = 9.sp,
-          fontWeight = FontWeight.Bold,
-          color = severityColor,
+        event.severity.uppercase(),
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Bold,
+        color = severityColor,
       )
     }
   }
@@ -740,9 +736,9 @@ private fun FailureSummaryTab(event: TelemetryDisplayEvent.Failure, textColor: C
 
 @Composable
 private fun FailureStackTraceTab(
-    event: TelemetryDisplayEvent.Failure,
-    textColor: Color,
-    onOpenSource: ((String, Int, String) -> Unit)?,
+  event: TelemetryDisplayEvent.Failure,
+  textColor: Color,
+  onOpenSource: ((String, Int, String) -> Unit)?,
 ) {
   val frames = event.stackTrace
   if (frames.isNullOrEmpty()) {
@@ -761,23 +757,23 @@ private fun FailureStackTraceTab(
     val fLine = frame.lineNumber
     if (frame.isAppCode && onOpenSource != null && fName != null && fLine != null) {
       Text(
-          frameText,
-          fontSize = 9.sp,
-          fontFamily = FontFamily.Monospace,
-          fontWeight = FontWeight.SemiBold,
-          color = textColor.copy(alpha = 0.9f),
-          modifier =
-              Modifier.clickable { onOpenSource(fName, fLine, frame.className) }
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(vertical = 1.dp),
+        frameText,
+        fontSize = 9.sp,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.SemiBold,
+        color = textColor.copy(alpha = 0.9f),
+        modifier =
+          Modifier.clickable { onOpenSource(fName, fLine, frame.className) }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(vertical = 1.dp),
       )
     } else {
       Text(
-          frameText,
-          fontSize = 9.sp,
-          fontFamily = FontFamily.Monospace,
-          color = textColor.copy(alpha = 0.4f),
-          modifier = Modifier.padding(vertical = 1.dp),
+        frameText,
+        fontSize = 9.sp,
+        fontFamily = FontFamily.Monospace,
+        color = textColor.copy(alpha = 0.4f),
+        modifier = Modifier.padding(vertical = 1.dp),
       )
     }
   }
@@ -785,57 +781,56 @@ private fun FailureStackTraceTab(
 
 @Composable
 private fun CollapsibleSection(
-    title: String,
-    textColor: Color,
-    defaultExpanded: Boolean = true,
-    copyText: String? = null,
-    content: @Composable () -> Unit,
+  title: String,
+  textColor: Color,
+  defaultExpanded: Boolean = true,
+  copyText: String? = null,
+  content: @Composable () -> Unit,
 ) {
   val focusedBorderColor = SharedTheme.globalColors.outlines.focused
   var expanded by remember { mutableStateOf(defaultExpanded) }
   var isFocused by remember { mutableStateOf(false) }
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .onFocusChanged { isFocused = it.isFocused }
-              .then(
-                  if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
-                  else Modifier
-              )
-              .clickable { expanded = !expanded }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(vertical = 2.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .onFocusChanged { isFocused = it.isFocused }
+        .then(
+          if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
+          else Modifier
+        )
+        .clickable { expanded = !expanded }
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(vertical = 2.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
-        if (expanded) "\u25BE" else "\u25B8",
-        fontSize = 9.sp,
-        color = textColor.copy(alpha = 0.5f),
+      if (expanded) "\u25BE" else "\u25B8",
+      fontSize = 9.sp,
+      color = textColor.copy(alpha = 0.5f),
     )
     Spacer(Modifier.width(4.dp))
     Text(
-        title,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = textColor.copy(alpha = 0.7f),
-        modifier = Modifier.weight(1f),
+      title,
+      fontSize = 10.sp,
+      fontWeight = FontWeight.SemiBold,
+      color = textColor.copy(alpha = 0.7f),
+      modifier = Modifier.weight(1f),
     )
     if (copyText != null && expanded) {
       var copyIsFocused by remember { mutableStateOf(false) }
       Box(
-          modifier =
-              Modifier.onFocusChanged { copyIsFocused = it.isFocused }
-                  .then(
-                      if (copyIsFocused)
-                          Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
-                      else Modifier
-                  )
-                  .clickable {
-                    val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                    clipboard.setContents(java.awt.datatransfer.StringSelection(copyText), null)
-                  }
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(4.dp),
+        modifier =
+          Modifier.onFocusChanged { copyIsFocused = it.isFocused }
+            .then(
+              if (copyIsFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
+              else Modifier
+            )
+            .clickable {
+              val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+              clipboard.setContents(java.awt.datatransfer.StringSelection(copyText), null)
+            }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(4.dp)
       ) {
         Text("\uD83D\uDCCB", fontSize = 10.sp) // clipboard icon
       }
@@ -849,16 +844,16 @@ private fun CollapsibleSection(
 @Composable
 private fun MonospaceBlock(text: String, textColor: Color) {
   Box(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-              .padding(6.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+        .padding(6.dp)
   ) {
     Text(
-        text,
-        fontSize = 9.sp,
-        fontFamily = FontFamily.Monospace,
-        color = textColor.copy(alpha = 0.8f),
+      text,
+      fontSize = 9.sp,
+      fontFamily = FontFamily.Monospace,
+      color = textColor.copy(alpha = 0.8f),
     )
   }
 }
@@ -871,15 +866,15 @@ private fun MonospaceBlock(text: String, textColor: Color) {
 private fun SyntaxHighlightedJson(json: String, textColor: Color) {
   val annotated = remember(json, textColor) { buildSyntaxHighlightedJson(json, textColor) }
   Box(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-              .padding(6.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+        .padding(6.dp)
   ) {
     Text(
-        annotated,
-        fontSize = 9.sp,
-        fontFamily = FontFamily.Monospace,
+      annotated,
+      fontSize = 9.sp,
+      fontFamily = FontFamily.Monospace,
     )
   }
 }
@@ -922,11 +917,11 @@ private fun buildSyntaxHighlightedJson(json: String, baseColor: Color): Annotate
         }
         json.startsWith("true", i) || json.startsWith("false", i) || json.startsWith("null", i) -> {
           val end =
-              when {
-                json.startsWith("true", i) -> i + 4
-                json.startsWith("false", i) -> i + 5
-                else -> i + 4
-              }
+            when {
+              json.startsWith("true", i) -> i + 4
+              json.startsWith("false", i) -> i + 5
+              else -> i + 4
+            }
           withStyle(SpanStyle(color = keywordColor)) { append(json.substring(i, end)) }
           i = end
         }
@@ -934,13 +929,13 @@ private fun buildSyntaxHighlightedJson(json: String, baseColor: Color): Annotate
           var j = i
           if (j < json.length && json[j] == '-') j++
           while (
-              j < json.length &&
-                  (json[j].isDigit() ||
-                      json[j] == '.' ||
-                      json[j] == 'e' ||
-                      json[j] == 'E' ||
-                      json[j] == '+' ||
-                      json[j] == '-')
+            j < json.length &&
+              (json[j].isDigit() ||
+                json[j] == '.' ||
+                json[j] == 'e' ||
+                json[j] == 'E' ||
+                json[j] == '+' ||
+                json[j] == '-')
           ) j++
           withStyle(SpanStyle(color = numberColor)) { append(json.substring(i, j)) }
           i = j
@@ -998,35 +993,35 @@ private fun copyEventAsMarkdown(event: TelemetryDisplayEvent) {
 
 @Composable
 private fun ActionButton(
-    label: String,
-    textColor: Color,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
+  label: String,
+  textColor: Color,
+  enabled: Boolean = true,
+  onClick: () -> Unit,
 ) {
   val focusedBorderColor = SharedTheme.globalColors.outlines.focused
   var isFocused by remember { mutableStateOf(false) }
   Box(
-      modifier =
-          Modifier.onFocusChanged { isFocused = it.isFocused }
-              .then(
-                  if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
-                  else Modifier
-              )
-              .background(
-                  if (enabled) textColor.copy(alpha = 0.12f) else textColor.copy(alpha = 0.05f),
-                  RoundedCornerShape(4.dp),
-              )
-              .then(
-                  if (enabled) Modifier.clickable { onClick() }.pointerHoverIcon(PointerIcon.Hand)
-                  else Modifier
-              )
-              .padding(horizontal = 10.dp, vertical = 4.dp),
+    modifier =
+      Modifier.onFocusChanged { isFocused = it.isFocused }
+        .then(
+          if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
+          else Modifier
+        )
+        .background(
+          if (enabled) textColor.copy(alpha = 0.12f) else textColor.copy(alpha = 0.05f),
+          RoundedCornerShape(4.dp),
+        )
+        .then(
+          if (enabled) Modifier.clickable { onClick() }.pointerHoverIcon(PointerIcon.Hand)
+          else Modifier
+        )
+        .padding(horizontal = 10.dp, vertical = 4.dp)
   ) {
     Text(
-        label,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = if (enabled) textColor.copy(alpha = 0.8f) else textColor.copy(alpha = 0.4f),
+      label,
+      fontSize = 10.sp,
+      fontWeight = FontWeight.SemiBold,
+      color = if (enabled) textColor.copy(alpha = 0.8f) else textColor.copy(alpha = 0.4f),
     )
   }
 }
@@ -1048,9 +1043,9 @@ private fun generateCurlCommand(event: TelemetryDisplayEvent.Network): String {
 
 @Composable
 private fun NavigationDetail(
-    event: TelemetryDisplayEvent.Navigation,
-    textColor: Color,
-    screenshotLoader: ScreenshotLoader? = null,
+  event: TelemetryDisplayEvent.Navigation,
+  textColor: Color,
+  screenshotLoader: ScreenshotLoader? = null,
 ) {
   DetailRow("Destination", event.destination, textColor)
   event.source?.let { DetailRow("Source", it, textColor) }
@@ -1071,19 +1066,19 @@ private fun NavigationDetail(
     }
     if (!loadFailed) {
       Box(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .heightIn(max = 300.dp)
-                  .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp)),
-          contentAlignment = Alignment.Center,
+        modifier =
+          Modifier.fillMaxWidth()
+            .heightIn(max = 300.dp)
+            .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp)),
+        contentAlignment = Alignment.Center,
       ) {
         val loadedBitmap = bitmap
         if (loadedBitmap != null) {
           Image(
-              bitmap = loadedBitmap,
-              contentDescription = "Screenshot of ${event.destination}",
-              modifier = Modifier.fillMaxWidth(),
-              contentScale = ContentScale.Fit,
+            bitmap = loadedBitmap,
+            contentDescription = "Screenshot of ${event.destination}",
+            modifier = Modifier.fillMaxWidth(),
+            contentScale = ContentScale.Fit,
           )
         } else {
           Text("Loading...", fontSize = 9.sp, color = textColor.copy(alpha = 0.4f))
@@ -1096,23 +1091,23 @@ private fun NavigationDetail(
 @Composable
 private fun LogDetail(event: TelemetryDisplayEvent.Log, textColor: Color) {
   val levelName =
-      when (event.level) {
-        2 -> "VERBOSE"
-        3 -> "DEBUG"
-        4 -> "INFO"
-        5 -> "WARN"
-        6 -> "ERROR"
-        7 -> "ASSERT"
-        else -> "UNKNOWN"
-      }
+    when (event.level) {
+      2 -> "VERBOSE"
+      3 -> "DEBUG"
+      4 -> "INFO"
+      5 -> "WARN"
+      6 -> "ERROR"
+      7 -> "ASSERT"
+      else -> "UNKNOWN"
+    }
   DetailRow("Level", levelName, textColor)
   DetailRow("Tag", event.tag, textColor)
   Spacer(Modifier.height(4.dp))
   Text(
-      event.message,
-      fontSize = 10.sp,
-      fontFamily = FontFamily.Monospace,
-      color = textColor.copy(alpha = 0.85f),
+    event.message,
+    fontSize = 10.sp,
+    fontFamily = FontFamily.Monospace,
+    color = textColor.copy(alpha = 0.85f),
   )
 }
 
@@ -1137,65 +1132,65 @@ private fun StorageDetail(event: TelemetryDisplayEvent.Storage, textColor: Color
     // Value removed — show only the previous value
     curValue == null && event.changeType == "remove" && prevValue != null -> {
       Text(
-          "Removed value:",
-          fontSize = 9.sp,
-          fontWeight = FontWeight.SemiBold,
-          color = textColor.copy(alpha = 0.5f),
+        "Removed value:",
+        fontSize = 9.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = textColor.copy(alpha = 0.5f),
       )
       Text(
-          prevValue,
-          fontSize = 10.sp,
-          fontFamily = FontFamily.Monospace,
-          color = Color(0xFFFF6B6B).copy(alpha = 0.8f),
-          modifier = Modifier.padding(vertical = 1.dp),
+        prevValue,
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace,
+        color = Color(0xFFFF6B6B).copy(alpha = 0.8f),
+        modifier = Modifier.padding(vertical = 1.dp),
       )
     }
     // New key added — show only the new value
     prevValue == null && event.changeType == "add" -> {
       curValue?.let { v ->
         Text(
-            "New value:",
-            fontSize = 9.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = textColor.copy(alpha = 0.5f),
+          "New value:",
+          fontSize = 9.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = textColor.copy(alpha = 0.5f),
         )
         Text(
-            v,
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
-            color = Color(0xFF51CF66).copy(alpha = 0.8f),
-            modifier = Modifier.padding(vertical = 1.dp),
+          v,
+          fontSize = 10.sp,
+          fontFamily = FontFamily.Monospace,
+          color = Color(0xFF51CF66).copy(alpha = 0.8f),
+          modifier = Modifier.padding(vertical = 1.dp),
         )
       }
     }
     // Modified — show before/after
     prevValue != null && curValue != null -> {
       Text(
-          "Previous:",
-          fontSize = 9.sp,
-          fontWeight = FontWeight.SemiBold,
-          color = textColor.copy(alpha = 0.5f),
+        "Previous:",
+        fontSize = 9.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = textColor.copy(alpha = 0.5f),
       )
       Text(
-          prevValue,
-          fontSize = 10.sp,
-          fontFamily = FontFamily.Monospace,
-          color = Color(0xFFFF6B6B).copy(alpha = 0.7f),
-          modifier = Modifier.padding(vertical = 1.dp),
+        prevValue,
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace,
+        color = Color(0xFFFF6B6B).copy(alpha = 0.7f),
+        modifier = Modifier.padding(vertical = 1.dp),
       )
       Spacer(Modifier.height(2.dp))
       Text(
-          "New:",
-          fontSize = 9.sp,
-          fontWeight = FontWeight.SemiBold,
-          color = textColor.copy(alpha = 0.5f),
+        "New:",
+        fontSize = 9.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = textColor.copy(alpha = 0.5f),
       )
       Text(
-          curValue,
-          fontSize = 10.sp,
-          fontFamily = FontFamily.Monospace,
-          color = Color(0xFF51CF66).copy(alpha = 0.8f),
-          modifier = Modifier.padding(vertical = 1.dp),
+        curValue,
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace,
+        color = Color(0xFF51CF66).copy(alpha = 0.8f),
+        modifier = Modifier.padding(vertical = 1.dp),
       )
     }
     // Fallback — just show value
@@ -1221,18 +1216,18 @@ private fun LayoutDetailMetadata(event: TelemetryDisplayEvent.Layout, textColor:
   val details = event.detailsJson
   if (details != null) {
     val metadata =
-        remember(details) {
-          try {
-            val json = Json { ignoreUnknownKeys = true }
-            val obj = json.parseToJsonElement(details).jsonObject
-            val foreground =
-                obj["foregroundActivity"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
-            val windowCount = obj["windowCount"]?.jsonPrimitive?.intOrNull
-            Pair(foreground, windowCount)
-          } catch (_: Exception) {
-            null
-          }
+      remember(details) {
+        try {
+          val json = Json { ignoreUnknownKeys = true }
+          val obj = json.parseToJsonElement(details).jsonObject
+          val foreground =
+            obj["foregroundActivity"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content
+          val windowCount = obj["windowCount"]?.jsonPrimitive?.intOrNull
+          Pair(foreground, windowCount)
+        } catch (_: Exception) {
+          null
         }
+      }
     if (metadata != null) {
       Spacer(Modifier.height(4.dp))
       metadata.first?.let { DetailRow("Foreground Activity", it, textColor) }
@@ -1247,61 +1242,61 @@ private fun LayoutDetailMetadata(event: TelemetryDisplayEvent.Layout, textColor:
  */
 @Composable
 private fun LayoutDetailHierarchy(
-    event: TelemetryDisplayEvent.Layout,
-    modifier: Modifier = Modifier,
+  event: TelemetryDisplayEvent.Layout,
+  modifier: Modifier = Modifier,
 ) {
   val details = event.detailsJson ?: return
   val parsed =
-      remember(details) {
-        try {
-          val json = Json { ignoreUnknownKeys = true }
-          val obj = json.parseToJsonElement(details).jsonObject
-          obj["hierarchy"]?.let { hierarchyElement ->
-            dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson(
-                buildJsonObject { put("hierarchy", hierarchyElement) }
-            )
-          }
-        } catch (_: Exception) {
-          null
+    remember(details) {
+      try {
+        val json = Json { ignoreUnknownKeys = true }
+        val obj = json.parseToJsonElement(details).jsonObject
+        obj["hierarchy"]?.let { hierarchyElement ->
+          dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson(
+            buildJsonObject { put("hierarchy", hierarchyElement) }
+          )
         }
+      } catch (_: Exception) {
+        null
       }
+    }
   val hierarchy = parsed ?: return
 
   dev.jasonpearson.automobile.desktop.core.layout.HierarchyTreeView(
-      hierarchy = hierarchy.root,
-      selectedElementId = null,
-      hoveredElementId = null,
-      onElementSelected = {},
-      onElementHovered = {},
-      parentMap = hierarchy.parentMap,
-      modifier = modifier,
+    hierarchy = hierarchy.root,
+    selectedElementId = null,
+    hoveredElementId = null,
+    onElementSelected = {},
+    onElementHovered = {},
+    parentMap = hierarchy.parentMap,
+    modifier = modifier,
   )
 }
 
 @Composable
 private fun PerformanceDetail(event: TelemetryDisplayEvent.Performance, textColor: Color) {
   val healthColor =
-      when (event.health) {
-        "critical" -> Color(0xFFFF4040)
-        "warning" -> Color(0xFFFFA94D)
-        else -> Color(0xFF51CF66)
-      }
+    when (event.health) {
+      "critical" -> Color(0xFFFF4040)
+      "warning" -> Color(0xFFFFA94D)
+      else -> Color(0xFF51CF66)
+    }
 
   Row(
-      modifier = Modifier.padding(vertical = 2.dp),
-      horizontalArrangement = Arrangement.spacedBy(4.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.padding(vertical = 2.dp),
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Box(
-        modifier =
-            Modifier.background(healthColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
-                .padding(horizontal = 6.dp, vertical = 1.dp),
+      modifier =
+        Modifier.background(healthColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+          .padding(horizontal = 6.dp, vertical = 1.dp)
     ) {
       Text(
-          event.health.uppercase(),
-          fontSize = 9.sp,
-          fontWeight = FontWeight.Bold,
-          color = healthColor,
+        event.health.uppercase(),
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Bold,
+        color = healthColor,
       )
     }
   }
@@ -1323,20 +1318,20 @@ private fun PerformanceDetail(event: TelemetryDisplayEvent.Performance, textColo
 private fun MemoryDetail(event: TelemetryDisplayEvent.Memory, textColor: Color) {
   val resultColor = if (event.passed) Color(0xFF51CF66) else Color(0xFFFF6B6B)
   Row(
-      modifier = Modifier.padding(vertical = 2.dp),
-      horizontalArrangement = Arrangement.spacedBy(4.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.padding(vertical = 2.dp),
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Box(
-        modifier =
-            Modifier.background(resultColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
-                .padding(horizontal = 6.dp, vertical = 1.dp),
+      modifier =
+        Modifier.background(resultColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+          .padding(horizontal = 6.dp, vertical = 1.dp)
     ) {
       Text(
-          if (event.passed) "PASSED" else "FAILED",
-          fontSize = 9.sp,
-          fontWeight = FontWeight.Bold,
-          color = resultColor,
+        if (event.passed) "PASSED" else "FAILED",
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Bold,
+        color = resultColor,
       )
     }
   }
@@ -1378,24 +1373,24 @@ private fun AccessibilityDetail(event: TelemetryDisplayEvent.Accessibility, text
     Spacer(Modifier.height(8.dp))
     for (v in event.violations) {
       val sevColor =
-          when (v.severity) {
-            "error" -> Color(0xFFFF6B6B)
-            "warning" -> Color(0xFFFFA94D)
-            else -> textColor.copy(alpha = 0.6f)
-          }
+        when (v.severity) {
+          "error" -> Color(0xFFFF6B6B)
+          "warning" -> Color(0xFFFFA94D)
+          else -> textColor.copy(alpha = 0.6f)
+        }
       Row(modifier = Modifier.padding(vertical = 2.dp)) {
         Text(
-            "[${v.criterion}] ",
-            fontSize = 9.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.SemiBold,
-            color = sevColor,
+          "[${v.criterion}] ",
+          fontSize = 9.sp,
+          fontFamily = FontFamily.Monospace,
+          fontWeight = FontWeight.SemiBold,
+          color = sevColor,
         )
         Text(
-            "${v.type}: ${v.message}",
-            fontSize = 9.sp,
-            fontFamily = FontFamily.Monospace,
-            color = textColor.copy(alpha = 0.75f),
+          "${v.type}: ${v.message}",
+          fontSize = 9.sp,
+          fontFamily = FontFamily.Monospace,
+          color = textColor.copy(alpha = 0.75f),
         )
       }
     }

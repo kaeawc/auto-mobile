@@ -28,8 +28,8 @@ import kotlinx.coroutines.withContext
 /** Section displaying daemon health: socket path, connection state, and version. */
 @Composable
 fun DaemonStatusSection(
-    dataSourceMode: DataSourceMode,
-    modifier: Modifier = Modifier,
+  dataSourceMode: DataSourceMode,
+  modifier: Modifier = Modifier,
 ) {
   val graph = LocalAutoMobileGraph.current
   val colors = SharedTheme.globalColors
@@ -57,53 +57,53 @@ fun DaemonStatusSection(
   }
 
   Column(
-      modifier =
-          modifier
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-              .padding(12.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+    modifier =
+      modifier
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+        .padding(12.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     CollapsibleSectionHeader(
-        title = "Daemon Status",
-        expanded = expanded,
-        onToggle = { expanded = !expanded },
-        trailing = { StatusDot(connected = isConnected) },
+      title = "Daemon Status",
+      expanded = expanded,
+      onToggle = { expanded = !expanded },
+      trailing = { StatusDot(connected = isConnected) },
     )
 
     if (expanded) {
       if (socketPath != null) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
           Text(
-              "Socket",
-              fontSize = 11.sp,
-              color = colors.text.normal.copy(alpha = 0.5f),
-              maxLines = 1,
-              softWrap = false,
+            "Socket",
+            fontSize = 11.sp,
+            color = colors.text.normal.copy(alpha = 0.5f),
+            maxLines = 1,
+            softWrap = false,
           )
           Text(
-              socketPath!!,
-              fontSize = 11.sp,
-              color = colors.text.normal.copy(alpha = 0.8f),
-              maxLines = 1,
-              softWrap = false,
+            socketPath!!,
+            fontSize = 11.sp,
+            color = colors.text.normal.copy(alpha = 0.8f),
+            maxLines = 1,
+            softWrap = false,
           )
         }
       }
 
       Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            "State:",
-            fontSize = 11.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
-            maxLines = 1,
-            softWrap = false,
+          "State:",
+          fontSize = 11.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
+          maxLines = 1,
+          softWrap = false,
         )
         Text(
-            if (isConnected) "Connected" else "Disconnected",
-            fontSize = 11.sp,
-            color = if (isConnected) Color(0xFF4CAF50) else Color(0xFFE53935),
-            maxLines = 1,
-            softWrap = false,
+          if (isConnected) "Connected" else "Disconnected",
+          fontSize = 11.sp,
+          color = if (isConnected) Color(0xFF4CAF50) else Color(0xFFE53935),
+          maxLines = 1,
+          softWrap = false,
         )
       }
 
@@ -111,18 +111,18 @@ fun DaemonStatusSection(
         val status = daemonStatus!!
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           Text(
-              "Version:",
-              fontSize = 11.sp,
-              color = colors.text.normal.copy(alpha = 0.5f),
-              maxLines = 1,
-              softWrap = false,
+            "Version:",
+            fontSize = 11.sp,
+            color = colors.text.normal.copy(alpha = 0.5f),
+            maxLines = 1,
+            softWrap = false,
           )
           Text(
-              "${status.version}${if (status.releaseVersion.isNotEmpty()) " (${status.releaseVersion})" else ""}",
-              fontSize = 11.sp,
-              color = colors.text.normal.copy(alpha = 0.8f),
-              maxLines = 1,
-              softWrap = false,
+            "${status.version}${if (status.releaseVersion.isNotEmpty()) " (${status.releaseVersion})" else ""}",
+            fontSize = 11.sp,
+            color = colors.text.normal.copy(alpha = 0.8f),
+            maxLines = 1,
+            softWrap = false,
           )
         }
       }

@@ -5,9 +5,9 @@ package dev.jasonpearson.automobile.desktop.core.datasource
  * tab switches or recomposition) return cached data instead of re-fetching.
  */
 class CachedNavigationDataSource(
-    private val delegate: NavigationDataSource,
-    ttlMs: Long = 30_000L,
-    clock: () -> Long = System::currentTimeMillis,
+  private val delegate: NavigationDataSource,
+  ttlMs: Long = 30_000L,
+  clock: () -> Long = System::currentTimeMillis,
 ) : NavigationDataSource {
 
   private val cache = InMemoryCache<Unit, Result<NavigationGraph>>(ttlMs, clock)

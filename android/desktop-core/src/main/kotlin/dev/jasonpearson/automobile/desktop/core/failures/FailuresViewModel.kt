@@ -18,9 +18,9 @@ sealed interface FailuresUiState {
   data object Loading : FailuresUiState
 
   data class Content(
-      val failureGroups: List<FailureGroup>,
-      val selectedFailure: FailureGroup? = null,
-      val filterType: FailureType? = null,
+    val failureGroups: List<FailureGroup>,
+    val selectedFailure: FailureGroup? = null,
+    val filterType: FailureType? = null,
   ) : FailuresUiState
 
   data class Error(val message: String) : FailuresUiState
@@ -55,8 +55,8 @@ sealed interface FailuresEffect {
  * Compose.
  */
 class FailuresViewModel(
-    private val dataSource: FailuresDataSource,
-    private val scope: CoroutineScope,
+  private val dataSource: FailuresDataSource,
+  private val scope: CoroutineScope,
 ) {
   private val _state = MutableStateFlow<FailuresUiState>(FailuresUiState.Loading)
   val state: StateFlow<FailuresUiState> = _state.asStateFlow()

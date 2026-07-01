@@ -7,8 +7,8 @@ import android.view.View
 import android.widget.FrameLayout
 
 internal class HighlightOverlayView(
-    context: Context,
-    private val drawer: OverlayDrawer? = null,
+  context: Context,
+  private val drawer: OverlayDrawer? = null,
 ) : FrameLayout(context) {
   companion object {
     private const val TAG = "HighlightOverlayView"
@@ -26,8 +26,8 @@ internal class HighlightOverlayView(
     super.onLayout(changed, left, top, right, bottom)
     if (changed) {
       Log.d(
-          TAG,
-          "Overlay layout changed: left=$left, top=$top, right=$right, bottom=$bottom, width=$width, height=$height",
+        TAG,
+        "Overlay layout changed: left=$left, top=$top, right=$right, bottom=$bottom, width=$width, height=$height",
       )
     }
   }

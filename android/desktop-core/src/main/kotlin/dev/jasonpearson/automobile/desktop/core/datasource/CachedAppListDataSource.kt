@@ -5,9 +5,9 @@ package dev.jasonpearson.automobile.desktop.core.datasource
  * tab switches or recomposition) return cached data instead of re-fetching.
  */
 class CachedAppListDataSource(
-    private val delegate: AppListDataSource,
-    ttlMs: Long = 30_000L,
-    clock: () -> Long = System::currentTimeMillis,
+  private val delegate: AppListDataSource,
+  ttlMs: Long = 30_000L,
+  clock: () -> Long = System::currentTimeMillis,
 ) : AppListDataSource {
 
   private val cache = InMemoryCache<Unit, Result<List<InstalledApp>>>(ttlMs, clock)

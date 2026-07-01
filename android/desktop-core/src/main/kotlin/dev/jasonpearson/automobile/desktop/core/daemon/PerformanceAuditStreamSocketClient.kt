@@ -20,11 +20,11 @@ interface PerformanceAuditStreamClient {
 }
 
 class PerformanceAuditStreamSocketClient(
-    private val socketPathValue: String = PerformanceAuditStreamSocketPaths.socketPath(),
-    private val json: Json = Json {
-      ignoreUnknownKeys = true
-      explicitNulls = false
-    },
+  private val socketPathValue: String = PerformanceAuditStreamSocketPaths.socketPath(),
+  private val json: Json = Json {
+    ignoreUnknownKeys = true
+    explicitNulls = false
+  },
 ) : PerformanceAuditStreamClient {
   override fun poll(request: PerformanceAuditStreamRequest): PerformanceAuditStreamResponse {
     val response = sendRequest(request)
@@ -40,20 +40,18 @@ class PerformanceAuditStreamSocketClient(
     val address = UnixDomainSocketAddress.of(socketPathValue)
     SocketChannel.open(address).use { channel ->
       val reader =
-          BufferedReader(
-              InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
-          )
+        BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
       val writer =
-          BufferedWriter(
-              OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
-          )
+        BufferedWriter(
+          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+        )
 
       writer.write(json.encodeToString(request))
       writer.newLine()
       writer.flush()
 
       val line =
-          reader.readLine() ?: throw McpConnectionException("Performance stream socket closed")
+        reader.readLine() ?: throw McpConnectionException("Performance stream socket closed")
       return json.decodeFromString(line)
     }
   }
@@ -75,22 +73,22 @@ object PerformanceAuditStreamSocketPaths {
 
 @Serializable
 data class PerformanceAuditStreamRequest(
-    val command: String = "poll",
-    val sinceTimestamp: String? = null,
-    val sinceId: Long? = null,
-    val startTime: String? = null,
-    val endTime: String? = null,
-    val limit: Int? = null,
-    val deviceId: String? = null,
-    val sessionId: String? = null,
-    val packageName: String? = null,
+  val command: String = "poll",
+  val sinceTimestamp: String? = null,
+  val sinceId: Long? = null,
+  val startTime: String? = null,
+  val endTime: String? = null,
+  val limit: Int? = null,
+  val deviceId: String? = null,
+  val sessionId: String? = null,
+  val packageName: String? = null,
 )
 
 @Serializable
 data class PerformanceAuditStreamResponse(
-    val success: Boolean,
-    val results: List<PerformanceAuditHistoryEntry> = emptyList(),
-    val lastTimestamp: String? = null,
-    val lastId: Long? = null,
-    val error: String? = null,
+  val success: Boolean,
+  val results: List<PerformanceAuditHistoryEntry> = emptyList(),
+  val lastTimestamp: String? = null,
+  val lastId: Long? = null,
+  val error: String? = null,
 )

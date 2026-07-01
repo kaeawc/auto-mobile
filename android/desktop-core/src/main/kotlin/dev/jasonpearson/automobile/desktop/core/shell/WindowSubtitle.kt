@@ -18,8 +18,8 @@ private const val APP_NAME = "AutoMobile"
  */
 @Composable
 fun FrameWindowScope.WindowSubtitle(
-    deviceName: String?,
-    foregroundApp: String?,
+  deviceName: String?,
+  foregroundApp: String?,
 ) {
   val title = buildString {
     append(APP_NAME)

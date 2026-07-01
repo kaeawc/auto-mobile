@@ -10,17 +10,17 @@ import android.view.View
 import android.view.WindowManager
 
 class OverlayManager(
-    private val context: Context,
-    private val windowManager: WindowManager =
-        context.getSystemService(Context.WINDOW_SERVICE) as WindowManager,
-    private val canDrawOverlays: (Context) -> Boolean = {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        Settings.canDrawOverlays(it)
-      } else {
-        true
-      }
-    },
-    private val viewFactory: (Context) -> View = { HighlightOverlayView(it) },
+  private val context: Context,
+  private val windowManager: WindowManager =
+    context.getSystemService(Context.WINDOW_SERVICE) as WindowManager,
+  private val canDrawOverlays: (Context) -> Boolean = {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      Settings.canDrawOverlays(it)
+    } else {
+      true
+    }
+  },
+  private val viewFactory: (Context) -> View = { HighlightOverlayView(it) },
 ) {
 
   companion object {
@@ -37,7 +37,7 @@ class OverlayManager(
 
     if (!overlayAdded) {
       val layoutParams =
-          overlayLayoutParams ?: createLayoutParams().also { overlayLayoutParams = it }
+        overlayLayoutParams ?: createLayoutParams().also { overlayLayoutParams = it }
       try {
         windowManager.addView(view, layoutParams)
         overlayAdded = true
@@ -84,21 +84,21 @@ class OverlayManager(
   private fun createLayoutParams(): WindowManager.LayoutParams {
     val overlayType = resolveOverlayType()
     return WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            overlayType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT,
-        )
-        .apply {
-          gravity = Gravity.TOP or Gravity.START
-          x = 0
-          y = 0
-          title = "AutoMobile Overlay"
-        }
+        WindowManager.LayoutParams.MATCH_PARENT,
+        WindowManager.LayoutParams.MATCH_PARENT,
+        overlayType,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+          WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+          WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        PixelFormat.TRANSLUCENT,
+      )
+      .apply {
+        gravity = Gravity.TOP or Gravity.START
+        x = 0
+        y = 0
+        title = "AutoMobile Overlay"
+      }
   }
 
   private fun resolveOverlayType(): Int {

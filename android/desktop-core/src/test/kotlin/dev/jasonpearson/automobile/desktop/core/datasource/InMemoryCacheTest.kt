@@ -28,10 +28,10 @@ class InMemoryCacheTest {
       1
     }
     val second =
-        cache.get("a") {
-          fetchCount++
-          2
-        }
+      cache.get("a") {
+        fetchCount++
+        2
+      }
 
     assertEquals(1, fetchCount)
     assertEquals(1, second)
@@ -49,10 +49,10 @@ class InMemoryCacheTest {
     }
     now = 101L
     val second =
-        cache.get("a") {
-          fetchCount++
-          2
-        }
+      cache.get("a") {
+        fetchCount++
+        2
+      }
 
     assertEquals(2, fetchCount)
     assertEquals(2, second)
@@ -70,10 +70,10 @@ class InMemoryCacheTest {
     }
     now = 99L
     val second =
-        cache.get("a") {
-          fetchCount++
-          2
-        }
+      cache.get("a") {
+        fetchCount++
+        2
+      }
 
     assertEquals(1, fetchCount)
     assertEquals(1, second)
@@ -90,10 +90,10 @@ class InMemoryCacheTest {
     }
     cache.invalidate("a")
     val second =
-        cache.get("a") {
-          fetchCount++
-          2
-        }
+      cache.get("a") {
+        fetchCount++
+        2
+      }
 
     assertEquals(2, fetchCount)
     assertEquals(2, second)
@@ -115,15 +115,15 @@ class InMemoryCacheTest {
     cache.invalidateAll()
 
     val a =
-        cache.get("a") {
-          fetchCount++
-          11
-        }
+      cache.get("a") {
+        fetchCount++
+        11
+      }
     val b =
-        cache.get("b") {
-          fetchCount++
-          21
-        }
+      cache.get("b") {
+        fetchCount++
+        21
+      }
 
     assertEquals(4, fetchCount)
     assertEquals(11, a)
@@ -158,16 +158,16 @@ class InMemoryCacheTest {
 
     // Launch multiple concurrent gets for the same key
     val results =
-        (1..10)
-            .map {
-              async {
-                cache.get("a") {
-                  fetchCount++
-                  42
-                }
-              }
+      (1..10)
+        .map {
+          async {
+            cache.get("a") {
+              fetchCount++
+              42
             }
-            .awaitAll()
+          }
+        }
+        .awaitAll()
 
     // All should get the same value; fetch count should be 1
     results.forEach { assertEquals(42, it) }
@@ -190,10 +190,10 @@ class InMemoryCacheTest {
     // Advance clock to 250 — only 50ms after the fetch completed at 200
     now = 250L
     val second =
-        cache.get("a") {
-          fetchCount++
-          2
-        }
+      cache.get("a") {
+        fetchCount++
+        2
+      }
 
     // Entry should still be fresh (250 - 200 = 50ms < 100ms TTL)
     assertEquals(1, fetchCount)
@@ -206,16 +206,16 @@ class InMemoryCacheTest {
     val cache = InMemoryCache<String, Int>(ttlMs = 10_000L)
 
     val results =
-        (1..5)
-            .map { i ->
-              async {
-                cache.get("key-$i") {
-                  fetchCount++
-                  i * 10
-                }
-              }
+      (1..5)
+        .map { i ->
+          async {
+            cache.get("key-$i") {
+              fetchCount++
+              i * 10
             }
-            .awaitAll()
+          }
+        }
+        .awaitAll()
 
     assertEquals(listOf(10, 20, 30, 40, 50), results)
     assertEquals(5, fetchCount)

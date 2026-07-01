@@ -10,7 +10,7 @@ import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.semantics
 
 private val AutoMobileRecompositionIdKey =
-    SemanticsPropertyKey<String>("auto-mobile-recomposition-id")
+  SemanticsPropertyKey<String>("auto-mobile-recomposition-id")
 
 var SemanticsPropertyReceiver.autoMobileRecompositionId by AutoMobileRecompositionIdKey
 
@@ -33,28 +33,28 @@ fun Modifier.autoMobileRecompositionId(id: String): Modifier {
  * @param likelyCause Optional cause of the recomposition
  */
 fun Modifier.autoMobileRecomposition(
-    id: String,
-    composableName: String? = null,
-    resourceId: String? = null,
-    testTag: String? = null,
-    parentChain: List<String>? = null,
-    stableAnnotated: Boolean? = null,
-    rememberedCount: Int? = null,
-    likelyCause: String? = null,
+  id: String,
+  composableName: String? = null,
+  resourceId: String? = null,
+  testTag: String? = null,
+  parentChain: List<String>? = null,
+  stableAnnotated: Boolean? = null,
+  rememberedCount: Int? = null,
+  likelyCause: String? = null,
 ): Modifier = composed {
   val scope = currentRecomposeScope
   SideEffect {
     ObservableRecompositionBridge.registerScope(id, scope)
     val resolvedCause = likelyCause ?: ObservableRecompositionBridge.consumeLikelyCause(scope)
     RecompositionTracker.recordRecomposition(
-        id = id,
-        composableName = composableName,
-        resourceId = resourceId,
-        testTag = testTag,
-        parentChain = parentChain,
-        stableAnnotated = stableAnnotated,
-        rememberedCount = rememberedCount,
-        likelyCause = resolvedCause,
+      id = id,
+      composableName = composableName,
+      resourceId = resourceId,
+      testTag = testTag,
+      parentChain = parentChain,
+      stableAnnotated = stableAnnotated,
+      rememberedCount = rememberedCount,
+      likelyCause = resolvedCause,
     )
   }
 
@@ -67,28 +67,28 @@ fun Modifier.autoMobileRecomposition(
  */
 @Composable
 fun TrackRecomposition(
-    id: String,
-    composableName: String? = null,
-    resourceId: String? = null,
-    testTag: String? = null,
-    parentChain: List<String>? = null,
-    stableAnnotated: Boolean? = null,
-    rememberedCount: Int? = null,
-    likelyCause: String? = null,
+  id: String,
+  composableName: String? = null,
+  resourceId: String? = null,
+  testTag: String? = null,
+  parentChain: List<String>? = null,
+  stableAnnotated: Boolean? = null,
+  rememberedCount: Int? = null,
+  likelyCause: String? = null,
 ) {
   val scope = currentRecomposeScope
   SideEffect {
     ObservableRecompositionBridge.registerScope(id, scope)
     val resolvedCause = likelyCause ?: ObservableRecompositionBridge.consumeLikelyCause(scope)
     RecompositionTracker.recordRecomposition(
-        id = id,
-        composableName = composableName,
-        resourceId = resourceId,
-        testTag = testTag,
-        parentChain = parentChain,
-        stableAnnotated = stableAnnotated,
-        rememberedCount = rememberedCount,
-        likelyCause = resolvedCause,
+      id = id,
+      composableName = composableName,
+      resourceId = resourceId,
+      testTag = testTag,
+      parentChain = parentChain,
+      stableAnnotated = stableAnnotated,
+      rememberedCount = rememberedCount,
+      likelyCause = resolvedCause,
     )
   }
 }
@@ -96,15 +96,15 @@ fun TrackRecomposition(
 /** Records a recomposition and measures composition duration for the wrapped content. */
 @Composable
 fun TrackRecomposition(
-    id: String,
-    composableName: String? = null,
-    resourceId: String? = null,
-    testTag: String? = null,
-    parentChain: List<String>? = null,
-    stableAnnotated: Boolean? = null,
-    rememberedCount: Int? = null,
-    likelyCause: String? = null,
-    content: @Composable () -> Unit,
+  id: String,
+  composableName: String? = null,
+  resourceId: String? = null,
+  testTag: String? = null,
+  parentChain: List<String>? = null,
+  stableAnnotated: Boolean? = null,
+  rememberedCount: Int? = null,
+  likelyCause: String? = null,
+  content: @Composable () -> Unit,
 ) {
   val scope = currentRecomposeScope
   val startTimeNs = System.nanoTime()
@@ -114,14 +114,14 @@ fun TrackRecomposition(
     ObservableRecompositionBridge.registerScope(id, scope)
     val resolvedCause = likelyCause ?: ObservableRecompositionBridge.consumeLikelyCause(scope)
     RecompositionTracker.recordRecomposition(
-        id = id,
-        composableName = composableName,
-        resourceId = resourceId,
-        testTag = testTag,
-        parentChain = parentChain,
-        stableAnnotated = stableAnnotated,
-        rememberedCount = rememberedCount,
-        likelyCause = resolvedCause,
+      id = id,
+      composableName = composableName,
+      resourceId = resourceId,
+      testTag = testTag,
+      parentChain = parentChain,
+      stableAnnotated = stableAnnotated,
+      rememberedCount = rememberedCount,
+      likelyCause = resolvedCause,
     )
     RecompositionTracker.recordDuration(id, durationMs)
   }

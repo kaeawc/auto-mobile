@@ -43,12 +43,12 @@ enum class StorageTab(val title: String, val icon: String) {
 /** Main Storage Dashboard with Database and Key-Value tabs. */
 @Composable
 fun StorageDashboard(
-    modifier: Modifier = Modifier,
-    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
-    clientProvider: (() -> AutoMobileClient)? = null,
-    deviceId: String? = null,
-    packageName: String? = null,
-    platform: StoragePlatform = StoragePlatform.Android,
+  modifier: Modifier = Modifier,
+  dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+  clientProvider: (() -> AutoMobileClient)? = null,
+  deviceId: String? = null,
+  packageName: String? = null,
+  platform: StoragePlatform = StoragePlatform.Android,
 ) {
   val graph = LocalAutoMobileGraph.current
   val colors = SharedTheme.globalColors
@@ -63,20 +63,20 @@ fun StorageDashboard(
 
   LaunchedEffect(dataSourceMode, clientProvider, deviceId, packageName) {
     LOG.info(
-        "StorageDashboard LaunchedEffect: mode=$dataSourceMode, clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName"
+      "StorageDashboard LaunchedEffect: mode=$dataSourceMode, clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName"
     )
     isLoading = true
     error = null
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       try {
         val newDataSource =
-            graph.dataSourceFactory.createStorageDataSource(
-                dataSourceMode,
-                clientProvider,
-                deviceId,
-                packageName,
-                platform,
-            )
+          graph.dataSourceFactory.createStorageDataSource(
+            dataSourceMode,
+            clientProvider,
+            deviceId,
+            packageName,
+            platform,
+          )
         dataSource = newDataSource
         LOG.info("StorageDashboard: Created data source: ${newDataSource::class.simpleName}")
 
@@ -124,63 +124,63 @@ fun StorageDashboard(
   }
 
   val onFetchTableData: (suspend (String, String) -> QueryResult)? =
-      remember(dataSource) {
-        val ds = dataSource ?: return@remember null
-        val callback: suspend (String, String) -> QueryResult = { databasePath, table ->
-          when (val r = ds.getTableData(databasePath, table)) {
-            is Result.Success -> r.data
-            is Result.Error -> QueryResult(emptyList(), emptyList(), 0, 0, error = r.message)
-            else -> QueryResult(emptyList(), emptyList(), 0, 0, error = "Failed to load data")
-          }
+    remember(dataSource) {
+      val ds = dataSource ?: return@remember null
+      val callback: suspend (String, String) -> QueryResult = { databasePath, table ->
+        when (val r = ds.getTableData(databasePath, table)) {
+          is Result.Success -> r.data
+          is Result.Error -> QueryResult(emptyList(), emptyList(), 0, 0, error = r.message)
+          else -> QueryResult(emptyList(), emptyList(), 0, 0, error = "Failed to load data")
         }
-        callback
       }
+      callback
+    }
 
   val onExecuteSQL: (suspend (String, String) -> QueryResult)? =
-      remember(dataSource) {
-        val ds = dataSource ?: return@remember null
-        val callback: suspend (String, String) -> QueryResult = { databasePath, query ->
-          when (val r = ds.executeSQL(databasePath, query)) {
-            is Result.Success -> r.data
-            is Result.Error -> QueryResult(emptyList(), emptyList(), 0, 0, error = r.message)
-            else -> QueryResult(emptyList(), emptyList(), 0, 0, error = "Failed to execute query")
-          }
+    remember(dataSource) {
+      val ds = dataSource ?: return@remember null
+      val callback: suspend (String, String) -> QueryResult = { databasePath, query ->
+        when (val r = ds.executeSQL(databasePath, query)) {
+          is Result.Success -> r.data
+          is Result.Error -> QueryResult(emptyList(), emptyList(), 0, 0, error = r.message)
+          else -> QueryResult(emptyList(), emptyList(), 0, 0, error = "Failed to execute query")
         }
-        callback
       }
+      callback
+    }
 
   Column(modifier = modifier.fillMaxSize()) {
     // Tab bar
     Row(
-        modifier =
-            Modifier.fillMaxWidth()
-                .background(colors.text.normal.copy(alpha = 0.03f))
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      modifier =
+        Modifier.fillMaxWidth()
+          .background(colors.text.normal.copy(alpha = 0.03f))
+          .padding(horizontal = 8.dp, vertical = 6.dp),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       StorageTab.entries.forEach { tab ->
         val isSelected = tab == selectedTab
 
         Row(
-            modifier =
-                Modifier.clip(RoundedCornerShape(6.dp))
-                    .background(
-                        if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent
-                    )
-                    .clickable { selectedTab = tab }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+          modifier =
+            Modifier.clip(RoundedCornerShape(6.dp))
+              .background(
+                if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent
+              )
+              .clickable { selectedTab = tab }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(horizontal = 14.dp, vertical = 8.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           Text(
-              tab.icon,
-              fontSize = 14.sp,
+            tab.icon,
+            fontSize = 14.sp,
           )
           Text(
-              tab.title,
-              fontSize = 12.sp,
-              color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+            tab.title,
+            fontSize = 12.sp,
+            color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
           )
         }
       }
@@ -189,22 +189,22 @@ fun StorageDashboard(
     // Content
     when (selectedTab) {
       StorageTab.Database ->
-          DatabaseInspector(
-              databases = databases,
-              loadError = if (databases.isEmpty()) error else null,
-              onFetchTableData = onFetchTableData,
-              onExecuteSQL = onExecuteSQL,
-              modifier = Modifier.fillMaxSize(),
-          )
+        DatabaseInspector(
+          databases = databases,
+          loadError = if (databases.isEmpty()) error else null,
+          onFetchTableData = onFetchTableData,
+          onExecuteSQL = onExecuteSQL,
+          modifier = Modifier.fillMaxSize(),
+        )
       StorageTab.KeyValue ->
-          KeyValueInspector(
-              keyValueFiles = keyValueFiles,
-              onSetValue =
-                  dataSource?.let { ds ->
-                    { fileName, key, value, type -> ds.setKeyValue(fileName, key, value, type) }
-                  },
-              modifier = Modifier.fillMaxSize(),
-          )
+        KeyValueInspector(
+          keyValueFiles = keyValueFiles,
+          onSetValue =
+            dataSource?.let { ds ->
+              { fileName, key, value, type -> ds.setKeyValue(fileName, key, value, type) }
+            },
+          modifier = Modifier.fillMaxSize(),
+        )
     }
   }
 }

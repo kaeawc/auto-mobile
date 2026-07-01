@@ -8,12 +8,12 @@ class HandledExceptionEventTest {
   @Test
   fun `DeviceInfo should have correct properties`() {
     val deviceInfo =
-        DeviceInfo(
-            model = "Pixel 6",
-            manufacturer = "Google",
-            osVersion = "14",
-            sdkInt = 34,
-        )
+      DeviceInfo(
+        model = "Pixel 6",
+        manufacturer = "Google",
+        osVersion = "14",
+        sdkInt = 34,
+      )
 
     assertEquals("Pixel 6", deviceInfo.model)
     assertEquals("Google", deviceInfo.manufacturer)
@@ -24,20 +24,20 @@ class HandledExceptionEventTest {
   @Test
   fun `DeviceInfo should support equality`() {
     val info1 =
-        DeviceInfo(
-            model = "Pixel 6",
-            manufacturer = "Google",
-            osVersion = "14",
-            sdkInt = 34,
-        )
+      DeviceInfo(
+        model = "Pixel 6",
+        manufacturer = "Google",
+        osVersion = "14",
+        sdkInt = 34,
+      )
 
     val info2 =
-        DeviceInfo(
-            model = "Pixel 6",
-            manufacturer = "Google",
-            osVersion = "14",
-            sdkInt = 34,
-        )
+      DeviceInfo(
+        model = "Pixel 6",
+        manufacturer = "Google",
+        osVersion = "14",
+        sdkInt = 34,
+      )
 
     assertEquals(info1, info2)
     assertEquals(info1.hashCode(), info2.hashCode())
@@ -46,12 +46,12 @@ class HandledExceptionEventTest {
   @Test
   fun `DeviceInfo should support copy`() {
     val original =
-        DeviceInfo(
-            model = "Pixel 6",
-            manufacturer = "Google",
-            osVersion = "14",
-            sdkInt = 34,
-        )
+      DeviceInfo(
+        model = "Pixel 6",
+        manufacturer = "Google",
+        osVersion = "14",
+        sdkInt = 34,
+      )
 
     val copied = original.copy(model = "Pixel 7")
 
@@ -64,25 +64,25 @@ class HandledExceptionEventTest {
   @Test
   fun `HandledExceptionEvent should have correct properties`() {
     val deviceInfo =
-        DeviceInfo(
-            model = "Pixel 6",
-            manufacturer = "Google",
-            osVersion = "14",
-            sdkInt = 34,
-        )
+      DeviceInfo(
+        model = "Pixel 6",
+        manufacturer = "Google",
+        osVersion = "14",
+        sdkInt = 34,
+      )
 
     val event =
-        HandledExceptionEvent(
-            timestamp = 1234567890L,
-            exceptionClass = "java.lang.NullPointerException",
-            exceptionMessage = "Cannot invoke method on null",
-            stackTrace = "at com.example.MyClass.myMethod(MyClass.kt:42)",
-            customMessage = "Error in user flow",
-            currentScreen = "HomeScreen",
-            packageName = "com.example.app",
-            appVersion = "1.0.0",
-            deviceInfo = deviceInfo,
-        )
+      HandledExceptionEvent(
+        timestamp = 1234567890L,
+        exceptionClass = "java.lang.NullPointerException",
+        exceptionMessage = "Cannot invoke method on null",
+        stackTrace = "at com.example.MyClass.myMethod(MyClass.kt:42)",
+        customMessage = "Error in user flow",
+        currentScreen = "HomeScreen",
+        packageName = "com.example.app",
+        appVersion = "1.0.0",
+        deviceInfo = deviceInfo,
+      )
 
     assertEquals(1234567890L, event.timestamp)
     assertEquals("java.lang.NullPointerException", event.exceptionClass)
@@ -98,25 +98,25 @@ class HandledExceptionEventTest {
   @Test
   fun `HandledExceptionEvent should support nullable fields`() {
     val deviceInfo =
-        DeviceInfo(
-            model = "Pixel 6",
-            manufacturer = "Google",
-            osVersion = "14",
-            sdkInt = 34,
-        )
+      DeviceInfo(
+        model = "Pixel 6",
+        manufacturer = "Google",
+        osVersion = "14",
+        sdkInt = 34,
+      )
 
     val event =
-        HandledExceptionEvent(
-            timestamp = 1234567890L,
-            exceptionClass = "java.lang.RuntimeException",
-            exceptionMessage = null,
-            stackTrace = "at com.example.Test(Test.kt:1)",
-            customMessage = null,
-            currentScreen = null,
-            packageName = "com.example.app",
-            appVersion = null,
-            deviceInfo = deviceInfo,
-        )
+      HandledExceptionEvent(
+        timestamp = 1234567890L,
+        exceptionClass = "java.lang.RuntimeException",
+        exceptionMessage = null,
+        stackTrace = "at com.example.Test(Test.kt:1)",
+        customMessage = null,
+        currentScreen = null,
+        packageName = "com.example.app",
+        appVersion = null,
+        deviceInfo = deviceInfo,
+      )
 
     assertNull(event.exceptionMessage)
     assertNull(event.customMessage)
@@ -127,38 +127,38 @@ class HandledExceptionEventTest {
   @Test
   fun `HandledExceptionEvent should support equality`() {
     val deviceInfo =
-        DeviceInfo(
-            model = "Pixel 6",
-            manufacturer = "Google",
-            osVersion = "14",
-            sdkInt = 34,
-        )
+      DeviceInfo(
+        model = "Pixel 6",
+        manufacturer = "Google",
+        osVersion = "14",
+        sdkInt = 34,
+      )
 
     val event1 =
-        HandledExceptionEvent(
-            timestamp = 1234567890L,
-            exceptionClass = "java.lang.NullPointerException",
-            exceptionMessage = "Test message",
-            stackTrace = "stack trace",
-            customMessage = "custom",
-            currentScreen = "Screen",
-            packageName = "com.example.app",
-            appVersion = "1.0.0",
-            deviceInfo = deviceInfo,
-        )
+      HandledExceptionEvent(
+        timestamp = 1234567890L,
+        exceptionClass = "java.lang.NullPointerException",
+        exceptionMessage = "Test message",
+        stackTrace = "stack trace",
+        customMessage = "custom",
+        currentScreen = "Screen",
+        packageName = "com.example.app",
+        appVersion = "1.0.0",
+        deviceInfo = deviceInfo,
+      )
 
     val event2 =
-        HandledExceptionEvent(
-            timestamp = 1234567890L,
-            exceptionClass = "java.lang.NullPointerException",
-            exceptionMessage = "Test message",
-            stackTrace = "stack trace",
-            customMessage = "custom",
-            currentScreen = "Screen",
-            packageName = "com.example.app",
-            appVersion = "1.0.0",
-            deviceInfo = deviceInfo,
-        )
+      HandledExceptionEvent(
+        timestamp = 1234567890L,
+        exceptionClass = "java.lang.NullPointerException",
+        exceptionMessage = "Test message",
+        stackTrace = "stack trace",
+        customMessage = "custom",
+        currentScreen = "Screen",
+        packageName = "com.example.app",
+        appVersion = "1.0.0",
+        deviceInfo = deviceInfo,
+      )
 
     assertEquals(event1, event2)
     assertEquals(event1.hashCode(), event2.hashCode())
@@ -167,25 +167,25 @@ class HandledExceptionEventTest {
   @Test
   fun `HandledExceptionEvent should support copy`() {
     val deviceInfo =
-        DeviceInfo(
-            model = "Pixel 6",
-            manufacturer = "Google",
-            osVersion = "14",
-            sdkInt = 34,
-        )
+      DeviceInfo(
+        model = "Pixel 6",
+        manufacturer = "Google",
+        osVersion = "14",
+        sdkInt = 34,
+      )
 
     val original =
-        HandledExceptionEvent(
-            timestamp = 1234567890L,
-            exceptionClass = "java.lang.NullPointerException",
-            exceptionMessage = "Test message",
-            stackTrace = "stack trace",
-            customMessage = "custom",
-            currentScreen = "Screen1",
-            packageName = "com.example.app",
-            appVersion = "1.0.0",
-            deviceInfo = deviceInfo,
-        )
+      HandledExceptionEvent(
+        timestamp = 1234567890L,
+        exceptionClass = "java.lang.NullPointerException",
+        exceptionMessage = "Test message",
+        stackTrace = "stack trace",
+        customMessage = "custom",
+        currentScreen = "Screen1",
+        packageName = "com.example.app",
+        appVersion = "1.0.0",
+        deviceInfo = deviceInfo,
+      )
 
     val copied = original.copy(currentScreen = "Screen2")
 

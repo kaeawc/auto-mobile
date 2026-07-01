@@ -38,14 +38,14 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `filterViewHierarchy removes non-interactive elements without content`() = runTest {
     val emptyElement =
-        UIElementInfo(
-            text = null,
-            contentDesc = null,
-            resourceId = null,
-            clickable = "false",
-            focusable = "false",
-            scrollable = "false",
-        )
+      UIElementInfo(
+        text = null,
+        contentDesc = null,
+        resourceId = null,
+        clickable = "false",
+        focusable = "false",
+        scrollable = "false",
+      )
 
     val interactiveElement = UIElementInfo(text = "Button", clickable = "true")
 
@@ -53,7 +53,7 @@ class ViewHierarchyExtractorTest {
 
     val children = listOf(emptyElement, interactiveElement, elementWithContent)
     val childrenJson =
-        json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
+      json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
 
     val rootElement = UIElementInfo(className = "android.widget.LinearLayout", node = childrenJson)
 
@@ -116,13 +116,13 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `UIElementInfo boolean helpers work correctly`() {
     val element =
-        UIElementInfo(
-            clickable = "true",
-            enabled = "false",
-            focusable = "true",
-            focused = "false",
-            scrollable = "true",
-        )
+      UIElementInfo(
+        clickable = "true",
+        enabled = "false",
+        focusable = "true",
+        focused = "false",
+        scrollable = "true",
+      )
 
     assertTrue(element.isClickable)
     assertFalse(element.isEnabled)
@@ -134,10 +134,10 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `UIElementInfo enabled defaults to true when not specified`() {
     val element =
-        UIElementInfo(
-            clickable = "false",
-            enabled = null, // Not specified
-        )
+      UIElementInfo(
+        clickable = "false",
+        enabled = null, // Not specified
+      )
 
     assertFalse(element.isClickable)
     assertTrue(element.isEnabled) // Should default to true
@@ -155,7 +155,7 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `detectIntentChooserIndicators returns true for resource id indicator`() {
     val child =
-        UIElementInfo(resourceId = "android:id/button_once", className = "android.widget.Button")
+      UIElementInfo(resourceId = "android:id/button_once", className = "android.widget.Button")
     val childJson = json.encodeToJsonElement(UIElementInfo.serializer(), child)
     val root = UIElementInfo(className = "android.widget.LinearLayout", node = childJson)
 
@@ -175,19 +175,19 @@ class ViewHierarchyExtractorTest {
   fun `detectNotificationPermissionDialog returns true when notification dialog markers present`() {
     val title = UIElementInfo(text = "Allow Example to send notifications?")
     val allowButton =
-        UIElementInfo(resourceId = "com.android.permissioncontroller:id/permission_allow_button")
+      UIElementInfo(resourceId = "com.android.permissioncontroller:id/permission_allow_button")
     val childrenJson =
-        json.encodeToJsonElement(
-            ListSerializer(UIElementInfo.serializer()),
-            listOf(title, allowButton),
-        )
+      json.encodeToJsonElement(
+        ListSerializer(UIElementInfo.serializer()),
+        listOf(title, allowButton),
+      )
     val root = UIElementInfo(className = "android.widget.LinearLayout", node = childrenJson)
 
     assertTrue(
-        extractor.detectNotificationPermissionDialogForTest(
-            root,
-            "com.android.permissioncontroller",
-        ),
+      extractor.detectNotificationPermissionDialogForTest(
+        root,
+        "com.android.permissioncontroller",
+      )
     )
   }
 
@@ -195,19 +195,19 @@ class ViewHierarchyExtractorTest {
   fun `detectNotificationPermissionDialog returns false for non-permission controller package`() {
     val title = UIElementInfo(text = "Allow Example to send notifications?")
     val allowButton =
-        UIElementInfo(resourceId = "com.android.permissioncontroller:id/permission_allow_button")
+      UIElementInfo(resourceId = "com.android.permissioncontroller:id/permission_allow_button")
     val childrenJson =
-        json.encodeToJsonElement(
-            ListSerializer(UIElementInfo.serializer()),
-            listOf(title, allowButton),
-        )
+      json.encodeToJsonElement(
+        ListSerializer(UIElementInfo.serializer()),
+        listOf(title, allowButton),
+      )
     val root = UIElementInfo(className = "android.widget.LinearLayout", node = childrenJson)
 
     assertFalse(
-        extractor.detectNotificationPermissionDialogForTest(
-            root,
-            "com.example.app",
-        ),
+      extractor.detectNotificationPermissionDialogForTest(
+        root,
+        "com.example.app",
+      )
     )
   }
 
@@ -217,7 +217,7 @@ class ViewHierarchyExtractorTest {
 
     val children = listOf(plainElement)
     val childrenJson =
-        json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
+      json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
 
     val rootElement = UIElementInfo(node = childrenJson)
     val filteredChildren = extractor.extractChildrenFromHierarchy(rootElement)
@@ -229,29 +229,29 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `meetsFilterCriteria includes elements with semantic properties`() = runTest {
     val elementWithTestTag =
-        UIElementInfo(text = "", testTag = "submit-button", clickable = "false")
+      UIElementInfo(text = "", testTag = "submit-button", clickable = "false")
     val elementWithRole = UIElementInfo(text = "", role = "button", clickable = "false")
     val elementWithState =
-        UIElementInfo(text = "", stateDescription = "Expanded", clickable = "false")
+      UIElementInfo(text = "", stateDescription = "Expanded", clickable = "false")
     val elementWithHint = UIElementInfo(text = "", hintText = "Enter name", clickable = "false")
     val elementWithError = UIElementInfo(text = "", errorMessage = "Required", clickable = "false")
     val elementWithActions =
-        UIElementInfo(text = "", actions = listOf("click", "focus"), clickable = "false")
+      UIElementInfo(text = "", actions = listOf("click", "focus"), clickable = "false")
     val elementWithRange =
-        UIElementInfo(text = "", rangeInfo = "current:50,min:0,max:100", clickable = "false")
+      UIElementInfo(text = "", rangeInfo = "current:50,min:0,max:100", clickable = "false")
 
     val children =
-        listOf(
-            elementWithTestTag,
-            elementWithRole,
-            elementWithState,
-            elementWithHint,
-            elementWithError,
-            elementWithActions,
-            elementWithRange,
-        )
+      listOf(
+        elementWithTestTag,
+        elementWithRole,
+        elementWithState,
+        elementWithHint,
+        elementWithError,
+        elementWithActions,
+        elementWithRange,
+      )
     val childrenJson =
-        json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
+      json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
 
     val rootElement = UIElementInfo(node = childrenJson)
     val filteredChildren = extractor.extractChildrenFromHierarchy(rootElement)
@@ -268,39 +268,39 @@ class ViewHierarchyExtractorTest {
 
     // Plain element should be filtered out
     assertFalse(
-        filteredChildren.any {
-          it.text == "" &&
-              it.testTag == null &&
-              it.role == null &&
-              it.stateDescription == null &&
-              it.hintText == null &&
-              it.errorMessage == null &&
-              it.actions == null &&
-              it.rangeInfo == null
-        }
+      filteredChildren.any {
+        it.text == "" &&
+          it.testTag == null &&
+          it.role == null &&
+          it.stateDescription == null &&
+          it.hintText == null &&
+          it.errorMessage == null &&
+          it.actions == null &&
+          it.rangeInfo == null
+      }
     )
   }
 
   @Test
   fun `UIElementInfo semantic properties are properly handled`() {
     val element =
-        UIElementInfo(
-            text = "Button",
-            testTag = "submit-button",
-            role = "button",
-            stateDescription = "Enabled",
-            errorMessage = null,
-            hintText = "Click to submit",
-            tooltipText = "Submit form",
-            paneTitle = "Main Form",
-            liveRegion = "polite",
-            collectionInfo = "rows:5,cols:3",
-            collectionItemInfo = "row:1,col:2",
-            rangeInfo = "current:50,min:0,max:100",
-            inputType = "text",
-            actions = listOf("click", "focus"),
-            extras = mapOf("custom-property" to "custom-value"),
-        )
+      UIElementInfo(
+        text = "Button",
+        testTag = "submit-button",
+        role = "button",
+        stateDescription = "Enabled",
+        errorMessage = null,
+        hintText = "Click to submit",
+        tooltipText = "Submit form",
+        paneTitle = "Main Form",
+        liveRegion = "polite",
+        collectionInfo = "rows:5,cols:3",
+        collectionItemInfo = "row:1,col:2",
+        rangeInfo = "current:50,min:0,max:100",
+        inputType = "text",
+        actions = listOf("click", "focus"),
+        extras = mapOf("custom-property" to "custom-value"),
+      )
 
     assertEquals("submit-button", element.testTag)
     assertEquals("button", element.role)
@@ -321,14 +321,14 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `semantic fields are serialized to JSON correctly`() {
     val element =
-        UIElementInfo(
-            text = "Button",
-            testTag = "submit-button",
-            role = "button",
-            stateDescription = "Enabled",
-            actions = listOf("click"),
-            extras = mapOf("custom" to "value"),
-        )
+      UIElementInfo(
+        text = "Button",
+        testTag = "submit-button",
+        role = "button",
+        stateDescription = "Enabled",
+        actions = listOf("click"),
+        extras = mapOf("custom" to "value"),
+      )
 
     val json = Json { prettyPrint = true }
     val jsonString = json.encodeToString(UIElementInfo.serializer(), element)
@@ -337,8 +337,8 @@ class ViewHierarchyExtractorTest {
     assertTrue("JSON should contain test-tag field", jsonString.contains("test-tag"))
     assertTrue("JSON should contain role field", jsonString.contains("\"role\""))
     assertTrue(
-        "JSON should contain state-description field",
-        jsonString.contains("state-description"),
+      "JSON should contain state-description field",
+      jsonString.contains("state-description"),
     )
     assertTrue("JSON should contain actions field", jsonString.contains("\"actions\""))
     assertTrue("JSON should contain extras field", jsonString.contains("\"extras\""))
@@ -350,13 +350,13 @@ class ViewHierarchyExtractorTest {
   fun `occlusion filter keeps overlapping root-level siblings`() {
     val siblingOne = elementWithBounds(resourceId = "sibling-one", bounds = bounds(0, 0, 100, 100))
     val siblingTwo =
-        elementWithBounds(resourceId = "sibling-two", bounds = bounds(50, 50, 150, 150))
+      elementWithBounds(resourceId = "sibling-two", bounds = bounds(50, 50, 150, 150))
     val root =
-        elementWithBounds(
-            resourceId = "root",
-            bounds = bounds(0, 0, 200, 200),
-            children = listOf(siblingOne, siblingTwo),
-        )
+      elementWithBounds(
+        resourceId = "root",
+        bounds = bounds(0, 0, 200, 200),
+        children = listOf(siblingOne, siblingTwo),
+      )
 
     val filtered = extractor.applyOcclusionFilteringSingleWindowForTest(root)
 
@@ -375,17 +375,17 @@ class ViewHierarchyExtractorTest {
   fun `occlusion filter ignores descendant overlaps`() {
     val child = elementWithBounds(resourceId = "child", bounds = bounds(0, 0, 100, 100))
     val parent =
-        elementWithBounds(
-            resourceId = "parent",
-            bounds = bounds(0, 0, 100, 100),
-            children = listOf(child),
-        )
+      elementWithBounds(
+        resourceId = "parent",
+        bounds = bounds(0, 0, 100, 100),
+        children = listOf(child),
+      )
     val root =
-        elementWithBounds(
-            resourceId = "root",
-            bounds = bounds(0, 0, 120, 120),
-            children = listOf(parent),
-        )
+      elementWithBounds(
+        resourceId = "root",
+        bounds = bounds(0, 0, 120, 120),
+        children = listOf(parent),
+      )
 
     val filtered = extractor.applyOcclusionFilteringSingleWindowForTest(root)
 
@@ -404,7 +404,7 @@ class ViewHierarchyExtractorTest {
     val targetParent = elementWithBounds(resourceId = "target-parent", children = listOf(target))
     val occluder = elementWithBounds(resourceId = "occluding-node", bounds = bounds(0, 0, 100, 100))
     val occluderParent =
-        elementWithBounds(resourceId = "occluder-parent", children = listOf(occluder))
+      elementWithBounds(resourceId = "occluder-parent", children = listOf(occluder))
     val root = elementWithBounds(children = listOf(targetParent, occluderParent))
 
     val filtered = extractor.applyOcclusionFilteringSingleWindowForTest(root)
@@ -420,7 +420,7 @@ class ViewHierarchyExtractorTest {
     val targetParent = elementWithBounds(resourceId = "partial-parent", children = listOf(target))
     val occluder = elementWithBounds(resourceId = "partial-occluder", bounds = bounds(0, 0, 50, 50))
     val occluderParent =
-        elementWithBounds(resourceId = "occluder-parent", children = listOf(occluder))
+      elementWithBounds(resourceId = "occluder-parent", children = listOf(occluder))
     val root = elementWithBounds(children = listOf(targetParent, occluderParent))
 
     val filtered = extractor.applyOcclusionFilteringSingleWindowForTest(root)
@@ -436,26 +436,26 @@ class ViewHierarchyExtractorTest {
   fun `hidden root occlusion retains children`() {
     val child = elementWithBounds(resourceId = "root-child", bounds = bounds(98, 98, 100, 100))
     val root =
-        elementWithBounds(
-            resourceId = "root-window",
-            bounds = bounds(0, 0, 100, 100),
-            children = listOf(child),
-        )
+      elementWithBounds(
+        resourceId = "root-window",
+        bounds = bounds(0, 0, 100, 100),
+        children = listOf(child),
+      )
     val occluderRoot =
-        elementWithBounds(resourceId = "occluding-root", bounds = bounds(0, 0, 98, 98))
+      elementWithBounds(resourceId = "occluding-root", bounds = bounds(0, 0, 98, 98))
 
     val windowEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = root)
     val occluderEntry =
-        extractor.createWindowEntry(windowId = 2, windowLayer = 1, hierarchy = occluderRoot)
+      extractor.createWindowEntry(windowId = 2, windowLayer = 1, hierarchy = occluderRoot)
     val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(windowEntry, occluderEntry))
     val filtered =
-        extractor.filterOccludedHierarchyForTest(
-            element = root,
-            occlusionInfo = occlusionInfo,
-            windowKey = 1,
-            path = "",
-            isRoot = true,
-        )
+      extractor.filterOccludedHierarchyForTest(
+        element = root,
+        occlusionInfo = occlusionInfo,
+        windowKey = 1,
+        path = "",
+        isRoot = true,
+      )
 
     assertNotNull(filtered)
     assertEquals("hidden", filtered!!.occlusionState)
@@ -466,20 +466,20 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `pickPrimaryAppWindowId returns null when no IME is up`() {
     val windows =
-        listOf(
-            ViewHierarchyExtractor.WindowMeta(
-                id = 10,
-                type = AccessibilityWindowInfo.TYPE_APPLICATION,
-                layer = 5,
-                hasRoot = true,
-            ),
-            ViewHierarchyExtractor.WindowMeta(
-                id = 11,
-                type = AccessibilityWindowInfo.TYPE_SYSTEM,
-                layer = 6,
-                hasRoot = true,
-            ),
-        )
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 10,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 5,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 11,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          layer = 6,
+          hasRoot = true,
+        ),
+      )
     assertNull(extractor.pickPrimaryAppWindowId(windows))
   }
 
@@ -489,26 +489,26 @@ class ViewHierarchyExtractorTest {
     // the IME has isActive=true (owns input focus) and the app window has isActive=false,
     // so the extractor must not rely on isActive to find the user-facing app.
     val windows =
-        listOf(
-            ViewHierarchyExtractor.WindowMeta(
-                id = 42,
-                type = AccessibilityWindowInfo.TYPE_APPLICATION,
-                layer = 1,
-                hasRoot = true,
-            ),
-            ViewHierarchyExtractor.WindowMeta(
-                id = 99,
-                type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
-                layer = 10,
-                hasRoot = true,
-            ),
-            ViewHierarchyExtractor.WindowMeta(
-                id = 7,
-                type = AccessibilityWindowInfo.TYPE_SYSTEM,
-                layer = 20,
-                hasRoot = true,
-            ),
-        )
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 42,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 1,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 99,
+          type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+          layer = 10,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 7,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          layer = 20,
+          hasRoot = true,
+        ),
+      )
     assertEquals(42, extractor.pickPrimaryAppWindowId(windows))
   }
 
@@ -517,46 +517,46 @@ class ViewHierarchyExtractorTest {
     // An IME window present in the windows list but without a root cannot contribute
     // occlusion and should not trigger the primary-window remap.
     val windows =
-        listOf(
-            ViewHierarchyExtractor.WindowMeta(
-                id = 42,
-                type = AccessibilityWindowInfo.TYPE_APPLICATION,
-                layer = 1,
-                hasRoot = true,
-            ),
-            ViewHierarchyExtractor.WindowMeta(
-                id = 99,
-                type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
-                layer = 10,
-                hasRoot = false,
-            ),
-        )
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 42,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 1,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 99,
+          type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+          layer = 10,
+          hasRoot = false,
+        ),
+      )
     assertNull(extractor.pickPrimaryAppWindowId(windows))
   }
 
   @Test
   fun `pickPrimaryAppWindowId picks highest-layer app window among multiple`() {
     val windows =
-        listOf(
-            ViewHierarchyExtractor.WindowMeta(
-                id = 1,
-                type = AccessibilityWindowInfo.TYPE_APPLICATION,
-                layer = 1,
-                hasRoot = true,
-            ),
-            ViewHierarchyExtractor.WindowMeta(
-                id = 2,
-                type = AccessibilityWindowInfo.TYPE_APPLICATION,
-                layer = 3,
-                hasRoot = true,
-            ),
-            ViewHierarchyExtractor.WindowMeta(
-                id = 99,
-                type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
-                layer = 10,
-                hasRoot = true,
-            ),
-        )
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 1,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 1,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 2,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 3,
+          hasRoot = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 99,
+          type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+          layer = 10,
+          hasRoot = true,
+        ),
+      )
     assertEquals(2, extractor.pickPrimaryAppWindowId(windows))
   }
 
@@ -571,54 +571,54 @@ class ViewHierarchyExtractorTest {
     val toolbar = elementWithBounds(resourceId = "toolbar", bounds = bounds(0, 172, 1080, 400))
     val composer = elementWithBounds(resourceId = "composer", bounds = bounds(0, 1200, 1080, 1340))
     val appRoot =
-        elementWithBounds(
-            resourceId = "app-root",
-            bounds = bounds(0, 0, 1080, 2410),
-            children = listOf(toolbar, composer),
-        )
+      elementWithBounds(
+        resourceId = "app-root",
+        bounds = bounds(0, 0, 1080, 2410),
+        children = listOf(toolbar, composer),
+      )
     // IME root reports the full transparent wrapper bounds, not the actual keyboard rect.
     val imeWrapper =
-        elementWithBounds(
-            resourceId = "ime-wrapper",
-            bounds = bounds(0, 172, 1080, 2410),
-        )
+      elementWithBounds(
+        resourceId = "ime-wrapper",
+        bounds = bounds(0, 172, 1080, 2410),
+      )
 
     val appEntry =
-        extractor.createWindowEntry(
-            windowId = 116,
-            windowLayer = 0,
-            hierarchy = appRoot,
-            windowType = "application",
-            isActive = true,
-            isFocused = true,
-        )
+      extractor.createWindowEntry(
+        windowId = 116,
+        windowLayer = 0,
+        hierarchy = appRoot,
+        windowType = "application",
+        isActive = true,
+        isFocused = true,
+      )
     val imeEntry =
-        extractor.createWindowEntry(
-            windowId = 108,
-            windowLayer = 5,
-            hierarchy = imeWrapper,
-            windowType = "input_method",
-            isActive = false,
-            isFocused = false,
-        )
+      extractor.createWindowEntry(
+        windowId = 108,
+        windowLayer = 5,
+        hierarchy = imeWrapper,
+        windowType = "input_method",
+        isActive = false,
+        isFocused = false,
+      )
     val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, imeEntry))
     val filtered =
-        extractor.filterOccludedHierarchyForTest(
-            element = appRoot,
-            occlusionInfo = occlusionInfo,
-            windowKey = 116,
-            path = "",
-            isRoot = true,
-        )
+      extractor.filterOccludedHierarchyForTest(
+        element = appRoot,
+        occlusionInfo = occlusionInfo,
+        windowKey = 116,
+        path = "",
+        isRoot = true,
+      )
 
     assertNotNull("App root must survive IME wrapper occlusion", filtered)
     assertNotNull(
-        "Toolbar above the keyboard must remain",
-        findElementByResourceId(filtered!!, "toolbar"),
+      "Toolbar above the keyboard must remain",
+      findElementByResourceId(filtered!!, "toolbar"),
     )
     assertNotNull(
-        "Composer above the keyboard must remain",
-        findElementByResourceId(filtered, "composer"),
+      "Composer above the keyboard must remain",
+      findElementByResourceId(filtered, "composer"),
     )
   }
 
@@ -631,50 +631,50 @@ class ViewHierarchyExtractorTest {
     val toolbar = elementWithBounds(resourceId = "toolbar", bounds = bounds(0, 156, 1280, 400))
     val editText = elementWithBounds(resourceId = "edit-text", bounds = bounds(0, 400, 1280, 500))
     val appRoot =
-        elementWithBounds(
-            resourceId = "app-root",
-            bounds = bounds(0, 0, 1280, 2856),
-            children = listOf(toolbar, editText),
-        )
+      elementWithBounds(
+        resourceId = "app-root",
+        bounds = bounds(0, 0, 1280, 2856),
+        children = listOf(toolbar, editText),
+      )
     val keyboardRoot =
-        elementWithBounds(resourceId = "keyboard", bounds = bounds(0, 1395, 1280, 2856))
+      elementWithBounds(resourceId = "keyboard", bounds = bounds(0, 1395, 1280, 2856))
 
     val appEntry =
-        extractor.createWindowEntry(
-            windowId = 46,
-            windowLayer = 0,
-            hierarchy = appRoot,
-            windowType = "application",
-            isActive = true,
-            isFocused = true,
-        )
+      extractor.createWindowEntry(
+        windowId = 46,
+        windowLayer = 0,
+        hierarchy = appRoot,
+        windowType = "application",
+        isActive = true,
+        isFocused = true,
+      )
     val imeEntry =
-        extractor.createWindowEntry(
-            windowId = 31,
-            windowLayer = 1,
-            hierarchy = keyboardRoot,
-            windowType = "input_method",
-            isActive = false,
-            isFocused = false,
-        )
+      extractor.createWindowEntry(
+        windowId = 31,
+        windowLayer = 1,
+        hierarchy = keyboardRoot,
+        windowType = "input_method",
+        isActive = false,
+        isFocused = false,
+      )
     val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, imeEntry))
     val filtered =
-        extractor.filterOccludedHierarchyForTest(
-            element = appRoot,
-            occlusionInfo = occlusionInfo,
-            windowKey = 46,
-            path = "",
-            isRoot = true,
-        )
+      extractor.filterOccludedHierarchyForTest(
+        element = appRoot,
+        occlusionInfo = occlusionInfo,
+        windowKey = 46,
+        path = "",
+        isRoot = true,
+      )
 
     assertNotNull("App root should not be removed by keyboard occlusion", filtered)
     assertNotNull(
-        "Toolbar above keyboard should be preserved",
-        findElementByResourceId(filtered!!, "toolbar"),
+      "Toolbar above keyboard should be preserved",
+      findElementByResourceId(filtered!!, "toolbar"),
     )
     assertNotNull(
-        "Edit text above keyboard should be preserved",
-        findElementByResourceId(filtered, "edit-text"),
+      "Edit text above keyboard should be preserved",
+      findElementByResourceId(filtered, "edit-text"),
     )
   }
 
@@ -682,47 +682,47 @@ class ViewHierarchyExtractorTest {
   fun `keyboard window occlusion marks elements behind keyboard as hidden`() {
     // Element fully behind the keyboard should be marked hidden
     val bottomElement =
-        elementWithBounds(resourceId = "bottom-item", bounds = bounds(0, 1400, 1280, 2800))
+      elementWithBounds(resourceId = "bottom-item", bounds = bounds(0, 1400, 1280, 2800))
     val appRoot =
-        elementWithBounds(
-            resourceId = "app-root",
-            bounds = bounds(0, 0, 1280, 2856),
-            children = listOf(bottomElement),
-        )
+      elementWithBounds(
+        resourceId = "app-root",
+        bounds = bounds(0, 0, 1280, 2856),
+        children = listOf(bottomElement),
+      )
     val keyboardRoot =
-        elementWithBounds(resourceId = "keyboard", bounds = bounds(0, 1395, 1280, 2856))
+      elementWithBounds(resourceId = "keyboard", bounds = bounds(0, 1395, 1280, 2856))
 
     val appEntry =
-        extractor.createWindowEntry(
-            windowId = 46,
-            windowLayer = 0,
-            hierarchy = appRoot,
-            isActive = true,
-            isFocused = true,
-        )
+      extractor.createWindowEntry(
+        windowId = 46,
+        windowLayer = 0,
+        hierarchy = appRoot,
+        isActive = true,
+        isFocused = true,
+      )
     val imeEntry =
-        extractor.createWindowEntry(
-            windowId = 31,
-            windowLayer = 1,
-            hierarchy = keyboardRoot,
-            isActive = false,
-            isFocused = false,
-        )
+      extractor.createWindowEntry(
+        windowId = 31,
+        windowLayer = 1,
+        hierarchy = keyboardRoot,
+        isActive = false,
+        isFocused = false,
+      )
     val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, imeEntry))
     val filtered =
-        extractor.filterOccludedHierarchyForTest(
-            element = appRoot,
-            occlusionInfo = occlusionInfo,
-            windowKey = 46,
-            path = "",
-            isRoot = true,
-        )
+      extractor.filterOccludedHierarchyForTest(
+        element = appRoot,
+        occlusionInfo = occlusionInfo,
+        windowKey = 46,
+        path = "",
+        isRoot = true,
+      )
 
     assertNotNull("App root should survive as isRoot=true", filtered)
     // The bottom element is fully behind the keyboard, so it should be removed
     assertNull(
-        "Element fully behind keyboard should be removed",
-        findElementByResourceId(filtered!!, "bottom-item"),
+      "Element fully behind keyboard should be removed",
+      findElementByResourceId(filtered!!, "bottom-item"),
     )
   }
 
@@ -735,13 +735,13 @@ class ViewHierarchyExtractorTest {
     val occluderPath = "0.0.0.1"
 
     val relationship =
-        extractor.determineNodeRelationship(
-            nodePath = nodePath,
-            occluderPath = occluderPath,
-            nodeOrder = 5,
-            nodeSubtreeEnd = 5,
-            occluderOrder = 6,
-        )
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 5,
+        nodeSubtreeEnd = 5,
+        occluderOrder = 6,
+      )
 
     assertEquals(ViewHierarchyExtractor.NodeRelationship.SIBLING, relationship)
   }
@@ -755,13 +755,13 @@ class ViewHierarchyExtractorTest {
     val occluderPath = "0.0.0.2"
 
     val relationship =
-        extractor.determineNodeRelationship(
-            nodePath = nodePath,
-            occluderPath = occluderPath,
-            nodeOrder = 10,
-            nodeSubtreeEnd = 10,
-            occluderOrder = 11,
-        )
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 10,
+        nodeSubtreeEnd = 10,
+        occluderOrder = 11,
+      )
 
     assertEquals(ViewHierarchyExtractor.NodeRelationship.UNCLE, relationship)
   }
@@ -774,13 +774,13 @@ class ViewHierarchyExtractorTest {
     val occluderPath = "0.0.0.2"
 
     val relationship =
-        extractor.determineNodeRelationship(
-            nodePath = nodePath,
-            occluderPath = occluderPath,
-            nodeOrder = 15,
-            nodeSubtreeEnd = 15,
-            occluderOrder = 16,
-        )
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 15,
+        nodeSubtreeEnd = 15,
+        occluderOrder = 16,
+      )
 
     assertEquals(ViewHierarchyExtractor.NodeRelationship.UNCLE, relationship)
   }
@@ -792,13 +792,13 @@ class ViewHierarchyExtractorTest {
     val occluderPath = "0.0.0.1.0"
 
     val relationship =
-        extractor.determineNodeRelationship(
-            nodePath = nodePath,
-            occluderPath = occluderPath,
-            nodeOrder = 10,
-            nodeSubtreeEnd = 15, // Subtree ends at 15
-            occluderOrder = 11, // Child is at 11, within [10, 15]
-        )
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 10,
+        nodeSubtreeEnd = 15, // Subtree ends at 15
+        occluderOrder = 11, // Child is at 11, within [10, 15]
+      )
 
     assertEquals(ViewHierarchyExtractor.NodeRelationship.DESCENDANT, relationship)
   }
@@ -810,13 +810,13 @@ class ViewHierarchyExtractorTest {
     val occluderPath = "0.0.0.1.2.0"
 
     val relationship =
-        extractor.determineNodeRelationship(
-            nodePath = nodePath,
-            occluderPath = occluderPath,
-            nodeOrder = 10,
-            nodeSubtreeEnd = 20,
-            occluderOrder = 18, // Deep descendant within subtree
-        )
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 10,
+        nodeSubtreeEnd = 20,
+        occluderOrder = 18, // Deep descendant within subtree
+      )
 
     assertEquals(ViewHierarchyExtractor.NodeRelationship.DESCENDANT, relationship)
   }
@@ -828,13 +828,13 @@ class ViewHierarchyExtractorTest {
     val occluderPath = "0.0.1.0.0"
 
     val relationship =
-        extractor.determineNodeRelationship(
-            nodePath = nodePath,
-            occluderPath = occluderPath,
-            nodeOrder = 10,
-            nodeSubtreeEnd = 12,
-            occluderOrder = 20,
-        )
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 10,
+        nodeSubtreeEnd = 12,
+        occluderOrder = 20,
+      )
 
     assertEquals(ViewHierarchyExtractor.NodeRelationship.UNRELATED, relationship)
   }
@@ -846,13 +846,13 @@ class ViewHierarchyExtractorTest {
     val occluderPath = "0.0.0.2.0"
 
     val relationship =
-        extractor.determineNodeRelationship(
-            nodePath = nodePath,
-            occluderPath = occluderPath,
-            nodeOrder = 10,
-            nodeSubtreeEnd = 10,
-            occluderOrder = 15,
-        )
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 10,
+        nodeSubtreeEnd = 10,
+        occluderOrder = 15,
+      )
 
     assertEquals(ViewHierarchyExtractor.NodeRelationship.UNRELATED, relationship)
   }
@@ -864,13 +864,13 @@ class ViewHierarchyExtractorTest {
     val occluderPath = "1"
 
     val relationship =
-        extractor.determineNodeRelationship(
-            nodePath = nodePath,
-            occluderPath = occluderPath,
-            nodeOrder = 0,
-            nodeSubtreeEnd = 100,
-            occluderOrder = 101,
-        )
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 0,
+        nodeSubtreeEnd = 100,
+        occluderOrder = 101,
+      )
 
     assertEquals(ViewHierarchyExtractor.NodeRelationship.SIBLING, relationship)
   }
@@ -882,13 +882,13 @@ class ViewHierarchyExtractorTest {
     val roleDescPath = "0.0.0.0.0.0.1.0.0.0.1"
 
     val relationship =
-        extractor.determineNodeRelationship(
-            nodePath = textPath,
-            occluderPath = roleDescPath,
-            nodeOrder = 10,
-            nodeSubtreeEnd = 10,
-            occluderOrder = 11,
-        )
+      extractor.determineNodeRelationship(
+        nodePath = textPath,
+        occluderPath = roleDescPath,
+        nodeOrder = 10,
+        nodeSubtreeEnd = 10,
+        occluderOrder = 11,
+      )
 
     assertEquals(ViewHierarchyExtractor.NodeRelationship.SIBLING, relationship)
   }
@@ -902,13 +902,13 @@ class ViewHierarchyExtractorTest {
     val occluderPath = "0.0.0.0.0.0.1.0.0.2"
 
     val relationship =
-        extractor.determineNodeRelationship(
-            nodePath = textPath,
-            occluderPath = occluderPath,
-            nodeOrder = 10,
-            nodeSubtreeEnd = 10,
-            occluderOrder = 11,
-        )
+      extractor.determineNodeRelationship(
+        nodePath = textPath,
+        occluderPath = occluderPath,
+        nodeOrder = 10,
+        nodeSubtreeEnd = 10,
+        occluderOrder = 11,
+      )
 
     assertEquals(ViewHierarchyExtractor.NodeRelationship.UNCLE, relationship)
   }
@@ -918,7 +918,7 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `UIElementInfo with resourceId gets viewId equal to resourceId`() {
     val element =
-        UIElementInfo(resourceId = "com.example:id/my_button", viewId = "com.example:id/my_button")
+      UIElementInfo(resourceId = "com.example:id/my_button", viewId = "com.example:id/my_button")
     assertEquals("com.example:id/my_button", element.viewId)
   }
 
@@ -946,11 +946,11 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `viewId field is serialized to JSON with correct key`() {
     val element =
-        UIElementInfo(
-            text = "Hello",
-            resourceId = "com.example:id/text",
-            viewId = "com.example:id/text",
-        )
+      UIElementInfo(
+        text = "Hello",
+        resourceId = "com.example:id/text",
+        viewId = "com.example:id/text",
+      )
     val jsonString = json.encodeToString(UIElementInfo.serializer(), element)
     assertTrue("JSON should contain view-id field", jsonString.contains("\"view-id\""))
   }
@@ -958,22 +958,22 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `detectContentHiddenRegions finds large empty non-interactive Compose descendant with sparse child coverage`() {
     val visibleToolbar =
-        elementWithBounds(
-            resourceId = "com.slack:id/top_bar",
-            bounds = bounds(0, 290, 1440, 458),
-        )
+      elementWithBounds(
+        resourceId = "com.slack:id/top_bar",
+        bounds = bounds(0, 290, 1440, 458),
+      )
     val hiddenBoundary =
-        elementWithBounds(
-            bounds = bounds(0, 368, 1440, 2752),
-            actions = listOf("accessibility_focus"),
-            children = listOf(visibleToolbar),
-        )
+      elementWithBounds(
+        bounds = bounds(0, 368, 1440, 2752),
+        actions = listOf("accessibility_focus"),
+        children = listOf(visibleToolbar),
+      )
     val composeRoot =
-        elementWithBounds(
-            className = "androidx.compose.ui.platform.ComposeView",
-            bounds = bounds(0, 0, 1440, 3000),
-            children = listOf(hiddenBoundary),
-        )
+      elementWithBounds(
+        className = "androidx.compose.ui.platform.ComposeView",
+        bounds = bounds(0, 0, 1440, 3000),
+        children = listOf(hiddenBoundary),
+      )
 
     val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
 
@@ -986,22 +986,22 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `detectContentHiddenRegions ignores large Compose descendants with text content`() {
     val textChild =
-        elementWithBounds(
-            bounds = bounds(32, 500, 400, 560),
-            text = "general",
-        )
+      elementWithBounds(
+        bounds = bounds(32, 500, 400, 560),
+        text = "general",
+      )
     val contentRegion =
-        elementWithBounds(
-            bounds = bounds(0, 368, 1440, 2752),
-            actions = listOf("accessibility_focus"),
-            children = listOf(textChild),
-        )
+      elementWithBounds(
+        bounds = bounds(0, 368, 1440, 2752),
+        actions = listOf("accessibility_focus"),
+        children = listOf(textChild),
+      )
     val composeRoot =
-        elementWithBounds(
-            className = "androidx.compose.ui.platform.ComposeView",
-            bounds = bounds(0, 0, 1440, 3000),
-            children = listOf(contentRegion),
-        )
+      elementWithBounds(
+        className = "androidx.compose.ui.platform.ComposeView",
+        bounds = bounds(0, 0, 1440, 3000),
+        children = listOf(contentRegion),
+      )
 
     val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
 
@@ -1011,16 +1011,16 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `detectContentHiddenRegions ignores interactive Compose descendants`() {
     val interactiveRegion =
-        elementWithBounds(
-            bounds = bounds(0, 368, 1440, 2752),
-            actions = listOf("click"),
-        )
+      elementWithBounds(
+        bounds = bounds(0, 368, 1440, 2752),
+        actions = listOf("click"),
+      )
     val composeRoot =
-        elementWithBounds(
-            className = "androidx.compose.ui.platform.ComposeView",
-            bounds = bounds(0, 0, 1440, 3000),
-            children = listOf(interactiveRegion),
-        )
+      elementWithBounds(
+        className = "androidx.compose.ui.platform.ComposeView",
+        bounds = bounds(0, 0, 1440, 3000),
+        children = listOf(interactiveRegion),
+      )
 
     val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
 
@@ -1034,9 +1034,9 @@ class ViewHierarchyExtractorTest {
     val secondWindow = composeRootWithHiddenBoundary(bounds(0, 1500, 1440, 2752))
 
     val regions =
-        extractor.detectContentHiddenRegionsAcrossRootsForTest(
-            listOf(firstWindow, duplicateWindow, secondWindow),
-        )
+      extractor.detectContentHiddenRegionsAcrossRootsForTest(
+        listOf(firstWindow, duplicateWindow, secondWindow)
+      )
 
     assertNotNull(regions)
     assertEquals(2, regions!!.size)
@@ -1053,41 +1053,41 @@ class ViewHierarchyExtractorTest {
   // Helper method to extract children from hierarchy (this would be made public in the actual
   // extractor for testing)
   private fun ViewHierarchyExtractor.extractChildrenFromHierarchy(
-      element: UIElementInfo
+    element: UIElementInfo
   ): List<UIElementInfo> {
     return this.javaClass
-        .getDeclaredMethod(
-            "extractChildrenFromNode",
-            kotlinx.serialization.json.JsonElement::class.java,
-        )
-        .let { method ->
-          method.isAccessible = true
-          @Suppress("UNCHECKED_CAST")
-          method.invoke(this, element.node) as List<UIElementInfo>
-        }
+      .getDeclaredMethod(
+        "extractChildrenFromNode",
+        kotlinx.serialization.json.JsonElement::class.java,
+      )
+      .let { method ->
+        method.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        method.invoke(this, element.node) as List<UIElementInfo>
+      }
   }
 
   private fun elementWithBounds(
-      resourceId: String? = null,
-      bounds: ElementBounds? = null,
-      className: String? = null,
-      text: String? = null,
-      actions: List<String>? = null,
-      children: List<UIElementInfo> = emptyList(),
+    resourceId: String? = null,
+    bounds: ElementBounds? = null,
+    className: String? = null,
+    text: String? = null,
+    actions: List<String>? = null,
+    children: List<UIElementInfo> = emptyList(),
   ): UIElementInfo {
     val node =
-        when {
-          children.isEmpty() -> null
-          children.size == 1 -> json.encodeToJsonElement(UIElementInfo.serializer(), children[0])
-          else -> json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
-        }
+      when {
+        children.isEmpty() -> null
+        children.size == 1 -> json.encodeToJsonElement(UIElementInfo.serializer(), children[0])
+        else -> json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
+      }
     return UIElementInfo(
-        resourceId = resourceId,
-        bounds = bounds,
-        className = className,
-        text = text,
-        actions = actions,
-        node = node,
+      resourceId = resourceId,
+      bounds = bounds,
+      className = className,
+      text = text,
+      actions = actions,
+      node = node,
     )
   }
 
@@ -1097,20 +1097,20 @@ class ViewHierarchyExtractorTest {
 
   private fun composeRootWithHiddenBoundary(boundaryBounds: ElementBounds): UIElementInfo {
     val hiddenBoundary =
-        elementWithBounds(
-            bounds = boundaryBounds,
-            actions = listOf("accessibility_focus"),
-        )
+      elementWithBounds(
+        bounds = boundaryBounds,
+        actions = listOf("accessibility_focus"),
+      )
     return elementWithBounds(
-        className = "androidx.compose.ui.platform.ComposeView",
-        bounds = bounds(0, 0, 1440, 3000),
-        children = listOf(hiddenBoundary),
+      className = "androidx.compose.ui.platform.ComposeView",
+      bounds = bounds(0, 0, 1440, 3000),
+      children = listOf(hiddenBoundary),
     )
   }
 
   private fun findElementByResourceId(
-      element: UIElementInfo,
-      resourceId: String,
+    element: UIElementInfo,
+    resourceId: String,
   ): UIElementInfo? {
     if (element.resourceId == resourceId) {
       return element
@@ -1125,51 +1125,51 @@ class ViewHierarchyExtractorTest {
   }
 
   private fun ViewHierarchyExtractor.applyOcclusionFilteringSingleWindowForTest(
-      element: UIElementInfo
+    element: UIElementInfo
   ): UIElementInfo? {
     return this.javaClass
-        .getDeclaredMethod("applyOcclusionFilteringSingleWindow", UIElementInfo::class.java)
-        .let { method ->
-          method.isAccessible = true
-          @Suppress("UNCHECKED_CAST")
-          method.invoke(this, element) as UIElementInfo?
-        }
+      .getDeclaredMethod("applyOcclusionFilteringSingleWindow", UIElementInfo::class.java)
+      .let { method ->
+        method.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        method.invoke(this, element) as UIElementInfo?
+      }
   }
 
   private fun ViewHierarchyExtractor.createWindowEntry(
-      windowId: Int,
-      windowLayer: Int,
-      hierarchy: UIElementInfo,
-      windowType: String = "application",
-      packageName: String? = null,
-      isActive: Boolean = true,
-      isFocused: Boolean = true,
+    windowId: Int,
+    windowLayer: Int,
+    hierarchy: UIElementInfo,
+    windowType: String = "application",
+    packageName: String? = null,
+    isActive: Boolean = true,
+    isFocused: Boolean = true,
   ): Any {
     val windowEntryClass = this.javaClass.declaredClasses.first { it.simpleName == "WindowEntry" }
     val constructor =
-        windowEntryClass.getDeclaredConstructor(
-            Int::class.javaPrimitiveType,
-            String::class.java,
-            Int::class.javaPrimitiveType,
-            String::class.java,
-            Boolean::class.javaPrimitiveType,
-            Boolean::class.javaPrimitiveType,
-            UIElementInfo::class.java,
-        )
+      windowEntryClass.getDeclaredConstructor(
+        Int::class.javaPrimitiveType,
+        String::class.java,
+        Int::class.javaPrimitiveType,
+        String::class.java,
+        Boolean::class.javaPrimitiveType,
+        Boolean::class.javaPrimitiveType,
+        UIElementInfo::class.java,
+      )
     constructor.isAccessible = true
     return constructor.newInstance(
-        windowId,
-        windowType,
-        windowLayer,
-        packageName,
-        isActive,
-        isFocused,
-        hierarchy,
+      windowId,
+      windowType,
+      windowLayer,
+      packageName,
+      isActive,
+      isFocused,
+      hierarchy,
     )
   }
 
   private fun ViewHierarchyExtractor.buildOcclusionInfoForTest(
-      windowEntries: List<Any>
+    windowEntries: List<Any>
   ): Map<*, *> {
     val method = this.javaClass.getDeclaredMethod("buildOcclusionInfo", List::class.java)
     method.isAccessible = true
@@ -1178,56 +1178,56 @@ class ViewHierarchyExtractorTest {
   }
 
   private fun ViewHierarchyExtractor.filterOccludedHierarchyForTest(
-      element: UIElementInfo,
-      occlusionInfo: Map<*, *>,
-      windowKey: Int,
-      path: String,
-      isRoot: Boolean,
+    element: UIElementInfo,
+    occlusionInfo: Map<*, *>,
+    windowKey: Int,
+    path: String,
+    isRoot: Boolean,
   ): UIElementInfo? {
     val method =
-        this.javaClass.getDeclaredMethod(
-            "filterOccludedHierarchy",
-            UIElementInfo::class.java,
-            Map::class.java,
-            Int::class.javaPrimitiveType,
-            String::class.java,
-            Boolean::class.javaPrimitiveType,
-        )
+      this.javaClass.getDeclaredMethod(
+        "filterOccludedHierarchy",
+        UIElementInfo::class.java,
+        Map::class.java,
+        Int::class.javaPrimitiveType,
+        String::class.java,
+        Boolean::class.javaPrimitiveType,
+      )
     method.isAccessible = true
     @Suppress("UNCHECKED_CAST")
     return method.invoke(this, element, occlusionInfo, windowKey, path, isRoot) as UIElementInfo?
   }
 
   private fun ViewHierarchyExtractor.detectContentHiddenRegionsForTest(
-      element: UIElementInfo,
-      screenWidth: Int,
-      screenHeight: Int,
+    element: UIElementInfo,
+    screenWidth: Int,
+    screenHeight: Int,
   ): List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion> {
     val method =
-        this.javaClass.getDeclaredMethod(
-            "detectContentHiddenRegions",
-            UIElementInfo::class.java,
-            Int::class.javaPrimitiveType,
-            Int::class.javaPrimitiveType,
-        )
+      this.javaClass.getDeclaredMethod(
+        "detectContentHiddenRegions",
+        UIElementInfo::class.java,
+        Int::class.javaPrimitiveType,
+        Int::class.javaPrimitiveType,
+      )
     method.isAccessible = true
     @Suppress("UNCHECKED_CAST")
     return method.invoke(this, element, screenWidth, screenHeight)
-        as List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>
+      as List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>
   }
 
   private fun ViewHierarchyExtractor.detectContentHiddenRegionsAcrossRootsForTest(
-      elements: List<UIElementInfo>
+    elements: List<UIElementInfo>
   ): List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>? {
     val method =
-        this.javaClass.getDeclaredMethod(
-            "detectContentHiddenRegions",
-            List::class.java,
-            dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions::class.java,
-        )
+      this.javaClass.getDeclaredMethod(
+        "detectContentHiddenRegions",
+        List::class.java,
+        dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions::class.java,
+      )
     method.isAccessible = true
     @Suppress("UNCHECKED_CAST")
     return method.invoke(this, elements, null)
-        as List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>?
+      as List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>?
   }
 }

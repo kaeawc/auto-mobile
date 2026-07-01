@@ -18,32 +18,32 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 @Composable
 fun EventTimeline(
-    events: List<TelemetryDisplayEvent>,
-    state: TimelineState,
-    activeFilterCategory: String?,
-    onEventClicked: (TelemetryDisplayEvent) -> Unit,
-    modifier: Modifier = Modifier,
+  events: List<TelemetryDisplayEvent>,
+  state: TimelineState,
+  activeFilterCategory: String?,
+  onEventClicked: (TelemetryDisplayEvent) -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   val filteredCategories by
-      remember(activeFilterCategory) {
-        derivedStateOf {
-          if (activeFilterCategory == null) emptySet()
-          else
-              TimelineCategory.entries
-                  .filter { it.label.equals(activeFilterCategory, ignoreCase = true) }
-                  .toSet()
-        }
+    remember(activeFilterCategory) {
+      derivedStateOf {
+        if (activeFilterCategory == null) emptySet()
+        else
+          TimelineCategory.entries
+            .filter { it.label.equals(activeFilterCategory, ignoreCase = true) }
+            .toSet()
       }
+    }
   val latestTimestamp = events.lastOrNull()?.timestamp ?: 0L
   val spans by
-      remember(events.size, latestTimestamp, filteredCategories) {
-        derivedStateOf { buildTimelineSpans(events, filteredCategories) }
-      }
+    remember(events.size, latestTimestamp, filteredCategories) {
+      derivedStateOf { buildTimelineSpans(events, filteredCategories) }
+    }
   val lanes by
-      remember(spans) {
-        derivedStateOf { activeLanes(spans) }
-      }
+    remember(spans) {
+      derivedStateOf { activeLanes(spans) }
+    }
 
   LaunchedEffect(spans.isNotEmpty()) {
     if (spans.isNotEmpty() && state.visibleStartMs == 0L && state.visibleEndMs == 1L) {
@@ -58,16 +58,16 @@ fun EventTimeline(
   } else {
     Column(modifier.fillMaxSize()) {
       TimelineToolbar(
-          state = state,
-          spanCount = spans.size,
-          onFitAll = { state.fitToEvents(spans) },
+        state = state,
+        spanCount = spans.size,
+        onFitAll = { state.fitToEvents(spans) },
       )
       TimelineCanvas(
-          spans = spans,
-          activeLanes = lanes,
-          state = state,
-          onEventClicked = onEventClicked,
-          modifier = Modifier.weight(1f).fillMaxWidth(),
+        spans = spans,
+        activeLanes = lanes,
+        state = state,
+        onEventClicked = onEventClicked,
+        modifier = Modifier.weight(1f).fillMaxWidth(),
       )
     }
   }

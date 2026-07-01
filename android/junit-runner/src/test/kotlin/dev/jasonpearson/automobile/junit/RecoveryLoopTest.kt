@@ -49,7 +49,7 @@ class RecoveryLoopTest {
     fakeDaemonClient.responses.add(buildFailureResponse(failedStepIndex = 2, failedTool = "tapOn"))
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
-        RecoveryOutcome(success = true, recoveryTimeMs = 100, observeResultAfterRecovery = "{}")
+      RecoveryOutcome(success = true, recoveryTimeMs = 100, observeResultAfterRecovery = "{}")
 
     val result = executePlan(aiAssistance = true)
 
@@ -100,7 +100,7 @@ class RecoveryLoopTest {
     fakeDaemonClient.responses.add(buildFailureResponse(failedStepIndex = 2, failedTool = "tapOn"))
     fakeDaemonClient.responses.add(buildFailureResponse(failedStepIndex = 4, failedTool = "swipe"))
     fakeAgent.recoveryOutcome =
-        RecoveryOutcome(success = true, recoveryTimeMs = 100, observeResultAfterRecovery = "{}")
+      RecoveryOutcome(success = true, recoveryTimeMs = 100, observeResultAfterRecovery = "{}")
 
     val result = executePlan(aiAssistance = true)
 
@@ -115,7 +115,7 @@ class RecoveryLoopTest {
     fakeDaemonClient.responses.add(buildFailureResponse(failedStepIndex = 2, failedTool = "tapOn"))
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
-        RecoveryOutcome(success = true, recoveryTimeMs = 100, observeResultAfterRecovery = "{}")
+      RecoveryOutcome(success = true, recoveryTimeMs = 100, observeResultAfterRecovery = "{}")
 
     executePlan(aiAssistance = true)
 
@@ -129,11 +129,11 @@ class RecoveryLoopTest {
   fun `resume pins to the same device that was recovered`() {
     // Failure response includes device "emulator-5554"
     fakeDaemonClient.responses.add(
-        buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", device = "emulator-5554")
+      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", device = "emulator-5554")
     )
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
-        RecoveryOutcome(success = true, recoveryTimeMs = 50, observeResultAfterRecovery = "{}")
+      RecoveryOutcome(success = true, recoveryTimeMs = 50, observeResultAfterRecovery = "{}")
 
     // Execute with device="auto" (default)
     executePlan(aiAssistance = true)
@@ -141,37 +141,37 @@ class RecoveryLoopTest {
     assertEquals("Should have made 2 daemon calls", 2, fakeDaemonClient.callArgs.size)
     // First call should NOT have deviceId (auto mode)
     assertNull(
-        "First call should not pin a device",
-        fakeDaemonClient.callArgs[0]["deviceId"],
+      "First call should not pin a device",
+      fakeDaemonClient.callArgs[0]["deviceId"],
     )
     // Resume call should pin to the recovered device
     assertEquals(
-        "Resume should pin to recovered device",
-        "emulator-5554",
-        fakeDaemonClient.callArgs[1]["deviceId"]?.let { (it as JsonPrimitive).content },
+      "Resume should pin to recovered device",
+      "emulator-5554",
+      fakeDaemonClient.callArgs[1]["deviceId"]?.let { (it as JsonPrimitive).content },
     )
   }
 
   @Test
   fun `FailedStepContext is populated correctly`() {
     val toolResults =
-        JsonArray(
-            listOf(
-                JsonObject(mapOf("toolName" to JsonPrimitive("observe"))),
-                JsonObject(mapOf("toolName" to JsonPrimitive("tapOn"))),
-            )
+      JsonArray(
+        listOf(
+          JsonObject(mapOf("toolName" to JsonPrimitive("observe"))),
+          JsonObject(mapOf("toolName" to JsonPrimitive("tapOn"))),
         )
+      )
     fakeDaemonClient.responses.add(
-        buildFailureResponse(
-            failedStepIndex = 2,
-            failedTool = "swipe",
-            error = "No scrollable container",
-            toolResults = toolResults,
-        )
+      buildFailureResponse(
+        failedStepIndex = 2,
+        failedTool = "swipe",
+        error = "No scrollable container",
+        toolResults = toolResults,
+      )
     )
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
-        RecoveryOutcome(success = true, recoveryTimeMs = 50, observeResultAfterRecovery = "{}")
+      RecoveryOutcome(success = true, recoveryTimeMs = 50, observeResultAfterRecovery = "{}")
 
     executePlan(aiAssistance = true)
 
@@ -202,47 +202,47 @@ class RecoveryLoopTest {
 
   private fun executePlan(aiAssistance: Boolean): AutoMobilePlanExecutionResult {
     return AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = aiAssistance),
+      "test-plans/launch-clock-app.yaml",
+      emptyMap(),
+      AutoMobilePlanExecutionOptions(aiAssistance = aiAssistance),
     )
   }
 
   private fun buildSuccessResponse(): DaemonResponse {
     return buildDaemonResponse(
-        JsonObject(
-            mapOf(
-                "success" to JsonPrimitive(true),
-                "executedSteps" to JsonPrimitive(5),
-                "totalSteps" to JsonPrimitive(5),
-            )
+      JsonObject(
+        mapOf(
+          "success" to JsonPrimitive(true),
+          "executedSteps" to JsonPrimitive(5),
+          "totalSteps" to JsonPrimitive(5),
         )
+      )
     )
   }
 
   private fun buildFailureResponse(
-      failedStepIndex: Int,
-      failedTool: String,
-      error: String = "Element not found",
-      toolResults: JsonArray? = null,
-      device: String? = null,
+    failedStepIndex: Int,
+    failedTool: String,
+    error: String = "Element not found",
+    toolResults: JsonArray? = null,
+    device: String? = null,
   ): DaemonResponse {
     val failedStepFields =
-        mutableMapOf<String, JsonElement>(
-            "stepIndex" to JsonPrimitive(failedStepIndex),
-            "tool" to JsonPrimitive(failedTool),
-            "error" to JsonPrimitive(error),
-        )
+      mutableMapOf<String, JsonElement>(
+        "stepIndex" to JsonPrimitive(failedStepIndex),
+        "tool" to JsonPrimitive(failedTool),
+        "error" to JsonPrimitive(error),
+      )
     if (device != null) {
       failedStepFields["device"] = JsonPrimitive(device)
     }
     val payload =
-        mutableMapOf<String, JsonElement>(
-            "success" to JsonPrimitive(false),
-            "executedSteps" to JsonPrimitive(failedStepIndex),
-            "totalSteps" to JsonPrimitive(5),
-            "failedStep" to JsonObject(failedStepFields),
-        )
+      mutableMapOf<String, JsonElement>(
+        "success" to JsonPrimitive(false),
+        "executedSteps" to JsonPrimitive(failedStepIndex),
+        "totalSteps" to JsonPrimitive(5),
+        "failedStep" to JsonObject(failedStepFields),
+      )
     if (toolResults != null) {
       payload["toolResults"] = toolResults
     }
@@ -252,27 +252,27 @@ class RecoveryLoopTest {
   private fun buildDaemonResponse(payload: JsonObject): DaemonResponse {
     val textPayload = json.encodeToString(JsonElement.serializer(), payload)
     val result =
-        JsonObject(
-            mapOf(
-                "content" to
-                    JsonArray(
-                        listOf(
-                            JsonObject(
-                                mapOf(
-                                    "type" to JsonPrimitive("text"),
-                                    "text" to JsonPrimitive(textPayload),
-                                )
-                            )
-                        )
-                    )
+      JsonObject(
+        mapOf(
+          "content" to
+            JsonArray(
+              listOf(
+                JsonObject(
+                  mapOf(
+                    "type" to JsonPrimitive("text"),
+                    "text" to JsonPrimitive(textPayload),
+                  )
+                )
+              )
             )
         )
+      )
     return DaemonResponse(
-        id = "test",
-        type = "mcp_response",
-        success = true,
-        result = result,
-        error = null,
+      id = "test",
+      type = "mcp_response",
+      success = true,
+      result = result,
+      error = null,
     )
   }
 }
@@ -287,9 +287,9 @@ private class RecoveryFakeDaemonToolClient : DaemonToolClient {
   override var sessionUuid: String = "recovery-test-session"
 
   override fun callTool(
-      toolName: String,
-      arguments: JsonObject,
-      timeoutMs: Long,
+    toolName: String,
+    arguments: JsonObject,
+    timeoutMs: Long,
   ): DaemonResponse {
     callArgs.add(arguments)
     return if (callIndex < responses.size) {
@@ -305,18 +305,16 @@ private class RecoveryFakeDaemonToolClient : DaemonToolClient {
 }
 
 /** Fake agent that records recovery calls and returns a configured outcome. */
-private class RecoveryFakeAutoMobileAgent(
-    recoveryEnabled: Boolean = true,
-) :
-    AutoMobileAgent(
-        configProvider = FakeConfigProvider(),
-        fileSystemOperations = FakeFileSystemOps(),
-        aiAgentFactory = FakeAIAgentFactory(),
-        timeProvider = FakeTimeProvider(),
-        mcpClient = FakeMCPClient(),
-        recoveryConfigProvider =
-            StaticRecoveryConfigProvider(enabled = recoveryEnabled, maxToolCalls = 5),
-    ) {
+private class RecoveryFakeAutoMobileAgent(recoveryEnabled: Boolean = true) :
+  AutoMobileAgent(
+    configProvider = FakeConfigProvider(),
+    fileSystemOperations = FakeFileSystemOps(),
+    aiAgentFactory = FakeAIAgentFactory(),
+    timeProvider = FakeTimeProvider(),
+    mcpClient = FakeMCPClient(),
+    recoveryConfigProvider =
+      StaticRecoveryConfigProvider(enabled = recoveryEnabled, maxToolCalls = 5),
+  ) {
   var recoveryOutcome: RecoveryOutcome = RecoveryOutcome(success = false, recoveryTimeMs = 0)
   val recoveryCalls = mutableListOf<FailedStepContext>()
 
@@ -328,7 +326,7 @@ private class RecoveryFakeAutoMobileAgent(
 
 private class FakeConfigProvider : AutoMobileAgent.ConfigProvider {
   override fun getModelConfig() =
-      AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "fake")
+    AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "fake")
 
   override fun getPlanMaxAgeMs() = 3600000L
 
@@ -349,15 +347,15 @@ private class FakeFileSystemOps : AutoMobileAgent.FileSystemOperations {
 
 private class FakeAIAgentFactory : AutoMobileAgent.AIAgentFactory {
   override fun createAIAgent(
-      config: AutoMobileAgent.ModelConfig
+    config: AutoMobileAgent.ModelConfig
   ): ai.koog.agents.core.agent.AIAgent<String, String> {
     throw UnsupportedOperationException("Not used in recovery tests")
   }
 
   override fun createAIAgentWithMCPTools(
-      config: AutoMobileAgent.ModelConfig,
-      mcpClient: AutoMobileAgent.MCPClient,
-      maxToolCalls: Int,
+    config: AutoMobileAgent.ModelConfig,
+    mcpClient: AutoMobileAgent.MCPClient,
+    maxToolCalls: Int,
   ): ai.koog.agents.core.agent.AIAgent<String, String> {
     throw UnsupportedOperationException("Not used in recovery tests")
   }

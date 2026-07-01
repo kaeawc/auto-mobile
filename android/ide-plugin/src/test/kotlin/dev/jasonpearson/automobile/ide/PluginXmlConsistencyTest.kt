@@ -16,14 +16,14 @@ class PluginXmlConsistencyTest {
 
   // Maps element tag names to the attribute that holds a class name.
   private val classAttributes =
-      mapOf(
-          "toolWindow" to "factoryClass",
-          "applicationConfigurable" to "instance",
-          "applicationService" to "serviceImplementation",
-          "externalAnnotator" to "implementationClass",
-          "completion.contributor" to "implementationClass",
-          "localInspection" to "implementationClass",
-      )
+    mapOf(
+      "toolWindow" to "factoryClass",
+      "applicationConfigurable" to "instance",
+      "applicationService" to "serviceImplementation",
+      "externalAnnotator" to "implementationClass",
+      "completion.contributor" to "implementationClass",
+      "localInspection" to "implementationClass",
+    )
 
   @Test
   fun `all plugin xml extension classes are loadable`() {
@@ -52,8 +52,8 @@ class PluginXmlConsistencyTest {
     }
 
     assertTrue(
-        missing.isEmpty(),
-        "plugin.xml references classes that are not on the classpath:\n${missing.joinToString("\n")}",
+      missing.isEmpty(),
+      "plugin.xml references classes that are not on the classpath:\n${missing.joinToString("\n")}",
     )
   }
 
@@ -61,26 +61,26 @@ class PluginXmlConsistencyTest {
   fun `tool window icon resources exist on classpath`() {
     listOf("/icons/toolWindow.svg", "/expui/automobile/toolWindow.svg").forEach { path ->
       assertNotNull(
-          javaClass.getResourceAsStream(path),
-          "Tool window icon not found on classpath: $path",
+        javaClass.getResourceAsStream(path),
+        "Tool window icon not found on classpath: $path",
       )
     }
   }
 
   private fun isLoadable(className: String): Boolean =
-      try {
-        Class.forName(className, false, javaClass.classLoader)
-        true
-      } catch (_: ClassNotFoundException) {
-        false
-      }
+    try {
+      Class.forName(className, false, javaClass.classLoader)
+      true
+    } catch (_: ClassNotFoundException) {
+      false
+    }
 
   private fun loadPluginXml(): org.w3c.dom.Document {
     val stream =
-        assertNotNull(
-            javaClass.classLoader.getResourceAsStream("META-INF/plugin.xml"),
-            "META-INF/plugin.xml not found on the classpath",
-        )
+      assertNotNull(
+        javaClass.classLoader.getResourceAsStream("META-INF/plugin.xml"),
+        "META-INF/plugin.xml not found on the classpath",
+      )
     return stream.use {
       val factory = DocumentBuilderFactory.newInstance()
       factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)

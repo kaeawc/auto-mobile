@@ -16,25 +16,25 @@ import java.awt.image.BufferedImage
  */
 @Composable
 fun ApplicationScope.AutoMobileSystemTray(
-    isConnected: Boolean,
-    isWindowVisible: Boolean,
-    onToggleWindow: () -> Unit,
-    onQuit: () -> Unit,
+  isConnected: Boolean,
+  isWindowVisible: Boolean,
+  onToggleWindow: () -> Unit,
+  onQuit: () -> Unit,
 ) {
   val icon = if (isConnected) connectedIcon else disconnectedIcon
   val tooltip = if (isConnected) "AutoMobile \u2014 Connected" else "AutoMobile \u2014 Disconnected"
 
   Tray(
-      icon = icon,
-      tooltip = tooltip,
-      menu = {
-        Item(
-            text = if (isWindowVisible) "Hide Window" else "Show Window",
-            onClick = onToggleWindow,
-        )
-        Separator()
-        Item("Quit AutoMobile", onClick = onQuit)
-      },
+    icon = icon,
+    tooltip = tooltip,
+    menu = {
+      Item(
+        text = if (isWindowVisible) "Hide Window" else "Show Window",
+        onClick = onToggleWindow,
+      )
+      Separator()
+      Item("Quit AutoMobile", onClick = onQuit)
+    },
   )
 }
 

@@ -56,20 +56,20 @@ fun DesignSystemDemoScreen(onBackClick: () -> Unit = {}) {
 
   AutoMobileTheme {
     Scaffold(
-        topBar = {
-          AutoMobileTopAppBar(
-              title = { AutoMobileTitle("Design System Demo") },
-              navigationIcon = { AutoMobileBackButton(onBackClick = onBackClick) },
-          )
-        }
+      topBar = {
+        AutoMobileTopAppBar(
+          title = { AutoMobileTitle("Design System Demo") },
+          navigationIcon = { AutoMobileBackButton(onBackClick = onBackClick) },
+        )
+      }
     ) { paddingValues ->
       Column(
-          modifier =
-              Modifier.fillMaxSize()
-                  .padding(paddingValues)
-                  .padding(AutoMobileDimensions.spacing4)
-                  .verticalScroll(rememberScrollState()),
-          verticalArrangement = Arrangement.spacedBy(AutoMobileDimensions.spacing4),
+        modifier =
+          Modifier.fillMaxSize()
+            .padding(paddingValues)
+            .padding(AutoMobileDimensions.spacing4)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(AutoMobileDimensions.spacing4),
       ) {
         // Typography Section
         AutoMobileCard {
@@ -87,21 +87,21 @@ fun DesignSystemDemoScreen(onBackClick: () -> Unit = {}) {
 
           Column(verticalArrangement = Arrangement.spacedBy(AutoMobileDimensions.spacing2)) {
             AutoMobileButton(
-                text = "Primary Button",
-                onClick = {},
-                modifier = Modifier.fillMaxWidth(),
+              text = "Primary Button",
+              onClick = {},
+              modifier = Modifier.fillMaxWidth(),
             )
 
             AutoMobileSecondaryButton(
-                text = "Secondary Button",
-                onClick = {},
-                modifier = Modifier.fillMaxWidth(),
+              text = "Secondary Button",
+              onClick = {},
+              modifier = Modifier.fillMaxWidth(),
             )
 
             AutoMobileOutlinedButton(
-                text = "Outlined Button",
-                onClick = {},
-                modifier = Modifier.fillMaxWidth(),
+              text = "Outlined Button",
+              onClick = {},
+              modifier = Modifier.fillMaxWidth(),
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(AutoMobileDimensions.spacing2)) {
@@ -117,7 +117,7 @@ fun DesignSystemDemoScreen(onBackClick: () -> Unit = {}) {
           AutoMobileHeadline("Cards")
           Spacer(modifier = Modifier.height(AutoMobileDimensions.spacing2))
           AutoMobileBodyText(
-              "This is an outlined card variant. Cards follow flat design principles and avoid nesting."
+            "This is an outlined card variant. Cards follow flat design principles and avoid nesting."
           )
         }
 
@@ -128,17 +128,17 @@ fun DesignSystemDemoScreen(onBackClick: () -> Unit = {}) {
 
           Column(verticalArrangement = Arrangement.spacedBy(AutoMobileDimensions.spacing2)) {
             AutoMobileTextField(
-                value = textFieldValue,
-                onValueChange = { textFieldValue = it },
-                label = { Text("Filled Text Field") },
-                modifier = Modifier.fillMaxWidth(),
+              value = textFieldValue,
+              onValueChange = { textFieldValue = it },
+              label = { Text("Filled Text Field") },
+              modifier = Modifier.fillMaxWidth(),
             )
 
             AutoMobileOutlinedTextField(
-                value = outlinedTextFieldValue,
-                onValueChange = { outlinedTextFieldValue = it },
-                label = { Text("Outlined Text Field") },
-                modifier = Modifier.fillMaxWidth(),
+              value = outlinedTextFieldValue,
+              onValueChange = { outlinedTextFieldValue = it },
+              label = { Text("Outlined Text Field") },
+              modifier = Modifier.fillMaxWidth(),
             )
           }
         }
@@ -183,16 +183,16 @@ fun DesignSystemDemoScreen(onBackClick: () -> Unit = {}) {
 
           Row(horizontalArrangement = Arrangement.spacedBy(AutoMobileDimensions.spacing2)) {
             AutoMobileFloatingActionButton(
-                onClick = {},
-                icon = Icons.Default.Add,
-                contentDescription = "Add",
+              onClick = {},
+              icon = Icons.Default.Add,
+              contentDescription = "Add",
             )
 
             AutoMobileExtendedFloatingActionButton(
-                text = "Add Item",
-                onClick = {},
-                icon = Icons.Default.Add,
-                contentDescription = "Add Item",
+              text = "Add Item",
+              onClick = {},
+              icon = Icons.Default.Add,
+              contentDescription = "Add Item",
             )
           }
         }
@@ -203,17 +203,17 @@ fun DesignSystemDemoScreen(onBackClick: () -> Unit = {}) {
           Spacer(modifier = Modifier.height(AutoMobileDimensions.spacing2))
 
           val bottomNavItems =
-              listOf(
-                  BottomNavItem("Home", Icons.Default.Home),
-                  BottomNavItem("Search", Icons.Default.Search),
-                  BottomNavItem("Profile", Icons.Default.Person),
-                  BottomNavItem("Settings", Icons.Default.Settings),
-              )
+            listOf(
+              BottomNavItem("Home", Icons.Default.Home),
+              BottomNavItem("Search", Icons.Default.Search),
+              BottomNavItem("Profile", Icons.Default.Person),
+              BottomNavItem("Settings", Icons.Default.Settings),
+            )
 
           AutoMobileBottomNavigation(
-              items = bottomNavItems,
-              selectedItemIndex = 0,
-              onItemSelected = {},
+            items = bottomNavItems,
+            selectedItemIndex = 0,
+            onItemSelected = {},
           )
         }
 

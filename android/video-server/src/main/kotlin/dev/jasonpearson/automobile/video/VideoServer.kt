@@ -49,18 +49,18 @@ object VideoServer {
     // Calculate output dimensions based on quality preset
     val (outputWidth, outputHeight) = calculateOutputDimensions(displayInfo, quality)
     println(
-        "Output: ${outputWidth}x${outputHeight} @ ${quality.bitrate / 1_000_000}Mbps @ ${quality.fps}fps"
+      "Output: ${outputWidth}x${outputHeight} @ ${quality.bitrate / 1_000_000}Mbps @ ${quality.fps}fps"
     )
 
     // Install shutdown hook for clean termination
     Runtime.getRuntime()
-        .addShutdownHook(
-            Thread {
-              println("\nShutting down...")
-              running = false
-              shutdown()
-            }
-        )
+      .addShutdownHook(
+        Thread {
+          println("\nShutting down...")
+          running = false
+          shutdown()
+        }
+      )
 
     try {
       run(outputWidth, outputHeight, displayInfo.densityDpi, quality)
@@ -100,25 +100,25 @@ object VideoServer {
 
   private fun printUsage() {
     println(
-        """
-        Usage: VideoServer [options]
+      """
+      Usage: VideoServer [options]
 
-        Options:
-          --quality, -q <preset>  Quality preset: low, medium, high (default: medium)
-          --help, -h              Show this help message
+      Options:
+        --quality, -q <preset>  Quality preset: low, medium, high (default: medium)
+        --help, -h              Show this help message
 
-        Quality presets:
-          low     540p @ 2 Mbps @ 30fps
-          medium  720p @ 4 Mbps @ 60fps
-          high    1080p @ 8 Mbps @ 60fps
-        """
-            .trimIndent()
+      Quality presets:
+        low     540p @ 2 Mbps @ 30fps
+        medium  720p @ 4 Mbps @ 60fps
+        high    1080p @ 8 Mbps @ 60fps
+      """
+        .trimIndent()
     )
   }
 
   private fun calculateOutputDimensions(
-      displayInfo: DisplayControl.DisplayInfo,
-      quality: QualityPreset,
+    displayInfo: DisplayControl.DisplayInfo,
+    quality: QualityPreset,
   ): Pair<Int, Int> {
     val displayWidth = displayInfo.width
     val displayHeight = displayInfo.height
@@ -149,12 +149,12 @@ object VideoServer {
   private fun run(width: Int, height: Int, densityDpi: Int, quality: QualityPreset) {
     // Create encoder
     encoder =
-        VideoEncoder(
-            width = width,
-            height = height,
-            bitrate = quality.bitrate,
-            fps = quality.fps,
-        )
+      VideoEncoder(
+        width = width,
+        height = height,
+        bitrate = quality.bitrate,
+        fps = quality.fps,
+      )
     val surface = encoder!!.start()
 
     // Create screen capture

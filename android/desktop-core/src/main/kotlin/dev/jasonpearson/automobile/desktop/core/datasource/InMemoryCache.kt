@@ -14,8 +14,8 @@ import kotlinx.coroutines.sync.withLock
  * @param clock Injectable clock for deterministic testing.
  */
 class InMemoryCache<K, V>(
-    private val ttlMs: Long = 30_000L,
-    private val clock: () -> Long = System::currentTimeMillis,
+  private val ttlMs: Long = 30_000L,
+  private val clock: () -> Long = System::currentTimeMillis,
 ) {
   private data class Entry<V>(val value: V, val timestamp: Long)
 

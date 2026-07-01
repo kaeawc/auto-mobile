@@ -49,11 +49,11 @@ enum class SearchCategory(val displayName: String) {
 
 /** A single search result with category, label, and preview text. */
 data class SearchResult(
-    val id: String,
-    val category: SearchCategory,
-    val label: String,
-    val preview: String,
-    val onSelect: () -> Unit,
+  val id: String,
+  val category: SearchCategory,
+  val label: String,
+  val preview: String,
+  val onSelect: () -> Unit,
 )
 
 /**
@@ -70,15 +70,15 @@ interface SearchResultProvider {
  */
 @Composable
 fun GlobalSearchOverlay(
-    searchProvider: SearchResultProvider,
-    onDismiss: () -> Unit,
+  searchProvider: SearchResultProvider,
+  onDismiss: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   var query by remember { mutableStateOf("") }
   val results =
-      remember(query) {
-        if (query.isBlank()) emptyList() else searchProvider.search(query)
-      }
+    remember(query) {
+      if (query.isBlank()) emptyList() else searchProvider.search(query)
+    }
   val flatItems = remember(results) { buildFlatItems(results) }
   var selectedIndex by remember { mutableIntStateOf(0) }
   val focusRequester = remember { FocusRequester() }
@@ -89,108 +89,106 @@ fun GlobalSearchOverlay(
   }
 
   Box(
-      modifier =
-          Modifier.fillMaxSize()
-              .background(colors.text.normal.copy(alpha = 0.4f))
-              .clickable(onClick = onDismiss),
-      contentAlignment = Alignment.TopCenter,
+    modifier =
+      Modifier.fillMaxSize()
+        .background(colors.text.normal.copy(alpha = 0.4f))
+        .clickable(onClick = onDismiss),
+    contentAlignment = Alignment.TopCenter,
   ) {
     Column(
-        modifier =
-            Modifier.padding(top = 80.dp)
-                .widthIn(max = 600.dp)
-                .fillMaxWidth(0.8f)
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
-                .clickable(enabled = false, onClick = {})
-                .onPreviewKeyEvent { event ->
-                  if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                  when (event.key) {
-                    Key.Escape -> {
-                      onDismiss()
-                      true
-                    }
-                    Key.DirectionDown -> {
-                      if (flatItems.isNotEmpty()) {
-                        selectedIndex = nextSelectableIndex(flatItems, selectedIndex, 1)
-                      }
-                      true
-                    }
-                    Key.DirectionUp -> {
-                      if (flatItems.isNotEmpty()) {
-                        selectedIndex = nextSelectableIndex(flatItems, selectedIndex, -1)
-                      }
-                      true
-                    }
-                    Key.Enter -> {
-                      val item = flatItems.getOrNull(selectedIndex)
-                      if (item is FlatItem.ResultItem) {
-                        item.result.onSelect()
-                        onDismiss()
-                      }
-                      true
-                    }
-                    else -> false
-                  }
-                },
+      modifier =
+        Modifier.padding(top = 80.dp)
+          .widthIn(max = 600.dp)
+          .fillMaxWidth(0.8f)
+          .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+          .clickable(enabled = false, onClick = {})
+          .onPreviewKeyEvent { event ->
+            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            when (event.key) {
+              Key.Escape -> {
+                onDismiss()
+                true
+              }
+              Key.DirectionDown -> {
+                if (flatItems.isNotEmpty()) {
+                  selectedIndex = nextSelectableIndex(flatItems, selectedIndex, 1)
+                }
+                true
+              }
+              Key.DirectionUp -> {
+                if (flatItems.isNotEmpty()) {
+                  selectedIndex = nextSelectableIndex(flatItems, selectedIndex, -1)
+                }
+                true
+              }
+              Key.Enter -> {
+                val item = flatItems.getOrNull(selectedIndex)
+                if (item is FlatItem.ResultItem) {
+                  item.result.onSelect()
+                  onDismiss()
+                }
+                true
+              }
+              else -> false
+            }
+          }
     ) {
       TextField(
-          value = query,
-          onValueChange = { query = it },
-          singleLine = true,
-          placeholder = { Text("Search everywhere...") },
-          modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-          textStyle = MaterialTheme.typography.bodyLarge,
+        value = query,
+        onValueChange = { query = it },
+        singleLine = true,
+        placeholder = { Text("Search everywhere...") },
+        modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+        textStyle = MaterialTheme.typography.bodyLarge,
       )
 
-      LazyColumn(
-          modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
-      ) {
+      LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
         itemsIndexed(flatItems) { index, item ->
           when (item) {
             is FlatItem.Header -> {
               Text(
-                  text = item.category.displayName,
-                  fontSize = 11.sp,
-                  fontWeight = FontWeight.SemiBold,
-                  color = colors.text.normal.copy(alpha = 0.5f),
-                  modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                text = item.category.displayName,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.text.normal.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
               )
             }
             is FlatItem.ResultItem -> {
               val isSelected = index == selectedIndex
               val bg =
-                  if (isSelected) {
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                  } else {
-                    MaterialTheme.colorScheme.surface
-                  }
+                if (isSelected) {
+                  MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                } else {
+                  MaterialTheme.colorScheme.surface
+                }
               Row(
-                  modifier =
-                      Modifier.fillMaxWidth()
-                          .background(bg)
-                          .clickable {
-                            item.result.onSelect()
-                            onDismiss()
-                          }
-                          .padding(horizontal = 16.dp, vertical = 8.dp),
-                  verticalAlignment = Alignment.CenterVertically,
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .background(bg)
+                    .clickable {
+                      item.result.onSelect()
+                      onDismiss()
+                    }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
               ) {
                 Text(
-                    text = item.result.label,
-                    fontSize = 14.sp,
-                    color = colors.text.normal,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                  text = item.result.label,
+                  fontSize = 14.sp,
+                  color = colors.text.normal,
+                  modifier = Modifier.weight(1f),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    text = item.result.preview,
-                    fontSize = 12.sp,
-                    color = colors.text.normal.copy(alpha = 0.4f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 200.dp),
+                  text = item.result.preview,
+                  fontSize = 12.sp,
+                  color = colors.text.normal.copy(alpha = 0.4f),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                  modifier = Modifier.widthIn(max = 200.dp),
                 )
               }
             }
@@ -200,13 +198,13 @@ fun GlobalSearchOverlay(
 
       if (query.isNotBlank() && results.isEmpty()) {
         Box(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            contentAlignment = Alignment.Center,
+          modifier = Modifier.fillMaxWidth().padding(16.dp),
+          contentAlignment = Alignment.Center,
         ) {
           Text(
-              text = "No results found",
-              fontSize = 13.sp,
-              color = colors.text.normal.copy(alpha = 0.5f),
+            text = "No results found",
+            fontSize = 13.sp,
+            color = colors.text.normal.copy(alpha = 0.5f),
           )
         }
       }

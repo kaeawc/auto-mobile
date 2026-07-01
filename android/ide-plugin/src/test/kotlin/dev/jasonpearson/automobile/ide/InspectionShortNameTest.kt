@@ -21,29 +21,29 @@ class InspectionShortNameTest {
       val element = inspections.item(index) as Element
       val implementationClass = element.getAttribute("implementationClass").trim()
       assertTrue(
-          implementationClass.isNotEmpty(),
-          "localInspection entry is missing implementationClass",
+        implementationClass.isNotEmpty(),
+        "localInspection entry is missing implementationClass",
       )
 
       val expectedShortName =
-          element.getAttribute("shortName").trim().ifEmpty { deriveShortName(implementationClass) }
+        element.getAttribute("shortName").trim().ifEmpty { deriveShortName(implementationClass) }
       val inspection = newInspectionInstance(implementationClass)
       val actualShortName = inspection.shortName
 
       assertEquals(
-          expectedShortName,
-          actualShortName,
-          "Short name mismatch for $implementationClass",
+        expectedShortName,
+        actualShortName,
+        "Short name mismatch for $implementationClass",
       )
     }
   }
 
   private fun loadPluginXml(): org.w3c.dom.Document {
     val resource =
-        assertNotNull(
-            javaClass.classLoader.getResourceAsStream("META-INF/plugin.xml"),
-            "META-INF/plugin.xml not found on the classpath",
-        )
+      assertNotNull(
+        javaClass.classLoader.getResourceAsStream("META-INF/plugin.xml"),
+        "META-INF/plugin.xml not found on the classpath",
+      )
 
     resource.use {
       val factory = DocumentBuilderFactory.newInstance()
@@ -72,6 +72,6 @@ class InspectionShortNameTest {
     constructor.isAccessible = true
     val instance = constructor.newInstance()
     return instance as? InspectionProfileEntry
-        ?: error("Class $implementationClass is not an InspectionProfileEntry")
+      ?: error("Class $implementationClass is not an InspectionProfileEntry")
   }
 }

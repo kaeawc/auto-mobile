@@ -13,20 +13,20 @@ internal object MemoryMonitor {
   }
   private val sampleInterval: Int by lazy {
     val configured =
-        System.getProperty(
-                "automobile.junit.memory.monitor.sample.interval",
-                DEFAULT_SAMPLE_INTERVAL.toString(),
-            )
-            .toIntOrNull()
+      System.getProperty(
+          "automobile.junit.memory.monitor.sample.interval",
+          DEFAULT_SAMPLE_INTERVAL.toString(),
+        )
+        .toIntOrNull()
     if (configured == null || configured <= 0) DEFAULT_SAMPLE_INTERVAL else configured
   }
   private val maxGrowthBytes: Long by lazy {
     val configured =
-        System.getProperty(
-                "automobile.junit.memory.max.growth.mb",
-                DEFAULT_MAX_GROWTH_MB.toString(),
-            )
-            .toLongOrNull()
+      System.getProperty(
+          "automobile.junit.memory.max.growth.mb",
+          DEFAULT_MAX_GROWTH_MB.toString(),
+        )
+        .toLongOrNull()
     val resolved = configured ?: DEFAULT_MAX_GROWTH_MB
     resolved * BYTES_PER_MB
   }
@@ -60,10 +60,10 @@ internal object MemoryMonitor {
   }
 
   fun onTestFinish(
-      className: String,
-      methodName: String,
-      success: Boolean,
-      errorMessage: String? = null,
+    className: String,
+    methodName: String,
+    success: Boolean,
+    errorMessage: String? = null,
   ) {
     if (!enabled) {
       return
@@ -81,8 +81,8 @@ internal object MemoryMonitor {
     if (logEnabled) {
       val status = if (success) "PASS" else "FAIL"
       val message =
-          "AutoMobileRunner: Memory $status $label heapUsedDelta=${String.format("%.2f", deltaMb)} MiB " +
-              "(start=${formatBytes(startSnapshot.heapUsedBytes)}, end=${formatBytes(endSnapshot.heapUsedBytes)})"
+        "AutoMobileRunner: Memory $status $label heapUsedDelta=${String.format("%.2f", deltaMb)} MiB " +
+          "(start=${formatBytes(startSnapshot.heapUsedBytes)}, end=${formatBytes(endSnapshot.heapUsedBytes)})"
       println(message)
     }
 
@@ -103,7 +103,7 @@ internal object MemoryMonitor {
             append("; ")
           }
           append(
-              "heap growth ${formatBytes(deltaBytes.absoluteValue)} exceeded limit ${formatBytes(maxGrowthBytes)}"
+            "heap growth ${formatBytes(deltaBytes.absoluteValue)} exceeded limit ${formatBytes(maxGrowthBytes)}"
           )
         }
       }

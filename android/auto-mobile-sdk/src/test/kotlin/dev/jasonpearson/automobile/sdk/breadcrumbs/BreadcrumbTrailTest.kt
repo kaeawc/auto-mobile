@@ -80,11 +80,11 @@ class BreadcrumbTrailTest {
         try {
           for (i in 0 until addsPerThread) {
             largeTrail.add(
-                Breadcrumb(
-                    System.nanoTime(),
-                    BreadcrumbCategory.CUSTOM,
-                    "t$t-i$i",
-                ),
+              Breadcrumb(
+                System.nanoTime(),
+                BreadcrumbCategory.CUSTOM,
+                "t$t-i$i",
+              )
             )
           }
         } finally {

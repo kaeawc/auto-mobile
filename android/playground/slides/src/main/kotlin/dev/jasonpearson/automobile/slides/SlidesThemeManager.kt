@@ -12,7 +12,7 @@ import androidx.compose.runtime.setValue
  */
 class SlidesThemeManager(context: Context) {
   private val sharedPrefs: SharedPreferences =
-      context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
   var isDarkMode by mutableStateOf(getStoredTheme())
     private set

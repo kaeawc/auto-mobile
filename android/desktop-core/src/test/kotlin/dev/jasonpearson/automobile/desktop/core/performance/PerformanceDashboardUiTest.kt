@@ -16,8 +16,8 @@ class PerformanceDashboardUiTest {
     setContent {
       MaterialTheme {
         PerformanceDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-            initialFps = 60f,
+          dataSourceMode = DataSourceMode.Fake,
+          initialFps = 60f,
         )
       }
     }
@@ -31,8 +31,8 @@ class PerformanceDashboardUiTest {
     setContent {
       MaterialTheme {
         PerformanceDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-            initialMemoryMb = 128f,
+          dataSourceMode = DataSourceMode.Fake,
+          initialMemoryMb = 128f,
         )
       }
     }
@@ -46,11 +46,11 @@ class PerformanceDashboardUiTest {
     setContent {
       MaterialTheme {
         PerformanceDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-            initialFps = 58f,
-            initialFrameTimeMs = 16f,
-            initialJankFrames = 3,
-            initialMemoryMb = 200f,
+          dataSourceMode = DataSourceMode.Fake,
+          initialFps = 58f,
+          initialFrameTimeMs = 16f,
+          initialJankFrames = 3,
+          initialMemoryMb = 200f,
         )
       }
     }
@@ -65,9 +65,9 @@ class PerformanceDashboardUiTest {
     setContent {
       MaterialTheme {
         PerformanceDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-            initialFps = 60f,
-            initialTouchLatencyMs = 42f,
+          dataSourceMode = DataSourceMode.Fake,
+          initialFps = 60f,
+          initialTouchLatencyMs = 42f,
         )
       }
     }
@@ -80,9 +80,9 @@ class PerformanceDashboardUiTest {
     setContent {
       MaterialTheme {
         PerformanceDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-            initialFps = 60f,
-            initialRecompositionRate = 5f,
+          dataSourceMode = DataSourceMode.Fake,
+          initialFps = 60f,
+          initialRecompositionRate = 5f,
         )
       }
     }

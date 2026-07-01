@@ -33,23 +33,23 @@ import java.util.Locale
 /** Renders full detail for a selected telemetry event by delegating to [TelemetryDetailPanel]. */
 @Composable
 fun EventInspectorContent(
-    event: TelemetryDisplayEvent,
-    onClose: () -> Unit,
-    onOpenSource: ((String, Int, String) -> Unit)? = null,
-    screenshotLoader: ScreenshotLoader? = null,
-    modifier: Modifier = Modifier,
+  event: TelemetryDisplayEvent,
+  onClose: () -> Unit,
+  onOpenSource: ((String, Int, String) -> Unit)? = null,
+  screenshotLoader: ScreenshotLoader? = null,
+  modifier: Modifier = Modifier,
 ) {
   val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
   val textColor = SharedTheme.globalColors.text.normal
 
   TelemetryDetailPanel(
-      event = event,
-      timeFormat = timeFormat,
-      textColor = textColor,
-      onClose = onClose,
-      onOpenSource = onOpenSource,
-      screenshotLoader = screenshotLoader,
-      modifier = modifier,
+    event = event,
+    timeFormat = timeFormat,
+    textColor = textColor,
+    onClose = onClose,
+    onOpenSource = onOpenSource,
+    screenshotLoader = screenshotLoader,
+    modifier = modifier,
   )
 }
 
@@ -59,41 +59,40 @@ fun EventInspectorContent(
  */
 @Composable
 fun InspectorTabBar(
-    tabs: List<String>,
-    selected: Int,
-    onSelect: (Int) -> Unit,
-    textColor: Color = SharedTheme.globalColors.text.normal,
-    focusedBorderColor: Color = SharedTheme.globalColors.outlines.focused,
+  tabs: List<String>,
+  selected: Int,
+  onSelect: (Int) -> Unit,
+  textColor: Color = SharedTheme.globalColors.text.normal,
+  focusedBorderColor: Color = SharedTheme.globalColors.outlines.focused,
 ) {
   Row(
-      modifier = Modifier.padding(bottom = 8.dp),
-      horizontalArrangement = Arrangement.spacedBy(2.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.padding(bottom = 8.dp),
+    horizontalArrangement = Arrangement.spacedBy(2.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     tabs.forEachIndexed { index, label ->
       val isSelected = index == selected
       var isFocused by remember { mutableStateOf(false) }
       Box(
-          modifier =
-              Modifier.onFocusChanged { isFocused = it.isFocused }
-                  .then(
-                      if (isFocused)
-                          Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
-                      else Modifier
-                  )
-                  .background(
-                      if (isSelected) textColor.copy(alpha = 0.12f) else Color.Transparent,
-                      RoundedCornerShape(4.dp),
-                  )
-                  .clickable { onSelect(index) }
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(horizontal = 8.dp, vertical = 4.dp),
+        modifier =
+          Modifier.onFocusChanged { isFocused = it.isFocused }
+            .then(
+              if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
+              else Modifier
+            )
+            .background(
+              if (isSelected) textColor.copy(alpha = 0.12f) else Color.Transparent,
+              RoundedCornerShape(4.dp),
+            )
+            .clickable { onSelect(index) }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
       ) {
         Text(
-            label,
-            fontSize = 10.sp,
-            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (isSelected) textColor else textColor.copy(alpha = 0.5f),
+          label,
+          fontSize = 10.sp,
+          fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+          color = if (isSelected) textColor else textColor.copy(alpha = 0.5f),
         )
       }
     }

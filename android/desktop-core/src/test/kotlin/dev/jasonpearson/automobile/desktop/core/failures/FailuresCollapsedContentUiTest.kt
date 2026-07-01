@@ -15,11 +15,11 @@ class FailuresCollapsedContentUiTest {
     setContent {
       MaterialTheme {
         FailuresCollapsedContent(
-            dateRangeLabel = "24h",
-            crashCount = 0,
-            anrCount = 0,
-            toolFailureCount = 0,
-            nonFatalCount = 0,
+          dateRangeLabel = "24h",
+          crashCount = 0,
+          anrCount = 0,
+          toolFailureCount = 0,
+          nonFatalCount = 0,
         )
       }
     }
@@ -31,11 +31,11 @@ class FailuresCollapsedContentUiTest {
     setContent {
       MaterialTheme {
         FailuresCollapsedContent(
-            dateRangeLabel = "7d",
-            crashCount = 0,
-            anrCount = 0,
-            toolFailureCount = 0,
-            nonFatalCount = 0,
+          dateRangeLabel = "7d",
+          crashCount = 0,
+          anrCount = 0,
+          toolFailureCount = 0,
+          nonFatalCount = 0,
         )
       }
     }
@@ -51,11 +51,11 @@ class FailuresCollapsedContentUiTest {
     setContent {
       MaterialTheme {
         FailuresCollapsedContent(
-            dateRangeLabel = "30d",
-            crashCount = 12,
-            anrCount = 3,
-            toolFailureCount = 7,
-            nonFatalCount = 25,
+          dateRangeLabel = "30d",
+          crashCount = 12,
+          anrCount = 3,
+          toolFailureCount = 7,
+          nonFatalCount = 25,
         )
       }
     }
@@ -70,11 +70,11 @@ class FailuresCollapsedContentUiTest {
     setContent {
       MaterialTheme {
         FailuresCollapsedContent(
-            dateRangeLabel = "30d",
-            crashCount = 1500,
-            anrCount = 200,
-            toolFailureCount = 0,
-            nonFatalCount = 10000,
+          dateRangeLabel = "30d",
+          crashCount = 1500,
+          anrCount = 200,
+          toolFailureCount = 0,
+          nonFatalCount = 10000,
         )
       }
     }
@@ -88,11 +88,11 @@ class FailuresCollapsedContentUiTest {
     setContent {
       MaterialTheme {
         FailuresCollapsedContent(
-            dateRangeLabel = "30d",
-            crashCount = 2500000,
-            anrCount = 0,
-            toolFailureCount = 0,
-            nonFatalCount = 0,
+          dateRangeLabel = "30d",
+          crashCount = 2500000,
+          anrCount = 0,
+          toolFailureCount = 0,
+          nonFatalCount = 0,
         )
       }
     }

@@ -26,22 +26,22 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
       }
 
       val style =
-          NotificationStyle.fromWireName(intent.getStringExtra(AutoMobileNotifications.EXTRA_STYLE))
+        NotificationStyle.fromWireName(intent.getStringExtra(AutoMobileNotifications.EXTRA_STYLE))
       val imagePath = intent.getStringExtra(AutoMobileNotifications.EXTRA_IMAGE_PATH)
       val channelId = intent.getStringExtra(AutoMobileNotifications.EXTRA_CHANNEL_ID)
       val actionsJson = intent.getStringExtra(AutoMobileNotifications.EXTRA_ACTIONS)
       val actions = parseActions(actionsJson)
 
       val success =
-          AutoMobileNotifications.postWithContext(
-              context,
-              title,
-              body,
-              style,
-              imagePath,
-              actions,
-              channelId,
-          )
+        AutoMobileNotifications.postWithContext(
+          context,
+          title,
+          body,
+          style,
+          imagePath,
+          actions,
+          channelId,
+        )
 
       resultCode = if (success) RESULT_SUCCESS else RESULT_ERROR
     } catch (e: Exception) {

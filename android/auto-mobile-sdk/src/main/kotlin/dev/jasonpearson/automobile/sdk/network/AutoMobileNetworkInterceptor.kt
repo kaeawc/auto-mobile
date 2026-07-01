@@ -28,16 +28,16 @@ import okio.Buffer
  * `compileOnly` so consumers must bring their own OkHttp dependency.
  */
 internal class AutoMobileNetworkInterceptor(
-    private val buffer: SdkEventBuffer,
-    private val applicationId: String? = null,
-    /** Capture request and response headers (may contain auth tokens) */
-    private val captureHeaders: Boolean = false,
-    /** Capture request and response bodies (truncated to [maxBodyBytes]) */
-    private val captureBodies: Boolean = false,
-    /** Maximum body size to capture in bytes */
-    private val maxBodyBytes: Long = MAX_BODY_BYTES,
-    /** Optional rule store for mock enforcement and error simulation */
-    private val ruleStore: NetworkMockRuleStore.RuleMatcher? = null,
+  private val buffer: SdkEventBuffer,
+  private val applicationId: String? = null,
+  /** Capture request and response headers (may contain auth tokens) */
+  private val captureHeaders: Boolean = false,
+  /** Capture request and response bodies (truncated to [maxBodyBytes]) */
+  private val captureBodies: Boolean = false,
+  /** Maximum body size to capture in bytes */
+  private val maxBodyBytes: Long = MAX_BODY_BYTES,
+  /** Optional rule store for mock enforcement and error simulation */
+  private val ruleStore: NetworkMockRuleStore.RuleMatcher? = null,
 ) : Interceptor {
 
   companion object {
@@ -45,14 +45,14 @@ internal class AutoMobileNetworkInterceptor(
     const val MAX_BODY_BYTES = 32L * 1024
 
     private val TEXT_CONTENT_TYPES =
-        setOf(
-            "application/json",
-            "text/plain",
-            "text/html",
-            "text/xml",
-            "application/xml",
-            "application/x-www-form-urlencoded",
-        )
+      setOf(
+        "application/json",
+        "text/plain",
+        "text/html",
+        "text/xml",
+        "application/xml",
+        "application/x-www-form-urlencoded",
+      )
 
     private fun isTextContentType(contentType: String?): Boolean {
       if (contentType == null) return false
@@ -67,42 +67,42 @@ internal class AutoMobileNetworkInterceptor(
 
     // Capture request headers — include OkHttp defaults that will be added later
     val reqHeaders =
-        if (captureHeaders) {
-          val headers = request.headers.toMap().toMutableMap()
-          if ("Host" !in headers) headers["Host"] = request.url.host
-          if ("User-Agent" !in headers) headers["User-Agent"] = "okhttp/${okhttp3.OkHttp.VERSION}"
-          headers
-        } else null
+      if (captureHeaders) {
+        val headers = request.headers.toMap().toMutableMap()
+        if ("Host" !in headers) headers["Host"] = request.url.host
+        if ("User-Agent" !in headers) headers["User-Agent"] = "okhttp/${okhttp3.OkHttp.VERSION}"
+        headers
+      } else null
 
     // Capture request body
     val reqBody =
-        if (captureBodies && request.body != null) {
-          captureRequestBody(request)
-        } else null
+      if (captureBodies && request.body != null) {
+        captureRequestBody(request)
+      } else null
 
     // --- Mock rule enforcement ---
     val mockRule =
-        ruleStore?.findMatchingRule(request.url.host, request.url.encodedPath, request.method)
+      ruleStore?.findMatchingRule(request.url.host, request.url.encodedPath, request.method)
     if (mockRule != null) {
       val durationMs = System.currentTimeMillis() - startMs
       buffer.add(
-          SdkNetworkRequestEvent(
-              timestamp = startMs,
-              applicationId = applicationId,
-              url = request.url.toString(),
-              method = request.method,
-              statusCode = mockRule.statusCode,
-              durationMs = durationMs,
-              requestBodySize = request.body?.contentLength() ?: -1,
-              responseBodySize = mockRule.responseBody.length.toLong(),
-              host = request.url.host,
-              path = request.url.encodedPath,
-              error = "mocked:${mockRule.mockId}",
-              requestHeaders = reqHeaders,
-              requestBody = reqBody,
-              responseBody = mockRule.responseBody,
-              contentType = mockRule.contentType,
-          )
+        SdkNetworkRequestEvent(
+          timestamp = startMs,
+          applicationId = applicationId,
+          url = request.url.toString(),
+          method = request.method,
+          statusCode = mockRule.statusCode,
+          durationMs = durationMs,
+          requestBodySize = request.body?.contentLength() ?: -1,
+          responseBodySize = mockRule.responseBody.length.toLong(),
+          host = request.url.host,
+          path = request.url.encodedPath,
+          error = "mocked:${mockRule.mockId}",
+          requestHeaders = reqHeaders,
+          requestBody = reqBody,
+          responseBody = mockRule.responseBody,
+          contentType = mockRule.contentType,
+        )
       )
       return buildMockResponse(request, mockRule)
     }
@@ -121,21 +121,21 @@ internal class AutoMobileNetworkInterceptor(
     } catch (e: Exception) {
       val durationMs = System.currentTimeMillis() - startMs
       buffer.add(
-          SdkNetworkRequestEvent(
-              timestamp = startMs,
-              applicationId = applicationId,
-              url = request.url.toString(),
-              method = request.method,
-              statusCode = 0,
-              durationMs = durationMs,
-              requestBodySize = request.body?.contentLength() ?: -1,
-              responseBodySize = -1,
-              host = request.url.host,
-              path = request.url.encodedPath,
-              error = e.message,
-              requestHeaders = reqHeaders,
-              requestBody = reqBody,
-          )
+        SdkNetworkRequestEvent(
+          timestamp = startMs,
+          applicationId = applicationId,
+          url = request.url.toString(),
+          method = request.method,
+          statusCode = 0,
+          durationMs = durationMs,
+          requestBodySize = request.body?.contentLength() ?: -1,
+          responseBodySize = -1,
+          host = request.url.host,
+          path = request.url.encodedPath,
+          error = e.message,
+          requestHeaders = reqHeaders,
+          requestBody = reqBody,
+        )
       )
       throw e
     }
@@ -144,66 +144,66 @@ internal class AutoMobileNetworkInterceptor(
     val responseContentType = response.header("Content-Type")
 
     val finalReqHeaders =
-        if (captureHeaders) {
-          response.request.headers.toMap()
-        } else reqHeaders
+      if (captureHeaders) {
+        response.request.headers.toMap()
+      } else reqHeaders
 
     val respHeaders =
-        if (captureHeaders) {
-          response.headers.toMap()
-        } else null
+      if (captureHeaders) {
+        response.headers.toMap()
+      } else null
 
     val respBody =
-        if (captureBodies && isTextContentType(responseContentType)) {
-          try {
-            response.peekBody(maxBodyBytes).string()
-          } catch (_: Exception) {
-            null
-          }
-        } else null
+      if (captureBodies && isTextContentType(responseContentType)) {
+        try {
+          response.peekBody(maxBodyBytes).string()
+        } catch (_: Exception) {
+          null
+        }
+      } else null
 
     buffer.add(
-        SdkNetworkRequestEvent(
-            timestamp = startMs,
-            applicationId = applicationId,
-            url = request.url.toString(),
-            method = request.method,
-            statusCode = response.code,
-            durationMs = durationMs,
-            requestBodySize = request.body?.contentLength() ?: -1,
-            responseBodySize = response.body?.contentLength() ?: -1,
-            protocol = response.protocol.toString(),
-            host = request.url.host,
-            path = request.url.encodedPath,
-            requestHeaders = finalReqHeaders,
-            responseHeaders = respHeaders,
-            requestBody = reqBody,
-            responseBody = respBody,
-            contentType = responseContentType,
-        )
+      SdkNetworkRequestEvent(
+        timestamp = startMs,
+        applicationId = applicationId,
+        url = request.url.toString(),
+        method = request.method,
+        statusCode = response.code,
+        durationMs = durationMs,
+        requestBodySize = request.body?.contentLength() ?: -1,
+        responseBodySize = response.body?.contentLength() ?: -1,
+        protocol = response.protocol.toString(),
+        host = request.url.host,
+        path = request.url.encodedPath,
+        requestHeaders = finalReqHeaders,
+        responseHeaders = respHeaders,
+        requestBody = reqBody,
+        responseBody = respBody,
+        contentType = responseContentType,
+      )
     )
 
     return response
   }
 
   private fun buildMockResponse(
-      request: okhttp3.Request,
-      rule: NetworkMockRuleStore.MatchedMockRule,
+    request: okhttp3.Request,
+    rule: NetworkMockRuleStore.MatchedMockRule,
   ): Response {
     val statusCode = rule.statusCode.coerceIn(100, 599)
     val mediaType =
-        try {
-          rule.contentType.toMediaType()
-        } catch (_: IllegalArgumentException) {
-          "application/octet-stream".toMediaType()
-        }
+      try {
+        rule.contentType.toMediaType()
+      } catch (_: IllegalArgumentException) {
+        "application/octet-stream".toMediaType()
+      }
     val builder =
-        Response.Builder()
-            .request(request)
-            .protocol(Protocol.HTTP_1_1)
-            .code(statusCode)
-            .message("Mocked by AutoMobile (${rule.mockId})")
-            .body(rule.responseBody.toResponseBody(mediaType))
+      Response.Builder()
+        .request(request)
+        .protocol(Protocol.HTTP_1_1)
+        .code(statusCode)
+        .message("Mocked by AutoMobile (${rule.mockId})")
+        .body(rule.responseBody.toResponseBody(mediaType))
     for ((name, value) in rule.responseHeaders) {
       builder.addHeader(name, value)
     }
@@ -211,58 +211,58 @@ internal class AutoMobileNetworkInterceptor(
   }
 
   private fun handleErrorSimulation(
-      request: okhttp3.Request,
-      sim: NetworkMockRuleStore.ErrorSimulationConfig,
-      startMs: Long,
-      durationMs: Long,
-      reqHeaders: Map<String, String>?,
-      reqBody: String?,
+    request: okhttp3.Request,
+    sim: NetworkMockRuleStore.ErrorSimulationConfig,
+    startMs: Long,
+    durationMs: Long,
+    reqHeaders: Map<String, String>?,
+    reqBody: String?,
   ): Response {
     val errorMsg = "simulated:${sim.errorType}"
     when (sim.errorType) {
       "http500" -> {
         buffer.add(
-            SdkNetworkRequestEvent(
-                timestamp = startMs,
-                applicationId = applicationId,
-                url = request.url.toString(),
-                method = request.method,
-                statusCode = 500,
-                durationMs = durationMs,
-                requestBodySize = request.body?.contentLength() ?: -1,
-                responseBodySize = 0,
-                host = request.url.host,
-                path = request.url.encodedPath,
-                error = errorMsg,
-                requestHeaders = reqHeaders,
-                requestBody = reqBody,
-            )
+          SdkNetworkRequestEvent(
+            timestamp = startMs,
+            applicationId = applicationId,
+            url = request.url.toString(),
+            method = request.method,
+            statusCode = 500,
+            durationMs = durationMs,
+            requestBodySize = request.body?.contentLength() ?: -1,
+            responseBodySize = 0,
+            host = request.url.host,
+            path = request.url.encodedPath,
+            error = errorMsg,
+            requestHeaders = reqHeaders,
+            requestBody = reqBody,
+          )
         )
         return Response.Builder()
-            .request(request)
-            .protocol(Protocol.HTTP_1_1)
-            .code(500)
-            .message("Simulated Error (AutoMobile)")
-            .body("".toResponseBody("text/plain".toMediaType()))
-            .build()
+          .request(request)
+          .protocol(Protocol.HTTP_1_1)
+          .code(500)
+          .message("Simulated Error (AutoMobile)")
+          .body("".toResponseBody("text/plain".toMediaType()))
+          .build()
       }
       else -> {
         buffer.add(
-            SdkNetworkRequestEvent(
-                timestamp = startMs,
-                applicationId = applicationId,
-                url = request.url.toString(),
-                method = request.method,
-                statusCode = 0,
-                durationMs = durationMs,
-                requestBodySize = request.body?.contentLength() ?: -1,
-                responseBodySize = -1,
-                host = request.url.host,
-                path = request.url.encodedPath,
-                error = errorMsg,
-                requestHeaders = reqHeaders,
-                requestBody = reqBody,
-            )
+          SdkNetworkRequestEvent(
+            timestamp = startMs,
+            applicationId = applicationId,
+            url = request.url.toString(),
+            method = request.method,
+            statusCode = 0,
+            durationMs = durationMs,
+            requestBodySize = request.body?.contentLength() ?: -1,
+            responseBodySize = -1,
+            host = request.url.host,
+            path = request.url.encodedPath,
+            error = errorMsg,
+            requestHeaders = reqHeaders,
+            requestBody = reqBody,
+          )
         )
         throw when (sim.errorType) {
           "timeout" -> SocketTimeoutException("Simulated timeout (AutoMobile)")

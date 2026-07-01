@@ -40,45 +40,45 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `parse tool results from successful plan execution`() {
     val step =
-        JsonObject(
-            mapOf(
-                "toolName" to JsonPrimitive("tapOn"),
-                "success" to JsonPrimitive(true),
-                "action" to JsonPrimitive("tap"),
-                "selectedElement" to
-                    JsonObject(
-                        mapOf(
-                            "text" to JsonPrimitive("Test Channel"),
-                            "resourceId" to JsonPrimitive("com.example:id/item"),
-                            "bounds" to
-                                JsonObject(
-                                    mapOf(
-                                        "left" to JsonPrimitive(0),
-                                        "top" to JsonPrimitive(0),
-                                        "right" to JsonPrimitive(100),
-                                        "bottom" to JsonPrimitive(100),
-                                        "centerX" to JsonPrimitive(50),
-                                        "centerY" to JsonPrimitive(50),
-                                    )
-                                ),
-                            "indexInMatches" to JsonPrimitive(2),
-                            "totalMatches" to JsonPrimitive(5),
-                            "selectionStrategy" to JsonPrimitive("random"),
-                        )
-                    ),
-            )
+      JsonObject(
+        mapOf(
+          "toolName" to JsonPrimitive("tapOn"),
+          "success" to JsonPrimitive(true),
+          "action" to JsonPrimitive("tap"),
+          "selectedElement" to
+            JsonObject(
+              mapOf(
+                "text" to JsonPrimitive("Test Channel"),
+                "resourceId" to JsonPrimitive("com.example:id/item"),
+                "bounds" to
+                  JsonObject(
+                    mapOf(
+                      "left" to JsonPrimitive(0),
+                      "top" to JsonPrimitive(0),
+                      "right" to JsonPrimitive(100),
+                      "bottom" to JsonPrimitive(100),
+                      "centerX" to JsonPrimitive(50),
+                      "centerY" to JsonPrimitive(50),
+                    )
+                  ),
+                "indexInMatches" to JsonPrimitive(2),
+                "totalMatches" to JsonPrimitive(5),
+                "selectionStrategy" to JsonPrimitive("random"),
+              )
+            ),
         )
+      )
 
     fakeDaemonClient.setResponse(
-        "executePlan",
-        buildDaemonResponse(
-            JsonObject(
-                mapOf(
-                    "success" to JsonPrimitive(true),
-                    "toolResults" to JsonArray(listOf(step)),
-                )
-            )
-        ),
+      "executePlan",
+      buildDaemonResponse(
+        JsonObject(
+          mapOf(
+            "success" to JsonPrimitive(true),
+            "toolResults" to JsonArray(listOf(step)),
+          )
+        )
+      ),
     )
 
     val result = executePlan()
@@ -91,24 +91,24 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `getSelection returns null when selectedElement is missing`() {
     val step =
-        JsonObject(
-            mapOf(
-                "toolName" to JsonPrimitive("tapOn"),
-                "success" to JsonPrimitive(true),
-                "action" to JsonPrimitive("tap"),
-            )
+      JsonObject(
+        mapOf(
+          "toolName" to JsonPrimitive("tapOn"),
+          "success" to JsonPrimitive(true),
+          "action" to JsonPrimitive("tap"),
         )
+      )
 
     fakeDaemonClient.setResponse(
-        "executePlan",
-        buildDaemonResponse(
-            JsonObject(
-                mapOf(
-                    "success" to JsonPrimitive(true),
-                    "toolResults" to JsonArray(listOf(step)),
-                )
-            )
-        ),
+      "executePlan",
+      buildDaemonResponse(
+        JsonObject(
+          mapOf(
+            "success" to JsonPrimitive(true),
+            "toolResults" to JsonArray(listOf(step)),
+          )
+        )
+      ),
     )
 
     val result = executePlan()
@@ -119,31 +119,31 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `getTypedResponse returns correct response type`() {
     val step =
-        JsonObject(
-            mapOf(
-                "toolName" to JsonPrimitive("tapOn"),
-                "success" to JsonPrimitive(true),
-                "selectedElement" to
-                    JsonObject(
-                        mapOf(
-                            "text" to JsonPrimitive("Channel A"),
-                            "indexInMatches" to JsonPrimitive(3),
-                            "totalMatches" to JsonPrimitive(10),
-                        )
-                    ),
-            )
+      JsonObject(
+        mapOf(
+          "toolName" to JsonPrimitive("tapOn"),
+          "success" to JsonPrimitive(true),
+          "selectedElement" to
+            JsonObject(
+              mapOf(
+                "text" to JsonPrimitive("Channel A"),
+                "indexInMatches" to JsonPrimitive(3),
+                "totalMatches" to JsonPrimitive(10),
+              )
+            ),
         )
+      )
 
     fakeDaemonClient.setResponse(
-        "executePlan",
-        buildDaemonResponse(
-            JsonObject(
-                mapOf(
-                    "success" to JsonPrimitive(true),
-                    "toolResults" to JsonArray(listOf(step)),
-                )
-            )
-        ),
+      "executePlan",
+      buildDaemonResponse(
+        JsonObject(
+          mapOf(
+            "success" to JsonPrimitive(true),
+            "toolResults" to JsonArray(listOf(step)),
+          )
+        )
+      ),
     )
 
     val result = executePlan()
@@ -159,15 +159,15 @@ class AutoMobilePlanExecutorTest {
     val step = JsonObject(emptyMap())
 
     fakeDaemonClient.setResponse(
-        "executePlan",
-        buildDaemonResponse(
-            JsonObject(
-                mapOf(
-                    "success" to JsonPrimitive(true),
-                    "toolResults" to JsonArray(listOf(step)),
-                )
-            )
-        ),
+      "executePlan",
+      buildDaemonResponse(
+        JsonObject(
+          mapOf(
+            "success" to JsonPrimitive(true),
+            "toolResults" to JsonArray(listOf(step)),
+          )
+        )
+      ),
     )
 
     val result = executePlan()
@@ -181,21 +181,21 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `resolveCaptureObserveSteps reads system property and normalizes`() {
     val cases =
-        listOf(
-            "summary" to "summary",
-            "full" to "full",
-            "  SUMMARY  " to "summary",
-            "FULL" to "full",
-            "bogus" to null,
-            "" to null,
-        )
+      listOf(
+        "summary" to "summary",
+        "full" to "full",
+        "  SUMMARY  " to "summary",
+        "FULL" to "full",
+        "bogus" to null,
+        "" to null,
+      )
     for ((input, expected) in cases) {
       System.setProperty(AutoMobilePlanExecutor.CAPTURE_OBSERVE_STEPS_PROPERTY, input)
       try {
         assertEquals(
-            "input=\"$input\"",
-            expected,
-            AutoMobilePlanExecutor.resolveCaptureObserveSteps(),
+          "input=\"$input\"",
+          expected,
+          AutoMobilePlanExecutor.resolveCaptureObserveSteps(),
         )
       } finally {
         System.clearProperty(AutoMobilePlanExecutor.CAPTURE_OBSERVE_STEPS_PROPERTY)
@@ -213,36 +213,36 @@ class AutoMobilePlanExecutorTest {
 
   private fun executePlan(): AutoMobilePlanExecutionResult {
     return AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(),
+      "test-plans/launch-clock-app.yaml",
+      emptyMap(),
+      AutoMobilePlanExecutionOptions(),
     )
   }
 
   private fun buildDaemonResponse(payload: JsonObject): DaemonResponse {
     val textPayload = json.encodeToString(JsonElement.serializer(), payload)
     val result =
-        JsonObject(
-            mapOf(
-                "content" to
-                    JsonArray(
-                        listOf(
-                            JsonObject(
-                                mapOf(
-                                    "type" to JsonPrimitive("text"),
-                                    "text" to JsonPrimitive(textPayload),
-                                )
-                            )
-                        )
-                    )
+      JsonObject(
+        mapOf(
+          "content" to
+            JsonArray(
+              listOf(
+                JsonObject(
+                  mapOf(
+                    "type" to JsonPrimitive("text"),
+                    "text" to JsonPrimitive(textPayload),
+                  )
+                )
+              )
             )
         )
+      )
     return DaemonResponse(
-        id = "test",
-        type = "mcp_response",
-        success = true,
-        result = result,
-        error = null,
+      id = "test",
+      type = "mcp_response",
+      success = true,
+      result = result,
+      error = null,
     )
   }
 }
@@ -256,12 +256,12 @@ private class FakeDaemonToolClient : DaemonToolClient {
   }
 
   override fun callTool(
-      toolName: String,
-      arguments: JsonObject,
-      timeoutMs: Long,
+    toolName: String,
+    arguments: JsonObject,
+    timeoutMs: Long,
   ): DaemonResponse {
     return responses[toolName]
-        ?: throw IllegalStateException("No response configured for tool: $toolName")
+      ?: throw IllegalStateException("No response configured for tool: $toolName")
   }
 
   override fun readResource(uri: String, timeoutMs: Long): DaemonResponse {

@@ -21,16 +21,16 @@ class IntellijValidationTrigger(private val project: Project) : ValidationTrigge
   override fun triggerValidation(document: Document) {
     // Use non-blocking read action to check PSI off EDT
     ReadAction.nonBlocking<Boolean> { checkIfValidYamlFile(document) }
-        .inSmartMode(project)
-        .expireWith(project)
-        .coalesceBy(this, document)
-        .finishOnUiThread(com.intellij.openapi.application.ModalityState.nonModal()) {
-            isValidYamlFile ->
-          if (isValidYamlFile) {
-            commitDocument(document)
-          }
+      .inSmartMode(project)
+      .expireWith(project)
+      .coalesceBy(this, document)
+      .finishOnUiThread(com.intellij.openapi.application.ModalityState.nonModal()) { isValidYamlFile
+        ->
+        if (isValidYamlFile) {
+          commitDocument(document)
         }
-        .submit(com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService())
+      }
+      .submit(com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService())
   }
 
   private fun checkIfValidYamlFile(document: Document): Boolean {

@@ -13,22 +13,20 @@ java {
 
 // Android SDK android.jar as compileOnly dependency for Android APIs
 val androidSdkPath: String =
-    System.getenv("ANDROID_HOME")
-        ?: System.getenv("ANDROID_SDK_ROOT")
-        ?: "${System.getProperty("user.home")}/Library/Android/sdk"
+  System.getenv("ANDROID_HOME")
+    ?: System.getenv("ANDROID_SDK_ROOT")
+    ?: "${System.getProperty("user.home")}/Library/Android/sdk"
 
 val compileSdk: String = libs.versions.build.android.compileSdk.get()
 val buildToolsVersion: String = libs.versions.build.android.buildTools.get()
 val minSdk: String = libs.versions.build.android.minSdk.get()
 val androidPlatformJar: File =
-    listOf(
-            File("$androidSdkPath/platforms/android-$compileSdk/android.jar"),
-            File("$androidSdkPath/platforms/android-$compileSdk.0/android.jar"),
-        )
-        .firstOrNull { it.exists() }
-        ?: error(
-            "Unable to find android.jar for compileSdk $compileSdk in $androidSdkPath/platforms"
-        )
+  listOf(
+      File("$androidSdkPath/platforms/android-$compileSdk/android.jar"),
+      File("$androidSdkPath/platforms/android-$compileSdk.0/android.jar"),
+    )
+    .firstOrNull { it.exists() }
+    ?: error("Unable to find android.jar for compileSdk $compileSdk in $androidSdkPath/platforms")
 
 dependencies {
   compileOnly(files(androidPlatformJar))
@@ -38,16 +36,14 @@ dependencies {
 tasks.withType<KotlinCompile>().configureEach {
   compilerOptions {
     languageVersion.set(
-        KotlinVersion.valueOf(
-            "KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}"
-        )
+      KotlinVersion.valueOf("KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}")
     )
   }
 }
 
 // Custom task to compile JAR to DEX using d8
 abstract class D8DexTask @Inject constructor(private val execOperations: ExecOperations) :
-    DefaultTask() {
+  DefaultTask() {
 
   @get:InputFile abstract val inputJar: RegularFileProperty
 
@@ -65,12 +61,12 @@ abstract class D8DexTask @Inject constructor(private val execOperations: ExecOpe
     // Run d8
     execOperations.exec {
       commandLine(
-          d8Path.get(),
-          "--output",
-          outputDir.absolutePath,
-          "--min-api",
-          minSdkVersion.get(),
-          inputJar.get().asFile.absolutePath,
+        d8Path.get(),
+        "--output",
+        outputDir.absolutePath,
+        "--min-api",
+        minSdkVersion.get(),
+        inputJar.get().asFile.absolutePath,
       )
     }
 

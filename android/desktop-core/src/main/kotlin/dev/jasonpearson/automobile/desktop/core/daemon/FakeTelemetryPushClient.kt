@@ -13,11 +13,11 @@ import kotlinx.coroutines.flow.asSharedFlow
 class FakeTelemetryPushClient : TelemetryPushClient {
 
   private val _telemetryEvents =
-      MutableSharedFlow<TelemetryDisplayEvent>(
-          replay = 0,
-          extraBufferCapacity = 200,
-          onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-      )
+    MutableSharedFlow<TelemetryDisplayEvent>(
+      replay = 0,
+      extraBufferCapacity = 200,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
   override val telemetryEvents: SharedFlow<TelemetryDisplayEvent> = _telemetryEvents.asSharedFlow()
 
   private val _connectionState = MutableSharedFlow<ConnectionState>(replay = 1)

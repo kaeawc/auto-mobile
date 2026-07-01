@@ -28,10 +28,10 @@ enum class BreadcrumbCategory {
  * @property metadata Optional key-value pairs with extra context
  */
 data class Breadcrumb(
-    val timestamp: Long,
-    val category: BreadcrumbCategory,
-    val message: String,
-    val metadata: Map<String, String> = emptyMap(),
+  val timestamp: Long,
+  val category: BreadcrumbCategory,
+  val message: String,
+  val metadata: Map<String, String> = emptyMap(),
 )
 
 /** Interface for collecting and retrieving breadcrumbs. */

@@ -15,36 +15,34 @@ import kotlinx.serialization.json.Json
  * @param appId Optional app ID to filter the navigation graph by specific app
  */
 class RealNavigationDataSource(
-    private val clientProvider: (() -> AutoMobileClient)? = null,
-    private val appId: String? = null,
+  private val clientProvider: (() -> AutoMobileClient)? = null,
+  private val appId: String? = null,
 ) : NavigationDataSource {
   private val json = Json { ignoreUnknownKeys = true }
 
   override suspend fun getNavigationGraph(): Result<NavigationGraph> {
     val provider =
-        clientProvider
-            ?: return Result.Success(
-                NavigationGraph(screens = emptyList(), transitions = emptyList())
-            )
+      clientProvider
+        ?: return Result.Success(NavigationGraph(screens = emptyList(), transitions = emptyList()))
 
     return try {
       val client = provider()
 
       // Build URI with optional appId filter
       val uri =
-          if (appId != null) {
-            "automobile:navigation/graph?appId=${java.net.URLEncoder.encode(appId, "UTF-8")}"
-          } else {
-            "automobile:navigation/graph"
-          }
+        if (appId != null) {
+          "automobile:navigation/graph?appId=${java.net.URLEncoder.encode(appId, "UTF-8")}"
+        } else {
+          "automobile:navigation/graph"
+        }
 
       // Read from MCP resource (not tool call)
       val contents = client.readResource(uri)
       val graphText =
-          contents.firstOrNull()?.text
-              ?: return Result.Success(
-                  NavigationGraph(screens = emptyList(), transitions = emptyList())
-              )
+        contents.firstOrNull()?.text
+          ?: return Result.Success(
+            NavigationGraph(screens = emptyList(), transitions = emptyList())
+          )
 
       // Parse the MCP navigation graph response
       val response = json.decodeFromString(McpNavigationGraphResponse.serializer(), graphText)
@@ -54,32 +52,32 @@ class RealNavigationDataSource(
 
       // Adapt MCP nodes to IDE ScreenNode model
       val screens =
-          response.nodes.map { node ->
-            ScreenNode(
-                id = node.id.toString(),
-                name = node.screenName,
-                type = inferScreenType(node.screenName),
-                packageName = response.appId ?: "",
-                transitionCount = outgoingEdgeCounts[node.screenName] ?: 0,
-                discoveredAt = System.currentTimeMillis(), // Not available from summary
-                screenshotUri = node.screenshotPath, // MCP resource URI for screenshot
-            )
-          }
+        response.nodes.map { node ->
+          ScreenNode(
+            id = node.id.toString(),
+            name = node.screenName,
+            type = inferScreenType(node.screenName),
+            packageName = response.appId ?: "",
+            transitionCount = outgoingEdgeCounts[node.screenName] ?: 0,
+            discoveredAt = System.currentTimeMillis(), // Not available from summary
+            screenshotUri = node.screenshotPath, // MCP resource URI for screenshot
+          )
+        }
 
       // Adapt MCP edges to IDE ScreenTransition model
       val transitions =
-          response.edges.map { edge ->
-            ScreenTransition(
-                id = edge.id.toString(),
-                fromScreen = edge.from,
-                toScreen = edge.to,
-                trigger = toolNameToTrigger(edge.toolName),
-                element = null, // Would need detailed edge data
-                avgLatencyMs = 0, // Not available from MCP yet
-                failureRate = 0f, // Not available from MCP yet
-                traversalCount = edge.traversalCount,
-            )
-          }
+        response.edges.map { edge ->
+          ScreenTransition(
+            id = edge.id.toString(),
+            fromScreen = edge.from,
+            toScreen = edge.to,
+            trigger = toolNameToTrigger(edge.toolName),
+            element = null, // Would need detailed edge data
+            avgLatencyMs = 0, // Not available from MCP yet
+            failureRate = 0f, // Not available from MCP yet
+            traversalCount = edge.traversalCount,
+          )
+        }
 
       Result.Success(NavigationGraph(screens = screens, transitions = transitions))
     } catch (e: McpConnectionException) {
@@ -121,25 +119,25 @@ class RealNavigationDataSource(
 
 @Serializable
 private data class McpNavigationGraphResponse(
-    val appId: String? = null,
-    val nodes: List<McpNavigationNode> = emptyList(),
-    val edges: List<McpNavigationEdge> = emptyList(),
-    val currentScreen: String? = null,
+  val appId: String? = null,
+  val nodes: List<McpNavigationNode> = emptyList(),
+  val edges: List<McpNavigationEdge> = emptyList(),
+  val currentScreen: String? = null,
 )
 
 @Serializable
 private data class McpNavigationNode(
-    val id: Int,
-    val screenName: String,
-    val visitCount: Int,
-    val screenshotPath: String? = null, // MCP resource URI for screenshot thumbnail
+  val id: Int,
+  val screenName: String,
+  val visitCount: Int,
+  val screenshotPath: String? = null, // MCP resource URI for screenshot thumbnail
 )
 
 @Serializable
 private data class McpNavigationEdge(
-    val id: Int,
-    val from: String,
-    val to: String,
-    val toolName: String?,
-    val traversalCount: Int = 1,
+  val id: Int,
+  val from: String,
+  val to: String,
+  val toolName: String?,
+  val traversalCount: Int = 1,
 )

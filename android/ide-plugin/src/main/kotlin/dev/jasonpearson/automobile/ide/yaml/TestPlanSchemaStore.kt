@@ -55,50 +55,50 @@ object TestPlanSchemaStore {
     val schema = loadSchema()
     val rootPropertySchemas = schema.objectValue("properties")
     val rootRequired =
-        schema.arrayValue("required")?.mapNotNull { it.stringValue() }?.toSet().orEmpty()
+      schema.arrayValue("required")?.mapNotNull { it.stringValue() }?.toSet().orEmpty()
     rootProperties = buildPropertyMap(rootPropertySchemas, rootRequired)
 
     val defs = schema.objectValue("\$defs") ?: schema.objectValue("definitions")
     val planStep = defs?.objectValue("planStep")
     val stepPropertySchemas = planStep?.objectValue("properties")
     val stepRequired =
-        planStep?.arrayValue("required")?.mapNotNull { it.stringValue() }?.toSet().orEmpty()
+      planStep?.arrayValue("required")?.mapNotNull { it.stringValue() }?.toSet().orEmpty()
     stepProperties = buildPropertyMap(stepPropertySchemas, stepRequired)
 
     metadataSchema = rootPropertySchemas?.objectValue("metadata")
     val metadataPropertySchemas = metadataSchema?.objectValue("properties")
     val metadataRequired =
-        metadataSchema?.arrayValue("required")?.mapNotNull { it.stringValue() }?.toSet().orEmpty()
+      metadataSchema?.arrayValue("required")?.mapNotNull { it.stringValue() }?.toSet().orEmpty()
     metadataProperties = buildPropertyMap(metadataPropertySchemas, metadataRequired)
 
     expectationSchema = defs?.objectValue("expectation")
   }
 
   private fun buildPropertyMap(
-      properties: JsonObject?,
-      required: Set<String>,
+    properties: JsonObject?,
+    required: Set<String>,
   ): Map<String, SchemaPropertyInfo> {
     if (properties == null) {
       return emptyMap()
     }
 
     return properties
-        .mapNotNull { (name, schemaElement) ->
-          val schemaObject = schemaElement.asObjectOrNull() ?: return@mapNotNull null
-          val description = schemaObject.stringValue("description")
-          val deprecated =
-              schemaObject.booleanValue("deprecated") == true ||
-                  description?.startsWith("DEPRECATED") == true ||
-                  name in ValidTools.DEPRECATED_FIELDS
-          SchemaPropertyInfo(
-              name = name,
-              description = description,
-              required = required.contains(name),
-              deprecated = deprecated,
-              schemas = listOf(schemaObject),
-          )
-        }
-        .associateBy { it.name }
+      .mapNotNull { (name, schemaElement) ->
+        val schemaObject = schemaElement.asObjectOrNull() ?: return@mapNotNull null
+        val description = schemaObject.stringValue("description")
+        val deprecated =
+          schemaObject.booleanValue("deprecated") == true ||
+            description?.startsWith("DEPRECATED") == true ||
+            name in ValidTools.DEPRECATED_FIELDS
+        SchemaPropertyInfo(
+          name = name,
+          description = description,
+          required = required.contains(name),
+          deprecated = deprecated,
+          schemas = listOf(schemaObject),
+        )
+      }
+      .associateBy { it.name }
   }
 
   private fun loadSchema(): JsonObject {
@@ -152,5 +152,5 @@ object TestPlanSchemaStore {
   private fun JsonElement.asObjectOrNull(): JsonObject? = this as? JsonObject
 
   private fun JsonElement.asArrayOrNull(): kotlinx.serialization.json.JsonArray? =
-      this as? kotlinx.serialization.json.JsonArray
+    this as? kotlinx.serialization.json.JsonArray
 }

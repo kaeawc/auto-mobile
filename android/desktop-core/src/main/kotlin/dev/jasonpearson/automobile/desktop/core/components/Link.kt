@@ -10,9 +10,9 @@ import androidx.compose.ui.Modifier
 @Composable
 fun Link(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
   Text(
-      text = text,
-      color = MaterialTheme.colorScheme.primary,
-      style = MaterialTheme.typography.bodyMedium,
-      modifier = modifier.clickable(onClick = onClick),
+    text = text,
+    color = MaterialTheme.colorScheme.primary,
+    style = MaterialTheme.typography.bodyMedium,
+    modifier = modifier.clickable(onClick = onClick),
   )
 }

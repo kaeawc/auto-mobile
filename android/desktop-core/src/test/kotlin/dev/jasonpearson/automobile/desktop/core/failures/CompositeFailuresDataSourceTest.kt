@@ -19,9 +19,9 @@ class CompositeFailuresDataSourceTest {
     val streamingGroups = listOf(createTestFailureGroup("streaming-1"))
 
     val mcpDataSource =
-        FakeFailuresDataSourceImpl(getFailureGroupsResult = Result.Success(mcpGroups))
+      FakeFailuresDataSourceImpl(getFailureGroupsResult = Result.Success(mcpGroups))
     val streamingDataSource =
-        FakeStreamingFailuresDataSource(getFailureGroupsResult = Result.Success(streamingGroups))
+      FakeStreamingFailuresDataSource(getFailureGroupsResult = Result.Success(streamingGroups))
 
     val composite = CompositeFailuresDataSource(mcpDataSource, streamingDataSource)
     val result = composite.getFailureGroups()
@@ -35,11 +35,11 @@ class CompositeFailuresDataSourceTest {
     val streamingGroups = listOf(createTestFailureGroup("streaming-1"))
 
     val mcpDataSource =
-        FakeFailuresDataSourceImpl(
-            getFailureGroupsResult = Result.Error(RuntimeException("MCP unavailable"))
-        )
+      FakeFailuresDataSourceImpl(
+        getFailureGroupsResult = Result.Error(RuntimeException("MCP unavailable"))
+      )
     val streamingDataSource =
-        FakeStreamingFailuresDataSource(getFailureGroupsResult = Result.Success(streamingGroups))
+      FakeStreamingFailuresDataSource(getFailureGroupsResult = Result.Success(streamingGroups))
 
     val composite = CompositeFailuresDataSource(mcpDataSource, streamingDataSource)
     val result = composite.getFailureGroups()
@@ -60,14 +60,13 @@ class CompositeFailuresDataSourceTest {
   @Test
   fun `getTimelineData uses MCP when available`() = runBlocking {
     val mcpTimeline =
-        TimelineData(
-            dataPoints = listOf(TimelineDataPoint("1h", 5, 2, 1, 0)),
-            previousPeriodTotals =
-                PeriodTotals(crashes = 3, anrs = 1, toolFailures = 0, nonfatals = 0),
-        )
+      TimelineData(
+        dataPoints = listOf(TimelineDataPoint("1h", 5, 2, 1, 0)),
+        previousPeriodTotals = PeriodTotals(crashes = 3, anrs = 1, toolFailures = 0, nonfatals = 0),
+      )
 
     val mcpDataSource =
-        FakeFailuresDataSourceImpl(getTimelineDataResult = Result.Success(mcpTimeline))
+      FakeFailuresDataSourceImpl(getTimelineDataResult = Result.Success(mcpTimeline))
 
     val composite = CompositeFailuresDataSource(mcpDataSource, null)
     val result = composite.getTimelineData(DateRange.OneHour, TimeAggregation.Minute)
@@ -91,9 +90,9 @@ class CompositeFailuresDataSourceTest {
   fun `notificationsFlow returns streaming flow when available`() = runBlocking {
     val notification = createTestNotification(1)
     val streamingDataSource =
-        FakeStreamingFailuresDataSource(
-            notificationsFlowResult = flowOf(Result.Success(listOf(notification)))
-        )
+      FakeStreamingFailuresDataSource(
+        notificationsFlowResult = flowOf(Result.Success(listOf(notification)))
+      )
 
     val composite = CompositeFailuresDataSource(null, streamingDataSource)
     val results = composite.notificationsFlow().toList()
@@ -116,10 +115,9 @@ class CompositeFailuresDataSourceTest {
     val groups = listOf(createTestFailureGroup("test-1"))
     val totals = FailureTotals(crashes = 1, anrs = 0, toolFailures = 0, nonfatals = 0)
     val streamingDataSource =
-        FakeStreamingFailuresDataSource(
-            failureGroupsFlowResult =
-                flowOf(Result.Success(FailureGroupsWithTotals(groups, totals)))
-        )
+      FakeStreamingFailuresDataSource(
+        failureGroupsFlowResult = flowOf(Result.Success(FailureGroupsWithTotals(groups, totals)))
+      )
 
     val composite = CompositeFailuresDataSource(null, streamingDataSource)
     val results = composite.failureGroupsFlow().toList()
@@ -144,82 +142,82 @@ class CompositeFailuresDataSourceTest {
   // Helper classes
 
   private class FakeFailuresDataSourceImpl(
-      private val getFailureGroupsResult: Result<List<FailureGroup>> = Result.Success(emptyList()),
-      private val getTimelineDataResult: Result<TimelineData> =
-          Result.Success(
-              TimelineData(
-                  emptyList(),
-                  PeriodTotals(crashes = 0, anrs = 0, toolFailures = 0, nonfatals = 0),
-              )
-          ),
+    private val getFailureGroupsResult: Result<List<FailureGroup>> = Result.Success(emptyList()),
+    private val getTimelineDataResult: Result<TimelineData> =
+      Result.Success(
+        TimelineData(
+          emptyList(),
+          PeriodTotals(crashes = 0, anrs = 0, toolFailures = 0, nonfatals = 0),
+        )
+      ),
   ) : FailuresDataSource {
     override suspend fun getFailureGroups(): Result<List<FailureGroup>> = getFailureGroupsResult
 
     override suspend fun getTimelineData(
-        dateRange: DateRange,
-        aggregation: TimeAggregation,
+      dateRange: DateRange,
+      aggregation: TimeAggregation,
     ): Result<TimelineData> = getTimelineDataResult
   }
 
   private class FakeStreamingFailuresDataSource(
-      private val getFailureGroupsResult: Result<List<FailureGroup>> = Result.Success(emptyList()),
-      private val getTimelineDataResult: Result<TimelineData> =
-          Result.Success(
-              TimelineData(
-                  emptyList(),
-                  PeriodTotals(crashes = 0, anrs = 0, toolFailures = 0, nonfatals = 0),
-              )
-          ),
-      private val notificationsFlowResult: Flow<Result<List<FailureNotification>>> = emptyFlow(),
-      private val failureGroupsFlowResult: Flow<Result<FailureGroupsWithTotals>> = emptyFlow(),
+    private val getFailureGroupsResult: Result<List<FailureGroup>> = Result.Success(emptyList()),
+    private val getTimelineDataResult: Result<TimelineData> =
+      Result.Success(
+        TimelineData(
+          emptyList(),
+          PeriodTotals(crashes = 0, anrs = 0, toolFailures = 0, nonfatals = 0),
+        )
+      ),
+    private val notificationsFlowResult: Flow<Result<List<FailureNotification>>> = emptyFlow(),
+    private val failureGroupsFlowResult: Flow<Result<FailureGroupsWithTotals>> = emptyFlow(),
   ) : FailuresDataSource, StreamingFailuresDataSourceInterface {
 
     override suspend fun getFailureGroups(): Result<List<FailureGroup>> = getFailureGroupsResult
 
     override suspend fun getTimelineData(
-        dateRange: DateRange,
-        aggregation: TimeAggregation,
+      dateRange: DateRange,
+      aggregation: TimeAggregation,
     ): Result<TimelineData> = getTimelineDataResult
 
     override fun notificationsFlow(): Flow<Result<List<FailureNotification>>> =
-        notificationsFlowResult
+      notificationsFlowResult
 
     override fun failureGroupsFlow(): Flow<Result<FailureGroupsWithTotals>> =
-        failureGroupsFlowResult
+      failureGroupsFlowResult
   }
 
   private fun createTestFailureGroup(id: String) =
-      FailureGroup(
-          id = id,
-          type = FailureType.Crash,
-          signature = "Test signature",
-          title = "Test title",
-          message = "Test message",
-          firstOccurrence = 0L,
-          lastOccurrence = 0L,
-          totalCount = 1,
-          uniqueSessions = 1,
-          severity = FailureSeverity.Medium,
-          deviceBreakdown = emptyList(),
-          versionBreakdown = emptyList(),
-          screenBreakdown = emptyList(),
-          failureScreens = emptyMap(),
-          stackTraceElements = emptyList(),
-          toolCallInfo = null,
-          affectedTests = emptyMap(),
-          recentCaptures = emptyList(),
-          sampleOccurrences = emptyList(),
-      )
+    FailureGroup(
+      id = id,
+      type = FailureType.Crash,
+      signature = "Test signature",
+      title = "Test title",
+      message = "Test message",
+      firstOccurrence = 0L,
+      lastOccurrence = 0L,
+      totalCount = 1,
+      uniqueSessions = 1,
+      severity = FailureSeverity.Medium,
+      deviceBreakdown = emptyList(),
+      versionBreakdown = emptyList(),
+      screenBreakdown = emptyList(),
+      failureScreens = emptyMap(),
+      stackTraceElements = emptyList(),
+      toolCallInfo = null,
+      affectedTests = emptyMap(),
+      recentCaptures = emptyList(),
+      sampleOccurrences = emptyList(),
+    )
 
   private fun createTestNotification(id: Int) =
-      FailureNotification(
-          id = id,
-          occurrenceId = "occ-$id",
-          groupId = "group-$id",
-          type = FailureType.Crash,
-          severity = FailureSeverity.Medium,
-          title = "Test notification $id",
-          timestamp = System.currentTimeMillis(),
-          acknowledged = false,
-      )
+    FailureNotification(
+      id = id,
+      occurrenceId = "occ-$id",
+      groupId = "group-$id",
+      type = FailureType.Crash,
+      severity = FailureSeverity.Medium,
+      title = "Test notification $id",
+      timestamp = System.currentTimeMillis(),
+      acknowledged = false,
+    )
 }

@@ -15,8 +15,8 @@ class ConnectionStatusIndicatorUiTest {
     setContent {
       MaterialTheme {
         ConnectionStatusIndicator(
-            isConnected = true,
-            label = "Connected",
+          isConnected = true,
+          label = "Connected",
         )
       }
     }
@@ -28,8 +28,8 @@ class ConnectionStatusIndicatorUiTest {
     setContent {
       MaterialTheme {
         ConnectionStatusIndicator(
-            isConnected = false,
-            label = "Disconnected",
+          isConnected = false,
+          label = "Disconnected",
         )
       }
     }
@@ -41,9 +41,9 @@ class ConnectionStatusIndicatorUiTest {
     setContent {
       MaterialTheme {
         ConnectionStatusIndicator(
-            isConnected = false,
-            isReconnecting = true,
-            label = "Reconnecting...",
+          isConnected = false,
+          isReconnecting = true,
+          label = "Reconnecting...",
         )
       }
     }
@@ -55,8 +55,8 @@ class ConnectionStatusIndicatorUiTest {
     setContent {
       MaterialTheme {
         ConnectionStatusIndicator(
-            isConnected = true,
-            label = null,
+          isConnected = true,
+          label = null,
         )
       }
     }

@@ -25,9 +25,9 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /** Horizontal tab representing a bottom panel option. */
 data class HorizontalTab(
-    val id: String,
-    val title: String,
-    val icon: ImageVector,
+  val id: String,
+  val title: String,
+  val icon: ImageVector,
 )
 
 /**
@@ -36,75 +36,73 @@ data class HorizontalTab(
  */
 @Composable
 fun HorizontalTabBar(
-    tabs: List<HorizontalTab>,
-    selectedTabId: String?,
-    onTabSelected: (String?) -> Unit,
-    modifier: Modifier = Modifier,
+  tabs: List<HorizontalTab>,
+  selectedTabId: String?,
+  onTabSelected: (String?) -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
 
   BoxWithConstraints(
-      modifier =
-          modifier
-              .fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.02f))
-              .padding(horizontal = 8.dp, vertical = 4.dp),
+    modifier =
+      modifier
+        .fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.02f))
+        .padding(horizontal = 8.dp, vertical = 4.dp)
   ) {
     // Calculate how many tabs can show text based on available width
     // Each tab with text needs ~100dp, icon-only needs ~40dp
     // Progressively hide text from rightmost tab first
     val availableWidth = maxWidth
     val tabsWithText =
-        when {
-          availableWidth >= 550.dp -> tabs.size // All tabs show text
-          availableWidth >= 450.dp -> tabs.size - 1 // Hide rightmost (Telemetry)
-          availableWidth >= 360.dp -> tabs.size - 2 // Hide 2 rightmost (Diagnostics, Telemetry)
-          availableWidth >= 280.dp ->
-              tabs.size - 3 // Hide 3 rightmost (Storage, Diagnostics, Telemetry)
-          else -> 0 // All icon-only
-        }
+      when {
+        availableWidth >= 550.dp -> tabs.size // All tabs show text
+        availableWidth >= 450.dp -> tabs.size - 1 // Hide rightmost (Telemetry)
+        availableWidth >= 360.dp -> tabs.size - 2 // Hide 2 rightmost (Diagnostics, Telemetry)
+        availableWidth >= 280.dp ->
+          tabs.size - 3 // Hide 3 rightmost (Storage, Diagnostics, Telemetry)
+        else -> 0 // All icon-only
+      }
 
     Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       tabs.forEachIndexed { index, tab ->
         val isSelected = tab.id == selectedTabId
         val showText = index < tabsWithText
 
         Box(
-            modifier =
-                Modifier.background(
-                        if (isSelected) colors.text.normal.copy(alpha = 0.1f)
-                        else Color.Transparent,
-                        RoundedCornerShape(6.dp),
-                    )
-                    .clickable {
-                      // Toggle selection - clicking selected tab deselects it
-                      onTabSelected(if (isSelected) null else tab.id)
-                    }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = if (showText) 12.dp else 8.dp, vertical = 6.dp),
+          modifier =
+            Modifier.background(
+                if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent,
+                RoundedCornerShape(6.dp),
+              )
+              .clickable {
+                // Toggle selection - clicking selected tab deselects it
+                onTabSelected(if (isSelected) null else tab.id)
+              }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(horizontal = if (showText) 12.dp else 8.dp, vertical = 6.dp)
         ) {
           Row(
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
             Icon(
-                imageVector = tab.icon,
-                contentDescription = tab.title,
-                modifier = Modifier.size(14.dp),
-                tint =
-                    if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+              imageVector = tab.icon,
+              contentDescription = tab.title,
+              modifier = Modifier.size(14.dp),
+              tint = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
             )
             if (showText) {
               Text(
-                  tab.title,
-                  fontSize = 11.sp,
-                  maxLines = 1,
-                  softWrap = false,
-                  color =
-                      if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                tab.title,
+                fontSize = 11.sp,
+                maxLines = 1,
+                softWrap = false,
+                color =
+                  if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
               )
             }
           }

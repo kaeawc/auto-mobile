@@ -22,8 +22,8 @@ interface RecoveryConfigProvider {
  * within a test suite run, long enough to avoid per-test daemon round-trips.
  */
 class DaemonRecoveryConfigProvider(
-    private val cacheTtlMs: Long = DEFAULT_CACHE_TTL_MS,
-    private val clock: () -> Long = System::currentTimeMillis,
+  private val cacheTtlMs: Long = DEFAULT_CACHE_TTL_MS,
+  private val clock: () -> Long = System::currentTimeMillis,
 ) : RecoveryConfigProvider {
 
   private data class CachedEntry(val config: CachedConfig, val fetchedAt: Long)
@@ -43,21 +43,21 @@ class DaemonRecoveryConfigProvider(
     }
 
     val config =
-        try {
-          val response =
-              DaemonSocketClientManager.readResource(
-                  "automobile:config/feature-flags/ai-recovery",
-                  5000L,
-              )
-          if (!response.success || response.result == null) {
-            CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
-          } else {
-            parseConfig(response)
-          }
-        } catch (e: Exception) {
-          println("Warning: Failed to read ai-recovery config from daemon: ${e.message}")
+      try {
+        val response =
+          DaemonSocketClientManager.readResource(
+            "automobile:config/feature-flags/ai-recovery",
+            5000L,
+          )
+        if (!response.success || response.result == null) {
           CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
+        } else {
+          parseConfig(response)
         }
+      } catch (e: Exception) {
+        println("Warning: Failed to read ai-recovery config from daemon: ${e.message}")
+        CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
+      }
 
     cached = CachedEntry(config, clock())
     return config
@@ -66,27 +66,27 @@ class DaemonRecoveryConfigProvider(
   private fun parseConfig(response: DaemonResponse): CachedConfig {
     val json = Json { ignoreUnknownKeys = true }
     val resultObj =
-        response.result?.jsonObject ?: return CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
+      response.result?.jsonObject ?: return CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
     val contents =
-        resultObj["contents"] ?: return CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
+      resultObj["contents"] ?: return CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
     val firstContent =
-        contents as? kotlinx.serialization.json.JsonArray
-            ?: return CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
+      contents as? kotlinx.serialization.json.JsonArray
+        ?: return CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
     if (firstContent.isEmpty()) return CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
     val text =
-        firstContent[0].jsonObject["text"]?.jsonPrimitive?.content
-            ?: return CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
+      firstContent[0].jsonObject["text"]?.jsonPrimitive?.content
+        ?: return CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
 
     val body = json.parseToJsonElement(text).jsonObject
     val enabled =
-        body["enabled"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: DEFAULT_ENABLED
+      body["enabled"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: DEFAULT_ENABLED
     val configObj = body["config"]?.jsonObject
     val maxToolCalls =
-        try {
-          configObj?.get("maxToolCalls")?.jsonPrimitive?.intOrNull ?: DEFAULT_MAX_TOOL_CALLS
-        } catch (_: Exception) {
-          DEFAULT_MAX_TOOL_CALLS
-        }
+      try {
+        configObj?.get("maxToolCalls")?.jsonPrimitive?.intOrNull ?: DEFAULT_MAX_TOOL_CALLS
+      } catch (_: Exception) {
+        DEFAULT_MAX_TOOL_CALLS
+      }
     return CachedConfig(enabled, maxToolCalls)
   }
 
@@ -99,8 +99,8 @@ class DaemonRecoveryConfigProvider(
 
 /** Fixed config for use in tests. */
 class StaticRecoveryConfigProvider(
-    private val enabled: Boolean = true,
-    private val maxToolCalls: Int = 5,
+  private val enabled: Boolean = true,
+  private val maxToolCalls: Int = 5,
 ) : RecoveryConfigProvider {
   override fun isRecoveryEnabled(): Boolean = enabled
 

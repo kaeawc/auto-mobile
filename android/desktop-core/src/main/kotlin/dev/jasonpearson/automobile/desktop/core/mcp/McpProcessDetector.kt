@@ -6,14 +6,14 @@ import java.io.InputStreamReader
 
 /** Data class for MCP process information */
 data class McpProcess(
-    val pid: Int,
-    val name: String,
-    val connectionType: McpConnectionType,
-    val port: Int? = null,
-    val socketPath: String? = null,
-    val uptimeMs: Long = 0,
-    val status: String = "Running",
-    val commandLine: String? = null,
+  val pid: Int,
+  val name: String,
+  val connectionType: McpConnectionType,
+  val port: Int? = null,
+  val socketPath: String? = null,
+  val uptimeMs: Long = 0,
+  val status: String = "Running",
+  val commandLine: String? = null,
 )
 
 enum class McpConnectionType(val label: String, val icon: String) {
@@ -30,28 +30,28 @@ interface McpProcessDetector {
 /** Fake implementation for testing and demo purposes */
 class FakeMcpProcessDetector : McpProcessDetector {
   override fun detectProcesses(): List<McpProcess> =
-      listOf(
-          McpProcess(
-              pid = 12345,
-              name = "auto-mobile-daemon",
-              connectionType = McpConnectionType.StreamableHttp,
-              port = 3000,
-              uptimeMs = 3600000, // 1 hour
-          ),
-          McpProcess(
-              pid = 12346,
-              name = "auto-mobile-mcp",
-              connectionType = McpConnectionType.UnixSocket,
-              socketPath = "/tmp/auto-mobile-daemon-501.sock",
-              uptimeMs = 1800000, // 30 min
-          ),
-          McpProcess(
-              pid = 12400,
-              name = "auto-mobile-stdio",
-              connectionType = McpConnectionType.Stdio,
-              uptimeMs = 600000, // 10 min
-          ),
-      )
+    listOf(
+      McpProcess(
+        pid = 12345,
+        name = "auto-mobile-daemon",
+        connectionType = McpConnectionType.StreamableHttp,
+        port = 3000,
+        uptimeMs = 3600000, // 1 hour
+      ),
+      McpProcess(
+        pid = 12346,
+        name = "auto-mobile-mcp",
+        connectionType = McpConnectionType.UnixSocket,
+        socketPath = "/tmp/auto-mobile-daemon-501.sock",
+        uptimeMs = 1800000, // 30 min
+      ),
+      McpProcess(
+        pid = 12400,
+        name = "auto-mobile-stdio",
+        connectionType = McpConnectionType.Stdio,
+        uptimeMs = 600000, // 10 min
+      ),
+    )
 }
 
 /** Runs a subprocess and returns its stdout lines, or null on failure. */
@@ -66,9 +66,9 @@ class SystemProcessRunner : ProcessRunner {
       pb.redirectErrorStream(true)
       val process = pb.start()
       val lines =
-          BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
-            reader.readLines()
-          }
+        BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+          reader.readLines()
+        }
       process.waitFor()
       lines
     } catch (e: Exception) {
@@ -87,18 +87,18 @@ class RealSocketFileChecker : SocketFileChecker {
     val tmpDir = File("/tmp")
     if (!tmpDir.isDirectory) return emptyList()
     return tmpDir
-        .listFiles { f ->
-          f.name.startsWith("auto-mobile-daemon") && f.name.endsWith(".sock")
-        }
-        ?.map { it.absolutePath } ?: emptyList()
+      .listFiles { f ->
+        f.name.startsWith("auto-mobile-daemon") && f.name.endsWith(".sock")
+      }
+      ?.map { it.absolutePath } ?: emptyList()
   }
 }
 
 /** Real implementation that detects actual MCP processes on the system */
 class RealMcpProcessDetector(
-    private val timeProvider: TimeProvider = SystemTimeProvider,
-    private val processRunner: ProcessRunner = SystemProcessRunner(),
-    private val socketFileChecker: SocketFileChecker = RealSocketFileChecker(),
+  private val timeProvider: TimeProvider = SystemTimeProvider,
+  private val processRunner: ProcessRunner = SystemProcessRunner(),
+  private val socketFileChecker: SocketFileChecker = RealSocketFileChecker(),
 ) : McpProcessDetector {
 
   override fun detectProcesses(): List<McpProcess> {
@@ -119,40 +119,40 @@ class RealMcpProcessDetector(
       // Fallback: if socket files exist but this PID isn't listening, still use Unix socket
       // (the daemon PID in the PID file may differ from the detected process PID)
       val fallbackSocketPath =
-          if (socketPath == null && socketFilesExist) {
-            socketFileChecker.findDaemonSocketFiles().firstOrNull()
-          } else null
+        if (socketPath == null && socketFilesExist) {
+          socketFileChecker.findDaemonSocketFiles().firstOrNull()
+        } else null
 
       val (connectionType, port, resolvedSocketPath) =
-          when {
-            socketPath != null -> {
-              Triple(McpConnectionType.UnixSocket, null, socketPath)
-            }
-            fallbackSocketPath != null &&
-                (cmdLine.contains("--daemon-mode") || cmdLine.contains("auto-mobile")) -> {
-              Triple(McpConnectionType.UnixSocket, null, fallbackSocketPath)
-            }
-            cmdLine.contains("--daemon-mode") -> {
-              Triple(McpConnectionType.StreamableHttp, extractPort(cmdLine) ?: 3000, null)
-            }
-            cmdLine.contains("--port") || cmdLine.contains(":3000") || cmdLine.contains("http") -> {
-              Triple(McpConnectionType.StreamableHttp, extractPort(cmdLine) ?: 3000, null)
-            }
-            else -> {
-              Triple(McpConnectionType.Stdio, null, null)
-            }
+        when {
+          socketPath != null -> {
+            Triple(McpConnectionType.UnixSocket, null, socketPath)
           }
+          fallbackSocketPath != null &&
+            (cmdLine.contains("--daemon-mode") || cmdLine.contains("auto-mobile")) -> {
+            Triple(McpConnectionType.UnixSocket, null, fallbackSocketPath)
+          }
+          cmdLine.contains("--daemon-mode") -> {
+            Triple(McpConnectionType.StreamableHttp, extractPort(cmdLine) ?: 3000, null)
+          }
+          cmdLine.contains("--port") || cmdLine.contains(":3000") || cmdLine.contains("http") -> {
+            Triple(McpConnectionType.StreamableHttp, extractPort(cmdLine) ?: 3000, null)
+          }
+          else -> {
+            Triple(McpConnectionType.Stdio, null, null)
+          }
+        }
 
       processes.add(
-          McpProcess(
-              pid = pid,
-              name = name,
-              connectionType = connectionType,
-              port = port,
-              socketPath = resolvedSocketPath,
-              uptimeMs = uptimeMs,
-              commandLine = cmdLine,
-          )
+        McpProcess(
+          pid = pid,
+          name = name,
+          connectionType = connectionType,
+          port = port,
+          socketPath = resolvedSocketPath,
+          uptimeMs = uptimeMs,
+          commandLine = cmdLine,
+        )
       )
     }
 
@@ -161,12 +161,11 @@ class RealMcpProcessDetector(
 
   private fun findAutoMobileProcesses(): List<ProcessInfo> {
     val lines =
-        processRunner.runAndReadLines(listOf("ps", "-eo", "pid,lstart,command"))
-            ?: return emptyList()
+      processRunner.runAndReadLines(listOf("ps", "-eo", "pid,lstart,command")) ?: return emptyList()
 
     return lines
-        .filter { it.contains("auto-mobile") && !it.contains("grep") }
-        .mapNotNull { line -> parseProcessLine(line) }
+      .filter { it.contains("auto-mobile") && !it.contains("grep") }
+      .mapNotNull { line -> parseProcessLine(line) }
   }
 
   internal fun parseProcessLine(line: String): ProcessInfo? {
@@ -213,8 +212,8 @@ class RealMcpProcessDetector(
   }
 
   internal fun classifyConnection(
-      socketPath: String?,
-      cmdLine: String,
+    socketPath: String?,
+    cmdLine: String,
   ): Triple<McpConnectionType, Int?, String?> {
     return when {
       socketPath != null -> {
@@ -234,23 +233,22 @@ class RealMcpProcessDetector(
 
   private fun isListeningOnSocket(pid: Int): String? {
     val lines =
-        processRunner.runAndReadLines(listOf("lsof", "-p", pid.toString(), "-a", "-U"))
-            ?: return null
+      processRunner.runAndReadLines(listOf("lsof", "-p", pid.toString(), "-a", "-U")) ?: return null
 
     return lines
-        .filter { it.contains("/tmp/auto-mobile-daemon") && it.contains(".sock") }
-        .mapNotNull { line ->
-          val parts = line.trim().split(Regex("\\s+"))
-          parts.lastOrNull()?.takeIf { it.startsWith("/tmp/auto-mobile-daemon") }
-        }
-        .firstOrNull()
+      .filter { it.contains("/tmp/auto-mobile-daemon") && it.contains(".sock") }
+      .mapNotNull { line ->
+        val parts = line.trim().split(Regex("\\s+"))
+        parts.lastOrNull()?.takeIf { it.startsWith("/tmp/auto-mobile-daemon") }
+      }
+      .firstOrNull()
   }
 
   internal data class ProcessInfo(
-      val pid: Int,
-      val name: String,
-      val startTime: Long,
-      val commandLine: String,
+    val pid: Int,
+    val name: String,
+    val startTime: Long,
+    val commandLine: String,
   )
 }
 

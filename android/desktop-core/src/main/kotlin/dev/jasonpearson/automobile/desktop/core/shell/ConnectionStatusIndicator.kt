@@ -21,33 +21,31 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 /** Small colored dot indicating connection status with an optional label. */
 @Composable
 fun ConnectionStatusIndicator(
-    isConnected: Boolean,
-    isReconnecting: Boolean = false,
-    label: String? = null,
-    modifier: Modifier = Modifier,
+  isConnected: Boolean,
+  isReconnecting: Boolean = false,
+  label: String? = null,
+  modifier: Modifier = Modifier,
 ) {
   val dotColor =
-      when {
-        isConnected -> Color(0xFF4CAF50) // green
-        isReconnecting -> Color(0xFFFFC107) // yellow
-        else -> Color(0xFFF44336) // red
-      }
+    when {
+      isConnected -> Color(0xFF4CAF50) // green
+      isReconnecting -> Color(0xFFFFC107) // yellow
+      else -> Color(0xFFF44336) // red
+    }
   val textColor = SharedTheme.globalColors.text.normal
 
   Row(
-      modifier = modifier,
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = modifier,
+    verticalAlignment = Alignment.CenterVertically,
   ) {
-    Box(
-        modifier = Modifier.size(6.dp).clip(CircleShape).background(dotColor),
-    )
+    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(dotColor))
     if (label != null) {
       Spacer(modifier = Modifier.width(3.dp))
       Text(
-          text = label,
-          style = DesktopTypography.label,
-          color = textColor.copy(alpha = 0.7f),
-          lineHeight = 10.sp,
+        text = label,
+        style = DesktopTypography.label,
+        color = textColor.copy(alpha = 0.7f),
+        lineHeight = 10.sp,
       )
     }
   }

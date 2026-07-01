@@ -15,18 +15,18 @@ import org.junit.Test
 class NavigationDashboardUiTest {
 
   private val sampleScreens =
-      listOf(
-          ScreenNode("s1", "Login", "Composable", "com.app.auth", 3, 1000L),
-          ScreenNode("s2", "Home", "Activity", "com.app.main", 5, 2000L),
-          ScreenNode("s3", "Settings", "Composable", "com.app.settings", 1, 3000L),
-      )
+    listOf(
+      ScreenNode("s1", "Login", "Composable", "com.app.auth", 3, 1000L),
+      ScreenNode("s2", "Home", "Activity", "com.app.main", 5, 2000L),
+      ScreenNode("s3", "Settings", "Composable", "com.app.settings", 1, 3000L),
+    )
 
   private val sampleTransitions =
-      listOf(
-          ScreenTransition("t1", "Login", "Home", "tap", "Login Button", 350, 0.03f),
-          ScreenTransition("t2", "Home", "Settings", "tap", "Settings Tab", 50, 0.0f),
-          ScreenTransition("t3", "Settings", "Home", "back", null, 40, 0.0f),
-      )
+    listOf(
+      ScreenTransition("t1", "Login", "Home", "tap", "Login Button", 350, 0.03f),
+      ScreenTransition("t2", "Home", "Settings", "tap", "Settings Tab", 50, 0.0f),
+      ScreenTransition("t3", "Settings", "Home", "back", null, 40, 0.0f),
+    )
 
   // -- FlowMapListView tests --
 
@@ -35,10 +35,10 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         FlowMapListView(
-            screens = sampleScreens,
-            transitions = sampleTransitions,
-            onScreenSelected = {},
-            onTransitionSelected = {},
+          screens = sampleScreens,
+          transitions = sampleTransitions,
+          onScreenSelected = {},
+          onTransitionSelected = {},
         )
       }
     }
@@ -53,10 +53,10 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         FlowMapListView(
-            screens = sampleScreens,
-            transitions = sampleTransitions,
-            onScreenSelected = {},
-            onTransitionSelected = {},
+          screens = sampleScreens,
+          transitions = sampleTransitions,
+          onScreenSelected = {},
+          onTransitionSelected = {},
         )
       }
     }
@@ -72,10 +72,10 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         FlowMapListView(
-            screens = emptyList(),
-            transitions = emptyList(),
-            onScreenSelected = {},
-            onTransitionSelected = {},
+          screens = emptyList(),
+          transitions = emptyList(),
+          onScreenSelected = {},
+          onTransitionSelected = {},
         )
       }
     }
@@ -89,10 +89,10 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         ScreenDetailView(
-            screen = sampleScreens[0],
-            transitions = sampleTransitions,
-            onBack = {},
-            onScreenSelected = {},
+          screen = sampleScreens[0],
+          transitions = sampleTransitions,
+          onBack = {},
+          onScreenSelected = {},
         )
       }
     }
@@ -107,10 +107,10 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         ScreenDetailView(
-            screen = sampleScreens[1], // Home
-            transitions = sampleTransitions,
-            onBack = {},
-            onScreenSelected = {},
+          screen = sampleScreens[1], // Home
+          transitions = sampleTransitions,
+          onBack = {},
+          onScreenSelected = {},
         )
       }
     }
@@ -126,10 +126,10 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         ScreenDetailView(
-            screen = sampleScreens[0],
-            transitions = emptyList(),
-            onBack = {},
-            onScreenSelected = {},
+          screen = sampleScreens[0],
+          transitions = emptyList(),
+          onBack = {},
+          onScreenSelected = {},
         )
       }
     }
@@ -141,10 +141,10 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         ScreenDetailView(
-            screen = sampleScreens[0],
-            transitions = emptyList(),
-            onBack = {},
-            onScreenSelected = {},
+          screen = sampleScreens[0],
+          transitions = emptyList(),
+          onBack = {},
+          onScreenSelected = {},
         )
       }
     }
@@ -158,9 +158,9 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         TransitionDetailView(
-            transition = sampleTransitions[0], // Login -> Home
-            onBack = {},
-            onScreenSelected = {},
+          transition = sampleTransitions[0], // Login -> Home
+          onBack = {},
+          onScreenSelected = {},
         )
       }
     }
@@ -174,9 +174,9 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         TransitionDetailView(
-            transition = sampleTransitions[0], // tap, "Login Button"
-            onBack = {},
-            onScreenSelected = {},
+          transition = sampleTransitions[0], // tap, "Login Button"
+          onBack = {},
+          onScreenSelected = {},
         )
       }
     }
@@ -189,9 +189,9 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         TransitionDetailView(
-            transition = sampleTransitions[0], // avgLatencyMs = 350
-            onBack = {},
-            onScreenSelected = {},
+          transition = sampleTransitions[0], // avgLatencyMs = 350
+          onBack = {},
+          onScreenSelected = {},
         )
       }
     }
@@ -203,9 +203,9 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         TransitionDetailView(
-            transition = sampleTransitions[0], // failureRate = 0.03
-            onBack = {},
-            onScreenSelected = {},
+          transition = sampleTransitions[0], // failureRate = 0.03
+          onBack = {},
+          onScreenSelected = {},
         )
       }
     }
@@ -218,9 +218,9 @@ class NavigationDashboardUiTest {
     setContent {
       MaterialTheme {
         TransitionDetailView(
-            transition = noLatency,
-            onBack = {},
-            onScreenSelected = {},
+          transition = noLatency,
+          onBack = {},
+          onScreenSelected = {},
         )
       }
     }

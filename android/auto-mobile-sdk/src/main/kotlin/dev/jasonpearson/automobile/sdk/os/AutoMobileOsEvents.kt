@@ -63,12 +63,12 @@ internal object AutoMobileOsEvents {
 
   private fun postEvent(kind: String, details: Map<String, String>? = null) {
     buffer?.add(
-        SdkLifecycleEvent(
-            timestamp = System.currentTimeMillis(),
-            applicationId = applicationId,
-            kind = kind,
-            details = details,
-        )
+      SdkLifecycleEvent(
+        timestamp = System.currentTimeMillis(),
+        applicationId = applicationId,
+        kind = kind,
+        details = details,
+      )
     )
   }
 
@@ -76,15 +76,15 @@ internal object AutoMobileOsEvents {
 
   private fun registerLifecycleObserver() {
     val observer =
-        object : DefaultLifecycleObserver {
-          override fun onStart(owner: LifecycleOwner) {
-            postEvent("foreground")
-          }
-
-          override fun onStop(owner: LifecycleOwner) {
-            postEvent("background")
-          }
+      object : DefaultLifecycleObserver {
+        override fun onStart(owner: LifecycleOwner) {
+          postEvent("foreground")
         }
+
+        override fun onStop(owner: LifecycleOwner) {
+          postEvent("background")
+        }
+      }
     lifecycleObserver = observer
     ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
   }
@@ -101,37 +101,37 @@ internal object AutoMobileOsEvents {
   private fun registerActivityCallbacks(context: Context) {
     val app = context.applicationContext as? Application ?: return
     val callbacks =
-        object : Application.ActivityLifecycleCallbacks {
-          private fun activityName(activity: Activity): String = activity.javaClass.simpleName
+      object : Application.ActivityLifecycleCallbacks {
+        private fun activityName(activity: Activity): String = activity.javaClass.simpleName
 
-          override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
-            postEvent("activity_created", mapOf("activity" to activityName(activity)))
-          }
-
-          override fun onActivityStarted(activity: Activity) {
-            postEvent("activity_started", mapOf("activity" to activityName(activity)))
-          }
-
-          override fun onActivityResumed(activity: Activity) {
-            postEvent("activity_resumed", mapOf("activity" to activityName(activity)))
-          }
-
-          override fun onActivityPaused(activity: Activity) {
-            postEvent("activity_paused", mapOf("activity" to activityName(activity)))
-          }
-
-          override fun onActivityStopped(activity: Activity) {
-            postEvent("activity_stopped", mapOf("activity" to activityName(activity)))
-          }
-
-          override fun onActivityDestroyed(activity: Activity) {
-            postEvent("activity_destroyed", mapOf("activity" to activityName(activity)))
-          }
-
-          override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {
-            // Not tracked — too noisy and low signal
-          }
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+          postEvent("activity_created", mapOf("activity" to activityName(activity)))
         }
+
+        override fun onActivityStarted(activity: Activity) {
+          postEvent("activity_started", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivityResumed(activity: Activity) {
+          postEvent("activity_resumed", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivityPaused(activity: Activity) {
+          postEvent("activity_paused", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivityStopped(activity: Activity) {
+          postEvent("activity_stopped", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivityDestroyed(activity: Activity) {
+          postEvent("activity_destroyed", mapOf("activity" to activityName(activity)))
+        }
+
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {
+          // Not tracked — too noisy and low signal
+        }
+      }
     activityCallbacks = callbacks
     app.registerActivityLifecycleCallbacks(callbacks)
   }
@@ -149,25 +149,25 @@ internal object AutoMobileOsEvents {
   @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
   private fun registerConnectivityCallback(context: Context) {
     val cm =
-        context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+      context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
     val callback =
-        object : ConnectivityManager.NetworkCallback() {
-          override fun onAvailable(network: Network) {
-            val caps = cm.getNetworkCapabilities(network)
-            val transport =
-                when {
-                  caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "wifi"
-                  caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "cellular"
-                  caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "ethernet"
-                  else -> "other"
-                }
-            postEvent("connectivity_change", mapOf("connected" to "true", "transport" to transport))
-          }
-
-          override fun onLost(network: Network) {
-            postEvent("connectivity_change", mapOf("connected" to "false"))
-          }
+      object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+          val caps = cm.getNetworkCapabilities(network)
+          val transport =
+            when {
+              caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "wifi"
+              caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "cellular"
+              caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "ethernet"
+              else -> "other"
+            }
+          postEvent("connectivity_change", mapOf("connected" to "true", "transport" to transport))
         }
+
+        override fun onLost(network: Network) {
+          postEvent("connectivity_change", mapOf("connected" to "false"))
+        }
+      }
     connectivityCallback = callback
     val request = NetworkRequest.Builder().build()
     cm.registerNetworkCallback(request, callback)
@@ -187,23 +187,23 @@ internal object AutoMobileOsEvents {
 
   private fun registerBatteryReceiver(context: Context) {
     val receiver =
-        object : BroadcastReceiver() {
-          override fun onReceive(ctx: Context?, intent: Intent?) {
-            if (intent?.action != Intent.ACTION_BATTERY_CHANGED) return
-            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-            val pct =
-                if (level >= 0 && scale > 0) ((level.toFloat() / scale) * 100).toInt().toString()
-                else "unknown"
-            val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
-            val charging = plugged != 0
-            // Only post when level or charging state actually changes
-            if (pct == lastBatteryPct && charging == lastBatteryCharging) return
-            lastBatteryPct = pct
-            lastBatteryCharging = charging
-            postEvent("battery_change", mapOf("level" to pct, "charging" to charging.toString()))
-          }
+      object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+          if (intent?.action != Intent.ACTION_BATTERY_CHANGED) return
+          val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+          val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+          val pct =
+            if (level >= 0 && scale > 0) ((level.toFloat() / scale) * 100).toInt().toString()
+            else "unknown"
+          val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+          val charging = plugged != 0
+          // Only post when level or charging state actually changes
+          if (pct == lastBatteryPct && charging == lastBatteryCharging) return
+          lastBatteryPct = pct
+          lastBatteryCharging = charging
+          postEvent("battery_change", mapOf("level" to pct, "charging" to charging.toString()))
         }
+      }
     batteryReceiver = receiver
     val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -226,20 +226,20 @@ internal object AutoMobileOsEvents {
 
   private fun registerScreenReceiver(context: Context) {
     val receiver =
-        object : BroadcastReceiver() {
-          override fun onReceive(ctx: Context?, intent: Intent?) {
-            when (intent?.action) {
-              Intent.ACTION_SCREEN_ON -> postEvent("screen_on")
-              Intent.ACTION_SCREEN_OFF -> postEvent("screen_off")
-            }
+      object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+          when (intent?.action) {
+            Intent.ACTION_SCREEN_ON -> postEvent("screen_on")
+            Intent.ACTION_SCREEN_OFF -> postEvent("screen_off")
           }
         }
+      }
     screenReceiver = receiver
     val filter =
-        IntentFilter().apply {
-          addAction(Intent.ACTION_SCREEN_ON)
-          addAction(Intent.ACTION_SCREEN_OFF)
-        }
+      IntentFilter().apply {
+        addAction(Intent.ACTION_SCREEN_ON)
+        addAction(Intent.ACTION_SCREEN_OFF)
+      }
     context.registerReceiver(receiver, filter)
   }
 

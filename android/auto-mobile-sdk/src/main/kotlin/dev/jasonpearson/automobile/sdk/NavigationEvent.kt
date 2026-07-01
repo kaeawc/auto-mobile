@@ -10,17 +10,17 @@ package dev.jasonpearson.automobile.sdk
  * @property metadata Additional metadata about the navigation event
  */
 data class NavigationEvent(
-    val destination: String,
-    val timestamp: Long = System.currentTimeMillis(),
-    val source: NavigationSource,
-    val arguments: Map<String, Any?> = emptyMap(),
-    val metadata: Map<String, String> = emptyMap(),
+  val destination: String,
+  val timestamp: Long = System.currentTimeMillis(),
+  val source: NavigationSource,
+  val arguments: Map<String, Any?> = emptyMap(),
+  val metadata: Map<String, String> = emptyMap(),
 )
 
 /** Identifies the source/framework of a navigation event. */
 enum class NavigationSource(
-    /** Platform-agnostic wire format value (lowercase snake_case, matches iOS rawValue). */
-    val wireValue: String,
+  /** Platform-agnostic wire format value (lowercase snake_case, matches iOS rawValue). */
+  val wireValue: String
 ) {
   /** Jetpack Navigation Component (XML-based) */
   NAVIGATION_COMPONENT("navigation_component"),

@@ -13,27 +13,27 @@ class DeviceResourceParserTest {
   @Test
   fun `parses minimal valid booted devices response`() {
     val json =
-        """
-        {
-            "totalCount": 1,
-            "androidCount": 1,
-            "iosCount": 0,
-            "virtualCount": 1,
-            "physicalCount": 0,
-            "lastUpdated": "2024-01-24T23:00:00Z",
-            "devices": [
-                {
-                    "name": "Pixel 8 API 35",
-                    "platform": "android",
-                    "deviceId": "emulator-5554",
-                    "source": "local",
-                    "isVirtual": true,
-                    "status": "booted"
-                }
-            ]
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "totalCount": 1,
+          "androidCount": 1,
+          "iosCount": 0,
+          "virtualCount": 1,
+          "physicalCount": 0,
+          "lastUpdated": "2024-01-24T23:00:00Z",
+          "devices": [
+              {
+                  "name": "Pixel 8 API 35",
+                  "platform": "android",
+                  "deviceId": "emulator-5554",
+                  "source": "local",
+                  "isVirtual": true,
+                  "status": "booted"
+              }
+          ]
+      }
+      """
+        .trimIndent()
 
     val result = DeviceResourceParser.parseBootedDevices(json)
     assertNotNull(result)
@@ -54,35 +54,35 @@ class DeviceResourceParserTest {
   @Test
   fun `parses device with optional serviceStatus`() {
     val json =
-        """
-        {
-            "totalCount": 1,
-            "androidCount": 1,
-            "iosCount": 0,
-            "virtualCount": 1,
-            "physicalCount": 0,
-            "lastUpdated": "2024-01-24T23:00:00Z",
-            "devices": [
-                {
-                    "name": "Pixel 8",
-                    "platform": "android",
-                    "deviceId": "emulator-5554",
-                    "source": "local",
-                    "isVirtual": true,
-                    "status": "booted",
-                    "serviceStatus": {
-                        "installed": true,
-                        "enabled": true,
-                        "running": true,
-                        "installedSha256": "abc123",
-                        "expectedSha256": "abc123",
-                        "isCompatible": true
-                    }
-                }
-            ]
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "totalCount": 1,
+          "androidCount": 1,
+          "iosCount": 0,
+          "virtualCount": 1,
+          "physicalCount": 0,
+          "lastUpdated": "2024-01-24T23:00:00Z",
+          "devices": [
+              {
+                  "name": "Pixel 8",
+                  "platform": "android",
+                  "deviceId": "emulator-5554",
+                  "source": "local",
+                  "isVirtual": true,
+                  "status": "booted",
+                  "serviceStatus": {
+                      "installed": true,
+                      "enabled": true,
+                      "running": true,
+                      "installedSha256": "abc123",
+                      "expectedSha256": "abc123",
+                      "isCompatible": true
+                  }
+              }
+          ]
+      }
+      """
+        .trimIndent()
 
     val result = DeviceResourceParser.parseBootedDevices(json)
     assertNotNull(result)
@@ -98,29 +98,29 @@ class DeviceResourceParserTest {
   @Test
   fun `ignores unknown fields in booted devices response`() {
     val json =
-        """
-        {
-            "totalCount": 1,
-            "androidCount": 1,
-            "iosCount": 0,
-            "virtualCount": 1,
-            "physicalCount": 0,
-            "lastUpdated": "2024-01-24T23:00:00Z",
-            "unknownFutureField": "ignored",
-            "devices": [
-                {
-                    "name": "Pixel 8",
-                    "platform": "android",
-                    "deviceId": "emulator-5554",
-                    "source": "local",
-                    "isVirtual": true,
-                    "status": "booted",
-                    "anotherUnknownField": 42
-                }
-            ]
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "totalCount": 1,
+          "androidCount": 1,
+          "iosCount": 0,
+          "virtualCount": 1,
+          "physicalCount": 0,
+          "lastUpdated": "2024-01-24T23:00:00Z",
+          "unknownFutureField": "ignored",
+          "devices": [
+              {
+                  "name": "Pixel 8",
+                  "platform": "android",
+                  "deviceId": "emulator-5554",
+                  "source": "local",
+                  "isVirtual": true,
+                  "status": "booted",
+                  "anotherUnknownField": 42
+              }
+          ]
+      }
+      """
+        .trimIndent()
 
     val result = DeviceResourceParser.parseBootedDevices(json)
     assertNotNull(result, "Parser should tolerate unknown fields")
@@ -147,20 +147,20 @@ class DeviceResourceParserTest {
   @Test
   fun `parses valid device images response`() {
     val json =
-        """
-        {
-            "totalCount": 3,
-            "androidCount": 2,
-            "iosCount": 1,
-            "lastUpdated": "2024-01-24T23:00:00Z",
-            "images": [
-                {"name": "Pixel 8 API 35", "platform": "android", "deviceId": "Pixel_8_API_35"},
-                {"name": "Pixel 7 API 34", "platform": "android", "deviceId": "Pixel_7_API_34"},
-                {"name": "iPhone 15 Pro",  "platform": "ios",     "deviceId": "iphone-15-pro"}
-            ]
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "totalCount": 3,
+          "androidCount": 2,
+          "iosCount": 1,
+          "lastUpdated": "2024-01-24T23:00:00Z",
+          "images": [
+              {"name": "Pixel 8 API 35", "platform": "android", "deviceId": "Pixel_8_API_35"},
+              {"name": "Pixel 7 API 34", "platform": "android", "deviceId": "Pixel_7_API_34"},
+              {"name": "iPhone 15 Pro",  "platform": "ios",     "deviceId": "iphone-15-pro"}
+          ]
+      }
+      """
+        .trimIndent()
 
     val result = DeviceResourceParser.parseDeviceImages(json)
     assertNotNull(result)
@@ -175,25 +175,25 @@ class DeviceResourceParserTest {
   @Test
   fun `parses device image with optional extended AVD fields`() {
     val json =
-        """
-        {
-            "totalCount": 1,
-            "androidCount": 1,
-            "iosCount": 0,
-            "lastUpdated": "2024-01-24T23:00:00Z",
-            "images": [
-                {
-                    "name": "Pixel 8 API 35",
-                    "platform": "android",
-                    "deviceId": "Pixel_8_API_35",
-                    "path": "/home/user/.android/avd/Pixel_8_API_35.avd",
-                    "target": "android-35",
-                    "basedOn": "Google APIs"
-                }
-            ]
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "totalCount": 1,
+          "androidCount": 1,
+          "iosCount": 0,
+          "lastUpdated": "2024-01-24T23:00:00Z",
+          "images": [
+              {
+                  "name": "Pixel 8 API 35",
+                  "platform": "android",
+                  "deviceId": "Pixel_8_API_35",
+                  "path": "/home/user/.android/avd/Pixel_8_API_35.avd",
+                  "target": "android-35",
+                  "basedOn": "Google APIs"
+              }
+          ]
+      }
+      """
+        .trimIndent()
 
     val result = DeviceResourceParser.parseDeviceImages(json)
     assertNotNull(result)

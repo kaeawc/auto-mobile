@@ -23,11 +23,11 @@ import okio.ByteString
  * @param connectionId Unique ID for this WebSocket connection (auto-generated)
  */
 internal class AutoMobileWebSocketListener(
-    private val delegate: WebSocketListener,
-    private val url: String,
-    private val buffer: SdkEventBuffer,
-    private val applicationId: String? = null,
-    private val connectionId: String = UUID.randomUUID().toString().take(8),
+  private val delegate: WebSocketListener,
+  private val url: String,
+  private val buffer: SdkEventBuffer,
+  private val applicationId: String? = null,
+  private val connectionId: String = UUID.randomUUID().toString().take(8),
 ) : WebSocketListener() {
 
   override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -58,20 +58,20 @@ internal class AutoMobileWebSocketListener(
   }
 
   private fun recordFrame(
-      direction: WebSocketFrameDirection,
-      type: WebSocketFrameType,
-      size: Long,
+    direction: WebSocketFrameDirection,
+    type: WebSocketFrameType,
+    size: Long,
   ) {
     buffer.add(
-        SdkWebSocketFrameEvent(
-            timestamp = System.currentTimeMillis(),
-            applicationId = applicationId,
-            connectionId = connectionId,
-            url = url,
-            direction = direction,
-            frameType = type,
-            payloadSize = size,
-        )
+      SdkWebSocketFrameEvent(
+        timestamp = System.currentTimeMillis(),
+        applicationId = applicationId,
+        connectionId = connectionId,
+        url = url,
+        direction = direction,
+        frameType = type,
+        payloadSize = size,
+      )
     )
   }
 }

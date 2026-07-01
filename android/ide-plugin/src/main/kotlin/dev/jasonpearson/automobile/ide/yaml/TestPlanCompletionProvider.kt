@@ -17,9 +17,9 @@ import org.jetbrains.yaml.psi.YAMLSequenceItem
 
 class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
   override fun addCompletions(
-      parameters: CompletionParameters,
-      context: ProcessingContext,
-      result: CompletionResultSet,
+    parameters: CompletionParameters,
+    context: ProcessingContext,
+    result: CompletionResultSet,
   ) {
     val file = parameters.originalFile as? YAMLFile ?: return
     val virtualFile = file.virtualFile ?: return
@@ -40,9 +40,9 @@ class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
   }
 
   private fun handleValueCompletion(
-      position: PsiElement,
-      keyValue: YAMLKeyValue,
-      result: CompletionResultSet,
+    position: PsiElement,
+    keyValue: YAMLKeyValue,
+    result: CompletionResultSet,
   ) {
     val stepMapping = findStepMapping(position)
     if (stepMapping != null) {
@@ -54,7 +54,7 @@ class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
       val path = buildPathForKeyValue(keyValue, stepMapping)
       val schemaContext = resolveStepSchemaContext(stepMapping, path) ?: return
       val enumValues =
-          JsonSchemaIntrospector.collectEnumValues(schemaContext.schema, schemaContext.path)
+        JsonSchemaIntrospector.collectEnumValues(schemaContext.schema, schemaContext.path)
       addEnumValueCompletions(result, enumValues)
       return
     }
@@ -67,9 +67,9 @@ class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
   }
 
   private fun handleKeyCompletion(
-      position: PsiElement,
-      mapping: YAMLMapping,
-      result: CompletionResultSet,
+    position: PsiElement,
+    mapping: YAMLMapping,
+    result: CompletionResultSet,
   ) {
     if (isTopLevelMapping(mapping)) {
       addPropertyCompletions(result, mapping, TestPlanSchemaStore.getRootProperties())
@@ -96,19 +96,19 @@ class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
     }
 
     val properties =
-        when {
-          path.isEmpty() -> TestPlanSchemaStore.getStepProperties()
-          path.firstOrNull()?.key == "params" -> {
-            val toolName = getToolName(stepMapping)
-            val toolSchema = toolName?.let {
-              ToolDefinitionStore.getToolDefinitions()[it]?.inputSchema
-            }
-            toolSchema
-                ?.let { JsonSchemaIntrospector.collectProperties(it, stripParamsPrefix(path)) }
-                .orEmpty()
+      when {
+        path.isEmpty() -> TestPlanSchemaStore.getStepProperties()
+        path.firstOrNull()?.key == "params" -> {
+          val toolName = getToolName(stepMapping)
+          val toolSchema = toolName?.let {
+            ToolDefinitionStore.getToolDefinitions()[it]?.inputSchema
           }
-          else -> emptyMap()
+          toolSchema
+            ?.let { JsonSchemaIntrospector.collectProperties(it, stripParamsPrefix(path)) }
+            .orEmpty()
         }
+        else -> emptyMap()
+      }
 
     addPropertyCompletions(result, mapping, properties)
   }
@@ -123,41 +123,41 @@ class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
     }
 
     definitions.values
-        .sortedBy { it.name }
-        .forEach { tool ->
-          var builder = LookupElementBuilder.create(tool.name)
-          TestPlanToolCategories.categoryFor(tool.name)?.let { category ->
-            builder = builder.withTypeText(category, true)
-          }
-          if (!tool.description.isNullOrBlank()) {
-            builder = builder.withTailText(" \u2014 ${tool.description}", true)
-          }
-          result.addElement(builder)
+      .sortedBy { it.name }
+      .forEach { tool ->
+        var builder = LookupElementBuilder.create(tool.name)
+        TestPlanToolCategories.categoryFor(tool.name)?.let { category ->
+          builder = builder.withTypeText(category, true)
         }
+        if (!tool.description.isNullOrBlank()) {
+          builder = builder.withTailText(" \u2014 ${tool.description}", true)
+        }
+        result.addElement(builder)
+      }
   }
 
   private fun addPropertyCompletions(
-      result: CompletionResultSet,
-      mapping: YAMLMapping,
-      properties: Map<String, SchemaPropertyInfo>,
+    result: CompletionResultSet,
+    mapping: YAMLMapping,
+    properties: Map<String, SchemaPropertyInfo>,
   ) {
     val existingKeys = mapping.keyValues.map { it.keyText }.toSet()
     properties.values
-        .filter { it.name !in existingKeys }
-        .sortedBy { it.name }
-        .forEach { property ->
-          var builder = LookupElementBuilder.create(property.name)
-          if (!property.description.isNullOrBlank()) {
-            builder = builder.withTailText(" \u2014 ${property.description}", true)
-          }
-          builder =
-              when {
-                property.deprecated -> builder.strikeout().withTypeText("Deprecated", true)
-                property.required -> builder.withTypeText("Required", true)
-                else -> builder
-              }
-          result.addElement(builder)
+      .filter { it.name !in existingKeys }
+      .sortedBy { it.name }
+      .forEach { property ->
+        var builder = LookupElementBuilder.create(property.name)
+        if (!property.description.isNullOrBlank()) {
+          builder = builder.withTailText(" \u2014 ${property.description}", true)
         }
+        builder =
+          when {
+            property.deprecated -> builder.strikeout().withTypeText("Deprecated", true)
+            property.required -> builder.withTypeText("Required", true)
+            else -> builder
+          }
+        result.addElement(builder)
+      }
   }
 
   private fun addEnumValueCompletions(result: CompletionResultSet, values: Set<String>) {
@@ -165,8 +165,8 @@ class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
   }
 
   private fun resolveStepSchemaContext(
-      stepMapping: YAMLMapping,
-      path: List<SchemaPathSegment>,
+    stepMapping: YAMLMapping,
+    path: List<SchemaPathSegment>,
   ): SchemaContext? {
     val expectationPath = extractExpectationPath(path)
     if (expectationPath != null) {
@@ -238,7 +238,7 @@ class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
     var current: PsiElement? = element
     while (current != null) {
       val sequenceItem =
-          PsiTreeUtil.getParentOfType(current, YAMLSequenceItem::class.java) ?: return null
+        PsiTreeUtil.getParentOfType(current, YAMLSequenceItem::class.java) ?: return null
       val sequence = sequenceItem.parent as? YAMLSequence ?: return null
       val keyValue = PsiTreeUtil.getParentOfType(sequence, YAMLKeyValue::class.java)
       if (keyValue?.keyText == "steps") {
@@ -250,8 +250,8 @@ class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
   }
 
   private fun buildPathForMapping(
-      mapping: YAMLMapping,
-      rootMapping: YAMLMapping,
+    mapping: YAMLMapping,
+    rootMapping: YAMLMapping,
   ): List<SchemaPathSegment> {
     if (mapping == rootMapping) {
       return emptyList()
@@ -283,17 +283,17 @@ class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
   }
 
   private fun buildPathForKeyValue(
-      keyValue: YAMLKeyValue,
-      rootMapping: YAMLMapping,
+    keyValue: YAMLKeyValue,
+    rootMapping: YAMLMapping,
   ): List<SchemaPathSegment> {
     val parentMapping =
-        PsiTreeUtil.getParentOfType(keyValue, YAMLMapping::class.java) ?: return emptyList()
+      PsiTreeUtil.getParentOfType(keyValue, YAMLMapping::class.java) ?: return emptyList()
     val basePath = buildPathForMapping(parentMapping, rootMapping)
     return basePath + SchemaPathSegment(keyValue.keyText, false)
   }
 
   private data class SchemaContext(
-      val schema: kotlinx.serialization.json.JsonObject,
-      val path: List<SchemaPathSegment>,
+    val schema: kotlinx.serialization.json.JsonObject,
+    val path: List<SchemaPathSegment>,
   )
 }

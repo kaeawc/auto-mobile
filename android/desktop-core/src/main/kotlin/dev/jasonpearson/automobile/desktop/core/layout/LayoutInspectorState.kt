@@ -128,10 +128,10 @@ class LayoutInspectorState {
   /** Toggle streaming mode (live/paused). */
   fun toggleStreaming() {
     streamingMode =
-        when (streamingMode) {
-          StreamingMode.Live -> StreamingMode.Paused
-          StreamingMode.Paused -> StreamingMode.Live
-        }
+      when (streamingMode) {
+        StreamingMode.Live -> StreamingMode.Paused
+        StreamingMode.Paused -> StreamingMode.Live
+      }
   }
 
   /** Update streaming mode. */
@@ -217,8 +217,8 @@ class LayoutInspectorState {
    * safe to call off the main thread.
    */
   fun computeChangedElements(
-      oldElementMap: Map<String, UIElementInfo>,
-      newElementMap: Map<String, UIElementInfo>,
+    oldElementMap: Map<String, UIElementInfo>,
+    newElementMap: Map<String, UIElementInfo>,
   ): Set<String> {
     if (oldElementMap.isEmpty()) return emptySet()
     val changedIds = mutableSetOf<String>()
@@ -236,16 +236,16 @@ class LayoutInspectorState {
   /** Check if an element's visible properties have changed. */
   private fun hasElementChanged(old: UIElementInfo, new: UIElementInfo): Boolean {
     return old.text != new.text ||
-        old.contentDescription != new.contentDescription ||
-        old.bounds != new.bounds ||
-        old.isClickable != new.isClickable ||
-        old.isEnabled != new.isEnabled ||
-        old.isFocused != new.isFocused ||
-        old.isSelected != new.isSelected ||
-        old.isScrollable != new.isScrollable ||
-        old.isCheckable != new.isCheckable ||
-        old.isChecked != new.isChecked ||
-        old.children.size != new.children.size
+      old.contentDescription != new.contentDescription ||
+      old.bounds != new.bounds ||
+      old.isClickable != new.isClickable ||
+      old.isEnabled != new.isEnabled ||
+      old.isFocused != new.isFocused ||
+      old.isSelected != new.isSelected ||
+      old.isScrollable != new.isScrollable ||
+      old.isCheckable != new.isCheckable ||
+      old.isChecked != new.isChecked ||
+      old.children.size != new.children.size
   }
 
   /**

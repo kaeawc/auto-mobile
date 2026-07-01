@@ -15,18 +15,18 @@ import org.jetbrains.jewel.ui.component.TextField
 /** IDE-specific LabeledTextField using Jewel's TextFieldState API. */
 @Composable
 fun LabeledTextField(
-    label: String,
-    state: TextFieldState,
-    modifier: Modifier = Modifier,
+  label: String,
+  state: TextFieldState,
+  modifier: Modifier = Modifier,
 ) {
   Column(
-      modifier = modifier,
-      verticalArrangement = Arrangement.spacedBy(4.dp),
+    modifier = modifier,
+    verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
     Text(
-        label,
-        color = JewelTheme.globalColors.text.normal.copy(alpha = 0.65f),
-        fontSize = 11.sp,
+      label,
+      color = JewelTheme.globalColors.text.normal.copy(alpha = 0.65f),
+      fontSize = 11.sp,
     )
     TextField(state = state, modifier = Modifier.fillMaxWidth())
   }

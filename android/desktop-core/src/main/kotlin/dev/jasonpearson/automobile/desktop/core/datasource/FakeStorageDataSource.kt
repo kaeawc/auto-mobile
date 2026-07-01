@@ -20,10 +20,10 @@ class FakeStorageDataSource : StorageDataSource {
   }
 
   override suspend fun setKeyValue(
-      fileName: String,
-      key: String,
-      value: String?,
-      type: KeyValueType,
+    fileName: String,
+    key: String,
+    value: String?,
+    type: KeyValueType,
   ): Result<Unit> {
     delay(100)
     return Result.Success(Unit)
@@ -40,10 +40,10 @@ class FakeStorageDataSource : StorageDataSource {
   }
 
   override suspend fun getTableData(
-      databasePath: String,
-      table: String,
-      limit: Int,
-      offset: Int,
+    databasePath: String,
+    table: String,
+    limit: Int,
+    offset: Int,
   ): Result<QueryResult> {
     delay(100)
     return Result.Success(StorageMockData.mockQueryResult)

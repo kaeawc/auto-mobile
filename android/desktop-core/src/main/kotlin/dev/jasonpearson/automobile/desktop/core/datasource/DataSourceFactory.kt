@@ -29,10 +29,10 @@ interface DataSourceFactory {
    * @param cacheTtlMs TTL in milliseconds for the in-memory cache (Real mode only)
    */
   fun createNavigationDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)? = null,
-      appId: String? = null,
-      cacheTtlMs: Long = 30_000L,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)? = null,
+    appId: String? = null,
+    cacheTtlMs: Long = 30_000L,
   ): NavigationDataSource
 
   /**
@@ -42,8 +42,8 @@ interface DataSourceFactory {
    * @param clientProvider Optional override client provider (e.g. for process-specific connections)
    */
   fun createTestDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)? = null,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)? = null,
   ): TestDataSource
 
   /**
@@ -53,8 +53,8 @@ interface DataSourceFactory {
    * @param clientProvider Optional override client provider (e.g. for process-specific connections)
    */
   fun createPerformanceDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)? = null,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)? = null,
   ): PerformanceDataSource
 
   /**
@@ -67,11 +67,11 @@ interface DataSourceFactory {
    * @param platform The storage platform (Android or iOS)
    */
   fun createStorageDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)? = null,
-      deviceId: String? = null,
-      packageName: String? = null,
-      platform: StoragePlatform = StoragePlatform.Android,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)? = null,
+    deviceId: String? = null,
+    packageName: String? = null,
+    platform: StoragePlatform = StoragePlatform.Android,
   ): StorageDataSource
 
   /**
@@ -82,9 +82,9 @@ interface DataSourceFactory {
    * @param platform The device platform ("android" or "ios")
    */
   fun createLayoutDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)? = null,
-      platform: String = "android",
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)? = null,
+    platform: String = "android",
   ): LayoutDataSource
 
   /**
@@ -97,10 +97,10 @@ interface DataSourceFactory {
    * @param cacheTtlMs TTL in milliseconds for the in-memory cache (Real mode only)
    */
   fun createAppListDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)? = null,
-      deviceId: String? = null,
-      cacheTtlMs: Long = 30_000L,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)? = null,
+    deviceId: String? = null,
+    cacheTtlMs: Long = 30_000L,
   ): AppListDataSource
 
   /**
@@ -111,9 +111,9 @@ interface DataSourceFactory {
    * @param streamClientProvider Optional function to provide a FailuresStreamClient for streaming
    */
   fun createFailuresDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)? = null,
-      streamClientProvider: (() -> FailuresStreamClient)? = null,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)? = null,
+    streamClientProvider: (() -> FailuresStreamClient)? = null,
   ): FailuresDataSource
 }
 
@@ -127,33 +127,31 @@ interface DataSourceFactory {
 @ContributesBinding(AppScope::class)
 @SingleIn(AppScope::class)
 @Inject
-class DefaultDataSourceFactory(
-    private val client: AutoMobileClient,
-) : DataSourceFactory {
+class DefaultDataSourceFactory(private val client: AutoMobileClient) : DataSourceFactory {
 
   private fun resolveProvider(clientProvider: (() -> AutoMobileClient)?): (() -> AutoMobileClient) {
     return clientProvider ?: { client }
   }
 
   override fun createNavigationDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)?,
-      appId: String?,
-      cacheTtlMs: Long,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)?,
+    appId: String?,
+    cacheTtlMs: Long,
   ): NavigationDataSource {
     return when (mode) {
       DataSourceMode.Fake -> FakeNavigationDataSource()
       DataSourceMode.Real ->
-          CachedNavigationDataSource(
-              delegate = RealNavigationDataSource(resolveProvider(clientProvider), appId),
-              ttlMs = cacheTtlMs,
-          )
+        CachedNavigationDataSource(
+          delegate = RealNavigationDataSource(resolveProvider(clientProvider), appId),
+          ttlMs = cacheTtlMs,
+        )
     }
   }
 
   override fun createTestDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)?,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)?,
   ): TestDataSource {
     return when (mode) {
       DataSourceMode.Fake -> FakeTestDataSource()
@@ -162,8 +160,8 @@ class DefaultDataSourceFactory(
   }
 
   override fun createPerformanceDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)?,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)?,
   ): PerformanceDataSource {
     return when (mode) {
       DataSourceMode.Fake -> FakePerformanceDataSource()
@@ -172,23 +170,23 @@ class DefaultDataSourceFactory(
   }
 
   override fun createStorageDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)?,
-      deviceId: String?,
-      packageName: String?,
-      platform: StoragePlatform,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)?,
+    deviceId: String?,
+    packageName: String?,
+    platform: StoragePlatform,
   ): StorageDataSource {
     return when (mode) {
       DataSourceMode.Fake -> FakeStorageDataSource()
       DataSourceMode.Real ->
-          RealStorageDataSource(resolveProvider(clientProvider), deviceId, packageName, platform)
+        RealStorageDataSource(resolveProvider(clientProvider), deviceId, packageName, platform)
     }
   }
 
   override fun createLayoutDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)?,
-      platform: String,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)?,
+    platform: String,
   ): LayoutDataSource {
     return when (mode) {
       DataSourceMode.Fake -> FakeLayoutDataSource()
@@ -197,33 +195,33 @@ class DefaultDataSourceFactory(
   }
 
   override fun createAppListDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)?,
-      deviceId: String?,
-      cacheTtlMs: Long,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)?,
+    deviceId: String?,
+    cacheTtlMs: Long,
   ): AppListDataSource {
     return when (mode) {
       DataSourceMode.Fake -> FakeAppListDataSource()
       DataSourceMode.Real ->
-          CachedAppListDataSource(
-              delegate = RealAppListDataSource(resolveProvider(clientProvider), deviceId),
-              ttlMs = cacheTtlMs,
-          )
+        CachedAppListDataSource(
+          delegate = RealAppListDataSource(resolveProvider(clientProvider), deviceId),
+          ttlMs = cacheTtlMs,
+        )
     }
   }
 
   override fun createFailuresDataSource(
-      mode: DataSourceMode,
-      clientProvider: (() -> AutoMobileClient)?,
-      streamClientProvider: (() -> FailuresStreamClient)?,
+    mode: DataSourceMode,
+    clientProvider: (() -> AutoMobileClient)?,
+    streamClientProvider: (() -> FailuresStreamClient)?,
   ): FailuresDataSource {
     return when (mode) {
       DataSourceMode.Fake -> FakeFailuresDataSource()
       DataSourceMode.Real ->
-          CompositeFailuresDataSource(
-              mcpDataSource = McpFailuresDataSource(resolveProvider(clientProvider)),
-              streamingDataSource = streamClientProvider?.let { StreamingFailuresDataSource(it()) },
-          )
+        CompositeFailuresDataSource(
+          mcpDataSource = McpFailuresDataSource(resolveProvider(clientProvider)),
+          streamingDataSource = streamClientProvider?.let { StreamingFailuresDataSource(it()) },
+        )
     }
   }
 }

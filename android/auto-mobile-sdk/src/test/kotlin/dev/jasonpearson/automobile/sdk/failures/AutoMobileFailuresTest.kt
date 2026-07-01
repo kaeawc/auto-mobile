@@ -68,8 +68,8 @@ class AutoMobileFailuresTest {
   @Test
   fun `constants should have correct values`() {
     assertEquals(
-        "dev.jasonpearson.automobile.sdk.HANDLED_EXCEPTION",
-        AutoMobileFailures.ACTION_HANDLED_EXCEPTION,
+      "dev.jasonpearson.automobile.sdk.HANDLED_EXCEPTION",
+      AutoMobileFailures.ACTION_HANDLED_EXCEPTION,
     )
     assertEquals("timestamp", AutoMobileFailures.EXTRA_TIMESTAMP)
     assertEquals("exception_class", AutoMobileFailures.EXTRA_EXCEPTION_CLASS)

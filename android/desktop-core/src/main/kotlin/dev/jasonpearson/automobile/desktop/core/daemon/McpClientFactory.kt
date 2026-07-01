@@ -46,7 +46,7 @@ object McpClientFactory {
   // @deprecated AUTO_MOBILE_MCP_HTTP_URL - use AUTOMOBILE_MCP_HTTP_URL instead
   fun createConfiguredHttp(): McpHttpClient? {
     val httpUrl =
-        readSetting("AUTOMOBILE_MCP_HTTP_URL", "AUTO_MOBILE_MCP_HTTP_URL", "automobile.mcp.httpUrl")
+      readSetting("AUTOMOBILE_MCP_HTTP_URL", "AUTO_MOBILE_MCP_HTTP_URL", "automobile.mcp.httpUrl")
     if (!httpUrl.isNullOrBlank()) {
       return McpHttpClient(normalizeHttpUrl(httpUrl))
     }
@@ -56,11 +56,11 @@ object McpClientFactory {
   // @deprecated AUTO_MOBILE_MCP_STDIO_COMMAND - use AUTOMOBILE_MCP_STDIO_COMMAND instead
   fun createConfiguredStdio(): McpStdioClient? {
     val stdioCommand =
-        readSetting(
-            "AUTOMOBILE_MCP_STDIO_COMMAND",
-            "AUTO_MOBILE_MCP_STDIO_COMMAND",
-            "automobile.mcp.stdioCommand",
-        )
+      readSetting(
+        "AUTOMOBILE_MCP_STDIO_COMMAND",
+        "AUTO_MOBILE_MCP_STDIO_COMMAND",
+        "automobile.mcp.stdioCommand",
+      )
     if (!stdioCommand.isNullOrBlank()) {
       return McpStdioClient(stdioCommand)
     }
@@ -68,9 +68,9 @@ object McpClientFactory {
   }
 
   private fun readSetting(
-      primaryEnvKey: String,
-      deprecatedEnvKey: String,
-      propertyKey: String,
+    primaryEnvKey: String,
+    deprecatedEnvKey: String,
+    propertyKey: String,
   ): String? {
     val primaryEnvValue = System.getenv(primaryEnvKey)
     if (!primaryEnvValue.isNullOrBlank()) {

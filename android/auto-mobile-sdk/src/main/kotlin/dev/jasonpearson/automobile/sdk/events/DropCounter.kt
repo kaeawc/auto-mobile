@@ -33,7 +33,7 @@ internal class DefaultDropCounter : DropCounter {
   }
 
   override fun snapshot(): Map<DropReason, Long> =
-      counts.mapValues { (_, v) -> v.get() }.filterValues { it > 0 }
+    counts.mapValues { (_, v) -> v.get() }.filterValues { it > 0 }
 
   override fun reset() {
     counts.values.forEach { it.set(0) }

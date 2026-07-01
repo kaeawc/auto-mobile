@@ -33,14 +33,14 @@ class AutoMobileAgentTest {
     mockAIAgent = mockk(relaxed = true)
 
     autoMobileAgent =
-        AutoMobileAgent(
-            configProvider = mockConfigProvider,
-            fileSystemOperations = mockFileSystemOperations,
-            aiAgentFactory = mockAiAgentFactory,
-            timeProvider = mockTimeProvider,
-            mcpClient = mockMcpClient,
-            recoveryConfigProvider = StaticRecoveryConfigProvider(maxToolCalls = 5),
-        )
+      AutoMobileAgent(
+        configProvider = mockConfigProvider,
+        fileSystemOperations = mockFileSystemOperations,
+        aiAgentFactory = mockAiAgentFactory,
+        timeProvider = mockTimeProvider,
+        mcpClient = mockMcpClient,
+        recoveryConfigProvider = StaticRecoveryConfigProvider(maxToolCalls = 5),
+      )
   }
 
   @Test
@@ -54,16 +54,16 @@ class AutoMobileAgentTest {
     val planFile = File(generatedPlansDir, "LoginTest_testLogin.yaml")
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
     val expectedYamlContent =
-        """
-        ---
-        name: login-test
-        description: Test login functionality
-        steps:
-          - tool: observe
-            withViewHierarchy: true
-            label: Initial observation
-        """
-            .trimIndent()
+      """
+      ---
+      name: login-test
+      description: Test login functionality
+      steps:
+        - tool: observe
+          withViewHierarchy: true
+          label: Initial observation
+      """
+        .trimIndent()
 
     every { mockFileSystemOperations.createDirectories(generatedPlansDir) } just runs
     every { mockFileSystemOperations.fileExists(planFile) } returns false
@@ -73,12 +73,12 @@ class AutoMobileAgentTest {
     every { mockFileSystemOperations.writeTextToFile(planFile, any()) } just runs
 
     coEvery { mockAIAgent.run(any()) } returns
-        """
+      """
             ```yaml
             $expectedYamlContent
             ```
         """
-            .trimIndent()
+        .trimIndent()
 
     // Act
     val result = autoMobileAgent.generatePlanFromPrompt(prompt, className, methodName, tempDir)
@@ -174,9 +174,9 @@ class AutoMobileAgentTest {
 
     // Act & Assert
     val exception =
-        assertThrows<RuntimeException> {
-          autoMobileAgent.generatePlanFromPrompt(prompt, className, methodName, tempDir)
-        }
+      assertThrows<RuntimeException> {
+        autoMobileAgent.generatePlanFromPrompt(prompt, className, methodName, tempDir)
+      }
     assertTrue(exception.message!!.contains("Failed to generate YAML plan from prompt"))
   }
 
@@ -184,18 +184,18 @@ class AutoMobileAgentTest {
   fun `attemptAiRecovery returns success when agent completes and observe succeeds`() {
     // Arrange
     val context =
-        FailedStepContext(
-            failedStepIndex = 2,
-            failedTool = "tapOn",
-            error = "Element not found",
-            succeededSteps =
-                listOf(
-                    SucceededStepSummary(0, "observe"),
-                    SucceededStepSummary(1, "tapOn"),
-                ),
-            planContent = "name: test\nsteps: []",
-            deviceId = "emulator-5554",
-        )
+      FailedStepContext(
+        failedStepIndex = 2,
+        failedTool = "tapOn",
+        error = "Element not found",
+        succeededSteps =
+          listOf(
+            SucceededStepSummary(0, "observe"),
+            SucceededStepSummary(1, "tapOn"),
+          ),
+        planContent = "name: test\nsteps: []",
+        deviceId = "emulator-5554",
+      )
     val startTime = 1000L
     val endTime = 2000L
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
@@ -207,7 +207,7 @@ class AutoMobileAgentTest {
     every { mockMcpClient.disconnect() } just runs
     every { mockConfigProvider.getModelConfig() } returns modelConfig
     every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5) } returns
-        mockAIAgent
+      mockAIAgent
     every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
 
     coEvery { mockAIAgent.run(any()) } returns "Recovery actions taken"
@@ -226,14 +226,14 @@ class AutoMobileAgentTest {
   fun `attemptAiRecovery returns failure when agent throws exception`() {
     // Arrange
     val context =
-        FailedStepContext(
-            failedStepIndex = 0,
-            failedTool = "tapOn",
-            error = "Element not found",
-            succeededSteps = emptyList(),
-            planContent = "name: test\nsteps: []",
-            deviceId = null,
-        )
+      FailedStepContext(
+        failedStepIndex = 0,
+        failedTool = "tapOn",
+        error = "Element not found",
+        succeededSteps = emptyList(),
+        planContent = "name: test\nsteps: []",
+        deviceId = null,
+      )
     val startTime = 1000L
     val endTime = 2000L
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
@@ -245,7 +245,7 @@ class AutoMobileAgentTest {
     every { mockMcpClient.disconnect() } just runs
     every { mockConfigProvider.getModelConfig() } returns modelConfig
     every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5) } returns
-        mockAIAgent
+      mockAIAgent
 
     coEvery { mockAIAgent.run(any()) } throws RuntimeException("AI failed")
 
@@ -261,14 +261,14 @@ class AutoMobileAgentTest {
   fun `attemptAiRecovery returns failure when config provider throws exception`() {
     // Arrange
     val context =
-        FailedStepContext(
-            failedStepIndex = 0,
-            failedTool = "tapOn",
-            error = "Element not found",
-            succeededSteps = emptyList(),
-            planContent = "name: test\nsteps: []",
-            deviceId = null,
-        )
+      FailedStepContext(
+        failedStepIndex = 0,
+        failedTool = "tapOn",
+        error = "Element not found",
+        succeededSteps = emptyList(),
+        planContent = "name: test\nsteps: []",
+        deviceId = null,
+      )
     val startTime = 1000L
     val endTime = 2000L
 
@@ -288,24 +288,23 @@ class AutoMobileAgentTest {
     // Arrange
     val customMaxToolCalls = 10
     val customAgent =
-        AutoMobileAgent(
-            configProvider = mockConfigProvider,
-            fileSystemOperations = mockFileSystemOperations,
-            aiAgentFactory = mockAiAgentFactory,
-            timeProvider = mockTimeProvider,
-            mcpClient = mockMcpClient,
-            recoveryConfigProvider =
-                StaticRecoveryConfigProvider(maxToolCalls = customMaxToolCalls),
-        )
+      AutoMobileAgent(
+        configProvider = mockConfigProvider,
+        fileSystemOperations = mockFileSystemOperations,
+        aiAgentFactory = mockAiAgentFactory,
+        timeProvider = mockTimeProvider,
+        mcpClient = mockMcpClient,
+        recoveryConfigProvider = StaticRecoveryConfigProvider(maxToolCalls = customMaxToolCalls),
+      )
     val context =
-        FailedStepContext(
-            failedStepIndex = 0,
-            failedTool = "tapOn",
-            error = "Element not found",
-            succeededSteps = emptyList(),
-            planContent = "name: test\nsteps: []",
-            deviceId = null,
-        )
+      FailedStepContext(
+        failedStepIndex = 0,
+        failedTool = "tapOn",
+        error = "Element not found",
+        succeededSteps = emptyList(),
+        planContent = "name: test\nsteps: []",
+        deviceId = null,
+      )
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
 
     every { mockTimeProvider.currentTimeMillis() } returns 1000L andThen 2000L
@@ -335,35 +334,35 @@ class AutoMobileAgentTest {
     // Arrange
     val agent = AutoMobileAgent()
     val response =
-        """
-        Here's your YAML plan:
-        ```yaml
-        ---
-        name: test-plan
-        description: A test plan
-        steps:
-          - tool: observe
-        ```
-        That should work!
-        """
-            .trimIndent()
+      """
+      Here's your YAML plan:
+      ```yaml
+      ---
+      name: test-plan
+      description: A test plan
+      steps:
+        - tool: observe
+      ```
+      That should work!
+      """
+        .trimIndent()
 
     // Act - using reflection to access private method for testing
     val method =
-        AutoMobileAgent::class.java.getDeclaredMethod("extractYamlFromResponse", String::class.java)
+      AutoMobileAgent::class.java.getDeclaredMethod("extractYamlFromResponse", String::class.java)
     method.isAccessible = true
     val result = method.invoke(agent, response) as String
 
     // Assert
     val expectedYaml =
-        """
-        ---
-        name: test-plan
-        description: A test plan
-        steps:
-          - tool: observe
-        """
-            .trimIndent()
+      """
+      ---
+      name: test-plan
+      description: A test plan
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
     assertEquals(expectedYaml, result)
   }
 
@@ -372,33 +371,33 @@ class AutoMobileAgentTest {
     // Arrange
     val agent = AutoMobileAgent()
     val response =
-        """
-        Here's your plan:
+      """
+      Here's your plan:
 
-        ---
-        name: test-plan
-        description: A test plan
-        steps:
-          - tool: observe
-        """
-            .trimIndent()
+      ---
+      name: test-plan
+      description: A test plan
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
 
     // Act
     val method =
-        AutoMobileAgent::class.java.getDeclaredMethod("extractYamlFromResponse", String::class.java)
+      AutoMobileAgent::class.java.getDeclaredMethod("extractYamlFromResponse", String::class.java)
     method.isAccessible = true
     val result = method.invoke(agent, response) as String
 
     // Assert
     val expectedYaml =
-        """
-        ---
-        name: test-plan
-        description: A test plan
-        steps:
-          - tool: observe
-        """
-            .trimIndent()
+      """
+      ---
+      name: test-plan
+      description: A test plan
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
     assertEquals(expectedYaml, result)
   }
 
@@ -407,17 +406,17 @@ class AutoMobileAgentTest {
     // Arrange
     val agent = AutoMobileAgent()
     val response =
-        """
-        name: test-plan
-        description: A test plan
-        steps:
-          - tool: observe
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      description: A test plan
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
 
     // Act
     val method =
-        AutoMobileAgent::class.java.getDeclaredMethod("extractYamlFromResponse", String::class.java)
+      AutoMobileAgent::class.java.getDeclaredMethod("extractYamlFromResponse", String::class.java)
     method.isAccessible = true
     val result = method.invoke(agent, response) as String
 
@@ -433,7 +432,7 @@ class AutoMobileAgentTest {
 
     // Act
     val method =
-        AutoMobileAgent::class.java.getDeclaredMethod("extractYamlFromResponse", String::class.java)
+      AutoMobileAgent::class.java.getDeclaredMethod("extractYamlFromResponse", String::class.java)
     method.isAccessible = true
     val result = method.invoke(agent, response) as String
 
@@ -448,7 +447,7 @@ class AutoMobileAgentTest {
 
     // Act
     val method =
-        AutoMobileAgent::class.java.getDeclaredMethod("extractYamlFromResponse", String::class.java)
+      AutoMobileAgent::class.java.getDeclaredMethod("extractYamlFromResponse", String::class.java)
     method.isAccessible = true
     val result = method.invoke(agent, null) as String
 

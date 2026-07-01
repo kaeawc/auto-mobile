@@ -9,7 +9,7 @@ import dev.jasonpearson.automobile.login.data.LoginRepository
  * non-empty constructor
  */
 class LoginViewModelFactory(private val loginRepository: LoginRepository) :
-    ViewModelProvider.Factory {
+  ViewModelProvider.Factory {
 
   @Suppress("UNCHECKED_CAST")
   override fun <T : ViewModel> create(modelClass: Class<T>): T {

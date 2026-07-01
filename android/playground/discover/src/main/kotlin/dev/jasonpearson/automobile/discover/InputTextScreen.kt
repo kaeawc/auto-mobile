@@ -64,70 +64,70 @@ fun InputTextScreen() {
     var validationErrorText by remember { mutableStateOf("") }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+      modifier = Modifier.fillMaxSize().padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
       // Header
       item {
         Text(
-            text = "INPUT TEXT SCREEN",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.fillMaxWidth(),
+          text = "INPUT TEXT SCREEN",
+          fontSize = 24.sp,
+          fontWeight = FontWeight.Bold,
+          modifier = Modifier.fillMaxWidth(),
         )
       }
 
       item {
         Text(
-            text = "Comprehensive text input and display components",
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth(),
+          text = "Comprehensive text input and display components",
+          fontSize = 16.sp,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          modifier = Modifier.fillMaxWidth(),
         )
       }
 
       // Basic Text Fields
       item {
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+          modifier = Modifier.fillMaxWidth(),
+          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
           Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Basic Text Fields",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp),
+              text = "Basic Text Fields",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(bottom = 8.dp),
             )
 
             TextField(
-                value = basicText,
-                onValueChange = { basicText = it },
-                label = { Text("Basic Text Field") },
-                placeholder = { Text("Enter some text...") },
-                modifier = Modifier.fillMaxWidth(),
+              value = basicText,
+              onValueChange = { basicText = it },
+              label = { Text("Basic Text Field") },
+              placeholder = { Text("Enter some text...") },
+              modifier = Modifier.fillMaxWidth(),
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
             OutlinedTextField(
-                value = emailText,
-                onValueChange = {
-                  emailText = it
-                  validationErrorText =
-                      if (it.isNotEmpty() && !it.contains("@")) {
-                        "Please enter a valid email"
-                      } else ""
-                },
-                label = { Text("Email") },
-                placeholder = { Text("Enter your email") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                isError = validationErrorText.isNotEmpty(),
-                supportingText =
-                    if (validationErrorText.isNotEmpty()) {
-                      { Text(validationErrorText, color = MaterialTheme.colorScheme.error) }
-                    } else null,
-                modifier = Modifier.fillMaxWidth(),
+              value = emailText,
+              onValueChange = {
+                emailText = it
+                validationErrorText =
+                  if (it.isNotEmpty() && !it.contains("@")) {
+                    "Please enter a valid email"
+                  } else ""
+              },
+              label = { Text("Email") },
+              placeholder = { Text("Enter your email") },
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+              isError = validationErrorText.isNotEmpty(),
+              supportingText =
+                if (validationErrorText.isNotEmpty()) {
+                  { Text(validationErrorText, color = MaterialTheme.colorScheme.error) }
+                } else null,
+              modifier = Modifier.fillMaxWidth(),
             )
           }
         }
@@ -136,41 +136,39 @@ fun InputTextScreen() {
       // Password Field
       item {
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+          modifier = Modifier.fillMaxWidth(),
+          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
           Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Password Field",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp),
+              text = "Password Field",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(bottom = 8.dp),
             )
 
             OutlinedTextField(
-                value = passwordText,
-                onValueChange = { passwordText = it },
-                label = { Text("Password") },
-                placeholder = { Text("Enter password") },
-                visualTransformation =
-                    if (passwordVisible) {
-                      VisualTransformation.None
-                    } else {
-                      PasswordVisualTransformation()
-                    },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                trailingIcon = {
-                  IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                    Icon(
-                        imageVector =
-                            if (passwordVisible) Icons.Filled.VisibilityOff
-                            else Icons.Filled.Visibility,
-                        contentDescription =
-                            if (passwordVisible) "Hide password" else "Show password",
-                    )
-                  }
+              value = passwordText,
+              onValueChange = { passwordText = it },
+              label = { Text("Password") },
+              placeholder = { Text("Enter password") },
+              visualTransformation =
+                if (passwordVisible) {
+                  VisualTransformation.None
+                } else {
+                  PasswordVisualTransformation()
                 },
-                modifier = Modifier.fillMaxWidth(),
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+              trailingIcon = {
+                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                  Icon(
+                    imageVector =
+                      if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                    contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                  )
+                }
+              },
+              modifier = Modifier.fillMaxWidth(),
             )
           }
         }
@@ -179,25 +177,25 @@ fun InputTextScreen() {
       // Multiline Text Area
       item {
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+          modifier = Modifier.fillMaxWidth(),
+          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
           Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Multiline Text Area",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp),
+              text = "Multiline Text Area",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(bottom = 8.dp),
             )
 
             OutlinedTextField(
-                value = multilineText,
-                onValueChange = { multilineText = it },
-                label = { Text("Comments") },
-                placeholder = { Text("Enter your comments here...") },
-                minLines = 3,
-                maxLines = 5,
-                modifier = Modifier.fillMaxWidth(),
+              value = multilineText,
+              onValueChange = { multilineText = it },
+              label = { Text("Comments") },
+              placeholder = { Text("Enter your comments here...") },
+              minLines = 3,
+              maxLines = 5,
+              modifier = Modifier.fillMaxWidth(),
             )
           }
         }
@@ -206,47 +204,47 @@ fun InputTextScreen() {
       // Numeric and Search Fields
       item {
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+          modifier = Modifier.fillMaxWidth(),
+          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
           Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Specialized Input Fields",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp),
+              text = "Specialized Input Fields",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(bottom = 8.dp),
             )
 
             OutlinedTextField(
-                value = numericText,
-                onValueChange = { newValue ->
-                  if (newValue.all { it.isDigit() || it == '.' }) {
-                    numericText = newValue
-                  }
-                },
-                label = { Text("Numeric Input") },
-                placeholder = { Text("Enter a number") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth(),
+              value = numericText,
+              onValueChange = { newValue ->
+                if (newValue.all { it.isDigit() || it == '.' }) {
+                  numericText = newValue
+                }
+              },
+              label = { Text("Numeric Input") },
+              placeholder = { Text("Enter a number") },
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+              modifier = Modifier.fillMaxWidth(),
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
             OutlinedTextField(
-                value = searchText,
-                onValueChange = { searchText = it },
-                label = { Text("Search") },
-                placeholder = { Text("Search for something...") },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search") },
-                trailingIcon =
-                    if (searchText.isNotEmpty()) {
-                      {
-                        IconButton(onClick = { searchText = "" }) {
-                          Icon(Icons.Filled.Clear, contentDescription = "Clear")
-                        }
-                      }
-                    } else null,
-                modifier = Modifier.fillMaxWidth(),
+              value = searchText,
+              onValueChange = { searchText = it },
+              label = { Text("Search") },
+              placeholder = { Text("Search for something...") },
+              leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search") },
+              trailingIcon =
+                if (searchText.isNotEmpty()) {
+                  {
+                    IconButton(onClick = { searchText = "" }) {
+                      Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                    }
+                  }
+                } else null,
+              modifier = Modifier.fillMaxWidth(),
             )
           }
         }
@@ -255,42 +253,42 @@ fun InputTextScreen() {
       // Chip Input
       item {
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+          modifier = Modifier.fillMaxWidth(),
+          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
           Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Chip Input Tags",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp),
+              text = "Chip Input Tags",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(bottom = 8.dp),
             )
 
             Text(
-                text = "Select your interests:",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 8.dp),
+              text = "Select your interests:",
+              fontSize = 14.sp,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.padding(bottom = 8.dp),
             )
 
             val chipOptions = listOf("Technology", "Sports", "Music", "Art", "Travel", "Food")
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
               chipOptions.take(3).forEach { chip ->
                 FilterChip(
-                    selected = selectedChips.contains(chip),
-                    onClick = {
-                      selectedChips =
-                          if (selectedChips.contains(chip)) {
-                            selectedChips - chip
-                          } else {
-                            selectedChips + chip
-                          }
-                    },
-                    label = { Text(chip) },
+                  selected = selectedChips.contains(chip),
+                  onClick = {
+                    selectedChips =
+                      if (selectedChips.contains(chip)) {
+                        selectedChips - chip
+                      } else {
+                        selectedChips + chip
+                      }
+                  },
+                  label = { Text(chip) },
                 )
               }
             }
@@ -298,21 +296,21 @@ fun InputTextScreen() {
             Spacer(modifier = Modifier.height(8.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
               chipOptions.drop(3).forEach { chip ->
                 FilterChip(
-                    selected = selectedChips.contains(chip),
-                    onClick = {
-                      selectedChips =
-                          if (selectedChips.contains(chip)) {
-                            selectedChips - chip
-                          } else {
-                            selectedChips + chip
-                          }
-                    },
-                    label = { Text(chip) },
+                  selected = selectedChips.contains(chip),
+                  onClick = {
+                    selectedChips =
+                      if (selectedChips.contains(chip)) {
+                        selectedChips - chip
+                      } else {
+                        selectedChips + chip
+                      }
+                  },
+                  label = { Text(chip) },
                 )
               }
             }
@@ -320,9 +318,9 @@ fun InputTextScreen() {
             if (selectedChips.isNotEmpty()) {
               Spacer(modifier = Modifier.height(8.dp))
               Text(
-                  text = "Selected: ${selectedChips.joinToString(", ")}",
-                  fontSize = 12.sp,
-                  color = MaterialTheme.colorScheme.primary,
+                text = "Selected: ${selectedChips.joinToString(", ")}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.primary,
               )
             }
           }
@@ -332,31 +330,31 @@ fun InputTextScreen() {
       // Rich Text Display
       item {
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+          modifier = Modifier.fillMaxWidth(),
+          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
           Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Rich Text Display",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp),
+              text = "Rich Text Display",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(bottom = 8.dp),
             )
 
             Text(
-                text =
-                    buildAnnotatedString {
-                      append("This text contains ")
-                      withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) { append("bold") }
-                      append(", ")
-                      withStyle(style = SpanStyle(fontStyle = FontStyle.Italic)) {
-                        append("italic")
-                      }
-                      append(", and ")
-                      withStyle(style = SpanStyle(color = Color.Blue)) { append("colored") }
-                      append(" text.")
-                    },
-                modifier = Modifier.fillMaxWidth(),
+              text =
+                buildAnnotatedString {
+                  append("This text contains ")
+                  withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) { append("bold") }
+                  append(", ")
+                  withStyle(style = SpanStyle(fontStyle = FontStyle.Italic)) {
+                    append("italic")
+                  }
+                  append(", and ")
+                  withStyle(style = SpanStyle(color = Color.Blue)) { append("colored") }
+                  append(" text.")
+                },
+              modifier = Modifier.fillMaxWidth(),
             )
           }
         }
@@ -365,15 +363,15 @@ fun InputTextScreen() {
       // URL Highlighted Text
       item {
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+          modifier = Modifier.fillMaxWidth(),
+          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
           Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Clickable URL Text",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp),
+              text = "Clickable URL Text",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(bottom = 8.dp),
             )
 
             val uriHandler = LocalUriHandler.current
@@ -381,7 +379,7 @@ fun InputTextScreen() {
               append("Visit our website at ")
               pushStringAnnotation(tag = "URL", annotation = "https://www.example.com")
               withStyle(
-                  style = SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline)
+                style = SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline)
               ) {
                 append("example.com")
               }
@@ -390,13 +388,13 @@ fun InputTextScreen() {
             }
 
             ClickableText(
-                text = annotatedText,
-                onClick = { offset ->
-                  annotatedText
-                      .getStringAnnotations(tag = "URL", start = offset, end = offset)
-                      .firstOrNull()
-                      ?.let { annotation -> uriHandler.openUri(annotation.item) }
-                },
+              text = annotatedText,
+              onClick = { offset ->
+                annotatedText
+                  .getStringAnnotations(tag = "URL", start = offset, end = offset)
+                  .firstOrNull()
+                  ?.let { annotation -> uriHandler.openUri(annotation.item) }
+              },
             )
           }
         }
@@ -405,22 +403,22 @@ fun InputTextScreen() {
       // Selectable Text
       item {
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+          modifier = Modifier.fillMaxWidth(),
+          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
           Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Selectable Text",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp),
+              text = "Selectable Text",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(bottom = 8.dp),
             )
 
             SelectionContainer {
               Text(
-                  text =
-                      "This text can be selected and copied. Long press to start text selection and drag to select the desired text portion.",
-                  modifier = Modifier.fillMaxWidth(),
+                text =
+                  "This text can be selected and copied. Long press to start text selection and drag to select the desired text portion.",
+                modifier = Modifier.fillMaxWidth(),
               )
             }
           }

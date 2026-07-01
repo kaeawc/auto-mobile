@@ -30,21 +30,21 @@ enum class NavigationSection {
 
 @Composable
 fun NavigationDashboard(
-    highlightedScreens: List<String> =
-        emptyList(), // Screen names to highlight (e.g., from test flow)
-    currentStepScreen: String? = highlightedScreens.lastOrNull(), // Current step being replayed
-    onHighlightCleared: () -> Unit = {}, // Called when user interacts to clear external highlights
-    onDetailViewChanged: (Boolean) -> Unit =
-        {}, // Called when entering/leaving a detail view (screen/transition)
-    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
-    clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
-    selectedAppId: String? = null, // App ID to filter navigation graph by (managed by parent)
-    observationStreamClient: ObservationStreamClient? =
-        null, // Real-time stream client for navigation updates
-    screenshotLoader: ScreenshotLoader? =
-        null, // Screenshot loader (hoisted to parent so cache persists across toggles)
-    settingsProvider: SettingsProvider =
-        FakeSettingsProvider(), // Settings provider (caller injects real impl)
+  highlightedScreens: List<String> =
+    emptyList(), // Screen names to highlight (e.g., from test flow)
+  currentStepScreen: String? = highlightedScreens.lastOrNull(), // Current step being replayed
+  onHighlightCleared: () -> Unit = {}, // Called when user interacts to clear external highlights
+  onDetailViewChanged: (Boolean) -> Unit =
+    {}, // Called when entering/leaving a detail view (screen/transition)
+  dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+  clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
+  selectedAppId: String? = null, // App ID to filter navigation graph by (managed by parent)
+  observationStreamClient: ObservationStreamClient? =
+    null, // Real-time stream client for navigation updates
+  screenshotLoader: ScreenshotLoader? =
+    null, // Screenshot loader (hoisted to parent so cache persists across toggles)
+  settingsProvider: SettingsProvider =
+    FakeSettingsProvider(), // Settings provider (caller injects real impl)
 ) {
   val graph = LocalAutoMobileGraph.current
   var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
@@ -72,22 +72,22 @@ fun NavigationDashboard(
 
   LaunchedEffect(dataSourceMode, clientProvider, selectedAppId) {
     LOG.info(
-        "Loading navigation data with mode: $dataSourceMode, appId: $selectedAppId, clientProvider=${if (clientProvider != null) "present" else "null"}"
+      "Loading navigation data with mode: $dataSourceMode, appId: $selectedAppId, clientProvider=${if (clientProvider != null) "present" else "null"}"
     )
     isLoading = true
     error = null
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       try {
         val dataSource =
-            graph.dataSourceFactory.createNavigationDataSource(
-                dataSourceMode,
-                clientProvider,
-                selectedAppId,
-            )
+          graph.dataSourceFactory.createNavigationDataSource(
+            dataSourceMode,
+            clientProvider,
+            selectedAppId,
+          )
         when (val result = dataSource.getNavigationGraph()) {
           is Result.Success -> {
             LOG.info(
-                "Navigation data loaded: ${result.data.screens.size} screens, ${result.data.transitions.size} transitions"
+              "Navigation data loaded: ${result.data.screens.size} screens, ${result.data.transitions.size} transitions"
             )
             navigationGraph = result.data
             isLoading = false
@@ -127,12 +127,12 @@ fun NavigationDashboard(
       // Only update if it's for the selected app (or if no app filter is set)
       if (selectedAppId == null || update.appId == selectedAppId) {
         LOG.info(
-            "Received navigation update - appId=${update.appId}, nodes=${update.nodes.size}, edges=${update.edges.size}, currentScreen=${update.currentScreen}"
+          "Received navigation update - appId=${update.appId}, nodes=${update.nodes.size}, edges=${update.edges.size}, currentScreen=${update.currentScreen}"
         )
         // Check for foreground app change before switching to Main
         val newAppId = update.appId
         val appChanged =
-            lastObservedAppId != null && newAppId != null && newAppId != lastObservedAppId
+          lastObservedAppId != null && newAppId != null && newAppId != lastObservedAppId
         if (appChanged) {
           LOG.info("Foreground app changed: $lastObservedAppId -> $newAppId, requesting nav graph")
           // Request the full navigation graph for the new foreground app (non-suspending IO call)
@@ -172,41 +172,41 @@ fun NavigationDashboard(
 
   when (currentSection) {
     NavigationSection.FlowMap ->
-        Box(modifier = Modifier.fillMaxSize()) {
-          NavigationCanvasView(
-              screens = screens,
-              transitions = transitions,
-              onScreenSelected = { screenId ->
-                selectedScreenId = screenId
-                currentSection = NavigationSection.ScreenDetail
-                onHighlightCleared()
-              },
-              externalHighlightedScreens = highlightedScreens,
-              currentReplayScreen = currentStepScreen,
-              screenshotLoader = screenshotLoader,
-              fogModeEnabled = fogModeEnabled,
-              currentObservedScreen = currentObservedScreen,
-              onFogModeToggled = { enabled ->
-                fogModeEnabled = enabled
-                settingsProvider.fogModeEnabled = enabled
-              },
-              fitToViewTrigger = fitToViewTrigger,
-          )
-        }
+      Box(modifier = Modifier.fillMaxSize()) {
+        NavigationCanvasView(
+          screens = screens,
+          transitions = transitions,
+          onScreenSelected = { screenId ->
+            selectedScreenId = screenId
+            currentSection = NavigationSection.ScreenDetail
+            onHighlightCleared()
+          },
+          externalHighlightedScreens = highlightedScreens,
+          currentReplayScreen = currentStepScreen,
+          screenshotLoader = screenshotLoader,
+          fogModeEnabled = fogModeEnabled,
+          currentObservedScreen = currentObservedScreen,
+          onFogModeToggled = { enabled ->
+            fogModeEnabled = enabled
+            settingsProvider.fogModeEnabled = enabled
+          },
+          fitToViewTrigger = fitToViewTrigger,
+        )
+      }
 
     NavigationSection.ScreenDetail -> {
       val screen =
-          screens.find { it.id == selectedScreenId }
-              ?: screens.find { it.name == selectedScreenId }
-              ?: screens.firstOrNull()
+        screens.find { it.id == selectedScreenId }
+          ?: screens.find { it.name == selectedScreenId }
+          ?: screens.firstOrNull()
 
       if (screen != null) {
         ScreenDetailView(
-            screen = screen,
-            transitions = transitions,
-            onBack = { currentSection = NavigationSection.FlowMap },
-            onScreenSelected = navigateToScreen,
-            screenshotLoader = screenshotLoader,
+          screen = screen,
+          transitions = transitions,
+          onBack = { currentSection = NavigationSection.FlowMap },
+          onScreenSelected = navigateToScreen,
+          screenshotLoader = screenshotLoader,
         )
       } else {
         currentSection = NavigationSection.FlowMap
@@ -215,13 +215,13 @@ fun NavigationDashboard(
 
     NavigationSection.TransitionDetail -> {
       val transition =
-          transitions.find { it.id == selectedTransitionId } ?: transitions.firstOrNull()
+        transitions.find { it.id == selectedTransitionId } ?: transitions.firstOrNull()
 
       if (transition != null) {
         TransitionDetailView(
-            transition = transition,
-            onBack = { currentSection = NavigationSection.FlowMap },
-            onScreenSelected = navigateToScreen,
+          transition = transition,
+          onBack = { currentSection = NavigationSection.FlowMap },
+          onScreenSelected = navigateToScreen,
         )
       } else {
         currentSection = NavigationSection.FlowMap
@@ -233,31 +233,31 @@ fun NavigationDashboard(
 /** Convert a navigation graph stream update to the NavigationGraph format used by the UI. */
 private fun convertStreamUpdateToGraph(update: NavigationGraphStreamUpdate): NavigationGraph {
   val screens =
-      update.nodes.map { node ->
-        ScreenNode(
-            id = node.id.toString(),
-            name = node.screenName,
-            type = "Screen", // Default type
-            packageName = update.appId ?: "",
-            transitionCount = node.visitCount,
-            discoveredAt = 0L, // Not available from stream
-            screenshotUri = node.screenshotPath,
-        )
-      }
+    update.nodes.map { node ->
+      ScreenNode(
+        id = node.id.toString(),
+        name = node.screenName,
+        type = "Screen", // Default type
+        packageName = update.appId ?: "",
+        transitionCount = node.visitCount,
+        discoveredAt = 0L, // Not available from stream
+        screenshotUri = node.screenshotPath,
+      )
+    }
 
   val transitions =
-      update.edges.map { edge ->
-        ScreenTransition(
-            id = edge.id.toString(),
-            fromScreen = edge.from,
-            toScreen = edge.to,
-            trigger = edge.toolName ?: "unknown",
-            element = null, // Not available from stream
-            avgLatencyMs = 0, // Not available from stream
-            failureRate = 0f, // Not available from stream
-            traversalCount = edge.traversalCount,
-        )
-      }
+    update.edges.map { edge ->
+      ScreenTransition(
+        id = edge.id.toString(),
+        fromScreen = edge.from,
+        toScreen = edge.to,
+        trigger = edge.toolName ?: "unknown",
+        element = null, // Not available from stream
+        avgLatencyMs = 0, // Not available from stream
+        failureRate = 0f, // Not available from stream
+        traversalCount = edge.traversalCount,
+      )
+    }
 
   return NavigationGraph(screens = screens, transitions = transitions)
 }

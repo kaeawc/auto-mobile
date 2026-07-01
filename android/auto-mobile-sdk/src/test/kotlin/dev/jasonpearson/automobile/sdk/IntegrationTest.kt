@@ -32,8 +32,8 @@ class IntegrationTest {
     // Simulate navigation flow
     CircuitAdapter.trackNavigation("HomeScreen")
     CircuitAdapter.trackNavigation(
-        destination = "ProfileScreen",
-        arguments = mapOf("userId" to "123"),
+      destination = "ProfileScreen",
+      arguments = mapOf("userId" to "123"),
     )
     CircuitAdapter.trackNavigation("SettingsScreen")
 
@@ -180,21 +180,21 @@ class IntegrationTest {
 
     // Simulate complex navigation flow
     CircuitAdapter.trackNavigation(
-        destination = "HomeScreen",
-        arguments = mapOf("tab" to "discover"),
-        metadata = mapOf("source" to "deeplink"),
+      destination = "HomeScreen",
+      arguments = mapOf("tab" to "discover"),
+      metadata = mapOf("source" to "deeplink"),
     )
 
     CircuitAdapter.trackNavigation(
-        destination = "VideoPlayerScreen",
-        arguments = mapOf("videoId" to "abc123", "autoplay" to true),
-        metadata = mapOf("transition" to "fade", "duration" to "300"),
+      destination = "VideoPlayerScreen",
+      arguments = mapOf("videoId" to "abc123", "autoplay" to true),
+      metadata = mapOf("transition" to "fade", "duration" to "300"),
     )
 
     CircuitAdapter.trackNavigation(
-        destination = "SettingsScreen",
-        arguments = emptyMap(),
-        metadata = mapOf("previousScreen" to "VideoPlayerScreen"),
+      destination = "SettingsScreen",
+      arguments = emptyMap(),
+      metadata = mapOf("previousScreen" to "VideoPlayerScreen"),
     )
 
     assertEquals(3, events.size)

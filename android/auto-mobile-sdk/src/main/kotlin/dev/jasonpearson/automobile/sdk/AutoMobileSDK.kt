@@ -125,10 +125,7 @@ object AutoMobileSDK {
     val appContext = this.context!!
 
     // Create disk persistence for events
-    val eventPersistence =
-        FileEventPersistence(
-            File(appContext.cacheDir, "automobile_events"),
-        )
+    val eventPersistence = FileEventPersistence(File(appContext.cacheDir, "automobile_events"))
     persistence = eventPersistence
 
     // Create drop counter for tracking event drops across the pipeline
@@ -138,16 +135,16 @@ object AutoMobileSDK {
 
     // Create shared event buffer with broadcast flush callback and disk persistence
     val buffer =
-        SdkEventBuffer(
-            maxBufferSize = configuration.bufferSize,
-            flushIntervalMs = configuration.flushIntervalMs,
-            onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
-            persistence = eventPersistence,
-            dropCounter = counter,
-            processors = configuration.eventProcessors,
-            maxPendingEvents = configuration.maxPendingEvents,
-            backPressureStrategy = configuration.backPressureStrategy,
-        )
+      SdkEventBuffer(
+        maxBufferSize = configuration.bufferSize,
+        flushIntervalMs = configuration.flushIntervalMs,
+        onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
+        persistence = eventPersistence,
+        dropCounter = counter,
+        processors = configuration.eventProcessors,
+        maxPendingEvents = configuration.maxPendingEvents,
+        backPressureStrategy = configuration.backPressureStrategy,
+      )
     buffer.isEnabled = _isEnabled
     buffer.start()
     eventBuffer = buffer
@@ -156,7 +153,7 @@ object AutoMobileSDK {
     val ctx = SdkContext()
     try {
       ctx.appVersion =
-          appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
+        appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
     } catch (_: Exception) {
       // PackageManager lookup may fail in test environments
     }
@@ -171,9 +168,9 @@ object AutoMobileSDK {
     // Thread-safe subsystems — can initialize from any thread
     NetworkMockRuleStore.initialize(appContext)
     AutoMobileNetwork.initialize(
-        appContext.packageName,
-        buffer,
-        NetworkMockRuleStore.getInstance().ruleMatcher,
+      appContext.packageName,
+      buffer,
+      NetworkMockRuleStore.getInstance().ruleMatcher,
     )
     AutoMobileLog.initialize()
     AutoMobileBroadcastInterceptor.initialize(appContext, buffer)
@@ -200,15 +197,15 @@ object AutoMobileSDK {
 
       // Register session tracker with process lifecycle
       val observer =
-          object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) {
-              tracker.onForeground()
-            }
-
-            override fun onStop(owner: LifecycleOwner) {
-              tracker.onBackground()
-            }
+        object : DefaultLifecycleObserver {
+          override fun onStart(owner: LifecycleOwner) {
+            tracker.onForeground()
           }
+
+          override fun onStop(owner: LifecycleOwner) {
+            tracker.onBackground()
+          }
+        }
       sessionLifecycleObserver = observer
       ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
       RecompositionTracker.initialize(appContext)
@@ -275,14 +272,14 @@ object AutoMobileSDK {
     val timestamp = System.currentTimeMillis()
 
     buf.add(
-        SdkNavigationEvent(
-            timestamp = timestamp,
-            applicationId = ctx.packageName,
-            destination = event.destination,
-            source = event.source.toProtocolType(),
-            arguments = event.arguments.mapValues { it.value?.toString() ?: "null" },
-            metadata = event.metadata,
-        )
+      SdkNavigationEvent(
+        timestamp = timestamp,
+        applicationId = ctx.packageName,
+        destination = event.destination,
+        source = event.source.toProtocolType(),
+        arguments = event.arguments.mapValues { it.value?.toString() ?: "null" },
+        metadata = event.metadata,
+      )
     )
   }
 
@@ -329,17 +326,17 @@ object AutoMobileSDK {
    * @param metadata Optional key-value metadata
    */
   fun addBreadcrumb(
-      message: String,
-      category: BreadcrumbCategory = BreadcrumbCategory.CUSTOM,
-      metadata: Map<String, String> = emptyMap(),
+    message: String,
+    category: BreadcrumbCategory = BreadcrumbCategory.CUSTOM,
+    metadata: Map<String, String> = emptyMap(),
   ) {
     breadcrumbTrail?.add(
-        Breadcrumb(
-            timestamp = System.currentTimeMillis(),
-            category = category,
-            message = message,
-            metadata = metadata,
-        ),
+      Breadcrumb(
+        timestamp = System.currentTimeMillis(),
+        category = category,
+        message = message,
+        metadata = metadata,
+      )
     )
   }
 

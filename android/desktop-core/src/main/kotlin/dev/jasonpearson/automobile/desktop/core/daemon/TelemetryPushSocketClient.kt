@@ -80,11 +80,11 @@ class TelemetryPushSocketClient : TelemetryPushClient {
   // Flow for live telemetry events — replay caches recent events for late collectors (e.g. tab
   // re-open)
   private val _telemetryEvents =
-      MutableSharedFlow<TelemetryDisplayEvent>(
-          replay = 500,
-          extraBufferCapacity = 200,
-          onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-      )
+    MutableSharedFlow<TelemetryDisplayEvent>(
+      replay = 500,
+      extraBufferCapacity = 200,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
   override val telemetryEvents: SharedFlow<TelemetryDisplayEvent> = _telemetryEvents.asSharedFlow()
 
   private var subscribedDeviceId: String? = null
@@ -125,13 +125,13 @@ class TelemetryPushSocketClient : TelemetryPushClient {
         val address = UnixDomainSocketAddress.of(socketPath)
         channel = SocketChannel.open(address)
         reader =
-            BufferedReader(
-                InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
-            )
+          BufferedReader(
+            InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
+          )
         writer =
-            BufferedWriter(
-                OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
-            )
+          BufferedWriter(
+            OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
+          )
 
         _state.update { ConnectionState.Connected(subscribed = false) }
         attempt = 0
@@ -162,7 +162,7 @@ class TelemetryPushSocketClient : TelemetryPushClient {
         val delayMs = calculateBackoff(attempt)
 
         log.warn(
-            "Failed to connect to telemetry push (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms"
+          "Failed to connect to telemetry push (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms"
         )
         _state.update { ConnectionState.Reconnecting(attempt, delayMs) }
 
@@ -196,10 +196,10 @@ class TelemetryPushSocketClient : TelemetryPushClient {
     try {
       if (previousState.subscribed) {
         val request =
-            TelemetryPushRequest(
-                id = UUID.randomUUID().toString(),
-                command = "unsubscribe",
-            )
+          TelemetryPushRequest(
+            id = UUID.randomUUID().toString(),
+            command = "unsubscribe",
+          )
         sendRequest(request)
       }
 
@@ -226,12 +226,12 @@ class TelemetryPushSocketClient : TelemetryPushClient {
 
   private fun subscribe() {
     val request =
-        TelemetryPushRequest(
-            id = UUID.randomUUID().toString(),
-            command = "subscribe",
-            category = null, // subscribe to all categories, filter client-side
-            deviceId = subscribedDeviceId,
-        )
+      TelemetryPushRequest(
+        id = UUID.randomUUID().toString(),
+        command = "subscribe",
+        category = null, // subscribe to all categories, filter client-side
+        deviceId = subscribedDeviceId,
+      )
 
     if (sendRequest(request)) {
       _state.update { current ->
@@ -331,10 +331,10 @@ class TelemetryPushSocketClient : TelemetryPushClient {
 
   private fun sendPong() {
     val request =
-        TelemetryPushRequest(
-            id = UUID.randomUUID().toString(),
-            command = "pong",
-        )
+      TelemetryPushRequest(
+        id = UUID.randomUUID().toString(),
+        command = "pong",
+      )
     sendRequest(request)
   }
 }

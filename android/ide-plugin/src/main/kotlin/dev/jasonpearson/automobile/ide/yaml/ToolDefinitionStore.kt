@@ -34,27 +34,27 @@ object ToolDefinitionStore : ToolDefinitionProvider {
 
   private fun loadToolDefinitions(): Map<String, ToolDefinition> {
     val stream =
-        getResourceStream("tool-definitions.json", "schemas/tool-definitions.json")
-            ?: return emptyMap()
+      getResourceStream("tool-definitions.json", "schemas/tool-definitions.json")
+        ?: return emptyMap()
     val jsonText = stream.bufferedReader().use { it.readText() }
     val parsed = json.parseToJsonElement(jsonText)
     val array = parsed as? kotlinx.serialization.json.JsonArray ?: return emptyMap()
 
     return array
-        .mapNotNull { element ->
-          val obj = element as? JsonObject ?: return@mapNotNull null
-          val name = obj.stringValue("name") ?: return@mapNotNull null
-          val description = obj.stringValue("description")
-          val schema = obj["inputSchema"]?.asObjectOrNull() ?: return@mapNotNull null
-          ToolDefinition(name, description, schema)
-        }
-        .associateBy { it.name }
+      .mapNotNull { element ->
+        val obj = element as? JsonObject ?: return@mapNotNull null
+        val name = obj.stringValue("name") ?: return@mapNotNull null
+        val description = obj.stringValue("description")
+        val schema = obj["inputSchema"]?.asObjectOrNull() ?: return@mapNotNull null
+        ToolDefinition(name, description, schema)
+      }
+      .associateBy { it.name }
   }
 
   private fun JsonObject.stringValue(key: String): String? = this[key]?.stringValue()
 
   private fun JsonElement.stringValue(): String? =
-      (this as? kotlinx.serialization.json.JsonPrimitive)?.content
+    (this as? kotlinx.serialization.json.JsonPrimitive)?.content
 
   private fun JsonElement.asObjectOrNull(): JsonObject? = this as? JsonObject
 

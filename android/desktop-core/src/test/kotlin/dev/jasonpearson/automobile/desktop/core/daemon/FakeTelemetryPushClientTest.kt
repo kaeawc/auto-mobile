@@ -34,8 +34,8 @@ class FakeTelemetryPushClientTest {
     client.disconnect()
     assertFalse(client.isConnected())
     assertEquals(
-        ConnectionState.Disconnected(null),
-        client.connectionState.first(),
+      ConnectionState.Disconnected(null),
+      client.connectionState.first(),
     )
   }
 
@@ -65,12 +65,12 @@ class FakeTelemetryPushClientTest {
   fun `emitEvent delivers to flow`() = runBlocking {
     val client = FakeTelemetryPushClient()
     val event =
-        TelemetryDisplayEvent.Log(
-            timestamp = 1000L,
-            level = 4,
-            tag = "TestTag",
-            message = "test message",
-        )
+      TelemetryDisplayEvent.Log(
+        timestamp = 1000L,
+        level = 4,
+        tag = "TestTag",
+        message = "test message",
+      )
 
     val collected = mutableListOf<TelemetryDisplayEvent>()
     val scope = CoroutineScope(Dispatchers.Unconfined)
@@ -103,29 +103,29 @@ class FakeTelemetryPushClientTest {
     }
 
     client.emitEvent(
-        TelemetryDisplayEvent.Network(
-            timestamp = 1000L,
-            method = "GET",
-            statusCode = 200,
-            url = "/users",
-            durationMs = 42,
-            host = null,
-            path = "/users",
-            error = null,
-            requestHeaders = null,
-            responseHeaders = null,
-            requestBody = null,
-            responseBody = null,
-            contentType = null,
-        )
+      TelemetryDisplayEvent.Network(
+        timestamp = 1000L,
+        method = "GET",
+        statusCode = 200,
+        url = "/users",
+        durationMs = 42,
+        host = null,
+        path = "/users",
+        error = null,
+        requestHeaders = null,
+        responseHeaders = null,
+        requestBody = null,
+        responseBody = null,
+        contentType = null,
+      )
     )
     client.emitEvent(
-        TelemetryDisplayEvent.Os(
-            timestamp = 2000L,
-            category = "lifecycle",
-            kind = "foreground",
-            details = null,
-        )
+      TelemetryDisplayEvent.Os(
+        timestamp = 2000L,
+        category = "lifecycle",
+        kind = "foreground",
+        details = null,
+      )
     )
 
     assertEquals(2, collected.size)

@@ -57,9 +57,9 @@ fun parseTimestampToMillis(input: String): Long? {
  */
 @Composable
 fun QuickJumpDialog(
-    onJump: (Long) -> Unit,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
+  onJump: (Long) -> Unit,
+  onDismiss: () -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   var text by remember { mutableStateOf("") }
@@ -72,92 +72,92 @@ fun QuickJumpDialog(
 
   ModalBackdrop(onDismiss = onDismiss, backdropAlpha = 0.4f, modifier = modifier) {
     Column(
-        modifier =
-            Modifier.widthIn(max = 400.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(colors.panelBackground)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {},
-                )
-                .padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+      modifier =
+        Modifier.widthIn(max = 400.dp)
+          .clip(RoundedCornerShape(12.dp))
+          .background(colors.panelBackground)
+          .clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = {},
+          )
+          .padding(20.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       Text(
-          text = "Jump to Timestamp",
-          fontSize = 14.sp,
-          fontWeight = FontWeight.Bold,
-          color = colors.text.normal,
+        text = "Jump to Timestamp",
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Bold,
+        color = colors.text.normal,
       )
       Spacer(Modifier.height(12.dp))
 
       BasicTextField(
-          value = text,
-          onValueChange = {
-            text = it
-            errorMessage = null
-          },
-          singleLine = true,
-          textStyle =
-              TextStyle(
-                  fontSize = 16.sp,
-                  color = colors.text.normal,
-              ),
-          cursorBrush = SolidColor(colors.text.info),
-          modifier =
-              Modifier.fillMaxWidth()
-                  .clip(RoundedCornerShape(6.dp))
-                  .background(colors.text.normal.copy(alpha = 0.08f))
-                  .padding(horizontal = 12.dp, vertical = 10.dp)
-                  .focusRequester(focusRequester)
-                  .onPreviewKeyEvent { event ->
-                    when {
-                      event.type == KeyEventType.KeyDown && event.key == Key.Enter -> {
-                        val millis = parseTimestampToMillis(text)
-                        if (millis != null) {
-                          onJump(millis)
-                          onDismiss()
-                        } else {
-                          errorMessage = "Enter a valid time (HH:MM or HH:MM:SS)"
-                        }
-                        true
-                      }
-                      event.type == KeyEventType.KeyDown && event.key == Key.Escape -> {
-                        onDismiss()
-                        true
-                      }
-                      else -> false
-                    }
-                  },
-          decorationBox = { innerTextField ->
-            Box {
-              if (text.isEmpty()) {
-                Text(
-                    text = "HH:MM:SS (e.g., 15:30:00)",
-                    fontSize = 16.sp,
-                    color = colors.text.normal.copy(alpha = 0.3f),
-                )
+        value = text,
+        onValueChange = {
+          text = it
+          errorMessage = null
+        },
+        singleLine = true,
+        textStyle =
+          TextStyle(
+            fontSize = 16.sp,
+            color = colors.text.normal,
+          ),
+        cursorBrush = SolidColor(colors.text.info),
+        modifier =
+          Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(colors.text.normal.copy(alpha = 0.08f))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .focusRequester(focusRequester)
+            .onPreviewKeyEvent { event ->
+              when {
+                event.type == KeyEventType.KeyDown && event.key == Key.Enter -> {
+                  val millis = parseTimestampToMillis(text)
+                  if (millis != null) {
+                    onJump(millis)
+                    onDismiss()
+                  } else {
+                    errorMessage = "Enter a valid time (HH:MM or HH:MM:SS)"
+                  }
+                  true
+                }
+                event.type == KeyEventType.KeyDown && event.key == Key.Escape -> {
+                  onDismiss()
+                  true
+                }
+                else -> false
               }
-              innerTextField()
+            },
+        decorationBox = { innerTextField ->
+          Box {
+            if (text.isEmpty()) {
+              Text(
+                text = "HH:MM:SS (e.g., 15:30:00)",
+                fontSize = 16.sp,
+                color = colors.text.normal.copy(alpha = 0.3f),
+              )
             }
-          },
+            innerTextField()
+          }
+        },
       )
 
       errorMessage?.let { msg ->
         Spacer(Modifier.height(6.dp))
         Text(
-            text = msg,
-            fontSize = 11.sp,
-            color = colors.text.error,
+          text = msg,
+          fontSize = 11.sp,
+          color = colors.text.error,
         )
       }
 
       Spacer(Modifier.height(8.dp))
       Text(
-          text = "Press Enter to jump, Escape to cancel",
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.4f),
+        text = "Press Enter to jump, Escape to cancel",
+        fontSize = 11.sp,
+        color = colors.text.normal.copy(alpha = 0.4f),
       )
     }
   }

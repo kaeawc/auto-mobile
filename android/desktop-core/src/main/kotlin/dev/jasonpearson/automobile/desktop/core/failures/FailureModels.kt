@@ -29,19 +29,19 @@ typealias FailureGroup = dev.jasonpearson.automobile.desktop.domain.FailureGroup
 /** Compose Color for each failure type (UI-layer concern, not in domain). */
 val FailureType.color: Color
   get() =
-      when (this) {
-        FailureType.Crash -> Color(0xFFE53935)
-        FailureType.ANR -> Color(0xFFFF9800)
-        FailureType.ToolCallFailure -> Color(0xFF9C27B0)
-        FailureType.NonFatal -> Color(0xFF2196F3)
-      }
+    when (this) {
+      FailureType.Crash -> Color(0xFFE53935)
+      FailureType.ANR -> Color(0xFFFF9800)
+      FailureType.ToolCallFailure -> Color(0xFF9C27B0)
+      FailureType.NonFatal -> Color(0xFF2196F3)
+    }
 
 /** Compose Color for each failure severity (UI-layer concern, not in domain). */
 val FailureSeverity.color: Color
   get() =
-      when (this) {
-        FailureSeverity.Critical -> Color(0xFFE53935)
-        FailureSeverity.High -> Color(0xFFFF5722)
-        FailureSeverity.Medium -> Color(0xFFFF9800)
-        FailureSeverity.Low -> Color(0xFFFFC107)
-      }
+    when (this) {
+      FailureSeverity.Critical -> Color(0xFFE53935)
+      FailureSeverity.High -> Color(0xFFFF5722)
+      FailureSeverity.Medium -> Color(0xFFFF9800)
+      FailureSeverity.Low -> Color(0xFFFFC107)
+    }

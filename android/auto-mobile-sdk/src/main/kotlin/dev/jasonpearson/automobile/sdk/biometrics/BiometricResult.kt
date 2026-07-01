@@ -25,7 +25,7 @@ sealed class BiometricResult {
    * @param errorMessage Human-readable error description (optional; defaults to empty string).
    */
   data class Error(
-      val errorCode: Int,
-      val errorMessage: String = "",
+    val errorCode: Int,
+    val errorMessage: String = "",
   ) : BiometricResult()
 }

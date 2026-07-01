@@ -38,52 +38,52 @@ enum class CenterTabType(val title: String, val icon: String) {
  */
 @Composable
 fun CenterTabStrip(
-    openTabs: List<CenterTabType>,
-    selectedTab: CenterTabType,
-    onSelectTab: (CenterTabType) -> Unit,
-    onCloseTab: (CenterTabType) -> Unit,
-    onAddTab: (CenterTabType) -> Unit,
-    modifier: Modifier = Modifier,
+  openTabs: List<CenterTabType>,
+  selectedTab: CenterTabType,
+  onSelectTab: (CenterTabType) -> Unit,
+  onCloseTab: (CenterTabType) -> Unit,
+  onAddTab: (CenterTabType) -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   var showAddMenu by remember { mutableStateOf(false) }
 
   Row(
-      modifier =
-          modifier.background(colors.panelBackground).padding(horizontal = 4.dp, vertical = 2.dp),
-      horizontalArrangement = Arrangement.spacedBy(2.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      modifier.background(colors.panelBackground).padding(horizontal = 4.dp, vertical = 2.dp),
+    horizontalArrangement = Arrangement.spacedBy(2.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     openTabs.forEach { tab ->
       val isSelected = tab == selectedTab
       Row(
-          modifier =
-              Modifier.clip(RoundedCornerShape(4.dp))
-                  .background(
-                      if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent,
-                  )
-                  .clickable { onSelectTab(tab) }
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(horizontal = 8.dp, vertical = 4.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier =
+          Modifier.clip(RoundedCornerShape(4.dp))
+            .background(
+              if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent
+            )
+            .clickable { onSelectTab(tab) }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         Text(tab.icon, fontSize = 11.sp)
         Text(
-            tab.title,
-            fontSize = 11.sp,
-            color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+          tab.title,
+          fontSize = 11.sp,
+          color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
         )
         // Close button (only if more than one tab open)
         if (openTabs.size > 1) {
           Text(
-              "\u00D7",
-              fontSize = 12.sp,
-              color = colors.text.normal.copy(alpha = 0.4f),
-              modifier =
-                  Modifier.clickable { onCloseTab(tab) }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(start = 2.dp),
+            "\u00D7",
+            fontSize = 12.sp,
+            color = colors.text.normal.copy(alpha = 0.4f),
+            modifier =
+              Modifier.clickable { onCloseTab(tab) }
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(start = 2.dp),
           )
         }
       }
@@ -92,23 +92,23 @@ fun CenterTabStrip(
     // "+" button to add new tab types
     Box {
       Text(
-          "+",
-          fontSize = 13.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-          modifier =
-              Modifier.clip(RoundedCornerShape(4.dp))
-                  .clickable { showAddMenu = !showAddMenu }
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(horizontal = 6.dp, vertical = 4.dp),
+        "+",
+        fontSize = 13.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+        modifier =
+          Modifier.clip(RoundedCornerShape(4.dp))
+            .clickable { showAddMenu = !showAddMenu }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
       )
       if (showAddMenu) {
         AddTabMenu(
-            openTabs = openTabs,
-            onAdd = { tab ->
-              onAddTab(tab)
-              showAddMenu = false
-            },
-            onDismiss = { showAddMenu = false },
+          openTabs = openTabs,
+          onAdd = { tab ->
+            onAddTab(tab)
+            showAddMenu = false
+          },
+          onDismiss = { showAddMenu = false },
         )
       }
     }
@@ -118,9 +118,9 @@ fun CenterTabStrip(
 /** Dropdown menu listing tab types not yet open. */
 @Composable
 private fun AddTabMenu(
-    openTabs: List<CenterTabType>,
-    onAdd: (CenterTabType) -> Unit,
-    onDismiss: () -> Unit,
+  openTabs: List<CenterTabType>,
+  onAdd: (CenterTabType) -> Unit,
+  onDismiss: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val available = CenterTabType.entries.filter { it !in openTabs }
@@ -131,21 +131,21 @@ private fun AddTabMenu(
   }
 
   Box(
-      modifier =
-          Modifier.padding(top = 24.dp)
-              .background(colors.panelBackground, RoundedCornerShape(4.dp))
-              .padding(4.dp),
+    modifier =
+      Modifier.padding(top = 24.dp)
+        .background(colors.panelBackground, RoundedCornerShape(4.dp))
+        .padding(4.dp)
   ) {
     androidx.compose.foundation.layout.Column {
       available.forEach { tab ->
         Text(
-            "${tab.icon} ${tab.title}",
-            fontSize = 11.sp,
-            color = colors.text.normal,
-            modifier =
-                Modifier.clickable { onAdd(tab) }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+          "${tab.icon} ${tab.title}",
+          fontSize = 11.sp,
+          color = colors.text.normal,
+          modifier =
+            Modifier.clickable { onAdd(tab) }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(horizontal = 8.dp, vertical = 4.dp),
         )
       }
     }

@@ -11,26 +11,25 @@ class McpHttpDiscoveryTest {
   fun mapsServersToWorktreesByBranch() {
     runBlocking {
       val worktrees =
-          listOf(
-              GitWorktree(path = "/worktrees/work-246", branch = "work/246"),
-              GitWorktree(path = "/worktrees/main", branch = "main"),
-          )
+        listOf(
+          GitWorktree(path = "/worktrees/work-246", branch = "work/246"),
+          GitWorktree(path = "/worktrees/main", branch = "main"),
+        )
       val ports = setOf(9164, 9000)
       val probe =
-          FakeHealthProbe(
-              mapOf(
-                  9164 to
-                      McpHealthResponse(server = "AutoMobile", port = 9164, branch = "work/246"),
-                  9000 to McpHealthResponse(server = "AutoMobile", port = 9000, branch = "main"),
-              )
+        FakeHealthProbe(
+          mapOf(
+            9164 to McpHealthResponse(server = "AutoMobile", port = 9164, branch = "work/246"),
+            9000 to McpHealthResponse(server = "AutoMobile", port = 9000, branch = "main"),
           )
+        )
 
       val discovery =
-          McpHttpDiscovery(
-              worktreeLister = FakeWorktreeLister(worktrees),
-              portScanner = FakePortScanner(ports),
-              healthProbe = probe,
-          )
+        McpHttpDiscovery(
+          worktreeLister = FakeWorktreeLister(worktrees),
+          portScanner = FakePortScanner(ports),
+          healthProbe = probe,
+        )
 
       val snapshot = discovery.discover("/worktrees")
 
@@ -50,24 +49,19 @@ class McpHttpDiscoveryTest {
   @Test
   fun addsUnmatchedServersAfterWorktrees() {
     runBlocking {
-      val worktrees =
-          listOf(
-              GitWorktree(path = "/worktrees/feature", branch = "feature"),
-          )
+      val worktrees = listOf(GitWorktree(path = "/worktrees/feature", branch = "feature"))
       val ports = setOf(9100)
       val probe =
-          FakeHealthProbe(
-              mapOf(
-                  9100 to McpHealthResponse(server = "AutoMobile", port = 9100, branch = "other"),
-              )
-          )
+        FakeHealthProbe(
+          mapOf(9100 to McpHealthResponse(server = "AutoMobile", port = 9100, branch = "other"))
+        )
 
       val discovery =
-          McpHttpDiscovery(
-              worktreeLister = FakeWorktreeLister(worktrees),
-              portScanner = FakePortScanner(ports),
-              healthProbe = probe,
-          )
+        McpHttpDiscovery(
+          worktreeLister = FakeWorktreeLister(worktrees),
+          portScanner = FakePortScanner(ports),
+          healthProbe = probe,
+        )
 
       val snapshot = discovery.discover("/worktrees")
 
@@ -85,19 +79,16 @@ class McpHttpDiscoveryTest {
       val worktrees = listOf(GitWorktree(path = "/worktrees/work-500", branch = "work/500"))
       val ports = setOf(9100)
       val probe =
-          FakeHealthProbe(
-              mapOf(
-                  9100 to
-                      McpHealthResponse(server = "AutoMobile", port = 9200, branch = "work/500"),
-              )
-          )
+        FakeHealthProbe(
+          mapOf(9100 to McpHealthResponse(server = "AutoMobile", port = 9200, branch = "work/500"))
+        )
 
       val discovery =
-          McpHttpDiscovery(
-              worktreeLister = FakeWorktreeLister(worktrees),
-              portScanner = FakePortScanner(ports),
-              healthProbe = probe,
-          )
+        McpHttpDiscovery(
+          worktreeLister = FakeWorktreeLister(worktrees),
+          portScanner = FakePortScanner(ports),
+          healthProbe = probe,
+        )
 
       val snapshot = discovery.discover("/worktrees")
 
@@ -108,20 +99,14 @@ class McpHttpDiscoveryTest {
   }
 }
 
-private class FakeWorktreeLister(
-    private val worktrees: List<GitWorktree>,
-) : WorktreeLister {
+private class FakeWorktreeLister(private val worktrees: List<GitWorktree>) : WorktreeLister {
   override suspend fun listWorktrees(projectBasePath: String?): List<GitWorktree> = worktrees
 }
 
-private class FakePortScanner(
-    private val ports: Set<Int>,
-) : PortScanner {
+private class FakePortScanner(private val ports: Set<Int>) : PortScanner {
   override suspend fun scanListeningPorts(): Set<Int> = ports
 }
 
-private class FakeHealthProbe(
-    private val responses: Map<Int, McpHealthResponse?>,
-) : HealthProbe {
+private class FakeHealthProbe(private val responses: Map<Int, McpHealthResponse?>) : HealthProbe {
   override suspend fun probeHealth(port: Int): McpHealthResponse? = responses[port]
 }

@@ -15,9 +15,7 @@ class StorageDashboardUiTest {
   fun `shows database tab by default`() = runComposeUiTest {
     setContent {
       MaterialTheme {
-        StorageDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-        )
+        StorageDashboard(dataSourceMode = DataSourceMode.Fake)
       }
     }
     onNodeWithText("Databases").assertIsDisplayed()
@@ -28,9 +26,7 @@ class StorageDashboardUiTest {
   fun `shows both tab icons`() = runComposeUiTest {
     setContent {
       MaterialTheme {
-        StorageDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-        )
+        StorageDashboard(dataSourceMode = DataSourceMode.Fake)
       }
     }
     onNodeWithText(StorageTab.Database.icon).assertIsDisplayed()
@@ -42,8 +38,8 @@ class StorageDashboardUiTest {
     setContent {
       MaterialTheme {
         StorageDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-            platform = StoragePlatform.Android,
+          dataSourceMode = DataSourceMode.Fake,
+          platform = StoragePlatform.Android,
         )
       }
     }
@@ -55,8 +51,8 @@ class StorageDashboardUiTest {
     setContent {
       MaterialTheme {
         StorageDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-            platform = StoragePlatform.iOS,
+          dataSourceMode = DataSourceMode.Fake,
+          platform = StoragePlatform.iOS,
         )
       }
     }
@@ -68,9 +64,9 @@ class StorageDashboardUiTest {
     setContent {
       MaterialTheme {
         StorageDashboard(
-            dataSourceMode = DataSourceMode.Fake,
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
+          dataSourceMode = DataSourceMode.Fake,
+          deviceId = "emulator-5554",
+          packageName = "com.example.app",
         )
       }
     }

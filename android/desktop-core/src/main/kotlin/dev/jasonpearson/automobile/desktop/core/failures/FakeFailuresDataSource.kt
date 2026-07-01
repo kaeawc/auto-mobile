@@ -12,9 +12,8 @@ import kotlinx.coroutines.flow.asSharedFlow
  * Fake failures data source for UI development and testing. Supports manually triggering new
  * failures via [triggerNewFailure].
  */
-class FakeFailuresDataSource(
-    private val clock: Clock = SystemClock,
-) : FailuresDataSource, StreamingFailuresDataSourceInterface {
+class FakeFailuresDataSource(private val clock: Clock = SystemClock) :
+  FailuresDataSource, StreamingFailuresDataSourceInterface {
 
   private val mockDataSource = MockFailuresDataSource(clock)
   private var notificationIdCounter = 1
@@ -34,8 +33,8 @@ class FakeFailuresDataSource(
   }
 
   override suspend fun getTimelineData(
-      dateRange: DateRange,
-      aggregation: TimeAggregation,
+    dateRange: DateRange,
+    aggregation: TimeAggregation,
   ): Result<TimelineData> {
     return mockDataSource.getTimelineData(dateRange, aggregation)
   }
@@ -68,16 +67,16 @@ class FakeFailuresDataSource(
     }
 
     val notification =
-        FailureNotification(
-            id = notificationIdCounter++,
-            occurrenceId = "fake-occ-${notificationIdCounter}",
-            groupId = "fake-group-${failureType.name.lowercase()}",
-            type = failureType,
-            severity = severity,
-            title = generateFakeTitle(failureType),
-            timestamp = now,
-            acknowledged = false,
-        )
+      FailureNotification(
+        id = notificationIdCounter++,
+        occurrenceId = "fake-occ-${notificationIdCounter}",
+        groupId = "fake-group-${failureType.name.lowercase()}",
+        type = failureType,
+        severity = severity,
+        title = generateFakeTitle(failureType),
+        timestamp = now,
+        acknowledged = false,
+      )
 
     // Emit the notification
     _notificationsFlow.emit(Result.Success(listOf(notification)))
@@ -86,13 +85,13 @@ class FakeFailuresDataSource(
     val groupsResult = getFailureGroups()
     if (groupsResult is Result.Success) {
       val totals =
-          FailureTotals(
-              crashes = groupsResult.data.count { it.type == FailureType.Crash } + triggeredCrashes,
-              anrs = groupsResult.data.count { it.type == FailureType.ANR } + triggeredAnrs,
-              toolFailures =
-                  groupsResult.data.count { it.type == FailureType.ToolCallFailure } +
-                      triggeredToolFailures,
-          )
+        FailureTotals(
+          crashes = groupsResult.data.count { it.type == FailureType.Crash } + triggeredCrashes,
+          anrs = groupsResult.data.count { it.type == FailureType.ANR } + triggeredAnrs,
+          toolFailures =
+            groupsResult.data.count { it.type == FailureType.ToolCallFailure } +
+              triggeredToolFailures,
+        )
       _failureGroupsFlow.emit(Result.Success(FailureGroupsWithTotals(groupsResult.data, totals)))
     }
   }
@@ -100,34 +99,34 @@ class FakeFailuresDataSource(
   private fun generateFakeTitle(type: FailureType): String {
     return when (type) {
       FailureType.Crash ->
-          listOf(
-                  "NullPointerException in UserViewModel",
-                  "ArrayIndexOutOfBoundsException in ListAdapter",
-                  "IllegalStateException in FragmentManager",
-                  "OutOfMemoryError in ImageLoader",
-              )
-              .random(random)
+        listOf(
+            "NullPointerException in UserViewModel",
+            "ArrayIndexOutOfBoundsException in ListAdapter",
+            "IllegalStateException in FragmentManager",
+            "OutOfMemoryError in ImageLoader",
+          )
+          .random(random)
       FailureType.ANR ->
-          listOf(
-                  "ANR: Main thread blocked in DatabaseQuery",
-                  "ANR: UI frozen during network call",
-                  "ANR: Deadlock in SyncManager",
-              )
-              .random(random)
+        listOf(
+            "ANR: Main thread blocked in DatabaseQuery",
+            "ANR: UI frozen during network call",
+            "ANR: Deadlock in SyncManager",
+          )
+          .random(random)
       FailureType.ToolCallFailure ->
-          listOf(
-                  "tapOn: Element not found - Submit button",
-                  "inputText: Keyboard not visible",
-                  "swipeOn: Gesture timeout exceeded",
-              )
-              .random(random)
+        listOf(
+            "tapOn: Element not found - Submit button",
+            "inputText: Keyboard not visible",
+            "swipeOn: Gesture timeout exceeded",
+          )
+          .random(random)
       FailureType.NonFatal ->
-          listOf(
-                  "Handled NetworkException in ApiClient",
-                  "Caught IllegalArgumentException in Parser",
-                  "Recovered from IOException in FileManager",
-              )
-              .random(random)
+        listOf(
+            "Handled NetworkException in ApiClient",
+            "Caught IllegalArgumentException in Parser",
+            "Recovered from IOException in FileManager",
+          )
+          .random(random)
     }
   }
 }

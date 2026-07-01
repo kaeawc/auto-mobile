@@ -22,11 +22,11 @@ class HighlightShapeConvertersTest {
   @Test
   fun `box shape converts bounds`() {
     val model =
-        HighlightShape(
-                type = "box",
-                bounds = HighlightBounds(x = 10, y = 20, width = 100, height = 50),
-            )
-            .toModel()
+      HighlightShape(
+          type = "box",
+          bounds = HighlightBounds(x = 10, y = 20, width = 100, height = 50),
+        )
+        .toModel()
 
     assertEquals("box", model.type)
     assertEquals(10, model.bounds?.x)
@@ -40,21 +40,21 @@ class HighlightShapeConvertersTest {
   @Test
   fun `path shape converts points and style with cap and join`() {
     val model =
-        HighlightShape(
-                type = "path",
-                points = listOf(HighlightPoint(1f, 2f), HighlightPoint(3f, 4f)),
-                style =
-                    HighlightStyle(
-                        strokeColor = "#FF8800",
-                        strokeWidth = 5f,
-                        dashPattern = listOf(4f, 2f),
-                        smoothing = SmoothingAlgorithm.CATMULL_ROM,
-                        tension = 0.6f,
-                        capStyle = HighlightLineCap.ROUND,
-                        joinStyle = HighlightLineJoin.BEVEL,
-                    ),
-            )
-            .toModel()
+      HighlightShape(
+          type = "path",
+          points = listOf(HighlightPoint(1f, 2f), HighlightPoint(3f, 4f)),
+          style =
+            HighlightStyle(
+              strokeColor = "#FF8800",
+              strokeWidth = 5f,
+              dashPattern = listOf(4f, 2f),
+              smoothing = SmoothingAlgorithm.CATMULL_ROM,
+              tension = 0.6f,
+              capStyle = HighlightLineCap.ROUND,
+              joinStyle = HighlightLineJoin.BEVEL,
+            ),
+        )
+        .toModel()
 
     assertEquals("path", model.type)
     assertNull(model.bounds)

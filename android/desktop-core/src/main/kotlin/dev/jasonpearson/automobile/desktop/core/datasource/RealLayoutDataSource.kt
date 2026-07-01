@@ -19,8 +19,8 @@ import kotlinx.serialization.json.intOrNull
  * state, then reads the screenshot from the observation/latest/screenshot resource.
  */
 class RealLayoutDataSource(
-    private val clientProvider: (() -> AutoMobileClient)? = null,
-    private val platform: String = "android",
+  private val clientProvider: (() -> AutoMobileClient)? = null,
+  private val platform: String = "android",
 ) : LayoutDataSource {
   private val json = Json { ignoreUnknownKeys = true }
 
@@ -34,7 +34,7 @@ class RealLayoutDataSource(
 
   override suspend fun getObservation(): Result<ObservationData> {
     val provider =
-        clientProvider ?: return Result.Success(ObservationData(hierarchy = createEmptyHierarchy()))
+      clientProvider ?: return Result.Success(ObservationData(hierarchy = createEmptyHierarchy()))
 
     return try {
       val client = provider()
@@ -44,44 +44,44 @@ class RealLayoutDataSource(
 
       // Parse the view hierarchy from the observe result
       val hierarchy =
-          observeResult.viewHierarchy?.let { viewHierarchyJson ->
-            try {
-              val viewHierarchyResult =
-                  json.decodeFromJsonElement(
-                      ViewHierarchyResultDto.serializer(),
-                      viewHierarchyJson,
-                  )
-              viewHierarchyResult.hierarchy?.node?.let { nodes ->
-                if (nodes.isNotEmpty()) {
-                  val counter = intArrayOf(0)
-                  parseHierarchy(nodes.first(), 0, counter)
-                } else null
-              }
-            } catch (e: Exception) {
-              null
+        observeResult.viewHierarchy?.let { viewHierarchyJson ->
+          try {
+            val viewHierarchyResult =
+              json.decodeFromJsonElement(
+                ViewHierarchyResultDto.serializer(),
+                viewHierarchyJson,
+              )
+            viewHierarchyResult.hierarchy?.node?.let { nodes ->
+              if (nodes.isNotEmpty()) {
+                val counter = intArrayOf(0)
+                parseHierarchy(nodes.first(), 0, counter)
+              } else null
             }
-          } ?: createEmptyHierarchy()
+          } catch (e: Exception) {
+            null
+          }
+        } ?: createEmptyHierarchy()
 
       // Fetch screenshot from the resource (observe populates it)
       val screenshotData =
-          try {
-            val screenshotContents = client.readResource("automobile:observation/latest/screenshot")
-            val screenshotBlob = screenshotContents.firstOrNull { !it.blob.isNullOrBlank() }?.blob
-            screenshotBlob?.let { Base64.getDecoder().decode(it) }
-          } catch (e: Exception) {
-            // Screenshot fetch failed - continue without it
-            null
-          }
+        try {
+          val screenshotContents = client.readResource("automobile:observation/latest/screenshot")
+          val screenshotBlob = screenshotContents.firstOrNull { !it.blob.isNullOrBlank() }?.blob
+          screenshotBlob?.let { Base64.getDecoder().decode(it) }
+        } catch (e: Exception) {
+          // Screenshot fetch failed - continue without it
+          null
+        }
 
       Result.Success(
-          ObservationData(
-              hierarchy = hierarchy,
-              screenshotData = screenshotData,
-              screenWidth = observeResult.screenSize?.width ?: 1080,
-              screenHeight = observeResult.screenSize?.height ?: 2340,
-              timestamp = observeResult.updatedAt ?: System.currentTimeMillis(),
-              rotation = observeResult.rotation ?: 0,
-          )
+        ObservationData(
+          hierarchy = hierarchy,
+          screenshotData = screenshotData,
+          screenWidth = observeResult.screenSize?.width ?: 1080,
+          screenHeight = observeResult.screenSize?.height ?: 2340,
+          timestamp = observeResult.updatedAt ?: System.currentTimeMillis(),
+          rotation = observeResult.rotation ?: 0,
+        )
       )
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
@@ -96,42 +96,42 @@ class RealLayoutDataSource(
     // Generate a unique ID using counter to ensure uniqueness across tree
     val nodeIndex = counter[0]++
     val baseId =
-        node.resourceId
-            ?: node.contentDesc?.let { "desc:$it" }
-            ?: node.text?.let { "text:$it" }
-            ?: "node-$depth-${bounds.hashCode()}"
+      node.resourceId
+        ?: node.contentDesc?.let { "desc:$it" }
+        ?: node.text?.let { "text:$it" }
+        ?: "node-$depth-${bounds.hashCode()}"
     val id = "$baseId#$nodeIndex"
 
     return UIElementInfo(
-        id = id,
-        className = node.className ?: "android.view.View",
-        resourceId = node.resourceId,
-        text = node.text,
-        contentDescription = node.contentDesc,
-        bounds = bounds,
-        isClickable = node.clickable == "true",
-        isEnabled = node.enabled != "false",
-        isFocused = node.focused == "true",
-        isSelected = node.selected == "true",
-        isScrollable = node.scrollable == "true",
-        isCheckable = node.checkable == "true",
-        isChecked = node.checked == "true",
-        depth = depth,
-        children = node.children.map { parseHierarchy(it, depth + 1, counter) },
+      id = id,
+      className = node.className ?: "android.view.View",
+      resourceId = node.resourceId,
+      text = node.text,
+      contentDescription = node.contentDesc,
+      bounds = bounds,
+      isClickable = node.clickable == "true",
+      isEnabled = node.enabled != "false",
+      isFocused = node.focused == "true",
+      isSelected = node.selected == "true",
+      isScrollable = node.scrollable == "true",
+      isCheckable = node.checkable == "true",
+      isChecked = node.checked == "true",
+      depth = depth,
+      children = node.children.map { parseHierarchy(it, depth + 1, counter) },
     )
   }
 
   private fun parseBounds(boundsElement: JsonElement?): ElementBounds {
     return when (boundsElement) {
       is JsonObject ->
-          ElementBounds(
-              left = (boundsElement["left"] as? JsonPrimitive)?.intOrNull ?: 0,
-              top = (boundsElement["top"] as? JsonPrimitive)?.intOrNull ?: 0,
-              right = (boundsElement["right"] as? JsonPrimitive)?.intOrNull ?: 0,
-              bottom = (boundsElement["bottom"] as? JsonPrimitive)?.intOrNull ?: 0,
-          )
+        ElementBounds(
+          left = (boundsElement["left"] as? JsonPrimitive)?.intOrNull ?: 0,
+          top = (boundsElement["top"] as? JsonPrimitive)?.intOrNull ?: 0,
+          right = (boundsElement["right"] as? JsonPrimitive)?.intOrNull ?: 0,
+          bottom = (boundsElement["bottom"] as? JsonPrimitive)?.intOrNull ?: 0,
+        )
       is JsonPrimitive ->
-          boundsElement.contentOrNull?.let { parseBoundsString(it) } ?: ElementBounds(0, 0, 0, 0)
+        boundsElement.contentOrNull?.let { parseBoundsString(it) } ?: ElementBounds(0, 0, 0, 0)
       else -> ElementBounds(0, 0, 0, 0)
     }
   }
@@ -142,10 +142,10 @@ class RealLayoutDataSource(
     return if (match != null) {
       val (left, top, right, bottom) = match.destructured
       ElementBounds(
-          left = left.toIntOrNull() ?: 0,
-          top = top.toIntOrNull() ?: 0,
-          right = right.toIntOrNull() ?: 0,
-          bottom = bottom.toIntOrNull() ?: 0,
+        left = left.toIntOrNull() ?: 0,
+        top = top.toIntOrNull() ?: 0,
+        right = right.toIntOrNull() ?: 0,
+        bottom = bottom.toIntOrNull() ?: 0,
       )
     } else {
       ElementBounds(0, 0, 0, 0)
@@ -154,21 +154,21 @@ class RealLayoutDataSource(
 
   private fun createEmptyHierarchy(message: String? = null): UIElementInfo {
     return UIElementInfo(
-        id = "root_placeholder",
-        className = "android.view.View",
-        resourceId = null,
-        text = message ?: "No data available",
-        contentDescription = null,
-        bounds = ElementBounds(0, 0, 0, 0),
-        isClickable = false,
-        isEnabled = false,
-        isFocused = false,
-        isSelected = false,
-        isScrollable = false,
-        isCheckable = false,
-        isChecked = false,
-        depth = 0,
-        children = emptyList(),
+      id = "root_placeholder",
+      className = "android.view.View",
+      resourceId = null,
+      text = message ?: "No data available",
+      contentDescription = null,
+      bounds = ElementBounds(0, 0, 0, 0),
+      isClickable = false,
+      isEnabled = false,
+      isFocused = false,
+      isSelected = false,
+      isScrollable = false,
+      isCheckable = false,
+      isChecked = false,
+      depth = 0,
+      children = emptyList(),
     )
   }
 }
@@ -177,45 +177,42 @@ class RealLayoutDataSource(
 
 @Serializable
 private data class ObservationResponse(
-    val updatedAt: Long? = null,
-    val screenSize: ScreenSizeDto? = null,
-    val viewHierarchy: ViewHierarchyResultDto? = null,
+  val updatedAt: Long? = null,
+  val screenSize: ScreenSizeDto? = null,
+  val viewHierarchy: ViewHierarchyResultDto? = null,
 )
 
 @Serializable
 private data class ScreenSizeDto(
-    val width: Int? = null,
-    val height: Int? = null,
+  val width: Int? = null,
+  val height: Int? = null,
 )
 
 @Serializable
 private data class ViewHierarchyResultDto(
-    val hierarchy: HierarchyContainerDto? = null,
-    val packageName: String? = null,
+  val hierarchy: HierarchyContainerDto? = null,
+  val packageName: String? = null,
 )
 
-@Serializable
-private data class HierarchyContainerDto(
-    val node: List<HierarchyNodeDto>? = null,
-)
+@Serializable private data class HierarchyContainerDto(val node: List<HierarchyNodeDto>? = null)
 
 @Serializable
 private data class HierarchyNodeDto(
-    val className: String? = null,
-    @kotlinx.serialization.SerialName("resource-id") val resourceId: String? = null,
-    val text: String? = null,
-    @kotlinx.serialization.SerialName("content-desc") val contentDesc: String? = null,
-    val bounds: JsonElement? = null,
-    val clickable: String? = null,
-    val enabled: String? = null,
-    val focused: String? = null,
-    val focusable: String? = null,
-    val selected: String? = null,
-    val scrollable: String? = null,
-    val checkable: String? = null,
-    val checked: String? = null,
-    // node can be either a single object or array - use JsonElement
-    val node: JsonElement? = null,
+  val className: String? = null,
+  @kotlinx.serialization.SerialName("resource-id") val resourceId: String? = null,
+  val text: String? = null,
+  @kotlinx.serialization.SerialName("content-desc") val contentDesc: String? = null,
+  val bounds: JsonElement? = null,
+  val clickable: String? = null,
+  val enabled: String? = null,
+  val focused: String? = null,
+  val focusable: String? = null,
+  val selected: String? = null,
+  val scrollable: String? = null,
+  val checkable: String? = null,
+  val checked: String? = null,
+  // node can be either a single object or array - use JsonElement
+  val node: JsonElement? = null,
 ) {
   // Parse children from the polymorphic node field
   val children: List<HierarchyNodeDto>
@@ -226,7 +223,7 @@ private data class HierarchyNodeDto(
           nodeElement.mapNotNull { elem ->
             try {
               Json { ignoreUnknownKeys = true }
-                  .decodeFromJsonElement(HierarchyNodeDto.serializer(), elem)
+                .decodeFromJsonElement(HierarchyNodeDto.serializer(), elem)
             } catch (e: Exception) {
               null
             }
@@ -235,8 +232,8 @@ private data class HierarchyNodeDto(
         nodeElement is kotlinx.serialization.json.JsonObject -> {
           try {
             listOf(
-                Json { ignoreUnknownKeys = true }
-                    .decodeFromJsonElement(HierarchyNodeDto.serializer(), nodeElement)
+              Json { ignoreUnknownKeys = true }
+                .decodeFromJsonElement(HierarchyNodeDto.serializer(), nodeElement)
             )
           } catch (e: Exception) {
             emptyList()

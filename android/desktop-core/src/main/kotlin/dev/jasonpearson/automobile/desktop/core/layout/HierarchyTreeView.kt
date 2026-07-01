@@ -47,10 +47,10 @@ import kotlinx.coroutines.delay
 
 /** Flattened tree node for virtualized rendering. */
 private data class FlatTreeNode(
-    val element: UIElementInfo,
-    val depth: Int,
-    val isExpanded: Boolean,
-    val hasChildren: Boolean,
+  val element: UIElementInfo,
+  val depth: Int,
+  val isExpanded: Boolean,
+  val hasChildren: Boolean,
 )
 
 /**
@@ -63,14 +63,14 @@ private data class FlatTreeNode(
  */
 @Composable
 fun HierarchyTreeView(
-    hierarchy: UIElementInfo?,
-    selectedElementId: String?,
-    hoveredElementId: String?,
-    onElementSelected: (String?) -> Unit,
-    onElementHovered: (String?) -> Unit,
-    onElementDoubleClicked: ((String) -> Unit)? = null,
-    parentMap: Map<String, String> = emptyMap(),
-    modifier: Modifier = Modifier,
+  hierarchy: UIElementInfo?,
+  selectedElementId: String?,
+  hoveredElementId: String?,
+  onElementSelected: (String?) -> Unit,
+  onElementHovered: (String?) -> Unit,
+  onElementDoubleClicked: ((String) -> Unit)? = null,
+  parentMap: Map<String, String> = emptyMap(),
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -106,36 +106,36 @@ fun HierarchyTreeView(
 
   // Compute selected path separately so it doesn't trigger flattenTree rebuild
   val selectedPath =
-      remember(selectedElementId, parentMap) {
-        if (selectedElementId != null && parentMap.isNotEmpty()) {
-          getPathFromParentMap(parentMap, selectedElementId).toSet()
-        } else emptySet()
-      }
+    remember(selectedElementId, parentMap) {
+      if (selectedElementId != null && parentMap.isNotEmpty()) {
+        getPathFromParentMap(parentMap, selectedElementId).toSet()
+      } else emptySet()
+    }
 
   // Pre-compute matching IDs for search — O(n) single pass instead of O(n^2) per-node
   val matchingIds =
-      remember(hierarchy, debouncedQuery) {
-        if (hierarchy != null && debouncedQuery.isNotEmpty()) {
-          computeMatchingIds(hierarchy, debouncedQuery)
-        } else emptySet()
-      }
+    remember(hierarchy, debouncedQuery) {
+      if (hierarchy != null && debouncedQuery.isNotEmpty()) {
+        computeMatchingIds(hierarchy, debouncedQuery)
+      } else emptySet()
+    }
 
   // Flatten hierarchy for virtualized list + build index map for O(1) scroll
   val (flatNodes, nodeIndexMap) =
-      remember(hierarchy, expandedIds, debouncedQuery) {
-        if (hierarchy == null) {
-          emptyList<FlatTreeNode>() to emptyMap()
-        } else {
-          val nodes =
-              flattenTree(
-                  root = hierarchy,
-                  expandedIds = expandedIds,
-                  searchQuery = debouncedQuery,
-                  matchingIds = matchingIds,
-              )
-          nodes to nodes.withIndex().associate { (i, n) -> n.element.id to i }
-        }
+    remember(hierarchy, expandedIds, debouncedQuery) {
+      if (hierarchy == null) {
+        emptyList<FlatTreeNode>() to emptyMap()
+      } else {
+        val nodes =
+          flattenTree(
+            root = hierarchy,
+            expandedIds = expandedIds,
+            searchQuery = debouncedQuery,
+            matchingIds = matchingIds,
+          )
+        nodes to nodes.withIndex().associate { (i, n) -> n.element.id to i }
       }
+    }
 
   // Scroll to selected item — O(1) via index map
   val listState = rememberLazyListState()
@@ -151,29 +151,29 @@ fun HierarchyTreeView(
   Column(modifier = modifier.fillMaxSize()) {
     // Search bar
     dev.jasonpearson.automobile.desktop.core.components.SearchBar(
-        query = searchQuery,
-        onQueryChange = { searchQuery = it },
-        placeholder = "Search views...",
-        modifier = Modifier.fillMaxWidth().padding(8.dp),
+      query = searchQuery,
+      onQueryChange = { searchQuery = it },
+      placeholder = "Search views...",
+      modifier = Modifier.fillMaxWidth().padding(8.dp),
     )
 
     // Tree list
     if (flatNodes.isEmpty()) {
       Box(
-          modifier = Modifier.fillMaxSize(),
-          contentAlignment = Alignment.Center,
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
       ) {
         if (hierarchy == null) {
           Text(
-              "No hierarchy loaded",
-              color = colors.text.normal.copy(alpha = 0.5f),
-              fontSize = 12.sp,
+            "No hierarchy loaded",
+            color = colors.text.normal.copy(alpha = 0.5f),
+            fontSize = 12.sp,
           )
         } else {
           Text(
-              "No matching elements",
-              color = colors.text.normal.copy(alpha = 0.5f),
-              fontSize = 12.sp,
+            "No matching elements",
+            color = colors.text.normal.copy(alpha = 0.5f),
+            fontSize = 12.sp,
           )
         }
       }
@@ -188,29 +188,29 @@ fun HierarchyTreeView(
 
       Box(modifier = Modifier.fillMaxSize().horizontalScroll(horizontalScrollState)) {
         LazyColumn(
-            state = listState,
-            modifier = Modifier.widthIn(min = estimatedContentWidth),
+          state = listState,
+          modifier = Modifier.widthIn(min = estimatedContentWidth),
         ) {
           itemsIndexed(flatNodes, key = { index, node -> "${index}_${node.element.id}" }) { _, node
             ->
             TreeNodeRow(
-                node = node,
-                isSelected = node.element.id == selectedElementId,
-                isHovered = node.element.id == hoveredElementId,
-                isInSelectedPath = node.element.id in selectedPath,
-                onToggleExpand = {
-                  expandedIds =
-                      if (node.isExpanded) {
-                        expandedIds - node.element.id
-                      } else {
-                        expandedIds + node.element.id
-                      }
-                },
-                onSelect = { onElementSelected(node.element.id) },
-                onDoubleClick = { onElementDoubleClicked?.invoke(node.element.id) },
-                onHoverChange = { isHovered ->
-                  onElementHovered(if (isHovered) node.element.id else null)
-                },
+              node = node,
+              isSelected = node.element.id == selectedElementId,
+              isHovered = node.element.id == hoveredElementId,
+              isInSelectedPath = node.element.id in selectedPath,
+              onToggleExpand = {
+                expandedIds =
+                  if (node.isExpanded) {
+                    expandedIds - node.element.id
+                  } else {
+                    expandedIds + node.element.id
+                  }
+              },
+              onSelect = { onElementSelected(node.element.id) },
+              onDoubleClick = { onElementDoubleClicked?.invoke(node.element.id) },
+              onHoverChange = { isHovered ->
+                onElementHovered(if (isHovered) node.element.id else null)
+              },
             )
           }
         }
@@ -226,75 +226,74 @@ private fun buildElementSelector(element: UIElementInfo): String {
     !element.resourceId.isNullOrEmpty() -> "//$simpleName[@resource-id='${element.resourceId}']"
     !element.text.isNullOrEmpty() -> "//$simpleName[@text='${element.text}']"
     !element.contentDescription.isNullOrEmpty() ->
-        "//$simpleName[@content-desc='${element.contentDescription}']"
+      "//$simpleName[@content-desc='${element.contentDescription}']"
     else -> "//$simpleName"
   }
 }
 
 @Composable
 private fun TreeNodeRow(
-    node: FlatTreeNode,
-    isSelected: Boolean,
-    isHovered: Boolean,
-    isInSelectedPath: Boolean,
-    onToggleExpand: () -> Unit,
-    onSelect: () -> Unit,
-    onDoubleClick: () -> Unit,
-    onHoverChange: (Boolean) -> Unit,
+  node: FlatTreeNode,
+  isSelected: Boolean,
+  isHovered: Boolean,
+  isInSelectedPath: Boolean,
+  onToggleExpand: () -> Unit,
+  onSelect: () -> Unit,
+  onDoubleClick: () -> Unit,
+  onHoverChange: (Boolean) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   val bgColor =
-      when {
-        isSelected -> Color(0xFF2196F3).copy(alpha = 0.2f)
-        isHovered -> colors.text.normal.copy(alpha = 0.08f)
-        isInSelectedPath -> colors.text.normal.copy(alpha = 0.04f)
-        else -> Color.Transparent
-      }
+    when {
+      isSelected -> Color(0xFF2196F3).copy(alpha = 0.2f)
+      isHovered -> colors.text.normal.copy(alpha = 0.08f)
+      isInSelectedPath -> colors.text.normal.copy(alpha = 0.04f)
+      else -> Color.Transparent
+    }
 
   // Row-level hover state for showing copy button
   val rowInteractionSource = remember { MutableInteractionSource() }
   val isRowHovered by rowInteractionSource.collectIsHoveredAsState()
 
   Row(
-      modifier =
-          Modifier.widthIn(min = 200.dp) // Minimum width to ensure content doesn't wrap
-              .heightIn(min = 18.dp) // Minimum tap target height
-              .background(bgColor)
-              .hoverable(rowInteractionSource)
-              .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onSelect() },
-                    onDoubleTap = { onDoubleClick() },
-                )
-              }
-              .onPointerEvent(PointerEventType.Enter) { onHoverChange(true) }
-              .onPointerEvent(PointerEventType.Exit) { onHoverChange(false) }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(vertical = 4.dp, horizontal = 4.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.widthIn(min = 200.dp) // Minimum width to ensure content doesn't wrap
+        .heightIn(min = 18.dp) // Minimum tap target height
+        .background(bgColor)
+        .hoverable(rowInteractionSource)
+        .pointerInput(Unit) {
+          detectTapGestures(
+            onTap = { onSelect() },
+            onDoubleTap = { onDoubleClick() },
+          )
+        }
+        .onPointerEvent(PointerEventType.Enter) { onHoverChange(true) }
+        .onPointerEvent(PointerEventType.Exit) { onHoverChange(false) }
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(vertical = 4.dp, horizontal = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     // Indentation
     Spacer(Modifier.width((node.depth * 16).dp))
 
     // Expand/collapse chevron
     Box(
-        modifier =
-            Modifier.size(18.dp)
-                .then(
-                    if (node.hasChildren)
-                        Modifier.clickable(onClick = onToggleExpand)
-                            .pointerHoverIcon(PointerIcon.Hand)
-                    else Modifier
-                ),
-        contentAlignment = Alignment.Center,
+      modifier =
+        Modifier.size(18.dp)
+          .then(
+            if (node.hasChildren)
+              Modifier.clickable(onClick = onToggleExpand).pointerHoverIcon(PointerIcon.Hand)
+            else Modifier
+          ),
+      contentAlignment = Alignment.Center,
     ) {
       if (node.hasChildren) {
         Text(
-            if (node.isExpanded) "\u25BC" else "\u25B6", // Down/right triangle
-            fontSize = 8.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
-            maxLines = 1,
+          if (node.isExpanded) "\u25BC" else "\u25B6", // Down/right triangle
+          fontSize = 8.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
+          maxLines = 1,
         )
       }
     }
@@ -308,11 +307,11 @@ private fun TreeNodeRow(
 
     // Class name (simplified)
     Text(
-        getSimpleClassName(node.element.className),
-        fontSize = 11.sp,
-        color = if (isSelected) Color(0xFF2196F3) else colors.text.normal,
-        maxLines = 1,
-        softWrap = false,
+      getSimpleClassName(node.element.className),
+      fontSize = 11.sp,
+      color = if (isSelected) Color(0xFF2196F3) else colors.text.normal,
+      maxLines = 1,
+      softWrap = false,
     )
 
     // Resource ID if present
@@ -320,34 +319,32 @@ private fun TreeNodeRow(
       val simpleName = resId.substringAfterLast("/")
       Spacer(Modifier.width(4.dp))
       Text(
-          "@$simpleName",
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-          maxLines = 1,
-          softWrap = false,
+        "@$simpleName",
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+        maxLines = 1,
+        softWrap = false,
       )
     }
 
     // Text content preview if present
     node.element.text
-        ?.takeIf { it.isNotEmpty() }
-        ?.let { text ->
-          Spacer(Modifier.width(4.dp))
-          Text(
-              "\"${text.take(30)}${if (text.length > 30) "..." else ""}\"",
-              fontSize = 10.sp,
-              color = colors.text.normal.copy(alpha = 0.4f),
-              maxLines = 1,
-              softWrap = false,
-          )
-        }
+      ?.takeIf { it.isNotEmpty() }
+      ?.let { text ->
+        Spacer(Modifier.width(4.dp))
+        Text(
+          "\"${text.take(30)}${if (text.length > 30) "..." else ""}\"",
+          fontSize = 10.sp,
+          color = colors.text.normal.copy(alpha = 0.4f),
+          maxLines = 1,
+          softWrap = false,
+        )
+      }
 
     Spacer(Modifier.width(8.dp))
 
     // State indicators
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
+    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
       if (node.element.isClickable) {
         StateIndicator("\u261B", "Clickable") // Pointing hand
       }
@@ -363,19 +360,19 @@ private fun TreeNodeRow(
     if (isRowHovered) {
       val selector = remember(node.element) { buildElementSelector(node.element) }
       Box(
-          modifier =
-              Modifier.size(24.dp)
-                  .clickable {
-                    val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                    clipboard.setContents(java.awt.datatransfer.StringSelection(selector), null)
-                  }
-                  .pointerHoverIcon(PointerIcon.Hand),
-          contentAlignment = Alignment.Center,
+        modifier =
+          Modifier.size(24.dp)
+            .clickable {
+              val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+              clipboard.setContents(java.awt.datatransfer.StringSelection(selector), null)
+            }
+            .pointerHoverIcon(PointerIcon.Hand),
+        contentAlignment = Alignment.Center,
       ) {
         Text(
-            "\uD83D\uDCCB", // 📋
-            fontSize = 9.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
+          "\uD83D\uDCCB", // 📋
+          fontSize = 9.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
         )
       }
     }
@@ -390,27 +387,27 @@ private fun ElementIcon(className: String) {
   val colors = SharedTheme.globalColors
 
   val (icon, color) =
-      when {
-        className.contains("Button") -> "\u25A3" to Color(0xFF4CAF50) // Square button
-        className.contains("TextView") || className.contains("Text") -> "T" to Color(0xFF2196F3)
-        className.contains("EditText") || className.contains("TextField") ->
-            "\u270E" to Color(0xFFFFC107) // Pencil
-        className.contains("ImageView") || className.contains("Image") ->
-            "\u25A1" to Color(0xFF9C27B0) // Empty square
-        className.contains("RecyclerView") || className.contains("ListView") ->
-            "\u2261" to Color(0xFFFF5722) // Triple bar
-        className.contains("Layout") || className.contains("ViewGroup") ->
-            "\u25A2" to Color(0xFF607D8B) // Square outline
-        className.contains("Toolbar") -> "\u2630" to Color(0xFF795548) // Hamburger
-        className.contains("CheckBox") -> "\u2611" to Color(0xFF4CAF50) // Checked box
-        className.contains("Switch") -> "\u25C9" to Color(0xFF4CAF50) // Toggle
-        else -> "\u25A1" to colors.text.normal.copy(alpha = 0.5f) // Generic
-      }
+    when {
+      className.contains("Button") -> "\u25A3" to Color(0xFF4CAF50) // Square button
+      className.contains("TextView") || className.contains("Text") -> "T" to Color(0xFF2196F3)
+      className.contains("EditText") || className.contains("TextField") ->
+        "\u270E" to Color(0xFFFFC107) // Pencil
+      className.contains("ImageView") || className.contains("Image") ->
+        "\u25A1" to Color(0xFF9C27B0) // Empty square
+      className.contains("RecyclerView") || className.contains("ListView") ->
+        "\u2261" to Color(0xFFFF5722) // Triple bar
+      className.contains("Layout") || className.contains("ViewGroup") ->
+        "\u25A2" to Color(0xFF607D8B) // Square outline
+      className.contains("Toolbar") -> "\u2630" to Color(0xFF795548) // Hamburger
+      className.contains("CheckBox") -> "\u2611" to Color(0xFF4CAF50) // Checked box
+      className.contains("Switch") -> "\u25C9" to Color(0xFF4CAF50) // Toggle
+      else -> "\u25A1" to colors.text.normal.copy(alpha = 0.5f) // Generic
+    }
 
   Text(
-      icon,
-      fontSize = 12.sp,
-      color = color,
+    icon,
+    fontSize = 12.sp,
+    color = color,
   )
 }
 
@@ -419,9 +416,9 @@ private fun StateIndicator(icon: String, tooltip: String) {
   val colors = SharedTheme.globalColors
 
   Text(
-      icon,
-      fontSize = 9.sp,
-      color = colors.text.normal.copy(alpha = 0.4f),
+    icon,
+    fontSize = 9.sp,
+    color = colors.text.normal.copy(alpha = 0.4f),
   )
 }
 
@@ -435,10 +432,10 @@ private fun getSimpleClassName(fullName: String): String {
  * checks.
  */
 private fun flattenTree(
-    root: UIElementInfo,
-    expandedIds: Set<String>,
-    searchQuery: String,
-    matchingIds: Set<String>,
+  root: UIElementInfo,
+  expandedIds: Set<String>,
+  searchQuery: String,
+  matchingIds: Set<String>,
 ): List<FlatTreeNode> {
   val result = mutableListOf<FlatTreeNode>()
 
@@ -447,16 +444,16 @@ private fun flattenTree(
 
     if (isIncluded) {
       val hasMatchingChild =
-          searchQuery.isNotEmpty() && element.children.any { it.id in matchingIds }
+        searchQuery.isNotEmpty() && element.children.any { it.id in matchingIds }
       val isExpanded = element.id in expandedIds || (searchQuery.isNotEmpty() && hasMatchingChild)
 
       result.add(
-          FlatTreeNode(
-              element = element,
-              depth = depth,
-              isExpanded = isExpanded,
-              hasChildren = element.children.isNotEmpty(),
-          )
+        FlatTreeNode(
+          element = element,
+          depth = depth,
+          isExpanded = isExpanded,
+          hasChildren = element.children.isNotEmpty(),
+        )
       )
 
       if (isExpanded) {
@@ -497,9 +494,9 @@ fun computeMatchingIds(root: UIElementInfo, searchQuery: String): Set<String> {
 private fun matchesSearch(element: UIElementInfo, searchQuery: String): Boolean {
   val query = searchQuery.lowercase()
   return element.className.lowercase().contains(query) ||
-      element.resourceId?.lowercase()?.contains(query) == true ||
-      element.text?.lowercase()?.contains(query) == true ||
-      element.contentDescription?.lowercase()?.contains(query) == true
+    element.resourceId?.lowercase()?.contains(query) == true ||
+    element.text?.lowercase()?.contains(query) == true ||
+    element.contentDescription?.lowercase()?.contains(query) == true
 }
 
 /** Collects all element IDs up to a given depth for auto-expansion. */

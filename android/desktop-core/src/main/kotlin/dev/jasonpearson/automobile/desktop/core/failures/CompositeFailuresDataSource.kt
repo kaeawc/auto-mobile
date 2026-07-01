@@ -11,8 +11,8 @@ import kotlinx.coroutines.flow.emptyFlow
  * notifications and updates come via Unix socket streaming.
  */
 class CompositeFailuresDataSource(
-    private val mcpDataSource: FailuresDataSource?,
-    private val streamingDataSource: StreamingFailuresDataSourceInterface?,
+  private val mcpDataSource: FailuresDataSource?,
+  private val streamingDataSource: StreamingFailuresDataSourceInterface?,
 ) : FailuresDataSource, StreamingFailuresDataSourceInterface {
 
   /**
@@ -41,8 +41,8 @@ class CompositeFailuresDataSource(
    * available and streaming implements FailuresDataSource.
    */
   override suspend fun getTimelineData(
-      dateRange: DateRange,
-      aggregation: TimeAggregation,
+    dateRange: DateRange,
+    aggregation: TimeAggregation,
   ): Result<TimelineData> {
     // Prefer MCP for timeline data
     mcpDataSource?.getTimelineData(dateRange, aggregation)?.let { result ->
@@ -53,16 +53,16 @@ class CompositeFailuresDataSource(
 
     // Fall back to streaming if available and implements FailuresDataSource
     (streamingDataSource as? FailuresDataSource)?.getTimelineData(dateRange, aggregation)?.let {
-        result ->
+      result ->
       return result
     }
 
     // Return empty if neither is available
     return Result.Success(
-        TimelineData(
-            dataPoints = emptyList(),
-            previousPeriodTotals = PeriodTotals(0, 0, 0),
-        )
+      TimelineData(
+        dataPoints = emptyList(),
+        previousPeriodTotals = PeriodTotals(0, 0, 0),
+      )
     )
   }
 

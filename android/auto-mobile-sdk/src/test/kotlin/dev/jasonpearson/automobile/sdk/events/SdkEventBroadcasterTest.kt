@@ -11,10 +11,10 @@ import org.junit.Test
 class SdkEventBroadcasterTest {
 
   private fun makeEvent(name: String): SdkEvent =
-      SdkLifecycleEvent(
-          timestamp = 1000L,
-          kind = name,
-      )
+    SdkLifecycleEvent(
+      timestamp = 1000L,
+      kind = name,
+    )
 
   @Test
   fun `empty events returns empty list`() {

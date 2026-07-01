@@ -26,9 +26,9 @@ class ErrorCardUiTest {
     setContent {
       MaterialTheme {
         ErrorCard(
-            title = "Error",
-            message = "Failed to load",
-            onRetry = {},
+          title = "Error",
+          message = "Failed to load",
+          onRetry = {},
         )
       }
     }
@@ -40,9 +40,9 @@ class ErrorCardUiTest {
     setContent {
       MaterialTheme {
         ErrorCard(
-            title = "Error",
-            message = "Failed to load",
-            onDismiss = {},
+          title = "Error",
+          message = "Failed to load",
+          onDismiss = {},
         )
       }
     }

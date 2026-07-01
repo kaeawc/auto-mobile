@@ -11,9 +11,9 @@ import androidx.compose.ui.Modifier
  */
 @Composable
 fun Tooltip(
-    tooltip: @Composable () -> Unit,
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit,
+  tooltip: @Composable () -> Unit,
+  modifier: Modifier = Modifier,
+  content: @Composable () -> Unit,
 ) {
   // Render the main content directly; full tooltip hover behavior can be
   // added later with Material3's TooltipBox when needed.

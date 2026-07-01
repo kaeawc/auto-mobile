@@ -18,15 +18,15 @@ public enum class MetricType {
 }
 
 public data class PerformanceMetric(
-    val id: String,
-    val type: MetricType,
-    val name: String,
-    val currentValue: Float,
-    val unit: String,
-    val thresholdWarning: Float,
-    val thresholdCritical: Float,
-    val trend: MetricTrend,
-    val history: List<MetricDataPoint>,
+  val id: String,
+  val type: MetricType,
+  val name: String,
+  val currentValue: Float,
+  val unit: String,
+  val thresholdWarning: Float,
+  val thresholdCritical: Float,
+  val trend: MetricTrend,
+  val history: List<MetricDataPoint>,
 )
 
 public enum class MetricTrend {
@@ -36,49 +36,49 @@ public enum class MetricTrend {
 }
 
 public data class MetricDataPoint(
-    val timestamp: Long,
-    val value: Float,
-    val screenName: String? = null,
-    val testStep: String? = null,
+  val timestamp: Long,
+  val value: Float,
+  val screenName: String? = null,
+  val testStep: String? = null,
 )
 
 public data class PerformanceAnomaly(
-    val id: String,
-    val metricType: MetricType,
-    val severity: HealthStatus,
-    val message: String,
-    val timestamp: Long,
-    val screenName: String?,
-    val testName: String?,
-    val value: Float,
-    val threshold: Float,
-    val isPinned: Boolean = false,
+  val id: String,
+  val metricType: MetricType,
+  val severity: HealthStatus,
+  val message: String,
+  val timestamp: Long,
+  val screenName: String?,
+  val testName: String?,
+  val value: Float,
+  val threshold: Float,
+  val isPinned: Boolean = false,
 )
 
 public data class PerformanceRun(
-    val id: String,
-    val name: String,
-    val timestamp: Long,
-    val durationMs: Int,
-    val deviceName: String,
-    val overallHealth: HealthStatus,
-    val metrics: List<PerformanceMetric>,
-    val anomalies: List<PerformanceAnomaly>,
-    val screensAnalyzed: List<String>,
+  val id: String,
+  val name: String,
+  val timestamp: Long,
+  val durationMs: Int,
+  val deviceName: String,
+  val overallHealth: HealthStatus,
+  val metrics: List<PerformanceMetric>,
+  val anomalies: List<PerformanceAnomaly>,
+  val screensAnalyzed: List<String>,
 )
 
 public data class RunComparison(
-    val baselineRun: PerformanceRun,
-    val compareRun: PerformanceRun,
-    val improvements: List<MetricChange>,
-    val regressions: List<MetricChange>,
+  val baselineRun: PerformanceRun,
+  val compareRun: PerformanceRun,
+  val improvements: List<MetricChange>,
+  val regressions: List<MetricChange>,
 )
 
 public data class MetricChange(
-    val metricType: MetricType,
-    val baselineValue: Float,
-    val compareValue: Float,
-    val percentChange: Float,
+  val metricType: MetricType,
+  val baselineValue: Float,
+  val compareValue: Float,
+  val percentChange: Float,
 )
 
 public object PerformanceThresholds {

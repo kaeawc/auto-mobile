@@ -25,10 +25,10 @@ enum class DesktopPlatform {
 }
 
 data class PlatformThemeValues(
-    val dividerThickness: Dp,
-    val cornerRadius: Dp,
-    val sidebarBackground: Color,
-    val titleBarHeight: Dp,
+  val dividerThickness: Dp,
+  val cornerRadius: Dp,
+  val sidebarBackground: Color,
+  val titleBarHeight: Dp,
 )
 
 object PlatformTheme {
@@ -39,26 +39,26 @@ object PlatformTheme {
       val panelBg = SharedTheme.globalColors.panelBackground
       return when (DesktopPlatform.current) {
         DesktopPlatform.MacOS ->
-            PlatformThemeValues(
-                dividerThickness = 1.dp,
-                cornerRadius = 6.dp,
-                sidebarBackground = panelBg.copy(alpha = 0.85f),
-                titleBarHeight = 28.dp,
-            )
+          PlatformThemeValues(
+            dividerThickness = 1.dp,
+            cornerRadius = 6.dp,
+            sidebarBackground = panelBg.copy(alpha = 0.85f),
+            titleBarHeight = 28.dp,
+          )
         DesktopPlatform.Windows ->
-            PlatformThemeValues(
-                dividerThickness = 2.dp,
-                cornerRadius = 2.dp,
-                sidebarBackground = panelBg,
-                titleBarHeight = 0.dp,
-            )
+          PlatformThemeValues(
+            dividerThickness = 2.dp,
+            cornerRadius = 2.dp,
+            sidebarBackground = panelBg,
+            titleBarHeight = 0.dp,
+          )
         DesktopPlatform.Linux ->
-            PlatformThemeValues(
-                dividerThickness = 1.dp,
-                cornerRadius = 4.dp,
-                sidebarBackground = panelBg,
-                titleBarHeight = 0.dp,
-            )
+          PlatformThemeValues(
+            dividerThickness = 1.dp,
+            cornerRadius = 4.dp,
+            sidebarBackground = panelBg,
+            titleBarHeight = 0.dp,
+          )
       }
     }
 }

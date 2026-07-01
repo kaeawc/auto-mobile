@@ -20,20 +20,20 @@ class StorageClient(private val client: UnifiedSocketClient) {
   /** Subscribe to storage change events. */
   fun subscribeToChanges(deviceId: String? = null): Flow<StorageUpdateEvent> {
     val params =
-        buildMap<String, JsonElement> {
-          deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
-        }
+      buildMap<String, JsonElement> {
+        deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
+      }
 
     return client
-        .subscribe(
-            domain = Domains.OBSERVATION,
-            event = "storage_update",
-            params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
+      .subscribe(
+        domain = Domains.OBSERVATION,
+        event = "storage_update",
+        params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
+      )
+      .map { message ->
+        json.decodeFromJsonElement(
+          message.result ?: throw IllegalStateException("No result in push")
         )
-        .map { message ->
-          json.decodeFromJsonElement(
-              message.result ?: throw IllegalStateException("No result in push")
-          )
-        }
+      }
   }
 }

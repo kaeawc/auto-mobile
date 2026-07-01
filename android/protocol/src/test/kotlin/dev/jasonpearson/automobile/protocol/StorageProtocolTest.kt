@@ -127,21 +127,21 @@ class StorageProtocolTest {
   @Test
   fun `FileList response roundtrip`() {
     val response =
-        StorageResponse.FileList(
-            files =
-                listOf(
-                    StorageFileInfo(
-                        name = "prefs",
-                        path = "/data/data/app/shared_prefs/prefs.xml",
-                        entryCount = 5,
-                    ),
-                    StorageFileInfo(
-                        name = "auth",
-                        path = "/data/data/app/shared_prefs/auth.xml",
-                        entryCount = 2,
-                    ),
-                ),
-        )
+      StorageResponse.FileList(
+        files =
+          listOf(
+            StorageFileInfo(
+              name = "prefs",
+              path = "/data/data/app/shared_prefs/prefs.xml",
+              entryCount = 5,
+            ),
+            StorageFileInfo(
+              name = "auth",
+              path = "/data/data/app/shared_prefs/auth.xml",
+              entryCount = 2,
+            ),
+          )
+      )
 
     val json = StorageProtocolSerializer.responseToJson(response)
     val deserialized = StorageProtocolSerializer.responseFromJson(json)
@@ -156,14 +156,14 @@ class StorageProtocolTest {
   @Test
   fun `Preferences response roundtrip`() {
     val response =
-        StorageResponse.Preferences(
-            file = StorageFileInfo(name = "prefs", path = "/path/to/prefs.xml", entryCount = 2),
-            entries =
-                listOf(
-                    StorageEntry(key = "user_name", value = "\"John\"", type = "STRING"),
-                    StorageEntry(key = "logged_in", value = "true", type = "BOOLEAN"),
-                ),
-        )
+      StorageResponse.Preferences(
+        file = StorageFileInfo(name = "prefs", path = "/path/to/prefs.xml", entryCount = 2),
+        entries =
+          listOf(
+            StorageEntry(key = "user_name", value = "\"John\"", type = "STRING"),
+            StorageEntry(key = "logged_in", value = "true", type = "BOOLEAN"),
+          ),
+      )
 
     val json = StorageProtocolSerializer.responseToJson(response)
     val deserialized = StorageProtocolSerializer.responseFromJson(json)
@@ -193,28 +193,28 @@ class StorageProtocolTest {
   @Test
   fun `Changes response roundtrip`() {
     val response =
-        StorageResponse.Changes(
-            fileName = "prefs",
-            changes =
-                listOf(
-                    StorageChangeEvent(
-                        fileName = "prefs",
-                        key = "counter",
-                        value = "42",
-                        type = "INT",
-                        timestamp = 1234567890L,
-                        sequenceNumber = 1L,
-                    ),
-                    StorageChangeEvent(
-                        fileName = "prefs",
-                        key = null,
-                        value = null,
-                        type = "CLEARED",
-                        timestamp = 1234567891L,
-                        sequenceNumber = 2L,
-                    ),
-                ),
-        )
+      StorageResponse.Changes(
+        fileName = "prefs",
+        changes =
+          listOf(
+            StorageChangeEvent(
+              fileName = "prefs",
+              key = "counter",
+              value = "42",
+              type = "INT",
+              timestamp = 1234567890L,
+              sequenceNumber = 1L,
+            ),
+            StorageChangeEvent(
+              fileName = "prefs",
+              key = null,
+              value = null,
+              type = "CLEARED",
+              timestamp = 1234567891L,
+              sequenceNumber = 2L,
+            ),
+          ),
+      )
 
     val json = StorageProtocolSerializer.responseToJson(response)
     val deserialized = StorageProtocolSerializer.responseFromJson(json)
@@ -260,29 +260,29 @@ class StorageProtocolTest {
   @Test
   fun `getMethodName returns correct method for each request type`() {
     assertEquals(
-        "checkAvailability",
-        StorageProtocolSerializer.getMethodName(StorageRequest.CheckAvailability),
+      "checkAvailability",
+      StorageProtocolSerializer.getMethodName(StorageRequest.CheckAvailability),
     )
     assertEquals("listFiles", StorageProtocolSerializer.getMethodName(StorageRequest.ListFiles))
     assertEquals(
-        "getPreferences",
-        StorageProtocolSerializer.getMethodName(StorageRequest.GetPreferences("f")),
+      "getPreferences",
+      StorageProtocolSerializer.getMethodName(StorageRequest.GetPreferences("f")),
     )
     assertEquals(
-        "subscribeToFile",
-        StorageProtocolSerializer.getMethodName(StorageRequest.Subscribe("f")),
+      "subscribeToFile",
+      StorageProtocolSerializer.getMethodName(StorageRequest.Subscribe("f")),
     )
     assertEquals(
-        "unsubscribeFromFile",
-        StorageProtocolSerializer.getMethodName(StorageRequest.Unsubscribe("f")),
+      "unsubscribeFromFile",
+      StorageProtocolSerializer.getMethodName(StorageRequest.Unsubscribe("f")),
     )
     assertEquals(
-        "getChanges",
-        StorageProtocolSerializer.getMethodName(StorageRequest.GetChanges("f")),
+      "getChanges",
+      StorageProtocolSerializer.getMethodName(StorageRequest.GetChanges("f")),
     )
     assertEquals(
-        "getListenedFiles",
-        StorageProtocolSerializer.getMethodName(StorageRequest.GetListenedFiles),
+      "getListenedFiles",
+      StorageProtocolSerializer.getMethodName(StorageRequest.GetListenedFiles),
     )
   }
 

@@ -17,10 +17,10 @@ private val disconnectedColor = Color(0xFFE53935)
 @Composable
 fun StatusDot(connected: Boolean, modifier: Modifier = Modifier) {
   Box(
-      modifier =
-          modifier
-              .size(8.dp)
-              .clip(CircleShape)
-              .background(if (connected) connectedColor else disconnectedColor),
+    modifier =
+      modifier
+        .size(8.dp)
+        .clip(CircleShape)
+        .background(if (connected) connectedColor else disconnectedColor)
   )
 }

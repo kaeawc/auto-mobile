@@ -39,19 +39,19 @@ private val JSON_BRACE_COLOR = Color(0xFFBBBBBB) // light grey
 /** Renders a network body with content-type-aware formatting. */
 @Composable
 fun NetworkBodyContent(
-    body: String?,
-    contentType: String?,
-    bodySize: Long,
-    textColor: Color,
+  body: String?,
+  contentType: String?,
+  bodySize: Long,
+  textColor: Color,
 ) {
   if (body.isNullOrBlank()) {
     val ct = contentType?.substringBefore(';')?.trim() ?: "unknown"
     val sizeText = formatByteSize(bodySize)
     if (bodySize > 0) {
       Text(
-          "Binary content ($ct, $sizeText)",
-          fontSize = 9.sp,
-          color = textColor.copy(alpha = 0.4f),
+        "Binary content ($ct, $sizeText)",
+        fontSize = 9.sp,
+        color = textColor.copy(alpha = 0.4f),
       )
     } else {
       Text("No body", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
@@ -68,19 +68,19 @@ fun NetworkBodyContent(
     baseContentType.contains("json") || looksLikeJson(body) -> JsonBodyBlock(body, textColor)
     // XML / HTML: syntax-aware monospace
     baseContentType.contains("xml") ||
-        baseContentType.contains("html") ||
-        body.trimStart().startsWith("<") -> XmlBodyBlock(body, textColor)
+      baseContentType.contains("html") ||
+      body.trimStart().startsWith("<") -> XmlBodyBlock(body, textColor)
     // Form data: key-value table
     baseContentType == "application/x-www-form-urlencoded" -> FormDataTable(body, textColor)
     // YAML
     baseContentType.contains("yaml") || baseContentType.contains("yml") ->
-        YamlBodyBlock(body, textColor)
+      YamlBodyBlock(body, textColor)
     // Check if content looks like binary garbage (non-printable chars)
     looksLikeBinary(body) -> {
       Text(
-          "Binary content ($baseContentType, ${formatByteSize(body.length.toLong())})",
-          fontSize = 9.sp,
-          color = textColor.copy(alpha = 0.4f),
+        "Binary content ($baseContentType, ${formatByteSize(body.length.toLong())})",
+        fontSize = 9.sp,
+        color = textColor.copy(alpha = 0.4f),
       )
     }
     // Fallback: plain monospace
@@ -106,11 +106,11 @@ private fun looksLikeJson(text: String): Boolean {
 private fun JsonBodyBlock(body: String, textColor: Color) {
   val annotated = remember(body) { colorizeJson(body) }
   Box(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-              .horizontalScroll(rememberScrollState())
-              .padding(8.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+        .horizontalScroll(rememberScrollState())
+        .padding(8.dp)
   ) {
     Text(annotated, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
   }
@@ -120,17 +120,17 @@ private fun JsonBodyBlock(body: String, textColor: Color) {
 @Composable
 private fun PlainBodyBlock(body: String, textColor: Color) {
   Box(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-              .horizontalScroll(rememberScrollState())
-              .padding(8.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+        .horizontalScroll(rememberScrollState())
+        .padding(8.dp)
   ) {
     Text(
-        body,
-        fontSize = 9.sp,
-        fontFamily = FontFamily.Monospace,
-        color = textColor.copy(alpha = 0.8f),
+      body,
+      fontSize = 9.sp,
+      fontFamily = FontFamily.Monospace,
+      color = textColor.copy(alpha = 0.8f),
     )
   }
 }
@@ -139,39 +139,39 @@ private fun PlainBodyBlock(body: String, textColor: Color) {
 @Composable
 private fun ImageBodyBlock(body: String, contentType: String, textColor: Color) {
   val bitmap =
-      remember(body) {
-        try {
-          // Try base64 first
-          val bytes =
-              try {
-                java.util.Base64.getDecoder().decode(body.trim())
-              } catch (_: Exception) {
-                body.toByteArray(Charsets.ISO_8859_1)
-              }
-          org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap()
-        } catch (_: Exception) {
-          null
-        }
+    remember(body) {
+      try {
+        // Try base64 first
+        val bytes =
+          try {
+            java.util.Base64.getDecoder().decode(body.trim())
+          } catch (_: Exception) {
+            body.toByteArray(Charsets.ISO_8859_1)
+          }
+        org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap()
+      } catch (_: Exception) {
+        null
       }
+    }
   if (bitmap != null) {
     Box(
-        modifier =
-            Modifier.fillMaxWidth()
-                .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-                .padding(8.dp),
+      modifier =
+        Modifier.fillMaxWidth()
+          .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+          .padding(8.dp)
     ) {
       Image(
-          bitmap = bitmap,
-          contentDescription = "Response image",
-          modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
-          contentScale = ContentScale.Fit,
+        bitmap = bitmap,
+        contentDescription = "Response image",
+        modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
+        contentScale = ContentScale.Fit,
       )
     }
   } else {
     Text(
-        "Image ($contentType, ${formatByteSize(body.length.toLong())})",
-        fontSize = 9.sp,
-        color = textColor.copy(alpha = 0.4f),
+      "Image ($contentType, ${formatByteSize(body.length.toLong())})",
+      fontSize = 9.sp,
+      color = textColor.copy(alpha = 0.4f),
     )
   }
 }
@@ -180,38 +180,38 @@ private fun ImageBodyBlock(body: String, contentType: String, textColor: Color) 
 @Composable
 private fun XmlBodyBlock(body: String, textColor: Color) {
   val annotated =
-      remember(body, textColor) {
-        buildAnnotatedString {
-          var i = 0
-          while (i < body.length) {
-            if (body[i] == '<') {
-              val end = body.indexOf('>', i)
-              if (end > i) {
-                withStyle(SpanStyle(color = Color(0xFF82AAFF))) {
-                  append(body.substring(i, end + 1))
-                }
-                i = end + 1
-              } else {
-                withStyle(SpanStyle(color = textColor.copy(alpha = 0.8f))) {
-                  append(body[i].toString())
-                }
-                i++
+    remember(body, textColor) {
+      buildAnnotatedString {
+        var i = 0
+        while (i < body.length) {
+          if (body[i] == '<') {
+            val end = body.indexOf('>', i)
+            if (end > i) {
+              withStyle(SpanStyle(color = Color(0xFF82AAFF))) {
+                append(body.substring(i, end + 1))
               }
+              i = end + 1
             } else {
               withStyle(SpanStyle(color = textColor.copy(alpha = 0.8f))) {
                 append(body[i].toString())
               }
               i++
             }
+          } else {
+            withStyle(SpanStyle(color = textColor.copy(alpha = 0.8f))) {
+              append(body[i].toString())
+            }
+            i++
           }
         }
       }
+    }
   Box(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-              .horizontalScroll(rememberScrollState())
-              .padding(8.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+        .horizontalScroll(rememberScrollState())
+        .padding(8.dp)
   ) {
     Text(annotated, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
   }
@@ -221,37 +221,35 @@ private fun XmlBodyBlock(body: String, textColor: Color) {
 @Composable
 private fun YamlBodyBlock(body: String, textColor: Color) {
   val annotated =
-      remember(body, textColor) {
-        buildAnnotatedString {
-          body.lines().forEach { line ->
-            val colonIndex = line.indexOf(':')
-            if (
-                colonIndex > 0 &&
-                    !line.trimStart().startsWith("#") &&
-                    !line.trimStart().startsWith("-")
-            ) {
-              withStyle(SpanStyle(color = Color(0xFF82AAFF))) {
-                append(line.substring(0, colonIndex))
-              }
-              withStyle(SpanStyle(color = Color(0xFFBBBBBB))) { append(":") }
-              withStyle(SpanStyle(color = Color(0xFFC3E88D))) {
-                append(line.substring(colonIndex + 1))
-              }
-            } else if (line.trimStart().startsWith("#")) {
-              withStyle(SpanStyle(color = Color(0xFF676E95))) { append(line) }
-            } else {
-              withStyle(SpanStyle(color = textColor.copy(alpha = 0.8f))) { append(line) }
+    remember(body, textColor) {
+      buildAnnotatedString {
+        body.lines().forEach { line ->
+          val colonIndex = line.indexOf(':')
+          if (
+            colonIndex > 0 && !line.trimStart().startsWith("#") && !line.trimStart().startsWith("-")
+          ) {
+            withStyle(SpanStyle(color = Color(0xFF82AAFF))) {
+              append(line.substring(0, colonIndex))
             }
-            append("\n")
+            withStyle(SpanStyle(color = Color(0xFFBBBBBB))) { append(":") }
+            withStyle(SpanStyle(color = Color(0xFFC3E88D))) {
+              append(line.substring(colonIndex + 1))
+            }
+          } else if (line.trimStart().startsWith("#")) {
+            withStyle(SpanStyle(color = Color(0xFF676E95))) { append(line) }
+          } else {
+            withStyle(SpanStyle(color = textColor.copy(alpha = 0.8f))) { append(line) }
           }
+          append("\n")
         }
       }
+    }
   Box(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-              .horizontalScroll(rememberScrollState())
-              .padding(8.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+        .horizontalScroll(rememberScrollState())
+        .padding(8.dp)
   ) {
     Text(annotated, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
   }
@@ -261,15 +259,15 @@ private fun YamlBodyBlock(body: String, textColor: Color) {
 @Composable
 private fun FormDataTable(body: String, textColor: Color) {
   val pairs =
-      remember(body) {
-        body.split("&").mapNotNull { param ->
-          val parts = param.split("=", limit = 2)
-          if (parts.size == 2) {
-            java.net.URLDecoder.decode(parts[0], "UTF-8") to
-                java.net.URLDecoder.decode(parts[1], "UTF-8")
-          } else null
-        }
+    remember(body) {
+      body.split("&").mapNotNull { param ->
+        val parts = param.split("=", limit = 2)
+        if (parts.size == 2) {
+          java.net.URLDecoder.decode(parts[0], "UTF-8") to
+            java.net.URLDecoder.decode(parts[1], "UTF-8")
+        } else null
       }
+    }
   if (pairs.isEmpty()) {
     PlainBodyBlock(body, textColor)
     return
@@ -286,35 +284,33 @@ fun HeaderDataTable(headers: Map<String, String>, textColor: Color) {
   }
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(textColor.copy(alpha = 0.03f), RoundedCornerShape(4.dp)),
+    modifier =
+      Modifier.fillMaxWidth().background(textColor.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
   ) {
     headers.entries.forEachIndexed { index, (key, value) ->
       Row(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .then(
-                      if (index % 2 == 0) Modifier.background(textColor.copy(alpha = 0.04f))
-                      else Modifier
-                  )
-                  .padding(horizontal = 8.dp, vertical = 3.dp),
+        modifier =
+          Modifier.fillMaxWidth()
+            .then(
+              if (index % 2 == 0) Modifier.background(textColor.copy(alpha = 0.04f)) else Modifier
+            )
+            .padding(horizontal = 8.dp, vertical = 3.dp)
       ) {
         Text(
-            key,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.Monospace,
-            color = textColor.copy(alpha = 0.6f),
-            modifier = Modifier.width(140.dp),
-            maxLines = 1,
+          key,
+          fontSize = 9.sp,
+          fontWeight = FontWeight.SemiBold,
+          fontFamily = FontFamily.Monospace,
+          color = textColor.copy(alpha = 0.6f),
+          modifier = Modifier.width(140.dp),
+          maxLines = 1,
         )
         Text(
-            value,
-            fontSize = 9.sp,
-            fontFamily = FontFamily.Monospace,
-            color = textColor.copy(alpha = 0.85f),
-            modifier = Modifier.weight(1f),
+          value,
+          fontSize = 9.sp,
+          fontFamily = FontFamily.Monospace,
+          color = textColor.copy(alpha = 0.85f),
+          modifier = Modifier.weight(1f),
         )
       }
     }
@@ -323,24 +319,24 @@ fun HeaderDataTable(headers: Map<String, String>, textColor: Color) {
 
 /** Format byte size to human-readable string. */
 fun formatByteSize(bytes: Long): String =
-    when {
-      bytes < 0 -> "unknown"
-      bytes < 1024 -> "$bytes B"
-      bytes < 1024 * 1024 -> "${"%.1f".format(bytes / 1024.0)} kB"
-      else -> "${"%.1f".format(bytes / (1024.0 * 1024.0))} MB"
-    }
+  when {
+    bytes < 0 -> "unknown"
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> "${"%.1f".format(bytes / 1024.0)} kB"
+    else -> "${"%.1f".format(bytes / (1024.0 * 1024.0))} MB"
+  }
 
 // --- JSON syntax colorizer ---
 
 private fun colorizeJson(raw: String): AnnotatedString {
   val pretty =
-      try {
-        val json = kotlinx.serialization.json.Json { prettyPrint = true }
-        val element = json.parseToJsonElement(raw)
-        json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), element)
-      } catch (_: Exception) {
-        return AnnotatedString(raw)
-      }
+    try {
+      val json = kotlinx.serialization.json.Json { prettyPrint = true }
+      val element = json.parseToJsonElement(raw)
+      json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), element)
+    } catch (_: Exception) {
+      return AnnotatedString(raw)
+    }
 
   return buildAnnotatedString {
     var i = 0
@@ -365,13 +361,13 @@ private fun colorizeJson(raw: String): AnnotatedString {
         c.isDigit() || c == '-' -> {
           val start = i
           while (
-              i < pretty.length &&
-                  (pretty[i].isDigit() ||
-                      pretty[i] == '.' ||
-                      pretty[i] == '-' ||
-                      pretty[i] == 'e' ||
-                      pretty[i] == 'E' ||
-                      pretty[i] == '+')
+            i < pretty.length &&
+              (pretty[i].isDigit() ||
+                pretty[i] == '.' ||
+                pretty[i] == '-' ||
+                pretty[i] == 'e' ||
+                pretty[i] == 'E' ||
+                pretty[i] == '+')
           ) {
             i++
           }

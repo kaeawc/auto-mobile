@@ -20,10 +20,10 @@ import kotlinx.coroutines.launch
  * - **Disconnected (never connected)**: propagated immediately.
  */
 class StreamConnectionGracePeriod(
-    private val scope: CoroutineScope,
-    private val gracePeriodMs: Long = 30_000L,
-    private val onStatusChange: (ConnectionStatus) -> Unit,
-    private val onDisconnectConfirmed: () -> Unit,
+  private val scope: CoroutineScope,
+  private val gracePeriodMs: Long = 30_000L,
+  private val onStatusChange: (ConnectionStatus) -> Unit,
+  private val onDisconnectConfirmed: () -> Unit,
 ) {
   private var hasBeenConnected = false
   private var gracePeriodJob: Job? = null

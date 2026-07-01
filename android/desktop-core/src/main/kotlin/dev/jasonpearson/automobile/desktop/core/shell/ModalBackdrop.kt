@@ -17,22 +17,22 @@ import androidx.compose.ui.graphics.Color
  */
 @Composable
 fun ModalBackdrop(
-    onDismiss: () -> Unit,
-    backdropAlpha: Float = 0.5f,
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit,
+  onDismiss: () -> Unit,
+  backdropAlpha: Float = 0.5f,
+  modifier: Modifier = Modifier,
+  content: @Composable () -> Unit,
 ) {
   Box(
-      modifier =
-          modifier
-              .fillMaxSize()
-              .background(Color.Black.copy(alpha = backdropAlpha))
-              .clickable(
-                  interactionSource = remember { MutableInteractionSource() },
-                  indication = null,
-                  onClick = onDismiss,
-              ),
-      contentAlignment = Alignment.Center,
+    modifier =
+      modifier
+        .fillMaxSize()
+        .background(Color.Black.copy(alpha = backdropAlpha))
+        .clickable(
+          interactionSource = remember { MutableInteractionSource() },
+          indication = null,
+          onClick = onDismiss,
+        ),
+    contentAlignment = Alignment.Center,
   ) {
     content()
   }

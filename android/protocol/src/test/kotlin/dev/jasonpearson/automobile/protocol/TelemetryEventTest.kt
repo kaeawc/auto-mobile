@@ -17,19 +17,19 @@ class TelemetryEventTest {
   @Test
   fun `serialize and deserialize network request event`() {
     val event: SdkEvent =
-        SdkNetworkRequestEvent(
-            timestamp = 1000L,
-            applicationId = "com.example.app",
-            url = "https://api.example.com/users",
-            method = "GET",
-            statusCode = 200,
-            durationMs = 150,
-            requestBodySize = 0,
-            responseBodySize = 1024,
-            protocol = "h2",
-            host = "api.example.com",
-            path = "/users",
-        )
+      SdkNetworkRequestEvent(
+        timestamp = 1000L,
+        applicationId = "com.example.app",
+        url = "https://api.example.com/users",
+        method = "GET",
+        statusCode = 200,
+        durationMs = 150,
+        requestBodySize = 0,
+        responseBodySize = 1024,
+        protocol = "h2",
+        host = "api.example.com",
+        path = "/users",
+      )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), event)
     assertTrue(encoded.contains(""""type":"network_request""""))
@@ -46,15 +46,15 @@ class TelemetryEventTest {
   @Test
   fun `serialize and deserialize websocket frame event`() {
     val event: SdkEvent =
-        SdkWebSocketFrameEvent(
-            timestamp = 2000L,
-            applicationId = "com.example.app",
-            connectionId = "abc123",
-            url = "wss://ws.example.com",
-            direction = WebSocketFrameDirection.RECEIVED,
-            frameType = WebSocketFrameType.TEXT,
-            payloadSize = 256,
-        )
+      SdkWebSocketFrameEvent(
+        timestamp = 2000L,
+        applicationId = "com.example.app",
+        connectionId = "abc123",
+        url = "wss://ws.example.com",
+        direction = WebSocketFrameDirection.RECEIVED,
+        frameType = WebSocketFrameType.TEXT,
+        payloadSize = 256,
+      )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), event)
     assertTrue(encoded.contains(""""type":"websocket_frame""""))
@@ -69,15 +69,15 @@ class TelemetryEventTest {
   @Test
   fun `serialize and deserialize log event`() {
     val event: SdkEvent =
-        SdkLogEvent(
-            timestamp = 3000L,
-            applicationId = "com.example.app",
-            level = 4, // INFO
-            tag = "OkHttp",
-            message = "HTTP 200 GET /users (150ms)",
-            pid = 1234,
-            tid = 5678,
-        )
+      SdkLogEvent(
+        timestamp = 3000L,
+        applicationId = "com.example.app",
+        level = 4, // INFO
+        tag = "OkHttp",
+        message = "HTTP 200 GET /users (150ms)",
+        pid = 1234,
+        tid = 5678,
+      )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), event)
     assertTrue(encoded.contains(""""type":"log""""))
@@ -93,13 +93,13 @@ class TelemetryEventTest {
   @Test
   fun `serialize and deserialize broadcast event`() {
     val event: SdkEvent =
-        SdkBroadcastEvent(
-            timestamp = 4000L,
-            applicationId = "com.example.app",
-            action = "android.intent.action.LOCALE_CHANGED",
-            categories = listOf("android.intent.category.DEFAULT"),
-            extraKeys = mapOf("locale" to "String"),
-        )
+      SdkBroadcastEvent(
+        timestamp = 4000L,
+        applicationId = "com.example.app",
+        action = "android.intent.action.LOCALE_CHANGED",
+        categories = listOf("android.intent.category.DEFAULT"),
+        extraKeys = mapOf("locale" to "String"),
+      )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), event)
     assertTrue(encoded.contains(""""type":"broadcast""""))
@@ -112,12 +112,12 @@ class TelemetryEventTest {
   @Test
   fun `serialize and deserialize lifecycle event`() {
     val event: SdkEvent =
-        SdkLifecycleEvent(
-            timestamp = 5000L,
-            applicationId = "com.example.app",
-            kind = "foreground",
-            details = null,
-        )
+      SdkLifecycleEvent(
+        timestamp = 5000L,
+        applicationId = "com.example.app",
+        kind = "foreground",
+        details = null,
+      )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), event)
     assertTrue(encoded.contains(""""type":"lifecycle""""))
@@ -130,25 +130,25 @@ class TelemetryEventTest {
   @Test
   fun `serialize and deserialize event batch`() {
     val batch: SdkEvent =
-        SdkEventBatch(
-            timestamp = 7000L,
-            applicationId = "com.example.app",
-            events =
-                listOf(
-                    SdkNetworkRequestEvent(
-                        timestamp = 7001L,
-                        url = "https://api.example.com",
-                        method = "POST",
-                        statusCode = 201,
-                    ),
-                    SdkLogEvent(
-                        timestamp = 7002L,
-                        level = 5,
-                        tag = "MyTag",
-                        message = "Warning",
-                    ),
-                ),
-        )
+      SdkEventBatch(
+        timestamp = 7000L,
+        applicationId = "com.example.app",
+        events =
+          listOf(
+            SdkNetworkRequestEvent(
+              timestamp = 7001L,
+              url = "https://api.example.com",
+              method = "POST",
+              statusCode = 201,
+            ),
+            SdkLogEvent(
+              timestamp = 7002L,
+              level = 5,
+              tag = "MyTag",
+              message = "Warning",
+            ),
+          ),
+      )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), batch)
     assertTrue(encoded.contains(""""type":"event_batch""""))
@@ -163,19 +163,19 @@ class TelemetryEventTest {
   @Test
   fun `SdkEventSerializer roundtrip for all new types`() {
     val events =
-        listOf<SdkEvent>(
-            SdkNetworkRequestEvent(timestamp = 1L, url = "https://x.com", method = "GET"),
-            SdkWebSocketFrameEvent(
-                timestamp = 2L,
-                connectionId = "c1",
-                url = "wss://x.com",
-                direction = WebSocketFrameDirection.SENT,
-                frameType = WebSocketFrameType.BINARY,
-            ),
-            SdkLogEvent(timestamp = 3L, level = 6, tag = "E", message = "err"),
-            SdkBroadcastEvent(timestamp = 4L, action = "A"),
-            SdkLifecycleEvent(timestamp = 5L, kind = "background"),
-        )
+      listOf<SdkEvent>(
+        SdkNetworkRequestEvent(timestamp = 1L, url = "https://x.com", method = "GET"),
+        SdkWebSocketFrameEvent(
+          timestamp = 2L,
+          connectionId = "c1",
+          url = "wss://x.com",
+          direction = WebSocketFrameDirection.SENT,
+          frameType = WebSocketFrameType.BINARY,
+        ),
+        SdkLogEvent(timestamp = 3L, level = 6, tag = "E", message = "err"),
+        SdkBroadcastEvent(timestamp = 4L, action = "A"),
+        SdkLifecycleEvent(timestamp = 5L, kind = "background"),
+      )
 
     for (event in events) {
       val j = SdkEventSerializer.toJson(event)
@@ -188,40 +188,40 @@ class TelemetryEventTest {
   @Test
   fun `getEventType returns correct type for new events`() {
     assertEquals(
-        "network_request",
-        SdkEventSerializer.getEventType(
-            SdkNetworkRequestEvent(timestamp = 1L, url = "u", method = "GET")
-        ),
+      "network_request",
+      SdkEventSerializer.getEventType(
+        SdkNetworkRequestEvent(timestamp = 1L, url = "u", method = "GET")
+      ),
     )
     assertEquals(
-        "websocket_frame",
-        SdkEventSerializer.getEventType(
-            SdkWebSocketFrameEvent(
-                timestamp = 1L,
-                connectionId = "c",
-                url = "u",
-                direction = WebSocketFrameDirection.SENT,
-                frameType = WebSocketFrameType.TEXT,
-            )
-        ),
+      "websocket_frame",
+      SdkEventSerializer.getEventType(
+        SdkWebSocketFrameEvent(
+          timestamp = 1L,
+          connectionId = "c",
+          url = "u",
+          direction = WebSocketFrameDirection.SENT,
+          frameType = WebSocketFrameType.TEXT,
+        )
+      ),
     )
     assertEquals(
-        "log",
-        SdkEventSerializer.getEventType(
-            SdkLogEvent(timestamp = 1L, level = 3, tag = "T", message = "M")
-        ),
+      "log",
+      SdkEventSerializer.getEventType(
+        SdkLogEvent(timestamp = 1L, level = 3, tag = "T", message = "M")
+      ),
     )
     assertEquals(
-        "broadcast",
-        SdkEventSerializer.getEventType(SdkBroadcastEvent(timestamp = 1L, action = "A")),
+      "broadcast",
+      SdkEventSerializer.getEventType(SdkBroadcastEvent(timestamp = 1L, action = "A")),
     )
     assertEquals(
-        "lifecycle",
-        SdkEventSerializer.getEventType(SdkLifecycleEvent(timestamp = 1L, kind = "foreground")),
+      "lifecycle",
+      SdkEventSerializer.getEventType(SdkLifecycleEvent(timestamp = 1L, kind = "foreground")),
     )
     assertEquals(
-        "event_batch",
-        SdkEventSerializer.getEventType(SdkEventBatch(timestamp = 1L, events = emptyList())),
+      "event_batch",
+      SdkEventSerializer.getEventType(SdkEventBatch(timestamp = 1L, events = emptyList())),
     )
   }
 }

@@ -17,11 +17,11 @@ const val MIN_EXECUTE_PLAN_TIMEOUT_MS: Long = 600_000L
 
 /** Configuration options for AutoMobile plan execution. */
 data class AutoMobilePlanExecutionOptions(
-    val timeoutMs: Long = MIN_EXECUTE_PLAN_TIMEOUT_MS,
-    val device: String = "auto",
-    val aiAssistance: Boolean = true,
-    val maxRetries: Int = 0,
-    val debugMode: Boolean = System.getProperty("automobile.debug", "false").toBoolean(),
+  val timeoutMs: Long = MIN_EXECUTE_PLAN_TIMEOUT_MS,
+  val device: String = "auto",
+  val aiAssistance: Boolean = true,
+  val maxRetries: Int = 0,
+  val debugMode: Boolean = System.getProperty("automobile.debug", "false").toBoolean(),
 )
 
 /**
@@ -29,19 +29,19 @@ data class AutoMobilePlanExecutionOptions(
  * [MIN_EXECUTE_PLAN_TIMEOUT_MS]).
  */
 fun AutoMobilePlanExecutionOptions.effectiveExecutePlanTimeoutMs(): Long =
-    maxOf(timeoutMs, MIN_EXECUTE_PLAN_TIMEOUT_MS)
+  maxOf(timeoutMs, MIN_EXECUTE_PLAN_TIMEOUT_MS)
 
 /** Result of AutoMobile plan execution. */
 data class AutoMobilePlanExecutionResult(
-    val success: Boolean,
-    val exitCode: Int,
-    val output: String = "",
-    val errorMessage: String = "",
-    val executionTimeMs: Long = 0L,
-    val aiRecoveryAttempted: Boolean = false,
-    val aiRecoverySuccessful: Boolean = false,
-    val parametersUsed: Map<String, Any> = emptyMap(),
-    val toolResults: List<ToolResultEntry> = emptyList(),
+  val success: Boolean,
+  val exitCode: Int,
+  val output: String = "",
+  val errorMessage: String = "",
+  val executionTimeMs: Long = 0L,
+  val aiRecoveryAttempted: Boolean = false,
+  val aiRecoverySuccessful: Boolean = false,
+  val parametersUsed: Map<String, Any> = emptyMap(),
+  val toolResults: List<ToolResultEntry> = emptyList(),
 ) {
   /** Get tool result by step index. */
   fun getToolResult(stepIndex: Int): ToolResult? {

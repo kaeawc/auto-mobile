@@ -13,10 +13,10 @@ package dev.jasonpearson.automobile.sdk.logging
  *   [android.util.Log.VERBOSE]).
  */
 data class CompiledLogFilter(
-    val name: String,
-    val tagPattern: Regex? = null,
-    val messagePattern: Regex? = null,
-    val minLevel: Int = android.util.Log.VERBOSE,
+  val name: String,
+  val tagPattern: Regex? = null,
+  val messagePattern: Regex? = null,
+  val minLevel: Int = android.util.Log.VERBOSE,
 ) {
   /** Returns `true` when the given [tag], [message], and [level] satisfy this filter. */
   fun matches(tag: String, message: String, level: Int): Boolean {

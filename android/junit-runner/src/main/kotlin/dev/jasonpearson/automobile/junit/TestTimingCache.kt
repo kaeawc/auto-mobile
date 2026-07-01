@@ -14,31 +14,31 @@ import kotlinx.serialization.json.jsonPrimitive
 
 @Serializable
 internal data class TestTimingStatusCounts(
-    val passed: Int = 0,
-    val failed: Int = 0,
-    val skipped: Int = 0,
+  val passed: Int = 0,
+  val failed: Int = 0,
+  val skipped: Int = 0,
 )
 
 @Serializable
 internal data class TestTimingEntry(
-    val testClass: String,
-    val testMethod: String,
-    val averageDurationMs: Int = 0,
-    val sampleSize: Int = 0,
-    val lastRun: String? = null,
-    val lastRunTimestampMs: Long? = null,
-    val successRate: Double? = null,
-    val failureRate: Double? = null,
-    val stdDevDurationMs: Int? = null,
-    val statusCounts: TestTimingStatusCounts? = null,
+  val testClass: String,
+  val testMethod: String,
+  val averageDurationMs: Int = 0,
+  val sampleSize: Int = 0,
+  val lastRun: String? = null,
+  val lastRunTimestampMs: Long? = null,
+  val successRate: Double? = null,
+  val failureRate: Double? = null,
+  val stdDevDurationMs: Int? = null,
+  val statusCounts: TestTimingStatusCounts? = null,
 )
 
 @Serializable
 internal data class TestTimingSummary(
-    val testTimings: List<TestTimingEntry> = emptyList(),
-    val generatedAt: String? = null,
-    val totalTests: Int = 0,
-    val totalSamples: Int = 0,
+  val testTimings: List<TestTimingEntry> = emptyList(),
+  val generatedAt: String? = null,
+  val totalTests: Int = 0,
+  val totalSamples: Int = 0,
 )
 
 internal data class TestTimingKey(val testClass: String, val testMethod: String)
@@ -143,13 +143,13 @@ internal object TestTimingCache {
     }
 
     addParam(
-        "lookbackDays",
-        resolvePositiveIntProperty("automobile.junit.timing.lookback.days", DEFAULT_LOOKBACK_DAYS)
-            .toString(),
+      "lookbackDays",
+      resolvePositiveIntProperty("automobile.junit.timing.lookback.days", DEFAULT_LOOKBACK_DAYS)
+        .toString(),
     )
     addParam(
-        "limit",
-        resolvePositiveIntProperty("automobile.junit.timing.limit", DEFAULT_LIMIT).toString(),
+      "limit",
+      resolvePositiveIntProperty("automobile.junit.timing.limit", DEFAULT_LIMIT).toString(),
     )
     addParam("minSamples", resolveMinSamples().toString())
     addParam("devicePlatform", "android")
@@ -168,11 +168,11 @@ internal object TestTimingCache {
 
   private fun resolveMinSamples(): Int {
     val value =
-        SystemPropertyCache.get(
-                "automobile.junit.timing.min.samples",
-                DEFAULT_MIN_SAMPLES.toString(),
-            )
-            .toIntOrNull()
+      SystemPropertyCache.get(
+          "automobile.junit.timing.min.samples",
+          DEFAULT_MIN_SAMPLES.toString(),
+        )
+        .toIntOrNull()
     return when {
       value == null -> DEFAULT_MIN_SAMPLES
       value < 0 -> 0
@@ -187,11 +187,11 @@ internal object TestTimingCache {
 
   private fun resolveTimeoutMs(): Long {
     val value =
-        SystemPropertyCache.get(
-                "automobile.junit.timing.fetch.timeout.ms",
-                DEFAULT_TIMEOUT_MS.toString(),
-            )
-            .toLongOrNull()
+      SystemPropertyCache.get(
+          "automobile.junit.timing.fetch.timeout.ms",
+          DEFAULT_TIMEOUT_MS.toString(),
+        )
+        .toLongOrNull()
     return if (value != null && value > 0) value else DEFAULT_TIMEOUT_MS
   }
 
@@ -211,5 +211,5 @@ internal object TestTimingCache {
   }
 
   private fun encodeQueryParam(value: String): String =
-      URLEncoder.encode(value, StandardCharsets.UTF_8.name())
+    URLEncoder.encode(value, StandardCharsets.UTF_8.name())
 }

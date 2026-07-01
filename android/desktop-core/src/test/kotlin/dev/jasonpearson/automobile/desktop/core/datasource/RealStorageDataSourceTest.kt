@@ -29,11 +29,11 @@ class RealStorageDataSourceTest {
   fun `getKeyValueFiles returns error when no deviceId`() = runBlocking {
     val client = FakeAutoMobileClient()
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = null,
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = null,
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.getKeyValueFiles()
 
@@ -45,11 +45,11 @@ class RealStorageDataSourceTest {
   fun `getKeyValueFiles returns error when no packageName`() = runBlocking {
     val client = FakeAutoMobileClient()
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = null,
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = null,
+      )
 
     val result = dataSource.getKeyValueFiles()
 
@@ -64,45 +64,45 @@ class RealStorageDataSourceTest {
     // Set up files response
     val filesUri = "automobile:devices/emulator-5554/storage/com.example.app/files"
     val filesResponse =
-        """
-        {
-            "deviceId": "emulator-5554",
-            "packageName": "com.example.app",
-            "files": [
-                {"name": "app_prefs", "path": "/data/data/com.example.app/shared_prefs/app_prefs.xml", "entryCount": 2}
-            ],
-            "totalCount": 1,
-            "lastUpdated": "2025-01-01T00:00:00Z"
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "deviceId": "emulator-5554",
+          "packageName": "com.example.app",
+          "files": [
+              {"name": "app_prefs", "path": "/data/data/com.example.app/shared_prefs/app_prefs.xml", "entryCount": 2}
+          ],
+          "totalCount": 1,
+          "lastUpdated": "2025-01-01T00:00:00Z"
+      }
+      """
+        .trimIndent()
     client.setResourceResponseWithText(filesUri, filesResponse)
 
     // Set up entries response
     val entriesUri = "automobile:devices/emulator-5554/storage/com.example.app/app_prefs/entries"
     val entriesResponse =
-        """
-        {
-            "deviceId": "emulator-5554",
-            "packageName": "com.example.app",
-            "fileName": "app_prefs",
-            "entries": [
-                {"key": "user_id", "value": "12345", "type": "LONG"},
-                {"key": "dark_mode", "value": "true", "type": "BOOLEAN"}
-            ],
-            "totalCount": 2,
-            "lastUpdated": "2025-01-01T00:00:00Z"
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "deviceId": "emulator-5554",
+          "packageName": "com.example.app",
+          "fileName": "app_prefs",
+          "entries": [
+              {"key": "user_id", "value": "12345", "type": "LONG"},
+              {"key": "dark_mode", "value": "true", "type": "BOOLEAN"}
+          ],
+          "totalCount": 2,
+          "lastUpdated": "2025-01-01T00:00:00Z"
+      }
+      """
+        .trimIndent()
     client.setResourceResponseWithText(entriesUri, entriesResponse)
 
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.getKeyValueFiles()
 
@@ -131,11 +131,11 @@ class RealStorageDataSourceTest {
     client.throwOnReadResource = McpConnectionException("Connection failed")
 
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.getKeyValueFiles()
 
@@ -149,20 +149,20 @@ class RealStorageDataSourceTest {
 
     val filesUri = "automobile:devices/emulator-5554/storage/com.example.app/files"
     val filesResponse =
-        """
-        {
-            "error": "Device not connected"
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "error": "Device not connected"
+      }
+      """
+        .trimIndent()
     client.setResourceResponseWithText(filesUri, filesResponse)
 
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.getKeyValueFiles()
 
@@ -176,24 +176,24 @@ class RealStorageDataSourceTest {
 
     val filesUri = "automobile:devices/emulator-5554/storage/com.example.app/files"
     val filesResponse =
-        """
-        {
-            "deviceId": "emulator-5554",
-            "packageName": "com.example.app",
-            "files": [],
-            "totalCount": 0,
-            "lastUpdated": "2025-01-01T00:00:00Z"
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "deviceId": "emulator-5554",
+          "packageName": "com.example.app",
+          "files": [],
+          "totalCount": 0,
+          "lastUpdated": "2025-01-01T00:00:00Z"
+      }
+      """
+        .trimIndent()
     client.setResourceResponseWithText(filesUri, filesResponse)
 
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.getKeyValueFiles()
 
@@ -207,40 +207,40 @@ class RealStorageDataSourceTest {
 
     val filesUri = "automobile:devices/emulator-5554/storage/com.example.app/files"
     val filesResponse =
-        """
-        {
-            "deviceId": "emulator-5554",
-            "packageName": "com.example.app",
-            "files": [{"name": "prefs", "path": "/path/prefs.xml", "entryCount": 6}],
-            "totalCount": 1
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "deviceId": "emulator-5554",
+          "packageName": "com.example.app",
+          "files": [{"name": "prefs", "path": "/path/prefs.xml", "entryCount": 6}],
+          "totalCount": 1
+      }
+      """
+        .trimIndent()
     client.setResourceResponseWithText(filesUri, filesResponse)
 
     val entriesUri = "automobile:devices/emulator-5554/storage/com.example.app/prefs/entries"
     val entriesResponse =
-        """
-        {
-            "entries": [
-                {"key": "str_key", "value": "hello", "type": "STRING"},
-                {"key": "int_key", "value": "42", "type": "INT"},
-                {"key": "long_key", "value": "9999999999", "type": "LONG"},
-                {"key": "float_key", "value": "3.14", "type": "FLOAT"},
-                {"key": "bool_key", "value": "false", "type": "BOOLEAN"},
-                {"key": "unknown_key", "value": "???", "type": "CUSTOM"}
-            ]
-        }
-        """
-            .trimIndent()
+      """
+      {
+          "entries": [
+              {"key": "str_key", "value": "hello", "type": "STRING"},
+              {"key": "int_key", "value": "42", "type": "INT"},
+              {"key": "long_key", "value": "9999999999", "type": "LONG"},
+              {"key": "float_key", "value": "3.14", "type": "FLOAT"},
+              {"key": "bool_key", "value": "false", "type": "BOOLEAN"},
+              {"key": "unknown_key", "value": "???", "type": "CUSTOM"}
+          ]
+      }
+      """
+        .trimIndent()
     client.setResourceResponseWithText(entriesUri, entriesResponse)
 
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.getKeyValueFiles()
 
@@ -279,11 +279,11 @@ class RealStorageDataSourceTest {
   fun `getDatabases returns error when no deviceId`() = runBlocking {
     val client = FakeAutoMobileClient()
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = null,
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = null,
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.getDatabases()
 
@@ -295,11 +295,11 @@ class RealStorageDataSourceTest {
   fun `getDatabases returns error when no packageName`() = runBlocking {
     val client = FakeAutoMobileClient()
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = null,
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = null,
+      )
 
     val result = dataSource.getDatabases()
 
@@ -313,54 +313,54 @@ class RealStorageDataSourceTest {
 
     val dbsUri = "automobile:devices/emulator-5554/databases?appId=com.example.app"
     client.setResourceResponseWithText(
-        dbsUri,
-        """
-        {
-            "deviceId": "emulator-5554",
-            "appId": "com.example.app",
-            "databases": [
-                {"name": "sessions.db", "path": "/data/data/com.example.app/databases/sessions.db"}
-            ],
-            "totalCount": 1
-        }
-        """
-            .trimIndent(),
+      dbsUri,
+      """
+      {
+          "deviceId": "emulator-5554",
+          "appId": "com.example.app",
+          "databases": [
+              {"name": "sessions.db", "path": "/data/data/com.example.app/databases/sessions.db"}
+          ],
+          "totalCount": 1
+      }
+      """
+        .trimIndent(),
     )
 
     val tablesUri =
-        "automobile:devices/emulator-5554/databases/%2Fdata%2Fdata%2Fcom.example.app%2Fdatabases%2Fsessions.db/tables?appId=com.example.app"
+      "automobile:devices/emulator-5554/databases/%2Fdata%2Fdata%2Fcom.example.app%2Fdatabases%2Fsessions.db/tables?appId=com.example.app"
     client.setResourceResponseWithText(
-        tablesUri,
-        """
-        {
-            "tables": ["sessions"],
-            "totalCount": 1
-        }
-        """
-            .trimIndent(),
+      tablesUri,
+      """
+      {
+          "tables": ["sessions"],
+          "totalCount": 1
+      }
+      """
+        .trimIndent(),
     )
 
     val structUri =
-        "automobile:devices/emulator-5554/databases/%2Fdata%2Fdata%2Fcom.example.app%2Fdatabases%2Fsessions.db/tables/sessions/structure?appId=com.example.app"
+      "automobile:devices/emulator-5554/databases/%2Fdata%2Fdata%2Fcom.example.app%2Fdatabases%2Fsessions.db/tables/sessions/structure?appId=com.example.app"
     client.setResourceResponseWithText(
-        structUri,
-        """
-        {
-            "columns": [
-                {"name": "id", "type": "INTEGER", "nullable": false, "primaryKey": true, "defaultValue": null},
-                {"name": "session_id", "type": "TEXT", "nullable": false, "primaryKey": false, "defaultValue": null}
-            ]
-        }
-        """
-            .trimIndent(),
+      structUri,
+      """
+      {
+          "columns": [
+              {"name": "id", "type": "INTEGER", "nullable": false, "primaryKey": true, "defaultValue": null},
+              {"name": "session_id", "type": "TEXT", "nullable": false, "primaryKey": false, "defaultValue": null}
+          ]
+      }
+      """
+        .trimIndent(),
     )
 
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.getDatabases()
 
@@ -395,11 +395,11 @@ class RealStorageDataSourceTest {
   fun `setKeyValue returns error when no deviceId`() = runBlocking {
     val client = FakeAutoMobileClient()
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = null,
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = null,
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.setKeyValue("prefs", "key1", "value1", KeyValueType.String)
 
@@ -411,11 +411,11 @@ class RealStorageDataSourceTest {
   fun `setKeyValue returns error when no packageName`() = runBlocking {
     val client = FakeAutoMobileClient()
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = null,
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = null,
+      )
 
     val result = dataSource.setKeyValue("prefs", "key1", "value1", KeyValueType.String)
 
@@ -427,11 +427,11 @@ class RealStorageDataSourceTest {
   fun `setKeyValue succeeds and passes correct arguments`() = runBlocking {
     val client = FakeAutoMobileClient()
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.setKeyValue("app_prefs", "theme", "dark", KeyValueType.String)
 
@@ -449,11 +449,11 @@ class RealStorageDataSourceTest {
   fun `setKeyValue passes null value correctly`() = runBlocking {
     val client = FakeAutoMobileClient()
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.setKeyValue("app_prefs", "theme", null, KeyValueType.String)
 
@@ -466,11 +466,11 @@ class RealStorageDataSourceTest {
     val client = FakeAutoMobileClient()
     client.setKeyValueResult = SetKeyValueResult(success = false, message = "Write failed")
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.setKeyValue("app_prefs", "key", "val", KeyValueType.String)
 
@@ -494,11 +494,11 @@ class RealStorageDataSourceTest {
   fun `removeKeyValue succeeds and passes correct arguments`() = runBlocking {
     val client = FakeAutoMobileClient()
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.removeKeyValue("app_prefs", "old_key")
 
@@ -515,11 +515,11 @@ class RealStorageDataSourceTest {
     val client = FakeAutoMobileClient()
     client.removeKeyValueResult = RemoveKeyValueResult(success = false, message = "Key not found")
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.removeKeyValue("app_prefs", "missing_key")
 
@@ -543,11 +543,11 @@ class RealStorageDataSourceTest {
   fun `clearKeyValueFile succeeds and passes correct arguments`() = runBlocking {
     val client = FakeAutoMobileClient()
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.clearKeyValueFile("app_prefs")
 
@@ -562,13 +562,13 @@ class RealStorageDataSourceTest {
   fun `clearKeyValueFile returns error when client reports failure`() = runBlocking {
     val client = FakeAutoMobileClient()
     client.clearKeyValueFileResult =
-        ClearKeyValueResult(success = false, message = "Permission denied")
+      ClearKeyValueResult(success = false, message = "Permission denied")
     val dataSource =
-        RealStorageDataSource(
-            clientProvider = { client },
-            deviceId = "emulator-5554",
-            packageName = "com.example.app",
-        )
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
 
     val result = dataSource.clearKeyValueFile("app_prefs")
 

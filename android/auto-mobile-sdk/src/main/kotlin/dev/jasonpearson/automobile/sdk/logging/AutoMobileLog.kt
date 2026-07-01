@@ -30,10 +30,10 @@ object AutoMobileLog {
    * @param minLevel Minimum [android.util.Log] priority (default [Log.VERBOSE]).
    */
   fun addFilter(
-      name: String,
-      tagPattern: Regex? = null,
-      messagePattern: Regex? = null,
-      minLevel: Int = Log.VERBOSE,
+    name: String,
+    tagPattern: Regex? = null,
+    messagePattern: Regex? = null,
+    minLevel: Int = Log.VERBOSE,
   ) {
     val filter = CompiledLogFilter(name, tagPattern, messagePattern, minLevel)
     synchronized(lock) { filters[name] = filter }

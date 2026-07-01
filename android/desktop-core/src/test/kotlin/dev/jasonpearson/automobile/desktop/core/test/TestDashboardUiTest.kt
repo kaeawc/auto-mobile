@@ -15,68 +15,68 @@ import org.junit.Test
 class TestDashboardUiTest {
 
   private val sampleTestRuns =
-      listOf(
-          TestRun(
-              id = "run1",
-              testId = "test1",
-              testName = "testLoginFlow",
-              status = TestStatus.Passed,
-              startTime = 1705003600000L,
-              durationMs = 4320,
-              steps =
-                  listOf(
-                      TestStep(
-                          "s1",
-                          0,
-                          "launch",
-                          "com.app",
-                          null,
-                          "Splash",
-                          800,
-                          TestStatus.Passed,
-                      ),
-                      TestStep(
-                          "s2",
-                          1,
-                          "tap",
-                          "Login button",
-                          null,
-                          "Login",
-                          290,
-                          TestStatus.Passed,
-                      ),
-                  ),
-              screensVisited = listOf("Splash", "Login", "Home"),
-              deviceId = "pixel8",
-              deviceName = "Pixel 8 API 35",
-              platform = TestPlatform.Android,
+    listOf(
+      TestRun(
+        id = "run1",
+        testId = "test1",
+        testName = "testLoginFlow",
+        status = TestStatus.Passed,
+        startTime = 1705003600000L,
+        durationMs = 4320,
+        steps =
+          listOf(
+            TestStep(
+              "s1",
+              0,
+              "launch",
+              "com.app",
+              null,
+              "Splash",
+              800,
+              TestStatus.Passed,
+            ),
+            TestStep(
+              "s2",
+              1,
+              "tap",
+              "Login button",
+              null,
+              "Login",
+              290,
+              TestStatus.Passed,
+            ),
           ),
-          TestRun(
-              id = "run2",
-              testId = "test2",
-              testName = "testSignupValidation",
-              status = TestStatus.Failed,
-              startTime = 1705003500000L,
-              durationMs = 2890,
-              steps = emptyList(),
-              screensVisited = listOf("Splash", "Login", "Signup"),
-              errorMessage = "AssertionError: Expected error toast not found",
-              deviceId = "pixel8",
-              deviceName = "Pixel 8 API 35",
-              platform = TestPlatform.Android,
-          ),
-      )
+        screensVisited = listOf("Splash", "Login", "Home"),
+        deviceId = "pixel8",
+        deviceName = "Pixel 8 API 35",
+        platform = TestPlatform.Android,
+      ),
+      TestRun(
+        id = "run2",
+        testId = "test2",
+        testName = "testSignupValidation",
+        status = TestStatus.Failed,
+        startTime = 1705003500000L,
+        durationMs = 2890,
+        steps = emptyList(),
+        screensVisited = listOf("Splash", "Login", "Signup"),
+        errorMessage = "AssertionError: Expected error toast not found",
+        deviceId = "pixel8",
+        deviceName = "Pixel 8 API 35",
+        platform = TestPlatform.Android,
+      ),
+    )
 
   @Test
   fun `shows loading state`() = runComposeUiTest {
     setContent {
       MaterialTheme {
         TestDashboardHome(
-            testRuns = emptyList(),
-            isLoading = true,
-            error = null,
-            onRecordTest = {},
-            onTestRunClick = {},
+          testRuns = emptyList(),
+          isLoading = true,
+          error = null,
+          onRecordTest = {},
+          onTestRunClick = {},
         )
       }
     }
@@ -88,11 +88,11 @@ class TestDashboardUiTest {
     setContent {
       MaterialTheme {
         TestDashboardHome(
-            testRuns = emptyList(),
-            isLoading = false,
-            error = "Connection refused",
-            onRecordTest = {},
-            onTestRunClick = {},
+          testRuns = emptyList(),
+          isLoading = false,
+          error = "Connection refused",
+          onRecordTest = {},
+          onTestRunClick = {},
         )
       }
     }
@@ -104,11 +104,11 @@ class TestDashboardUiTest {
     setContent {
       MaterialTheme {
         TestDashboardHome(
-            testRuns = emptyList(),
-            isLoading = false,
-            error = null,
-            onRecordTest = {},
-            onTestRunClick = {},
+          testRuns = emptyList(),
+          isLoading = false,
+          error = null,
+          onRecordTest = {},
+          onTestRunClick = {},
         )
       }
     }
@@ -121,11 +121,11 @@ class TestDashboardUiTest {
     setContent {
       MaterialTheme {
         TestDashboardHome(
-            testRuns = emptyList(),
-            isLoading = false,
-            error = null,
-            onRecordTest = {},
-            onTestRunClick = {},
+          testRuns = emptyList(),
+          isLoading = false,
+          error = null,
+          onRecordTest = {},
+          onTestRunClick = {},
         )
       }
     }
@@ -138,11 +138,11 @@ class TestDashboardUiTest {
     setContent {
       MaterialTheme {
         TestDashboardHome(
-            testRuns = sampleTestRuns,
-            isLoading = false,
-            error = null,
-            onRecordTest = {},
-            onTestRunClick = {},
+          testRuns = sampleTestRuns,
+          isLoading = false,
+          error = null,
+          onRecordTest = {},
+          onTestRunClick = {},
         )
       }
     }
@@ -155,11 +155,11 @@ class TestDashboardUiTest {
     setContent {
       MaterialTheme {
         TestDashboardHome(
-            testRuns = sampleTestRuns,
-            isLoading = false,
-            error = null,
-            onRecordTest = {},
-            onTestRunClick = {},
+          testRuns = sampleTestRuns,
+          isLoading = false,
+          error = null,
+          onRecordTest = {},
+          onTestRunClick = {},
         )
       }
     }
@@ -172,11 +172,11 @@ class TestDashboardUiTest {
     setContent {
       MaterialTheme {
         TestDashboardHome(
-            testRuns = sampleTestRuns,
-            isLoading = false,
-            error = null,
-            onRecordTest = {},
-            onTestRunClick = {},
+          testRuns = sampleTestRuns,
+          isLoading = false,
+          error = null,
+          onRecordTest = {},
+          onTestRunClick = {},
         )
       }
     }
@@ -189,11 +189,11 @@ class TestDashboardUiTest {
     setContent {
       MaterialTheme {
         TestDashboardHome(
-            testRuns = sampleTestRuns,
-            isLoading = false,
-            error = null,
-            onRecordTest = {},
-            onTestRunClick = {},
+          testRuns = sampleTestRuns,
+          isLoading = false,
+          error = null,
+          onRecordTest = {},
+          onTestRunClick = {},
         )
       }
     }
@@ -207,11 +207,11 @@ class TestDashboardUiTest {
     setContent {
       MaterialTheme {
         TestDashboardHome(
-            testRuns = sampleTestRuns,
-            isLoading = false,
-            error = null,
-            onRecordTest = {},
-            onTestRunClick = {},
+          testRuns = sampleTestRuns,
+          isLoading = false,
+          error = null,
+          onRecordTest = {},
+          onTestRunClick = {},
         )
       }
     }

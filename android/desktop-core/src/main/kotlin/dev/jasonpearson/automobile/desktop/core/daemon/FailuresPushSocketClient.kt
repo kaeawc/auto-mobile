@@ -75,11 +75,11 @@ class FailuresPushSocketClient {
 
   // Flow for live failure notifications
   private val _failureNotifications =
-      MutableSharedFlow<FailureNotification>(
-          replay = 1,
-          extraBufferCapacity = 50,
-          onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-      )
+    MutableSharedFlow<FailureNotification>(
+      replay = 1,
+      extraBufferCapacity = 50,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
   val failureNotifications: SharedFlow<FailureNotification> = _failureNotifications.asSharedFlow()
 
   /**
@@ -122,13 +122,13 @@ class FailuresPushSocketClient {
         val address = UnixDomainSocketAddress.of(socketPath)
         channel = SocketChannel.open(address)
         reader =
-            BufferedReader(
-                InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
-            )
+          BufferedReader(
+            InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
+          )
         writer =
-            BufferedWriter(
-                OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
-            )
+          BufferedWriter(
+            OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
+          )
 
         _state.update { ConnectionState.Connected(subscribed = false) }
         attempt = 0
@@ -159,7 +159,7 @@ class FailuresPushSocketClient {
         val delayMs = calculateBackoff(attempt)
 
         log.warn(
-            "Failed to connect to failures push (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms"
+          "Failed to connect to failures push (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms"
         )
         _state.update { ConnectionState.Reconnecting(attempt, delayMs) }
 
@@ -196,10 +196,10 @@ class FailuresPushSocketClient {
     try {
       if (previousState.subscribed) {
         val request =
-            FailuresPushRequest(
-                id = UUID.randomUUID().toString(),
-                command = "unsubscribe",
-            )
+          FailuresPushRequest(
+            id = UUID.randomUUID().toString(),
+            command = "unsubscribe",
+          )
         sendRequest(request)
       }
 
@@ -226,12 +226,12 @@ class FailuresPushSocketClient {
 
   private fun subscribe(type: String?, severity: String?) {
     val request =
-        FailuresPushRequest(
-            id = UUID.randomUUID().toString(),
-            command = "subscribe",
-            type = type,
-            severity = severity,
-        )
+      FailuresPushRequest(
+        id = UUID.randomUUID().toString(),
+        command = "subscribe",
+        type = type,
+        severity = severity,
+      )
 
     if (sendRequest(request)) {
       _state.update { current ->
@@ -242,7 +242,7 @@ class FailuresPushSocketClient {
         }
       }
       log.info(
-          "Subscribed to failures push (type: ${type ?: "all"}, severity: ${severity ?: "all"})"
+        "Subscribed to failures push (type: ${type ?: "all"}, severity: ${severity ?: "all"})"
       )
     }
   }
@@ -328,39 +328,39 @@ class FailuresPushSocketClient {
 
   private fun sendPong() {
     val request =
-        FailuresPushRequest(
-            id = UUID.randomUUID().toString(),
-            command = "pong",
-        )
+      FailuresPushRequest(
+        id = UUID.randomUUID().toString(),
+        command = "pong",
+      )
     sendRequest(request)
   }
 }
 
 @Serializable
 data class FailuresPushRequest(
-    val id: String,
-    val command: String,
-    val type: String? = null,
-    val severity: String? = null,
+  val id: String,
+  val command: String,
+  val type: String? = null,
+  val severity: String? = null,
 )
 
 @Serializable
 data class FailuresPushResponse(
-    val id: String? = null,
-    val type: String,
-    val success: Boolean? = null,
-    val error: String? = null,
-    val timestamp: Long? = null,
-    val data: FailureNotification? = null,
+  val id: String? = null,
+  val type: String,
+  val success: Boolean? = null,
+  val error: String? = null,
+  val timestamp: Long? = null,
+  val data: FailureNotification? = null,
 )
 
 @Serializable
 data class FailureNotification(
-    val occurrenceId: String,
-    val groupId: String,
-    val type: String, // "crash" | "anr" | "tool_failure" | "nonfatal"
-    val severity: String, // "low" | "medium" | "high" | "critical"
-    val title: String,
-    val message: String,
-    val timestamp: Long,
+  val occurrenceId: String,
+  val groupId: String,
+  val type: String, // "crash" | "anr" | "tool_failure" | "nonfatal"
+  val severity: String, // "low" | "medium" | "high" | "critical"
+  val title: String,
+  val message: String,
+  val timestamp: Long,
 )

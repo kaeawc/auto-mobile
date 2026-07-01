@@ -48,9 +48,9 @@ sealed class OnboardingPage {
   data class Emoji(val title: String, val description: String, val emoji: String) : OnboardingPage()
 
   data class Drawable(
-      val title: String,
-      val description: String,
-      @DrawableRes val drawableResId: Int,
+    val title: String,
+    val description: String,
+    @DrawableRes val drawableResId: Int,
   ) : OnboardingPage()
 }
 
@@ -59,49 +59,45 @@ sealed class OnboardingPage {
 fun OnboardingScreen(onFinish: () -> Unit) {
   TrackRecomposition(id = "screen.onboarding", composableName = "OnboardingScreen") {
     val pages: List<OnboardingPage> =
-        listOf(
-            OnboardingPage.Drawable(
-                title = stringResource(id = R.string.onboarding_welcome_title),
-                description = stringResource(id = R.string.onboarding_welcome_description),
-                drawableResId =
-                    dev.jasonpearson.automobile.design.assets.R.drawable.automobile_logo,
-            ),
-            OnboardingPage.Emoji(
-                title = stringResource(id = R.string.onboarding_source_intelligence_title),
-                description =
-                    stringResource(id = R.string.onboarding_source_intelligence_description),
-                emoji = stringResource(id = R.string.onboarding_source_intelligence_emoji),
-            ),
-            OnboardingPage.Emoji(
-                title = stringResource(id = R.string.onboarding_gestures_title),
-                description = stringResource(id = R.string.onboarding_gestures_description),
-                emoji = stringResource(id = R.string.onboarding_gestures_emoji),
-            ),
-            OnboardingPage.Emoji(
-                title = stringResource(id = R.string.onboarding_automation_title),
-                description = stringResource(id = R.string.onboarding_automation_description),
-                emoji = stringResource(id = R.string.onboarding_automation_emoji),
-            ),
-            OnboardingPage.Emoji(
-                title = stringResource(id = R.string.onboarding_opensource_title),
-                description = stringResource(id = R.string.onboarding_opensource_description),
-                emoji = stringResource(id = R.string.onboarding_opensource_emoji),
-            ),
-        )
+      listOf(
+        OnboardingPage.Drawable(
+          title = stringResource(id = R.string.onboarding_welcome_title),
+          description = stringResource(id = R.string.onboarding_welcome_description),
+          drawableResId = dev.jasonpearson.automobile.design.assets.R.drawable.automobile_logo,
+        ),
+        OnboardingPage.Emoji(
+          title = stringResource(id = R.string.onboarding_source_intelligence_title),
+          description = stringResource(id = R.string.onboarding_source_intelligence_description),
+          emoji = stringResource(id = R.string.onboarding_source_intelligence_emoji),
+        ),
+        OnboardingPage.Emoji(
+          title = stringResource(id = R.string.onboarding_gestures_title),
+          description = stringResource(id = R.string.onboarding_gestures_description),
+          emoji = stringResource(id = R.string.onboarding_gestures_emoji),
+        ),
+        OnboardingPage.Emoji(
+          title = stringResource(id = R.string.onboarding_automation_title),
+          description = stringResource(id = R.string.onboarding_automation_description),
+          emoji = stringResource(id = R.string.onboarding_automation_emoji),
+        ),
+        OnboardingPage.Emoji(
+          title = stringResource(id = R.string.onboarding_opensource_title),
+          description = stringResource(id = R.string.onboarding_opensource_description),
+          emoji = stringResource(id = R.string.onboarding_opensource_emoji),
+        ),
+      )
 
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val coroutineScope = rememberCoroutineScope()
 
     Column(
-        modifier =
-            Modifier.fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
-                .safeDrawingPadding()
+      modifier =
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()
     ) {
       // Skip button
       Row(
-          modifier = Modifier.fillMaxWidth().padding(16.dp),
-          horizontalArrangement = Arrangement.End,
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        horizontalArrangement = Arrangement.End,
       ) {
         if (pagerState.currentPage < pages.size - 1) {
           TextButton(onClick = onFinish) { Text(stringResource(id = R.string.onboarding_skip)) }
@@ -115,30 +111,30 @@ fun OnboardingScreen(onFinish: () -> Unit) {
 
       // Bottom navigation
       Column(
-          modifier = Modifier.padding(24.dp),
-          horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
       ) {
         // Page indicators
         PageIndicators(
-            pageCount = pages.size,
-            currentPage = pagerState.currentPage,
-            modifier = Modifier.padding(bottom = 24.dp),
+          pageCount = pages.size,
+          currentPage = pagerState.currentPage,
+          modifier = Modifier.padding(bottom = 24.dp),
         )
 
         // Navigation buttons
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           // Back button
           if (pagerState.currentPage > 0) {
             OutlinedButton(
-                onClick = {
-                  coroutineScope.launch {
-                    pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                  }
+              onClick = {
+                coroutineScope.launch {
+                  pagerState.animateScrollToPage(pagerState.currentPage - 1)
                 }
+              }
             ) {
               Text(stringResource(id = R.string.onboarding_back))
             }
@@ -148,22 +144,22 @@ fun OnboardingScreen(onFinish: () -> Unit) {
 
           // Next/Finish button
           Button(
-              onClick = {
-                if (pagerState.currentPage < pages.size - 1) {
-                  coroutineScope.launch {
-                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                  }
-                } else {
-                  onFinish()
+            onClick = {
+              if (pagerState.currentPage < pages.size - 1) {
+                coroutineScope.launch {
+                  pagerState.animateScrollToPage(pagerState.currentPage + 1)
                 }
-              },
-              modifier = Modifier.widthIn(min = 100.dp),
+              } else {
+                onFinish()
+              }
+            },
+            modifier = Modifier.widthIn(min = 100.dp),
           ) {
             Text(
-                text =
-                    if (pagerState.currentPage < pages.size - 1)
-                        stringResource(id = R.string.onboarding_next)
-                    else stringResource(id = R.string.onboarding_get_started)
+              text =
+                if (pagerState.currentPage < pages.size - 1)
+                  stringResource(id = R.string.onboarding_next)
+                else stringResource(id = R.string.onboarding_get_started)
             )
           }
         }
@@ -188,21 +184,21 @@ fun DrawablePageContent(page: OnboardingPage.Drawable, modifier: Modifier = Modi
   val context = LocalContext.current
 
   Column(
-      modifier = modifier.padding(horizontal = 32.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.Center,
+    modifier = modifier.padding(horizontal = 32.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.Center,
   ) {
     // Logo/Icon
     AutoMobileLogo()
 
     // Title
     Text(
-        text = page.title,
-        fontSize = 28.sp,
-        fontWeight = FontWeight.Bold,
-        textAlign = TextAlign.Center,
-        color = MaterialTheme.colorScheme.onBackground,
-        modifier = Modifier.padding(bottom = 16.dp),
+      text = page.title,
+      fontSize = 28.sp,
+      fontWeight = FontWeight.Bold,
+      textAlign = TextAlign.Center,
+      color = MaterialTheme.colorScheme.onBackground,
+      modifier = Modifier.padding(bottom = 16.dp),
     )
 
     // Description
@@ -211,11 +207,11 @@ fun DrawablePageContent(page: OnboardingPage.Drawable, modifier: Modifier = Modi
       val annotatedString = buildAnnotatedString {
         append(stringResource(id = R.string.onboarding_opensource_description_part1))
         withStyle(
-            style =
-                SpanStyle(
-                    color = MaterialTheme.colorScheme.primary,
-                    textDecoration = TextDecoration.Underline,
-                )
+          style =
+            SpanStyle(
+              color = MaterialTheme.colorScheme.primary,
+              textDecoration = TextDecoration.Underline,
+            )
         ) {
           pushStringAnnotation("url", githubUrl)
           append(stringResource(id = R.string.onboarding_opensource_description_part2))
@@ -224,20 +220,20 @@ fun DrawablePageContent(page: OnboardingPage.Drawable, modifier: Modifier = Modi
       }
 
       Text(
-          text = annotatedString,
-          fontSize = 16.sp,
-          textAlign = TextAlign.Center,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          lineHeight = 24.sp,
-          modifier = Modifier.clickable { uriHandler.openUri(githubUrl) },
+        text = annotatedString,
+        fontSize = 16.sp,
+        textAlign = TextAlign.Center,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        lineHeight = 24.sp,
+        modifier = Modifier.clickable { uriHandler.openUri(githubUrl) },
       )
     } else {
       Text(
-          text = page.description,
-          fontSize = 16.sp,
-          textAlign = TextAlign.Center,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          lineHeight = 24.sp,
+        text = page.description,
+        fontSize = 16.sp,
+        textAlign = TextAlign.Center,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        lineHeight = 24.sp,
       )
     }
   }
@@ -249,21 +245,21 @@ fun EmojiPageContent(page: OnboardingPage.Emoji, modifier: Modifier = Modifier) 
   val context = LocalContext.current
 
   Column(
-      modifier = modifier.padding(horizontal = 32.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.Center,
+    modifier = modifier.padding(horizontal = 32.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.Center,
   ) {
     // Emoji/Icon
     Text(text = page.emoji, fontSize = 80.sp, modifier = Modifier.padding(bottom = 32.dp))
 
     // Title
     Text(
-        text = page.title,
-        fontSize = 28.sp,
-        fontWeight = FontWeight.Bold,
-        textAlign = TextAlign.Center,
-        color = MaterialTheme.colorScheme.onBackground,
-        modifier = Modifier.padding(bottom = 16.dp),
+      text = page.title,
+      fontSize = 28.sp,
+      fontWeight = FontWeight.Bold,
+      textAlign = TextAlign.Center,
+      color = MaterialTheme.colorScheme.onBackground,
+      modifier = Modifier.padding(bottom = 16.dp),
     )
 
     // Description
@@ -273,11 +269,11 @@ fun EmojiPageContent(page: OnboardingPage.Emoji, modifier: Modifier = Modifier) 
         append(stringResource(id = R.string.onboarding_opensource_description_part1))
         append(" ")
         withStyle(
-            style =
-                SpanStyle(
-                    color = MaterialTheme.colorScheme.primary,
-                    textDecoration = TextDecoration.Underline,
-                )
+          style =
+            SpanStyle(
+              color = MaterialTheme.colorScheme.primary,
+              textDecoration = TextDecoration.Underline,
+            )
         ) {
           pushStringAnnotation("url", githubUrl)
           append(stringResource(id = R.string.onboarding_opensource_description_part2))
@@ -286,20 +282,20 @@ fun EmojiPageContent(page: OnboardingPage.Emoji, modifier: Modifier = Modifier) 
       }
 
       Text(
-          text = annotatedString,
-          fontSize = 16.sp,
-          textAlign = TextAlign.Center,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          lineHeight = 24.sp,
-          modifier = Modifier.clickable { uriHandler.openUri(githubUrl) },
+        text = annotatedString,
+        fontSize = 16.sp,
+        textAlign = TextAlign.Center,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        lineHeight = 24.sp,
+        modifier = Modifier.clickable { uriHandler.openUri(githubUrl) },
       )
     } else {
       Text(
-          text = page.description,
-          fontSize = 16.sp,
-          textAlign = TextAlign.Center,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          lineHeight = 24.sp,
+        text = page.description,
+        fontSize = 16.sp,
+        textAlign = TextAlign.Center,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        lineHeight = 24.sp,
       )
     }
   }
@@ -310,16 +306,16 @@ fun PageIndicators(pageCount: Int, currentPage: Int, modifier: Modifier = Modifi
   Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
     repeat(pageCount) { index ->
       Box(
-          modifier =
-              Modifier.size(width = if (index == currentPage) 24.dp else 8.dp, height = 8.dp)
-                  .clip(RoundedCornerShape(4.dp))
-                  .background(
-                      if (index == currentPage) {
-                        MaterialTheme.colorScheme.primary
-                      } else {
-                        MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                      }
-                  )
+        modifier =
+          Modifier.size(width = if (index == currentPage) 24.dp else 8.dp, height = 8.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(
+              if (index == currentPage) {
+                MaterialTheme.colorScheme.primary
+              } else {
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+              }
+            )
       )
     }
   }

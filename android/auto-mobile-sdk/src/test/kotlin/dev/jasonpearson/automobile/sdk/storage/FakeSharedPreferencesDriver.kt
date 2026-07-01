@@ -81,14 +81,14 @@ class FakeSharedPreferencesDriver : SharedPreferencesDriver {
     if (!recordChanges) return
 
     val change =
-        PreferenceChange(
-            fileName = fileName,
-            key = key,
-            newValue = value,
-            type = detectType(value),
-            timestamp = System.currentTimeMillis(),
-            sequenceNumber = sequenceCounter.incrementAndGet(),
-        )
+      PreferenceChange(
+        fileName = fileName,
+        key = key,
+        newValue = value,
+        type = detectType(value),
+        timestamp = System.currentTimeMillis(),
+        sequenceNumber = sequenceCounter.incrementAndGet(),
+      )
     changeQueues.getOrPut(fileName) { CopyOnWriteArrayList() }.add(change)
   }
 
@@ -157,9 +157,9 @@ class FakeSharedPreferencesDriver : SharedPreferencesDriver {
   override fun getPreferenceFiles(): List<PreferenceFileDescriptor> {
     return preferenceFiles.map { (name, data) ->
       PreferenceFileDescriptor(
-          name = name,
-          path = "/data/data/com.example.app/shared_prefs/$name.xml",
-          entryCount = data.size,
+        name = name,
+        path = "/data/data/com.example.app/shared_prefs/$name.xml",
+        entryCount = data.size,
       )
     }
   }

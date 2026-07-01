@@ -14,13 +14,13 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class TimestampedNavigationEvent(
-    val destination: String,
-    val source: String,
-    val arguments: Map<String, String>,
-    val metadata: Map<String, String>,
-    val timestamp: Long, // System.currentTimeMillis()
-    val sequenceNumber: Long, // Monotonically increasing sequence number
-    val applicationId: String? = null, // Package name of the app that generated this event
+  val destination: String,
+  val source: String,
+  val arguments: Map<String, String>,
+  val metadata: Map<String, String>,
+  val timestamp: Long, // System.currentTimeMillis()
+  val sequenceNumber: Long, // Monotonically increasing sequence number
+  val applicationId: String? = null, // Package name of the app that generated this event
 )
 
 /**
@@ -53,25 +53,25 @@ class NavigationEventAccumulator {
 
   /** Manually add a navigation event from external sources (e.g., broadcasts). */
   fun addEvent(
-      destination: String,
-      source: String,
-      arguments: Map<String, String>,
-      metadata: Map<String, String>,
-      applicationId: String? = null,
+    destination: String,
+    source: String,
+    arguments: Map<String, String>,
+    metadata: Map<String, String>,
+    applicationId: String? = null,
   ) {
     val timestamp = System.currentTimeMillis()
     val sequence = sequenceNumber++
 
     val timestampedEvent =
-        TimestampedNavigationEvent(
-            destination = destination,
-            source = source,
-            arguments = arguments,
-            metadata = metadata,
-            timestamp = timestamp,
-            sequenceNumber = sequence,
-            applicationId = applicationId,
-        )
+      TimestampedNavigationEvent(
+        destination = destination,
+        source = source,
+        arguments = arguments,
+        metadata = metadata,
+        timestamp = timestamp,
+        sequenceNumber = sequence,
+        applicationId = applicationId,
+      )
 
     events.add(timestampedEvent)
     if (events.size > maxEvents) {
@@ -90,25 +90,25 @@ class NavigationEventAccumulator {
     // Convert NavigationEvent to TimestampedNavigationEvent
     // Convert arguments map to String-keyed map (serialize non-string values)
     val stringArguments =
-        event.arguments.mapValues { (_, value) ->
-          when (value) {
-            null -> "null"
-            is String -> value
-            is Number -> value.toString()
-            is Boolean -> value.toString()
-            else -> value.toString()
-          }
+      event.arguments.mapValues { (_, value) ->
+        when (value) {
+          null -> "null"
+          is String -> value
+          is Number -> value.toString()
+          is Boolean -> value.toString()
+          else -> value.toString()
         }
+      }
 
     val timestampedEvent =
-        TimestampedNavigationEvent(
-            destination = event.destination,
-            source = event.source.name,
-            arguments = stringArguments,
-            metadata = event.metadata,
-            timestamp = timestamp,
-            sequenceNumber = sequence,
-        )
+      TimestampedNavigationEvent(
+        destination = event.destination,
+        source = event.source.name,
+        arguments = stringArguments,
+        metadata = event.metadata,
+        timestamp = timestamp,
+        sequenceNumber = sequence,
+      )
 
     // Add to events list
     events.add(timestampedEvent)
@@ -158,18 +158,18 @@ class NavigationEventAccumulator {
   /** Get current statistics. */
   fun getStats(): NavigationStats {
     return NavigationStats(
-        totalEvents = events.size,
-        oldestTimestamp = events.firstOrNull()?.timestamp,
-        newestTimestamp = events.lastOrNull()?.timestamp,
-        currentSequence = sequenceNumber,
+      totalEvents = events.size,
+      oldestTimestamp = events.firstOrNull()?.timestamp,
+      newestTimestamp = events.lastOrNull()?.timestamp,
+      currentSequence = sequenceNumber,
     )
   }
 }
 
 @Serializable
 data class NavigationStats(
-    val totalEvents: Int,
-    val oldestTimestamp: Long?,
-    val newestTimestamp: Long?,
-    val currentSequence: Long,
+  val totalEvents: Int,
+  val oldestTimestamp: Long?,
+  val newestTimestamp: Long?,
+  val currentSequence: Long,
 )

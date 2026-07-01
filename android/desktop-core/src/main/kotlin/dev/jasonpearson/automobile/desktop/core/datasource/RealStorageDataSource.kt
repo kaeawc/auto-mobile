@@ -34,10 +34,10 @@ private val LOG = LoggerFactory.getLogger("RealStorageDataSource")
  * @param packageName The package name of the app to inspect
  */
 class RealStorageDataSource(
-    private val clientProvider: (() -> AutoMobileClient)? = null,
-    private val deviceId: String? = null,
-    private val packageName: String? = null,
-    private val platform: StoragePlatform = StoragePlatform.Android,
+  private val clientProvider: (() -> AutoMobileClient)? = null,
+  private val deviceId: String? = null,
+  private val packageName: String? = null,
+  private val platform: StoragePlatform = StoragePlatform.Android,
 ) : StorageDataSource {
   private val json = Json { ignoreUnknownKeys = true }
 
@@ -45,27 +45,25 @@ class RealStorageDataSource(
     LOG.info("getDatabases: deviceId=$deviceId, packageName=$packageName")
 
     val provider =
-        clientProvider
-            ?: run {
-              LOG.warn("getDatabases: No clientProvider")
-              return Result.Error(
-                  IllegalStateException(
-                      "Not connected to MCP server. Please select a device first."
-                  )
-              )
-            }
+      clientProvider
+        ?: run {
+          LOG.warn("getDatabases: No clientProvider")
+          return Result.Error(
+            IllegalStateException("Not connected to MCP server. Please select a device first.")
+          )
+        }
     val device =
-        deviceId
-            ?: run {
-              LOG.warn("getDatabases: No deviceId provided")
-              return Result.Error(IllegalStateException("No device ID provided"))
-            }
+      deviceId
+        ?: run {
+          LOG.warn("getDatabases: No deviceId provided")
+          return Result.Error(IllegalStateException("No device ID provided"))
+        }
     val pkg =
-        packageName
-            ?: run {
-              LOG.warn("getDatabases: No packageName provided")
-              return Result.Error(IllegalStateException("No package name provided"))
-            }
+      packageName
+        ?: run {
+          LOG.warn("getDatabases: No packageName provided")
+          return Result.Error(IllegalStateException("No package name provided"))
+        }
 
     return try {
       val client = provider()
@@ -86,52 +84,51 @@ class RealStorageDataSource(
 
       // 2. For each database, get tables and their structure
       val databases =
-          dbsResponse.databases.map { dbEntry ->
-            val tablesUri = buildTablesUri(device, dbEntry.path, pkg)
-            val tablesContents = client.readResource(tablesUri)
-            val tablesText = tablesContents.firstOrNull()?.text
-            val tableNames =
-                if (tablesText != null) {
-                  val tablesResponse =
-                      json.decodeFromString(McpTablesResponse.serializer(), tablesText)
-                  tablesResponse.tables
-                } else {
-                  emptyList()
-                }
-
-            LOG.info("getDatabases: DB ${dbEntry.name} has ${tableNames.size} tables")
-
-            // 3. For each table, get structure
-            val tables = tableNames.map { tableName ->
-              val structUri = buildTableStructureUri(device, dbEntry.path, tableName, pkg)
-              val structContents = client.readResource(structUri)
-              val structText = structContents.firstOrNull()?.text
-              val columns =
-                  if (structText != null) {
-                    val structResponse =
-                        json.decodeFromString(McpTableStructureResponse.serializer(), structText)
-                    structResponse.columns.map { col ->
-                      ColumnInfo(
-                          name = col.name,
-                          type = col.type,
-                          isPrimaryKey = col.primaryKey,
-                          isNullable = col.nullable,
-                          defaultValue = col.defaultValue,
-                      )
-                    }
-                  } else {
-                    emptyList()
-                  }
-              TableInfo(name = tableName, rowCount = 0, columns = columns)
+        dbsResponse.databases.map { dbEntry ->
+          val tablesUri = buildTablesUri(device, dbEntry.path, pkg)
+          val tablesContents = client.readResource(tablesUri)
+          val tablesText = tablesContents.firstOrNull()?.text
+          val tableNames =
+            if (tablesText != null) {
+              val tablesResponse = json.decodeFromString(McpTablesResponse.serializer(), tablesText)
+              tablesResponse.tables
+            } else {
+              emptyList()
             }
 
-            DatabaseInfo(
-                name = dbEntry.name,
-                path = dbEntry.path,
-                sizeBytes = dbEntry.sizeBytes,
-                tables = tables,
-            )
+          LOG.info("getDatabases: DB ${dbEntry.name} has ${tableNames.size} tables")
+
+          // 3. For each table, get structure
+          val tables = tableNames.map { tableName ->
+            val structUri = buildTableStructureUri(device, dbEntry.path, tableName, pkg)
+            val structContents = client.readResource(structUri)
+            val structText = structContents.firstOrNull()?.text
+            val columns =
+              if (structText != null) {
+                val structResponse =
+                  json.decodeFromString(McpTableStructureResponse.serializer(), structText)
+                structResponse.columns.map { col ->
+                  ColumnInfo(
+                    name = col.name,
+                    type = col.type,
+                    isPrimaryKey = col.primaryKey,
+                    isNullable = col.nullable,
+                    defaultValue = col.defaultValue,
+                  )
+                }
+              } else {
+                emptyList()
+              }
+            TableInfo(name = tableName, rowCount = 0, columns = columns)
           }
+
+          DatabaseInfo(
+            name = dbEntry.name,
+            path = dbEntry.path,
+            sizeBytes = dbEntry.sizeBytes,
+            tables = tables,
+          )
+        }
 
       LOG.info("getDatabases: Returning ${databases.size} databases")
       Result.Success(databases)
@@ -145,15 +142,15 @@ class RealStorageDataSource(
   }
 
   override suspend fun getTableData(
-      databasePath: String,
-      table: String,
-      limit: Int,
-      offset: Int,
+    databasePath: String,
+    table: String,
+    limit: Int,
+    offset: Int,
   ): Result<QueryResult> {
     LOG.info("getTableData: databasePath=$databasePath, table=$table, limit=$limit, offset=$offset")
 
     val provider =
-        clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+      clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
     val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
@@ -163,8 +160,8 @@ class RealStorageDataSource(
       LOG.info("getTableData: Fetching from URI: $uri")
       val contents = client.readResource(uri)
       val text =
-          contents.firstOrNull()?.text
-              ?: return Result.Success(QueryResult(emptyList(), emptyList(), 0, 0))
+        contents.firstOrNull()?.text
+          ?: return Result.Success(QueryResult(emptyList(), emptyList(), 0, 0))
 
       val response = json.decodeFromString(McpTableDataResponse.serializer(), text)
 
@@ -174,12 +171,12 @@ class RealStorageDataSource(
 
       val rows = response.rows.map { row -> row.map { jsonElementToAny(it) } }
       Result.Success(
-          QueryResult(
-              columns = response.columns,
-              rows = rows,
-              rowCount = response.total,
-              executionTimeMs = 0,
-          )
+        QueryResult(
+          columns = response.columns,
+          rows = rows,
+          rowCount = response.total,
+          executionTimeMs = 0,
+        )
       )
     } catch (e: McpConnectionException) {
       LOG.warn("getTableData: MCP connection error: ${e.message}", e)
@@ -194,7 +191,7 @@ class RealStorageDataSource(
     LOG.info("executeSQL: databasePath=$databasePath, query=$query")
 
     val provider =
-        clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+      clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
     val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
@@ -214,23 +211,23 @@ class RealStorageDataSource(
       }
 
       val queryResult =
-          if (sqlResult.type == "mutation") {
-            val rowsAffected = sqlResult.rowsAffected ?: 0
-            QueryResult(
-                columns = listOf("rows_affected"),
-                rows = listOf(listOf(rowsAffected)),
-                rowCount = rowsAffected,
-                executionTimeMs = 0,
-            )
-          } else {
-            val rows = sqlResult.rows.map { row -> row.map { jsonElementToAny(it) } }
-            QueryResult(
-                columns = sqlResult.columns,
-                rows = rows,
-                rowCount = rows.size,
-                executionTimeMs = 0,
-            )
-          }
+        if (sqlResult.type == "mutation") {
+          val rowsAffected = sqlResult.rowsAffected ?: 0
+          QueryResult(
+            columns = listOf("rows_affected"),
+            rows = listOf(listOf(rowsAffected)),
+            rowCount = rowsAffected,
+            executionTimeMs = 0,
+          )
+        } else {
+          val rows = sqlResult.rows.map { row -> row.map { jsonElementToAny(it) } }
+          QueryResult(
+            columns = sqlResult.columns,
+            rows = rows,
+            rowCount = rows.size,
+            executionTimeMs = 0,
+          )
+        }
       Result.Success(queryResult)
     } catch (e: McpConnectionException) {
       LOG.warn("executeSQL: MCP connection error: ${e.message}", e)
@@ -243,31 +240,29 @@ class RealStorageDataSource(
 
   override suspend fun getKeyValueFiles(): Result<List<KeyValueFile>> {
     LOG.info(
-        "getKeyValueFiles: clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName"
+      "getKeyValueFiles: clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName"
     )
 
     val provider =
-        clientProvider
-            ?: run {
-              LOG.warn("getKeyValueFiles: No clientProvider")
-              return Result.Error(
-                  IllegalStateException(
-                      "Not connected to MCP server. Please select a device first."
-                  )
-              )
-            }
+      clientProvider
+        ?: run {
+          LOG.warn("getKeyValueFiles: No clientProvider")
+          return Result.Error(
+            IllegalStateException("Not connected to MCP server. Please select a device first.")
+          )
+        }
     val device =
-        deviceId
-            ?: run {
-              LOG.warn("getKeyValueFiles: No deviceId provided")
-              return Result.Error(IllegalStateException("No device ID provided"))
-            }
+      deviceId
+        ?: run {
+          LOG.warn("getKeyValueFiles: No deviceId provided")
+          return Result.Error(IllegalStateException("No device ID provided"))
+        }
     val pkg =
-        packageName
-            ?: run {
-              LOG.warn("getKeyValueFiles: No packageName provided")
-              return Result.Error(IllegalStateException("No package name provided"))
-            }
+      packageName
+        ?: run {
+          LOG.warn("getKeyValueFiles: No packageName provided")
+          return Result.Error(IllegalStateException("No package name provided"))
+        }
 
     return try {
       val client = provider()
@@ -287,7 +282,7 @@ class RealStorageDataSource(
 
       val filesResponse = json.decodeFromString(McpStorageFilesResponse.serializer(), filesText)
       LOG.info(
-          "getKeyValueFiles: Parsed response, files count=${filesResponse.files.size}, error=${filesResponse.error}"
+        "getKeyValueFiles: Parsed response, files count=${filesResponse.files.size}, error=${filesResponse.error}"
       )
 
       // Check for error in response
@@ -298,41 +293,41 @@ class RealStorageDataSource(
 
       // For each file, fetch its entries
       val keyValueFiles =
-          filesResponse.files.map { file ->
-            val entriesUri = buildStorageEntriesUri(device, pkg, file.name)
-            LOG.info("getKeyValueFiles: Fetching entries for ${file.name} from: $entriesUri")
-            val entriesContents = client.readResource(entriesUri)
-            val entriesText = entriesContents.firstOrNull()?.text
+        filesResponse.files.map { file ->
+          val entriesUri = buildStorageEntriesUri(device, pkg, file.name)
+          LOG.info("getKeyValueFiles: Fetching entries for ${file.name} from: $entriesUri")
+          val entriesContents = client.readResource(entriesUri)
+          val entriesText = entriesContents.firstOrNull()?.text
 
-            val entries =
-                if (entriesText != null) {
-                  val entriesResponse =
-                      json.decodeFromString(
-                          McpStorageEntriesResponse.serializer(),
-                          entriesText,
-                      )
-                  LOG.info(
-                      "getKeyValueFiles: File ${file.name} has ${entriesResponse.entries.size} entries"
-                  )
-                  entriesResponse.entries.map { entry ->
-                    KeyValueEntry(
-                        key = entry.key,
-                        value = parseValue(entry.value, entry.type),
-                        type = mapKeyValueType(entry.type),
-                    )
-                  }
-                } else {
-                  LOG.warn("getKeyValueFiles: No entries text for ${file.name}")
-                  emptyList()
-                }
+          val entries =
+            if (entriesText != null) {
+              val entriesResponse =
+                json.decodeFromString(
+                  McpStorageEntriesResponse.serializer(),
+                  entriesText,
+                )
+              LOG.info(
+                "getKeyValueFiles: File ${file.name} has ${entriesResponse.entries.size} entries"
+              )
+              entriesResponse.entries.map { entry ->
+                KeyValueEntry(
+                  key = entry.key,
+                  value = parseValue(entry.value, entry.type),
+                  type = mapKeyValueType(entry.type),
+                )
+              }
+            } else {
+              LOG.warn("getKeyValueFiles: No entries text for ${file.name}")
+              emptyList()
+            }
 
-            KeyValueFile(
-                name = file.name,
-                path = file.path,
-                platform = platform,
-                entries = entries,
-            )
-          }
+          KeyValueFile(
+            name = file.name,
+            path = file.path,
+            platform = platform,
+            entries = entries,
+          )
+        }
 
       LOG.info("getKeyValueFiles: Returning ${keyValueFiles.size} files")
       Result.Success(keyValueFiles)
@@ -346,13 +341,13 @@ class RealStorageDataSource(
   }
 
   override suspend fun setKeyValue(
-      fileName: String,
-      key: String,
-      value: String?,
-      type: KeyValueType,
+    fileName: String,
+    key: String,
+    value: String?,
+    type: KeyValueType,
   ): Result<Unit> {
     val provider =
-        clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+      clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
     val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
@@ -372,7 +367,7 @@ class RealStorageDataSource(
 
   override suspend fun removeKeyValue(fileName: String, key: String): Result<Unit> {
     val provider =
-        clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+      clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
     val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
@@ -392,7 +387,7 @@ class RealStorageDataSource(
 
   override suspend fun clearKeyValueFile(fileName: String): Result<Unit> {
     val provider =
-        clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+      clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
     val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
@@ -422,10 +417,10 @@ class RealStorageDataSource(
   }
 
   private fun buildTableStructureUri(
-      deviceId: String,
-      databasePath: String,
-      table: String,
-      packageName: String,
+    deviceId: String,
+    databasePath: String,
+    table: String,
+    packageName: String,
   ): String {
     val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
     val encodedTable = java.net.URLEncoder.encode(table, "UTF-8")
@@ -434,12 +429,12 @@ class RealStorageDataSource(
   }
 
   private fun buildTableDataUri(
-      deviceId: String,
-      databasePath: String,
-      table: String,
-      packageName: String,
-      limit: Int,
-      offset: Int,
+    deviceId: String,
+    databasePath: String,
+    table: String,
+    packageName: String,
+    limit: Int,
+    offset: Int,
   ): String {
     val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
     val encodedTable = java.net.URLEncoder.encode(table, "UTF-8")
@@ -453,9 +448,9 @@ class RealStorageDataSource(
   }
 
   private fun buildStorageEntriesUri(
-      deviceId: String,
-      packageName: String,
-      fileName: String,
+    deviceId: String,
+    packageName: String,
+    fileName: String,
   ): String {
     val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
     val encodedFile = java.net.URLEncoder.encode(fileName, "UTF-8")
@@ -466,14 +461,14 @@ class RealStorageDataSource(
     return when (element) {
       is JsonNull -> null
       is JsonPrimitive ->
-          when {
-            element.isString -> element.content
-            element.content == "true" || element.content == "false" ->
-                element.content.toBooleanStrictOrNull() ?: element.content
-            element.content.toLongOrNull() != null -> element.content.toLong()
-            element.content.toDoubleOrNull() != null -> element.content.toDouble()
-            else -> element.content
-          }
+        when {
+          element.isString -> element.content
+          element.content == "true" || element.content == "false" ->
+            element.content.toBooleanStrictOrNull() ?: element.content
+          element.content.toLongOrNull() != null -> element.content.toLong()
+          element.content.toDoubleOrNull() != null -> element.content.toDouble()
+          else -> element.content
+        }
       else -> element.toString()
     }
   }
@@ -517,89 +512,89 @@ class RealStorageDataSource(
 
 @Serializable
 private data class McpDatabasesResponse(
-    val databases: List<McpDatabaseEntry> = emptyList(),
-    val error: String? = null,
+  val databases: List<McpDatabaseEntry> = emptyList(),
+  val error: String? = null,
 )
 
 @Serializable
 private data class McpDatabaseEntry(
-    val name: String,
-    val path: String,
-    val sizeBytes: Long = 0,
+  val name: String,
+  val path: String,
+  val sizeBytes: Long = 0,
 )
 
 @Serializable
 private data class McpTablesResponse(
-    val tables: List<String> = emptyList(),
-    val error: String? = null,
+  val tables: List<String> = emptyList(),
+  val error: String? = null,
 )
 
 @Serializable
 private data class McpTableStructureResponse(
-    val columns: List<McpColumnDef> = emptyList(),
-    val error: String? = null,
+  val columns: List<McpColumnDef> = emptyList(),
+  val error: String? = null,
 )
 
 @Serializable
 private data class McpColumnDef(
-    val name: String,
-    val type: String,
-    val nullable: Boolean = true,
-    val primaryKey: Boolean = false,
-    val defaultValue: String? = null,
+  val name: String,
+  val type: String,
+  val nullable: Boolean = true,
+  val primaryKey: Boolean = false,
+  val defaultValue: String? = null,
 )
 
 @Serializable
 private data class McpTableDataResponse(
-    val columns: List<String> = emptyList(),
-    val rows: List<List<JsonElement>> = emptyList(),
-    val total: Int = 0,
-    val error: String? = null,
+  val columns: List<String> = emptyList(),
+  val rows: List<List<JsonElement>> = emptyList(),
+  val total: Int = 0,
+  val error: String? = null,
 )
 
 @Serializable
 private data class McpSqlResult(
-    val type: String = "query",
-    val message: String? = null,
-    val columns: List<String> = emptyList(),
-    val rows: List<List<JsonElement>> = emptyList(),
-    val rowsAffected: Int? = null,
-    val error: String? = null,
+  val type: String = "query",
+  val message: String? = null,
+  val columns: List<String> = emptyList(),
+  val rows: List<List<JsonElement>> = emptyList(),
+  val rowsAffected: Int? = null,
+  val error: String? = null,
 )
 
 // MCP response models for storage (key-value) resources
 
 @Serializable
 private data class McpStorageFilesResponse(
-    val deviceId: String? = null,
-    val packageName: String? = null,
-    val files: List<McpPreferenceFile> = emptyList(),
-    val totalCount: Int = 0,
-    val lastUpdated: String? = null,
-    val error: String? = null,
+  val deviceId: String? = null,
+  val packageName: String? = null,
+  val files: List<McpPreferenceFile> = emptyList(),
+  val totalCount: Int = 0,
+  val lastUpdated: String? = null,
+  val error: String? = null,
 )
 
 @Serializable
 private data class McpPreferenceFile(
-    val name: String,
-    val path: String,
-    val entryCount: Int = 0,
+  val name: String,
+  val path: String,
+  val entryCount: Int = 0,
 )
 
 @Serializable
 private data class McpStorageEntriesResponse(
-    val deviceId: String? = null,
-    val packageName: String? = null,
-    val fileName: String? = null,
-    val entries: List<McpKeyValueEntry> = emptyList(),
-    val totalCount: Int = 0,
-    val lastUpdated: String? = null,
-    val error: String? = null,
+  val deviceId: String? = null,
+  val packageName: String? = null,
+  val fileName: String? = null,
+  val entries: List<McpKeyValueEntry> = emptyList(),
+  val totalCount: Int = 0,
+  val lastUpdated: String? = null,
+  val error: String? = null,
 )
 
 @Serializable
 private data class McpKeyValueEntry(
-    val key: String,
-    val value: String? = null,
-    val type: String,
+  val key: String,
+  val value: String? = null,
+  val type: String,
 )

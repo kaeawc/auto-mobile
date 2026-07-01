@@ -73,7 +73,7 @@ import kotlinx.coroutines.withContext
 private val IS_MAC = System.getProperty("os.name", "").contains("Mac", ignoreCase = true)
 
 private fun PointerEvent.isZoomModifierPressed(): Boolean =
-    if (IS_MAC) keyboardModifiers.isMetaPressed else keyboardModifiers.isCtrlPressed
+  if (IS_MAC) keyboardModifiers.isMetaPressed else keyboardModifiers.isCtrlPressed
 
 // Layout constants
 private val NODE_WIDTH = 80.dp
@@ -81,24 +81,24 @@ private val NODE_HEIGHT = 140.dp
 
 // Computed node positions based on a simple layered layout
 private data class NodePosition(
-    val screenId: String,
-    val x: Float,
-    val y: Float,
+  val screenId: String,
+  val x: Float,
+  val y: Float,
 )
 
 @Composable
 fun NavigationCanvasView(
-    screens: List<ScreenNode>,
-    transitions: List<ScreenTransition>,
-    onScreenSelected: (String) -> Unit,
-    externalHighlightedScreens: List<String> =
-        emptyList(), // External highlights (e.g., from test flow)
-    currentReplayScreen: String? = null, // Currently active screen during replay
-    screenshotLoader: ScreenshotLoader? = null, // Loader for screenshot thumbnails
-    fogModeEnabled: Boolean = true, // Whether fog mode + auto-focus is enabled
-    currentObservedScreen: String? = null, // Current screen from device observation stream
-    onFogModeToggled: (Boolean) -> Unit = {}, // Called when user toggles fog mode
-    fitToViewTrigger: Int = 0, // Incremented to trigger fit-to-view animation
+  screens: List<ScreenNode>,
+  transitions: List<ScreenTransition>,
+  onScreenSelected: (String) -> Unit,
+  externalHighlightedScreens: List<String> =
+    emptyList(), // External highlights (e.g., from test flow)
+  currentReplayScreen: String? = null, // Currently active screen during replay
+  screenshotLoader: ScreenshotLoader? = null, // Loader for screenshot thumbnails
+  fogModeEnabled: Boolean = true, // Whether fog mode + auto-focus is enabled
+  currentObservedScreen: String? = null, // Current screen from device observation stream
+  onFogModeToggled: (Boolean) -> Unit = {}, // Called when user toggles fog mode
+  fitToViewTrigger: Int = 0, // Incremented to trigger fit-to-view animation
 ) {
   val density = LocalDensity.current
   val colors = SharedTheme.globalColors
@@ -128,106 +128,104 @@ fun NavigationCanvasView(
   // Compute highlighted elements based on hover state OR external highlights
   // Track hovered, source (came from), and target (could go to) screens separately
   data class HighlightState(
-      val hoveredScreen: String? = null,
-      val sourceScreens: Set<String> = emptySet(), // Orange - nodes we came from
-      val targetScreens: Set<String> = emptySet(), // Green - nodes we could go to
-      val testFlowScreens: Set<String> = emptySet(), // Blue - screens from test flow
+    val hoveredScreen: String? = null,
+    val sourceScreens: Set<String> = emptySet(), // Orange - nodes we came from
+    val targetScreens: Set<String> = emptySet(), // Green - nodes we could go to
+    val testFlowScreens: Set<String> = emptySet(), // Blue - screens from test flow
   )
 
   val highlightState =
-      remember(hoveredScreenName, hoveredTransitionId, transitions, externalHighlightedScreens) {
-        when {
-          hoveredScreenName != null -> {
-            // Hovering a screen: show where we came from (sources) and where we can go (targets)
-            val sources = mutableSetOf<String>()
-            val targets = mutableSetOf<String>()
-            transitions
-                .filter { it.trigger != "back" }
-                .forEach { t ->
-                  if (t.fromScreen == hoveredScreenName) targets.add(t.toScreen)
-                  if (t.toScreen == hoveredScreenName) sources.add(t.fromScreen)
-                }
-            HighlightState(
-                hoveredScreen = hoveredScreenName,
-                sourceScreens = sources,
-                targetScreens = targets,
-            )
-          }
-          hoveredTransitionId != null -> {
-            // Hovering an edge: source is orange, target is green
-            val transition = transitions.find { it.id == hoveredTransitionId }
-            if (transition != null) {
-              HighlightState(
-                  sourceScreens = setOf(transition.fromScreen),
-                  targetScreens = setOf(transition.toScreen),
-              )
-            } else HighlightState()
-          }
-          externalHighlightedScreens.isNotEmpty() -> {
-            // External highlights (e.g., from "View in Graph" on test detail)
-            HighlightState(
-                testFlowScreens = externalHighlightedScreens.toSet(),
-            )
-          }
-          else -> HighlightState()
+    remember(hoveredScreenName, hoveredTransitionId, transitions, externalHighlightedScreens) {
+      when {
+        hoveredScreenName != null -> {
+          // Hovering a screen: show where we came from (sources) and where we can go (targets)
+          val sources = mutableSetOf<String>()
+          val targets = mutableSetOf<String>()
+          transitions
+            .filter { it.trigger != "back" }
+            .forEach { t ->
+              if (t.fromScreen == hoveredScreenName) targets.add(t.toScreen)
+              if (t.toScreen == hoveredScreenName) sources.add(t.fromScreen)
+            }
+          HighlightState(
+            hoveredScreen = hoveredScreenName,
+            sourceScreens = sources,
+            targetScreens = targets,
+          )
         }
+        hoveredTransitionId != null -> {
+          // Hovering an edge: source is orange, target is green
+          val transition = transitions.find { it.id == hoveredTransitionId }
+          if (transition != null) {
+            HighlightState(
+              sourceScreens = setOf(transition.fromScreen),
+              targetScreens = setOf(transition.toScreen),
+            )
+          } else HighlightState()
+        }
+        externalHighlightedScreens.isNotEmpty() -> {
+          // External highlights (e.g., from "View in Graph" on test detail)
+          HighlightState(testFlowScreens = externalHighlightedScreens.toSet())
+        }
+        else -> HighlightState()
       }
+    }
 
   // For backwards compatibility, compute combined highlighted screens
   val highlightedScreens =
-      remember(highlightState) {
-        buildSet {
-          highlightState.hoveredScreen?.let { add(it) }
-          addAll(highlightState.sourceScreens)
-          addAll(highlightState.targetScreens)
-          addAll(highlightState.testFlowScreens)
-        }
+    remember(highlightState) {
+      buildSet {
+        highlightState.hoveredScreen?.let { add(it) }
+        addAll(highlightState.sourceScreens)
+        addAll(highlightState.targetScreens)
+        addAll(highlightState.testFlowScreens)
       }
+    }
 
   // Compute highlighted transitions for test flow (sequential path through screens)
   val testFlowTransitions =
-      remember(highlightState.testFlowScreens, transitions) {
-        if (highlightState.testFlowScreens.isEmpty()) emptySet()
-        else {
-          val flowScreensList = externalHighlightedScreens
-          val flowTransitions = mutableSetOf<String>()
-          // Find transitions between consecutive screens in the flow
-          for (i in 0 until flowScreensList.size - 1) {
-            val fromScreen = flowScreensList[i]
-            val toScreen = flowScreensList[i + 1]
-            transitions
-                .find { it.fromScreen == fromScreen && it.toScreen == toScreen }
-                ?.let { flowTransitions.add(it.id) }
-          }
-          flowTransitions
+    remember(highlightState.testFlowScreens, transitions) {
+      if (highlightState.testFlowScreens.isEmpty()) emptySet()
+      else {
+        val flowScreensList = externalHighlightedScreens
+        val flowTransitions = mutableSetOf<String>()
+        // Find transitions between consecutive screens in the flow
+        for (i in 0 until flowScreensList.size - 1) {
+          val fromScreen = flowScreensList[i]
+          val toScreen = flowScreensList[i + 1]
+          transitions
+            .find { it.fromScreen == fromScreen && it.toScreen == toScreen }
+            ?.let { flowTransitions.add(it.id) }
         }
+        flowTransitions
       }
+    }
 
   val highlightedTransitions =
-      remember(hoveredScreenName, hoveredTransitionId, transitions, testFlowTransitions) {
-        when {
-          testFlowTransitions.isNotEmpty() -> testFlowTransitions
-          hoveredScreenName != null -> {
-            // Highlight all edges connected to hovered screen
-            transitions
-                .filter { it.trigger != "back" }
-                .filter { it.fromScreen == hoveredScreenName || it.toScreen == hoveredScreenName }
-                .map { it.id }
-                .toSet()
-          }
-          hoveredTransitionId != null -> setOf(hoveredTransitionId!!)
-          else -> emptySet()
+    remember(hoveredScreenName, hoveredTransitionId, transitions, testFlowTransitions) {
+      when {
+        testFlowTransitions.isNotEmpty() -> testFlowTransitions
+        hoveredScreenName != null -> {
+          // Highlight all edges connected to hovered screen
+          transitions
+            .filter { it.trigger != "back" }
+            .filter { it.fromScreen == hoveredScreenName || it.toScreen == hoveredScreenName }
+            .map { it.id }
+            .toSet()
         }
+        hoveredTransitionId != null -> setOf(hoveredTransitionId!!)
+        else -> emptySet()
       }
+    }
 
   // Compute edge hit zones for hover detection
   // Each edge is represented by its start and end points (simplified from the full path)
   data class EdgeHitZone(
-      val transitionId: String,
-      val startX: Float,
-      val startY: Float,
-      val endX: Float,
-      val endY: Float,
+    val transitionId: String,
+    val startX: Float,
+    val startY: Float,
+    val endX: Float,
+    val endY: Float,
   )
 
   // Helper to compute distance from point to line segment
@@ -253,9 +251,9 @@ fun NavigationCanvasView(
 
   // Compute node positions using D3-style force-directed layout
   val nodePositions =
-      remember(screens, transitions) {
-        computeNodePositions(screens, transitions, density)
-      }
+    remember(screens, transitions) {
+      computeNodePositions(screens, transitions, density)
+    }
 
   // Create lookup maps
   val screenById = remember(screens) { screens.associateBy { it.id } }
@@ -268,22 +266,22 @@ fun NavigationCanvasView(
 
   // Compute edge hit zones (right edge to left edge, matching actual line drawing)
   val edgeHitZones =
-      remember(transitions, positionByName, nodeWidthPx, nodeHeightPx) {
-        val forwardTransitions = transitions.filter { it.trigger != "back" }
-        forwardTransitions.mapNotNull { transition ->
-          val fromPos = positionByName[transition.fromScreen]
-          val toPos = positionByName[transition.toScreen]
-          if (fromPos != null && toPos != null) {
-            EdgeHitZone(
-                transitionId = transition.id,
-                startX = fromPos.x + nodeWidthPx, // Right edge
-                startY = fromPos.y + nodeHeightPx / 2, // Center Y
-                endX = toPos.x, // Left edge
-                endY = toPos.y + nodeHeightPx / 2, // Center Y
-            )
-          } else null
-        }
+    remember(transitions, positionByName, nodeWidthPx, nodeHeightPx) {
+      val forwardTransitions = transitions.filter { it.trigger != "back" }
+      forwardTransitions.mapNotNull { transition ->
+        val fromPos = positionByName[transition.fromScreen]
+        val toPos = positionByName[transition.toScreen]
+        if (fromPos != null && toPos != null) {
+          EdgeHitZone(
+            transitionId = transition.id,
+            startX = fromPos.x + nodeWidthPx, // Right edge
+            startY = fromPos.y + nodeHeightPx / 2, // Center Y
+            endX = toPos.x, // Left edge
+            endY = toPos.y + nodeHeightPx / 2, // Center Y
+          )
+        } else null
       }
+    }
 
   // Check edge hover when mouse moves (only if not hovering a screen)
   LaunchedEffect(mouseX, mouseY, edgeHitZones, scale, offsetX, offsetY, hoveredScreenName) {
@@ -295,16 +293,16 @@ fun NavigationCanvasView(
     } else {
       val hitThreshold = 15f // Pixels from edge line to count as hit
       val detectedEdge =
-          edgeHitZones
-              .find { zone ->
-                // Transform edge points to screen coordinates
-                val sx = zone.startX * scale + offsetX
-                val sy = zone.startY * scale + offsetY
-                val ex = zone.endX * scale + offsetX
-                val ey = zone.endY * scale + offsetY
-                distanceToSegment(mouseX, mouseY, sx, sy, ex, ey) < hitThreshold
-              }
-              ?.transitionId
+        edgeHitZones
+          .find { zone ->
+            // Transform edge points to screen coordinates
+            val sx = zone.startX * scale + offsetX
+            val sy = zone.startY * scale + offsetY
+            val ex = zone.endX * scale + offsetX
+            val ey = zone.endY * scale + offsetY
+            distanceToSegment(mouseX, mouseY, sx, sy, ex, ey) < hitThreshold
+          }
+          ?.transitionId
 
       if (detectedEdge != hoveredTransitionId) {
         hoveredTransitionId = detectedEdge
@@ -314,7 +312,7 @@ fun NavigationCanvasView(
   val arrowColor = colors.text.normal.copy(alpha = 0.3f)
   val highlightedArrowColor = Color(0xFF1976D2) // Darker blue for highlighted edges
   val dimmedArrowColor =
-      colors.text.normal.copy(alpha = 0.1f) // Dimmed when something else is highlighted
+    colors.text.normal.copy(alpha = 0.1f) // Dimmed when something else is highlighted
 
   // Track if we've done initial fit and auto-panned for highlighted screens
   var hasInitialFit by remember { mutableStateOf(false) }
@@ -342,11 +340,11 @@ fun NavigationCanvasView(
       val next = mutableSetOf<String>()
       for (screen in frontier) {
         transitions
-            .filter { it.trigger != "back" }
-            .forEach { t ->
-              if (t.fromScreen == screen) next.add(t.toScreen)
-              if (t.toScreen == screen) next.add(t.fromScreen)
-            }
+          .filter { it.trigger != "back" }
+          .forEach { t ->
+            if (t.fromScreen == screen) next.add(t.toScreen)
+            if (t.toScreen == screen) next.add(t.fromScreen)
+          }
       }
       // Compute new frontier BEFORE adding to result, otherwise frontier is always empty
       frontier = next - result
@@ -362,11 +360,11 @@ fun NavigationCanvasView(
     // Auto-fit entire graph on initial load (no highlights)
     LaunchedEffect(viewportWidth, viewportHeight, nodePositions) {
       if (
-          !hasInitialFit &&
-              externalHighlightedScreens.isEmpty() &&
-              nodePositions.isNotEmpty() &&
-              viewportWidth > 0 &&
-              viewportHeight > 0
+        !hasInitialFit &&
+          externalHighlightedScreens.isEmpty() &&
+          nodePositions.isNotEmpty() &&
+          viewportWidth > 0 &&
+          viewportHeight > 0
       ) {
         // Compute bounding box of ALL screens
         val minX = nodePositions.minOf { it.x }
@@ -403,10 +401,10 @@ fun NavigationCanvasView(
     // Fit entire graph when triggered (e.g., foreground app changed)
     LaunchedEffect(fitToViewTrigger) {
       if (
-          fitToViewTrigger > 0 &&
-              nodePositions.isNotEmpty() &&
-              viewportWidth > 0 &&
-              viewportHeight > 0
+        fitToViewTrigger > 0 &&
+          nodePositions.isNotEmpty() &&
+          viewportWidth > 0 &&
+          viewportHeight > 0
       ) {
         val minX = nodePositions.minOf { it.x }
         val maxX = nodePositions.maxOf { it.x } + nodeWidthPx
@@ -435,8 +433,8 @@ fun NavigationCanvasView(
     // Auto-pan to show highlighted screens when they change (from test flow)
     LaunchedEffect(externalHighlightedScreens, viewportWidth, viewportHeight) {
       if (
-          externalHighlightedScreens.isNotEmpty() &&
-              externalHighlightedScreens != lastAutoPannedScreens
+        externalHighlightedScreens.isNotEmpty() &&
+          externalHighlightedScreens != lastAutoPannedScreens
       ) {
         // Compute bounding box of highlighted screens
         val highlightedPositions = externalHighlightedScreens.mapNotNull { screenName ->
@@ -477,11 +475,11 @@ fun NavigationCanvasView(
 
     // Animated pan and zoom for fog mode focus — fixed 4x zoom centered on focused node
     LaunchedEffect(
-        focusedScreenName,
-        fogModeEnabled,
-        viewportWidth,
-        viewportHeight,
-        nodePositions,
+      focusedScreenName,
+      fogModeEnabled,
+      viewportWidth,
+      viewportHeight,
+      nodePositions,
     ) {
       if (fogModeEnabled && focusedScreenName != null && viewportWidth > 0 && viewportHeight > 0) {
         val targetPos = positionByName[focusedScreenName]
@@ -527,240 +525,237 @@ fun NavigationCanvasView(
     }
 
     Box(
-        modifier =
-            Modifier.fillMaxSize()
-                .pointerInput(Unit) {
-                  detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    offsetX += dragAmount.x
-                    offsetY += dragAmount.y
-                    // Snap animatables to prevent conflicts with manual drag
-                    animationScope.launch {
-                      animatedOffsetX.snapTo(offsetX)
-                      animatedOffsetY.snapTo(offsetY)
-                      animatedScale.snapTo(scale)
+      modifier =
+        Modifier.fillMaxSize()
+          .pointerInput(Unit) {
+            detectDragGestures { change, dragAmount ->
+              change.consume()
+              offsetX += dragAmount.x
+              offsetY += dragAmount.y
+              // Snap animatables to prevent conflicts with manual drag
+              animationScope.launch {
+                animatedOffsetX.snapTo(offsetX)
+                animatedOffsetY.snapTo(offsetY)
+                animatedScale.snapTo(scale)
+              }
+            }
+          }
+          .onPointerEvent(PointerEventType.Move) { event ->
+            val pos = event.changes.firstOrNull()?.position
+            if (pos != null) {
+              mouseX = pos.x
+              mouseY = pos.y
+            }
+          }
+          .onPointerEvent(PointerEventType.Exit) {
+            // Deselect all elements when mouse leaves canvas
+            hoveredScreenName = null
+            hoveredTransitionId = null
+          }
+          .onPointerEvent(PointerEventType.Scroll) { event ->
+            // Only allow scroll-to-zoom when Cmd (macOS) / Ctrl (other) is held
+            if (!event.isZoomModifierPressed()) return@onPointerEvent
+            val change = event.changes.firstOrNull() ?: return@onPointerEvent
+            val scrollDelta = change.scrollDelta.y
+            if (scrollDelta != 0f) {
+              // 10x less sensitive: smaller zoom factor per scroll tick
+              val zoomFactor = if (scrollDelta > 0) 0.99f else 1.01f
+              val newScale = (scale * zoomFactor).coerceIn(0.05f, 5f)
+              // Zoom around cursor position
+              zoomAroundPoint(newScale, change.position.x, change.position.y)
+              // Snap animatables to prevent conflicts with manual zoom
+              animationScope.launch {
+                animatedScale.snapTo(scale)
+                animatedOffsetX.snapTo(offsetX)
+                animatedOffsetY.snapTo(offsetY)
+              }
+            }
+          }
+          .drawBehind {
+            // Draw smooth curved edges between closest points on nodes
+            val strokeWidth = 4f * scale
+
+            // Filter out back press transitions
+            val forwardTransitions = transitions.filter { it.trigger != "back" }
+
+            // Edge point data class
+            data class EdgePoint(val x: Float, val y: Float, val side: String)
+
+            forwardTransitions.forEach { transition ->
+              val fromPos = positionByName[transition.fromScreen]
+              val toPos = positionByName[transition.toScreen]
+
+              if (fromPos != null && toPos != null) {
+                // Calculate all edge midpoints for source node
+                val fromLeft =
+                  EdgePoint(
+                    fromPos.x * scale + offsetX,
+                    (fromPos.y + nodeHeightPx / 2) * scale + offsetY,
+                    "left",
+                  )
+                val fromRight =
+                  EdgePoint(
+                    (fromPos.x + nodeWidthPx) * scale + offsetX,
+                    (fromPos.y + nodeHeightPx / 2) * scale + offsetY,
+                    "right",
+                  )
+                val fromTop =
+                  EdgePoint(
+                    (fromPos.x + nodeWidthPx / 2) * scale + offsetX,
+                    fromPos.y * scale + offsetY,
+                    "top",
+                  )
+                val fromBottom =
+                  EdgePoint(
+                    (fromPos.x + nodeWidthPx / 2) * scale + offsetX,
+                    (fromPos.y + nodeHeightPx) * scale + offsetY,
+                    "bottom",
+                  )
+
+                // Calculate all edge midpoints for target node
+                val toLeft =
+                  EdgePoint(
+                    toPos.x * scale + offsetX,
+                    (toPos.y + nodeHeightPx / 2) * scale + offsetY,
+                    "left",
+                  )
+                val toRight =
+                  EdgePoint(
+                    (toPos.x + nodeWidthPx) * scale + offsetX,
+                    (toPos.y + nodeHeightPx / 2) * scale + offsetY,
+                    "right",
+                  )
+                val toTop =
+                  EdgePoint(
+                    (toPos.x + nodeWidthPx / 2) * scale + offsetX,
+                    toPos.y * scale + offsetY,
+                    "top",
+                  )
+                val toBottom =
+                  EdgePoint(
+                    (toPos.x + nodeWidthPx / 2) * scale + offsetX,
+                    (toPos.y + nodeHeightPx) * scale + offsetY,
+                    "bottom",
+                  )
+
+                val fromPoints = listOf(fromRight, fromBottom, fromTop, fromLeft) // Priority order
+                val toPoints = listOf(toLeft, toTop, toBottom, toRight) // Priority order
+
+                // Find the pair of points with minimum distance
+                fun dist(p1: EdgePoint, p2: EdgePoint) =
+                  kotlin.math.sqrt((p2.x - p1.x) * (p2.x - p1.x) + (p2.y - p1.y) * (p2.y - p1.y))
+
+                // Deterministic side priority (lower = preferred when distances are close)
+                fun sidePriority(fromSide: String, toSide: String): Int {
+                  val fromPriority =
+                    when (fromSide) {
+                      "right" -> 0
+                      "bottom" -> 1
+                      "top" -> 2
+                      else -> 3 // left
+                    }
+                  val toPriority =
+                    when (toSide) {
+                      "left" -> 0
+                      "top" -> 1
+                      "bottom" -> 2
+                      else -> 3 // right
+                    }
+                  return fromPriority * 4 + toPriority
+                }
+
+                // Find minimum distance first
+                var minDist = Float.MAX_VALUE
+                for (fp in fromPoints) {
+                  for (tp in toPoints) {
+                    val d = dist(fp, tp)
+                    if (d < minDist) minDist = d
+                  }
+                }
+
+                // Find best pair within 15% of minimum distance, using priority as
+                // tie-breaker
+                val margin = minDist * 0.15f
+                var bestFrom = fromRight
+                var bestTo = toLeft
+                var bestPriority = Int.MAX_VALUE
+
+                for (fp in fromPoints) {
+                  for (tp in toPoints) {
+                    val d = dist(fp, tp)
+                    if (d <= minDist + margin) {
+                      val priority = sidePriority(fp.side, tp.side)
+                      if (priority < bestPriority) {
+                        bestPriority = priority
+                        bestFrom = fp
+                        bestTo = tp
+                      }
                     }
                   }
                 }
-                .onPointerEvent(PointerEventType.Move) { event ->
-                  val pos = event.changes.firstOrNull()?.position
-                  if (pos != null) {
-                    mouseX = pos.x
-                    mouseY = pos.y
+
+                val startX = bestFrom.x
+                val startY = bestFrom.y
+                val endX = bestTo.x
+                val endY = bestTo.y
+
+                // Determine edge color based on highlight state
+                val isHighlighted = transition.id in highlightedTransitions
+                val hasAnyHighlight =
+                  highlightedScreens.isNotEmpty() || highlightedTransitions.isNotEmpty()
+                val edgeColor =
+                  when {
+                    isHighlighted -> highlightedArrowColor
+                    hasAnyHighlight -> dimmedArrowColor
+                    else -> arrowColor
                   }
-                }
-                .onPointerEvent(PointerEventType.Exit) {
-                  // Deselect all elements when mouse leaves canvas
-                  hoveredScreenName = null
-                  hoveredTransitionId = null
-                }
-                .onPointerEvent(PointerEventType.Scroll) { event ->
-                  // Only allow scroll-to-zoom when Cmd (macOS) / Ctrl (other) is held
-                  if (!event.isZoomModifierPressed()) return@onPointerEvent
-                  val change = event.changes.firstOrNull() ?: return@onPointerEvent
-                  val scrollDelta = change.scrollDelta.y
-                  if (scrollDelta != 0f) {
-                    // 10x less sensitive: smaller zoom factor per scroll tick
-                    val zoomFactor = if (scrollDelta > 0) 0.99f else 1.01f
-                    val newScale = (scale * zoomFactor).coerceIn(0.05f, 5f)
-                    // Zoom around cursor position
-                    zoomAroundPoint(newScale, change.position.x, change.position.y)
-                    // Snap animatables to prevent conflicts with manual zoom
-                    animationScope.launch {
-                      animatedScale.snapTo(scale)
-                      animatedOffsetX.snapTo(offsetX)
-                      animatedOffsetY.snapTo(offsetY)
-                    }
+                val edgeStrokeWidth = if (isHighlighted) strokeWidth * 1.5f else strokeWidth
+
+                // Build smooth curved path using cubic bezier
+                val path = Path()
+                path.moveTo(startX, startY)
+
+                // Control point offset - extends perpendicular to the edge
+                val curveStrength = minDist * 0.4f
+
+                // Control point 1: extends outward from start point based on which side
+                val ctrl1X =
+                  when (bestFrom.side) {
+                    "left" -> startX - curveStrength
+                    "right" -> startX + curveStrength
+                    else -> startX
                   }
-                }
-                .drawBehind {
-                  // Draw smooth curved edges between closest points on nodes
-                  val strokeWidth = 4f * scale
-
-                  // Filter out back press transitions
-                  val forwardTransitions = transitions.filter { it.trigger != "back" }
-
-                  // Edge point data class
-                  data class EdgePoint(val x: Float, val y: Float, val side: String)
-
-                  forwardTransitions.forEach { transition ->
-                    val fromPos = positionByName[transition.fromScreen]
-                    val toPos = positionByName[transition.toScreen]
-
-                    if (fromPos != null && toPos != null) {
-                      // Calculate all edge midpoints for source node
-                      val fromLeft =
-                          EdgePoint(
-                              fromPos.x * scale + offsetX,
-                              (fromPos.y + nodeHeightPx / 2) * scale + offsetY,
-                              "left",
-                          )
-                      val fromRight =
-                          EdgePoint(
-                              (fromPos.x + nodeWidthPx) * scale + offsetX,
-                              (fromPos.y + nodeHeightPx / 2) * scale + offsetY,
-                              "right",
-                          )
-                      val fromTop =
-                          EdgePoint(
-                              (fromPos.x + nodeWidthPx / 2) * scale + offsetX,
-                              fromPos.y * scale + offsetY,
-                              "top",
-                          )
-                      val fromBottom =
-                          EdgePoint(
-                              (fromPos.x + nodeWidthPx / 2) * scale + offsetX,
-                              (fromPos.y + nodeHeightPx) * scale + offsetY,
-                              "bottom",
-                          )
-
-                      // Calculate all edge midpoints for target node
-                      val toLeft =
-                          EdgePoint(
-                              toPos.x * scale + offsetX,
-                              (toPos.y + nodeHeightPx / 2) * scale + offsetY,
-                              "left",
-                          )
-                      val toRight =
-                          EdgePoint(
-                              (toPos.x + nodeWidthPx) * scale + offsetX,
-                              (toPos.y + nodeHeightPx / 2) * scale + offsetY,
-                              "right",
-                          )
-                      val toTop =
-                          EdgePoint(
-                              (toPos.x + nodeWidthPx / 2) * scale + offsetX,
-                              toPos.y * scale + offsetY,
-                              "top",
-                          )
-                      val toBottom =
-                          EdgePoint(
-                              (toPos.x + nodeWidthPx / 2) * scale + offsetX,
-                              (toPos.y + nodeHeightPx) * scale + offsetY,
-                              "bottom",
-                          )
-
-                      val fromPoints =
-                          listOf(fromRight, fromBottom, fromTop, fromLeft) // Priority order
-                      val toPoints = listOf(toLeft, toTop, toBottom, toRight) // Priority order
-
-                      // Find the pair of points with minimum distance
-                      fun dist(p1: EdgePoint, p2: EdgePoint) =
-                          kotlin.math.sqrt(
-                              (p2.x - p1.x) * (p2.x - p1.x) + (p2.y - p1.y) * (p2.y - p1.y)
-                          )
-
-                      // Deterministic side priority (lower = preferred when distances are close)
-                      fun sidePriority(fromSide: String, toSide: String): Int {
-                        val fromPriority =
-                            when (fromSide) {
-                              "right" -> 0
-                              "bottom" -> 1
-                              "top" -> 2
-                              else -> 3 // left
-                            }
-                        val toPriority =
-                            when (toSide) {
-                              "left" -> 0
-                              "top" -> 1
-                              "bottom" -> 2
-                              else -> 3 // right
-                            }
-                        return fromPriority * 4 + toPriority
-                      }
-
-                      // Find minimum distance first
-                      var minDist = Float.MAX_VALUE
-                      for (fp in fromPoints) {
-                        for (tp in toPoints) {
-                          val d = dist(fp, tp)
-                          if (d < minDist) minDist = d
-                        }
-                      }
-
-                      // Find best pair within 15% of minimum distance, using priority as
-                      // tie-breaker
-                      val margin = minDist * 0.15f
-                      var bestFrom = fromRight
-                      var bestTo = toLeft
-                      var bestPriority = Int.MAX_VALUE
-
-                      for (fp in fromPoints) {
-                        for (tp in toPoints) {
-                          val d = dist(fp, tp)
-                          if (d <= minDist + margin) {
-                            val priority = sidePriority(fp.side, tp.side)
-                            if (priority < bestPriority) {
-                              bestPriority = priority
-                              bestFrom = fp
-                              bestTo = tp
-                            }
-                          }
-                        }
-                      }
-
-                      val startX = bestFrom.x
-                      val startY = bestFrom.y
-                      val endX = bestTo.x
-                      val endY = bestTo.y
-
-                      // Determine edge color based on highlight state
-                      val isHighlighted = transition.id in highlightedTransitions
-                      val hasAnyHighlight =
-                          highlightedScreens.isNotEmpty() || highlightedTransitions.isNotEmpty()
-                      val edgeColor =
-                          when {
-                            isHighlighted -> highlightedArrowColor
-                            hasAnyHighlight -> dimmedArrowColor
-                            else -> arrowColor
-                          }
-                      val edgeStrokeWidth = if (isHighlighted) strokeWidth * 1.5f else strokeWidth
-
-                      // Build smooth curved path using cubic bezier
-                      val path = Path()
-                      path.moveTo(startX, startY)
-
-                      // Control point offset - extends perpendicular to the edge
-                      val curveStrength = minDist * 0.4f
-
-                      // Control point 1: extends outward from start point based on which side
-                      val ctrl1X =
-                          when (bestFrom.side) {
-                            "left" -> startX - curveStrength
-                            "right" -> startX + curveStrength
-                            else -> startX
-                          }
-                      val ctrl1Y =
-                          when (bestFrom.side) {
-                            "top" -> startY - curveStrength
-                            "bottom" -> startY + curveStrength
-                            else -> startY
-                          }
-
-                      // Control point 2: extends outward from end point based on which side
-                      val ctrl2X =
-                          when (bestTo.side) {
-                            "left" -> endX - curveStrength
-                            "right" -> endX + curveStrength
-                            else -> endX
-                          }
-                      val ctrl2Y =
-                          when (bestTo.side) {
-                            "top" -> endY - curveStrength
-                            "bottom" -> endY + curveStrength
-                            else -> endY
-                          }
-
-                      path.cubicTo(ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, endY)
-
-                      drawPath(
-                          path = path,
-                          color = edgeColor,
-                          style = Stroke(width = edgeStrokeWidth, cap = StrokeCap.Round),
-                      )
-                    }
+                val ctrl1Y =
+                  when (bestFrom.side) {
+                    "top" -> startY - curveStrength
+                    "bottom" -> startY + curveStrength
+                    else -> startY
                   }
-                }
+
+                // Control point 2: extends outward from end point based on which side
+                val ctrl2X =
+                  when (bestTo.side) {
+                    "left" -> endX - curveStrength
+                    "right" -> endX + curveStrength
+                    else -> endX
+                  }
+                val ctrl2Y =
+                  when (bestTo.side) {
+                    "top" -> endY - curveStrength
+                    "bottom" -> endY + curveStrength
+                    else -> endY
+                  }
+
+                path.cubicTo(ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, endY)
+
+                drawPath(
+                  path = path,
+                  color = edgeColor,
+                  style = Stroke(width = edgeStrokeWidth, cap = StrokeCap.Round),
+                )
+              }
+            }
+          }
     ) {
       // Render screen nodes as Composables
       nodePositions.forEach { pos ->
@@ -769,35 +764,35 @@ fun NavigationCanvasView(
         val hasAnyHighlight = highlightedScreens.isNotEmpty() || highlightedTransitions.isNotEmpty()
 
         Box(
-            modifier =
-                Modifier.offset {
-                      IntOffset(
-                          (pos.x * scale + offsetX).roundToInt(),
-                          (pos.y * scale + offsetY).roundToInt(),
-                      )
-                    }
-                    .graphicsLayer {
-                      scaleX = scale
-                      scaleY = scale
-                      transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
-                    }
+          modifier =
+            Modifier.offset {
+                IntOffset(
+                  (pos.x * scale + offsetX).roundToInt(),
+                  (pos.y * scale + offsetY).roundToInt(),
+                )
+              }
+              .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+              }
         ) {
           ScreenNodeCard(
-              screen = screen,
-              isHovered = screen.name == highlightState.hoveredScreen,
-              isSource = screen.name in highlightState.sourceScreens,
-              isTarget = screen.name in highlightState.targetScreens,
-              isInTestFlow = screen.name in highlightState.testFlowScreens,
-              isCurrentReplayStep = screen.name == currentReplayScreen,
-              isFogFocused = fogModeEnabled && screen.name == focusedScreenName,
-              isDimmed = hasAnyHighlight && screen.name !in highlightedScreens,
-              onClick = {
-                onScreenSelected(screen.id)
-              },
-              onHoverChange = { isHovered ->
-                hoveredScreenName = if (isHovered) screen.name else null
-              },
-              screenshotLoader = screenshotLoader,
+            screen = screen,
+            isHovered = screen.name == highlightState.hoveredScreen,
+            isSource = screen.name in highlightState.sourceScreens,
+            isTarget = screen.name in highlightState.targetScreens,
+            isInTestFlow = screen.name in highlightState.testFlowScreens,
+            isCurrentReplayStep = screen.name == currentReplayScreen,
+            isFogFocused = fogModeEnabled && screen.name == focusedScreenName,
+            isDimmed = hasAnyHighlight && screen.name !in highlightedScreens,
+            onClick = {
+              onScreenSelected(screen.id)
+            },
+            onHoverChange = { isHovered ->
+              hoveredScreenName = if (isHovered) screen.name else null
+            },
+            screenshotLoader = screenshotLoader,
           )
         }
       }
@@ -815,19 +810,19 @@ fun NavigationCanvasView(
             val maxRadius = maxOf(size.width, size.height) * 0.625f
 
             drawRect(
-                brush =
-                    Brush.radialGradient(
-                        colorStops =
-                            arrayOf(
-                                0.0f to Color.Transparent,
-                                0.3f to fogColor.copy(alpha = 0.05f),
-                                0.6f to fogColor.copy(alpha = 0.20f),
-                                1.0f to fogColor.copy(alpha = 0.50f),
-                            ),
-                        center = androidx.compose.ui.geometry.Offset(centerX, centerY),
-                        radius = maxRadius,
+              brush =
+                Brush.radialGradient(
+                  colorStops =
+                    arrayOf(
+                      0.0f to Color.Transparent,
+                      0.3f to fogColor.copy(alpha = 0.05f),
+                      0.6f to fogColor.copy(alpha = 0.20f),
+                      1.0f to fogColor.copy(alpha = 0.50f),
                     ),
-                size = size,
+                  center = androidx.compose.ui.geometry.Offset(centerX, centerY),
+                  radius = maxRadius,
+                ),
+              size = size,
             )
           }
         }
@@ -836,56 +831,56 @@ fun NavigationCanvasView(
       // Fog + auto-focus toggle, below the Layout/Navigation toggle
       val fogEnabled = currentObservedScreen != null
       Row(
-          modifier =
-              Modifier.align(Alignment.TopStart)
-                  .zIndex(2f)
-                  .padding(start = 12.dp, top = 44.dp)
-                  .graphicsLayer { alpha = if (fogEnabled) 1f else 0.4f }
-                  .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                  .padding(8.dp),
-          horizontalArrangement = Arrangement.spacedBy(16.dp),
-          verticalAlignment = Alignment.CenterVertically,
+        modifier =
+          Modifier.align(Alignment.TopStart)
+            .zIndex(2f)
+            .padding(start = 12.dp, top = 44.dp)
+            .graphicsLayer { alpha = if (fogEnabled) 1f else 0.4f }
+            .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text("Fog", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.7f))
           Spacer(Modifier.width(4.dp))
           ToggleSwitch(
-              checked = fogModeEnabled && fogEnabled,
-              onCheckedChange = { if (fogEnabled) onFogModeToggled(it) },
+            checked = fogModeEnabled && fogEnabled,
+            onCheckedChange = { if (fogEnabled) onFogModeToggled(it) },
           )
         }
       }
 
       // Zoom controls in bottom right
       ZoomControls(
-          scale = scale,
-          onZoomIn = {
-            zoomAroundCenter((scale * 1.2f).coerceAtMost(5f))
-            animationScope.launch {
-              animatedScale.snapTo(scale)
-              animatedOffsetX.snapTo(offsetX)
-              animatedOffsetY.snapTo(offsetY)
-            }
-          },
-          onZoomOut = {
-            zoomAroundCenter((scale / 1.2f).coerceAtLeast(0.05f))
-            animationScope.launch {
-              animatedScale.snapTo(scale)
-              animatedOffsetX.snapTo(offsetX)
-              animatedOffsetY.snapTo(offsetY)
-            }
-          },
-          onReset = {
-            scale = 1f
-            offsetX = 0f
-            offsetY = 0f
-            animationScope.launch {
-              animatedScale.snapTo(1f)
-              animatedOffsetX.snapTo(0f)
-              animatedOffsetY.snapTo(0f)
-            }
-          },
-          modifier = Modifier.align(Alignment.BottomEnd).zIndex(2f).padding(16.dp),
+        scale = scale,
+        onZoomIn = {
+          zoomAroundCenter((scale * 1.2f).coerceAtMost(5f))
+          animationScope.launch {
+            animatedScale.snapTo(scale)
+            animatedOffsetX.snapTo(offsetX)
+            animatedOffsetY.snapTo(offsetY)
+          }
+        },
+        onZoomOut = {
+          zoomAroundCenter((scale / 1.2f).coerceAtLeast(0.05f))
+          animationScope.launch {
+            animatedScale.snapTo(scale)
+            animatedOffsetX.snapTo(offsetX)
+            animatedOffsetY.snapTo(offsetY)
+          }
+        },
+        onReset = {
+          scale = 1f
+          offsetX = 0f
+          offsetY = 0f
+          animationScope.launch {
+            animatedScale.snapTo(1f)
+            animatedOffsetX.snapTo(0f)
+            animatedOffsetY.snapTo(0f)
+          }
+        },
+        modifier = Modifier.align(Alignment.BottomEnd).zIndex(2f).padding(16.dp),
       )
     }
   }
@@ -893,17 +888,17 @@ fun NavigationCanvasView(
 
 @Composable
 private fun ScreenNodeCard(
-    screen: ScreenNode,
-    isHovered: Boolean,
-    isSource: Boolean, // Orange - nodes we came from
-    isTarget: Boolean, // Green - nodes we could go to
-    isInTestFlow: Boolean = false, // Blue - part of test flow path
-    isCurrentReplayStep: Boolean = false, // Currently active step in replay
-    isFogFocused: Boolean = false, // Focused node in fog mode
-    isDimmed: Boolean,
-    onClick: () -> Unit,
-    onHoverChange: (Boolean) -> Unit,
-    screenshotLoader: ScreenshotLoader? = null,
+  screen: ScreenNode,
+  isHovered: Boolean,
+  isSource: Boolean, // Orange - nodes we came from
+  isTarget: Boolean, // Green - nodes we could go to
+  isInTestFlow: Boolean = false, // Blue - part of test flow path
+  isCurrentReplayStep: Boolean = false, // Currently active step in replay
+  isFogFocused: Boolean = false, // Focused node in fog mode
+  isDimmed: Boolean,
+  onClick: () -> Unit,
+  onHoverChange: (Boolean) -> Unit,
+  screenshotLoader: ScreenshotLoader? = null,
 ) {
   // Screenshot loading state
   var screenshotBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
@@ -916,9 +911,9 @@ private fun ScreenNodeCard(
     if (screenshotUri != null && screenshotLoader != null) {
       isLoadingScreenshot = true
       screenshotBitmap =
-          withContext(Dispatchers.IO) {
-            screenshotLoader.load(screenshotUri)
-          }
+        withContext(Dispatchers.IO) {
+          screenshotLoader.load(screenshotUri)
+        }
       isLoadingScreenshot = false
     } else {
       screenshotBitmap = null
@@ -937,76 +932,74 @@ private fun ScreenNodeCard(
 
   // Visual states based on highlighting type
   val isHighlighted =
-      isHovered || isSource || isTarget || isInTestFlow || isCurrentReplayStep || isFogFocused
+    isHovered || isSource || isTarget || isInTestFlow || isCurrentReplayStep || isFogFocused
   val borderColor =
-      when {
-        isCurrentReplayStep -> currentStepGreen // Current step is bright green
-        isFogFocused -> fogFocusYellow // Fog focus is yellow
-        isHovered -> lightBlue
-        isInTestFlow -> testFlowBlue
-        isSource -> orange
-        isTarget -> green
-        else -> Color.Transparent
-      }
+    when {
+      isCurrentReplayStep -> currentStepGreen // Current step is bright green
+      isFogFocused -> fogFocusYellow // Fog focus is yellow
+      isHovered -> lightBlue
+      isInTestFlow -> testFlowBlue
+      isSource -> orange
+      isTarget -> green
+      else -> Color.Transparent
+    }
   val borderWidth =
-      when {
-        isCurrentReplayStep -> 3.dp
-        isFogFocused -> 3.dp
-        else -> 2.dp
-      }
+    when {
+      isCurrentReplayStep -> 3.dp
+      isFogFocused -> 3.dp
+      else -> 2.dp
+    }
   val textAlpha = if (isDimmed) 0.4f else 0.8f
 
   Tooltip(
-      tooltip = {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-          Text(screen.name, fontSize = 12.sp)
-          Text(screen.type, fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.7f))
-          Text(screen.packageName, fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
-        }
-      },
+    tooltip = {
+      Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(screen.name, fontSize = 12.sp)
+        Text(screen.type, fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.7f))
+        Text(screen.packageName, fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
+      }
+    }
   ) {
     Box(
-        modifier =
-            Modifier.clickable(onClick = onClick)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .onPointerEvent(PointerEventType.Enter) { onHoverChange(true) }
-                .onPointerEvent(PointerEventType.Exit) { onHoverChange(false) },
+      modifier =
+        Modifier.clickable(onClick = onClick)
+          .pointerHoverIcon(PointerIcon.Hand)
+          .onPointerEvent(PointerEventType.Enter) { onHoverChange(true) }
+          .onPointerEvent(PointerEventType.Exit) { onHoverChange(false) }
     ) {
       // Screen name positioned 8dp above the card (plus ~12dp for text height)
       Text(
-          text = screen.name.take(12) + if (screen.name.length > 12) "…" else "",
-          fontSize = 9.sp,
-          color = colors.text.normal.copy(alpha = textAlpha),
-          modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp),
+        text = screen.name.take(12) + if (screen.name.length > 12) "…" else "",
+        fontSize = 9.sp,
+        color = colors.text.normal.copy(alpha = textAlpha),
+        modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp),
       )
 
       // Screenshot card - edge to edge
       Box(
-          modifier =
-              Modifier.size(NODE_WIDTH, NODE_HEIGHT)
-                  .clip(RoundedCornerShape(8.dp))
-                  .background(colors.text.normal.copy(alpha = 0.08f))
-                  .then(
-                      if (isHighlighted)
-                          Modifier.border(borderWidth, borderColor, RoundedCornerShape(8.dp))
-                      else Modifier
-                  ),
-          contentAlignment = Alignment.Center,
+        modifier =
+          Modifier.size(NODE_WIDTH, NODE_HEIGHT)
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.text.normal.copy(alpha = 0.08f))
+            .then(
+              if (isHighlighted) Modifier.border(borderWidth, borderColor, RoundedCornerShape(8.dp))
+              else Modifier
+            ),
+        contentAlignment = Alignment.Center,
       ) {
         when {
           screenshotBitmap != null -> {
             Image(
-                bitmap = screenshotBitmap!!,
-                contentDescription = "Screenshot of ${screen.name}",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
+              bitmap = screenshotBitmap!!,
+              contentDescription = "Screenshot of ${screen.name}",
+              modifier = Modifier.fillMaxSize(),
+              contentScale = ContentScale.Crop,
             )
           }
           isLoadingScreenshot -> {
             // Show subtle loading indicator (dimmed placeholder)
             Box(
-                modifier =
-                    Modifier.fillMaxSize().background(colors.text.normal.copy(alpha = 0.04f)),
+              modifier = Modifier.fillMaxSize().background(colors.text.normal.copy(alpha = 0.04f))
             )
           }
         // else: empty placeholder (no screenshot available)
@@ -1018,30 +1011,30 @@ private fun ScreenNodeCard(
 
 @Composable
 private fun ZoomControls(
-    scale: Float,
-    onZoomIn: () -> Unit,
-    onZoomOut: () -> Unit,
-    onReset: () -> Unit,
-    modifier: Modifier = Modifier,
+  scale: Float,
+  onZoomIn: () -> Unit,
+  onZoomOut: () -> Unit,
+  onReset: () -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
 
   Column(
-      modifier =
-          modifier
-              .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-              .padding(4.dp),
-      verticalArrangement = Arrangement.spacedBy(2.dp),
+    modifier =
+      modifier
+        .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+        .padding(4.dp),
+    verticalArrangement = Arrangement.spacedBy(2.dp),
   ) {
     ZoomButton("+", onClick = onZoomIn)
     ZoomButton("−", onClick = onZoomOut)
     ZoomButton("⟲", onClick = onReset)
 
     Text(
-        "${(scale * 100).toInt()}%",
-        fontSize = 9.sp,
-        color = colors.text.normal.copy(alpha = 0.5f),
-        modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 2.dp),
+      "${(scale * 100).toInt()}%",
+      fontSize = 9.sp,
+      color = colors.text.normal.copy(alpha = 0.5f),
+      modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 2.dp),
     )
   }
 }
@@ -1051,12 +1044,12 @@ private fun ZoomButton(label: String, onClick: () -> Unit) {
   val colors = SharedTheme.globalColors
 
   Box(
-      modifier =
-          Modifier.size(28.dp)
-              .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand),
-      contentAlignment = Alignment.Center,
+    modifier =
+      Modifier.size(28.dp)
+        .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand),
+    contentAlignment = Alignment.Center,
   ) {
     Text(label, fontSize = 14.sp)
   }
@@ -1064,31 +1057,31 @@ private fun ZoomButton(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun ToggleSwitch(
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
+  checked: Boolean,
+  onCheckedChange: (Boolean) -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   val trackColor = if (checked) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.3f)
   val thumbColor = Color.White
 
   Box(
-      modifier =
-          modifier
-              .width(32.dp)
-              .height(18.dp)
-              .clip(RoundedCornerShape(9.dp))
-              .background(trackColor)
-              .clickable { onCheckedChange(!checked) }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(2.dp),
+    modifier =
+      modifier
+        .width(32.dp)
+        .height(18.dp)
+        .clip(RoundedCornerShape(9.dp))
+        .background(trackColor)
+        .clickable { onCheckedChange(!checked) }
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(2.dp)
   ) {
     Box(
-        modifier =
-            Modifier.size(14.dp)
-                .offset(x = if (checked) 14.dp else 0.dp)
-                .clip(CircleShape)
-                .background(thumbColor),
+      modifier =
+        Modifier.size(14.dp)
+          .offset(x = if (checked) 14.dp else 0.dp)
+          .clip(CircleShape)
+          .background(thumbColor)
     )
   }
 }
@@ -1103,9 +1096,9 @@ private fun ToggleSwitch(
  * Based on: https://observablehq.com/@d3/disjoint-force-directed-graph/2
  */
 private fun computeNodePositions(
-    screens: List<ScreenNode>,
-    transitions: List<ScreenTransition>,
-    density: androidx.compose.ui.unit.Density,
+  screens: List<ScreenNode>,
+  transitions: List<ScreenTransition>,
+  density: androidx.compose.ui.unit.Density,
 ): List<NodePosition> {
   if (screens.isEmpty()) return emptyList()
 
@@ -1114,11 +1107,11 @@ private fun computeNodePositions(
 
   // Create mutable node state for simulation
   data class SimNode(
-      val id: String,
-      var x: Float,
-      var y: Float,
-      var vx: Float = 0f,
-      var vy: Float = 0f,
+    val id: String,
+    var x: Float,
+    var y: Float,
+    var vx: Float = 0f,
+    var vy: Float = 0f,
   )
 
   // Initialize nodes in a phyllotaxis pattern (like D3 does for better initial spread)
@@ -1126,9 +1119,9 @@ private fun computeNodePositions(
     val angle = Math.PI * (3 - kotlin.math.sqrt(5.0)) * i // Golden angle
     val radius = 10f * kotlin.math.sqrt(i.toFloat() + 0.5f)
     SimNode(
-        id = screen.name,
-        x = (radius * kotlin.math.cos(angle)).toFloat(),
-        y = (radius * kotlin.math.sin(angle)).toFloat(),
+      id = screen.name,
+      x = (radius * kotlin.math.cos(angle)).toFloat(),
+      y = (radius * kotlin.math.sin(angle)).toFloat(),
     )
   }
   val nodeById = nodes.associateBy { it.id }
@@ -1136,16 +1129,16 @@ private fun computeNodePositions(
   // Build link list (forward transitions only)
   data class SimLink(val source: SimNode, val target: SimNode)
   val links =
-      transitions
-          .filter { it.trigger != "back" }
-          .mapNotNull { t ->
-            val source = nodeById[t.fromScreen]
-            val target = nodeById[t.toScreen]
-            if (source != null && target != null && source != target) {
-              SimLink(source, target)
-            } else null
-          }
-          .distinctBy { setOf(it.source.id, it.target.id) } // Deduplicate bidirectional
+    transitions
+      .filter { it.trigger != "back" }
+      .mapNotNull { t ->
+        val source = nodeById[t.fromScreen]
+        val target = nodeById[t.toScreen]
+        if (source != null && target != null && source != target) {
+          SimLink(source, target)
+        } else null
+      }
+      .distinctBy { setOf(it.source.id, it.target.id) } // Deduplicate bidirectional
 
   // Count connections per node (for link strength calculation)
   val connectionCount = mutableMapOf<String, Int>().withDefault { 0 }
@@ -1171,12 +1164,12 @@ private fun computeNodePositions(
 
   // Helper to compute closest point on line segment and distance
   fun pointToSegmentDistance(
-      px: Float,
-      py: Float,
-      x1: Float,
-      y1: Float,
-      x2: Float,
-      y2: Float,
+    px: Float,
+    py: Float,
+    x1: Float,
+    y1: Float,
+    x2: Float,
+    y2: Float,
   ): Triple<Float, Float, Float> { // Returns (distance, closestX, closestY)
     val dx = x2 - x1
     val dy = y2 - y1
@@ -1195,7 +1188,7 @@ private fun computeNodePositions(
     val closestX = x1 + t * dx
     val closestY = y1 + t * dy
     val dist =
-        kotlin.math.sqrt((px - closestX) * (px - closestX) + (py - closestY) * (py - closestY))
+      kotlin.math.sqrt((px - closestX) * (px - closestX) + (py - closestY) * (py - closestY))
 
     return Triple(dist, closestX, closestY)
   }
@@ -1277,14 +1270,14 @@ private fun computeNodePositions(
 
         // Calculate distance from node center to edge line segment
         val (distance, closestX, closestY) =
-            pointToSegmentDistance(
-                node.x,
-                node.y,
-                link.source.x,
-                link.source.y,
-                link.target.x,
-                link.target.y,
-            )
+          pointToSegmentDistance(
+            node.x,
+            node.y,
+            link.source.x,
+            link.source.y,
+            link.target.x,
+            link.target.y,
+          )
 
         // If node is too close to edge, push it away
         if (distance < edgeRepulsionDistance && distance > 0.1f) {
@@ -1314,11 +1307,11 @@ private fun computeNodePositions(
 
       // D3-style adaptive strength: 1 / min(count(source), count(target))
       val adaptiveStrength =
-          linkStrength /
-              minOf(
-                  connectionCount.getValue(link.source.id),
-                  connectionCount.getValue(link.target.id),
-              )
+        linkStrength /
+          minOf(
+            connectionCount.getValue(link.source.id),
+            connectionCount.getValue(link.target.id),
+          )
 
       // Spring force toward target distance
       val force = (distance - linkDistance) * adaptiveStrength * alpha
@@ -1423,9 +1416,9 @@ private fun computeNodePositions(
 
   return nodes.map { node ->
     NodePosition(
-        screenId = node.id,
-        x = node.x - minX + paddingX,
-        y = node.y - minY + paddingY,
+      screenId = node.id,
+      x = node.x - minX + paddingX,
+      y = node.y - minY + paddingY,
     )
   }
 }

@@ -11,52 +11,52 @@ import kotlinx.serialization.json.jsonPrimitive
 
 @Serializable
 data class PerformanceAuditMetrics(
-    val p50Ms: Double? = null,
-    val p90Ms: Double? = null,
-    val p95Ms: Double? = null,
-    val p99Ms: Double? = null,
-    val jankCount: Int? = null,
-    val missedVsyncCount: Int? = null,
-    val slowUiThreadCount: Int? = null,
-    val frameDeadlineMissedCount: Int? = null,
-    val cpuUsagePercent: Double? = null,
-    val touchLatencyMs: Double? = null,
+  val p50Ms: Double? = null,
+  val p90Ms: Double? = null,
+  val p95Ms: Double? = null,
+  val p99Ms: Double? = null,
+  val jankCount: Int? = null,
+  val missedVsyncCount: Int? = null,
+  val slowUiThreadCount: Int? = null,
+  val frameDeadlineMissedCount: Int? = null,
+  val cpuUsagePercent: Double? = null,
+  val touchLatencyMs: Double? = null,
 )
 
 @Serializable
 data class PerformanceAuditHistoryEntry(
-    val id: Long,
-    val deviceId: String,
-    val sessionId: String,
-    val packageName: String,
-    val timestamp: String,
-    val passed: Boolean,
-    val metrics: PerformanceAuditMetrics,
-    val diagnostics: String? = null,
+  val id: Long,
+  val deviceId: String,
+  val sessionId: String,
+  val packageName: String,
+  val timestamp: String,
+  val passed: Boolean,
+  val metrics: PerformanceAuditMetrics,
+  val diagnostics: String? = null,
 )
 
 @Serializable
 data class PerformanceAuditHistoryRange(
-    val startTime: String,
-    val endTime: String,
+  val startTime: String,
+  val endTime: String,
 )
 
 @Serializable
 data class PerformanceAuditHistoryResult(
-    val results: List<PerformanceAuditHistoryEntry> = emptyList(),
-    val toolCalls: List<String> = emptyList(),
-    val hasMore: Boolean = false,
-    val nextOffset: Int? = null,
-    val range: PerformanceAuditHistoryRange? = null,
+  val results: List<PerformanceAuditHistoryEntry> = emptyList(),
+  val toolCalls: List<String> = emptyList(),
+  val hasMore: Boolean = false,
+  val nextOffset: Int? = null,
+  val range: PerformanceAuditHistoryRange? = null,
 )
 
 internal const val PERFORMANCE_RESULTS_RESOURCE_URI = "automobile:performance-results"
 
 internal fun buildPerformanceResultsUri(
-    startTime: String?,
-    endTime: String?,
-    limit: Int?,
-    offset: Int?,
+  startTime: String?,
+  endTime: String?,
+  limit: Int?,
+  offset: Int?,
 ): String {
   val params = mutableListOf<Pair<String, String>>()
   if (!startTime.isNullOrBlank()) {
@@ -75,15 +75,15 @@ internal fun buildPerformanceResultsUri(
     return PERFORMANCE_RESULTS_RESOURCE_URI
   }
   val query =
-      params.joinToString("&") { (key, value) ->
-        "$key=${URLEncoder.encode(value, StandardCharsets.UTF_8)}"
-      }
+    params.joinToString("&") { (key, value) ->
+      "$key=${URLEncoder.encode(value, StandardCharsets.UTF_8)}"
+    }
   return "$PERFORMANCE_RESULTS_RESOURCE_URI?$query"
 }
 
 internal fun decodePerformanceAuditResource(
-    json: Json,
-    contents: List<McpResourceContent>,
+  json: Json,
+  contents: List<McpResourceContent>,
 ): PerformanceAuditHistoryResult {
   val payload = contents.firstOrNull()?.text?.trim().orEmpty()
   if (payload.isBlank()) {

@@ -22,12 +22,12 @@ class TestPlanDocumentListenerTest {
     testDisposable = com.intellij.openapi.util.Disposer.newDisposable()
     fakeValidationTrigger = FakeValidationTrigger(testDisposable)
     listener =
-        TestPlanDocumentListener(
-            validationTrigger = fakeValidationTrigger,
-            parentDisposable = testDisposable,
-            isLintingEnabled = { lintingEnabled },
-            delayMs = 0, // No delay for tests
-        )
+      TestPlanDocumentListener(
+        validationTrigger = fakeValidationTrigger,
+        parentDisposable = testDisposable,
+        isLintingEnabled = { lintingEnabled },
+        delayMs = 0, // No delay for tests
+      )
   }
 
   @After
@@ -84,9 +84,9 @@ class TestPlanDocumentListenerTest {
 
     assertEquals(1, fakeValidationTrigger.shouldValidateCalls.size)
     assertEquals(
-        0,
-        fakeValidationTrigger.triggerValidationCalls.size,
-        "triggerValidation should not be called when shouldValidate returns false",
+      0,
+      fakeValidationTrigger.triggerValidationCalls.size,
+      "triggerValidation should not be called when shouldValidate returns false",
     )
   }
 
@@ -103,12 +103,12 @@ class TestPlanDocumentListenerTest {
     debounceTrigger.shouldValidateResult = true
 
     val debouncingListener =
-        TestPlanDocumentListener(
-            validationTrigger = debounceTrigger,
-            parentDisposable = debounceDisposable,
-            isLintingEnabled = { lintingEnabled },
-            delayMs = 100, // 100ms delay
-        )
+      TestPlanDocumentListener(
+        validationTrigger = debounceTrigger,
+        parentDisposable = debounceDisposable,
+        isLintingEnabled = { lintingEnabled },
+        delayMs = 100, // 100ms delay
+      )
 
     try {
       // Trigger multiple rapid changes
@@ -123,8 +123,8 @@ class TestPlanDocumentListenerTest {
 
       // Should only trigger validation once due to debouncing
       assertTrue(
-          debounceTrigger.triggerValidationCalls.size <= 2,
-          "Debouncing should reduce validation calls. Got ${debounceTrigger.triggerValidationCalls.size}",
+        debounceTrigger.triggerValidationCalls.size <= 2,
+        "Debouncing should reduce validation calls. Got ${debounceTrigger.triggerValidationCalls.size}",
       )
     } finally {
       debouncingListener.dispose()
@@ -141,12 +141,12 @@ class TestPlanDocumentListenerTest {
     disposeTrigger.shouldValidateResult = true
 
     val debouncingListener =
-        TestPlanDocumentListener(
-            validationTrigger = disposeTrigger,
-            parentDisposable = disposeDisposable,
-            isLintingEnabled = { lintingEnabled },
-            delayMs = 500, // Long delay
-        )
+      TestPlanDocumentListener(
+        validationTrigger = disposeTrigger,
+        parentDisposable = disposeDisposable,
+        isLintingEnabled = { lintingEnabled },
+        delayMs = 500, // Long delay
+      )
 
     val document = createTestDocument()
     val event = createDocumentEvent(document)
@@ -161,9 +161,9 @@ class TestPlanDocumentListenerTest {
 
     // Validation should have been cancelled
     assertEquals(
-        0,
-        disposeTrigger.triggerValidationCalls.size,
-        "Pending validations should be cancelled on dispose",
+      0,
+      disposeTrigger.triggerValidationCalls.size,
+      "Pending validations should be cancelled on dispose",
     )
 
     com.intellij.openapi.util.Disposer.dispose(disposeDisposable)
@@ -233,24 +233,24 @@ class TestPlanDocumentListenerTest {
     override fun fireReadOnlyModificationAttempt() {}
 
     override fun addDocumentListener(
-        listener: com.intellij.openapi.editor.event.DocumentListener
+      listener: com.intellij.openapi.editor.event.DocumentListener
     ) {}
 
     override fun removeDocumentListener(
-        listener: com.intellij.openapi.editor.event.DocumentListener
+      listener: com.intellij.openapi.editor.event.DocumentListener
     ) {}
 
     override fun createRangeMarker(startOffset: Int, endOffset: Int): RangeMarker =
-        throw UnsupportedOperationException()
+      throw UnsupportedOperationException()
 
     override fun createRangeMarker(
-        startOffset: Int,
-        endOffset: Int,
-        surviveOnExternalChange: Boolean,
+      startOffset: Int,
+      endOffset: Int,
+      surviveOnExternalChange: Boolean,
     ): RangeMarker = throw UnsupportedOperationException()
 
     override fun createGuardedBlock(startOffset: Int, endOffset: Int): RangeMarker =
-        throw UnsupportedOperationException()
+      throw UnsupportedOperationException()
 
     override fun removeGuardedBlock(block: RangeMarker) {}
 

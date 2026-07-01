@@ -13,19 +13,19 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun LabeledTextField(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
+  label: String,
+  value: String,
+  onValueChange: (String) -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   Column(
-      modifier = modifier,
-      verticalArrangement = Arrangement.spacedBy(4.dp),
+    modifier = modifier,
+    verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
     Text(
-        label,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-        fontSize = 11.sp,
+      label,
+      color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+      fontSize = 11.sp,
     )
     TextField(value = value, onValueChange = onValueChange, modifier = Modifier.fillMaxWidth())
   }

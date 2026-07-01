@@ -41,15 +41,15 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
  */
 @Composable
 fun RightInspectorPanel(
-    selectedEvent: TelemetryDisplayEvent?,
-    onClose: () -> Unit,
-    isLiveMode: Boolean = false,
-    onToggleLiveMode: (Boolean) -> Unit = {},
-    layoutInspectorState: LayoutInspectorState? = null,
-    hasDevice: Boolean = false,
-    onOpenSource: ((String, Int, String) -> Unit)? = null,
-    screenshotLoader: ScreenshotLoader? = null,
-    modifier: Modifier = Modifier,
+  selectedEvent: TelemetryDisplayEvent?,
+  onClose: () -> Unit,
+  isLiveMode: Boolean = false,
+  onToggleLiveMode: (Boolean) -> Unit = {},
+  layoutInspectorState: LayoutInspectorState? = null,
+  hasDevice: Boolean = false,
+  onOpenSource: ((String, Int, String) -> Unit)? = null,
+  screenshotLoader: ScreenshotLoader? = null,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   val panelModifier = modifier.fillMaxSize().background(colors.panelBackground)
@@ -65,11 +65,11 @@ fun RightInspectorPanel(
   Column(panelModifier) {
     // Header bar with mode toggle
     Row(
-        Modifier.fillMaxWidth()
-            .height(24.dp)
-            .background(colors.text.normal.copy(alpha = 0.04f))
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      Modifier.fillMaxWidth()
+        .height(24.dp)
+        .background(colors.text.normal.copy(alpha = 0.04f))
+        .padding(horizontal = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       if (canShowLive && (isLayoutEvent || isLiveMode)) {
         InspectorTabButton("Event", !isLiveMode) { onToggleLiveMode(false) }
@@ -79,20 +79,18 @@ fun RightInspectorPanel(
         Text("Live Layout", fontSize = 10.sp, color = colors.text.info)
       } else if (selectedEvent != null) {
         Text(
-            inspectorTitle(selectedEvent),
-            fontSize = 10.sp,
-            color = colors.text.normal.copy(alpha = 0.7f),
+          inspectorTitle(selectedEvent),
+          fontSize = 10.sp,
+          color = colors.text.normal.copy(alpha = 0.7f),
         )
       }
       Spacer(Modifier.weight(1f))
       Text(
-          "\u2715",
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-          modifier =
-              Modifier.clickable(onClick = onClose)
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(4.dp),
+        "\u2715",
+        fontSize = 11.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+        modifier =
+          Modifier.clickable(onClick = onClose).pointerHoverIcon(PointerIcon.Hand).padding(4.dp),
       )
     }
     Box(Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.08f)))
@@ -102,11 +100,11 @@ fun RightInspectorPanel(
       LiveLayoutSplitPane(layoutInspectorState, Modifier.weight(1f))
     } else if (selectedEvent != null) {
       EventInspectorContent(
-          event = selectedEvent,
-          onClose = onClose,
-          onOpenSource = onOpenSource,
-          screenshotLoader = screenshotLoader,
-          modifier = Modifier.weight(1f),
+        event = selectedEvent,
+        onClose = onClose,
+        onOpenSource = onOpenSource,
+        screenshotLoader = screenshotLoader,
+        modifier = Modifier.weight(1f),
       )
     }
   }
@@ -114,8 +112,8 @@ fun RightInspectorPanel(
 
 @Composable
 private fun LiveLayoutSplitPane(
-    layoutInspectorState: LayoutInspectorState,
-    modifier: Modifier = Modifier,
+  layoutInspectorState: LayoutInspectorState,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   val splitFraction = remember { mutableFloatStateOf(0.6f) }
@@ -130,41 +128,41 @@ private fun LiveLayoutSplitPane(
     Column(Modifier.fillMaxSize()) {
       Box(Modifier.fillMaxWidth().height(with(density) { topHeightPx.toDp() })) {
         HierarchyTreeView(
-            hierarchy = layoutInspectorState.hierarchy,
-            selectedElementId = layoutInspectorState.selectedElementId,
-            hoveredElementId = layoutInspectorState.hoveredElementId,
-            onElementSelected = { layoutInspectorState.selectElement(it) },
-            onElementHovered = { layoutInspectorState.hoverElement(it) },
-            parentMap = layoutInspectorState.parentMap,
-            modifier = Modifier.fillMaxSize(),
+          hierarchy = layoutInspectorState.hierarchy,
+          selectedElementId = layoutInspectorState.selectedElementId,
+          hoveredElementId = layoutInspectorState.hoveredElementId,
+          onElementSelected = { layoutInspectorState.selectElement(it) },
+          onElementHovered = { layoutInspectorState.hoverElement(it) },
+          parentMap = layoutInspectorState.parentMap,
+          modifier = Modifier.fillMaxSize(),
         )
       }
       Box(
-          Modifier.fillMaxWidth()
-              .height(5.dp)
-              .pointerHoverIcon(PointerIcon(java.awt.Cursor(java.awt.Cursor.N_RESIZE_CURSOR)))
-              .pointerInput(Unit) {
-                detectDragGestures { _, dragAmount ->
-                  val newFraction = splitFraction.floatValue + (dragAmount.y / totalHeightPx)
-                  splitFraction.floatValue = newFraction.coerceIn(0.1f, 0.9f)
-                }
-              },
-          contentAlignment = Alignment.Center,
+        Modifier.fillMaxWidth()
+          .height(5.dp)
+          .pointerHoverIcon(PointerIcon(java.awt.Cursor(java.awt.Cursor.N_RESIZE_CURSOR)))
+          .pointerInput(Unit) {
+            detectDragGestures { _, dragAmount ->
+              val newFraction = splitFraction.floatValue + (dragAmount.y / totalHeightPx)
+              splitFraction.floatValue = newFraction.coerceIn(0.1f, 0.9f)
+            }
+          },
+        contentAlignment = Alignment.Center,
       ) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.10f)))
       }
       Box(Modifier.fillMaxWidth().height(with(density) { bottomHeightPx.toDp() })) {
         if (layoutInspectorState.selectedElementId != null) {
           PropertyInspectorPanel(
-              element = layoutInspectorState.selectedElement,
-              modifier = Modifier.fillMaxSize(),
+            element = layoutInspectorState.selectedElement,
+            modifier = Modifier.fillMaxSize(),
           )
         } else {
           Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                "Select an element to view properties",
-                fontSize = 11.sp,
-                color = colors.text.normal.copy(alpha = 0.4f),
+              "Select an element to view properties",
+              fontSize = 11.sp,
+              color = colors.text.normal.copy(alpha = 0.4f),
             )
           }
         }
@@ -177,31 +175,31 @@ private fun LiveLayoutSplitPane(
 private fun InspectorTabButton(label: String, isActive: Boolean, onClick: () -> Unit) {
   val colors = SharedTheme.globalColors
   Text(
-      label,
-      fontSize = 10.sp,
-      color = if (isActive) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
-      modifier =
-          Modifier.clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .background(
-                  if (isActive) colors.text.normal.copy(alpha = 0.08f) else Color.Transparent,
-                  RoundedCornerShape(4.dp),
-              )
-              .padding(horizontal = 8.dp, vertical = 3.dp),
+    label,
+    fontSize = 10.sp,
+    color = if (isActive) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
+    modifier =
+      Modifier.clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .background(
+          if (isActive) colors.text.normal.copy(alpha = 0.08f) else Color.Transparent,
+          RoundedCornerShape(4.dp),
+        )
+        .padding(horizontal = 8.dp, vertical = 3.dp),
   )
 }
 
 private fun inspectorTitle(event: TelemetryDisplayEvent): String =
-    when (event) {
-      is TelemetryDisplayEvent.Network -> "${event.method} ${event.statusCode}"
-      is TelemetryDisplayEvent.Navigation -> "Navigation"
-      is TelemetryDisplayEvent.Failure -> event.type
-      is TelemetryDisplayEvent.Log -> "Log (${event.level})"
-      is TelemetryDisplayEvent.Os -> "OS: ${event.category}"
-      is TelemetryDisplayEvent.Storage -> "Storage"
-      is TelemetryDisplayEvent.Layout -> "Layout"
-      is TelemetryDisplayEvent.Performance -> "Performance"
-      is TelemetryDisplayEvent.Memory -> "Memory"
-      is TelemetryDisplayEvent.ToolCall -> "Tool: ${event.toolName}"
-      is TelemetryDisplayEvent.Accessibility -> "Accessibility"
-    }
+  when (event) {
+    is TelemetryDisplayEvent.Network -> "${event.method} ${event.statusCode}"
+    is TelemetryDisplayEvent.Navigation -> "Navigation"
+    is TelemetryDisplayEvent.Failure -> event.type
+    is TelemetryDisplayEvent.Log -> "Log (${event.level})"
+    is TelemetryDisplayEvent.Os -> "OS: ${event.category}"
+    is TelemetryDisplayEvent.Storage -> "Storage"
+    is TelemetryDisplayEvent.Layout -> "Layout"
+    is TelemetryDisplayEvent.Performance -> "Performance"
+    is TelemetryDisplayEvent.Memory -> "Memory"
+    is TelemetryDisplayEvent.ToolCall -> "Tool: ${event.toolName}"
+    is TelemetryDisplayEvent.Accessibility -> "Accessibility"
+  }

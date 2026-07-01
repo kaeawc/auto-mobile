@@ -71,16 +71,15 @@ enum class TestScreen {
 
 @Composable
 fun TestDashboard(
-    onOpenFile: (String) -> Unit = {}, // Callback to open file in editor
-    onNavigateToGraph: (List<String>) -> Unit =
-        {}, // Navigate to nav graph with highlighted screens
-    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
-    clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
-    observationStreamClient: ObservationStreamClient? =
-        null, // Real-time stream client for hierarchy/screenshot/navigation updates
-    testRecordingClient: TestRecordingClient? = null, // Client for test recording operations
-    fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
-        dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
+  onOpenFile: (String) -> Unit = {}, // Callback to open file in editor
+  onNavigateToGraph: (List<String>) -> Unit = {}, // Navigate to nav graph with highlighted screens
+  dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+  clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
+  observationStreamClient: ObservationStreamClient? =
+    null, // Real-time stream client for hierarchy/screenshot/navigation updates
+  testRecordingClient: TestRecordingClient? = null, // Client for test recording operations
+  fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
+    dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
 ) {
   val graph = LocalAutoMobileGraph.current
   var currentScreen by remember { mutableStateOf(TestScreen.Dashboard) }
@@ -101,11 +100,10 @@ fun TestDashboard(
   val currentForegroundPackage = currentHierarchyUpdate?.packageName
   LaunchedEffect(currentForegroundPackage) {
     if (
-        currentForegroundPackage != null &&
-            currentNavigationUpdate?.appId != currentForegroundPackage
+      currentForegroundPackage != null && currentNavigationUpdate?.appId != currentForegroundPackage
     ) {
       LOG.info(
-          "Foreground app changed to $currentForegroundPackage, clearing stale navigation data"
+        "Foreground app changed to $currentForegroundPackage, clearing stale navigation data"
       )
       currentNavigationUpdate = null
     }
@@ -118,7 +116,7 @@ fun TestDashboard(
     LOG.info("Starting hierarchy updates collection in TestDashboard")
     observationStreamClient.hierarchyUpdates.collect { update ->
       LOG.info(
-          "Received hierarchy update in TestDashboard - deviceId=${update.deviceId}, hasData=${update.data != null}"
+        "Received hierarchy update in TestDashboard - deviceId=${update.deviceId}, hasData=${update.data != null}"
       )
       currentHierarchyUpdate = update
     }
@@ -131,7 +129,7 @@ fun TestDashboard(
     LOG.info("Starting screenshot updates collection in TestDashboard")
     observationStreamClient.screenshotUpdates.collect { update ->
       LOG.info(
-          "Received screenshot update in TestDashboard - deviceId=${update.deviceId}, hasScreenshot=${update.screenshotBase64 != null}"
+        "Received screenshot update in TestDashboard - deviceId=${update.deviceId}, hasScreenshot=${update.screenshotBase64 != null}"
       )
       currentScreenshotUpdate = update
     }
@@ -150,12 +148,12 @@ fun TestDashboard(
       // Only accept navigation updates that match the foreground app (or if no hierarchy yet)
       if (foregroundPackage == null || update.appId == foregroundPackage) {
         LOG.info(
-            "Received navigation update in TestDashboard - appId=${update.appId}, nodes=${update.nodes.size}"
+          "Received navigation update in TestDashboard - appId=${update.appId}, nodes=${update.nodes.size}"
         )
         currentNavigationUpdate = update
       } else {
         LOG.info(
-            "Ignoring navigation update for ${update.appId} (foreground is $foregroundPackage)"
+          "Ignoring navigation update for ${update.appId} (foreground is $foregroundPackage)"
         )
       }
     }
@@ -167,7 +165,7 @@ fun TestDashboard(
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       try {
         val dataSource =
-            graph.dataSourceFactory.createTestDataSource(dataSourceMode, clientProvider)
+          graph.dataSourceFactory.createTestDataSource(dataSourceMode, clientProvider)
         when (val result = dataSource.getTestRuns()) {
           is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {
             testRuns = result.data
@@ -190,62 +188,61 @@ fun TestDashboard(
 
   when (currentScreen) {
     TestScreen.Dashboard ->
-        TestDashboardHome(
-            testRuns = testRuns,
-            isLoading = isLoading,
-            error = error,
-            onRecordTest = { currentScreen = TestScreen.RecordingTest },
-            onTestRunClick = { run ->
-              selectedTestRun = run
-              currentScreen = TestScreen.TestRunDetail
-            },
-        )
+      TestDashboardHome(
+        testRuns = testRuns,
+        isLoading = isLoading,
+        error = error,
+        onRecordTest = { currentScreen = TestScreen.RecordingTest },
+        onTestRunClick = { run ->
+          selectedTestRun = run
+          currentScreen = TestScreen.TestRunDetail
+        },
+      )
     TestScreen.RecordingTest ->
-        RecordingTestScreen(
-            recordedActions = recordedActions,
-            onActionRecorded = { recordedActions = recordedActions + it },
-            onFinishRecording = {
-              recordedActions = emptyList()
-              currentScreen = TestScreen.Dashboard
-            },
-            onBack = {
-              recordedActions = emptyList()
-              currentScreen = TestScreen.Dashboard
-            },
-            screenshotUpdate = currentScreenshotUpdate,
-            hierarchyUpdate = currentHierarchyUpdate,
-            navigationUpdate = currentNavigationUpdate,
-            testRecordingClient = testRecordingClient,
-            fileSaver = fileSaver,
-        )
+      RecordingTestScreen(
+        recordedActions = recordedActions,
+        onActionRecorded = { recordedActions = recordedActions + it },
+        onFinishRecording = {
+          recordedActions = emptyList()
+          currentScreen = TestScreen.Dashboard
+        },
+        onBack = {
+          recordedActions = emptyList()
+          currentScreen = TestScreen.Dashboard
+        },
+        screenshotUpdate = currentScreenshotUpdate,
+        hierarchyUpdate = currentHierarchyUpdate,
+        navigationUpdate = currentNavigationUpdate,
+        testRecordingClient = testRecordingClient,
+        fileSaver = fileSaver,
+      )
     TestScreen.ModuleSelection ->
-        ModuleSelectionScreen(
-            recordedActions = recordedActions,
-            onModuleSelected = { module ->
-              // TODO: Export YAML and open file
-              recordedActions = emptyList()
-              currentScreen = TestScreen.Dashboard
-            },
-            onBack = { currentScreen = TestScreen.RecordingTest },
-        )
+      ModuleSelectionScreen(
+        recordedActions = recordedActions,
+        onModuleSelected = { module ->
+          // TODO: Export YAML and open file
+          recordedActions = emptyList()
+          currentScreen = TestScreen.Dashboard
+        },
+        onBack = { currentScreen = TestScreen.RecordingTest },
+      )
     TestScreen.TestRunDetail ->
-        selectedTestRun?.let { run ->
-          TestRunDetailScreen(
-              testRun = run,
-              allTestRuns = testRuns,
-              onBack = { currentScreen = TestScreen.Dashboard },
-              onViewInGraph = { onNavigateToGraph(run.screensVisited) },
-              onNavigateToRun = { runId ->
-                // Navigate to another test run by ID
-                val targetRun =
-                    testRuns.find { it.id == runId }
-                        ?: TestMockData.recentRuns.find { it.id == runId }
-                if (targetRun != null) {
-                  selectedTestRun = targetRun
-                }
-              },
-          )
-        } ?: run { currentScreen = TestScreen.Dashboard }
+      selectedTestRun?.let { run ->
+        TestRunDetailScreen(
+          testRun = run,
+          allTestRuns = testRuns,
+          onBack = { currentScreen = TestScreen.Dashboard },
+          onViewInGraph = { onNavigateToGraph(run.screensVisited) },
+          onNavigateToRun = { runId ->
+            // Navigate to another test run by ID
+            val targetRun =
+              testRuns.find { it.id == runId } ?: TestMockData.recentRuns.find { it.id == runId }
+            if (targetRun != null) {
+              selectedTestRun = targetRun
+            }
+          },
+        )
+      } ?: run { currentScreen = TestScreen.Dashboard }
   }
 }
 
@@ -257,11 +254,11 @@ private enum class TestFilter {
 
 @Composable
 internal fun TestDashboardHome(
-    testRuns: List<TestRun>,
-    isLoading: Boolean = false,
-    error: String? = null,
-    onRecordTest: () -> Unit,
-    onTestRunClick: (TestRun) -> Unit,
+  testRuns: List<TestRun>,
+  isLoading: Boolean = false,
+  error: String? = null,
+  onRecordTest: () -> Unit,
+  onTestRunClick: (TestRun) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val scrollState = rememberScrollState()
@@ -269,34 +266,32 @@ internal fun TestDashboardHome(
 
   // Sort based on filter - use sampleSize for popularity (fallback to TestMockData for fake data)
   val sortedRuns =
-      remember(selectedFilter, testRuns) {
-        when (selectedFilter) {
-          TestFilter.Recent -> testRuns.sortedByDescending { it.startTime }
-          TestFilter.Popular ->
-              testRuns.sortedByDescending { run ->
-                // Use sampleSize if available, otherwise look up from mock data
-                if (run.sampleSize > 0) run.sampleSize
-                else TestMockData.testCases.find { it.id == run.testId }?.runCount ?: 0
-              }
-          TestFilter.Both ->
-              testRuns.sortedByDescending { run ->
-                val popularity =
-                    if (run.sampleSize > 0) run.sampleSize
-                    else TestMockData.testCases.find { it.id == run.testId }?.runCount ?: 0
-                run.startTime + popularity * 100_000
-              }
-        }
+    remember(selectedFilter, testRuns) {
+      when (selectedFilter) {
+        TestFilter.Recent -> testRuns.sortedByDescending { it.startTime }
+        TestFilter.Popular ->
+          testRuns.sortedByDescending { run ->
+            // Use sampleSize if available, otherwise look up from mock data
+            if (run.sampleSize > 0) run.sampleSize
+            else TestMockData.testCases.find { it.id == run.testId }?.runCount ?: 0
+          }
+        TestFilter.Both ->
+          testRuns.sortedByDescending { run ->
+            val popularity =
+              if (run.sampleSize > 0) run.sampleSize
+              else TestMockData.testCases.find { it.id == run.testId }?.runCount ?: 0
+            run.startTime + popularity * 100_000
+          }
       }
+    }
 
-  Column(
-      modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp),
-  ) {
+  Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp)) {
     Text("Testing", fontSize = 18.sp)
     Text(
-        "Create, run, and analyze UI tests",
-        color = colors.text.normal.copy(alpha = 0.6f),
-        fontSize = 12.sp,
-        modifier = Modifier.padding(top = 4.dp),
+      "Create, run, and analyze UI tests",
+      color = colors.text.normal.copy(alpha = 0.6f),
+      fontSize = 12.sp,
+      modifier = Modifier.padding(top = 4.dp),
     )
 
     Spacer(Modifier.height(20.dp))
@@ -308,28 +303,28 @@ internal fun TestDashboardHome(
 
     // Test Runs header with filter chips
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       Text("Test Runs", fontSize = 14.sp, color = colors.text.normal.copy(alpha = 0.8f))
 
       // Filter chips
       Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         FilterChip(
-            label = "Recent",
-            selected = selectedFilter == TestFilter.Recent,
-            onClick = { selectedFilter = TestFilter.Recent },
+          label = "Recent",
+          selected = selectedFilter == TestFilter.Recent,
+          onClick = { selectedFilter = TestFilter.Recent },
         )
         FilterChip(
-            label = "Popular",
-            selected = selectedFilter == TestFilter.Popular,
-            onClick = { selectedFilter = TestFilter.Popular },
+          label = "Popular",
+          selected = selectedFilter == TestFilter.Popular,
+          onClick = { selectedFilter = TestFilter.Popular },
         )
         FilterChip(
-            label = "Both",
-            selected = selectedFilter == TestFilter.Both,
-            onClick = { selectedFilter = TestFilter.Both },
+          label = "Both",
+          selected = selectedFilter == TestFilter.Both,
+          onClick = { selectedFilter = TestFilter.Both },
         )
       }
     }
@@ -339,26 +334,26 @@ internal fun TestDashboardHome(
     // Loading state
     if (isLoading) {
       Box(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
-                  .padding(16.dp),
-          contentAlignment = Alignment.Center,
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
+            .padding(16.dp),
+        contentAlignment = Alignment.Center,
       ) {
         Text(
-            "Loading test data...",
-            fontSize = 12.sp,
-            color = colors.text.normal.copy(alpha = 0.6f),
+          "Loading test data...",
+          fontSize = 12.sp,
+          color = colors.text.normal.copy(alpha = 0.6f),
         )
       }
     }
     // Error state
     else if (error != null) {
       Box(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .background(Color(0xFFFF5722).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
-                  .padding(16.dp),
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(Color(0xFFFF5722).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+            .padding(16.dp)
       ) {
         Text(error, fontSize = 12.sp, color = Color(0xFFFF5722))
       }
@@ -366,19 +361,19 @@ internal fun TestDashboardHome(
     // Empty state
     else if (sortedRuns.isEmpty()) {
       Box(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
-                  .padding(16.dp),
-          contentAlignment = Alignment.Center,
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
+            .padding(16.dp),
+        contentAlignment = Alignment.Center,
       ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
           Text("No test runs yet", fontSize = 13.sp, color = colors.text.normal.copy(alpha = 0.6f))
           Text(
-              "Record or run exploratory tests to see them here",
-              fontSize = 11.sp,
-              color = colors.text.normal.copy(alpha = 0.4f),
-              modifier = Modifier.padding(top = 4.dp),
+            "Record or run exploratory tests to see them here",
+            fontSize = 11.sp,
+            color = colors.text.normal.copy(alpha = 0.4f),
+            modifier = Modifier.padding(top = 4.dp),
           )
         }
       }
@@ -390,10 +385,10 @@ internal fun TestDashboardHome(
         val testCase = TestMockData.testCases.find { it.id == run.testId }
         val runCount = if (run.sampleSize > 0) run.sampleSize else testCase?.runCount ?: 0
         TestRunRowEnhanced(
-            run = run,
-            runCount = runCount,
-            flakinessScore = testCase?.flakinessScore ?: 0f,
-            onClick = { onTestRunClick(run) },
+          run = run,
+          runCount = runCount,
+          flakinessScore = testCase?.flakinessScore ?: 0f,
+          onClick = { onTestRunClick(run) },
         )
         Spacer(Modifier.height(6.dp))
       }
@@ -403,24 +398,23 @@ internal fun TestDashboardHome(
 
 @Composable
 private fun FilterChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
+  label: String,
+  selected: Boolean,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val bgColor = if (selected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent
   val borderColor =
-      if (selected) colors.text.normal.copy(alpha = 0.3f)
-      else colors.text.normal.copy(alpha = 0.15f)
+    if (selected) colors.text.normal.copy(alpha = 0.3f) else colors.text.normal.copy(alpha = 0.15f)
   val textColor = if (selected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f)
 
   Box(
-      modifier =
-          Modifier.border(1.dp, borderColor, RoundedCornerShape(12.dp))
-              .background(bgColor, RoundedCornerShape(12.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 10.dp, vertical = 4.dp),
+    modifier =
+      Modifier.border(1.dp, borderColor, RoundedCornerShape(12.dp))
+        .background(bgColor, RoundedCornerShape(12.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 10.dp, vertical = 4.dp)
   ) {
     Text(label, fontSize = 11.sp, color = textColor)
   }
@@ -428,70 +422,70 @@ private fun FilterChip(
 
 @Composable
 private fun TestRunRowEnhanced(
-    run: TestRun,
-    runCount: Int,
-    flakinessScore: Float,
-    onClick: () -> Unit,
+  run: TestRun,
+  runCount: Int,
+  flakinessScore: Float,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val statusColor =
-      when (run.status) {
-        TestStatus.Passed -> Color(0xFF4CAF50)
-        TestStatus.Failed -> Color(0xFFFF5722)
-        TestStatus.Running -> Color(0xFF2196F3)
-        TestStatus.Skipped -> colors.text.normal.copy(alpha = 0.4f)
-      }
+    when (run.status) {
+      TestStatus.Passed -> Color(0xFF4CAF50)
+      TestStatus.Failed -> Color(0xFFFF5722)
+      TestStatus.Running -> Color(0xFF2196F3)
+      TestStatus.Skipped -> colors.text.normal.copy(alpha = 0.4f)
+    }
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(12.dp),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(12.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.weight(1f),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier.weight(1f),
     ) {
       Box(modifier = Modifier.size(8.dp).background(statusColor, CircleShape))
       Column {
         Text(run.testName, fontSize = 13.sp)
         // Show steps if available, otherwise show sample count as "runs"
         val detailText =
-            if (run.steps.isNotEmpty()) {
-              "${run.deviceName} • ${run.steps.size} steps • $runCount runs"
-            } else {
-              "${run.deviceName} • $runCount runs"
-            }
+          if (run.steps.isNotEmpty()) {
+            "${run.deviceName} • ${run.steps.size} steps • $runCount runs"
+          } else {
+            "${run.deviceName} • $runCount runs"
+          }
         Text(
-            detailText,
-            fontSize = 11.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
+          detailText,
+          fontSize = 11.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
         )
       }
     }
 
     Column(horizontalAlignment = Alignment.End) {
       Text(
-          "${run.durationMs / 1000.0}s",
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
+        "${run.durationMs / 1000.0}s",
+        fontSize = 11.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
       )
       if (flakinessScore > 0.1f) {
         Text(
-            "${(flakinessScore * 100).toInt()}% flaky",
-            fontSize = 10.sp,
-            color = Color(0xFFFFC107),
+          "${(flakinessScore * 100).toInt()}% flaky",
+          fontSize = 10.sp,
+          color = Color(0xFFFFC107),
         )
       } else if (run.status == TestStatus.Failed) {
         Text(
-            "Failed",
-            fontSize = 10.sp,
-            color = Color(0xFFFF5722),
+          "Failed",
+          fontSize = 10.sp,
+          color = Color(0xFFFF5722),
         )
       }
     }
@@ -500,31 +494,31 @@ private fun TestRunRowEnhanced(
 
 @Composable
 private fun SuggestedPromptChip(
-    text: String,
-    onClick: () -> Unit,
+  text: String,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-              .border(1.dp, colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 10.dp, vertical = 8.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+        .border(1.dp, colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 10.dp, vertical = 8.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
-        "+",
-        fontSize = 14.sp,
-        color = colors.text.normal.copy(alpha = 0.4f),
+      "+",
+      fontSize = 14.sp,
+      color = colors.text.normal.copy(alpha = 0.4f),
     )
     Text(
-        text,
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = 0.7f),
+      text,
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = 0.7f),
     )
   }
 }
@@ -537,16 +531,16 @@ private enum class RecordingPhase {
 
 @Composable
 private fun RecordingTestScreen(
-    recordedActions: List<RecordedAction>,
-    onActionRecorded: (RecordedAction) -> Unit,
-    onFinishRecording: () -> Unit,
-    onBack: () -> Unit,
-    screenshotUpdate: ScreenshotStreamUpdate? = null,
-    hierarchyUpdate: HierarchyStreamUpdate? = null,
-    navigationUpdate: NavigationGraphStreamUpdate? = null,
-    testRecordingClient: TestRecordingClient? = null,
-    fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
-        dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
+  recordedActions: List<RecordedAction>,
+  onActionRecorded: (RecordedAction) -> Unit,
+  onFinishRecording: () -> Unit,
+  onBack: () -> Unit,
+  screenshotUpdate: ScreenshotStreamUpdate? = null,
+  hierarchyUpdate: HierarchyStreamUpdate? = null,
+  navigationUpdate: NavigationGraphStreamUpdate? = null,
+  testRecordingClient: TestRecordingClient? = null,
+  fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
+    dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
 ) {
   val colors = SharedTheme.globalColors
   val coroutineScope = rememberCoroutineScope()
@@ -573,15 +567,15 @@ private fun RecordingTestScreen(
 
   // Decode screenshot if available
   val screenshotBytes =
-      remember(screenshotUpdate?.screenshotBase64) {
-        screenshotUpdate?.screenshotBase64?.let { base64 ->
-          try {
-            java.util.Base64.getDecoder().decode(base64)
-          } catch (e: Exception) {
-            null
-          }
+    remember(screenshotUpdate?.screenshotBase64) {
+      screenshotUpdate?.screenshotBase64?.let { base64 ->
+        try {
+          java.util.Base64.getDecoder().decode(base64)
+        } catch (e: Exception) {
+          null
         }
       }
+    }
 
   // Current screen info from hierarchy or navigation
   val currentPackageName = hierarchyUpdate?.packageName
@@ -591,18 +585,16 @@ private fun RecordingTestScreen(
     RecordingPhase.Setup -> {
       // ============ SETUP PHASE ============
       val scrollState = rememberScrollState()
-      Column(
-          modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp),
-      ) {
+      Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp)) {
         Link("← Back", onClick = onBack)
         Spacer(Modifier.height(12.dp))
 
         Text("Record Test", fontSize = 18.sp)
         Text(
-            "Create and record a UI test",
-            color = colors.text.normal.copy(alpha = 0.6f),
-            fontSize = 12.sp,
-            modifier = Modifier.padding(top = 4.dp),
+          "Create and record a UI test",
+          color = colors.text.normal.copy(alpha = 0.6f),
+          fontSize = 12.sp,
+          modifier = Modifier.padding(top = 4.dp),
         )
 
         Spacer(Modifier.height(24.dp))
@@ -616,51 +608,47 @@ private fun RecordingTestScreen(
 
         // Prompt input row with multiline text area, Clear, and Start buttons
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Bottom,
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.Bottom,
         ) {
           Box(
-              modifier =
-                  Modifier.weight(1f)
-                      .height(80.dp)
-                      .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-                      .padding(8.dp),
+            modifier =
+              Modifier.weight(1f)
+                .height(80.dp)
+                .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+                .padding(8.dp)
           ) {
             // Placeholder text when empty
             if (isEmpty) {
               Text(
-                  placeholderText,
-                  fontSize = 12.sp,
-                  color = colors.text.normal.copy(alpha = 0.4f),
+                placeholderText,
+                fontSize = 12.sp,
+                color = colors.text.normal.copy(alpha = 0.4f),
               )
             }
             androidx.compose.foundation.text.BasicTextField(
-                value = promptText,
-                onValueChange = { promptText = it },
-                modifier = Modifier.fillMaxSize(),
-                textStyle =
-                    androidx.compose.ui.text.TextStyle(
-                        fontSize = 12.sp,
-                        color = colors.text.normal,
-                    ),
-                minLines = 2,
-                maxLines = 4,
+              value = promptText,
+              onValueChange = { promptText = it },
+              modifier = Modifier.fillMaxSize(),
+              textStyle =
+                androidx.compose.ui.text.TextStyle(
+                  fontSize = 12.sp,
+                  color = colors.text.normal,
+                ),
+              minLines = 2,
+              maxLines = 4,
             )
           }
 
           // Clear button - only enabled when there's text
           if (!isEmpty) {
-            OutlinedButton(
-                onClick = { promptText = "" },
-            ) {
+            OutlinedButton(onClick = { promptText = "" }) {
               Text("Clear")
             }
           }
 
-          Button(
-              onClick = { recordingPhase = RecordingPhase.Recording },
-          ) {
+          Button(onClick = { recordingPhase = RecordingPhase.Recording }) {
             Text("Start")
           }
         }
@@ -674,17 +662,17 @@ private fun RecordingTestScreen(
 
           // Heuristically generated prompts based on coverage analysis
           val suggestedPrompts =
-              listOf(
-                  "Test the VideoCall screen - try starting, ending, and muting calls",
-                  "Explore Privacy settings and verify all toggles work correctly",
-                  "Test the VoiceCall → MediaGallery transition with different media types",
-              )
+            listOf(
+              "Test the VideoCall screen - try starting, ending, and muting calls",
+              "Explore Privacy settings and verify all toggles work correctly",
+              "Test the VoiceCall → MediaGallery transition with different media types",
+            )
 
           Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             suggestedPrompts.forEach { suggestion ->
               SuggestedPromptChip(
-                  text = suggestion,
-                  onClick = { promptText = suggestion },
+                text = suggestion,
+                onClick = { promptText = suggestion },
               )
             }
           }
@@ -694,15 +682,15 @@ private fun RecordingTestScreen(
 
         // Coverage analysis with loading state
         Box(
-            modifier =
-                Modifier.fillMaxWidth()
-                    .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                    .padding(16.dp),
+          modifier =
+            Modifier.fillMaxWidth()
+              .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+              .padding(16.dp)
         ) {
           if (isLoadingAnalysis) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(12.dp),
+              verticalAlignment = Alignment.CenterVertically,
             ) {
               // Simple animated loading dots using LaunchedEffect
               var dotCount by remember { mutableStateOf(0) }
@@ -714,9 +702,9 @@ private fun RecordingTestScreen(
               }
               val dots = ".".repeat(dotCount)
               Text(
-                  "Analyzing coverage$dots",
-                  fontSize = 12.sp,
-                  color = colors.text.normal.copy(alpha = 0.6f),
+                "Analyzing coverage$dots",
+                fontSize = 12.sp,
+                color = colors.text.normal.copy(alpha = 0.6f),
               )
             }
           } else {
@@ -724,25 +712,25 @@ private fun RecordingTestScreen(
               Text("Coverage Analysis", fontSize = 13.sp)
               Spacer(Modifier.height(8.dp))
               Text(
-                  "Based on your navigation graph, these areas have low test coverage:",
-                  fontSize = 12.sp,
-                  color = colors.text.normal.copy(alpha = 0.7f),
+                "Based on your navigation graph, these areas have low test coverage:",
+                fontSize = 12.sp,
+                color = colors.text.normal.copy(alpha = 0.7f),
               )
               Spacer(Modifier.height(8.dp))
               listOf(
-                      "VideoCall screen (55% coverage)",
-                      "Privacy settings flow (58% coverage)",
-                      "VoiceCall → MediaGallery transition (untested)",
-                      "GroupChat error handling (no tests)",
+                  "VideoCall screen (55% coverage)",
+                  "Privacy settings flow (58% coverage)",
+                  "VoiceCall → MediaGallery transition (untested)",
+                  "GroupChat error handling (no tests)",
+                )
+                .forEach { item ->
+                  Text(
+                    "• $item",
+                    fontSize = 11.sp,
+                    color = colors.text.normal.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(vertical = 2.dp),
                   )
-                  .forEach { item ->
-                    Text(
-                        "• $item",
-                        fontSize = 11.sp,
-                        color = colors.text.normal.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(vertical = 2.dp),
-                    )
-                  }
+                }
             }
           }
         }
@@ -753,45 +741,45 @@ private fun RecordingTestScreen(
       Column(modifier = Modifier.fillMaxSize()) {
         // Header with recording indicator
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.fillMaxWidth().padding(16.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           Link("← Cancel", onClick = onBack)
 
           // Collapsible prompt indicator
           Row(
-              modifier =
-                  Modifier.clickable { promptExpanded = !promptExpanded }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-                      .padding(horizontal = 8.dp, vertical = 4.dp),
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            modifier =
+              Modifier.clickable { promptExpanded = !promptExpanded }
+                .pointerHoverIcon(PointerIcon.Hand)
+                .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
             Text(
-                if (promptExpanded) "▼" else "▶",
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
+              if (promptExpanded) "▼" else "▶",
+              fontSize = 10.sp,
+              color = colors.text.normal.copy(alpha = 0.5f),
             )
             val promptPreview =
-                if (promptText.isEmpty()) {
-                  "No prompt"
-                } else if (promptText.length > 20) {
-                  promptText.take(20) + "..."
-                } else {
-                  promptText
-                }
+              if (promptText.isEmpty()) {
+                "No prompt"
+              } else if (promptText.length > 20) {
+                promptText.take(20) + "..."
+              } else {
+                promptText
+              }
             Text(
-                promptPreview,
-                fontSize = 11.sp,
-                color = colors.text.normal.copy(alpha = 0.6f),
+              promptPreview,
+              fontSize = 11.sp,
+              color = colors.text.normal.copy(alpha = 0.6f),
             )
           }
 
           Row(
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
             // Recording indicator (pulsing red dot)
             Box(modifier = Modifier.size(10.dp).background(Color(0xFFFF4444), CircleShape))
@@ -799,42 +787,42 @@ private fun RecordingTestScreen(
           }
 
           Button(
-              onClick = {
-                if (testRecordingClient != null && !isStoppingRecording) {
-                  isStoppingRecording = true
-                  stopError = null
-                  coroutineScope.launch(Dispatchers.IO) {
-                    try {
-                      val result =
-                          testRecordingClient.stopTestRecording(
-                              recordingId = currentRecordingId,
-                              planName = null,
-                          )
-                      withContext(Dispatchers.Main) {
-                        exportedPlan =
-                            ExportedPlan(
-                                recordingId = result.recordingId,
-                                planName = result.planName,
-                                planContent = result.planContent,
-                                stepCount = result.stepCount,
-                                durationMs = result.durationMs,
-                            )
-                        isStoppingRecording = false
-                        recordingPhase = RecordingPhase.Reviewing
-                      }
-                    } catch (e: Exception) {
-                      withContext(Dispatchers.Main) {
-                        stopError = e.message ?: "Failed to stop recording"
-                        isStoppingRecording = false
-                      }
+            onClick = {
+              if (testRecordingClient != null && !isStoppingRecording) {
+                isStoppingRecording = true
+                stopError = null
+                coroutineScope.launch(Dispatchers.IO) {
+                  try {
+                    val result =
+                      testRecordingClient.stopTestRecording(
+                        recordingId = currentRecordingId,
+                        planName = null,
+                      )
+                    withContext(Dispatchers.Main) {
+                      exportedPlan =
+                        ExportedPlan(
+                          recordingId = result.recordingId,
+                          planName = result.planName,
+                          planContent = result.planContent,
+                          stepCount = result.stepCount,
+                          durationMs = result.durationMs,
+                        )
+                      isStoppingRecording = false
+                      recordingPhase = RecordingPhase.Reviewing
+                    }
+                  } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                      stopError = e.message ?: "Failed to stop recording"
+                      isStoppingRecording = false
                     }
                   }
-                } else {
-                  // No client available, just go back to dashboard
-                  onFinishRecording()
                 }
-              },
-              enabled = !isStoppingRecording,
+              } else {
+                // No client available, just go back to dashboard
+                onFinishRecording()
+              }
+            },
+            enabled = !isStoppingRecording,
           ) {
             Text(if (isStoppingRecording) "Stopping..." else "Finish Recording")
           }
@@ -843,16 +831,16 @@ private fun RecordingTestScreen(
         // Expanded prompt section (read-only)
         if (promptExpanded && promptText.isNotEmpty()) {
           Box(
-              modifier =
-                  Modifier.fillMaxWidth()
-                      .padding(horizontal = 16.dp)
-                      .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-                      .padding(12.dp),
+            modifier =
+              Modifier.fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+                .padding(12.dp)
           ) {
             Text(
-                promptText,
-                fontSize = 12.sp,
-                color = colors.text.normal.copy(alpha = 0.7f),
+              promptText,
+              fontSize = 12.sp,
+              color = colors.text.normal.copy(alpha = 0.7f),
             )
           }
           Spacer(Modifier.height(8.dp))
@@ -860,17 +848,17 @@ private fun RecordingTestScreen(
 
         // Instructions
         Box(
-            modifier =
-                Modifier.fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                    .padding(12.dp),
+          modifier =
+            Modifier.fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+              .padding(12.dp)
         ) {
           Text(
-              "Use your AI agent (Claude Code, Codex, etc.) to interact with the app. " +
-                  "Tool calls will be recorded below.",
-              fontSize = 12.sp,
-              color = colors.text.normal.copy(alpha = 0.7f),
+            "Use your AI agent (Claude Code, Codex, etc.) to interact with the app. " +
+              "Tool calls will be recorded below.",
+            fontSize = 12.sp,
+            color = colors.text.normal.copy(alpha = 0.7f),
           )
         }
 
@@ -878,36 +866,34 @@ private fun RecordingTestScreen(
 
         // Main content - side by side device preview and action log
         Row(
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+          modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+          horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
           // Left side: Device preview with live screenshot
-          Column(
-              modifier = Modifier.width(180.dp).fillMaxHeight(),
-          ) {
+          Column(modifier = Modifier.width(180.dp).fillMaxHeight()) {
             // Current screen info
             if (currentPackageName != null || currentScreenName != null) {
               Column(
-                  modifier =
-                      Modifier.fillMaxWidth()
-                          .background(
-                              colors.text.normal.copy(alpha = 0.05f),
-                              RoundedCornerShape(6.dp),
-                          )
-                          .padding(8.dp),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .background(
+                      colors.text.normal.copy(alpha = 0.05f),
+                      RoundedCornerShape(6.dp),
+                    )
+                    .padding(8.dp)
               ) {
                 currentPackageName?.let { pkg ->
                   Text(
-                      pkg.substringAfterLast('.'),
-                      fontSize = 11.sp,
-                      color = colors.text.normal.copy(alpha = 0.8f),
+                    pkg.substringAfterLast('.'),
+                    fontSize = 11.sp,
+                    color = colors.text.normal.copy(alpha = 0.8f),
                   )
                 }
                 currentScreenName?.let { screen ->
                   Text(
-                      screen,
-                      fontSize = 10.sp,
-                      color = colors.text.normal.copy(alpha = 0.5f),
+                    screen,
+                    fontSize = 10.sp,
+                    color = colors.text.normal.copy(alpha = 0.5f),
                   )
                 }
               }
@@ -916,68 +902,68 @@ private fun RecordingTestScreen(
 
             // Live device screenshot
             Box(
-                modifier =
-                    Modifier.weight(1f)
-                        .fillMaxWidth()
-                        .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
-                        .border(
-                            1.dp,
-                            colors.text.normal.copy(alpha = 0.1f),
-                            RoundedCornerShape(8.dp),
-                        ),
-                contentAlignment = Alignment.Center,
+              modifier =
+                Modifier.weight(1f)
+                  .fillMaxWidth()
+                  .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
+                  .border(
+                    1.dp,
+                    colors.text.normal.copy(alpha = 0.1f),
+                    RoundedCornerShape(8.dp),
+                  ),
+              contentAlignment = Alignment.Center,
             ) {
               if (screenshotBytes != null) {
                 // Display the live screenshot
                 val imageBitmap =
-                    remember(screenshotBytes) {
-                      try {
-                        val skiaImage = Image.makeFromEncoded(screenshotBytes)
-                        skiaImage.toComposeImageBitmap()
-                      } catch (e: Exception) {
-                        null
-                      }
+                  remember(screenshotBytes) {
+                    try {
+                      val skiaImage = Image.makeFromEncoded(screenshotBytes)
+                      skiaImage.toComposeImageBitmap()
+                    } catch (e: Exception) {
+                      null
                     }
+                  }
                 imageBitmap?.let { bitmap ->
                   Image(
-                      bitmap = bitmap,
-                      contentDescription = "Live device screen",
-                      modifier = Modifier.fillMaxSize().padding(4.dp),
-                      contentScale = ContentScale.Fit,
+                    bitmap = bitmap,
+                    contentDescription = "Live device screen",
+                    modifier = Modifier.fillMaxSize().padding(4.dp),
+                    contentScale = ContentScale.Fit,
                   )
                 }
-                    ?: run {
-                      // Fallback if image decode fails
-                      Column(
-                          horizontalAlignment = Alignment.CenterHorizontally,
-                          verticalArrangement = Arrangement.Center,
-                      ) {
-                        Text(
-                            "Device Preview",
-                            fontSize = 10.sp,
-                            color = colors.text.normal.copy(alpha = 0.4f),
-                        )
-                      }
+                  ?: run {
+                    // Fallback if image decode fails
+                    Column(
+                      horizontalAlignment = Alignment.CenterHorizontally,
+                      verticalArrangement = Arrangement.Center,
+                    ) {
+                      Text(
+                        "Device Preview",
+                        fontSize = 10.sp,
+                        color = colors.text.normal.copy(alpha = 0.4f),
+                      )
                     }
+                  }
               } else {
                 // No screenshot available yet
                 Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+                  horizontalAlignment = Alignment.CenterHorizontally,
+                  verticalArrangement = Arrangement.Center,
                 ) {
                   Text("📱", fontSize = 24.sp)
                   Spacer(Modifier.height(4.dp))
                   Text(
-                      "Awaiting device...",
-                      fontSize = 10.sp,
-                      color = colors.text.normal.copy(alpha = 0.4f),
+                    "Awaiting device...",
+                    fontSize = 10.sp,
+                    color = colors.text.normal.copy(alpha = 0.4f),
                   )
                   if (screenshotUpdate == null) {
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Connect a device to see live updates",
-                        fontSize = 9.sp,
-                        color = colors.text.normal.copy(alpha = 0.3f),
+                      "Connect a device to see live updates",
+                      fontSize = 9.sp,
+                      color = colors.text.normal.copy(alpha = 0.3f),
                     )
                   }
                 }
@@ -989,9 +975,9 @@ private fun RecordingTestScreen(
               if (navUpdate.nodes.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "${navUpdate.nodes.size} screens discovered",
-                    fontSize = 10.sp,
-                    color = Color(0xFF4CAF50),
+                  "${navUpdate.nodes.size} screens discovered",
+                  fontSize = 10.sp,
+                  color = Color(0xFF4CAF50),
                 )
               }
             }
@@ -999,63 +985,61 @@ private fun RecordingTestScreen(
 
           // Right side: Terminal-style action log
           Box(
-              modifier =
-                  Modifier.weight(1f)
-                      .fillMaxHeight()
-                      .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
-                      .padding(12.dp),
+            modifier =
+              Modifier.weight(1f)
+                .fillMaxHeight()
+                .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
+                .padding(12.dp)
           ) {
             if (recordedActions.isEmpty()) {
               Column {
                 Text(
-                    "$ awaiting tool calls...",
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF888888),
+                  "$ awaiting tool calls...",
+                  fontSize = 12.sp,
+                  fontFamily = FontFamily.Monospace,
+                  color = Color(0xFF888888),
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "# Example actions that will be recorded:",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF666666),
+                  "# Example actions that will be recorded:",
+                  fontSize = 11.sp,
+                  fontFamily = FontFamily.Monospace,
+                  color = Color(0xFF666666),
                 )
                 Text(
-                    "# - tapOn(element: \"Login button\")",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF666666),
+                  "# - tapOn(element: \"Login button\")",
+                  fontSize = 11.sp,
+                  fontFamily = FontFamily.Monospace,
+                  color = Color(0xFF666666),
                 )
                 Text(
-                    "# - inputText(text: \"user@example.com\")",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF666666),
+                  "# - inputText(text: \"user@example.com\")",
+                  fontSize = 11.sp,
+                  fontFamily = FontFamily.Monospace,
+                  color = Color(0xFF666666),
                 )
                 Text(
-                    "# - swipeOn(direction: \"up\")",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF666666),
+                  "# - swipeOn(direction: \"up\")",
+                  fontSize = 11.sp,
+                  fontFamily = FontFamily.Monospace,
+                  color = Color(0xFF666666),
                 )
               }
             } else {
-              Column(
-                  modifier = Modifier.verticalScroll(rememberScrollState()),
-              ) {
+              Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 recordedActions.forEachIndexed { index, action ->
                   Text(
-                      "[$index] ${action.toolName}(${action.parameters.entries.joinToString { "${it.key}: ${it.value}" }})",
-                      fontSize = 12.sp,
-                      fontFamily = FontFamily.Monospace,
-                      color = Color(0xFF4EC9B0),
+                    "[$index] ${action.toolName}(${action.parameters.entries.joinToString { "${it.key}: ${it.value}" }})",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF4EC9B0),
                   )
                   action.result?.let {
                     Text(
-                        "    → $it",
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF888888),
+                      "    → $it",
+                      fontSize = 11.sp,
+                      fontFamily = FontFamily.Monospace,
+                      color = Color(0xFF888888),
                     )
                   }
                   Spacer(Modifier.height(4.dp))
@@ -1069,11 +1053,11 @@ private fun RecordingTestScreen(
 
         // Launch buttons
         Row(
-            modifier =
-                Modifier.fillMaxWidth()
-                    .background(colors.text.normal.copy(alpha = 0.03f))
-                    .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+          modifier =
+            Modifier.fillMaxWidth()
+              .background(colors.text.normal.copy(alpha = 0.03f))
+              .padding(12.dp),
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
           OutlinedButton(onClick = { /* TODO: Launch Claude Code */ }) {
             Text("Launch Claude Code")
@@ -1085,11 +1069,11 @@ private fun RecordingTestScreen(
         stopError?.let { error ->
           Spacer(Modifier.height(8.dp))
           Box(
-              modifier =
-                  Modifier.fillMaxWidth()
-                      .padding(horizontal = 16.dp)
-                      .background(Color(0xFFFF5722).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
-                      .padding(12.dp),
+            modifier =
+              Modifier.fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .background(Color(0xFFFF5722).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+                .padding(12.dp)
           ) {
             Text(error, fontSize = 12.sp, color = Color(0xFFFF5722))
           }
@@ -1100,32 +1084,32 @@ private fun RecordingTestScreen(
       // ============ REVIEWING PHASE ============
       exportedPlan?.let { plan ->
         PlanReviewPanel(
-            plan = plan,
-            onSave = { /* handled in PlanReviewPanel */ },
-            onCopy = { /* handled in PlanReviewPanel */ },
-            onDismiss = {
-              exportedPlan = null
-              onFinishRecording()
-            },
-            fileSaver = fileSaver,
+          plan = plan,
+          onSave = { /* handled in PlanReviewPanel */ },
+          onCopy = { /* handled in PlanReviewPanel */ },
+          onDismiss = {
+            exportedPlan = null
+            onFinishRecording()
+          },
+          fileSaver = fileSaver,
         )
       }
-          ?: run {
-            // Fallback if no plan (shouldn't happen)
-            onFinishRecording()
-          }
+        ?: run {
+          // Fallback if no plan (shouldn't happen)
+          onFinishRecording()
+        }
     }
   }
 }
 
 @Composable
 private fun PlanReviewPanel(
-    plan: ExportedPlan,
-    onSave: () -> Unit,
-    onCopy: () -> Unit,
-    onDismiss: () -> Unit,
-    fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
-        dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
+  plan: ExportedPlan,
+  onSave: () -> Unit,
+  onCopy: () -> Unit,
+  onDismiss: () -> Unit,
+  fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
+    dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
 ) {
   val colors = SharedTheme.globalColors
   val scrollState = rememberScrollState()
@@ -1140,46 +1124,42 @@ private fun PlanReviewPanel(
     }
   }
 
-  Column(
-      modifier = Modifier.fillMaxSize().padding(16.dp),
-  ) {
+  Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
     // Header
     Link("← Back to Dashboard", onClick = onDismiss)
     Spacer(Modifier.height(12.dp))
 
     Text("Plan Review", fontSize = 18.sp)
     Text(
-        plan.planName,
-        color = colors.text.normal.copy(alpha = 0.6f),
-        fontSize = 12.sp,
-        modifier = Modifier.padding(top = 4.dp),
+      plan.planName,
+      color = colors.text.normal.copy(alpha = 0.6f),
+      fontSize = 12.sp,
+      modifier = Modifier.padding(top = 4.dp),
     )
     Text(
-        "${plan.stepCount} steps \u2022 ${plan.durationMs / 1000.0}s duration",
-        color = colors.text.normal.copy(alpha = 0.5f),
-        fontSize = 11.sp,
-        modifier = Modifier.padding(top = 2.dp),
+      "${plan.stepCount} steps \u2022 ${plan.durationMs / 1000.0}s duration",
+      color = colors.text.normal.copy(alpha = 0.5f),
+      fontSize = 11.sp,
+      modifier = Modifier.padding(top = 2.dp),
     )
 
     Spacer(Modifier.height(16.dp))
 
     // YAML code viewer with syntax highlighting
     Box(
-        modifier =
-            Modifier.weight(1f)
-                .fillMaxWidth()
-                .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
-                .border(1.dp, colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                .padding(12.dp),
+      modifier =
+        Modifier.weight(1f)
+          .fillMaxWidth()
+          .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
+          .border(1.dp, colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+          .padding(12.dp)
     ) {
-      Column(
-          modifier = Modifier.fillMaxSize().verticalScroll(scrollState),
-      ) {
+      Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
         val highlightedYaml = highlightYaml(plan.planContent)
         Text(
-            text = highlightedYaml,
-            fontSize = 12.sp,
-            fontFamily = FontFamily.Monospace,
+          text = highlightedYaml,
+          fontSize = 12.sp,
+          fontFamily = FontFamily.Monospace,
         )
       }
     }
@@ -1188,38 +1168,38 @@ private fun PlanReviewPanel(
 
     // Action buttons
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       OutlinedButton(
-          onClick = {
-            savePlanToFile(
-                plan,
-                fileSaver,
-            ) { path ->
-              saveSuccess = path
-            }
-            onSave()
-          },
-          modifier = Modifier.weight(1f),
+        onClick = {
+          savePlanToFile(
+            plan,
+            fileSaver,
+          ) { path ->
+            saveSuccess = path
+          }
+          onSave()
+        },
+        modifier = Modifier.weight(1f),
       ) {
         Text(saveSuccess?.let { "Saved!" } ?: "Save")
       }
 
       OutlinedButton(
-          onClick = {
-            copyPlanToClipboard(plan.planContent)
-            copySuccess = true
-            onCopy()
-          },
-          modifier = Modifier.weight(1f),
+        onClick = {
+          copyPlanToClipboard(plan.planContent)
+          copySuccess = true
+          onCopy()
+        },
+        modifier = Modifier.weight(1f),
       ) {
         Text(if (copySuccess) "Copied!" else "Copy")
       }
 
       Button(
-          onClick = onDismiss,
-          modifier = Modifier.weight(1f),
+        onClick = onDismiss,
+        modifier = Modifier.weight(1f),
       ) {
         Text("Dismiss")
       }
@@ -1249,20 +1229,20 @@ private fun highlightYaml(yaml: String): androidx.compose.ui.text.AnnotatedStrin
     val defaultColor = Color(0xFFD4D4D4) // Light gray default
 
     val toolNames =
-        setOf(
-            "tapOn",
-            "swipeOn",
-            "dragAndDrop",
-            "pinchOn",
-            "inputText",
-            "clearText",
-            "pressButton",
-            "pressKey",
-            "launchApp",
-            "terminateApp",
-            "installApp",
-            "observe",
-        )
+      setOf(
+        "tapOn",
+        "swipeOn",
+        "dragAndDrop",
+        "pinchOn",
+        "inputText",
+        "clearText",
+        "pressButton",
+        "pressKey",
+        "launchApp",
+        "terminateApp",
+        "installApp",
+        "observe",
+      )
 
     lines.forEachIndexed { index, line ->
       if (index > 0) {
@@ -1305,7 +1285,7 @@ private fun highlightYaml(yaml: String): androidx.compose.ui.text.AnnotatedStrin
             }
             // Quoted string
             (trimmedValue.startsWith("\"") && trimmedValue.endsWith("\"")) ||
-                (trimmedValue.startsWith("'") && trimmedValue.endsWith("'")) -> {
+              (trimmedValue.startsWith("'") && trimmedValue.endsWith("'")) -> {
               builder.pushStyle(androidx.compose.ui.text.SpanStyle(color = stringColor))
               builder.append(trimmedValue)
               builder.pop()
@@ -1363,9 +1343,9 @@ private fun highlightYaml(yaml: String): androidx.compose.ui.text.AnnotatedStrin
 }
 
 private fun savePlanToFile(
-    plan: ExportedPlan,
-    fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver,
-    onSuccess: (String) -> Unit,
+  plan: ExportedPlan,
+  fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver,
+  onSuccess: (String) -> Unit,
 ) {
   fileSaver.save("${plan.planName}.yaml", plan.planContent, onSuccess)
 }
@@ -1381,86 +1361,84 @@ private fun copyPlanToClipboard(content: String) {
 
 @Composable
 private fun ModuleSelectionScreen(
-    recordedActions: List<RecordedAction>,
-    onModuleSelected: (GradleModule) -> Unit,
-    onBack: () -> Unit,
+  recordedActions: List<RecordedAction>,
+  onModuleSelected: (GradleModule) -> Unit,
+  onBack: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   var searchText by remember { mutableStateOf("") }
 
   val filteredModules =
-      remember(searchText) {
-        val query = searchText
-        if (query.isBlank()) {
-          TestMockData.modules
-        } else {
-          TestMockData.modules.filter {
-            it.name.contains(query, ignoreCase = true) || it.path.contains(query, ignoreCase = true)
-          }
+    remember(searchText) {
+      val query = searchText
+      if (query.isBlank()) {
+        TestMockData.modules
+      } else {
+        TestMockData.modules.filter {
+          it.name.contains(query, ignoreCase = true) || it.path.contains(query, ignoreCase = true)
         }
       }
+    }
 
-  Column(
-      modifier = Modifier.fillMaxSize().padding(16.dp),
-  ) {
+  Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
     Link("← Back to Recording", onClick = onBack)
     Spacer(Modifier.height(12.dp))
 
     Text("Select Module", fontSize = 18.sp)
     Text(
-        "Choose which module to save the test plan in",
-        color = colors.text.normal.copy(alpha = 0.6f),
-        fontSize = 12.sp,
-        modifier = Modifier.padding(top = 4.dp),
+      "Choose which module to save the test plan in",
+      color = colors.text.normal.copy(alpha = 0.6f),
+      fontSize = 12.sp,
+      modifier = Modifier.padding(top = 4.dp),
     )
 
     Spacer(Modifier.height(8.dp))
 
     Text(
-        "${recordedActions.size} actions recorded",
-        fontSize = 12.sp,
-        color = Color(0xFF4CAF50),
+      "${recordedActions.size} actions recorded",
+      fontSize = 12.sp,
+      color = Color(0xFF4CAF50),
     )
 
     Spacer(Modifier.height(16.dp))
 
     // Search field
     TextField(
-        value = searchText,
-        onValueChange = { searchText = it },
-        modifier = Modifier.fillMaxWidth(),
+      value = searchText,
+      onValueChange = { searchText = it },
+      modifier = Modifier.fillMaxWidth(),
     )
 
     Spacer(Modifier.height(12.dp))
 
     // Module list
     Column(
-        modifier = Modifier.verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+      modifier = Modifier.verticalScroll(rememberScrollState()),
+      verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
       filteredModules.forEach { module ->
         Row(
-            modifier =
-                Modifier.fillMaxWidth()
-                    .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
-                    .clickable { onModuleSelected(module) }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+          modifier =
+            Modifier.fillMaxWidth()
+              .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
+              .clickable { onModuleSelected(module) }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(12.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           Column {
             Text(module.name, fontSize = 13.sp)
             Text(
-                module.path,
-                fontSize = 11.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
+              module.path,
+              fontSize = 11.sp,
+              color = colors.text.normal.copy(alpha = 0.5f),
             )
           }
           Text(
-              "→",
-              fontSize = 14.sp,
-              color = colors.text.normal.copy(alpha = 0.3f),
+            "→",
+            fontSize = 14.sp,
+            color = colors.text.normal.copy(alpha = 0.3f),
           )
         }
       }
@@ -1470,17 +1448,17 @@ private fun ModuleSelectionScreen(
 
 // Data class for historical run records
 private data class HistoricalRun(
-    val runId: String?, // null if no record exists (just pass/fail indicator)
-    val passed: Boolean,
+  val runId: String?, // null if no record exists (just pass/fail indicator)
+  val passed: Boolean,
 )
 
 @Composable
 private fun TestRunDetailScreen(
-    testRun: TestRun,
-    allTestRuns: List<TestRun> = emptyList(),
-    onBack: () -> Unit,
-    onViewInGraph: () -> Unit,
-    onNavigateToRun: (String) -> Unit = {}, // Navigate to another test run by ID
+  testRun: TestRun,
+  allTestRuns: List<TestRun> = emptyList(),
+  onBack: () -> Unit,
+  onViewInGraph: () -> Unit,
+  onNavigateToRun: (String) -> Unit = {}, // Navigate to another test run by ID
 ) {
   val colors = SharedTheme.globalColors
   val scrollState = rememberScrollState()
@@ -1491,20 +1469,20 @@ private fun TestRunDetailScreen(
 
   // Calculate cumulative timestamps for each step
   val stepTimestamps =
-      remember(testRun.steps) {
-        var cumulative = 0L
-        testRun.steps.map { step ->
-          val start = cumulative
-          cumulative += step.durationMs
-          start to cumulative
-        }
+    remember(testRun.steps) {
+      var cumulative = 0L
+      testRun.steps.map { step ->
+        val start = cumulative
+        cumulative += step.durationMs
+        start to cumulative
       }
+    }
 
   // Determine current step based on playback time
   val currentStepIndex =
-      remember(playbackTimeMs, stepTimestamps) {
-        stepTimestamps.indexOfLast { (start, _) -> playbackTimeMs >= start }.coerceAtLeast(0)
-      }
+    remember(playbackTimeMs, stepTimestamps) {
+      stepTimestamps.indexOfLast { (start, _) -> playbackTimeMs >= start }.coerceAtLeast(0)
+    }
 
   // Animate playback when playing
   androidx.compose.runtime.LaunchedEffect(isPlaying) {
@@ -1523,70 +1501,68 @@ private fun TestRunDetailScreen(
 
   // Historical runs for the same test, sorted by start time
   val historicalRuns =
-      remember(testRun.testId, allTestRuns) {
-        allTestRuns
-            .filter { it.testId == testRun.testId }
-            .sortedBy { it.startTime }
-            .takeLast(10) // Show last 10 runs
-            .map { run ->
-              HistoricalRun(
-                  runId = run.id,
-                  passed = run.status == TestStatus.Passed,
-              )
-            }
-            .ifEmpty {
-              // Fallback: just show the current run if no history
-              listOf(HistoricalRun(testRun.id, testRun.status == TestStatus.Passed))
-            }
-      }
+    remember(testRun.testId, allTestRuns) {
+      allTestRuns
+        .filter { it.testId == testRun.testId }
+        .sortedBy { it.startTime }
+        .takeLast(10) // Show last 10 runs
+        .map { run ->
+          HistoricalRun(
+            runId = run.id,
+            passed = run.status == TestStatus.Passed,
+          )
+        }
+        .ifEmpty {
+          // Fallback: just show the current run if no history
+          listOf(HistoricalRun(testRun.id, testRun.status == TestStatus.Passed))
+        }
+    }
   val passRate =
-      if (historicalRuns.isNotEmpty()) {
-        (historicalRuns.count { it.passed } * 100) / historicalRuns.size
-      } else 0
+    if (historicalRuns.isNotEmpty()) {
+      (historicalRuns.count { it.passed } * 100) / historicalRuns.size
+    } else 0
 
   BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
     val isWideLayout = maxWidth >= 400.dp
 
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp),
-    ) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp)) {
       // Header row with back, title, playback controls, and view in graph
       Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         Link("← Back", onClick = onBack)
 
         // Playback controls in header (if video exists)
         if (testRun.videoPath != null) {
           Row(
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
             // Responsive button labels
             val showFullLabels = isWideLayout
             OutlinedButton(
-                onClick = {
-                  if (playbackTimeMs >= testRun.durationMs) {
-                    playbackTimeMs = 0
-                  }
-                  isPlaying = !isPlaying
-                },
+              onClick = {
+                if (playbackTimeMs >= testRun.durationMs) {
+                  playbackTimeMs = 0
+                }
+                isPlaying = !isPlaying
+              }
             ) {
               Text(
-                  if (showFullLabels) {
-                    if (isPlaying) "|| Pause" else "> Play"
-                  } else {
-                    if (isPlaying) "||" else ">"
-                  }
+                if (showFullLabels) {
+                  if (isPlaying) "|| Pause" else "> Play"
+                } else {
+                  if (isPlaying) "||" else ">"
+                }
               )
             }
             OutlinedButton(
-                onClick = {
-                  isPlaying = false
-                  playbackTimeMs = 0
-                },
+              onClick = {
+                isPlaying = false
+                playbackTimeMs = 0
+              }
             ) {
               Text(if (showFullLabels) "[] Reset" else "[]")
             }
@@ -1602,25 +1578,25 @@ private fun TestRunDetailScreen(
 
       // Title with status
       Row(
-          horizontalArrangement = Arrangement.spacedBy(10.dp),
-          verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         val statusColor =
-            when (testRun.status) {
-              TestStatus.Passed -> Color(0xFF4CAF50)
-              TestStatus.Failed -> Color(0xFFFF5722)
-              TestStatus.Running -> Color(0xFF2196F3)
-              TestStatus.Skipped -> colors.text.normal.copy(alpha = 0.4f)
-            }
+          when (testRun.status) {
+            TestStatus.Passed -> Color(0xFF4CAF50)
+            TestStatus.Failed -> Color(0xFFFF5722)
+            TestStatus.Running -> Color(0xFF2196F3)
+            TestStatus.Skipped -> colors.text.normal.copy(alpha = 0.4f)
+          }
         Box(modifier = Modifier.size(12.dp).background(statusColor, CircleShape))
         Text(testRun.testName, fontSize = 18.sp)
       }
 
       Text(
-          "${testRun.deviceName} • ${testRun.durationMs / 1000.0}s",
-          color = colors.text.normal.copy(alpha = 0.6f),
-          fontSize = 12.sp,
-          modifier = Modifier.padding(top = 4.dp),
+        "${testRun.deviceName} • ${testRun.durationMs / 1000.0}s",
+        color = colors.text.normal.copy(alpha = 0.6f),
+        fontSize = 12.sp,
+        modifier = Modifier.padding(top = 4.dp),
       )
 
       // Error message if failed
@@ -1628,16 +1604,16 @@ private fun TestRunDetailScreen(
       if (errorMsg != null) {
         Spacer(Modifier.height(12.dp))
         Box(
-            modifier =
-                Modifier.fillMaxWidth()
-                    .background(Color(0xFFFF5722).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
-                    .padding(12.dp),
+          modifier =
+            Modifier.fillMaxWidth()
+              .background(Color(0xFFFF5722).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+              .padding(12.dp)
         ) {
           Text(
-              errorMsg,
-              fontSize = 12.sp,
-              color = Color(0xFFFF5722),
-              fontFamily = FontFamily.Monospace,
+            errorMsg,
+            fontSize = 12.sp,
+            color = Color(0xFFFF5722),
+            fontFamily = FontFamily.Monospace,
           )
         }
       }
@@ -1646,11 +1622,11 @@ private fun TestRunDetailScreen(
 
       // Run History - compact chart with pass rate overlay
       RunHistoryChart(
-          historicalRuns = historicalRuns,
-          passRate = passRate,
-          currentRunId = testRun.id,
-          onRunClick = { runId -> runId?.let { onNavigateToRun(it) } },
-          isCompact = !isWideLayout,
+        historicalRuns = historicalRuns,
+        passRate = passRate,
+        currentRunId = testRun.id,
+        onRunClick = { runId -> runId?.let { onNavigateToRun(it) } },
+        isCompact = !isWideLayout,
       )
 
       Spacer(Modifier.height(16.dp))
@@ -1659,8 +1635,8 @@ private fun TestRunDetailScreen(
       if (isWideLayout && testRun.videoPath != null) {
         // Wide layout: steps and video side by side
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
           // Steps column
           Column(modifier = Modifier.weight(1f)) {
@@ -1669,13 +1645,13 @@ private fun TestRunDetailScreen(
 
             testRun.steps.forEachIndexed { index, step ->
               TestStepRowWithScreenshot(
-                  step = step,
-                  isCurrentStep = index == currentStepIndex && (isPlaying || playbackTimeMs > 0),
-                  onStepClick = {
-                    playbackTimeMs = stepTimestamps[index].first
-                    isPlaying = false
-                  },
-                  isCompact = true,
+                step = step,
+                isCurrentStep = index == currentStepIndex && (isPlaying || playbackTimeMs > 0),
+                onStepClick = {
+                  playbackTimeMs = stepTimestamps[index].first
+                  isPlaying = false
+                },
+                isCompact = true,
               )
               Spacer(Modifier.height(6.dp))
             }
@@ -1687,10 +1663,10 @@ private fun TestRunDetailScreen(
             Spacer(Modifier.height(8.dp))
 
             VideoPlayerWithTimeline(
-                testRun = testRun,
-                currentStepIndex = currentStepIndex,
-                playbackTimeMs = playbackTimeMs,
-                stepTimestamps = stepTimestamps,
+              testRun = testRun,
+              currentStepIndex = currentStepIndex,
+              playbackTimeMs = playbackTimeMs,
+              stepTimestamps = stepTimestamps,
             )
           }
         }
@@ -1701,13 +1677,13 @@ private fun TestRunDetailScreen(
 
         testRun.steps.forEachIndexed { index, step ->
           TestStepRowWithScreenshot(
-              step = step,
-              isCurrentStep = index == currentStepIndex && (isPlaying || playbackTimeMs > 0),
-              onStepClick = {
-                playbackTimeMs = stepTimestamps[index].first
-                isPlaying = false
-              },
-              isCompact = !isWideLayout,
+            step = step,
+            isCurrentStep = index == currentStepIndex && (isPlaying || playbackTimeMs > 0),
+            onStepClick = {
+              playbackTimeMs = stepTimestamps[index].first
+              isPlaying = false
+            },
+            isCompact = !isWideLayout,
           )
           Spacer(Modifier.height(8.dp))
         }
@@ -1719,10 +1695,10 @@ private fun TestRunDetailScreen(
           Spacer(Modifier.height(8.dp))
 
           VideoPlayerWithTimeline(
-              testRun = testRun,
-              currentStepIndex = currentStepIndex,
-              playbackTimeMs = playbackTimeMs,
-              stepTimestamps = stepTimestamps,
+            testRun = testRun,
+            currentStepIndex = currentStepIndex,
+            playbackTimeMs = playbackTimeMs,
+            stepTimestamps = stepTimestamps,
           )
         }
       }
@@ -1733,24 +1709,24 @@ private fun TestRunDetailScreen(
       Text("Screens Visited", fontSize = 14.sp, color = colors.text.normal.copy(alpha = 0.8f))
       Spacer(Modifier.height(8.dp))
       Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
       ) {
         testRun.screensVisited.forEachIndexed { index, screen ->
           val isCurrentScreen = testRun.steps.getOrNull(currentStepIndex)?.screenName == screen
           Box(
-              modifier =
-                  Modifier.background(
-                          if (isCurrentScreen) Color(0xFF2196F3).copy(alpha = 0.2f)
-                          else colors.text.normal.copy(alpha = 0.08f),
-                          RoundedCornerShape(4.dp),
-                      )
-                      .then(
-                          if (isCurrentScreen)
-                              Modifier.border(1.dp, Color(0xFF2196F3), RoundedCornerShape(4.dp))
-                          else Modifier
-                      )
-                      .padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier =
+              Modifier.background(
+                  if (isCurrentScreen) Color(0xFF2196F3).copy(alpha = 0.2f)
+                  else colors.text.normal.copy(alpha = 0.08f),
+                  RoundedCornerShape(4.dp),
+                )
+                .then(
+                  if (isCurrentScreen)
+                    Modifier.border(1.dp, Color(0xFF2196F3), RoundedCornerShape(4.dp))
+                  else Modifier
+                )
+                .padding(horizontal = 8.dp, vertical = 4.dp)
           ) {
             Text(screen, fontSize = 11.sp)
           }
@@ -1761,8 +1737,8 @@ private fun TestRunDetailScreen(
 
       // Related Tests
       RelatedTestsSection(
-          testRun = testRun,
-          isCompact = !isWideLayout,
+        testRun = testRun,
+        isCompact = !isWideLayout,
       )
 
       Spacer(Modifier.height(16.dp))
@@ -1777,28 +1753,28 @@ private fun TestRunDetailScreen(
 
       if (hasSnapshot) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          modifier = Modifier.fillMaxWidth(),
         ) {
           ActionCard(
-              icon = "📱",
-              title = if (isWideLayout) "Restore to Device" else "Restore",
-              description =
-                  if (isWideLayout) {
-                    "Restore app snapshot to ${if (testRun.platform == TestPlatform.Android) "emulator" else "simulator"}"
-                  } else {
-                    "Restore snapshot"
-                  },
-              onClick = { showDevicePicker = true },
-              modifier = Modifier.weight(1f),
+            icon = "📱",
+            title = if (isWideLayout) "Restore to Device" else "Restore",
+            description =
+              if (isWideLayout) {
+                "Restore app snapshot to ${if (testRun.platform == TestPlatform.Android) "emulator" else "simulator"}"
+              } else {
+                "Restore snapshot"
+              },
+            onClick = { showDevicePicker = true },
+            modifier = Modifier.weight(1f),
           )
 
           ActionCard(
-              icon = "📤",
-              title = if (isWideLayout) "Send Snapshot" else "Send",
-              description = if (isWideLayout) "Open snapshot file in Finder" else "Open in Finder",
-              onClick = { /* TODO: Open Finder with snapshot file selected */ },
-              modifier = Modifier.weight(1f),
+            icon = "📤",
+            title = if (isWideLayout) "Send Snapshot" else "Send",
+            description = if (isWideLayout) "Open snapshot file in Finder" else "Open in Finder",
+            onClick = { /* TODO: Open Finder with snapshot file selected */ },
+            modifier = Modifier.weight(1f),
           )
         }
 
@@ -1806,23 +1782,23 @@ private fun TestRunDetailScreen(
       }
 
       ActionCard(
-          icon = "📦",
-          title = if (isWideLayout) "Send Debug Bundle" else "Debug Bundle",
-          description =
-              if (isWideLayout) {
-                "Export test results, video, screenshots${if (hasSnapshot) " & snapshot" else ""} as portable bundle"
-              } else {
-                "Export all test data"
-              },
-          onClick = { /* TODO: Create and export debug bundle */ },
-          modifier = Modifier.fillMaxWidth(),
+        icon = "📦",
+        title = if (isWideLayout) "Send Debug Bundle" else "Debug Bundle",
+        description =
+          if (isWideLayout) {
+            "Export test results, video, screenshots${if (hasSnapshot) " & snapshot" else ""} as portable bundle"
+          } else {
+            "Export all test data"
+          },
+        onClick = { /* TODO: Create and export debug bundle */ },
+        modifier = Modifier.fillMaxWidth(),
       )
 
       if (showDevicePicker) {
         DevicePickerOverlay(
-            platform = testRun.platform,
-            onDeviceSelected = { device -> showDevicePicker = false },
-            onDismiss = { showDevicePicker = false },
+          platform = testRun.platform,
+          onDeviceSelected = { device -> showDevicePicker = false },
+          onDismiss = { showDevicePicker = false },
         )
       }
     }
@@ -1831,11 +1807,11 @@ private fun TestRunDetailScreen(
 
 @Composable
 private fun RunHistoryChart(
-    historicalRuns: List<HistoricalRun>,
-    passRate: Int,
-    currentRunId: String,
-    onRunClick: (String?) -> Unit,
-    isCompact: Boolean,
+  historicalRuns: List<HistoricalRun>,
+  passRate: Int,
+  currentRunId: String,
+  onRunClick: (String?) -> Unit,
+  isCompact: Boolean,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -1845,55 +1821,54 @@ private fun RunHistoryChart(
 
     // Chart with pass rate overlay
     Box(
-        modifier =
-            Modifier.fillMaxWidth()
-                .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-                .padding(8.dp),
+      modifier =
+        Modifier.fillMaxWidth()
+          .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+          .padding(8.dp)
     ) {
       Row(
-          horizontalArrangement = Arrangement.spacedBy(3.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
       ) {
         historicalRuns.forEach { run ->
           val isCurrentRun = run.runId == currentRunId
           val isClickable = run.runId != null && !isCurrentRun
           val barColor =
-              when {
-                isCurrentRun -> Color(0xFF2196F3) // Blue for current
-                run.passed -> Color(0xFF4CAF50)
-                else -> Color(0xFFFF5722)
-              }
+            when {
+              isCurrentRun -> Color(0xFF2196F3) // Blue for current
+              run.passed -> Color(0xFF4CAF50)
+              else -> Color(0xFFFF5722)
+            }
 
           Box(
-              modifier =
-                  Modifier.weight(1f)
-                      .height(20.dp)
-                      .background(barColor, RoundedCornerShape(2.dp))
-                      .then(
-                          if (isCurrentRun)
-                              Modifier.border(
-                                  1.dp,
-                                  Color.White.copy(alpha = 0.5f),
-                                  RoundedCornerShape(2.dp),
-                              )
-                          else Modifier
-                      )
-                      .then(
-                          if (isClickable)
-                              Modifier.clickable { onRunClick(run.runId) }
-                                  .pointerHoverIcon(PointerIcon.Hand)
-                          else Modifier
-                      ),
+            modifier =
+              Modifier.weight(1f)
+                .height(20.dp)
+                .background(barColor, RoundedCornerShape(2.dp))
+                .then(
+                  if (isCurrentRun)
+                    Modifier.border(
+                      1.dp,
+                      Color.White.copy(alpha = 0.5f),
+                      RoundedCornerShape(2.dp),
+                    )
+                  else Modifier
+                )
+                .then(
+                  if (isClickable)
+                    Modifier.clickable { onRunClick(run.runId) }.pointerHoverIcon(PointerIcon.Hand)
+                  else Modifier
+                )
           )
         }
 
         // Pass rate inside the chart area
         Spacer(Modifier.width(8.dp))
         Text(
-            "$passRate%",
-            fontSize = 12.sp,
-            color = colors.text.normal.copy(alpha = 0.7f),
+          "$passRate%",
+          fontSize = 12.sp,
+          color = colors.text.normal.copy(alpha = 0.7f),
         )
       }
     }
@@ -1902,10 +1877,10 @@ private fun RunHistoryChart(
 
 @Composable
 private fun VideoPlayerWithTimeline(
-    testRun: TestRun,
-    currentStepIndex: Int,
-    playbackTimeMs: Long,
-    stepTimestamps: List<Pair<Long, Long>>,
+  testRun: TestRun,
+  currentStepIndex: Int,
+  playbackTimeMs: Long,
+  stepTimestamps: List<Pair<Long, Long>>,
 ) {
   val colors = SharedTheme.globalColors
   val videoPath = testRun.videoPath
@@ -1921,15 +1896,15 @@ private fun VideoPlayerWithTimeline(
     if (videoPath != null) {
       // Extract frame at current time, or use last frame time if at end
       val effectiveTimeMs =
-          if (playbackTimeMs >= testRun.durationMs) {
-            // At end - show frame from slightly before end
-            (testRun.durationMs - 100L).coerceAtLeast(0L)
-          } else {
-            playbackTimeMs
-          }
+        if (playbackTimeMs >= testRun.durationMs) {
+          // At end - show frame from slightly before end
+          (testRun.durationMs - 100L).coerceAtLeast(0L)
+        } else {
+          playbackTimeMs
+        }
 
       val frameImage =
-          remember(videoPath, effectiveTimeMs) { extractVideoFrame(videoPath, effectiveTimeMs) }
+        remember(videoPath, effectiveTimeMs) { extractVideoFrame(videoPath, effectiveTimeMs) }
 
       // Update last loaded frame and aspect ratio when we get a frame
       frameImage?.let { img ->
@@ -1941,27 +1916,26 @@ private fun VideoPlayerWithTimeline(
       val displayFrame = frameImage ?: lastLoadedFrame
 
       Box(
-          modifier =
-              Modifier.fillMaxWidth().background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp)),
-          contentAlignment = Alignment.Center,
+        modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center,
       ) {
         if (displayFrame != null) {
           Image(
-              bitmap = displayFrame.toComposeImageBitmap(),
-              contentDescription = "Video frame",
-              modifier = Modifier.fillMaxWidth(),
-              contentScale = ContentScale.FillWidth,
+            bitmap = displayFrame.toComposeImageBitmap(),
+            contentDescription = "Video frame",
+            modifier = Modifier.fillMaxWidth(),
+            contentScale = ContentScale.FillWidth,
           )
         } else {
           // Loading state - show minimal placeholder (only shown initially)
           Box(
-              modifier = Modifier.fillMaxWidth().height(200.dp),
-              contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxWidth().height(200.dp),
+            contentAlignment = Alignment.Center,
           ) {
             Text(
-                "Loading...",
-                fontSize = 12.sp,
-                color = Color.White.copy(alpha = 0.5f),
+              "Loading...",
+              fontSize = 12.sp,
+              color = Color.White.copy(alpha = 0.5f),
             )
           }
         }
@@ -1969,16 +1943,16 @@ private fun VideoPlayerWithTimeline(
     } else {
       // No video available
       Box(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .height(100.dp)
-                  .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp)),
-          contentAlignment = Alignment.Center,
+        modifier =
+          Modifier.fillMaxWidth()
+            .height(100.dp)
+            .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center,
       ) {
         Text(
-            "No video recording",
-            fontSize = 12.sp,
-            color = Color.White.copy(alpha = 0.5f),
+          "No video recording",
+          fontSize = 12.sp,
+          color = Color.White.copy(alpha = 0.5f),
         )
       }
     }
@@ -1988,31 +1962,29 @@ private fun VideoPlayerWithTimeline(
     // Progress bar
     val progress = (playbackTimeMs.toFloat() / testRun.durationMs).coerceIn(0f, 1f)
     Box(
-        modifier =
-            Modifier.fillMaxWidth()
-                .height(6.dp)
-                .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(3.dp)),
+      modifier =
+        Modifier.fillMaxWidth()
+          .height(6.dp)
+          .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(3.dp))
     ) {
       Box(
-          modifier =
-              Modifier.fillMaxWidth(progress)
-                  .height(6.dp)
-                  .background(Color(0xFF2196F3), RoundedCornerShape(3.dp)),
+        modifier =
+          Modifier.fillMaxWidth(progress)
+            .height(6.dp)
+            .background(Color(0xFF2196F3), RoundedCornerShape(3.dp))
       )
       // Step markers
       stepTimestamps.forEachIndexed { index, (start, _) ->
         val markerPos = start.toFloat() / testRun.durationMs
-        Box(
-            modifier = Modifier.fillMaxWidth(markerPos).height(6.dp),
-        ) {
+        Box(modifier = Modifier.fillMaxWidth(markerPos).height(6.dp)) {
           Box(
-              modifier =
-                  Modifier.align(Alignment.CenterEnd)
-                      .size(width = 2.dp, height = 6.dp)
-                      .background(
-                          if (index == currentStepIndex) Color(0xFF4CAF50)
-                          else colors.text.normal.copy(alpha = 0.3f)
-                      ),
+            modifier =
+              Modifier.align(Alignment.CenterEnd)
+                .size(width = 2.dp, height = 6.dp)
+                .background(
+                  if (index == currentStepIndex) Color(0xFF4CAF50)
+                  else colors.text.normal.copy(alpha = 0.3f)
+                )
           )
         }
       }
@@ -2022,29 +1994,29 @@ private fun VideoPlayerWithTimeline(
 
     // Time display and Open Video link
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(
-          "${formatTime(playbackTimeMs)} / ${formatTime(testRun.durationMs.toLong())}",
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
+        "${formatTime(playbackTimeMs)} / ${formatTime(testRun.durationMs.toLong())}",
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
       )
 
       if (videoPath != null) {
         Link(
-            text = "Open Video File",
-            onClick = {
-              try {
-                val file = java.io.File(videoPath)
-                if (file.exists()) {
-                  java.awt.Desktop.getDesktop().open(file)
-                }
-              } catch (e: Exception) {
-                LoggerFactory.getLogger("VideoPlayer").warn("Failed to open video: ${e.message}")
+          text = "Open Video File",
+          onClick = {
+            try {
+              val file = java.io.File(videoPath)
+              if (file.exists()) {
+                java.awt.Desktop.getDesktop().open(file)
               }
-            },
+            } catch (e: Exception) {
+              LoggerFactory.getLogger("VideoPlayer").warn("Failed to open video: ${e.message}")
+            }
+          },
         )
       }
     }
@@ -2053,68 +2025,67 @@ private fun VideoPlayerWithTimeline(
 
 @Composable
 private fun RelatedTestsSection(
-    testRun: TestRun,
-    isCompact: Boolean,
+  testRun: TestRun,
+  isCompact: Boolean,
 ) {
   val colors = SharedTheme.globalColors
 
   val relatedTests =
-      remember(testRun) {
-        TestMockData.testCases
-            .filter { test ->
-              test.id != testRun.testId && test.screensVisited.any { it in testRun.screensVisited }
-            }
-            .take(3)
-            .map { test ->
-              val sharedScreens = test.screensVisited.filter { it in testRun.screensVisited }
-              Triple(test.name, sharedScreens, test.flakinessScore)
-            }
-      }
+    remember(testRun) {
+      TestMockData.testCases
+        .filter { test ->
+          test.id != testRun.testId && test.screensVisited.any { it in testRun.screensVisited }
+        }
+        .take(3)
+        .map { test ->
+          val sharedScreens = test.screensVisited.filter { it in testRun.screensVisited }
+          Triple(test.name, sharedScreens, test.flakinessScore)
+        }
+    }
 
   Text("Related Tests", fontSize = 12.sp, color = colors.text.normal.copy(alpha = 0.6f))
   Spacer(Modifier.height(6.dp))
 
   if (relatedTests.isEmpty()) {
     Text(
-        "No related tests found",
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = 0.4f),
+      "No related tests found",
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = 0.4f),
     )
   } else {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
       relatedTests.forEach { (name, sharedScreens, flakiness) ->
         Row(
-            modifier =
-                Modifier.fillMaxWidth()
-                    .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
-                    .padding(8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+          modifier =
+            Modifier.fillMaxWidth()
+              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
+              .padding(8.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           Column(modifier = Modifier.weight(1f)) {
             Text(name, fontSize = 11.sp)
             if (!isCompact) {
               Text(
-                  "Shares: ${sharedScreens.joinToString(", ")}",
-                  fontSize = 9.sp,
-                  color = colors.text.normal.copy(alpha = 0.4f),
+                "Shares: ${sharedScreens.joinToString(", ")}",
+                fontSize = 9.sp,
+                color = colors.text.normal.copy(alpha = 0.4f),
               )
             }
           }
           if (flakiness > 0.05f) {
             Text(
-                if (isCompact) "${(flakiness * 100).toInt()}%"
-                else "${(flakiness * 100).toInt()}% flaky",
-                fontSize = 9.sp,
-                color =
-                    if (flakiness > 0.1f) Color(0xFFFF9800)
-                    else colors.text.normal.copy(alpha = 0.5f),
+              if (isCompact) "${(flakiness * 100).toInt()}%"
+              else "${(flakiness * 100).toInt()}% flaky",
+              fontSize = 9.sp,
+              color =
+                if (flakiness > 0.1f) Color(0xFFFF9800) else colors.text.normal.copy(alpha = 0.5f),
             )
           } else {
             Text(
-                if (isCompact) "✓" else "Stable",
-                fontSize = 9.sp,
-                color = Color(0xFF4CAF50).copy(alpha = 0.8f),
+              if (isCompact) "✓" else "Stable",
+              fontSize = 9.sp,
+              color = Color(0xFF4CAF50).copy(alpha = 0.8f),
             )
           }
         }
@@ -2125,51 +2096,51 @@ private fun RelatedTestsSection(
 
 @Composable
 private fun ActionCard(
-    icon: String,
-    title: String,
-    description: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    emphasized: Boolean = false,
+  icon: String,
+  title: String,
+  description: String,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  emphasized: Boolean = false,
 ) {
   val colors = SharedTheme.globalColors
   val bgColor =
-      if (emphasized) {
-        Color(0xFF2196F3).copy(alpha = 0.1f)
-      } else {
-        colors.text.normal.copy(alpha = 0.05f)
-      }
+    if (emphasized) {
+      Color(0xFF2196F3).copy(alpha = 0.1f)
+    } else {
+      colors.text.normal.copy(alpha = 0.05f)
+    }
   val borderColor =
-      if (emphasized) {
-        Color(0xFF2196F3).copy(alpha = 0.3f)
-      } else {
-        Color.Transparent
-      }
+    if (emphasized) {
+      Color(0xFF2196F3).copy(alpha = 0.3f)
+    } else {
+      Color.Transparent
+    }
 
   Box(
-      modifier =
-          modifier
-              .then(
-                  if (borderColor != Color.Transparent)
-                      Modifier.border(1.dp, borderColor, RoundedCornerShape(8.dp))
-                  else Modifier
-              )
-              .background(bgColor, RoundedCornerShape(8.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(12.dp),
+    modifier =
+      modifier
+        .then(
+          if (borderColor != Color.Transparent)
+            Modifier.border(1.dp, borderColor, RoundedCornerShape(8.dp))
+          else Modifier
+        )
+        .background(bgColor, RoundedCornerShape(8.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(12.dp)
   ) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.Top,
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+      verticalAlignment = Alignment.Top,
     ) {
       Text(icon, fontSize = 20.sp)
       Column {
         Text(title, fontSize = 13.sp)
         Text(
-            description,
-            fontSize = 11.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
+          description,
+          fontSize = 11.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
         )
       }
     }
@@ -2178,9 +2149,9 @@ private fun ActionCard(
 
 @Composable
 private fun DevicePickerOverlay(
-    platform: TestPlatform,
-    onDeviceSelected: (BootedDevice) -> Unit,
-    onDismiss: () -> Unit,
+  platform: TestPlatform,
+  onDeviceSelected: (BootedDevice) -> Unit,
+  onDismiss: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -2188,37 +2159,37 @@ private fun DevicePickerOverlay(
   // Filter to only show devices matching the test platform
   val allDevices = remember {
     listOf(
-        BootedDevice("pixel8", "Pixel 8 API 35", DeviceType.AndroidEmulator, "Running"),
-        BootedDevice("pixel7", "Pixel 7 API 34", DeviceType.AndroidEmulator, "Running"),
-        BootedDevice("iphone15", "iPhone 15 Pro", DeviceType.iOSSimulator, "Booted"),
-        BootedDevice("iphone14", "iPhone 14", DeviceType.iOSSimulator, "Booted"),
+      BootedDevice("pixel8", "Pixel 8 API 35", DeviceType.AndroidEmulator, "Running"),
+      BootedDevice("pixel7", "Pixel 7 API 34", DeviceType.AndroidEmulator, "Running"),
+      BootedDevice("iphone15", "iPhone 15 Pro", DeviceType.iOSSimulator, "Booted"),
+      BootedDevice("iphone14", "iPhone 14", DeviceType.iOSSimulator, "Booted"),
     )
   }
 
   val availableDevices =
-      remember(platform) {
-        allDevices.filter { device ->
-          when (platform) {
-            TestPlatform.Android -> device.type == DeviceType.AndroidEmulator
-            TestPlatform.iOS -> device.type == DeviceType.iOSSimulator
-          }
+    remember(platform) {
+      allDevices.filter { device ->
+        when (platform) {
+          TestPlatform.Android -> device.type == DeviceType.AndroidEmulator
+          TestPlatform.iOS -> device.type == DeviceType.iOSSimulator
         }
       }
+    }
 
   val platformName = if (platform == TestPlatform.Android) "Android Emulator" else "iOS Simulator"
 
   Box(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
-              .border(1.dp, colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-              .padding(12.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
+        .border(1.dp, colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+        .padding(12.dp)
   ) {
     Column {
       Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         Text("Select $platformName", fontSize = 13.sp)
         Link("Cancel", onClick = onDismiss)
@@ -2228,8 +2199,8 @@ private fun DevicePickerOverlay(
 
       availableDevices.forEach { device ->
         DevicePickerRow(
-            device = device,
-            onClick = { onDeviceSelected(device) },
+          device = device,
+          onClick = { onDeviceSelected(device) },
         )
         Spacer(Modifier.height(6.dp))
       }
@@ -2239,39 +2210,39 @@ private fun DevicePickerOverlay(
 
 @Composable
 private fun DevicePickerRow(
-    device: BootedDevice,
-    onClick: () -> Unit,
+  device: BootedDevice,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val iconColor = colors.text.normal.copy(alpha = 0.7f)
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(10.dp),
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(10.dp),
+    horizontalArrangement = Arrangement.spacedBy(10.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     // Device type icon
     Text(
-        when (device.type) {
-          DeviceType.AndroidEmulator,
-          DeviceType.AndroidPhysical -> "🤖"
-          DeviceType.iOSSimulator,
-          DeviceType.iOSPhysical -> "🍎"
-        },
-        fontSize = 16.sp,
+      when (device.type) {
+        DeviceType.AndroidEmulator,
+        DeviceType.AndroidPhysical -> "🤖"
+        DeviceType.iOSSimulator,
+        DeviceType.iOSPhysical -> "🍎"
+      },
+      fontSize = 16.sp,
     )
 
     Column(modifier = Modifier.weight(1f)) {
       Text(device.name, fontSize = 12.sp)
       Text(
-          device.status,
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
+        device.status,
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
       )
     }
 
@@ -2293,64 +2264,64 @@ private fun formatTime(ms: Long): String {
 
 @Composable
 private fun TestStepRowWithScreenshot(
-    step: TestStep,
-    isCurrentStep: Boolean,
-    onStepClick: () -> Unit,
-    isCompact: Boolean = false,
+  step: TestStep,
+  isCurrentStep: Boolean,
+  onStepClick: () -> Unit,
+  isCompact: Boolean = false,
 ) {
   val colors = SharedTheme.globalColors
   val statusColor =
-      when (step.status) {
-        TestStatus.Passed -> Color(0xFF4CAF50)
-        TestStatus.Failed -> Color(0xFFFF5722)
-        TestStatus.Running -> Color(0xFF2196F3)
-        TestStatus.Skipped -> colors.text.normal.copy(alpha = 0.4f)
-      }
+    when (step.status) {
+      TestStatus.Passed -> Color(0xFF4CAF50)
+      TestStatus.Failed -> Color(0xFFFF5722)
+      TestStatus.Running -> Color(0xFF2196F3)
+      TestStatus.Skipped -> colors.text.normal.copy(alpha = 0.4f)
+    }
 
   val highlightColor =
-      if (isCurrentStep) Color(0xFF2196F3).copy(alpha = 0.15f)
-      else colors.text.normal.copy(alpha = 0.03f)
+    if (isCurrentStep) Color(0xFF2196F3).copy(alpha = 0.15f)
+    else colors.text.normal.copy(alpha = 0.03f)
 
   val borderModifier =
-      if (isCurrentStep) {
-        Modifier.border(1.5.dp, Color(0xFF2196F3).copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-      } else Modifier
+    if (isCurrentStep) {
+      Modifier.border(1.5.dp, Color(0xFF2196F3).copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+    } else Modifier
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .then(borderModifier)
-              .background(highlightColor, RoundedCornerShape(6.dp))
-              .clickable(onClick = onStepClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(if (isCompact) 8.dp else 10.dp),
-      verticalAlignment = Alignment.Top,
+    modifier =
+      Modifier.fillMaxWidth()
+        .then(borderModifier)
+        .background(highlightColor, RoundedCornerShape(6.dp))
+        .clickable(onClick = onStepClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(if (isCompact) 8.dp else 10.dp),
+    verticalAlignment = Alignment.Top,
   ) {
     // Screenshot thumbnail - smaller in compact mode
     if (!isCompact) {
       Box(
-          modifier =
-              Modifier.width(48.dp)
-                  .height(85.dp)
-                  .background(Color(0xFF2A2A2A), RoundedCornerShape(4.dp)),
-          contentAlignment = Alignment.Center,
+        modifier =
+          Modifier.width(48.dp)
+            .height(85.dp)
+            .background(Color(0xFF2A2A2A), RoundedCornerShape(4.dp)),
+        contentAlignment = Alignment.Center,
       ) {
         if (step.screenshotPath != null) {
           Column(
-              horizontalAlignment = Alignment.CenterHorizontally,
-              verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
           ) {
             Text(
-                step.screenName?.take(6) ?: "?",
-                fontSize = 8.sp,
-                color = Color.White.copy(alpha = 0.7f),
+              step.screenName?.take(6) ?: "?",
+              fontSize = 8.sp,
+              color = Color.White.copy(alpha = 0.7f),
             )
           }
         } else {
           Text(
-              "—",
-              fontSize = 10.sp,
-              color = Color.White.copy(alpha = 0.3f),
+            "—",
+            fontSize = 10.sp,
+            color = Color.White.copy(alpha = 0.3f),
           )
         }
       }
@@ -2359,42 +2330,42 @@ private fun TestStepRowWithScreenshot(
 
     Column(modifier = Modifier.weight(1f)) {
       Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
       ) {
         // Step number
         Text(
-            "${step.index + 1}",
-            fontSize = if (isCompact) 10.sp else 11.sp,
-            color = colors.text.normal.copy(alpha = 0.4f),
+          "${step.index + 1}",
+          fontSize = if (isCompact) 10.sp else 11.sp,
+          color = colors.text.normal.copy(alpha = 0.4f),
         )
 
         // Status indicator
         Box(
-            modifier =
-                Modifier.size(if (isCompact) 6.dp else 8.dp).background(statusColor, CircleShape)
+          modifier =
+            Modifier.size(if (isCompact) 6.dp else 8.dp).background(statusColor, CircleShape)
         )
 
         // Action - truncate in compact mode
         val actionText =
-            if (isCompact && step.target.length > 15) {
-              "${step.action}: ${step.target.take(15)}..."
-            } else {
-              "${step.action}: ${step.target}"
-            }
+          if (isCompact && step.target.length > 15) {
+            "${step.action}: ${step.target.take(15)}..."
+          } else {
+            "${step.action}: ${step.target}"
+          }
         Text(
-            actionText,
-            fontSize = if (isCompact) 11.sp else 12.sp,
+          actionText,
+          fontSize = if (isCompact) 11.sp else 12.sp,
         )
       }
 
       if (!isCompact) {
         step.screenName?.let {
           Text(
-              "on $it",
-              fontSize = 10.sp,
-              color = colors.text.normal.copy(alpha = 0.5f),
-              modifier = Modifier.padding(top = 2.dp),
+            "on $it",
+            fontSize = 10.sp,
+            color = colors.text.normal.copy(alpha = 0.5f),
+            modifier = Modifier.padding(top = 2.dp),
           )
         }
       }
@@ -2403,26 +2374,26 @@ private fun TestStepRowWithScreenshot(
         Spacer(Modifier.height(4.dp))
         // Show full error when selected, ellipses otherwise
         val displayError =
-            if (isCurrentStep) {
-              error // Full stacktrace/error when selected
-            } else if (error.length > 35) {
-              error.take(35) + "..."
-            } else {
-              error
-            }
+          if (isCurrentStep) {
+            error // Full stacktrace/error when selected
+          } else if (error.length > 35) {
+            error.take(35) + "..."
+          } else {
+            error
+          }
         Text(
-            displayError,
-            fontSize = 10.sp,
-            color = Color(0xFFFF5722),
+          displayError,
+          fontSize = 10.sp,
+          color = Color(0xFFFF5722),
         )
       }
     }
 
     // Duration only (removed ">" indicator)
     Text(
-        "${step.durationMs}ms",
-        fontSize = if (isCompact) 9.sp else 10.sp,
-        color = colors.text.normal.copy(alpha = 0.4f),
+      "${step.durationMs}ms",
+      fontSize = if (isCompact) 9.sp else 10.sp,
+      color = colors.text.normal.copy(alpha = 0.4f),
     )
   }
 }
@@ -2432,11 +2403,11 @@ private fun ArtifactButton(label: String) {
   val colors = SharedTheme.globalColors
 
   Box(
-      modifier =
-          Modifier.background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-              .clickable { /* TODO: Open artifact */ }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 12.dp, vertical = 8.dp),
+    modifier =
+      Modifier.background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+        .clickable { /* TODO: Open artifact */ }
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 12.dp, vertical = 8.dp)
   ) {
     Text(label, fontSize = 12.sp)
   }
@@ -2481,19 +2452,19 @@ private fun extractVideoFrame(videoPath: String, timeMs: Long): org.jetbrains.sk
 
     // Use ffmpeg to extract a single frame
     val process =
-        ProcessBuilder(
-                "ffmpeg",
-                "-ss",
-                timeStr,
-                "-i",
-                videoPath,
-                "-vframes",
-                "1",
-                "-y",
-                tempFile.absolutePath,
-            )
-            .redirectErrorStream(true)
-            .start()
+      ProcessBuilder(
+          "ffmpeg",
+          "-ss",
+          timeStr,
+          "-i",
+          videoPath,
+          "-vframes",
+          "1",
+          "-y",
+          tempFile.absolutePath,
+        )
+        .redirectErrorStream(true)
+        .start()
 
     val exitCode = process.waitFor()
     if (exitCode != 0 || !tempFile.exists() || tempFile.length() == 0L) {

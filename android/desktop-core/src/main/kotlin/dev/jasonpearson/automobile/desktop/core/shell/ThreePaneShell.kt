@@ -78,47 +78,47 @@ enum class FocusedPane {
  */
 @Composable
 fun ThreePaneShell(
-    // Pane visibility
-    showLeftPane: Boolean,
-    onToggleLeftPane: () -> Unit,
-    showRightPane: Boolean,
-    onToggleRightPane: () -> Unit,
-    showBottomPane: Boolean,
-    onToggleBottomPane: () -> Unit,
-    // Device info (for status bar)
-    deviceName: String?,
-    foregroundApp: String?,
-    // Status bar data
-    crashCount: Int,
-    anrCount: Int,
-    nonFatalCount: Int,
-    toolFailureCount: Int,
-    currentFps: Float?,
-    currentMemoryMb: Float?,
-    isDaemonConnected: Boolean,
-    // Optional enhanced status bar data
-    networkReqPerSec: Float? = null,
-    connectionStartTime: Long? = null,
-    cpuUsagePercent: Float? = null,
-    // Keyboard navigation callbacks
-    onNavigateUp: (() -> Unit)? = null,
-    onNavigateDown: (() -> Unit)? = null,
-    onSelectEvent: (() -> Unit)? = null,
-    onDeselectEvent: (() -> Unit)? = null,
-    onJumpToTop: (() -> Unit)? = null,
-    onJumpToBottom: (() -> Unit)? = null,
-    onFocusSearch: (() -> Unit)? = null,
-    onQuickJump: ((Long) -> Unit)? = null,
-    // Menu bar bridge (optional — when provided, menu bar can trigger overlays)
-    menuBarActions: MenuBarActions? = null,
-    // Vim mode
-    vimModeEnabled: Boolean = false,
-    // Pane content slots
-    centerContent: @Composable (Modifier) -> Unit,
-    leftPaneContent: @Composable () -> Unit,
-    rightPaneContent: @Composable () -> Unit,
-    bottomPaneContent: @Composable () -> Unit,
-    modifier: Modifier = Modifier,
+  // Pane visibility
+  showLeftPane: Boolean,
+  onToggleLeftPane: () -> Unit,
+  showRightPane: Boolean,
+  onToggleRightPane: () -> Unit,
+  showBottomPane: Boolean,
+  onToggleBottomPane: () -> Unit,
+  // Device info (for status bar)
+  deviceName: String?,
+  foregroundApp: String?,
+  // Status bar data
+  crashCount: Int,
+  anrCount: Int,
+  nonFatalCount: Int,
+  toolFailureCount: Int,
+  currentFps: Float?,
+  currentMemoryMb: Float?,
+  isDaemonConnected: Boolean,
+  // Optional enhanced status bar data
+  networkReqPerSec: Float? = null,
+  connectionStartTime: Long? = null,
+  cpuUsagePercent: Float? = null,
+  // Keyboard navigation callbacks
+  onNavigateUp: (() -> Unit)? = null,
+  onNavigateDown: (() -> Unit)? = null,
+  onSelectEvent: (() -> Unit)? = null,
+  onDeselectEvent: (() -> Unit)? = null,
+  onJumpToTop: (() -> Unit)? = null,
+  onJumpToBottom: (() -> Unit)? = null,
+  onFocusSearch: (() -> Unit)? = null,
+  onQuickJump: ((Long) -> Unit)? = null,
+  // Menu bar bridge (optional — when provided, menu bar can trigger overlays)
+  menuBarActions: MenuBarActions? = null,
+  // Vim mode
+  vimModeEnabled: Boolean = false,
+  // Pane content slots
+  centerContent: @Composable (Modifier) -> Unit,
+  leftPaneContent: @Composable () -> Unit,
+  rightPaneContent: @Composable () -> Unit,
+  bottomPaneContent: @Composable () -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   // Default pane widths / heights
   val defaultLeftWidth = 220.dp
@@ -165,136 +165,133 @@ fun ThreePaneShell(
 
   Box(modifier.fillMaxSize()) {
     Column(
-        Modifier.fillMaxSize().focusTarget().onPreviewKeyEvent { event ->
-          if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+      Modifier.fillMaxSize().focusTarget().onPreviewKeyEvent { event ->
+        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
 
-          // When modal overlays are open, only allow Escape to close them
-          if (showCheatSheet) {
-            if (event.key == Key.Escape) {
-              showCheatSheet = false
-              return@onPreviewKeyEvent true
-            }
+        // When modal overlays are open, only allow Escape to close them
+        if (showCheatSheet) {
+          if (event.key == Key.Escape) {
+            showCheatSheet = false
             return@onPreviewKeyEvent true
           }
-          if (showQuickJump) return@onPreviewKeyEvent false
+          return@onPreviewKeyEvent true
+        }
+        if (showQuickJump) return@onPreviewKeyEvent false
 
-          when {
-            // Cmd+0 -> toggle left pane
-            event.isMetaPressed && !event.isShiftPressed && event.key == Key.Zero -> {
-              onToggleLeftPane()
-              true
-            }
-            // Cmd+Shift+0 -> toggle right pane
-            event.isMetaPressed && event.isShiftPressed && event.key == Key.Zero -> {
-              onToggleRightPane()
-              true
-            }
-            // Cmd+Shift+Y -> toggle bottom pane
-            event.isMetaPressed && event.isShiftPressed && event.key == Key.Y -> {
-              onToggleBottomPane()
-              true
-            }
-            // Cmd+/ -> shortcut cheat sheet
-            event.isMetaPressed && event.key == Key.Slash -> {
-              showCheatSheet = true
-              true
-            }
-            // Cmd+K -> quick jump
-            event.isMetaPressed && event.key == Key.K -> {
-              if (onQuickJump != null) {
-                showQuickJump = true
-              }
-              true
-            }
-            // Tab -> focus next pane
-            !event.isMetaPressed && !event.isShiftPressed && event.key == Key.Tab -> {
-              focusedPane = cyclePane(focusedPane, showLeftPane, showRightPane, forward = true)
-              requestFocusForPane(
-                  focusedPane,
-                  leftFocusRequester,
-                  centerFocusRequester,
-                  rightFocusRequester,
-              )
-              true
-            }
-            // Shift+Tab -> focus previous pane
-            !event.isMetaPressed && event.isShiftPressed && event.key == Key.Tab -> {
-              focusedPane = cyclePane(focusedPane, showLeftPane, showRightPane, forward = false)
-              requestFocusForPane(
-                  focusedPane,
-                  leftFocusRequester,
-                  centerFocusRequester,
-                  rightFocusRequester,
-              )
-              true
-            }
-            // Arrow Up -> navigate up in event list
-            event.key == Key.DirectionUp -> {
-              onNavigateUp?.invoke()
-              onNavigateUp != null
-            }
-            // Arrow Down -> navigate down in event list
-            event.key == Key.DirectionDown -> {
-              onNavigateDown?.invoke()
-              onNavigateDown != null
-            }
-            // Enter -> select/inspect focused event
-            event.key == Key.Enter -> {
-              onSelectEvent?.invoke()
-              onSelectEvent != null
-            }
-            // Escape -> deselect/close inspector
-            event.key == Key.Escape -> {
-              onDeselectEvent?.invoke()
-              onDeselectEvent != null
-            }
-            // Vim-style keys (only when vim mode enabled and no modifier keys)
-            vimModeEnabled && !event.isMetaPressed && !event.isShiftPressed -> {
-              when (event.key) {
-                Key.J -> {
-                  onNavigateDown?.invoke()
-                  onNavigateDown != null
-                }
-                Key.K -> {
-                  onNavigateUp?.invoke()
-                  onNavigateUp != null
-                }
-                Key.G -> {
-                  onJumpToTop?.invoke()
-                  onJumpToTop != null
-                }
-                // Vim / -> focus search (must be inside this branch to avoid
-                // being shadowed by the catch-all else -> false above)
-                Key.Slash -> {
-                  onFocusSearch?.invoke()
-                  onFocusSearch != null
-                }
-                else -> false
-              }
-            }
-            // Vim G (Shift+g) -> jump to bottom
-            vimModeEnabled &&
-                !event.isMetaPressed &&
-                event.isShiftPressed &&
-                event.key == Key.G -> {
-              onJumpToBottom?.invoke()
-              onJumpToBottom != null
-            }
-            else -> false
+        when {
+          // Cmd+0 -> toggle left pane
+          event.isMetaPressed && !event.isShiftPressed && event.key == Key.Zero -> {
+            onToggleLeftPane()
+            true
           }
-        },
+          // Cmd+Shift+0 -> toggle right pane
+          event.isMetaPressed && event.isShiftPressed && event.key == Key.Zero -> {
+            onToggleRightPane()
+            true
+          }
+          // Cmd+Shift+Y -> toggle bottom pane
+          event.isMetaPressed && event.isShiftPressed && event.key == Key.Y -> {
+            onToggleBottomPane()
+            true
+          }
+          // Cmd+/ -> shortcut cheat sheet
+          event.isMetaPressed && event.key == Key.Slash -> {
+            showCheatSheet = true
+            true
+          }
+          // Cmd+K -> quick jump
+          event.isMetaPressed && event.key == Key.K -> {
+            if (onQuickJump != null) {
+              showQuickJump = true
+            }
+            true
+          }
+          // Tab -> focus next pane
+          !event.isMetaPressed && !event.isShiftPressed && event.key == Key.Tab -> {
+            focusedPane = cyclePane(focusedPane, showLeftPane, showRightPane, forward = true)
+            requestFocusForPane(
+              focusedPane,
+              leftFocusRequester,
+              centerFocusRequester,
+              rightFocusRequester,
+            )
+            true
+          }
+          // Shift+Tab -> focus previous pane
+          !event.isMetaPressed && event.isShiftPressed && event.key == Key.Tab -> {
+            focusedPane = cyclePane(focusedPane, showLeftPane, showRightPane, forward = false)
+            requestFocusForPane(
+              focusedPane,
+              leftFocusRequester,
+              centerFocusRequester,
+              rightFocusRequester,
+            )
+            true
+          }
+          // Arrow Up -> navigate up in event list
+          event.key == Key.DirectionUp -> {
+            onNavigateUp?.invoke()
+            onNavigateUp != null
+          }
+          // Arrow Down -> navigate down in event list
+          event.key == Key.DirectionDown -> {
+            onNavigateDown?.invoke()
+            onNavigateDown != null
+          }
+          // Enter -> select/inspect focused event
+          event.key == Key.Enter -> {
+            onSelectEvent?.invoke()
+            onSelectEvent != null
+          }
+          // Escape -> deselect/close inspector
+          event.key == Key.Escape -> {
+            onDeselectEvent?.invoke()
+            onDeselectEvent != null
+          }
+          // Vim-style keys (only when vim mode enabled and no modifier keys)
+          vimModeEnabled && !event.isMetaPressed && !event.isShiftPressed -> {
+            when (event.key) {
+              Key.J -> {
+                onNavigateDown?.invoke()
+                onNavigateDown != null
+              }
+              Key.K -> {
+                onNavigateUp?.invoke()
+                onNavigateUp != null
+              }
+              Key.G -> {
+                onJumpToTop?.invoke()
+                onJumpToTop != null
+              }
+              // Vim / -> focus search (must be inside this branch to avoid
+              // being shadowed by the catch-all else -> false above)
+              Key.Slash -> {
+                onFocusSearch?.invoke()
+                onFocusSearch != null
+              }
+              else -> false
+            }
+          }
+          // Vim G (Shift+g) -> jump to bottom
+          vimModeEnabled && !event.isMetaPressed && event.isShiftPressed && event.key == Key.G -> {
+            onJumpToBottom?.invoke()
+            onJumpToBottom != null
+          }
+          else -> false
+        }
+      }
     ) {
       // macOS title bar spacer
       TitleBarSpacer()
 
       // Pane toggle toolbar
       PaneToggleToolbar(
-          showLeftPane = showLeftPane,
-          onToggleLeftPane = onToggleLeftPane,
-          showRightPane = showRightPane,
-          onToggleRightPane = onToggleRightPane,
-          showBottomPane = showBottomPane,
-          onToggleBottomPane = onToggleBottomPane,
+        showLeftPane = showLeftPane,
+        onToggleLeftPane = onToggleLeftPane,
+        showRightPane = showRightPane,
+        onToggleRightPane = onToggleRightPane,
+        showBottomPane = showBottomPane,
+        onToggleBottomPane = onToggleBottomPane,
       )
 
       // Main 3-pane area
@@ -302,55 +299,53 @@ fun ThreePaneShell(
         // Left sidebar (collapsible)
         if (showLeftPane) {
           Box(
-              Modifier.width(leftPaneWidth)
-                  .fillMaxHeight()
-                  .focusRequester(leftFocusRequester)
-                  .focusTarget(),
+            Modifier.width(leftPaneWidth)
+              .fillMaxHeight()
+              .focusRequester(leftFocusRequester)
+              .focusTarget()
           ) {
             leftPaneContent()
           }
           VerticalDividerStub(
-              onDrag = { delta ->
-                leftPaneWidth = (leftPaneWidth + delta).coerceIn(150.dp, 400.dp)
-              },
+            onDrag = { delta ->
+              leftPaneWidth = (leftPaneWidth + delta).coerceIn(150.dp, 400.dp)
+            }
           )
         }
 
         // Center canvas (flex) + status bar
-        Column(
-            Modifier.weight(1f).focusRequester(centerFocusRequester).focusTarget(),
-        ) {
+        Column(Modifier.weight(1f).focusRequester(centerFocusRequester).focusTarget()) {
           centerContent(Modifier.weight(1f))
 
           // Status bar
           StatusBarStub(
-              crashCount = crashCount,
-              anrCount = anrCount,
-              nonFatalCount = nonFatalCount,
-              toolFailureCount = toolFailureCount,
-              currentFps = currentFps,
-              currentMemoryMb = currentMemoryMb,
-              isDaemonConnected = isDaemonConnected,
-              deviceName = deviceName,
-              foregroundApp = foregroundApp,
-              networkReqPerSec = networkReqPerSec,
-              connectionStartTime = connectionStartTime,
-              cpuUsagePercent = cpuUsagePercent,
+            crashCount = crashCount,
+            anrCount = anrCount,
+            nonFatalCount = nonFatalCount,
+            toolFailureCount = toolFailureCount,
+            currentFps = currentFps,
+            currentMemoryMb = currentMemoryMb,
+            isDaemonConnected = isDaemonConnected,
+            deviceName = deviceName,
+            foregroundApp = foregroundApp,
+            networkReqPerSec = networkReqPerSec,
+            connectionStartTime = connectionStartTime,
+            cpuUsagePercent = cpuUsagePercent,
           )
         }
 
         // Right inspector (collapsible)
         if (showRightPane) {
           VerticalDividerStub(
-              onDrag = { delta ->
-                rightPaneWidth = (rightPaneWidth - delta).coerceIn(200.dp, 500.dp)
-              },
+            onDrag = { delta ->
+              rightPaneWidth = (rightPaneWidth - delta).coerceIn(200.dp, 500.dp)
+            }
           )
           Box(
-              Modifier.width(rightPaneWidth)
-                  .fillMaxHeight()
-                  .focusRequester(rightFocusRequester)
-                  .focusTarget(),
+            Modifier.width(rightPaneWidth)
+              .fillMaxHeight()
+              .focusRequester(rightFocusRequester)
+              .focusTarget()
           ) {
             rightPaneContent()
           }
@@ -360,9 +355,9 @@ fun ThreePaneShell(
       // Bottom timeline (collapsible)
       if (showBottomPane) {
         HorizontalDividerStub(
-            onDrag = { delta ->
-              bottomPaneHeight = (bottomPaneHeight - delta).coerceIn(80.dp, 300.dp)
-            },
+          onDrag = { delta ->
+            bottomPaneHeight = (bottomPaneHeight - delta).coerceIn(80.dp, 300.dp)
+          }
         )
         Box(Modifier.fillMaxWidth().height(bottomPaneHeight)) {
           bottomPaneContent()
@@ -373,15 +368,15 @@ fun ThreePaneShell(
     // Modal overlays
     if (showCheatSheet) {
       ShortcutCheatSheet(
-          vimModeEnabled = vimModeEnabled,
-          onDismiss = { showCheatSheet = false },
+        vimModeEnabled = vimModeEnabled,
+        onDismiss = { showCheatSheet = false },
       )
     }
 
     if (showQuickJump && onQuickJump != null) {
       QuickJumpDialog(
-          onJump = onQuickJump,
-          onDismiss = { showQuickJump = false },
+        onJump = onQuickJump,
+        onDismiss = { showQuickJump = false },
       )
     }
   }
@@ -396,10 +391,10 @@ private fun visiblePanes(showLeft: Boolean, showRight: Boolean): List<FocusedPan
 
 /** Cycles to the next or previous pane, skipping hidden panes. */
 private fun cyclePane(
-    current: FocusedPane,
-    showLeft: Boolean,
-    showRight: Boolean,
-    forward: Boolean,
+  current: FocusedPane,
+  showLeft: Boolean,
+  showRight: Boolean,
+  forward: Boolean,
 ): FocusedPane {
   val order = visiblePanes(showLeft, showRight)
   val currentIndex = order.indexOf(current).coerceAtLeast(0)
@@ -409,10 +404,10 @@ private fun cyclePane(
 
 /** Requests focus for the given pane. */
 private fun requestFocusForPane(
-    pane: FocusedPane,
-    leftRequester: FocusRequester,
-    centerRequester: FocusRequester,
-    rightRequester: FocusRequester,
+  pane: FocusedPane,
+  leftRequester: FocusRequester,
+  centerRequester: FocusRequester,
+  rightRequester: FocusRequester,
 ) {
   try {
     when (pane) {
@@ -445,18 +440,18 @@ private fun TitleBarSpacer() {
 private fun VerticalDividerStub(onDrag: (Dp) -> Unit, onReset: () -> Unit = {}) {
   val density = LocalDensity.current
   Box(
-      Modifier.width(5.dp)
-          .fillMaxHeight()
-          .background(SharedTheme.globalColors.text.normal.copy(alpha = 0.12f))
-          .pointerHoverIcon(PointerIcon.Hand)
-          .pointerInput(Unit) {
-            detectDragGestures { _, dragAmount ->
-              with(density) { onDrag(dragAmount.x.toDp()) }
-            }
-          }
-          .pointerInput(Unit) {
-            detectTapGestures(onDoubleTap = { onReset() })
-          },
+    Modifier.width(5.dp)
+      .fillMaxHeight()
+      .background(SharedTheme.globalColors.text.normal.copy(alpha = 0.12f))
+      .pointerHoverIcon(PointerIcon.Hand)
+      .pointerInput(Unit) {
+        detectDragGestures { _, dragAmount ->
+          with(density) { onDrag(dragAmount.x.toDp()) }
+        }
+      }
+      .pointerInput(Unit) {
+        detectTapGestures(onDoubleTap = { onReset() })
+      }
   )
 }
 
@@ -465,18 +460,18 @@ private fun VerticalDividerStub(onDrag: (Dp) -> Unit, onReset: () -> Unit = {}) 
 private fun HorizontalDividerStub(onDrag: (Dp) -> Unit, onReset: () -> Unit = {}) {
   val density = LocalDensity.current
   Box(
-      Modifier.height(5.dp)
-          .fillMaxWidth()
-          .background(SharedTheme.globalColors.text.normal.copy(alpha = 0.12f))
-          .pointerHoverIcon(PointerIcon.Hand)
-          .pointerInput(Unit) {
-            detectDragGestures { _, dragAmount ->
-              with(density) { onDrag(dragAmount.y.toDp()) }
-            }
-          }
-          .pointerInput(Unit) {
-            detectTapGestures(onDoubleTap = { onReset() })
-          },
+    Modifier.height(5.dp)
+      .fillMaxWidth()
+      .background(SharedTheme.globalColors.text.normal.copy(alpha = 0.12f))
+      .pointerHoverIcon(PointerIcon.Hand)
+      .pointerInput(Unit) {
+        detectDragGestures { _, dragAmount ->
+          with(density) { onDrag(dragAmount.y.toDp()) }
+        }
+      }
+      .pointerInput(Unit) {
+        detectTapGestures(onDoubleTap = { onReset() })
+      }
   )
 }
 
@@ -490,18 +485,18 @@ private fun formatElapsed(elapsedSeconds: Long): String {
 /** Status bar showing failure counts, FPS, memory, and connection state. */
 @Composable
 private fun StatusBarStub(
-    crashCount: Int,
-    anrCount: Int,
-    nonFatalCount: Int,
-    toolFailureCount: Int,
-    currentFps: Float?,
-    currentMemoryMb: Float?,
-    isDaemonConnected: Boolean,
-    deviceName: String?,
-    foregroundApp: String?,
-    networkReqPerSec: Float? = null,
-    connectionStartTime: Long? = null,
-    cpuUsagePercent: Float? = null,
+  crashCount: Int,
+  anrCount: Int,
+  nonFatalCount: Int,
+  toolFailureCount: Int,
+  currentFps: Float?,
+  currentMemoryMb: Float?,
+  isDaemonConnected: Boolean,
+  deviceName: String?,
+  foregroundApp: String?,
+  networkReqPerSec: Float? = null,
+  connectionStartTime: Long? = null,
+  cpuUsagePercent: Float? = null,
 ) {
   val colors = SharedTheme.globalColors
   val totalFailures = crashCount + anrCount + nonFatalCount + toolFailureCount
@@ -520,28 +515,28 @@ private fun StatusBarStub(
   }
 
   Row(
-      Modifier.fillMaxWidth()
-          .height(24.dp)
-          .background(colors.panelBackground)
-          .padding(horizontal = 8.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    Modifier.fillMaxWidth()
+      .height(24.dp)
+      .background(colors.panelBackground)
+      .padding(horizontal = 8.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     // Connection indicator — clickable segment
     val connColor =
-        if (isDaemonConnected) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.3f)
+      if (isDaemonConnected) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.3f)
     Text(
-        text = if (isDaemonConnected) "Connected" else "Disconnected",
-        fontSize = 10.sp,
-        color = connColor,
+      text = if (isDaemonConnected) "Connected" else "Disconnected",
+      fontSize = 10.sp,
+      color = connColor,
     )
 
     // Session timer
     if (connectionStartTime != null && isDaemonConnected) {
       Spacer(Modifier.width(8.dp))
       Text(
-          text = formatElapsed(elapsedSeconds),
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
+        text = formatElapsed(elapsedSeconds),
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
       )
     }
 
@@ -550,10 +545,10 @@ private fun StatusBarStub(
     // Device / app
     if (deviceName != null) {
       Text(
-          text = deviceName + (foregroundApp?.let { " — $it" } ?: ""),
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.6f),
-          maxLines = 1,
+        text = deviceName + (foregroundApp?.let { " — $it" } ?: ""),
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.6f),
+        maxLines = 1,
       )
     }
 
@@ -562,9 +557,9 @@ private fun StatusBarStub(
     // Network throughput
     networkReqPerSec?.let { rps ->
       Text(
-          text = "${"%.0f".format(rps)} req/s",
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.6f),
+        text = "${"%.0f".format(rps)} req/s",
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.6f),
       )
       Spacer(Modifier.width(12.dp))
     }
@@ -572,15 +567,15 @@ private fun StatusBarStub(
     // CPU usage — color-coded
     cpuUsagePercent?.let { cpu ->
       val cpuColor =
-          when {
-            cpu >= 80f -> colors.text.error
-            cpu >= 50f -> colors.text.warning
-            else -> Color(0xFF4CAF50)
-          }
+        when {
+          cpu >= 80f -> colors.text.error
+          cpu >= 50f -> colors.text.warning
+          else -> Color(0xFF4CAF50)
+        }
       Text(
-          text = "CPU: ${"%.0f".format(cpu)}%",
-          fontSize = 10.sp,
-          color = cpuColor,
+        text = "CPU: ${"%.0f".format(cpu)}%",
+        fontSize = 10.sp,
+        color = cpuColor,
       )
       Spacer(Modifier.width(12.dp))
     }
@@ -588,9 +583,9 @@ private fun StatusBarStub(
     // Failure counts
     if (totalFailures > 0) {
       Text(
-          text = "Failures: $totalFailures",
-          fontSize = 10.sp,
-          color = if (crashCount > 0) colors.text.error else colors.text.warning,
+        text = "Failures: $totalFailures",
+        fontSize = 10.sp,
+        color = if (crashCount > 0) colors.text.error else colors.text.warning,
       )
       Spacer(Modifier.width(12.dp))
     }
@@ -598,14 +593,14 @@ private fun StatusBarStub(
     // FPS
     currentFps?.let { fps ->
       Text(
-          text = "FPS: ${fps.toInt()}",
-          fontSize = 10.sp,
-          color =
-              when {
-                fps >= 55f -> Color(0xFF4CAF50)
-                fps >= 30f -> colors.text.warning
-                else -> colors.text.error
-              },
+        text = "FPS: ${fps.toInt()}",
+        fontSize = 10.sp,
+        color =
+          when {
+            fps >= 55f -> Color(0xFF4CAF50)
+            fps >= 30f -> colors.text.warning
+            else -> colors.text.error
+          },
       )
       Spacer(Modifier.width(12.dp))
     }
@@ -613,9 +608,9 @@ private fun StatusBarStub(
     // Memory
     currentMemoryMb?.let { mem ->
       Text(
-          text = "Mem: ${mem.toInt()} MB",
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.6f),
+        text = "Mem: ${mem.toInt()} MB",
+        fontSize = 10.sp,
+        color = colors.text.normal.copy(alpha = 0.6f),
       )
     }
   }
@@ -624,77 +619,77 @@ private fun StatusBarStub(
 /** Toolbar row with pane toggle buttons (Xcode-style). */
 @Composable
 private fun PaneToggleToolbar(
-    showLeftPane: Boolean,
-    onToggleLeftPane: () -> Unit,
-    showRightPane: Boolean,
-    onToggleRightPane: () -> Unit,
-    showBottomPane: Boolean,
-    onToggleBottomPane: () -> Unit,
+  showLeftPane: Boolean,
+  onToggleLeftPane: () -> Unit,
+  showRightPane: Boolean,
+  onToggleRightPane: () -> Unit,
+  showBottomPane: Boolean,
+  onToggleBottomPane: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   Row(
-      Modifier.fillMaxWidth()
-          .height(28.dp)
-          .background(colors.panelBackground)
-          .padding(horizontal = 8.dp),
-      horizontalArrangement = Arrangement.End,
-      verticalAlignment = Alignment.CenterVertically,
+    Modifier.fillMaxWidth()
+      .height(28.dp)
+      .background(colors.panelBackground)
+      .padding(horizontal = 8.dp),
+    horizontalArrangement = Arrangement.End,
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     PaneToggleIcon(
-        label = "Left",
-        isActive = showLeftPane,
-        onClick = onToggleLeftPane,
+      label = "Left",
+      isActive = showLeftPane,
+      onClick = onToggleLeftPane,
     )
     Spacer(Modifier.width(4.dp))
     PaneToggleIcon(
-        label = "Bottom",
-        isActive = showBottomPane,
-        onClick = onToggleBottomPane,
+      label = "Bottom",
+      isActive = showBottomPane,
+      onClick = onToggleBottomPane,
     )
     Spacer(Modifier.width(4.dp))
     PaneToggleIcon(
-        label = "Right",
-        isActive = showRightPane,
-        onClick = onToggleRightPane,
+      label = "Right",
+      isActive = showRightPane,
+      onClick = onToggleRightPane,
     )
   }
 }
 
 @Composable
 private fun PaneToggleIcon(
-    label: String,
-    isActive: Boolean,
-    onClick: () -> Unit,
+  label: String,
+  isActive: Boolean,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val interactionSource = remember { MutableInteractionSource() }
   val isHovered by interactionSource.collectIsHoveredAsState()
 
   val targetAlpha =
-      when {
-        isActive -> 0.15f
-        isHovered -> 0.10f
-        else -> 0f
-      }
+    when {
+      isActive -> 0.15f
+      isHovered -> 0.10f
+      else -> 0f
+    }
   val bgColor by
-      animateColorAsState(
-          targetValue = colors.text.normal.copy(alpha = targetAlpha),
-          animationSpec = tween(durationMillis = 100),
-          label = "paneToggleBg",
-      )
+    animateColorAsState(
+      targetValue = colors.text.normal.copy(alpha = targetAlpha),
+      animationSpec = tween(durationMillis = 100),
+      label = "paneToggleBg",
+    )
 
   Text(
-      text = label,
-      fontSize = 10.sp,
-      color = if (isActive) colors.text.info else colors.text.normal.copy(alpha = 0.4f),
-      modifier =
-          Modifier.background(bgColor)
-              .hoverable(interactionSource)
-              .clickable(
-                  interactionSource = interactionSource,
-                  indication = null,
-                  onClick = onClick,
-              )
-              .padding(horizontal = 6.dp, vertical = 2.dp),
+    text = label,
+    fontSize = 10.sp,
+    color = if (isActive) colors.text.info else colors.text.normal.copy(alpha = 0.4f),
+    modifier =
+      Modifier.background(bgColor)
+        .hoverable(interactionSource)
+        .clickable(
+          interactionSource = interactionSource,
+          indication = null,
+          onClick = onClick,
+        )
+        .padding(horizontal = 6.dp, vertical = 2.dp),
   )
 }

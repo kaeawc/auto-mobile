@@ -20,9 +20,9 @@ sealed interface NavigationUiState {
   data object Loading : NavigationUiState
 
   data class Content(
-      val graph: NavigationGraph,
-      val selectedScreenId: String? = null,
-      val currentSection: NavigationSection = NavigationSection.FlowMap,
+    val graph: NavigationGraph,
+    val selectedScreenId: String? = null,
+    val currentSection: NavigationSection = NavigationSection.FlowMap,
   ) : NavigationUiState
 
   data class Error(val message: String) : NavigationUiState
@@ -51,8 +51,8 @@ sealed interface NavigationEffect {
  * independent of Compose.
  */
 class NavigationViewModel(
-    private val dataSource: NavigationDataSource,
-    private val scope: CoroutineScope,
+  private val dataSource: NavigationDataSource,
+  private val scope: CoroutineScope,
 ) {
   private val _state = MutableStateFlow<NavigationUiState>(NavigationUiState.Loading)
   val state: StateFlow<NavigationUiState> = _state.asStateFlow()
@@ -81,7 +81,7 @@ class NavigationViewModel(
         when (val result = dataSource.getNavigationGraph()) {
           is Result.Success -> {
             LOG.info(
-                "Navigation data loaded: ${result.data.screens.size} screens, ${result.data.transitions.size} transitions"
+              "Navigation data loaded: ${result.data.screens.size} screens, ${result.data.transitions.size} transitions"
             )
             _state.value = NavigationUiState.Content(graph = result.data)
           }
@@ -103,8 +103,8 @@ class NavigationViewModel(
   private fun selectScreen(screenId: String) {
     _state.update { current ->
       (current as? NavigationUiState.Content)?.copy(
-          selectedScreenId = screenId,
-          currentSection = NavigationSection.ScreenDetail,
+        selectedScreenId = screenId,
+        currentSection = NavigationSection.ScreenDetail,
       ) ?: current
     }
   }
@@ -115,8 +115,8 @@ class NavigationViewModel(
         val screen = current.graph.screens.find { it.name == screenName }
         if (screen != null) {
           current.copy(
-              selectedScreenId = screen.id,
-              currentSection = NavigationSection.ScreenDetail,
+            selectedScreenId = screen.id,
+            currentSection = NavigationSection.ScreenDetail,
           )
         } else {
           current
@@ -130,8 +130,8 @@ class NavigationViewModel(
   private fun backToFlowMap() {
     _state.update { current ->
       (current as? NavigationUiState.Content)?.copy(
-          selectedScreenId = null,
-          currentSection = NavigationSection.FlowMap,
+        selectedScreenId = null,
+        currentSection = NavigationSection.FlowMap,
       ) ?: current
     }
   }

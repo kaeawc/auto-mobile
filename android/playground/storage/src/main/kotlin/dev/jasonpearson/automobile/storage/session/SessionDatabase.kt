@@ -5,7 +5,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 class SessionDatabase(context: Context) :
-    SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+  SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
   override fun onCreate(db: SQLiteDatabase) {
     db.execSQL(CREATE_SESSIONS_TABLE)
@@ -21,7 +21,7 @@ class SessionDatabase(context: Context) :
     private const val DATABASE_VERSION = 1
 
     private const val CREATE_SESSIONS_TABLE =
-        """
+      """
             CREATE TABLE sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,

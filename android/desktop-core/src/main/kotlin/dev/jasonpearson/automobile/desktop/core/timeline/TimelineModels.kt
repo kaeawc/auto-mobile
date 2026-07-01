@@ -18,26 +18,26 @@ enum class TimelineCategory(val color: Color, val laneIndex: Int, val label: Str
 }
 
 fun TelemetryDisplayEvent.toTimelineCategory(): TimelineCategory =
-    when (this) {
-      is TelemetryDisplayEvent.Network -> TimelineCategory.Network
-      is TelemetryDisplayEvent.ToolCall -> TimelineCategory.ToolCall
-      is TelemetryDisplayEvent.Navigation -> TimelineCategory.Navigation
-      is TelemetryDisplayEvent.Failure -> TimelineCategory.Failure
-      is TelemetryDisplayEvent.Os -> TimelineCategory.Os
-      is TelemetryDisplayEvent.Accessibility -> TimelineCategory.Accessibility
-      is TelemetryDisplayEvent.Log -> TimelineCategory.Log
-      is TelemetryDisplayEvent.Storage -> TimelineCategory.Storage
-      is TelemetryDisplayEvent.Layout -> TimelineCategory.Layout
-      is TelemetryDisplayEvent.Memory -> TimelineCategory.Memory
-      is TelemetryDisplayEvent.Performance -> TimelineCategory.Performance
-    }
+  when (this) {
+    is TelemetryDisplayEvent.Network -> TimelineCategory.Network
+    is TelemetryDisplayEvent.ToolCall -> TimelineCategory.ToolCall
+    is TelemetryDisplayEvent.Navigation -> TimelineCategory.Navigation
+    is TelemetryDisplayEvent.Failure -> TimelineCategory.Failure
+    is TelemetryDisplayEvent.Os -> TimelineCategory.Os
+    is TelemetryDisplayEvent.Accessibility -> TimelineCategory.Accessibility
+    is TelemetryDisplayEvent.Log -> TimelineCategory.Log
+    is TelemetryDisplayEvent.Storage -> TimelineCategory.Storage
+    is TelemetryDisplayEvent.Layout -> TimelineCategory.Layout
+    is TelemetryDisplayEvent.Memory -> TimelineCategory.Memory
+    is TelemetryDisplayEvent.Performance -> TimelineCategory.Performance
+  }
 
 data class TimelineSpan(
-    val event: TelemetryDisplayEvent,
-    val startMs: Long,
-    val endMs: Long,
-    val category: TimelineCategory,
-    val isFiltered: Boolean,
+  val event: TelemetryDisplayEvent,
+  val startMs: Long,
+  val endMs: Long,
+  val category: TimelineCategory,
+  val isFiltered: Boolean,
 )
 
 /**
@@ -45,27 +45,27 @@ data class TimelineSpan(
  * visible. Duration-bearing events use their actual duration.
  */
 fun buildTimelineSpans(
-    events: List<TelemetryDisplayEvent>,
-    filteredCategories: Set<TimelineCategory> = emptySet(),
+  events: List<TelemetryDisplayEvent>,
+  filteredCategories: Set<TimelineCategory> = emptySet(),
 ): List<TimelineSpan> = events.map { event ->
   val category = event.toTimelineCategory()
   val durationMs =
-      when (event) {
-        is TelemetryDisplayEvent.Network -> event.durationMs
-        is TelemetryDisplayEvent.ToolCall -> event.durationMs
-        is TelemetryDisplayEvent.Layout -> event.durationMs ?: 0L
-        else -> 0L
-      }
+    when (event) {
+      is TelemetryDisplayEvent.Network -> event.durationMs
+      is TelemetryDisplayEvent.ToolCall -> event.durationMs
+      is TelemetryDisplayEvent.Layout -> event.durationMs ?: 0L
+      else -> 0L
+    }
   val effectiveDuration = if (durationMs > 0) durationMs else 50L
   TimelineSpan(
-      event = event,
-      startMs = event.timestamp,
-      endMs = event.timestamp + effectiveDuration,
-      category = category,
-      isFiltered = category in filteredCategories,
+    event = event,
+    startMs = event.timestamp,
+    endMs = event.timestamp + effectiveDuration,
+    category = category,
+    isFiltered = category in filteredCategories,
   )
 }
 
 /** Returns the sorted distinct lane indices that have at least one span. */
 fun activeLanes(spans: List<TimelineSpan>): List<Int> =
-    spans.map { it.category.laneIndex }.distinct().sorted()
+  spans.map { it.category.laneIndex }.distinct().sorted()

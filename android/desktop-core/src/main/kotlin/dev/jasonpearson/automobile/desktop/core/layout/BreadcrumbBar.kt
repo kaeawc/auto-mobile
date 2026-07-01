@@ -34,11 +34,11 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
  */
 @Composable
 fun BreadcrumbBar(
-    selectedElementId: String?,
-    parentMap: Map<String, String>,
-    elementMap: Map<String, UIElementInfo>,
-    onElementSelected: (String?) -> Unit,
-    modifier: Modifier = Modifier,
+  selectedElementId: String?,
+  parentMap: Map<String, String>,
+  elementMap: Map<String, UIElementInfo>,
+  onElementSelected: (String?) -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -46,21 +46,21 @@ fun BreadcrumbBar(
 
   // Build path from root to selected element — O(depth) via parentMap
   val path =
-      remember(selectedElementId, parentMap) {
-        getPathFromParentMap(parentMap, selectedElementId)
-      }
+    remember(selectedElementId, parentMap) {
+      getPathFromParentMap(parentMap, selectedElementId)
+    }
 
   val scrollState = rememberScrollState()
 
   Row(
-      modifier =
-          modifier
-              .fillMaxWidth()
-              .background(colors.panelBackground)
-              .horizontalScroll(scrollState)
-              .padding(horizontal = 8.dp, vertical = 4.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(2.dp),
+    modifier =
+      modifier
+        .fillMaxWidth()
+        .background(colors.panelBackground)
+        .horizontalScroll(scrollState)
+        .padding(horizontal = 8.dp, vertical = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(2.dp),
   ) {
     path.forEachIndexed { index, elementId ->
       val element = elementMap[elementId]
@@ -68,17 +68,17 @@ fun BreadcrumbBar(
       val isLast = index == path.lastIndex
 
       BreadcrumbSegment(
-          label = label,
-          isSelected = isLast,
-          textColor = colors.text.normal,
-          onClick = { onElementSelected(elementId) },
+        label = label,
+        isSelected = isLast,
+        textColor = colors.text.normal,
+        onClick = { onElementSelected(elementId) },
       )
 
       if (!isLast) {
         Text(
-            text = " > ",
-            fontSize = 9.sp,
-            color = colors.text.normal.copy(alpha = 0.3f),
+          text = " > ",
+          fontSize = 9.sp,
+          color = colors.text.normal.copy(alpha = 0.3f),
         )
       }
     }
@@ -87,29 +87,29 @@ fun BreadcrumbBar(
 
 @Composable
 private fun BreadcrumbSegment(
-    label: String,
-    isSelected: Boolean,
-    textColor: Color,
-    onClick: () -> Unit,
+  label: String,
+  isSelected: Boolean,
+  textColor: Color,
+  onClick: () -> Unit,
 ) {
   Box(
-      modifier =
-          Modifier.background(
-                  if (isSelected) Color(0xFF2196F3).copy(alpha = 0.15f) else Color.Transparent,
-                  RoundedCornerShape(3.dp),
-              )
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 4.dp, vertical = 2.dp),
+    modifier =
+      Modifier.background(
+          if (isSelected) Color(0xFF2196F3).copy(alpha = 0.15f) else Color.Transparent,
+          RoundedCornerShape(3.dp),
+        )
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 4.dp, vertical = 2.dp)
   ) {
     Text(
-        text = label,
-        fontSize = 10.sp,
-        fontFamily = FontFamily.Monospace,
-        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-        color = if (isSelected) Color(0xFF2196F3) else textColor.copy(alpha = 0.6f),
-        maxLines = 1,
-        softWrap = false,
+      text = label,
+      fontSize = 10.sp,
+      fontFamily = FontFamily.Monospace,
+      fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+      color = if (isSelected) Color(0xFF2196F3) else textColor.copy(alpha = 0.6f),
+      maxLines = 1,
+      softWrap = false,
     )
   }
 }

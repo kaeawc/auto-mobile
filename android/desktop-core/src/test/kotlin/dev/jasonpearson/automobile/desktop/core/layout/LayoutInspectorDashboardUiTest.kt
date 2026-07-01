@@ -13,42 +13,42 @@ import org.junit.Test
 class LayoutInspectorDashboardUiTest {
 
   private val sampleElement =
-      UIElementInfo(
-          id = "btn_login",
-          className = "android.widget.Button",
-          resourceId = "com.app:id/btn_login",
-          text = "Sign In",
-          contentDescription = "Login button",
-          bounds = ElementBounds(100, 200, 400, 280),
-          isClickable = true,
-          isEnabled = true,
-          isFocused = false,
-          isSelected = false,
-          isScrollable = false,
-          isCheckable = false,
-          isChecked = false,
-          depth = 2,
-          children = emptyList(),
-      )
+    UIElementInfo(
+      id = "btn_login",
+      className = "android.widget.Button",
+      resourceId = "com.app:id/btn_login",
+      text = "Sign In",
+      contentDescription = "Login button",
+      bounds = ElementBounds(100, 200, 400, 280),
+      isClickable = true,
+      isEnabled = true,
+      isFocused = false,
+      isSelected = false,
+      isScrollable = false,
+      isCheckable = false,
+      isChecked = false,
+      depth = 2,
+      children = emptyList(),
+    )
 
   private val sampleElementNoText =
-      UIElementInfo(
-          id = "img_avatar",
-          className = "android.widget.ImageView",
-          resourceId = "com.app:id/avatar",
-          text = null,
-          contentDescription = "User avatar",
-          bounds = ElementBounds(50, 50, 150, 150),
-          isClickable = true,
-          isEnabled = true,
-          isFocused = false,
-          isSelected = true,
-          isScrollable = false,
-          isCheckable = false,
-          isChecked = false,
-          depth = 1,
-          children = emptyList(),
-      )
+    UIElementInfo(
+      id = "img_avatar",
+      className = "android.widget.ImageView",
+      resourceId = "com.app:id/avatar",
+      text = null,
+      contentDescription = "User avatar",
+      bounds = ElementBounds(50, 50, 150, 150),
+      isClickable = true,
+      isEnabled = true,
+      isFocused = false,
+      isSelected = true,
+      isScrollable = false,
+      isCheckable = false,
+      isChecked = false,
+      depth = 1,
+      children = emptyList(),
+    )
 
   // -- PropertyInspectorPanel tests --
 
@@ -175,10 +175,10 @@ class LayoutInspectorDashboardUiTest {
     setContent {
       MaterialTheme {
         BreadcrumbBar(
-            selectedElementId = null,
-            parentMap = emptyMap(),
-            elementMap = emptyMap(),
-            onElementSelected = {},
+          selectedElementId = null,
+          parentMap = emptyMap(),
+          elementMap = emptyMap(),
+          onElementSelected = {},
         )
       }
     }
@@ -189,41 +189,41 @@ class LayoutInspectorDashboardUiTest {
   @Test
   fun `breadcrumb bar shows path for selected element`() = runComposeUiTest {
     val root =
-        UIElementInfo(
-            id = "root",
-            className = "android.widget.FrameLayout",
-            resourceId = null,
-            text = null,
-            contentDescription = null,
-            bounds = ElementBounds(0, 0, 1080, 2340),
-            isClickable = false,
-            isEnabled = true,
-            isFocused = false,
-            isSelected = false,
-            isScrollable = false,
-            isCheckable = false,
-            isChecked = false,
-            depth = 0,
-            children = emptyList(),
-        )
+      UIElementInfo(
+        id = "root",
+        className = "android.widget.FrameLayout",
+        resourceId = null,
+        text = null,
+        contentDescription = null,
+        bounds = ElementBounds(0, 0, 1080, 2340),
+        isClickable = false,
+        isEnabled = true,
+        isFocused = false,
+        isSelected = false,
+        isScrollable = false,
+        isCheckable = false,
+        isChecked = false,
+        depth = 0,
+        children = emptyList(),
+      )
     val child =
-        UIElementInfo(
-            id = "child1",
-            className = "android.widget.Button",
-            resourceId = "com.app:id/btn",
-            text = "Click",
-            contentDescription = null,
-            bounds = ElementBounds(10, 10, 200, 60),
-            isClickable = true,
-            isEnabled = true,
-            isFocused = false,
-            isSelected = false,
-            isScrollable = false,
-            isCheckable = false,
-            isChecked = false,
-            depth = 1,
-            children = emptyList(),
-        )
+      UIElementInfo(
+        id = "child1",
+        className = "android.widget.Button",
+        resourceId = "com.app:id/btn",
+        text = "Click",
+        contentDescription = null,
+        bounds = ElementBounds(10, 10, 200, 60),
+        isClickable = true,
+        isEnabled = true,
+        isFocused = false,
+        isSelected = false,
+        isScrollable = false,
+        isCheckable = false,
+        isChecked = false,
+        depth = 1,
+        children = emptyList(),
+      )
 
     val parentMap = mapOf("child1" to "root")
     val elementMap = mapOf("root" to root, "child1" to child)
@@ -231,10 +231,10 @@ class LayoutInspectorDashboardUiTest {
     setContent {
       MaterialTheme {
         BreadcrumbBar(
-            selectedElementId = "child1",
-            parentMap = parentMap,
-            elementMap = elementMap,
-            onElementSelected = {},
+          selectedElementId = "child1",
+          parentMap = parentMap,
+          elementMap = elementMap,
+          onElementSelected = {},
         )
       }
     }

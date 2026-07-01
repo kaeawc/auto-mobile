@@ -26,19 +26,19 @@ internal interface SessionTracking {
  *   function
  */
 internal class SessionTracker(
-    private val timeoutMs: Long = 30_000L,
-    private val uuidProvider: () -> String = { java.util.UUID.randomUUID().toString() },
-    private val timerFactory: (Long, Runnable) -> (() -> Unit) = { delayMs, action ->
-      val executor = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "SessionTimeout").apply { isDaemon = true }
-      }
-      val future = executor.schedule(action, delayMs, TimeUnit.MILLISECONDS)
-      val cancel: () -> Unit = {
-        future.cancel(false)
-        executor.shutdown()
-      }
-      cancel
-    },
+  private val timeoutMs: Long = 30_000L,
+  private val uuidProvider: () -> String = { java.util.UUID.randomUUID().toString() },
+  private val timerFactory: (Long, Runnable) -> (() -> Unit) = { delayMs, action ->
+    val executor = Executors.newSingleThreadScheduledExecutor { r ->
+      Thread(r, "SessionTimeout").apply { isDaemon = true }
+    }
+    val future = executor.schedule(action, delayMs, TimeUnit.MILLISECONDS)
+    val cancel: () -> Unit = {
+      future.cancel(false)
+      executor.shutdown()
+    }
+    cancel
+  },
 ) : SessionTracking {
 
   private val lock = ReentrantLock()
@@ -78,17 +78,17 @@ internal class SessionTracker(
       if (state != SessionState.ACTIVE) return
       state = SessionState.BACKGROUNDED
       timeoutCancel =
-          timerFactory(
-              timeoutMs,
-              Runnable {
-                lock.withLock {
-                  if (state == SessionState.BACKGROUNDED) {
-                    state = SessionState.ENDED
-                    _sessionId = null
-                  }
-                }
-              },
-          )
+        timerFactory(
+          timeoutMs,
+          Runnable {
+            lock.withLock {
+              if (state == SessionState.BACKGROUNDED) {
+                state = SessionState.ENDED
+                _sessionId = null
+              }
+            }
+          },
+        )
     }
   }
 

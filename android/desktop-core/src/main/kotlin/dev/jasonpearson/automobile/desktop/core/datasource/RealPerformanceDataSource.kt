@@ -14,9 +14,8 @@ import dev.jasonpearson.automobile.desktop.core.performance.PerformanceRun
  * Real performance data source that fetches from MCP resources. Uses the performance-results
  * resource to get actual performance audit data.
  */
-class RealPerformanceDataSource(
-    private val clientProvider: (() -> AutoMobileClient)? = null,
-) : PerformanceDataSource {
+class RealPerformanceDataSource(private val clientProvider: (() -> AutoMobileClient)? = null) :
+  PerformanceDataSource {
   override suspend fun getPerformanceRun(): Result<PerformanceRun> {
     val provider = clientProvider ?: return Result.Success(createEmptyRun())
 
@@ -59,17 +58,17 @@ class RealPerformanceDataSource(
         // Check for anomalies (failures)
         if (!entry.passed) {
           anomalies.add(
-              PerformanceAnomaly(
-                  id = "anomaly-${entry.id}",
-                  metricType = MetricType.Jank,
-                  severity = HealthStatus.Warning,
-                  message = entry.diagnostics ?: "Performance audit failed",
-                  timestamp = timestamp,
-                  screenName = null,
-                  testName = null,
-                  value = entry.metrics.jankCount?.toFloat() ?: 0f,
-                  threshold = 5f, // Default threshold
-              )
+            PerformanceAnomaly(
+              id = "anomaly-${entry.id}",
+              metricType = MetricType.Jank,
+              severity = HealthStatus.Warning,
+              message = entry.diagnostics ?: "Performance audit failed",
+              timestamp = timestamp,
+              screenName = null,
+              testName = null,
+              value = entry.metrics.jankCount?.toFloat() ?: 0f,
+              threshold = 5f, // Default threshold
+            )
           )
         }
       }
@@ -78,93 +77,93 @@ class RealPerformanceDataSource(
       if (p50Values.isNotEmpty()) {
         val currentValue = p50Values.lastOrNull()?.value ?: 0f
         metrics.add(
-            PerformanceMetric(
-                id = "p50_frame_time",
-                type = MetricType.TimeToFirstFrame,
-                name = "Frame Time (P50)",
-                currentValue = currentValue,
-                unit = "ms",
-                thresholdWarning = 16f, // ~60fps
-                thresholdCritical = 33f, // ~30fps
-                trend = calculateTrend(p50Values),
-                history = p50Values.sortedBy { it.timestamp },
-            )
+          PerformanceMetric(
+            id = "p50_frame_time",
+            type = MetricType.TimeToFirstFrame,
+            name = "Frame Time (P50)",
+            currentValue = currentValue,
+            unit = "ms",
+            thresholdWarning = 16f, // ~60fps
+            thresholdCritical = 33f, // ~30fps
+            trend = calculateTrend(p50Values),
+            history = p50Values.sortedBy { it.timestamp },
+          )
         )
       }
 
       if (p90Values.isNotEmpty()) {
         val currentValue = p90Values.lastOrNull()?.value ?: 0f
         metrics.add(
-            PerformanceMetric(
-                id = "p90_frame_time",
-                type = MetricType.TimeToFirstFrame,
-                name = "Frame Time (P90)",
-                currentValue = currentValue,
-                unit = "ms",
-                thresholdWarning = 20f,
-                thresholdCritical = 40f,
-                trend = calculateTrend(p90Values),
-                history = p90Values.sortedBy { it.timestamp },
-            )
+          PerformanceMetric(
+            id = "p90_frame_time",
+            type = MetricType.TimeToFirstFrame,
+            name = "Frame Time (P90)",
+            currentValue = currentValue,
+            unit = "ms",
+            thresholdWarning = 20f,
+            thresholdCritical = 40f,
+            trend = calculateTrend(p90Values),
+            history = p90Values.sortedBy { it.timestamp },
+          )
         )
       }
 
       if (jankCounts.isNotEmpty()) {
         val currentValue = jankCounts.lastOrNull()?.value ?: 0f
         metrics.add(
-            PerformanceMetric(
-                id = "jank_count",
-                type = MetricType.Jank,
-                name = "Jank (Missed Frames)",
-                currentValue = currentValue,
-                unit = "frames",
-                thresholdWarning = 5f,
-                thresholdCritical = 10f,
-                trend = calculateTrend(jankCounts),
-                history = jankCounts.sortedBy { it.timestamp },
-            )
+          PerformanceMetric(
+            id = "jank_count",
+            type = MetricType.Jank,
+            name = "Jank (Missed Frames)",
+            currentValue = currentValue,
+            unit = "frames",
+            thresholdWarning = 5f,
+            thresholdCritical = 10f,
+            trend = calculateTrend(jankCounts),
+            history = jankCounts.sortedBy { it.timestamp },
+          )
         )
       }
 
       if (touchLatencies.isNotEmpty()) {
         val currentValue = touchLatencies.lastOrNull()?.value ?: 0f
         metrics.add(
-            PerformanceMetric(
-                id = "touch_latency",
-                type = MetricType.TouchLatency,
-                name = "Touch Latency",
-                currentValue = currentValue,
-                unit = "ms",
-                thresholdWarning = 100f,
-                thresholdCritical = 200f,
-                trend = calculateTrend(touchLatencies),
-                history = touchLatencies.sortedBy { it.timestamp },
-            )
+          PerformanceMetric(
+            id = "touch_latency",
+            type = MetricType.TouchLatency,
+            name = "Touch Latency",
+            currentValue = currentValue,
+            unit = "ms",
+            thresholdWarning = 100f,
+            thresholdCritical = 200f,
+            trend = calculateTrend(touchLatencies),
+            history = touchLatencies.sortedBy { it.timestamp },
+          )
         )
       }
 
       // Determine overall health
       val overallHealth =
-          when {
-            anomalies.any { it.severity == HealthStatus.Critical } -> HealthStatus.Critical
-            anomalies.isNotEmpty() -> HealthStatus.Warning
-            else -> HealthStatus.Healthy
-          }
+        when {
+          anomalies.any { it.severity == HealthStatus.Critical } -> HealthStatus.Critical
+          anomalies.isNotEmpty() -> HealthStatus.Warning
+          else -> HealthStatus.Healthy
+        }
 
       val latestEntry = auditResult.results.maxByOrNull { parseTimestamp(it.timestamp) }
 
       Result.Success(
-          PerformanceRun(
-              id = "mcp-run-${now}",
-              name = "MCP Performance Data",
-              timestamp = latestEntry?.let { parseTimestamp(it.timestamp) } ?: now,
-              durationMs = 0, // Not tracked in audit results
-              deviceName = latestEntry?.deviceId ?: "Unknown",
-              overallHealth = overallHealth,
-              metrics = metrics,
-              anomalies = anomalies,
-              screensAnalyzed = screensAnalyzed.toList(),
-          )
+        PerformanceRun(
+          id = "mcp-run-${now}",
+          name = "MCP Performance Data",
+          timestamp = latestEntry?.let { parseTimestamp(it.timestamp) } ?: now,
+          durationMs = 0, // Not tracked in audit results
+          deviceName = latestEntry?.deviceId ?: "Unknown",
+          overallHealth = overallHealth,
+          metrics = metrics,
+          anomalies = anomalies,
+          screensAnalyzed = screensAnalyzed.toList(),
+        )
       )
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
@@ -175,15 +174,15 @@ class RealPerformanceDataSource(
 
   private fun createEmptyRun(): PerformanceRun {
     return PerformanceRun(
-        id = "empty-run",
-        name = "No data available",
-        timestamp = System.currentTimeMillis(),
-        durationMs = 0,
-        deviceName = "Unknown",
-        overallHealth = HealthStatus.Healthy,
-        metrics = emptyList(),
-        anomalies = emptyList(),
-        screensAnalyzed = emptyList(),
+      id = "empty-run",
+      name = "No data available",
+      timestamp = System.currentTimeMillis(),
+      durationMs = 0,
+      deviceName = "Unknown",
+      overallHealth = HealthStatus.Healthy,
+      metrics = emptyList(),
+      anomalies = emptyList(),
+      screensAnalyzed = emptyList(),
     )
   }
 

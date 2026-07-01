@@ -17,6 +17,6 @@ val ConnectionState.isConnected: Boolean
 
 val ConnectionState.shouldReconnect: Boolean
   get() =
-      this is ConnectionState.Connecting ||
-          this is ConnectionState.Connected ||
-          this is ConnectionState.Reconnecting
+    this is ConnectionState.Connecting ||
+      this is ConnectionState.Connected ||
+      this is ConnectionState.Reconnecting

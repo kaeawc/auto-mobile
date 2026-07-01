@@ -26,10 +26,10 @@ sealed class SlideContent {
    * functionality.
    */
   data class CodeSample(
-      val code: String,
-      val language: String,
-      val title: String? = null,
-      val highlight: String? = null,
+    val code: String,
+    val language: String,
+    val title: String? = null,
+    val highlight: String? = null,
   ) : SlideContent()
 
   /**
@@ -37,18 +37,18 @@ sealed class SlideContent {
    * loading states.
    */
   data class Visualization(
-      val imageUrl: String,
-      val caption: String? = null,
-      val contentDescription: String? = null,
+    val imageUrl: String,
+    val caption: String? = null,
+    val contentDescription: String? = null,
   ) : SlideContent()
 
   /**
    * Video player slide with controls and caption. Auto-pauses when navigating away from the slide.
    */
   data class Video(
-      val videoUrl: String,
-      val caption: String? = null,
-      val contentDescription: String? = null,
+    val videoUrl: String,
+    val caption: String? = null,
+    val contentDescription: String? = null,
   ) : SlideContent()
 
   /**
@@ -56,8 +56,8 @@ sealed class SlideContent {
    * theming support.
    */
   data class MermaidDiagram(
-      val code: String,
-      val title: String,
+    val code: String,
+    val title: String,
   ) : SlideContent()
 
   /**
@@ -65,11 +65,11 @@ sealed class SlideContent {
    * based on current theme.
    */
   data class Screenshot(
-      val lightScreenshot: Int? = null,
-      val darkScreenshot: Int? = null,
-      val title: String? = null,
-      val caption: String? = null,
-      val contentDescription: String? = null,
+    val lightScreenshot: Int? = null,
+    val darkScreenshot: Int? = null,
+    val title: String? = null,
+    val caption: String? = null,
+    val contentDescription: String? = null,
   ) : SlideContent()
 }
 

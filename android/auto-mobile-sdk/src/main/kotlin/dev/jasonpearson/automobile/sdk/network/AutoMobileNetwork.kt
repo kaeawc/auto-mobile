@@ -30,20 +30,20 @@ import okhttp3.WebSocketListener
  * @property contentType Content type of the response (e.g. "application/json").
  */
 data class NetworkRequestRecord(
-    val url: String,
-    val method: String,
-    val requestHeaders: Map<String, String>? = null,
-    val requestBodySize: Long = -1,
-    val statusCode: Int = 0,
-    val responseHeaders: Map<String, String>? = null,
-    val responseBodySize: Long = -1,
-    val durationMs: Long = 0,
-    val error: String? = null,
-    val host: String? = null,
-    val path: String? = null,
-    val requestBody: String? = null,
-    val responseBody: String? = null,
-    val contentType: String? = null,
+  val url: String,
+  val method: String,
+  val requestHeaders: Map<String, String>? = null,
+  val requestBodySize: Long = -1,
+  val statusCode: Int = 0,
+  val responseHeaders: Map<String, String>? = null,
+  val responseBodySize: Long = -1,
+  val durationMs: Long = 0,
+  val error: String? = null,
+  val host: String? = null,
+  val path: String? = null,
+  val requestBody: String? = null,
+  val responseBody: String? = null,
+  val contentType: String? = null,
 )
 
 /**
@@ -71,9 +71,9 @@ object AutoMobileNetwork {
    * @param ruleStore Optional rule matcher for mock enforcement and error simulation
    */
   internal fun initialize(
-      applicationId: String?,
-      buffer: SdkEventBuffer,
-      ruleStore: NetworkMockRuleStore.RuleMatcher? = null,
+    applicationId: String?,
+    buffer: SdkEventBuffer,
+    ruleStore: NetworkMockRuleStore.RuleMatcher? = null,
   ) {
     this.applicationId = applicationId
     this.buffer = buffer
@@ -92,16 +92,16 @@ object AutoMobileNetwork {
    * @return An [Interceptor] that records network events, or null if not initialized
    */
   fun interceptor(
-      captureHeaders: Boolean = false,
-      captureBodies: Boolean = false,
+    captureHeaders: Boolean = false,
+    captureBodies: Boolean = false,
   ): Interceptor? {
     val buf = buffer ?: return null
     return AutoMobileNetworkInterceptor(
-        buf,
-        applicationId,
-        captureHeaders,
-        captureBodies,
-        ruleStore = ruleStore,
+      buf,
+      applicationId,
+      captureHeaders,
+      captureBodies,
+      ruleStore = ruleStore,
     )
   }
 
@@ -116,40 +116,40 @@ object AutoMobileNetwork {
    * @param captureBodies Whether to include request/response bodies (default false).
    */
   fun recordRequest(
-      record: NetworkRequestRecord,
-      captureHeaders: Boolean = false,
-      captureBodies: Boolean = false,
+    record: NetworkRequestRecord,
+    captureHeaders: Boolean = false,
+    captureBodies: Boolean = false,
   ) {
     val buf = buffer ?: return
     val parsedUrl =
-        if (record.host == null || record.path == null) {
-          try {
-            java.net.URL(record.url)
-          } catch (_: Exception) {
-            null
-          }
-        } else null
+      if (record.host == null || record.path == null) {
+        try {
+          java.net.URL(record.url)
+        } catch (_: Exception) {
+          null
+        }
+      } else null
     val host = record.host ?: parsedUrl?.host
     val path = record.path ?: parsedUrl?.path
     buf.add(
-        SdkNetworkRequestEvent(
-            timestamp = System.currentTimeMillis(),
-            applicationId = applicationId,
-            url = record.url,
-            method = record.method,
-            statusCode = record.statusCode,
-            durationMs = record.durationMs,
-            requestBodySize = record.requestBodySize,
-            responseBodySize = record.responseBodySize,
-            host = host,
-            path = path,
-            error = record.error,
-            requestHeaders = if (captureHeaders) record.requestHeaders else null,
-            responseHeaders = if (captureHeaders) record.responseHeaders else null,
-            requestBody = if (captureBodies) record.requestBody else null,
-            responseBody = if (captureBodies) record.responseBody else null,
-            contentType = record.contentType,
-        )
+      SdkNetworkRequestEvent(
+        timestamp = System.currentTimeMillis(),
+        applicationId = applicationId,
+        url = record.url,
+        method = record.method,
+        statusCode = record.statusCode,
+        durationMs = record.durationMs,
+        requestBodySize = record.requestBodySize,
+        responseBodySize = record.responseBodySize,
+        host = host,
+        path = path,
+        error = record.error,
+        requestHeaders = if (captureHeaders) record.requestHeaders else null,
+        responseHeaders = if (captureHeaders) record.responseHeaders else null,
+        requestBody = if (captureBodies) record.requestBody else null,
+        responseBody = if (captureBodies) record.responseBody else null,
+        contentType = record.contentType,
+      )
     )
   }
 

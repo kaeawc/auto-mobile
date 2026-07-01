@@ -18,19 +18,19 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun ErrorCard(
-    title: String,
-    message: String,
-    modifier: Modifier = Modifier,
-    onDismiss: (() -> Unit)? = null,
-    onRetry: (() -> Unit)? = null,
+  title: String,
+  message: String,
+  modifier: Modifier = Modifier,
+  onDismiss: (() -> Unit)? = null,
+  onRetry: (() -> Unit)? = null,
 ) {
   Card(
-      modifier = modifier.fillMaxWidth(),
-      colors =
-          CardDefaults.cardColors(
-              containerColor = MaterialTheme.colorScheme.errorContainer,
-              contentColor = MaterialTheme.colorScheme.onErrorContainer,
-          ),
+    modifier = modifier.fillMaxWidth(),
+    colors =
+      CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+      ),
   ) {
     Column(modifier = Modifier.padding(16.dp)) {
       Text(text = title, style = MaterialTheme.typography.titleMedium)

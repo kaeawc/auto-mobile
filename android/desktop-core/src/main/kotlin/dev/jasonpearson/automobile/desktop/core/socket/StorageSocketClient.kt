@@ -40,20 +40,20 @@ fun interface StorageChangeListener {
 
 /** Event emitted when a storage value changes. */
 data class StorageChangedEvent(
-    /** Package name of the app where the change occurred */
-    val packageName: String,
-    /** Name of the preference file that changed */
-    val fileName: String,
-    /** Key that changed (null if the entire file was cleared) */
-    val key: String?,
-    /** Previous value (null if new key or file cleared) */
-    val oldValue: Any?,
-    /** New value (null if key was deleted or file cleared) */
-    val newValue: Any?,
-    /** Type of the value */
-    val valueType: String,
-    /** Timestamp when the change occurred (milliseconds since epoch) */
-    val timestamp: Long,
-    /** Sequence number for ordering events */
-    val sequenceNumber: Long = 0,
+  /** Package name of the app where the change occurred */
+  val packageName: String,
+  /** Name of the preference file that changed */
+  val fileName: String,
+  /** Key that changed (null if the entire file was cleared) */
+  val key: String?,
+  /** Previous value (null if new key or file cleared) */
+  val oldValue: Any?,
+  /** New value (null if key was deleted or file cleared) */
+  val newValue: Any?,
+  /** Type of the value */
+  val valueType: String,
+  /** Timestamp when the change occurred (milliseconds since epoch) */
+  val timestamp: Long,
+  /** Sequence number for ordering events */
+  val sequenceNumber: Long = 0,
 )

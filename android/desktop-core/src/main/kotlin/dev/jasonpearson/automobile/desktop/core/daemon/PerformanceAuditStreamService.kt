@@ -4,70 +4,70 @@ import java.time.Instant
 import java.util.LinkedHashMap
 
 data class PerformanceAuditStreamCursor(
-    val lastTimestamp: String? = null,
-    val lastId: Long? = null,
+  val lastTimestamp: String? = null,
+  val lastId: Long? = null,
 )
 
 data class PerformanceAuditStreamSnapshot(
-    val results: List<PerformanceAuditHistoryEntry>,
-    val cursor: PerformanceAuditStreamCursor,
+  val results: List<PerformanceAuditHistoryEntry>,
+  val cursor: PerformanceAuditStreamCursor,
 )
 
 class PerformanceAuditStreamService(
-    private val socketClient: PerformanceAuditStreamClient = PerformanceAuditStreamSocketClient(),
-    private val cache: PerformanceAuditStreamCache = PerformanceAuditStreamCacheStore.shared,
-    private val clock: PerformanceAuditClock = SystemPerformanceAuditClock(),
-    private val defaultWindowMs: Long = PerformanceAuditStreamCache.DEFAULT_TTL_MS,
-    private val defaultLimit: Int = 200,
-    private val maxCursors: Int = DEFAULT_MAX_CURSORS,
+  private val socketClient: PerformanceAuditStreamClient = PerformanceAuditStreamSocketClient(),
+  private val cache: PerformanceAuditStreamCache = PerformanceAuditStreamCacheStore.shared,
+  private val clock: PerformanceAuditClock = SystemPerformanceAuditClock(),
+  private val defaultWindowMs: Long = PerformanceAuditStreamCache.DEFAULT_TTL_MS,
+  private val defaultLimit: Int = 200,
+  private val maxCursors: Int = DEFAULT_MAX_CURSORS,
 ) {
   companion object {
     const val DEFAULT_MAX_CURSORS = 100
   }
 
   private data class FilterKey(
-      val deviceId: String?,
-      val sessionId: String?,
-      val packageName: String?,
+    val deviceId: String?,
+    val sessionId: String?,
+    val packageName: String?,
   )
 
   private val cursors = LinkedHashMap<FilterKey, PerformanceAuditStreamCursor>(16, 0.75f, true)
 
   fun poll(
-      filter: PerformanceAuditStreamFilter = PerformanceAuditStreamFilter()
+    filter: PerformanceAuditStreamFilter = PerformanceAuditStreamFilter()
   ): PerformanceAuditStreamSnapshot {
     val windowMs = filter.timeWindowMs ?: defaultWindowMs
     val startTime = formatTimestamp(clock.nowMs() - windowMs)
     val key = FilterKey(filter.deviceId, filter.sessionId, filter.packageName)
     val cursor = cursors[key] ?: PerformanceAuditStreamCursor()
     val response =
-        socketClient.poll(
-            PerformanceAuditStreamRequest(
-                sinceTimestamp = cursor.lastTimestamp,
-                sinceId = cursor.lastId,
-                startTime = startTime,
-                endTime = null,
-                limit = defaultLimit,
-                deviceId = filter.deviceId,
-                sessionId = filter.sessionId,
-                packageName = filter.packageName,
-            )
+      socketClient.poll(
+        PerformanceAuditStreamRequest(
+          sinceTimestamp = cursor.lastTimestamp,
+          sinceId = cursor.lastId,
+          startTime = startTime,
+          endTime = null,
+          limit = defaultLimit,
+          deviceId = filter.deviceId,
+          sessionId = filter.sessionId,
+          packageName = filter.packageName,
         )
+      )
 
     if (response.results.isNotEmpty()) {
       cache.merge(response.results)
     }
 
     cursors[key] =
-        PerformanceAuditStreamCursor(
-            lastTimestamp = response.lastTimestamp ?: cursor.lastTimestamp,
-            lastId = response.lastId ?: cursor.lastId,
-        )
+      PerformanceAuditStreamCursor(
+        lastTimestamp = response.lastTimestamp ?: cursor.lastTimestamp,
+        lastId = response.lastId ?: cursor.lastId,
+      )
     trimCursors()
 
     return PerformanceAuditStreamSnapshot(
-        cache.snapshot(filter.copy(timeWindowMs = windowMs)),
-        cursors[key] ?: PerformanceAuditStreamCursor(),
+      cache.snapshot(filter.copy(timeWindowMs = windowMs)),
+      cursors[key] ?: PerformanceAuditStreamCursor(),
     )
   }
 

@@ -27,49 +27,49 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
  */
 @Composable
 fun InspectorPaneHeader(
-    title: String,
-    isDetached: Boolean,
-    onDetachToggle: () -> Unit,
-    onClose: () -> Unit,
-    modifier: Modifier = Modifier,
+  title: String,
+  isDetached: Boolean,
+  onDetachToggle: () -> Unit,
+  onClose: () -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier =
-          modifier
-              .fillMaxWidth()
-              .background(colors.panelBackground)
-              .padding(horizontal = 8.dp, vertical = 4.dp),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      modifier
+        .fillMaxWidth()
+        .background(colors.panelBackground)
+        .padding(horizontal = 8.dp, vertical = 4.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(title, fontSize = 12.sp, color = colors.text.normal)
 
     Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       // Pop-out / dock button
       Text(
-          text = if (isDetached) "\u2B73" else "\u2197", // down-arrow or up-right arrow
-          fontSize = 14.sp,
-          color = colors.text.normal.copy(alpha = 0.6f),
-          modifier =
-              Modifier.clickable(onClick = onDetachToggle)
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .background(colors.text.normal.copy(alpha = 0.06f), RoundedCornerShape(3.dp))
-                  .padding(horizontal = 4.dp, vertical = 2.dp),
+        text = if (isDetached) "\u2B73" else "\u2197", // down-arrow or up-right arrow
+        fontSize = 14.sp,
+        color = colors.text.normal.copy(alpha = 0.6f),
+        modifier =
+          Modifier.clickable(onClick = onDetachToggle)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .background(colors.text.normal.copy(alpha = 0.06f), RoundedCornerShape(3.dp))
+            .padding(horizontal = 4.dp, vertical = 2.dp),
       )
       // Close button
       Text(
-          "\u00D7",
-          fontSize = 14.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-          modifier =
-              Modifier.clickable(onClick = onClose)
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(horizontal = 2.dp),
+        "\u00D7",
+        fontSize = 14.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+        modifier =
+          Modifier.clickable(onClick = onClose)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 2.dp),
       )
     }
   }
@@ -81,21 +81,19 @@ fun InspectorPaneHeader(
  */
 @Composable
 fun DetachedInspectorWindow(
-    title: String,
-    onReattach: () -> Unit,
-    content: @Composable () -> Unit,
+  title: String,
+  onReattach: () -> Unit,
+  content: @Composable () -> Unit,
 ) {
   val windowState = rememberWindowState(width = 400.dp, height = 600.dp)
 
   Window(
-      onCloseRequest = onReattach,
-      title = title,
-      state = windowState,
+    onCloseRequest = onReattach,
+    title = title,
+    state = windowState,
   ) {
     val colors = SharedTheme.globalColors
-    Box(
-        modifier = Modifier.fillMaxSize().background(colors.panelBackground),
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(colors.panelBackground)) {
       content()
     }
   }

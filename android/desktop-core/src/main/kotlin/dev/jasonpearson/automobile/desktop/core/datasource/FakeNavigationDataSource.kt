@@ -10,10 +10,10 @@ class FakeNavigationDataSource : NavigationDataSource {
     delay(100)
 
     return Result.Success(
-        NavigationGraph(
-            screens = NavigationMockData.screens,
-            transitions = NavigationMockData.transitions,
-        )
+      NavigationGraph(
+        screens = NavigationMockData.screens,
+        transitions = NavigationMockData.transitions,
+      )
     )
   }
 }

@@ -73,10 +73,10 @@ class NoOpImplementationsTest {
   @Test
   fun `NoOpNavigationListener onNavigationEvent does not throw`() {
     val event =
-        NavigationEvent(
-            destination = "/home",
-            source = NavigationSource.CUSTOM,
-        )
+      NavigationEvent(
+        destination = "/home",
+        source = NavigationSource.CUSTOM,
+      )
     NoOpNavigationListener.onNavigationEvent(event)
   }
 }

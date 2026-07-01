@@ -12,10 +12,10 @@ class AutoMobileContentDeviceEventTest {
   fun `handler disconnects layout and clears performance metrics for active device connection loss`() {
     val sink = FakeDeviceStreamEventSink()
     val handler =
-        AutoMobileDeviceStreamEventHandler(
-            activeDeviceId = { "emulator-5554" },
-            sink = sink,
-        )
+      AutoMobileDeviceStreamEventHandler(
+        activeDeviceId = { "emulator-5554" },
+        sink = sink,
+      )
 
     handler.handle(deviceConnectionLostEvent(deviceId = "emulator-5554"))
 
@@ -27,10 +27,10 @@ class AutoMobileContentDeviceEventTest {
   fun `handler ignores inactive device connection loss`() {
     val sink = FakeDeviceStreamEventSink()
     val handler =
-        AutoMobileDeviceStreamEventHandler(
-            activeDeviceId = { "emulator-5556" },
-            sink = sink,
-        )
+      AutoMobileDeviceStreamEventHandler(
+        activeDeviceId = { "emulator-5556" },
+        sink = sink,
+      )
 
     handler.handle(deviceConnectionLostEvent(deviceId = "emulator-5554"))
 
@@ -42,10 +42,10 @@ class AutoMobileContentDeviceEventTest {
   fun `handler ignores connection loss when no device is active`() {
     val sink = FakeDeviceStreamEventSink()
     val handler =
-        AutoMobileDeviceStreamEventHandler(
-            activeDeviceId = { null },
-            sink = sink,
-        )
+      AutoMobileDeviceStreamEventHandler(
+        activeDeviceId = { null },
+        sink = sink,
+      )
 
     handler.handle(deviceConnectionLostEvent(deviceId = "emulator-5554"))
 
@@ -77,14 +77,14 @@ class AutoMobileContentDeviceEventTest {
   @Test
   fun `stream frame matches active device`() {
     assertTrue(
-        isActiveDeviceStreamFrame(deviceId = "emulator-5554", activeDeviceId = "emulator-5554")
+      isActiveDeviceStreamFrame(deviceId = "emulator-5554", activeDeviceId = "emulator-5554")
     )
   }
 
   @Test
   fun `stream frame ignores inactive device`() {
     assertFalse(
-        isActiveDeviceStreamFrame(deviceId = "emulator-5554", activeDeviceId = "emulator-5556")
+      isActiveDeviceStreamFrame(deviceId = "emulator-5554", activeDeviceId = "emulator-5556")
     )
   }
 
@@ -94,11 +94,11 @@ class AutoMobileContentDeviceEventTest {
   }
 
   private fun deviceConnectionLostEvent(deviceId: String): DeviceStreamEvent.DeviceConnectionLost =
-      DeviceStreamEvent.DeviceConnectionLost(
-          deviceId = deviceId,
-          timestamp = 1234,
-          error = "device connection lost",
-      )
+    DeviceStreamEvent.DeviceConnectionLost(
+      deviceId = deviceId,
+      timestamp = 1234,
+      error = "device connection lost",
+    )
 
   private class FakeDeviceStreamEventSink : AutoMobileDeviceStreamEventSink {
     var disconnectLayoutCalls = 0

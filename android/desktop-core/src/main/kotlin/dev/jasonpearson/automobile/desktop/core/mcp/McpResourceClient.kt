@@ -27,89 +27,89 @@ sealed class ResourceReadResult {
 
 /** Information about an available resource */
 data class ResourceInfo(
-    val uri: String,
-    val name: String,
-    val description: String?,
-    val mimeType: String?,
+  val uri: String,
+  val name: String,
+  val description: String?,
+  val mimeType: String?,
 )
 
 /** Fake implementation for testing */
 class FakeMcpResourceClient : McpResourceClient {
   var bootedDevicesResponse: String =
-      """
-      {
-          "totalCount": 2,
-          "androidCount": 2,
-          "iosCount": 0,
-          "virtualCount": 2,
-          "physicalCount": 0,
-          "lastUpdated": "2024-01-24T23:00:00Z",
-          "devices": [
-              {
-                  "name": "Pixel 8 API 35",
-                  "platform": "android",
-                  "deviceId": "emulator-5554",
-                  "source": "local",
-                  "isVirtual": true,
-                  "status": "booted"
-              },
-              {
-                  "name": "Pixel 7 API 34",
-                  "platform": "android",
-                  "deviceId": "emulator-5556",
-                  "source": "local",
-                  "isVirtual": true,
-                  "status": "booted"
-              }
-          ]
-      }
-      """
-          .trimIndent()
+    """
+    {
+        "totalCount": 2,
+        "androidCount": 2,
+        "iosCount": 0,
+        "virtualCount": 2,
+        "physicalCount": 0,
+        "lastUpdated": "2024-01-24T23:00:00Z",
+        "devices": [
+            {
+                "name": "Pixel 8 API 35",
+                "platform": "android",
+                "deviceId": "emulator-5554",
+                "source": "local",
+                "isVirtual": true,
+                "status": "booted"
+            },
+            {
+                "name": "Pixel 7 API 34",
+                "platform": "android",
+                "deviceId": "emulator-5556",
+                "source": "local",
+                "isVirtual": true,
+                "status": "booted"
+            }
+        ]
+    }
+    """
+      .trimIndent()
 
   var deviceImagesResponse: String =
-      """
-      {
-          "totalCount": 5,
-          "androidCount": 3,
-          "iosCount": 2,
-          "lastUpdated": "2024-01-24T23:00:00Z",
-          "images": [
-              {"name": "Pixel 8 API 35", "platform": "android", "deviceId": "Pixel_8_API_35"},
-              {"name": "Pixel 7 API 34", "platform": "android", "deviceId": "Pixel_7_API_34"},
-              {"name": "Pixel 6 API 33", "platform": "android", "deviceId": "Pixel_6_API_33"},
-              {"name": "iPhone 15 Pro", "platform": "ios", "deviceId": "iphone-15-pro"},
-              {"name": "iPhone 14", "platform": "ios", "deviceId": "iphone-14"}
-          ]
-      }
-      """
-          .trimIndent()
+    """
+    {
+        "totalCount": 5,
+        "androidCount": 3,
+        "iosCount": 2,
+        "lastUpdated": "2024-01-24T23:00:00Z",
+        "images": [
+            {"name": "Pixel 8 API 35", "platform": "android", "deviceId": "Pixel_8_API_35"},
+            {"name": "Pixel 7 API 34", "platform": "android", "deviceId": "Pixel_7_API_34"},
+            {"name": "Pixel 6 API 33", "platform": "android", "deviceId": "Pixel_6_API_33"},
+            {"name": "iPhone 15 Pro", "platform": "ios", "deviceId": "iphone-15-pro"},
+            {"name": "iPhone 14", "platform": "ios", "deviceId": "iphone-14"}
+        ]
+    }
+    """
+      .trimIndent()
 
   override suspend fun readResource(uri: String): ResourceReadResult {
     return when (uri) {
       "automobile:devices/booted" ->
-          ResourceReadResult.Success(bootedDevicesResponse, "application/json")
+        ResourceReadResult.Success(bootedDevicesResponse, "application/json")
       "automobile:devices/images" ->
-          ResourceReadResult.Success(deviceImagesResponse, "application/json")
+        ResourceReadResult.Success(deviceImagesResponse, "application/json")
       else -> ResourceReadResult.Error("Unknown resource: $uri")
     }
   }
 
   override suspend fun listResources(): List<ResourceInfo> =
-      listOf(
-          ResourceInfo(
-              "automobile:devices/booted",
-              "Booted Devices",
-              "Currently running devices",
-              "application/json",
-          ),
-          ResourceInfo(
-              "automobile:devices/images",
-              "Device Images",
-              "Available device images",
-              "application/json",
-          ),
-          ResourceInfo("automobile:failures", "Failures", "Failure groups", "application/json"),
-      )
+    listOf(
+      ResourceInfo(
+        "automobile:devices/booted",
+        "Booted Devices",
+        "Currently running devices",
+        "application/json",
+      ),
+      ResourceInfo(
+        "automobile:devices/images",
+        "Device Images",
+        "Available device images",
+        "application/json",
+      ),
+      ResourceInfo("automobile:failures", "Failures", "Failure groups", "application/json"),
+    )
 
   override fun close() {}
 }
@@ -118,9 +118,7 @@ class FakeMcpResourceClient : McpResourceClient {
  * Real MCP client that wraps AutoMobileClient (daemon client) Uses the existing daemon protocol to
  * read MCP resources
  */
-class DaemonMcpResourceClient(
-    private val client: AutoMobileClient,
-) : McpResourceClient {
+class DaemonMcpResourceClient(private val client: AutoMobileClient) : McpResourceClient {
 
   override suspend fun readResource(uri: String): ResourceReadResult {
     return try {
@@ -143,7 +141,7 @@ class DaemonMcpResourceClient(
       println("[DaemonMcpResourceClient] Exception: $errorMsg")
       e.printStackTrace()
       ResourceReadResult.Error(
-          "Connection error: $errorMsg\n\nCause: ${e.cause?.message ?: "none"}\n\nStack: ${e.stackTrace.take(3).joinToString("\n") { "  at $it" }}"
+        "Connection error: $errorMsg\n\nCause: ${e.cause?.message ?: "none"}\n\nStack: ${e.stackTrace.take(3).joinToString("\n") { "  at $it" }}"
       )
     }
   }
@@ -155,10 +153,10 @@ class DaemonMcpResourceClient(
       println("[DaemonMcpResourceClient] Found ${resources.size} resources")
       resources.map { resource ->
         ResourceInfo(
-            uri = resource.uri,
-            name = resource.name,
-            description = resource.description,
-            mimeType = resource.mimeType,
+          uri = resource.uri,
+          name = resource.name,
+          description = resource.description,
+          mimeType = resource.mimeType,
         )
       }
     } catch (e: Exception) {
@@ -176,11 +174,11 @@ class DaemonMcpResourceClient(
 /** Data class for daemon PID file content */
 @Serializable
 private data class PidFileData(
-    val pid: Int,
-    val socketPath: String,
-    val port: Int,
-    val startedAt: Long,
-    val version: String,
+  val pid: Int,
+  val socketPath: String,
+  val port: Int,
+  val startedAt: Long,
+  val version: String,
 )
 
 /** Factory for creating MCP resource clients */

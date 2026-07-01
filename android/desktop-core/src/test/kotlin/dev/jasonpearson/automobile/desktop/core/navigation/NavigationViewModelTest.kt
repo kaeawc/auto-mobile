@@ -18,14 +18,12 @@ class NavigationViewModelTest {
   private val testScope = TestScope(testDispatcher)
 
   private val testScreens =
-      listOf(
-          ScreenNode("s1", "Login", "Composable", "com.app", 2, 0L),
-          ScreenNode("s2", "Home", "Composable", "com.app", 3, 1000L),
-      )
+    listOf(
+      ScreenNode("s1", "Login", "Composable", "com.app", 2, 0L),
+      ScreenNode("s2", "Home", "Composable", "com.app", 3, 1000L),
+    )
   private val testTransitions =
-      listOf(
-          ScreenTransition("t1", "Login", "Home", "tap", "Login Button", 100, 0.01f),
-      )
+    listOf(ScreenTransition("t1", "Login", "Home", "tap", "Login Button", 100, 0.01f))
   private val testGraph = NavigationGraph(screens = testScreens, transitions = testTransitions)
 
   @Test
@@ -117,10 +115,10 @@ class NavigationViewModelTest {
 
     // Change to a new graph on next call
     val updatedGraph =
-        NavigationGraph(
-            screens = listOf(ScreenNode("s3", "Settings", "Composable", "com.app", 1, 2000L)),
-            transitions = emptyList(),
-        )
+      NavigationGraph(
+        screens = listOf(ScreenNode("s3", "Settings", "Composable", "com.app", 1, 2000L)),
+        transitions = emptyList(),
+      )
     dataSource.result = Result.Success(updatedGraph)
 
     vm.onAction(NavigationAction.Refresh)
@@ -136,10 +134,10 @@ class NavigationViewModelTest {
     val vm = NavigationViewModel(dataSource, this)
 
     val newGraph =
-        NavigationGraph(
-            screens = listOf(ScreenNode("s3", "Settings", "Composable", "com.app", 1, 2000L)),
-            transitions = emptyList(),
-        )
+      NavigationGraph(
+        screens = listOf(ScreenNode("s3", "Settings", "Composable", "com.app", 1, 2000L)),
+        transitions = emptyList(),
+      )
     vm.onAction(NavigationAction.UpdateGraph(newGraph))
 
     val state = vm.state.value as NavigationUiState.Content
@@ -161,15 +159,13 @@ class NavigationViewModelTest {
 
   // -- Fakes --
 
-  private class FakeNavigationDataSourceImpl(
-      var result: Result<NavigationGraph>,
-  ) : NavigationDataSource {
+  private class FakeNavigationDataSourceImpl(var result: Result<NavigationGraph>) :
+    NavigationDataSource {
     override suspend fun getNavigationGraph(): Result<NavigationGraph> = result
   }
 
-  private class ThrowingNavigationDataSource(
-      private val exception: Exception,
-  ) : NavigationDataSource {
+  private class ThrowingNavigationDataSource(private val exception: Exception) :
+    NavigationDataSource {
     override suspend fun getNavigationGraph(): Result<NavigationGraph> = throw exception
   }
 }

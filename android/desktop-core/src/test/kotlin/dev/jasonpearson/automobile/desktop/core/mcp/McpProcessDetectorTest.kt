@@ -12,11 +12,11 @@ class McpProcessDetectorTest {
   @Test
   fun parseProcessLineExtractsPidAndCommand() {
     val detector =
-        RealMcpProcessDetector(
-            timeProvider = timeProvider,
-            processRunner = FakeProcessRunner(),
-            socketFileChecker = FakeSocketFileChecker(),
-        )
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = FakeProcessRunner(),
+        socketFileChecker = FakeSocketFileChecker(),
+      )
     val line = "97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile --daemon-mode"
     val info = detector.parseProcessLine(line)
 
@@ -28,11 +28,11 @@ class McpProcessDetectorTest {
   @Test
   fun parseProcessLineReturnsNullForShortLine() {
     val detector =
-        RealMcpProcessDetector(
-            timeProvider = timeProvider,
-            processRunner = FakeProcessRunner(),
-            socketFileChecker = FakeSocketFileChecker(),
-        )
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = FakeProcessRunner(),
+        socketFileChecker = FakeSocketFileChecker(),
+      )
     val info = detector.parseProcessLine("123 short")
     assertNull(info)
   }
@@ -40,11 +40,11 @@ class McpProcessDetectorTest {
   @Test
   fun parseProcessLineReturnsNullForNonNumericPid() {
     val detector =
-        RealMcpProcessDetector(
-            timeProvider = timeProvider,
-            processRunner = FakeProcessRunner(),
-            socketFileChecker = FakeSocketFileChecker(),
-        )
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = FakeProcessRunner(),
+        socketFileChecker = FakeSocketFileChecker(),
+      )
     val info = detector.parseProcessLine("abc Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile")
     assertNull(info)
   }
@@ -52,14 +52,14 @@ class McpProcessDetectorTest {
   @Test
   fun extractProcessNameRecognizesDaemon() {
     val detector =
-        RealMcpProcessDetector(
-            timeProvider = timeProvider,
-            processRunner = FakeProcessRunner(),
-            socketFileChecker = FakeSocketFileChecker(),
-        )
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = FakeProcessRunner(),
+        socketFileChecker = FakeSocketFileChecker(),
+      )
     assertEquals(
-        "auto-mobile-daemon",
-        detector.extractProcessName("bun /path/to/auto-mobile-daemon"),
+      "auto-mobile-daemon",
+      detector.extractProcessName("bun /path/to/auto-mobile-daemon"),
     )
     assertEquals("auto-mobile", detector.extractProcessName("bun /path/to/auto-mobile --stdio"))
   }
@@ -67,11 +67,11 @@ class McpProcessDetectorTest {
   @Test
   fun extractPortFromCommandLine() {
     val detector =
-        RealMcpProcessDetector(
-            timeProvider = timeProvider,
-            processRunner = FakeProcessRunner(),
-            socketFileChecker = FakeSocketFileChecker(),
-        )
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = FakeProcessRunner(),
+        socketFileChecker = FakeSocketFileChecker(),
+      )
     assertEquals(9164, detector.extractPort("--port 9164"))
     assertEquals(9164, detector.extractPort("--port=9164"))
     assertEquals(3000, detector.extractPort("localhost:3000/health"))
@@ -81,16 +81,16 @@ class McpProcessDetectorTest {
   @Test
   fun classifyConnectionReturnsUnixSocketWhenSocketPathPresent() {
     val detector =
-        RealMcpProcessDetector(
-            timeProvider = timeProvider,
-            processRunner = FakeProcessRunner(),
-            socketFileChecker = FakeSocketFileChecker(),
-        )
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = FakeProcessRunner(),
+        socketFileChecker = FakeSocketFileChecker(),
+      )
     val (type, port, path) =
-        detector.classifyConnection(
-            socketPath = "/tmp/auto-mobile-daemon-501.sock",
-            cmdLine = "bun /path/to/auto-mobile",
-        )
+      detector.classifyConnection(
+        socketPath = "/tmp/auto-mobile-daemon-501.sock",
+        cmdLine = "bun /path/to/auto-mobile",
+      )
     assertEquals(McpConnectionType.UnixSocket, type)
     assertNull(port)
     assertEquals("/tmp/auto-mobile-daemon-501.sock", path)
@@ -99,16 +99,16 @@ class McpProcessDetectorTest {
   @Test
   fun classifyConnectionReturnsHttpForDaemonMode() {
     val detector =
-        RealMcpProcessDetector(
-            timeProvider = timeProvider,
-            processRunner = FakeProcessRunner(),
-            socketFileChecker = FakeSocketFileChecker(),
-        )
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = FakeProcessRunner(),
+        socketFileChecker = FakeSocketFileChecker(),
+      )
     val (type, port, path) =
-        detector.classifyConnection(
-            socketPath = null,
-            cmdLine = "bun /path/to/auto-mobile --daemon-mode --port 9164",
-        )
+      detector.classifyConnection(
+        socketPath = null,
+        cmdLine = "bun /path/to/auto-mobile --daemon-mode --port 9164",
+      )
     assertEquals(McpConnectionType.StreamableHttp, type)
     assertEquals(9164, port)
     assertNull(path)
@@ -117,16 +117,16 @@ class McpProcessDetectorTest {
   @Test
   fun classifyConnectionReturnsStdioByDefault() {
     val detector =
-        RealMcpProcessDetector(
-            timeProvider = timeProvider,
-            processRunner = FakeProcessRunner(),
-            socketFileChecker = FakeSocketFileChecker(),
-        )
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = FakeProcessRunner(),
+        socketFileChecker = FakeSocketFileChecker(),
+      )
     val (type, port, path) =
-        detector.classifyConnection(
-            socketPath = null,
-            cmdLine = "bun /path/to/auto-mobile --stdio",
-        )
+      detector.classifyConnection(
+        socketPath = null,
+        cmdLine = "bun /path/to/auto-mobile --stdio",
+      )
     assertEquals(McpConnectionType.Stdio, type)
     assertNull(port)
     assertNull(path)
@@ -135,21 +135,19 @@ class McpProcessDetectorTest {
   @Test
   fun fastPathSkipsLsofWhenNoSocketFilesExist() {
     val psRunner =
-        FakeProcessRunner(
-            responses =
-                mapOf(
-                    listOf("ps", "-eo", "pid,lstart,command") to
-                        listOf(
-                            "97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile --stdio",
-                        ),
-                ),
-        )
+      FakeProcessRunner(
+        responses =
+          mapOf(
+            listOf("ps", "-eo", "pid,lstart,command") to
+              listOf("97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile --stdio")
+          )
+      )
     val detector =
-        RealMcpProcessDetector(
-            timeProvider = timeProvider,
-            processRunner = psRunner,
-            socketFileChecker = FakeSocketFileChecker(files = emptyList()),
-        )
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = psRunner,
+        socketFileChecker = FakeSocketFileChecker(files = emptyList()),
+      )
 
     val processes = detector.detectProcesses()
 
@@ -157,36 +155,30 @@ class McpProcessDetectorTest {
     assertEquals(McpConnectionType.Stdio, processes[0].connectionType)
     // lsof should never have been called
     assertEquals(
-        listOf(listOf("ps", "-eo", "pid,lstart,command")),
-        psRunner.commandsExecuted,
+      listOf(listOf("ps", "-eo", "pid,lstart,command")),
+      psRunner.commandsExecuted,
     )
   }
 
   @Test
   fun detectsUnixSocketWhenSocketFileExistsAndLsofFindsIt() {
     val psRunner =
-        FakeProcessRunner(
-            responses =
-                mapOf(
-                    listOf("ps", "-eo", "pid,lstart,command") to
-                        listOf(
-                            "97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile",
-                        ),
-                    listOf("lsof", "-p", "97956", "-a", "-U") to
-                        listOf(
-                            "bun  97956 jason  17u  unix 0x1234 0t0  /tmp/auto-mobile-daemon-501.sock",
-                        ),
-                ),
-        )
+      FakeProcessRunner(
+        responses =
+          mapOf(
+            listOf("ps", "-eo", "pid,lstart,command") to
+              listOf("97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile"),
+            listOf("lsof", "-p", "97956", "-a", "-U") to
+              listOf("bun  97956 jason  17u  unix 0x1234 0t0  /tmp/auto-mobile-daemon-501.sock"),
+          )
+      )
     val detector =
-        RealMcpProcessDetector(
-            timeProvider = timeProvider,
-            processRunner = psRunner,
-            socketFileChecker =
-                FakeSocketFileChecker(
-                    files = listOf("/tmp/auto-mobile-daemon-501.sock"),
-                ),
-        )
+      RealMcpProcessDetector(
+        timeProvider = timeProvider,
+        processRunner = psRunner,
+        socketFileChecker =
+          FakeSocketFileChecker(files = listOf("/tmp/auto-mobile-daemon-501.sock")),
+      )
 
     val processes = detector.detectProcesses()
 
@@ -197,7 +189,7 @@ class McpProcessDetectorTest {
 }
 
 private class FakeProcessRunner(
-    private val responses: Map<List<String>, List<String>> = emptyMap(),
+  private val responses: Map<List<String>, List<String>> = emptyMap()
 ) : ProcessRunner {
   val commandsExecuted = mutableListOf<List<String>>()
 
@@ -207,8 +199,7 @@ private class FakeProcessRunner(
   }
 }
 
-private class FakeSocketFileChecker(
-    private val files: List<String> = emptyList(),
-) : SocketFileChecker {
+private class FakeSocketFileChecker(private val files: List<String> = emptyList()) :
+  SocketFileChecker {
   override fun findDaemonSocketFiles(): List<String> = files
 }

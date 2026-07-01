@@ -9,7 +9,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 
 private val log =
-    dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory.getLogger("HierarchyParser")
+  dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory.getLogger("HierarchyParser")
 
 /**
  * Parse a hierarchy JsonElement (from observation stream) into a [ParsedHierarchy] containing the
@@ -35,10 +35,10 @@ fun parseHierarchyFromJson(hierarchyJson: JsonElement): ParsedHierarchy? {
     val rotation = (jsonObj["rotation"] as? JsonPrimitive)?.intOrNull ?: 0
 
     ParsedHierarchy(
-        root = root,
-        elementMap = elementMap,
-        parentMap = parentMap,
-        rotation = rotation,
+      root = root,
+      elementMap = elementMap,
+      parentMap = parentMap,
+      rotation = rotation,
     )
   } catch (e: Exception) {
     log.warn("Failed to parse hierarchy JSON: ${e.message}", e)
@@ -48,11 +48,11 @@ fun parseHierarchyFromJson(hierarchyJson: JsonElement): ParsedHierarchy? {
 
 /** Parse a node JsonElement which can be either a single node or array of nodes. */
 private fun parseNodeElement(
-    nodeElement: JsonElement,
-    depth: Int,
-    siblingIndex: Int,
-    elementMap: MutableMap<String, UIElementInfo>,
-    parentMap: MutableMap<String, String>,
+  nodeElement: JsonElement,
+  depth: Int,
+  siblingIndex: Int,
+  elementMap: MutableMap<String, UIElementInfo>,
+  parentMap: MutableMap<String, String>,
 ): UIElementInfo? {
   return when (nodeElement) {
     is JsonObject -> parseJsonObjectNode(nodeElement, depth, siblingIndex, elementMap, parentMap)
@@ -68,11 +68,11 @@ private fun parseNodeElement(
 
 /** Parse a single node JsonObject into UIElementInfo. */
 private fun parseJsonObjectNode(
-    nodeObj: JsonObject,
-    depth: Int,
-    siblingIndex: Int,
-    elementMap: MutableMap<String, UIElementInfo>,
-    parentMap: MutableMap<String, String>,
+  nodeObj: JsonObject,
+  depth: Int,
+  siblingIndex: Int,
+  elementMap: MutableMap<String, UIElementInfo>,
+  parentMap: MutableMap<String, String>,
 ): UIElementInfo {
   // Check if attributes are in "$" or at root level
   val attrs = nodeObj["\$"]?.jsonObject ?: nodeObj
@@ -107,29 +107,29 @@ private fun parseJsonObjectNode(
   // Generate stable ID from depth, sibling index, and bounds — no global counter
   // so IDs remain stable when nodes are added/removed in unrelated subtrees.
   val baseId =
-      resourceId ?: contentDesc?.let { "desc:$it" } ?: text?.take(20)?.let { "text:$it" } ?: "view"
+    resourceId ?: contentDesc?.let { "desc:$it" } ?: text?.take(20)?.let { "text:$it" } ?: "view"
   val id =
-      "$baseId@d${depth}s${siblingIndex}:${bounds.left},${bounds.top}-${bounds.right},${bounds.bottom}"
+    "$baseId@d${depth}s${siblingIndex}:${bounds.left},${bounds.top}-${bounds.right},${bounds.bottom}"
 
   val element =
-      UIElementInfo(
-          id = id,
-          className = className,
-          resourceId = resourceId?.takeIf { it.isNotEmpty() },
-          text = text?.takeIf { it.isNotEmpty() },
-          contentDescription = contentDesc?.takeIf { it.isNotEmpty() },
-          bounds = bounds,
-          isClickable = isClickable,
-          isEnabled = isEnabled,
-          isFocused = isFocused,
-          isSelected = isSelected,
-          isScrollable = isScrollable,
-          isCheckable = isCheckable,
-          isChecked = isChecked,
-          depth = depth,
-          children = children,
-          extras = extras,
-      )
+    UIElementInfo(
+      id = id,
+      className = className,
+      resourceId = resourceId?.takeIf { it.isNotEmpty() },
+      text = text?.takeIf { it.isNotEmpty() },
+      contentDescription = contentDesc?.takeIf { it.isNotEmpty() },
+      bounds = bounds,
+      isClickable = isClickable,
+      isEnabled = isEnabled,
+      isFocused = isFocused,
+      isSelected = isSelected,
+      isScrollable = isScrollable,
+      isCheckable = isCheckable,
+      isChecked = isChecked,
+      depth = depth,
+      children = children,
+      extras = extras,
+    )
 
   // Populate lookup indexes as side-effect during parsing — zero extra traversals
   elementMap[id] = element
@@ -143,18 +143,18 @@ private fun parseJsonObjectNode(
 /** Parse bounds from either the attributes object or a separate bounds object. */
 private fun parseBounds(attrs: JsonObject, nodeObj: JsonObject): ElementBounds {
   return parseBoundsElement(attrs["bounds"])
-      ?: parseBoundsElement(nodeObj["bounds"])
-      ?: ElementBounds(0, 0, 0, 0)
+    ?: parseBoundsElement(nodeObj["bounds"])
+    ?: ElementBounds(0, 0, 0, 0)
 }
 
 private fun parseBoundsElement(boundsElement: JsonElement?): ElementBounds? {
   return when (boundsElement) {
     is JsonObject -> {
       ElementBounds(
-          left = boundsElement.getInt("left") ?: 0,
-          top = boundsElement.getInt("top") ?: 0,
-          right = boundsElement.getInt("right") ?: 0,
-          bottom = boundsElement.getInt("bottom") ?: 0,
+        left = boundsElement.getInt("left") ?: 0,
+        top = boundsElement.getInt("top") ?: 0,
+        right = boundsElement.getInt("right") ?: 0,
+        bottom = boundsElement.getInt("bottom") ?: 0,
       )
     }
     is JsonPrimitive -> boundsElement.contentOrNull?.let { parseBoundsString(it) }
@@ -169,10 +169,10 @@ private fun parseBoundsString(boundsStr: String): ElementBounds {
   return if (match != null) {
     val (left, top, right, bottom) = match.destructured
     ElementBounds(
-        left = left.toIntOrNull() ?: 0,
-        top = top.toIntOrNull() ?: 0,
-        right = right.toIntOrNull() ?: 0,
-        bottom = bottom.toIntOrNull() ?: 0,
+      left = left.toIntOrNull() ?: 0,
+      top = top.toIntOrNull() ?: 0,
+      right = right.toIntOrNull() ?: 0,
+      bottom = bottom.toIntOrNull() ?: 0,
     )
   } else {
     ElementBounds(0, 0, 0, 0)
@@ -181,10 +181,10 @@ private fun parseBoundsString(boundsStr: String): ElementBounds {
 
 /** Parse child nodes from the "node" field which can be a single object or array. */
 private fun parseChildren(
-    childrenElement: JsonElement?,
-    parentDepth: Int,
-    elementMap: MutableMap<String, UIElementInfo>,
-    parentMap: MutableMap<String, String>,
+  childrenElement: JsonElement?,
+  parentDepth: Int,
+  elementMap: MutableMap<String, UIElementInfo>,
+  parentMap: MutableMap<String, String>,
 ): List<UIElementInfo> {
   if (childrenElement == null) return emptyList()
 

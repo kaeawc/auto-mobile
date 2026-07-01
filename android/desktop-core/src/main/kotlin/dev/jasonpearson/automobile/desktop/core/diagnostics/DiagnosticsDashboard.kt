@@ -45,9 +45,9 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 fun DiagnosticsDashboard(
-    connectedMcpProcess: McpProcess?,
-    dataSourceMode: DataSourceMode,
-    modifier: Modifier = Modifier,
+  connectedMcpProcess: McpProcess?,
+  dataSourceMode: DataSourceMode,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -61,8 +61,8 @@ fun DiagnosticsDashboard(
   }
 
   Column(
-      modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(16.dp),
+    modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
     // System Requirements Section
     DiagnosticSection(title = "System Requirements") {
@@ -75,56 +75,55 @@ fun DiagnosticsDashboard(
     DiagnosticSection(title = "MCP Daemon") {
       if (connectedMcpProcess != null) {
         DiagnosticRow(
-            label = "Status",
-            value = "Connected",
-            status = DiagnosticStatus.Success,
+          label = "Status",
+          value = "Connected",
+          status = DiagnosticStatus.Success,
         )
         DiagnosticRow(
-            label = "Process Name",
-            value = connectedMcpProcess.name,
-            status = DiagnosticStatus.Info,
+          label = "Process Name",
+          value = connectedMcpProcess.name,
+          status = DiagnosticStatus.Info,
         )
         DiagnosticRow(
-            label = "PID",
-            value = connectedMcpProcess.pid.toString(),
-            status = DiagnosticStatus.Info,
+          label = "PID",
+          value = connectedMcpProcess.pid.toString(),
+          status = DiagnosticStatus.Info,
         )
         DiagnosticRow(
-            label = "Connection Type",
-            value =
-                when (connectedMcpProcess.connectionType) {
-                  McpConnectionType.UnixSocket -> "Unix Socket"
-                  McpConnectionType.StreamableHttp ->
-                      "HTTP (Port ${connectedMcpProcess.port ?: "?"})"
-                  McpConnectionType.Stdio -> "Standard I/O"
-                },
-            status = DiagnosticStatus.Info,
+          label = "Connection Type",
+          value =
+            when (connectedMcpProcess.connectionType) {
+              McpConnectionType.UnixSocket -> "Unix Socket"
+              McpConnectionType.StreamableHttp -> "HTTP (Port ${connectedMcpProcess.port ?: "?"})"
+              McpConnectionType.Stdio -> "Standard I/O"
+            },
+          status = DiagnosticStatus.Info,
         )
         connectedMcpProcess.socketPath?.let { path ->
           DiagnosticRow(
-              label = "Socket Path",
-              value = path,
-              status =
-                  if (File(path).exists()) DiagnosticStatus.Success else DiagnosticStatus.Warning,
-              isMonospace = true,
+            label = "Socket Path",
+            value = path,
+            status =
+              if (File(path).exists()) DiagnosticStatus.Success else DiagnosticStatus.Warning,
+            isMonospace = true,
           )
         }
       } else {
         DiagnosticRow(
-            label = "Status",
-            value =
-                if (dataSourceMode == DataSourceMode.Fake) "Not Required (Fake Mode)"
-                else "Not Connected",
-            status =
-                if (dataSourceMode == DataSourceMode.Fake) DiagnosticStatus.Info
-                else DiagnosticStatus.Warning,
+          label = "Status",
+          value =
+            if (dataSourceMode == DataSourceMode.Fake) "Not Required (Fake Mode)"
+            else "Not Connected",
+          status =
+            if (dataSourceMode == DataSourceMode.Fake) DiagnosticStatus.Info
+            else DiagnosticStatus.Warning,
         )
         if (dataSourceMode == DataSourceMode.Real) {
           Text(
-              "Start the AutoMobile MCP server to connect.",
-              fontSize = 11.sp,
-              color = colors.text.normal.copy(alpha = 0.5f),
-              modifier = Modifier.padding(top = 8.dp),
+            "Start the AutoMobile MCP server to connect.",
+            fontSize = 11.sp,
+            color = colors.text.normal.copy(alpha = 0.5f),
+            modifier = Modifier.padding(top = 8.dp),
           )
         }
       }
@@ -137,30 +136,29 @@ fun DiagnosticsDashboard(
         if (socketPath != null) {
           val socketFile = File(socketPath)
           DiagnosticRow(
-              label = "Socket Exists",
-              value = if (socketFile.exists()) "Yes" else "No",
-              status =
-                  if (socketFile.exists()) DiagnosticStatus.Success else DiagnosticStatus.Error,
+            label = "Socket Exists",
+            value = if (socketFile.exists()) "Yes" else "No",
+            status = if (socketFile.exists()) DiagnosticStatus.Success else DiagnosticStatus.Error,
           )
           if (socketFile.exists()) {
             DiagnosticRow(
-                label = "Readable",
-                value = if (socketFile.canRead()) "Yes" else "No",
-                status =
-                    if (socketFile.canRead()) DiagnosticStatus.Success else DiagnosticStatus.Error,
+              label = "Readable",
+              value = if (socketFile.canRead()) "Yes" else "No",
+              status =
+                if (socketFile.canRead()) DiagnosticStatus.Success else DiagnosticStatus.Error,
             )
             DiagnosticRow(
-                label = "Writable",
-                value = if (socketFile.canWrite()) "Yes" else "No",
-                status =
-                    if (socketFile.canWrite()) DiagnosticStatus.Success else DiagnosticStatus.Error,
+              label = "Writable",
+              value = if (socketFile.canWrite()) "Yes" else "No",
+              status =
+                if (socketFile.canWrite()) DiagnosticStatus.Success else DiagnosticStatus.Error,
             )
           }
         } else {
           DiagnosticRow(
-              label = "Socket Path",
-              value = "Not configured",
-              status = DiagnosticStatus.Warning,
+            label = "Socket Path",
+            value = "Not configured",
+            status = DiagnosticStatus.Warning,
           )
         }
       }
@@ -169,13 +167,13 @@ fun DiagnosticsDashboard(
     // Data Source Mode Section
     DiagnosticSection(title = "Data Source") {
       DiagnosticRow(
-          label = "Mode",
-          value =
-              when (dataSourceMode) {
-                DataSourceMode.Fake -> "Fake (Mock Data)"
-                DataSourceMode.Real -> "Real (Live Device)"
-              },
-          status = DiagnosticStatus.Info,
+        label = "Mode",
+        value =
+          when (dataSourceMode) {
+            DataSourceMode.Fake -> "Fake (Mock Data)"
+            DataSourceMode.Real -> "Real (Live Device)"
+          },
+        status = DiagnosticStatus.Info,
       )
     }
   }
@@ -183,22 +181,22 @@ fun DiagnosticsDashboard(
 
 @Composable
 private fun DiagnosticSection(
-    title: String,
-    content: @Composable () -> Unit,
+  title: String,
+  content: @Composable () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
-              .padding(12.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
+        .padding(12.dp)
   ) {
     Text(
-        title,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        color = colors.text.normal.copy(alpha = 0.8f),
+      title,
+      fontSize = 13.sp,
+      fontWeight = FontWeight.Medium,
+      color = colors.text.normal.copy(alpha = 0.8f),
     )
     Spacer(Modifier.height(12.dp))
     content()
@@ -207,31 +205,31 @@ private fun DiagnosticSection(
 
 @Composable
 private fun DiagnosticRow(
-    label: String,
-    value: String,
-    status: DiagnosticStatus,
-    isMonospace: Boolean = false,
+  label: String,
+  value: String,
+  status: DiagnosticStatus,
+  isMonospace: Boolean = false,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
-        label,
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
-        modifier = Modifier.width(120.dp),
+      label,
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = 0.6f),
+      modifier = Modifier.width(120.dp),
     )
     StatusIndicator(status)
     Spacer(Modifier.width(8.dp))
     Text(
-        value,
-        fontSize = 11.sp,
-        fontFamily = if (isMonospace) FontFamily.Monospace else FontFamily.Default,
-        color = colors.text.normal.copy(alpha = 0.9f),
-        maxLines = 1,
+      value,
+      fontSize = 11.sp,
+      fontFamily = if (isMonospace) FontFamily.Monospace else FontFamily.Default,
+      color = colors.text.normal.copy(alpha = 0.9f),
+      maxLines = 1,
     )
   }
 }
@@ -241,22 +239,22 @@ private fun DiagnosticCheckRow(check: DiagnosticCheck) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     StatusIndicator(check.status)
     Spacer(Modifier.width(8.dp))
     Column(modifier = Modifier.weight(1f)) {
       Text(
-          check.name,
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.9f),
+        check.name,
+        fontSize = 11.sp,
+        color = colors.text.normal.copy(alpha = 0.9f),
       )
       if (check.details != null) {
         Text(
-            check.details,
-            fontSize = 10.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
+          check.details,
+          fontSize = 10.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
         )
       }
     }
@@ -266,16 +264,14 @@ private fun DiagnosticCheckRow(check: DiagnosticCheck) {
 @Composable
 private fun StatusIndicator(status: DiagnosticStatus) {
   val color =
-      when (status) {
-        DiagnosticStatus.Success -> Color(0xFF4CAF50)
-        DiagnosticStatus.Warning -> Color(0xFFFF9800)
-        DiagnosticStatus.Error -> Color(0xFFE53935)
-        DiagnosticStatus.Info -> Color(0xFF2196F3)
-      }
+    when (status) {
+      DiagnosticStatus.Success -> Color(0xFF4CAF50)
+      DiagnosticStatus.Warning -> Color(0xFFFF9800)
+      DiagnosticStatus.Error -> Color(0xFFE53935)
+      DiagnosticStatus.Info -> Color(0xFF2196F3)
+    }
 
-  Box(
-      modifier = Modifier.size(8.dp).background(color, CircleShape),
-  )
+  Box(modifier = Modifier.size(8.dp).background(color, CircleShape))
 }
 
 private enum class DiagnosticStatus {
@@ -286,9 +282,9 @@ private enum class DiagnosticStatus {
 }
 
 private data class DiagnosticCheck(
-    val name: String,
-    val status: DiagnosticStatus,
-    val details: String? = null,
+  val name: String,
+  val status: DiagnosticStatus,
+  val details: String? = null,
 )
 
 private fun runSystemChecks(): List<DiagnosticCheck> {
@@ -296,82 +292,82 @@ private fun runSystemChecks(): List<DiagnosticCheck> {
 
   // Check ADB
   val adbCheck =
-      try {
-        val process = ProcessBuilder("which", "adb").start()
-        val exitCode = process.waitFor()
-        if (exitCode == 0) {
-          val path = process.inputStream.bufferedReader().readText().trim()
-          DiagnosticCheck("ADB", DiagnosticStatus.Success, path)
-        } else {
-          DiagnosticCheck("ADB", DiagnosticStatus.Error, "Not found in PATH")
-        }
-      } catch (e: Exception) {
-        DiagnosticCheck("ADB", DiagnosticStatus.Error, e.message)
+    try {
+      val process = ProcessBuilder("which", "adb").start()
+      val exitCode = process.waitFor()
+      if (exitCode == 0) {
+        val path = process.inputStream.bufferedReader().readText().trim()
+        DiagnosticCheck("ADB", DiagnosticStatus.Success, path)
+      } else {
+        DiagnosticCheck("ADB", DiagnosticStatus.Error, "Not found in PATH")
       }
+    } catch (e: Exception) {
+      DiagnosticCheck("ADB", DiagnosticStatus.Error, e.message)
+    }
   checks.add(adbCheck)
 
   // Check Node.js
   val nodeCheck =
-      try {
-        val process = ProcessBuilder("node", "--version").start()
-        val exitCode = process.waitFor()
-        if (exitCode == 0) {
-          val version = process.inputStream.bufferedReader().readText().trim()
-          DiagnosticCheck("Node.js", DiagnosticStatus.Success, version)
-        } else {
-          DiagnosticCheck("Node.js", DiagnosticStatus.Error, "Not found")
-        }
-      } catch (e: Exception) {
-        DiagnosticCheck("Node.js", DiagnosticStatus.Error, e.message)
+    try {
+      val process = ProcessBuilder("node", "--version").start()
+      val exitCode = process.waitFor()
+      if (exitCode == 0) {
+        val version = process.inputStream.bufferedReader().readText().trim()
+        DiagnosticCheck("Node.js", DiagnosticStatus.Success, version)
+      } else {
+        DiagnosticCheck("Node.js", DiagnosticStatus.Error, "Not found")
       }
+    } catch (e: Exception) {
+      DiagnosticCheck("Node.js", DiagnosticStatus.Error, e.message)
+    }
   checks.add(nodeCheck)
 
   // Check Bun (optional)
   val bunCheck =
-      try {
-        val process = ProcessBuilder("bun", "--version").start()
-        val exitCode = process.waitFor()
-        if (exitCode == 0) {
-          val version = process.inputStream.bufferedReader().readText().trim()
-          DiagnosticCheck("Bun", DiagnosticStatus.Success, version)
-        } else {
-          DiagnosticCheck("Bun", DiagnosticStatus.Info, "Not installed (optional)")
-        }
-      } catch (e: Exception) {
+    try {
+      val process = ProcessBuilder("bun", "--version").start()
+      val exitCode = process.waitFor()
+      if (exitCode == 0) {
+        val version = process.inputStream.bufferedReader().readText().trim()
+        DiagnosticCheck("Bun", DiagnosticStatus.Success, version)
+      } else {
         DiagnosticCheck("Bun", DiagnosticStatus.Info, "Not installed (optional)")
       }
+    } catch (e: Exception) {
+      DiagnosticCheck("Bun", DiagnosticStatus.Info, "Not installed (optional)")
+    }
   checks.add(bunCheck)
 
   // Check ANDROID_HOME
   val androidHomeCheck =
-      System.getenv("ANDROID_HOME")?.let { path ->
-        if (File(path).exists()) {
-          DiagnosticCheck("ANDROID_HOME", DiagnosticStatus.Success, path)
-        } else {
-          DiagnosticCheck(
-              "ANDROID_HOME",
-              DiagnosticStatus.Warning,
-              "Set but path doesn't exist: $path",
-          )
-        }
-      } ?: DiagnosticCheck("ANDROID_HOME", DiagnosticStatus.Warning, "Not set")
+    System.getenv("ANDROID_HOME")?.let { path ->
+      if (File(path).exists()) {
+        DiagnosticCheck("ANDROID_HOME", DiagnosticStatus.Success, path)
+      } else {
+        DiagnosticCheck(
+          "ANDROID_HOME",
+          DiagnosticStatus.Warning,
+          "Set but path doesn't exist: $path",
+        )
+      }
+    } ?: DiagnosticCheck("ANDROID_HOME", DiagnosticStatus.Warning, "Not set")
   checks.add(androidHomeCheck)
 
   // Check Java
   val javaCheck =
-      try {
-        val process = ProcessBuilder("java", "-version").redirectErrorStream(true).start()
-        val exitCode = process.waitFor()
-        if (exitCode == 0) {
-          val output = process.inputStream.bufferedReader().readText()
-          val versionLine = output.lines().firstOrNull() ?: "Unknown"
-          DiagnosticCheck("Java", DiagnosticStatus.Success, versionLine)
-        } else {
-          DiagnosticCheck("Java", DiagnosticStatus.Error, "Not found")
-        }
-      } catch (e: Exception) {
-        DiagnosticCheck("Java", DiagnosticStatus.Error, e.message)
+    try {
+      val process = ProcessBuilder("java", "-version").redirectErrorStream(true).start()
+      val exitCode = process.waitFor()
+      if (exitCode == 0) {
+        val output = process.inputStream.bufferedReader().readText()
+        val versionLine = output.lines().firstOrNull() ?: "Unknown"
+        DiagnosticCheck("Java", DiagnosticStatus.Success, versionLine)
+      } else {
+        DiagnosticCheck("Java", DiagnosticStatus.Error, "Not found")
       }
+    } catch (e: Exception) {
+      DiagnosticCheck("Java", DiagnosticStatus.Error, e.message)
+    }
   checks.add(javaCheck)
 
   return checks

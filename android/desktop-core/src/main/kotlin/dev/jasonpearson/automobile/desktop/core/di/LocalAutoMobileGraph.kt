@@ -12,11 +12,11 @@ import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
  * creates instances via factories — matching the pre-DI behavior.
  */
 val LocalAutoMobileGraph =
-    staticCompositionLocalOf<AutoMobileGraphProvider> {
-      val client = McpClientFactory.createPreferred(null)
-      object : AutoMobileGraphProvider {
-        override val autoMobileClient = client
-        override val settingsProvider = FakeSettingsProvider()
-        override val dataSourceFactory = DefaultDataSourceFactory(client)
-      }
+  staticCompositionLocalOf<AutoMobileGraphProvider> {
+    val client = McpClientFactory.createPreferred(null)
+    object : AutoMobileGraphProvider {
+      override val autoMobileClient = client
+      override val settingsProvider = FakeSettingsProvider()
+      override val dataSourceFactory = DefaultDataSourceFactory(client)
     }
+  }

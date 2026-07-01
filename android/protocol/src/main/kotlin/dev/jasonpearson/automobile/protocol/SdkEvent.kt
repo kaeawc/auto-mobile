@@ -40,16 +40,16 @@ enum class NavigationSourceType {
 @Serializable
 @SerialName("navigation")
 data class SdkNavigationEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** The destination identifier (route, screen name, deep link, etc.) */
-    val destination: String,
-    /** The navigation framework that generated this event */
-    val source: NavigationSourceType,
-    /** Optional navigation arguments as string key-value pairs */
-    val arguments: Map<String, String>? = null,
-    /** Additional metadata about the navigation event */
-    val metadata: Map<String, String>? = null,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** The destination identifier (route, screen name, deep link, etc.) */
+  val destination: String,
+  /** The navigation framework that generated this event */
+  val source: NavigationSourceType,
+  /** Optional navigation arguments as string key-value pairs */
+  val arguments: Map<String, String>? = null,
+  /** Additional metadata about the navigation event */
+  val metadata: Map<String, String>? = null,
 ) : SdkEvent()
 
 // =============================================================================
@@ -59,32 +59,32 @@ data class SdkNavigationEvent(
 /** Device information captured at the time of an exception. */
 @Serializable
 data class SdkDeviceInfo(
-    val model: String,
-    val manufacturer: String,
-    val osVersion: String,
-    val sdkInt: Int,
+  val model: String,
+  val manufacturer: String,
+  val osVersion: String,
+  val sdkInt: Int,
 )
 
 /** Represents a handled (non-fatal) exception that was caught and reported by the app. */
 @Serializable
 @SerialName("handled_exception")
 data class SdkHandledExceptionEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** Fully qualified class name of the exception (e.g., "java.lang.NullPointerException") */
-    val exceptionClass: String,
-    /** Exception message, if any */
-    val exceptionMessage: String?,
-    /** Full stack trace as a string */
-    val stackTrace: String,
-    /** Optional custom message provided by the developer */
-    val customMessage: String? = null,
-    /** Current screen/destination at the time of the exception */
-    val currentScreen: String? = null,
-    /** Application version name, if available */
-    val appVersion: String? = null,
-    /** Device information */
-    val deviceInfo: SdkDeviceInfo? = null,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** Fully qualified class name of the exception (e.g., "java.lang.NullPointerException") */
+  val exceptionClass: String,
+  /** Exception message, if any */
+  val exceptionMessage: String?,
+  /** Full stack trace as a string */
+  val stackTrace: String,
+  /** Optional custom message provided by the developer */
+  val customMessage: String? = null,
+  /** Current screen/destination at the time of the exception */
+  val currentScreen: String? = null,
+  /** Application version name, if available */
+  val appVersion: String? = null,
+  /** Device information */
+  val deviceInfo: SdkDeviceInfo? = null,
 ) : SdkEvent()
 
 // =============================================================================
@@ -95,14 +95,14 @@ data class SdkHandledExceptionEvent(
 @Serializable
 @SerialName("notification_action")
 data class SdkNotificationActionEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** The notification ID */
-    val notificationId: String,
-    /** The action ID that was tapped */
-    val actionId: String,
-    /** The action label that was displayed */
-    val actionLabel: String,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** The notification ID */
+  val notificationId: String,
+  /** The action ID that was tapped */
+  val actionId: String,
+  /** The action label that was displayed */
+  val actionLabel: String,
 ) : SdkEvent()
 
 // =============================================================================
@@ -113,10 +113,10 @@ data class SdkNotificationActionEvent(
 @Serializable
 @SerialName("recomposition_snapshot")
 data class SdkRecompositionSnapshotEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** JSON string containing the recomposition tracking data */
-    val snapshotJson: String,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** JSON string containing the recomposition tracking data */
+  val snapshotJson: String,
 ) : SdkEvent()
 
 // =============================================================================
@@ -130,22 +130,22 @@ data class SdkRecompositionSnapshotEvent(
 @Serializable
 @SerialName("crash")
 data class SdkCrashEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** Fully qualified class name of the exception (e.g., "java.lang.NullPointerException") */
-    val exceptionClass: String,
-    /** Exception message, if any */
-    val exceptionMessage: String?,
-    /** Full stack trace as a string */
-    val stackTrace: String,
-    /** Thread name where the crash occurred */
-    val threadName: String,
-    /** Current screen/destination at the time of the crash */
-    val currentScreen: String? = null,
-    /** Application version name, if available */
-    val appVersion: String? = null,
-    /** Device information */
-    val deviceInfo: SdkDeviceInfo? = null,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** Fully qualified class name of the exception (e.g., "java.lang.NullPointerException") */
+  val exceptionClass: String,
+  /** Exception message, if any */
+  val exceptionMessage: String?,
+  /** Full stack trace as a string */
+  val stackTrace: String,
+  /** Thread name where the crash occurred */
+  val threadName: String,
+  /** Current screen/destination at the time of the crash */
+  val currentScreen: String? = null,
+  /** Application version name, if available */
+  val appVersion: String? = null,
+  /** Device information */
+  val deviceInfo: SdkDeviceInfo? = null,
 ) : SdkEvent()
 
 // =============================================================================
@@ -160,22 +160,22 @@ data class SdkCrashEvent(
 @Serializable
 @SerialName("anr")
 data class SdkAnrEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** Process ID that experienced the ANR */
-    val pid: Int,
-    /** Process name */
-    val processName: String,
-    /** Process importance when ANR occurred (FOREGROUND, VISIBLE, CACHED, etc.) */
-    val importance: String,
-    /** Full thread dump from ApplicationExitInfo.traceInputStream */
-    val trace: String?,
-    /** Human-readable reason description */
-    val reason: String,
-    /** Application version name, if available */
-    val appVersion: String? = null,
-    /** Device information */
-    val deviceInfo: SdkDeviceInfo? = null,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** Process ID that experienced the ANR */
+  val pid: Int,
+  /** Process name */
+  val processName: String,
+  /** Process importance when ANR occurred (FOREGROUND, VISIBLE, CACHED, etc.) */
+  val importance: String,
+  /** Full thread dump from ApplicationExitInfo.traceInputStream */
+  val trace: String?,
+  /** Human-readable reason description */
+  val reason: String,
+  /** Application version name, if available */
+  val appVersion: String? = null,
+  /** Device information */
+  val deviceInfo: SdkDeviceInfo? = null,
 ) : SdkEvent()
 
 // =============================================================================
@@ -186,38 +186,38 @@ data class SdkAnrEvent(
 @Serializable
 @SerialName("network_request")
 data class SdkNetworkRequestEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** Request URL */
-    val url: String,
-    /** HTTP method (GET, POST, etc.) */
-    val method: String,
-    /** HTTP status code (0 if no response) */
-    val statusCode: Int = 0,
-    /** Request duration in milliseconds */
-    val durationMs: Long = 0,
-    /** Request body size in bytes (-1 if unknown) */
-    val requestBodySize: Long = -1,
-    /** Response body size in bytes (-1 if unknown) */
-    val responseBodySize: Long = -1,
-    /** HTTP protocol (e.g., "h2", "http/1.1") */
-    val protocol: String? = null,
-    /** Request host extracted from URL */
-    val host: String? = null,
-    /** Request path extracted from URL */
-    val path: String? = null,
-    /** Error message if the request failed */
-    val error: String? = null,
-    /** Request headers (opt-in, may contain auth tokens) */
-    val requestHeaders: Map<String, String>? = null,
-    /** Response headers */
-    val responseHeaders: Map<String, String>? = null,
-    /** Request body text (truncated, null for binary or when capture disabled) */
-    val requestBody: String? = null,
-    /** Response body text (truncated, null for binary or when capture disabled) */
-    val responseBody: String? = null,
-    /** Content-Type of the response */
-    val contentType: String? = null,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** Request URL */
+  val url: String,
+  /** HTTP method (GET, POST, etc.) */
+  val method: String,
+  /** HTTP status code (0 if no response) */
+  val statusCode: Int = 0,
+  /** Request duration in milliseconds */
+  val durationMs: Long = 0,
+  /** Request body size in bytes (-1 if unknown) */
+  val requestBodySize: Long = -1,
+  /** Response body size in bytes (-1 if unknown) */
+  val responseBodySize: Long = -1,
+  /** HTTP protocol (e.g., "h2", "http/1.1") */
+  val protocol: String? = null,
+  /** Request host extracted from URL */
+  val host: String? = null,
+  /** Request path extracted from URL */
+  val path: String? = null,
+  /** Error message if the request failed */
+  val error: String? = null,
+  /** Request headers (opt-in, may contain auth tokens) */
+  val requestHeaders: Map<String, String>? = null,
+  /** Response headers */
+  val responseHeaders: Map<String, String>? = null,
+  /** Request body text (truncated, null for binary or when capture disabled) */
+  val requestBody: String? = null,
+  /** Response body text (truncated, null for binary or when capture disabled) */
+  val responseBody: String? = null,
+  /** Content-Type of the response */
+  val contentType: String? = null,
 ) : SdkEvent()
 
 /** Direction of a WebSocket frame. */
@@ -241,18 +241,18 @@ enum class WebSocketFrameType {
 @Serializable
 @SerialName("websocket_frame")
 data class SdkWebSocketFrameEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** Connection identifier to group frames by WebSocket connection */
-    val connectionId: String,
-    /** WebSocket URL */
-    val url: String,
-    /** Frame direction (sent or received) */
-    val direction: WebSocketFrameDirection,
-    /** Frame type */
-    val frameType: WebSocketFrameType,
-    /** Frame payload size in bytes */
-    val payloadSize: Long = 0,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** Connection identifier to group frames by WebSocket connection */
+  val connectionId: String,
+  /** WebSocket URL */
+  val url: String,
+  /** Frame direction (sent or received) */
+  val direction: WebSocketFrameDirection,
+  /** Frame type */
+  val frameType: WebSocketFrameType,
+  /** Frame payload size in bytes */
+  val payloadSize: Long = 0,
 ) : SdkEvent()
 
 // =============================================================================
@@ -263,18 +263,18 @@ data class SdkWebSocketFrameEvent(
 @Serializable
 @SerialName("log")
 data class SdkLogEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** Log level (VERBOSE=2, DEBUG=3, INFO=4, WARN=5, ERROR=6, ASSERT=7) */
-    val level: Int,
-    /** Log tag */
-    val tag: String,
-    /** Log message */
-    val message: String,
-    /** Process ID that produced this log entry */
-    val pid: Int = 0,
-    /** Thread ID that produced this log entry */
-    val tid: Int = 0,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** Log level (VERBOSE=2, DEBUG=3, INFO=4, WARN=5, ERROR=6, ASSERT=7) */
+  val level: Int,
+  /** Log tag */
+  val tag: String,
+  /** Log message */
+  val message: String,
+  /** Process ID that produced this log entry */
+  val pid: Int = 0,
+  /** Thread ID that produced this log entry */
+  val tid: Int = 0,
 ) : SdkEvent()
 
 // =============================================================================
@@ -285,14 +285,14 @@ data class SdkLogEvent(
 @Serializable
 @SerialName("broadcast")
 data class SdkBroadcastEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** Broadcast action string */
-    val action: String,
-    /** Broadcast categories, if any */
-    val categories: List<String>? = null,
-    /** Extra keys and their type names (not values, to avoid leaking data) */
-    val extraKeys: Map<String, String>? = null,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** Broadcast action string */
+  val action: String,
+  /** Broadcast categories, if any */
+  val categories: List<String>? = null,
+  /** Extra keys and their type names (not values, to avoid leaking data) */
+  val extraKeys: Map<String, String>? = null,
 ) : SdkEvent()
 
 // =============================================================================
@@ -303,15 +303,14 @@ data class SdkBroadcastEvent(
 @Serializable
 @SerialName("lifecycle")
 data class SdkLifecycleEvent(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /**
-     * Event kind: foreground, background, connectivity_change, battery_change, screen_on,
-     * screen_off
-     */
-    val kind: String,
-    /** Additional details about the event */
-    val details: Map<String, String>? = null,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /**
+   * Event kind: foreground, background, connectivity_change, battery_change, screen_on, screen_off
+   */
+  val kind: String,
+  /** Additional details about the event */
+  val details: Map<String, String>? = null,
 ) : SdkEvent()
 
 // =============================================================================
@@ -325,8 +324,8 @@ data class SdkLifecycleEvent(
 @Serializable
 @SerialName("event_batch")
 data class SdkEventBatch(
-    override val timestamp: Long,
-    override val applicationId: String? = null,
-    /** The batched events */
-    val events: List<SdkEvent>,
+  override val timestamp: Long,
+  override val applicationId: String? = null,
+  /** The batched events */
+  val events: List<SdkEvent>,
 ) : SdkEvent()

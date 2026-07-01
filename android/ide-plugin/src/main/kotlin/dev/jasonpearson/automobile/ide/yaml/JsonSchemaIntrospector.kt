@@ -8,17 +8,17 @@ import kotlinx.serialization.json.JsonPrimitive
 data class SchemaPathSegment(val key: String, val isArrayItem: Boolean)
 
 data class SchemaPropertyInfo(
-    val name: String,
-    val description: String?,
-    val required: Boolean,
-    val deprecated: Boolean,
-    val schemas: List<JsonObject>,
+  val name: String,
+  val description: String?,
+  val required: Boolean,
+  val deprecated: Boolean,
+  val schemas: List<JsonObject>,
 )
 
 object JsonSchemaIntrospector {
   fun collectProperties(
-      rootSchema: JsonObject,
-      path: List<SchemaPathSegment>,
+    rootSchema: JsonObject,
+    path: List<SchemaPathSegment>,
   ): Map<String, SchemaPropertyInfo> {
     val schemas = collectSchemasAtPath(rootSchema, path, rootSchema)
     if (schemas.isEmpty()) {
@@ -32,14 +32,14 @@ object JsonSchemaIntrospector {
     return propertySchemas.mapValues { (name, schemasForProperty) ->
       val description = schemasForProperty.firstNotNullOfOrNull { it.stringValue("description") }
       val deprecated =
-          schemasForProperty.any { it.booleanValue("deprecated") == true } ||
-              description?.startsWith("DEPRECATED") == true
+        schemasForProperty.any { it.booleanValue("deprecated") == true } ||
+          description?.startsWith("DEPRECATED") == true
       SchemaPropertyInfo(
-          name = name,
-          description = description,
-          required = required.contains(name),
-          deprecated = deprecated,
-          schemas = schemasForProperty,
+        name = name,
+        description = description,
+        required = required.contains(name),
+        deprecated = deprecated,
+        schemas = schemasForProperty,
       )
     }
   }
@@ -60,9 +60,9 @@ object JsonSchemaIntrospector {
   }
 
   private fun collectSchemasAtPath(
-      schema: JsonObject,
-      path: List<SchemaPathSegment>,
-      rootSchema: JsonObject,
+    schema: JsonObject,
+    path: List<SchemaPathSegment>,
+    rootSchema: JsonObject,
   ): List<JsonObject> {
     if (path.isEmpty()) {
       return listOf(resolveRef(schema, rootSchema))
@@ -88,9 +88,9 @@ object JsonSchemaIntrospector {
   }
 
   private fun collectPropertySchemas(
-      schema: JsonObject,
-      key: String,
-      rootSchema: JsonObject,
+    schema: JsonObject,
+    key: String,
+    rootSchema: JsonObject,
   ): List<JsonObject> {
     val resolved = resolveRef(schema, rootSchema)
     val result = mutableListOf<JsonObject>()
@@ -107,10 +107,10 @@ object JsonSchemaIntrospector {
   }
 
   private fun collectProperties(
-      schema: JsonObject,
-      rootSchema: JsonObject,
-      properties: MutableMap<String, MutableList<JsonObject>>,
-      required: MutableSet<String>,
+    schema: JsonObject,
+    rootSchema: JsonObject,
+    properties: MutableMap<String, MutableList<JsonObject>>,
+    required: MutableSet<String>,
   ) {
     val resolved = resolveRef(schema, rootSchema)
     resolved.objectValue("properties")?.forEach { (key, value) ->

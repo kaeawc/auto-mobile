@@ -131,7 +131,7 @@ class SdkContextTest {
           latch.countDown()
         }
       }
-          .start()
+        .start()
     }
 
     latch.await()

@@ -134,11 +134,11 @@ object AutoMobileCrashes {
 
   private fun broadcastCrash(thread: Thread, throwable: Throwable) {
     val ctx =
-        context
-            ?: run {
-              AutoMobileSDK.logger.w(TAG) { "Context not available, cannot broadcast crash" }
-              return
-            }
+      context
+        ?: run {
+          AutoMobileSDK.logger.w(TAG) { "Context not available, cannot broadcast crash" }
+          return
+        }
 
     try {
       val timestamp = System.currentTimeMillis()
@@ -181,50 +181,50 @@ object AutoMobileCrashes {
 
       // Create protocol event for type-safe serialization
       val sdkEvent =
-          SdkCrashEvent(
-              timestamp = timestamp,
-              applicationId = ctx.packageName,
-              exceptionClass = throwable.javaClass.name,
-              exceptionMessage = throwable.message,
-              stackTrace = fullStackTrace,
-              threadName = thread.name,
-              currentScreen = currentScreen,
-              appVersion = appVersion,
-              deviceInfo =
-                  SdkDeviceInfo(
-                      model = Build.MODEL,
-                      manufacturer = Build.MANUFACTURER,
-                      osVersion = Build.VERSION.RELEASE,
-                      sdkInt = Build.VERSION.SDK_INT,
-                  ),
-          )
+        SdkCrashEvent(
+          timestamp = timestamp,
+          applicationId = ctx.packageName,
+          exceptionClass = throwable.javaClass.name,
+          exceptionMessage = throwable.message,
+          stackTrace = fullStackTrace,
+          threadName = thread.name,
+          currentScreen = currentScreen,
+          appVersion = appVersion,
+          deviceInfo =
+            SdkDeviceInfo(
+              model = Build.MODEL,
+              manufacturer = Build.MANUFACTURER,
+              osVersion = Build.VERSION.RELEASE,
+              sdkInt = Build.VERSION.SDK_INT,
+            ),
+        )
 
       val intent =
-          Intent(ACTION_CRASH).apply {
-            // Scope broadcast to only the accessibility service to prevent data leakage
-            setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
+        Intent(ACTION_CRASH).apply {
+          // Scope broadcast to only the accessibility service to prevent data leakage
+          setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
 
-            // Type-safe serialized event (new protocol)
-            putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(sdkEvent))
-            putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.CRASH)
+          // Type-safe serialized event (new protocol)
+          putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(sdkEvent))
+          putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.CRASH)
 
-            // Legacy extras for backward compatibility
-            putExtra(EXTRA_TIMESTAMP, timestamp)
-            putExtra(EXTRA_EXCEPTION_CLASS, throwable.javaClass.name)
-            putExtra(EXTRA_EXCEPTION_MESSAGE, throwable.message)
-            putExtra(EXTRA_STACK_TRACE, fullStackTrace)
-            putExtra(EXTRA_THREAD_NAME, thread.name)
-            putExtra(EXTRA_CURRENT_SCREEN, currentScreen)
-            putExtra(EXTRA_PACKAGE_NAME, ctx.packageName)
-            putExtra(EXTRA_APP_VERSION, appVersion)
-            putExtra(EXTRA_DEVICE_MODEL, Build.MODEL)
-            putExtra(EXTRA_DEVICE_MANUFACTURER, Build.MANUFACTURER)
-            putExtra(EXTRA_OS_VERSION, Build.VERSION.RELEASE)
-            putExtra(EXTRA_SDK_INT, Build.VERSION.SDK_INT)
+          // Legacy extras for backward compatibility
+          putExtra(EXTRA_TIMESTAMP, timestamp)
+          putExtra(EXTRA_EXCEPTION_CLASS, throwable.javaClass.name)
+          putExtra(EXTRA_EXCEPTION_MESSAGE, throwable.message)
+          putExtra(EXTRA_STACK_TRACE, fullStackTrace)
+          putExtra(EXTRA_THREAD_NAME, thread.name)
+          putExtra(EXTRA_CURRENT_SCREEN, currentScreen)
+          putExtra(EXTRA_PACKAGE_NAME, ctx.packageName)
+          putExtra(EXTRA_APP_VERSION, appVersion)
+          putExtra(EXTRA_DEVICE_MODEL, Build.MODEL)
+          putExtra(EXTRA_DEVICE_MANUFACTURER, Build.MANUFACTURER)
+          putExtra(EXTRA_OS_VERSION, Build.VERSION.RELEASE)
+          putExtra(EXTRA_SDK_INT, Build.VERSION.SDK_INT)
 
-            // Attach breadcrumb trail snapshot
-            serializeBreadcrumbs()?.let { putExtra(EXTRA_BREADCRUMBS, it) }
-          }
+          // Attach breadcrumb trail snapshot
+          serializeBreadcrumbs()?.let { putExtra(EXTRA_BREADCRUMBS, it) }
+        }
 
       ctx.sendBroadcast(intent)
 
@@ -288,14 +288,14 @@ object AutoMobileCrashes {
   private fun getAppVersion(context: Context): String? {
     return try {
       val packageInfo =
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.packageManager.getPackageInfo(
-                context.packageName,
-                PackageManager.PackageInfoFlags.of(0),
-            )
-          } else {
-            @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0)
-          }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.PackageInfoFlags.of(0),
+          )
+        } else {
+          @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0)
+        }
       packageInfo.versionName
     } catch (e: Exception) {
       AutoMobileSDK.logger.w(TAG, e) { "Failed to get app version" }

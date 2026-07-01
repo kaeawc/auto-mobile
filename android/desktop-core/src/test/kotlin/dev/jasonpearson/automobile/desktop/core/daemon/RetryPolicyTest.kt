@@ -12,10 +12,10 @@ class RetryPolicyTest {
   fun succeedsOnFirstAttemptWithoutRetry() {
     var attempts = 0
     val result =
-        retryWithBackoffBlocking(RetryPolicy(maxRetries = 3, initialDelayMs = 1)) {
-          attempts++
-          "ok"
-        }
+      retryWithBackoffBlocking(RetryPolicy(maxRetries = 3, initialDelayMs = 1)) {
+        attempts++
+        "ok"
+      }
     assertEquals("ok", result)
     assertEquals(1, attempts)
   }
@@ -25,12 +25,12 @@ class RetryPolicyTest {
     var attempts = 0
     val policy = RetryPolicy(maxRetries = 3, initialDelayMs = 1, jitterFraction = 0.0)
     val ex =
-        assertFailsWith<IllegalStateException> {
-          retryWithBackoffBlocking(policy) {
-            attempts++
-            throw IllegalStateException("fail $attempts")
-          }
+      assertFailsWith<IllegalStateException> {
+        retryWithBackoffBlocking(policy) {
+          attempts++
+          throw IllegalStateException("fail $attempts")
         }
+      }
     assertEquals(3, attempts)
     assertEquals("fail 3", ex.message)
   }
@@ -40,11 +40,11 @@ class RetryPolicyTest {
     var attempts = 0
     val policy = RetryPolicy(maxRetries = 3, initialDelayMs = 1, jitterFraction = 0.0)
     val result =
-        retryWithBackoffBlocking(policy) {
-          attempts++
-          if (attempts < 2) throw IllegalStateException("transient")
-          "recovered"
-        }
+      retryWithBackoffBlocking(policy) {
+        attempts++
+        if (attempts < 2) throw IllegalStateException("transient")
+        "recovered"
+      }
     assertEquals("recovered", result)
     assertEquals(2, attempts)
   }
@@ -79,10 +79,10 @@ class RetryPolicyTest {
   fun zeroMaxRetriesExecutesBlockOnce() {
     var attempts = 0
     val result =
-        retryWithBackoffBlocking(RetryPolicy(maxRetries = 0, initialDelayMs = 1)) {
-          attempts++
-          "ok"
-        }
+      retryWithBackoffBlocking(RetryPolicy(maxRetries = 0, initialDelayMs = 1)) {
+        attempts++
+        "ok"
+      }
     assertEquals("ok", result)
     assertEquals(1, attempts)
   }
@@ -91,12 +91,12 @@ class RetryPolicyTest {
   fun zeroMaxRetriesThrowsOnFailure() {
     var attempts = 0
     val ex =
-        assertFailsWith<IllegalStateException> {
-          retryWithBackoffBlocking(RetryPolicy(maxRetries = 0, initialDelayMs = 1)) {
-            attempts++
-            throw IllegalStateException("fail")
-          }
+      assertFailsWith<IllegalStateException> {
+        retryWithBackoffBlocking(RetryPolicy(maxRetries = 0, initialDelayMs = 1)) {
+          attempts++
+          throw IllegalStateException("fail")
         }
+      }
     assertEquals(1, attempts)
     assertEquals("fail", ex.message)
   }
@@ -104,13 +104,13 @@ class RetryPolicyTest {
   @Test
   fun backoffDelayRespectsMaxDelay() {
     val policy =
-        RetryPolicy(
-            maxRetries = 3,
-            initialDelayMs = 10000,
-            maxDelayMs = 5,
-            backoffMultiplier = 10.0,
-            jitterFraction = 0.0,
-        )
+      RetryPolicy(
+        maxRetries = 3,
+        initialDelayMs = 10000,
+        maxDelayMs = 5,
+        backoffMultiplier = 10.0,
+        jitterFraction = 0.0,
+      )
     var attempts = 0
     val start = System.currentTimeMillis()
     assertFailsWith<RuntimeException> {

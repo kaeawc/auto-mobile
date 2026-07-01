@@ -28,39 +28,39 @@ class ToolResultParserTest {
   @Test
   fun `parse tapOn response with selectedElement`() {
     val payload =
-        """
-        {
-          "success": true,
-          "action": "tap",
-          "element": {
-            "text": "Test Channel",
-            "resource-id": "com.example:id/item",
-            "content-desc": "Item",
-            "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 100 }
+      """
+      {
+        "success": true,
+        "action": "tap",
+        "element": {
+          "text": "Test Channel",
+          "resource-id": "com.example:id/item",
+          "content-desc": "Item",
+          "bounds": { "left": 0, "top": 0, "right": 100, "bottom": 100 }
+        },
+        "selectedElement": {
+          "text": "Test Channel",
+          "resourceId": "com.example:id/item",
+          "bounds": {
+            "left": 0, "top": 0, "right": 100, "bottom": 100,
+            "centerX": 50, "centerY": 50
           },
-          "selectedElement": {
-            "text": "Test Channel",
-            "resourceId": "com.example:id/item",
-            "bounds": {
-              "left": 0, "top": 0, "right": 100, "bottom": 100,
-              "centerX": 50, "centerY": 50
-            },
-            "indexInMatches": 2,
-            "totalMatches": 5,
-            "selectionStrategy": "random"
-          },
-          "observation": {
-            "selectedElements": [
-              {
-                "text": "Test Channel",
-                "resourceId": "com.example:id/item",
-                "selectedState": { "method": "visual", "confidence": 0.8 }
-              }
-            ]
-          }
+          "indexInMatches": 2,
+          "totalMatches": 5,
+          "selectionStrategy": "random"
+        },
+        "observation": {
+          "selectedElements": [
+            {
+              "text": "Test Channel",
+              "resourceId": "com.example:id/item",
+              "selectedState": { "method": "visual", "confidence": 0.8 }
+            }
+          ]
         }
-        """
-            .trimIndent()
+      }
+      """
+        .trimIndent()
 
     val response = ToolResultParser.parseTapOnResponse(payload)
 
@@ -74,13 +74,13 @@ class ToolResultParserTest {
   @Test
   fun `parse tapOn response without selectedElement is backwards compatible`() {
     val payload =
-        """
-        {
-          "success": true,
-          "action": "tap"
-        }
-        """
-            .trimIndent()
+      """
+      {
+        "success": true,
+        "action": "tap"
+      }
+      """
+        .trimIndent()
 
     val response = ToolResultParser.parseTapOnResponse(payload)
 
@@ -91,14 +91,14 @@ class ToolResultParserTest {
   @Test
   fun `parse tapOn response without action for focus noop`() {
     val payload =
-        """
-        {
-          "success": true,
-          "wasAlreadyFocused": true,
-          "focusChanged": false
-        }
-        """
-            .trimIndent()
+      """
+      {
+        "success": true,
+        "wasAlreadyFocused": true,
+        "focusChanged": false
+      }
+      """
+        .trimIndent()
 
     val response = ToolResultParser.parseTapOnResponse(payload)
 
@@ -109,13 +109,13 @@ class ToolResultParserTest {
   @Test
   fun `parse tool result for unknown tool returns generic response`() {
     val payload =
-        """
-        {
-          "success": true,
-          "customField": "value"
-        }
-        """
-            .trimIndent()
+      """
+      {
+        "success": true,
+        "customField": "value"
+      }
+      """
+        .trimIndent()
 
     val result = ToolResultParser.parseToolResult(0, "unknownTool", payload)
 
@@ -126,14 +126,14 @@ class ToolResultParserTest {
   @Test
   fun `parse MCP response wrapper`() {
     val payload =
-        """
-        {
-          "content": [
-            { "type": "text", "text": "{\"success\":true,\"action\":\"tap\"}" }
-          ]
-        }
-        """
-            .trimIndent()
+      """
+      {
+        "content": [
+          { "type": "text", "text": "{\"success\":true,\"action\":\"tap\"}" }
+        ]
+      }
+      """
+        .trimIndent()
 
     val element = json.parseToJsonElement(payload)
     val result = ToolResultParser.parseToolResultFromMcpResponse(1, "tapOn", element)
@@ -166,16 +166,14 @@ class ToolResultParserTest {
   @Test
   fun `generate sample payload from fake schema`() {
     val fakeSchema =
-        JsonObject(
-            mapOf(
-                "type" to JsonPrimitive("object"),
-                "properties" to
-                    JsonObject(
-                        mapOf("success" to JsonObject(mapOf("type" to JsonPrimitive("boolean"))))
-                    ),
-                "required" to JsonArray(listOf(JsonPrimitive("success"))),
-            )
+      JsonObject(
+        mapOf(
+          "type" to JsonPrimitive("object"),
+          "properties" to
+            JsonObject(mapOf("success" to JsonObject(mapOf("type" to JsonPrimitive("boolean"))))),
+          "required" to JsonArray(listOf(JsonPrimitive("success"))),
         )
+      )
 
     val sample = SchemaSampleGenerator.generate(fakeSchema).jsonObject
 
@@ -185,21 +183,21 @@ class ToolResultParserTest {
   @Test
   fun `load fake tool definitions without disk IO`() {
     val fakeDefinitions =
-        """
-        [
-          {
-            "name": "tapOn",
-            "outputSchema": {
-              "type": "object",
-              "properties": {
-                "success": { "type": "boolean" }
-              },
-              "required": ["success"]
-            }
+      """
+      [
+        {
+          "name": "tapOn",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "success": { "type": "boolean" }
+            },
+            "required": ["success"]
           }
-        ]
-        """
-            .trimIndent()
+        }
+      ]
+      """
+        .trimIndent()
 
     val definitions = FakeToolDefinitionsSource(json, fakeDefinitions).load()
 
@@ -210,8 +208,8 @@ class ToolResultParserTest {
 
 @Serializable
 private data class ToolDefinitionSnapshot(
-    val name: String,
-    val outputSchema: JsonObject? = null,
+  val name: String,
+  val outputSchema: JsonObject? = null,
 )
 
 private interface ToolDefinitionsSource {
@@ -219,8 +217,8 @@ private interface ToolDefinitionsSource {
 }
 
 private class DiskToolDefinitionsSource(
-    private val json: Json,
-    private val path: Path,
+  private val json: Json,
+  private val path: Path,
 ) : ToolDefinitionsSource {
   override fun load(): List<ToolDefinitionSnapshot> {
     val content = Files.readString(path)
@@ -229,8 +227,8 @@ private class DiskToolDefinitionsSource(
 }
 
 private class FakeToolDefinitionsSource(
-    private val json: Json,
-    private val content: String,
+  private val json: Json,
+  private val content: String,
 ) : ToolDefinitionsSource {
   override fun load(): List<ToolDefinitionSnapshot> {
     return json.decodeFromString(content)
@@ -308,8 +306,8 @@ private object SchemaSampleGenerator {
   private fun generateObject(schema: JsonObject, root: JsonObject): JsonElement {
     val properties = schema["properties"]?.jsonObject ?: JsonObject(emptyMap())
     val required =
-        schema["required"]?.jsonArray?.mapNotNull { (it as? JsonPrimitive)?.content }?.toSet()
-            ?: emptySet()
+      schema["required"]?.jsonArray?.mapNotNull { (it as? JsonPrimitive)?.content }?.toSet()
+        ?: emptySet()
 
     val values = mutableMapOf<String, JsonElement>()
     for (key in required) {

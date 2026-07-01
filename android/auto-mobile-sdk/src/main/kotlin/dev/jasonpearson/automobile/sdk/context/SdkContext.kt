@@ -29,10 +29,10 @@ internal class SdkContext {
   fun snapshot(): SdkContextSnapshot {
     lock.withLock {
       return SdkContextSnapshot(
-          sessionId = sessionId,
-          userId = userId,
-          appVersion = appVersion,
-          tags = HashMap(_tags),
+        sessionId = sessionId,
+        userId = userId,
+        appVersion = appVersion,
+        tags = HashMap(_tags),
       )
     }
   }
@@ -50,8 +50,8 @@ internal class SdkContext {
 
 /** Immutable snapshot of SDK context at a point in time. */
 data class SdkContextSnapshot(
-    val sessionId: String?,
-    val userId: String?,
-    val appVersion: String?,
-    val tags: Map<String, String>,
+  val sessionId: String?,
+  val userId: String?,
+  val appVersion: String?,
+  val tags: Map<String, String>,
 )

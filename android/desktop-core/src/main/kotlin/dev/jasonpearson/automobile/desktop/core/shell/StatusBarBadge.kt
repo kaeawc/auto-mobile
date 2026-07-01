@@ -26,40 +26,38 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
  */
 @Composable
 fun StatusBarBadge(
-    count: Int,
-    label: String,
-    color: Color,
-    modifier: Modifier = Modifier,
+  count: Int,
+  label: String,
+  color: Color,
+  modifier: Modifier = Modifier,
 ) {
   if (count <= 0) return
 
   val textColor = SharedTheme.globalColors.text.normal
 
   Row(
-      modifier =
-          modifier
-              .height(20.dp)
-              .clip(RoundedCornerShape(4.dp))
-              .background(color.copy(alpha = 0.12f))
-              .padding(horizontal = 4.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      modifier
+        .height(20.dp)
+        .clip(RoundedCornerShape(4.dp))
+        .background(color.copy(alpha = 0.12f))
+        .padding(horizontal = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
-    Box(
-        modifier = Modifier.size(6.dp).clip(CircleShape).background(color),
+    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(color))
+    Spacer(modifier = Modifier.width(3.dp))
+    Text(
+      text = "$count",
+      fontSize = 11.sp,
+      color = color,
+      lineHeight = 11.sp,
     )
     Spacer(modifier = Modifier.width(3.dp))
     Text(
-        text = "$count",
-        fontSize = 11.sp,
-        color = color,
-        lineHeight = 11.sp,
-    )
-    Spacer(modifier = Modifier.width(3.dp))
-    Text(
-        text = label,
-        fontSize = 10.sp,
-        color = textColor.copy(alpha = 0.7f),
-        lineHeight = 10.sp,
+      text = label,
+      fontSize = 10.sp,
+      color = textColor.copy(alpha = 0.7f),
+      lineHeight = 10.sp,
     )
   }
 }

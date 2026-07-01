@@ -48,11 +48,11 @@ class FakeAutoMobileClientTest {
   fun `returns configurable observe result`() {
     val client = FakeAutoMobileClient()
     val result =
-        ObserveResult(
-            updatedAt = 12345L,
-            screenSize = ObserveScreenSize(width = 1080, height = 1920),
-            rotation = 0,
-        )
+      ObserveResult(
+        updatedAt = 12345L,
+        screenSize = ObserveScreenSize(width = 1080, height = 1920),
+        rotation = 0,
+      )
     client.observeResult = result
 
     assertEquals(result, client.observe("android"))

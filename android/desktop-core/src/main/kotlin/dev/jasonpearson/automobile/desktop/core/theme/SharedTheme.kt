@@ -15,21 +15,19 @@ import androidx.compose.ui.unit.sp
  * colors through a single abstraction.
  */
 data class SharedTextColors(
-    val normal: Color,
-    val info: Color,
-    val error: Color,
-    val warning: Color,
-    val success: Color,
+  val normal: Color,
+  val info: Color,
+  val error: Color,
+  val warning: Color,
+  val success: Color,
 )
 
-data class SharedOutlineColors(
-    val focused: Color,
-)
+data class SharedOutlineColors(val focused: Color)
 
 data class SharedGlobalColors(
-    val text: SharedTextColors,
-    val outlines: SharedOutlineColors,
-    val panelBackground: Color,
+  val text: SharedTextColors,
+  val outlines: SharedOutlineColors,
+  val panelBackground: Color,
 )
 
 /** Named text styles for consistent typography across the desktop app. */
@@ -47,19 +45,16 @@ object SharedTheme {
     @Composable
     @ReadOnlyComposable
     get() =
-        SharedGlobalColors(
-            text =
-                SharedTextColors(
-                    normal = MaterialTheme.colorScheme.onSurface,
-                    info = MaterialTheme.colorScheme.primary,
-                    error = MaterialTheme.colorScheme.error,
-                    warning = MaterialTheme.colorScheme.tertiary,
-                    success = Color(0xFF4CAF50),
-                ),
-            outlines =
-                SharedOutlineColors(
-                    focused = MaterialTheme.colorScheme.primary,
-                ),
-            panelBackground = MaterialTheme.colorScheme.surface,
-        )
+      SharedGlobalColors(
+        text =
+          SharedTextColors(
+            normal = MaterialTheme.colorScheme.onSurface,
+            info = MaterialTheme.colorScheme.primary,
+            error = MaterialTheme.colorScheme.error,
+            warning = MaterialTheme.colorScheme.tertiary,
+            success = Color(0xFF4CAF50),
+          ),
+        outlines = SharedOutlineColors(focused = MaterialTheme.colorScheme.primary),
+        panelBackground = MaterialTheme.colorScheme.surface,
+      )
 }

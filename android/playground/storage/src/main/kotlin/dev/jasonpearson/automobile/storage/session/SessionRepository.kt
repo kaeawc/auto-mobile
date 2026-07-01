@@ -11,20 +11,20 @@ class SessionRepository(private val context: Context) {
 
   fun recordSessionStart() {
     val appVersion =
-        try {
-          context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        } catch (e: Exception) {
-          null
-        }
+      try {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+      } catch (e: Exception) {
+        null
+      }
 
     val values =
-        ContentValues().apply {
-          put("session_id", UUID.randomUUID().toString())
-          put("started_at", System.currentTimeMillis())
-          put("app_version", appVersion)
-          put("device_model", Build.MODEL)
-          put("os_version", Build.VERSION.RELEASE)
-        }
+      ContentValues().apply {
+        put("session_id", UUID.randomUUID().toString())
+        put("started_at", System.currentTimeMillis())
+        put("app_version", appVersion)
+        put("device_model", Build.MODEL)
+        put("os_version", Build.VERSION.RELEASE)
+      }
 
     database.writableDatabase.insert("sessions", null, values)
   }

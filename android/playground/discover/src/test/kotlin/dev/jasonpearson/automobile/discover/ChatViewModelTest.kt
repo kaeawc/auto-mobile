@@ -117,18 +117,18 @@ class ChatViewModelTest {
   @Test
   fun `bot responses are from predefined list`() = runTest {
     val botResponses =
-        listOf(
-            "That's interesting! Tell me more.",
-            "I see what you mean.",
-            "Thanks for sharing that with me.",
-            "How do you feel about that?",
-            "What do you think about this topic?",
-            "That sounds great!",
-            "I understand your perspective.",
-            "Could you elaborate on that?",
-            "That's a good point.",
-            "I appreciate you telling me this.",
-        )
+      listOf(
+        "That's interesting! Tell me more.",
+        "I see what you mean.",
+        "Thanks for sharing that with me.",
+        "How do you feel about that?",
+        "What do you think about this topic?",
+        "That sounds great!",
+        "I understand your perspective.",
+        "Could you elaborate on that?",
+        "That's a good point.",
+        "I appreciate you telling me this.",
+      )
 
     viewModel.addUserMessage("Test message")
     advanceTimeBy(4000L)
@@ -137,8 +137,8 @@ class ChatViewModelTest {
     val botMessage = messages.last()
 
     assertTrue(
-        "Bot response should be from predefined list",
-        botResponses.contains(botMessage.text),
+      "Bot response should be from predefined list",
+      botResponses.contains(botMessage.text),
     )
   }
 
@@ -176,8 +176,8 @@ class ChatViewModelTest {
     val userMessage = messages.last()
 
     assertTrue(
-        "Message timestamp should be within expected range",
-        userMessage.timestamp in beforeTime..afterTime,
+      "Message timestamp should be within expected range",
+      userMessage.timestamp in beforeTime..afterTime,
     )
   }
 }

@@ -17,8 +17,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 class McpStdioClient(
-    private val command: String,
-    private val json: Json = Json { ignoreUnknownKeys = true },
+  private val command: String,
+  private val json: Json = Json { ignoreUnknownKeys = true },
 ) : AutoMobileClient {
   override val transportName: String = "MCP STDIO"
   override val connectionDescription: String = command
@@ -45,7 +45,7 @@ class McpStdioClient(
     ensureInitialized()
     val response = sendRequest("resources/list-templates")
     val result =
-        json.decodeFromJsonElement(ListResourceTemplatesResult.serializer(), response.result!!)
+      json.decodeFromJsonElement(ListResourceTemplatesResult.serializer(), response.result!!)
     return result.resourceTemplates
   }
 
@@ -59,20 +59,20 @@ class McpStdioClient(
   override fun readResource(uri: String): List<McpResourceContent> {
     ensureInitialized()
     val response =
-        sendRequest(
-            "resources/read",
-            buildJsonObject { put("uri", JsonPrimitive(uri)) },
-        )
+      sendRequest(
+        "resources/read",
+        buildJsonObject { put("uri", JsonPrimitive(uri)) },
+      )
     val result = json.decodeFromJsonElement(ReadResourceResult.serializer(), response.result!!)
     return result.contents
   }
 
   override fun getNavigationGraph(platform: String): JsonElement {
     val response =
-        callTool(
-            "getNavigationGraph",
-            buildJsonObject { put("platform", JsonPrimitive(platform)) },
-        )
+      callTool(
+        "getNavigationGraph",
+        buildJsonObject { put("platform", JsonPrimitive(platform)) },
+      )
     return response
   }
 
@@ -83,29 +83,29 @@ class McpStdioClient(
   }
 
   override fun setFeatureFlag(
-      key: String,
-      enabled: Boolean,
-      config: JsonObject?,
+    key: String,
+    enabled: Boolean,
+    config: JsonObject?,
   ): FeatureFlagState {
     val response =
-        callTool(
-            "setFeatureFlag",
-            buildJsonObject {
-              put("key", JsonPrimitive(key))
-              put("enabled", JsonPrimitive(enabled))
-              if (config != null) {
-                put("config", config)
-              }
-            },
-        )
+      callTool(
+        "setFeatureFlag",
+        buildJsonObject {
+          put("key", JsonPrimitive(key))
+          put("enabled", JsonPrimitive(enabled))
+          if (config != null) {
+            put("config", config)
+          }
+        },
+      )
     return decodeToolResponse(json, response, FeatureFlagState.serializer())
   }
 
   override fun listPerformanceAuditResults(
-      startTime: String?,
-      endTime: String?,
-      limit: Int?,
-      offset: Int?,
+    startTime: String?,
+    endTime: String?,
+    limit: Int?,
+    offset: Int?,
   ): PerformanceAuditHistoryResult {
     val uri = buildPerformanceResultsUri(startTime, endTime, limit, offset)
     val contents = readResource(uri)
@@ -127,53 +127,53 @@ class McpStdioClient(
   }
 
   override fun stopTestRecording(
-      recordingId: String?,
-      planName: String?,
+    recordingId: String?,
+    planName: String?,
   ): TestRecordingStopResult {
     val resolvedPlanName = planName?.ifBlank { null }
     return testRecordingClient.stopTestRecording(recordingId, resolvedPlanName)
   }
 
   override fun executePlan(
-      planContent: String,
-      platform: String,
-      startStep: Int?,
-      sessionUuid: String?,
+    planContent: String,
+    platform: String,
+    startStep: Int?,
+    sessionUuid: String?,
   ): ExecutePlanResult {
     val response =
-        callTool(
-            "executePlan",
-            buildJsonObject {
-              put("planContent", JsonPrimitive(planContent))
-              put("platform", JsonPrimitive(platform))
-              if (startStep != null) {
-                put("startStep", JsonPrimitive(startStep))
-              }
-              if (!sessionUuid.isNullOrBlank()) {
-                put("sessionUuid", JsonPrimitive(sessionUuid))
-              }
-            },
-        )
+      callTool(
+        "executePlan",
+        buildJsonObject {
+          put("planContent", JsonPrimitive(planContent))
+          put("platform", JsonPrimitive(platform))
+          if (startStep != null) {
+            put("startStep", JsonPrimitive(startStep))
+          }
+          if (!sessionUuid.isNullOrBlank()) {
+            put("sessionUuid", JsonPrimitive(sessionUuid))
+          }
+        },
+      )
     return decodeToolResponse(json, response, ExecutePlanResult.serializer())
   }
 
   override fun startDevice(name: String, platform: String, deviceId: String?): StartDeviceResult {
     val response =
-        callTool(
-            "startDevice",
+      callTool(
+        "startDevice",
+        buildJsonObject {
+          put(
+            "device",
             buildJsonObject {
-              put(
-                  "device",
-                  buildJsonObject {
-                    put("name", JsonPrimitive(name))
-                    put("platform", JsonPrimitive(platform))
-                    if (deviceId != null) {
-                      put("deviceId", JsonPrimitive(deviceId))
-                    }
-                  },
-              )
+              put("name", JsonPrimitive(name))
+              put("platform", JsonPrimitive(platform))
+              if (deviceId != null) {
+                put("deviceId", JsonPrimitive(deviceId))
+              }
             },
-        )
+          )
+        },
+      )
     return try {
       decodeToolResponse(json, response, StartDeviceResult.serializer())
     } catch (e: Exception) {
@@ -183,13 +183,13 @@ class McpStdioClient(
 
   override fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult {
     val response =
-        callTool(
-            "setActiveDevice",
-            buildJsonObject {
-              put("deviceId", JsonPrimitive(deviceId))
-              put("platform", JsonPrimitive(platform))
-            },
-        )
+      callTool(
+        "setActiveDevice",
+        buildJsonObject {
+          put("deviceId", JsonPrimitive(deviceId))
+          put("platform", JsonPrimitive(platform))
+        },
+      )
     return try {
       decodeToolResponse(json, response, SetActiveDeviceResult.serializer())
     } catch (e: Exception) {
@@ -199,12 +199,12 @@ class McpStdioClient(
 
   override fun observe(platform: String): ObserveResult {
     val response =
-        callTool(
-            "observe",
-            buildJsonObject {
-              put("platform", JsonPrimitive(platform))
-            },
-        )
+      callTool(
+        "observe",
+        buildJsonObject {
+          put("platform", JsonPrimitive(platform))
+        },
+      )
     return try {
       decodeToolResponse(json, response, ObserveResult.serializer())
     } catch (e: Exception) {
@@ -214,19 +214,19 @@ class McpStdioClient(
 
   override fun killDevice(name: String, deviceId: String, platform: String): KillDeviceResult {
     val response =
-        callTool(
-            "killDevice",
+      callTool(
+        "killDevice",
+        buildJsonObject {
+          put(
+            "device",
             buildJsonObject {
-              put(
-                  "device",
-                  buildJsonObject {
-                    put("name", JsonPrimitive(name))
-                    put("deviceId", JsonPrimitive(deviceId))
-                    put("platform", JsonPrimitive(platform))
-                  },
-              )
+              put("name", JsonPrimitive(name))
+              put("deviceId", JsonPrimitive(deviceId))
+              put("platform", JsonPrimitive(platform))
             },
-        )
+          )
+        },
+      )
     return try {
       decodeToolResponse(json, response, KillDeviceResult.serializer())
     } catch (e: Exception) {
@@ -235,17 +235,17 @@ class McpStdioClient(
   }
 
   override fun getDaemonStatus():
-      dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
+    dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
     val response =
-        callTool(
-            "getDaemonStatus",
-            JsonObject(emptyMap()),
-        )
+      callTool(
+        "getDaemonStatus",
+        JsonObject(emptyMap()),
+      )
     return try {
       decodeToolResponse(
-          json,
-          response,
-          dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse.serializer(),
+        json,
+        response,
+        dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse.serializer(),
       )
     } catch (e: Exception) {
       dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse()
@@ -254,13 +254,13 @@ class McpStdioClient(
 
   override fun updateService(deviceId: String, platform: String): UpdateServiceResult {
     val response =
-        callTool(
-            "updateService",
-            buildJsonObject {
-              put("deviceId", JsonPrimitive(deviceId))
-              put("platform", JsonPrimitive(platform))
-            },
-        )
+      callTool(
+        "updateService",
+        buildJsonObject {
+          put("deviceId", JsonPrimitive(deviceId))
+          put("platform", JsonPrimitive(platform))
+        },
+      )
     return try {
       decodeToolResponse(json, response, UpdateServiceResult.serializer())
     } catch (e: Exception) {
@@ -269,29 +269,29 @@ class McpStdioClient(
   }
 
   override fun setKeyValue(
-      deviceId: String,
-      appId: String,
-      fileName: String,
-      key: String,
-      value: String?,
-      type: String,
+    deviceId: String,
+    appId: String,
+    fileName: String,
+    key: String,
+    value: String?,
+    type: String,
   ): SetKeyValueResult {
     val response =
-        callTool(
-            "setKeyValue",
-            buildJsonObject {
-              put("deviceId", JsonPrimitive(deviceId))
-              put("platform", JsonPrimitive("android"))
-              put("appId", JsonPrimitive(appId))
-              put("fileName", JsonPrimitive(fileName))
-              put("key", JsonPrimitive(key))
-              put(
-                  "value",
-                  if (value != null) JsonPrimitive(value) else kotlinx.serialization.json.JsonNull,
-              )
-              put("type", JsonPrimitive(type))
-            },
-        )
+      callTool(
+        "setKeyValue",
+        buildJsonObject {
+          put("deviceId", JsonPrimitive(deviceId))
+          put("platform", JsonPrimitive("android"))
+          put("appId", JsonPrimitive(appId))
+          put("fileName", JsonPrimitive(fileName))
+          put("key", JsonPrimitive(key))
+          put(
+            "value",
+            if (value != null) JsonPrimitive(value) else kotlinx.serialization.json.JsonNull,
+          )
+          put("type", JsonPrimitive(type))
+        },
+      )
     return try {
       decodeToolResponse(json, response, SetKeyValueResult.serializer())
     } catch (e: Exception) {
@@ -300,22 +300,22 @@ class McpStdioClient(
   }
 
   override fun removeKeyValue(
-      deviceId: String,
-      appId: String,
-      fileName: String,
-      key: String,
+    deviceId: String,
+    appId: String,
+    fileName: String,
+    key: String,
   ): RemoveKeyValueResult {
     val response =
-        callTool(
-            "removeKeyValue",
-            buildJsonObject {
-              put("deviceId", JsonPrimitive(deviceId))
-              put("platform", JsonPrimitive("android"))
-              put("appId", JsonPrimitive(appId))
-              put("fileName", JsonPrimitive(fileName))
-              put("key", JsonPrimitive(key))
-            },
-        )
+      callTool(
+        "removeKeyValue",
+        buildJsonObject {
+          put("deviceId", JsonPrimitive(deviceId))
+          put("platform", JsonPrimitive("android"))
+          put("appId", JsonPrimitive(appId))
+          put("fileName", JsonPrimitive(fileName))
+          put("key", JsonPrimitive(key))
+        },
+      )
     return try {
       decodeToolResponse(json, response, RemoveKeyValueResult.serializer())
     } catch (e: Exception) {
@@ -324,20 +324,20 @@ class McpStdioClient(
   }
 
   override fun clearKeyValueFile(
-      deviceId: String,
-      appId: String,
-      fileName: String,
+    deviceId: String,
+    appId: String,
+    fileName: String,
   ): ClearKeyValueResult {
     val response =
-        callTool(
-            "clearKeyValueFile",
-            buildJsonObject {
-              put("deviceId", JsonPrimitive(deviceId))
-              put("platform", JsonPrimitive("android"))
-              put("appId", JsonPrimitive(appId))
-              put("fileName", JsonPrimitive(fileName))
-            },
-        )
+      callTool(
+        "clearKeyValueFile",
+        buildJsonObject {
+          put("deviceId", JsonPrimitive(deviceId))
+          put("platform", JsonPrimitive("android"))
+          put("appId", JsonPrimitive(appId))
+          put("fileName", JsonPrimitive(fileName))
+        },
+      )
     return try {
       decodeToolResponse(json, response, ClearKeyValueResult.serializer())
     } catch (e: Exception) {
@@ -348,13 +348,13 @@ class McpStdioClient(
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
     ensureInitialized()
     val response =
-        sendRequest(
-            "tools/call",
-            buildJsonObject {
-              put("name", JsonPrimitive(name))
-              put("arguments", arguments)
-            },
-        )
+      sendRequest(
+        "tools/call",
+        buildJsonObject {
+          put("name", JsonPrimitive(name))
+          put("arguments", arguments)
+        },
+      )
     return response.result ?: JsonObject(emptyMap())
   }
 
@@ -379,20 +379,20 @@ class McpStdioClient(
     }
 
     val response =
-        sendRequest(
-            "initialize",
+      sendRequest(
+        "initialize",
+        buildJsonObject {
+          put("protocolVersion", JsonPrimitive(LATEST_MCP_PROTOCOL_VERSION))
+          put("capabilities", JsonObject(emptyMap()))
+          put(
+            "clientInfo",
             buildJsonObject {
-              put("protocolVersion", JsonPrimitive(LATEST_MCP_PROTOCOL_VERSION))
-              put("capabilities", JsonObject(emptyMap()))
-              put(
-                  "clientInfo",
-                  buildJsonObject {
-                    put("name", JsonPrimitive("auto-mobile-ide-plugin"))
-                    put("version", JsonPrimitive("0.1.0"))
-                  },
-              )
+              put("name", JsonPrimitive("auto-mobile-ide-plugin"))
+              put("version", JsonPrimitive("0.1.0"))
             },
-        )
+          )
+        },
+      )
     if (response.result == null) {
       throw McpConnectionException("Initialize response missing result")
     }
@@ -404,22 +404,22 @@ class McpStdioClient(
 
   private fun sendNotification(method: String, params: JsonElement? = null) {
     val request =
-        JsonRpcRequest(
-            id = null,
-            method = method,
-            params = params,
-        )
+      JsonRpcRequest(
+        id = null,
+        method = method,
+        params = params,
+      )
     sendRequest(request, expectResponse = false)
   }
 
   private fun sendRequest(method: String, params: JsonElement? = null): JsonRpcResponse {
     val requestId = JsonPrimitive(UUID.randomUUID().toString())
     val request =
-        JsonRpcRequest(
-            id = requestId,
-            method = method,
-            params = params,
-        )
+      JsonRpcRequest(
+        id = requestId,
+        method = method,
+        params = params,
+      )
     return sendRequest(request, expectResponse = true)
   }
 
@@ -451,7 +451,7 @@ class McpStdioClient(
         }
         if (response.error != null) {
           throw McpConnectionException(
-              "MCP stdio error ${response.error.code}: ${response.error.message}"
+            "MCP stdio error ${response.error.code}: ${response.error.message}"
           )
         }
         if (response.result == null) {
@@ -473,7 +473,7 @@ class McpStdioClient(
     }
 
     val newProcess =
-        ProcessBuilder(commandParts).redirectError(ProcessBuilder.Redirect.INHERIT).start()
+      ProcessBuilder(commandParts).redirectError(ProcessBuilder.Redirect.INHERIT).start()
     process = newProcess
     reader = BufferedReader(InputStreamReader(newProcess.inputStream))
     writer = BufferedWriter(OutputStreamWriter(newProcess.outputStream))

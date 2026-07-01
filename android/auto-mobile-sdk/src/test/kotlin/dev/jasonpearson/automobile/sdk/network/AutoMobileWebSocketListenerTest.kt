@@ -18,42 +18,42 @@ class AutoMobileWebSocketListenerTest {
   private fun collectingBuffer(): Pair<SdkEventBuffer, MutableList<SdkEvent>> {
     val events = mutableListOf<SdkEvent>()
     val buffer =
-        SdkEventBuffer(
-            maxBufferSize = 1,
-            flushIntervalMs = 60_000,
-            onFlush = { events.addAll(it) },
-            executor = Executors.newSingleThreadScheduledExecutor(),
-        )
+      SdkEventBuffer(
+        maxBufferSize = 1,
+        flushIntervalMs = 60_000,
+        onFlush = { events.addAll(it) },
+        executor = Executors.newSingleThreadScheduledExecutor(),
+      )
     return buffer to events
   }
 
   /** Minimal no-op WebSocket for testing callbacks */
   private val fakeWebSocket =
-      object : WebSocket {
-        override fun cancel() {}
+    object : WebSocket {
+      override fun cancel() {}
 
-        override fun close(code: Int, reason: String?) = false
+      override fun close(code: Int, reason: String?) = false
 
-        override fun queueSize() = 0L
+      override fun queueSize() = 0L
 
-        override fun request() = okhttp3.Request.Builder().url("https://fake").build()
+      override fun request() = okhttp3.Request.Builder().url("https://fake").build()
 
-        override fun send(text: String) = false
+      override fun send(text: String) = false
 
-        override fun send(bytes: okio.ByteString) = false
-      }
+      override fun send(bytes: okio.ByteString) = false
+    }
 
   @Test
   fun `records text message as RECEIVED TEXT with correct size`() {
     val (buffer, events) = collectingBuffer()
     val delegate = RecordingDelegate()
     val listener =
-        AutoMobileWebSocketListener(
-            delegate = delegate,
-            url = "wss://example.com/ws",
-            buffer = buffer,
-            connectionId = "abc12345",
-        )
+      AutoMobileWebSocketListener(
+        delegate = delegate,
+        url = "wss://example.com/ws",
+        buffer = buffer,
+        connectionId = "abc12345",
+      )
 
     listener.onMessage(fakeWebSocket, "hello world")
 
@@ -151,13 +151,13 @@ class AutoMobileWebSocketListenerTest {
     val (buffer, events) = collectingBuffer()
     val delegate = RecordingDelegate()
     val listener =
-        AutoMobileWebSocketListener(
-            delegate,
-            "wss://x",
-            buffer,
-            applicationId = "com.example.app",
-            connectionId = "c1",
-        )
+      AutoMobileWebSocketListener(
+        delegate,
+        "wss://x",
+        buffer,
+        applicationId = "com.example.app",
+        connectionId = "c1",
+      )
 
     listener.onMessage(fakeWebSocket, "msg")
 

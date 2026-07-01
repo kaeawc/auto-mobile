@@ -46,7 +46,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_swipe`() {
     val message =
-        """{"type":"request_swipe","requestId":"swipe-1","x1":0,"y1":100,"x2":0,"y2":500,"duration":400}"""
+      """{"type":"request_swipe","requestId":"swipe-1","x1":0,"y1":100,"x2":0,"y2":500,"duration":400}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestSwipe>(request)
@@ -61,7 +61,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_drag with legacy fields`() {
     val message =
-        """{"type":"request_drag","requestId":"drag-1","x1":50,"y1":50,"x2":150,"y2":150,"holdTime":800,"duration":500}"""
+      """{"type":"request_drag","requestId":"drag-1","x1":50,"y1":50,"x2":150,"y2":150,"holdTime":800,"duration":500}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestDrag>(request)
@@ -78,7 +78,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_pinch`() {
     val message =
-        """{"type":"request_pinch","requestId":"pinch-1","centerX":540,"centerY":960,"distanceStart":100,"distanceEnd":300,"rotationDegrees":45.0,"duration":500}"""
+      """{"type":"request_pinch","requestId":"pinch-1","centerX":540,"centerY":960,"distanceStart":100,"distanceEnd":300,"rotationDegrees":45.0,"duration":500}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestPinch>(request)
@@ -94,7 +94,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_set_text`() {
     val message =
-        """{"type":"request_set_text","requestId":"text-1","text":"Hello World","resourceId":"input_field"}"""
+      """{"type":"request_set_text","requestId":"text-1","text":"Hello World","resourceId":"input_field"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestSetText>(request)
@@ -116,7 +116,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_clipboard`() {
     val message =
-        """{"type":"request_clipboard","requestId":"clip-1","action":"copy","text":"Copied text"}"""
+      """{"type":"request_clipboard","requestId":"clip-1","action":"copy","text":"Copied text"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestClipboard>(request)
@@ -128,7 +128,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize add_highlight`() {
     val message =
-        """{"type":"add_highlight","requestId":"hl-1","id":"highlight-1","shape":{"type":"box","bounds":{"x":0,"y":0,"width":100,"height":50}}}"""
+      """{"type":"add_highlight","requestId":"hl-1","id":"highlight-1","shape":{"type":"box","bounds":{"x":0,"y":0,"width":100,"height":50}}}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<AddHighlight>(request)
@@ -142,7 +142,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_action with bounds disambiguation`() {
     val message =
-        """{"type":"request_action","requestId":"a1","action":"click","resourceId":"com.app:id/name","boundsLeft":10,"boundsTop":20,"boundsRight":100,"boundsBottom":80}"""
+      """{"type":"request_action","requestId":"a1","action":"click","resourceId":"com.app:id/name","boundsLeft":10,"boundsTop":20,"boundsRight":100,"boundsBottom":80}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestAction>(request)
@@ -158,7 +158,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_action bounds only with null resourceId`() {
     val message =
-        """{"type":"request_action","requestId":"b2","action":"click","resourceId":null,"boundsLeft":10,"boundsTop":20,"boundsRight":100,"boundsBottom":80}"""
+      """{"type":"request_action","requestId":"b2","action":"click","resourceId":null,"boundsLeft":10,"boundsTop":20,"boundsRight":100,"boundsBottom":80}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestAction>(request)
@@ -185,7 +185,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize get_preferences`() {
     val message =
-        """{"type":"get_preferences","requestId":"pref-1","packageName":"com.example.app","fileName":"settings.xml"}"""
+      """{"type":"get_preferences","requestId":"pref-1","packageName":"com.example.app","fileName":"settings.xml"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<GetPreferences>(request)
@@ -197,7 +197,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_settings_get`() {
     val message =
-        """{"type":"request_settings_get","requestId":"sg-1","namespace":"system","key":"user_rotation"}"""
+      """{"type":"request_settings_get","requestId":"sg-1","namespace":"system","key":"user_rotation"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestSettingsGet>(request)
@@ -209,7 +209,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_settings_put with int value`() {
     val message =
-        """{"type":"request_settings_put","requestId":"sp-1","namespace":"system","key":"user_rotation","value":"1","valueType":"int"}"""
+      """{"type":"request_settings_put","requestId":"sp-1","namespace":"system","key":"user_rotation","value":"1","valueType":"int"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestSettingsPut>(request)
@@ -223,7 +223,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_settings_put with null value defaults to string type`() {
     val message =
-        """{"type":"request_settings_put","requestId":"sp-2","namespace":"secure","key":"enabled_accessibility_services","value":null}"""
+      """{"type":"request_settings_put","requestId":"sp-2","namespace":"secure","key":"enabled_accessibility_services","value":null}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestSettingsPut>(request)
@@ -247,7 +247,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_installed_packages`() {
     val message =
-        """{"type":"request_installed_packages","requestId":"pkg-1","includeSystem":false,"userId":10}"""
+      """{"type":"request_installed_packages","requestId":"pkg-1","includeSystem":false,"userId":10}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestInstalledPackages>(request)
@@ -270,7 +270,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_package_info`() {
     val message =
-        """{"type":"request_package_info","requestId":"pi-1","packageName":"com.example.app","includePermissions":true}"""
+      """{"type":"request_package_info","requestId":"pi-1","packageName":"com.example.app","includePermissions":true}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestPackageInfo>(request)
@@ -282,7 +282,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_launch_intent`() {
     val message =
-        """{"type":"request_launch_intent","requestId":"li-1","packageName":"com.example.app"}"""
+      """{"type":"request_launch_intent","requestId":"li-1","packageName":"com.example.app"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestLaunchIntent>(request)
@@ -293,7 +293,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize set_accessibility_flags`() {
     val message =
-        """{"type":"set_accessibility_flags","includeNotImportantViews":false,"reportViewIds":true,"retrieveInteractiveWindows":false}"""
+      """{"type":"set_accessibility_flags","includeNotImportantViews":false,"reportViewIds":true,"retrieveInteractiveWindows":false}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<SetAccessibilityFlags>(request)
@@ -335,7 +335,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize subscribe_storage`() {
     val message =
-        """{"type":"subscribe_storage","requestId":"sub-1","packageName":"com.example.app","fileName":"settings.xml"}"""
+      """{"type":"subscribe_storage","requestId":"sub-1","packageName":"com.example.app","fileName":"settings.xml"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<SubscribeStorage>(request)
@@ -349,7 +349,7 @@ class WebSocketRequestTest {
     // The TS client sends only subscriptionId ("packageName:fileName"). Verify the sealed class
     // decodes it without throwing; packageName/fileName are absent (the pre-migration no-op case).
     val message =
-        """{"type":"unsubscribe_storage","requestId":"unsub-1","subscriptionId":"com.example.app:settings.xml"}"""
+      """{"type":"unsubscribe_storage","requestId":"unsub-1","subscriptionId":"com.example.app:settings.xml"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<UnsubscribeStorage>(request)

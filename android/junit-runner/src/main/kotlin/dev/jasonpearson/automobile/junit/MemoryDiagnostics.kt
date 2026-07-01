@@ -7,13 +7,13 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 internal data class MemorySnapshot(
-    val timestampMs: Long,
-    val heapUsedBytes: Long,
-    val heapCommittedBytes: Long,
-    val heapMaxBytes: Long,
-    val nonHeapUsedBytes: Long,
-    val nonHeapCommittedBytes: Long,
-    val nonHeapMaxBytes: Long,
+  val timestampMs: Long,
+  val heapUsedBytes: Long,
+  val heapCommittedBytes: Long,
+  val heapMaxBytes: Long,
+  val nonHeapUsedBytes: Long,
+  val nonHeapCommittedBytes: Long,
+  val nonHeapMaxBytes: Long,
 )
 
 internal object MemoryDiagnostics {
@@ -21,20 +21,20 @@ internal object MemoryDiagnostics {
   private const val DEFAULT_TOOL_TIMEOUT_MS = 20_000L
   private val labelSanitizer = RegexCache.getRegex("[^a-zA-Z0-9_-]")
   private val timestampFormatter =
-      DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS").withZone(ZoneId.systemDefault())
+    DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS").withZone(ZoneId.systemDefault())
 
   fun captureSnapshot(): MemorySnapshot {
     val bean = ManagementFactory.getMemoryMXBean()
     val heap = bean.heapMemoryUsage
     val nonHeap = bean.nonHeapMemoryUsage
     return MemorySnapshot(
-        timestampMs = System.currentTimeMillis(),
-        heapUsedBytes = heap.used,
-        heapCommittedBytes = heap.committed,
-        heapMaxBytes = heap.max,
-        nonHeapUsedBytes = nonHeap.used,
-        nonHeapCommittedBytes = nonHeap.committed,
-        nonHeapMaxBytes = nonHeap.max,
+      timestampMs = System.currentTimeMillis(),
+      heapUsedBytes = heap.used,
+      heapCommittedBytes = heap.committed,
+      heapMaxBytes = heap.max,
+      nonHeapUsedBytes = nonHeap.used,
+      nonHeapCommittedBytes = nonHeap.committed,
+      nonHeapMaxBytes = nonHeap.max,
     )
   }
 
@@ -46,7 +46,7 @@ internal object MemoryDiagnostics {
     val baseDir = resolveHeapDumpDir()
     if (!baseDir.exists() && !baseDir.mkdirs()) {
       System.err.println(
-          "MemoryDiagnostics: Failed to create heap dump directory: ${baseDir.absolutePath}"
+        "MemoryDiagnostics: Failed to create heap dump directory: ${baseDir.absolutePath}"
       )
       return null
     }
@@ -60,12 +60,12 @@ internal object MemoryDiagnostics {
     val jmap = findTool("jmap")
 
     val command =
-        when {
-          jcmd != null -> listOf(jcmd, pid.toString(), "GC.heap_dump", heapDumpFile.absolutePath)
-          jmap != null ->
-              listOf(jmap, "-dump:format=b,file=${heapDumpFile.absolutePath}", pid.toString())
-          else -> null
-        }
+      when {
+        jcmd != null -> listOf(jcmd, pid.toString(), "GC.heap_dump", heapDumpFile.absolutePath)
+        jmap != null ->
+          listOf(jmap, "-dump:format=b,file=${heapDumpFile.absolutePath}", pid.toString())
+        else -> null
+      }
 
     if (command == null) {
       System.err.println("MemoryDiagnostics: jcmd/jmap not found; cannot create heap dump.")
@@ -74,10 +74,10 @@ internal object MemoryDiagnostics {
 
     val output = runTool(command, DEFAULT_TOOL_TIMEOUT_MS)
     writeCommandOutput(
-        File(baseDir, "${timestamp}_${sanitizedLabel}_heap_dump.log"),
-        command,
-        output,
-        reason,
+      File(baseDir, "${timestamp}_${sanitizedLabel}_heap_dump.log"),
+      command,
+      output,
+      reason,
     )
 
     return if (heapDumpFile.exists()) heapDumpFile else null
@@ -87,7 +87,7 @@ internal object MemoryDiagnostics {
     val baseDir = resolveHeapDumpDir()
     if (!baseDir.exists() && !baseDir.mkdirs()) {
       System.err.println(
-          "MemoryDiagnostics: Failed to create heap dump directory: ${baseDir.absolutePath}"
+        "MemoryDiagnostics: Failed to create heap dump directory: ${baseDir.absolutePath}"
       )
       return null
     }
@@ -97,7 +97,7 @@ internal object MemoryDiagnostics {
     val diagnosticsDir = File(baseDir, "diagnostics/${timestamp}_${sanitizedLabel}")
     if (!diagnosticsDir.exists() && !diagnosticsDir.mkdirs()) {
       System.err.println(
-          "MemoryDiagnostics: Failed to create diagnostics directory: ${diagnosticsDir.absolutePath}"
+        "MemoryDiagnostics: Failed to create diagnostics directory: ${diagnosticsDir.absolutePath}"
       )
       return null
     }
@@ -122,61 +122,61 @@ internal object MemoryDiagnostics {
     val errors = mutableListOf<String>()
 
     runAndWriteTool(
-        diagnosticsDir,
-        "jstat-gc",
-        findTool("jstat"),
-        listOf("-gc", pid.toString(), "1", "1"),
-        errors,
+      diagnosticsDir,
+      "jstat-gc",
+      findTool("jstat"),
+      listOf("-gc", pid.toString(), "1", "1"),
+      errors,
     )
     runAndWriteTool(
-        diagnosticsDir,
-        "jstat-gccapacity",
-        findTool("jstat"),
-        listOf("-gccapacity", pid.toString(), "1", "1"),
-        errors,
+      diagnosticsDir,
+      "jstat-gccapacity",
+      findTool("jstat"),
+      listOf("-gccapacity", pid.toString(), "1", "1"),
+      errors,
     )
 
     runAndWriteTool(
-        diagnosticsDir,
-        "jcmd-heap-info",
-        findTool("jcmd"),
-        listOf(pid.toString(), "GC.heap_info"),
-        errors,
+      diagnosticsDir,
+      "jcmd-heap-info",
+      findTool("jcmd"),
+      listOf(pid.toString(), "GC.heap_info"),
+      errors,
     )
     runAndWriteTool(
-        diagnosticsDir,
-        "jcmd-class-histogram",
-        findTool("jcmd"),
-        listOf(pid.toString(), "GC.class_histogram"),
-        errors,
+      diagnosticsDir,
+      "jcmd-class-histogram",
+      findTool("jcmd"),
+      listOf(pid.toString(), "GC.class_histogram"),
+      errors,
     )
     runAndWriteTool(
-        diagnosticsDir,
-        "jcmd-vm-flags",
-        findTool("jcmd"),
-        listOf(pid.toString(), "VM.flags"),
-        errors,
+      diagnosticsDir,
+      "jcmd-vm-flags",
+      findTool("jcmd"),
+      listOf(pid.toString(), "VM.flags"),
+      errors,
     )
     runAndWriteTool(
-        diagnosticsDir,
-        "jcmd-vm-system-properties",
-        findTool("jcmd"),
-        listOf(pid.toString(), "VM.system_properties"),
-        errors,
+      diagnosticsDir,
+      "jcmd-vm-system-properties",
+      findTool("jcmd"),
+      listOf(pid.toString(), "VM.system_properties"),
+      errors,
     )
     runAndWriteTool(
-        diagnosticsDir,
-        "jcmd-gc-finalizer-info",
-        findTool("jcmd"),
-        listOf(pid.toString(), "GC.finalizer_info"),
-        errors,
+      diagnosticsDir,
+      "jcmd-gc-finalizer-info",
+      findTool("jcmd"),
+      listOf(pid.toString(), "GC.finalizer_info"),
+      errors,
     )
     runAndWriteTool(
-        diagnosticsDir,
-        "jcmd-thread-print",
-        findTool("jcmd"),
-        listOf(pid.toString(), "Thread.print"),
-        errors,
+      diagnosticsDir,
+      "jcmd-thread-print",
+      findTool("jcmd"),
+      listOf(pid.toString(), "Thread.print"),
+      errors,
     )
 
     if (errors.isNotEmpty()) {
@@ -188,7 +188,7 @@ internal object MemoryDiagnostics {
 
   private fun resolveHeapDumpDir(): File {
     val configured =
-        System.getProperty("automobile.junit.memory.heapdump.dir", DEFAULT_HEAP_DUMP_DIR)
+      System.getProperty("automobile.junit.memory.heapdump.dir", DEFAULT_HEAP_DUMP_DIR)
     val trimmed = configured.trim()
     return File(if (trimmed.isEmpty()) DEFAULT_HEAP_DUMP_DIR else trimmed)
   }
@@ -209,31 +209,31 @@ internal object MemoryDiagnostics {
     val parentWindowsCandidate = javaHome.parentFile?.let { File(it, "bin/$toolName.exe") }
 
     listOf(directCandidate, parentCandidate, windowsCandidate, parentWindowsCandidate)
-        .firstOrNull { it != null && it.exists() && it.canExecute() }
-        ?.let {
-          return it.absolutePath
-        }
+      .firstOrNull { it != null && it.exists() && it.canExecute() }
+      ?.let {
+        return it.absolutePath
+      }
 
     val path = System.getenv("PATH") ?: return null
     val segments = path.split(File.pathSeparator)
     val candidates =
-        segments
-            .map { segment ->
-              listOf(
-                  File(segment, toolName),
-                  File(segment, "$toolName.exe"),
-              )
-            }
-            .flatten()
+      segments
+        .map { segment ->
+          listOf(
+            File(segment, toolName),
+            File(segment, "$toolName.exe"),
+          )
+        }
+        .flatten()
     return candidates.firstOrNull { it.exists() && it.canExecute() }?.absolutePath
   }
 
   private fun runAndWriteTool(
-      diagnosticsDir: File,
-      filePrefix: String,
-      tool: String?,
-      args: List<String>,
-      errors: MutableList<String>,
+    diagnosticsDir: File,
+    filePrefix: String,
+    tool: String?,
+    args: List<String>,
+    errors: MutableList<String>,
   ) {
     if (tool == null) {
       errors.add("$filePrefix: tool not found")
@@ -260,10 +260,10 @@ internal object MemoryDiagnostics {
   }
 
   private fun writeCommandOutput(
-      file: File,
-      command: List<String>,
-      output: ToolOutput,
-      reason: String?,
+    file: File,
+    command: List<String>,
+    output: ToolOutput,
+    reason: String?,
   ) {
     val content = buildString {
       appendLine("Command: ${command.joinToString(" ")}")

@@ -18,8 +18,8 @@ class DiagnosticsDashboardUiTest {
     setContent {
       MaterialTheme {
         DiagnosticsDashboard(
-            connectedMcpProcess = null,
-            dataSourceMode = DataSourceMode.Fake,
+          connectedMcpProcess = null,
+          dataSourceMode = DataSourceMode.Fake,
         )
       }
     }
@@ -33,8 +33,8 @@ class DiagnosticsDashboardUiTest {
     setContent {
       MaterialTheme {
         DiagnosticsDashboard(
-            connectedMcpProcess = null,
-            dataSourceMode = DataSourceMode.Fake,
+          connectedMcpProcess = null,
+          dataSourceMode = DataSourceMode.Fake,
         )
       }
     }
@@ -46,8 +46,8 @@ class DiagnosticsDashboardUiTest {
     setContent {
       MaterialTheme {
         DiagnosticsDashboard(
-            connectedMcpProcess = null,
-            dataSourceMode = DataSourceMode.Real,
+          connectedMcpProcess = null,
+          dataSourceMode = DataSourceMode.Real,
         )
       }
     }
@@ -58,17 +58,17 @@ class DiagnosticsDashboardUiTest {
   @Test
   fun `shows connected status with process info`() = runComposeUiTest {
     val process =
-        McpProcess(
-            pid = 12345,
-            name = "auto-mobile-daemon",
-            connectionType = McpConnectionType.StreamableHttp,
-            port = 3000,
-        )
+      McpProcess(
+        pid = 12345,
+        name = "auto-mobile-daemon",
+        connectionType = McpConnectionType.StreamableHttp,
+        port = 3000,
+      )
     setContent {
       MaterialTheme {
         DiagnosticsDashboard(
-            connectedMcpProcess = process,
-            dataSourceMode = DataSourceMode.Real,
+          connectedMcpProcess = process,
+          dataSourceMode = DataSourceMode.Real,
         )
       }
     }
@@ -80,17 +80,17 @@ class DiagnosticsDashboardUiTest {
   @Test
   fun `shows http connection type with port`() = runComposeUiTest {
     val process =
-        McpProcess(
-            pid = 100,
-            name = "daemon",
-            connectionType = McpConnectionType.StreamableHttp,
-            port = 8080,
-        )
+      McpProcess(
+        pid = 100,
+        name = "daemon",
+        connectionType = McpConnectionType.StreamableHttp,
+        port = 8080,
+      )
     setContent {
       MaterialTheme {
         DiagnosticsDashboard(
-            connectedMcpProcess = process,
-            dataSourceMode = DataSourceMode.Real,
+          connectedMcpProcess = process,
+          dataSourceMode = DataSourceMode.Real,
         )
       }
     }
@@ -102,8 +102,8 @@ class DiagnosticsDashboardUiTest {
     setContent {
       MaterialTheme {
         DiagnosticsDashboard(
-            connectedMcpProcess = null,
-            dataSourceMode = DataSourceMode.Fake,
+          connectedMcpProcess = null,
+          dataSourceMode = DataSourceMode.Fake,
         )
       }
     }
@@ -115,8 +115,8 @@ class DiagnosticsDashboardUiTest {
     setContent {
       MaterialTheme {
         DiagnosticsDashboard(
-            connectedMcpProcess = null,
-            dataSourceMode = DataSourceMode.Real,
+          connectedMcpProcess = null,
+          dataSourceMode = DataSourceMode.Real,
         )
       }
     }
@@ -126,16 +126,16 @@ class DiagnosticsDashboardUiTest {
   @Test
   fun `shows stdio connection type`() = runComposeUiTest {
     val process =
-        McpProcess(
-            pid = 200,
-            name = "mcp-stdio",
-            connectionType = McpConnectionType.Stdio,
-        )
+      McpProcess(
+        pid = 200,
+        name = "mcp-stdio",
+        connectionType = McpConnectionType.Stdio,
+      )
     setContent {
       MaterialTheme {
         DiagnosticsDashboard(
-            connectedMcpProcess = process,
-            dataSourceMode = DataSourceMode.Real,
+          connectedMcpProcess = process,
+          dataSourceMode = DataSourceMode.Real,
         )
       }
     }

@@ -11,10 +11,10 @@ import org.junit.Test
 class EventProcessorTest {
 
   private fun makeEvent(name: String = "test"): SdkEvent =
-      SdkLifecycleEvent(
-          timestamp = 1L,
-          kind = name,
-      )
+    SdkLifecycleEvent(
+      timestamp = 1L,
+      kind = name,
+    )
 
   private fun drainExecutor(executor: java.util.concurrent.ScheduledExecutorService) {
     executor.submit {}.get(1, TimeUnit.SECONDS)
@@ -24,13 +24,13 @@ class EventProcessorTest {
   fun `processor that returns event allows buffering`() {
     val flushed = mutableListOf<List<SdkEvent>>()
     val buffer =
-        SdkEventBuffer(
-            maxBufferSize = 100,
-            flushIntervalMs = 60_000,
-            onFlush = { flushed.add(it) },
-            executor = Executors.newSingleThreadScheduledExecutor(),
-            processors = listOf(EventProcessor { it }),
-        )
+      SdkEventBuffer(
+        maxBufferSize = 100,
+        flushIntervalMs = 60_000,
+        onFlush = { flushed.add(it) },
+        executor = Executors.newSingleThreadScheduledExecutor(),
+        processors = listOf(EventProcessor { it }),
+      )
 
     buffer.add(makeEvent())
     buffer.flush()
@@ -44,14 +44,14 @@ class EventProcessorTest {
     val counter = DefaultDropCounter()
     val flushed = mutableListOf<List<SdkEvent>>()
     val buffer =
-        SdkEventBuffer(
-            maxBufferSize = 100,
-            flushIntervalMs = 60_000,
-            onFlush = { flushed.add(it) },
-            executor = Executors.newSingleThreadScheduledExecutor(),
-            dropCounter = counter,
-            processors = listOf(EventProcessor { null }),
-        )
+      SdkEventBuffer(
+        maxBufferSize = 100,
+        flushIntervalMs = 60_000,
+        onFlush = { flushed.add(it) },
+        executor = Executors.newSingleThreadScheduledExecutor(),
+        dropCounter = counter,
+        processors = listOf(EventProcessor { null }),
+      )
 
     buffer.add(makeEvent())
     buffer.flush()
@@ -64,24 +64,24 @@ class EventProcessorTest {
   fun `processors run in order and can modify event`() {
     val flushed = CopyOnWriteArrayList<List<SdkEvent>>()
     val buffer =
-        SdkEventBuffer(
-            maxBufferSize = 100,
-            flushIntervalMs = 60_000,
-            onFlush = { flushed.add(it) },
-            executor = Executors.newSingleThreadScheduledExecutor(),
-            processors =
-                listOf(
-                    EventProcessor { event ->
-                      // First processor: modify the event
-                      SdkLifecycleEvent(timestamp = event.timestamp, kind = "modified")
-                    },
-                    EventProcessor { event ->
-                      // Second processor: sees modified event
-                      val lifecycle = event as SdkLifecycleEvent
-                      if (lifecycle.kind == "modified") event else null
-                    },
-                ),
-        )
+      SdkEventBuffer(
+        maxBufferSize = 100,
+        flushIntervalMs = 60_000,
+        onFlush = { flushed.add(it) },
+        executor = Executors.newSingleThreadScheduledExecutor(),
+        processors =
+          listOf(
+            EventProcessor { event ->
+              // First processor: modify the event
+              SdkLifecycleEvent(timestamp = event.timestamp, kind = "modified")
+            },
+            EventProcessor { event ->
+              // Second processor: sees modified event
+              val lifecycle = event as SdkLifecycleEvent
+              if (lifecycle.kind == "modified") event else null
+            },
+          ),
+      )
 
     buffer.add(makeEvent("original"))
     buffer.flush()
@@ -95,18 +95,18 @@ class EventProcessorTest {
   fun `second processor returning null drops event`() {
     val counter = DefaultDropCounter()
     val buffer =
-        SdkEventBuffer(
-            maxBufferSize = 100,
-            flushIntervalMs = 60_000,
-            onFlush = {},
-            executor = Executors.newSingleThreadScheduledExecutor(),
-            dropCounter = counter,
-            processors =
-                listOf(
-                    EventProcessor { it }, // pass-through
-                    EventProcessor { null }, // drop
-                ),
-        )
+      SdkEventBuffer(
+        maxBufferSize = 100,
+        flushIntervalMs = 60_000,
+        onFlush = {},
+        executor = Executors.newSingleThreadScheduledExecutor(),
+        dropCounter = counter,
+        processors =
+          listOf(
+            EventProcessor { it }, // pass-through
+            EventProcessor { null }, // drop
+          ),
+      )
 
     buffer.add(makeEvent())
     assertEquals(1L, counter.snapshot()[DropReason.FILTERED])
@@ -117,14 +117,14 @@ class EventProcessorTest {
     val counter = DefaultDropCounter()
     val flushed = mutableListOf<List<SdkEvent>>()
     val buffer =
-        SdkEventBuffer(
-            maxBufferSize = 100, // high so capacity flush doesn't trigger
-            flushIntervalMs = 60_000,
-            onFlush = { flushed.add(it) },
-            executor = Executors.newSingleThreadScheduledExecutor(),
-            dropCounter = counter,
-            maxPendingEvents = 3,
-        )
+      SdkEventBuffer(
+        maxBufferSize = 100, // high so capacity flush doesn't trigger
+        flushIntervalMs = 60_000,
+        onFlush = { flushed.add(it) },
+        executor = Executors.newSingleThreadScheduledExecutor(),
+        dropCounter = counter,
+        maxPendingEvents = 3,
+      )
 
     buffer.add(makeEvent("a"))
     buffer.add(makeEvent("b"))
@@ -144,14 +144,14 @@ class EventProcessorTest {
   fun `maxPendingEvents counts multiple overflows`() {
     val counter = DefaultDropCounter()
     val buffer =
-        SdkEventBuffer(
-            maxBufferSize = 100,
-            flushIntervalMs = 60_000,
-            onFlush = {},
-            executor = Executors.newSingleThreadScheduledExecutor(),
-            dropCounter = counter,
-            maxPendingEvents = 2,
-        )
+      SdkEventBuffer(
+        maxBufferSize = 100,
+        flushIntervalMs = 60_000,
+        onFlush = {},
+        executor = Executors.newSingleThreadScheduledExecutor(),
+        dropCounter = counter,
+        maxPendingEvents = 2,
+      )
 
     // Add 5 events with cap of 2
     repeat(5) { buffer.add(makeEvent("e$it")) }

@@ -14,27 +14,27 @@ class HierarchyPerformanceTest {
     fun build(d: Int): UIElementInfo {
       val id = "$prefix-${counter++}"
       val children =
-          if (d < depth) {
-            (0 until branching).map { build(d + 1) }
-          } else {
-            emptyList()
-          }
+        if (d < depth) {
+          (0 until branching).map { build(d + 1) }
+        } else {
+          emptyList()
+        }
       return UIElementInfo(
-          id = id,
-          className = "android.view.View",
-          resourceId = null,
-          text = null,
-          contentDescription = null,
-          bounds = ElementBounds(0, 0, 100, 100),
-          isClickable = false,
-          isEnabled = true,
-          isFocused = false,
-          isSelected = false,
-          isScrollable = false,
-          isCheckable = false,
-          isChecked = false,
-          depth = d,
-          children = children,
+        id = id,
+        className = "android.view.View",
+        resourceId = null,
+        text = null,
+        contentDescription = null,
+        bounds = ElementBounds(0, 0, 100, 100),
+        isClickable = false,
+        isEnabled = true,
+        isFocused = false,
+        isSelected = false,
+        isScrollable = false,
+        isCheckable = false,
+        isChecked = false,
+        depth = d,
+        children = children,
       )
     }
     return build(0)
@@ -116,23 +116,23 @@ class HierarchyPerformanceTest {
 
     // Add a new child to root
     val newChild =
-        UIElementInfo(
-            id = "new-child",
-            className = "android.widget.Button",
-            resourceId = null,
-            text = "New",
-            contentDescription = null,
-            bounds = ElementBounds(0, 0, 50, 50),
-            isClickable = true,
-            isEnabled = true,
-            isFocused = false,
-            isSelected = false,
-            isScrollable = false,
-            isCheckable = false,
-            isChecked = false,
-            depth = 1,
-            children = emptyList(),
-        )
+      UIElementInfo(
+        id = "new-child",
+        className = "android.widget.Button",
+        resourceId = null,
+        text = "New",
+        contentDescription = null,
+        bounds = ElementBounds(0, 0, 50, 50),
+        isClickable = true,
+        isEnabled = true,
+        isFocused = false,
+        isSelected = false,
+        isScrollable = false,
+        isCheckable = false,
+        isChecked = false,
+        depth = 1,
+        children = emptyList(),
+      )
     val root2 = root1.copy(children = root1.children + newChild)
     val parsed2 = buildParsedHierarchy(root2)
 
@@ -204,8 +204,8 @@ class HierarchyPerformanceTest {
 
     assertTrue(parsed.elementMap.size > 1000, "Tree should have >1000 nodes")
     assertTrue(
-        durationMs < 100,
-        "buildParsedHierarchy should complete in <100ms, took ${durationMs}ms",
+      durationMs < 100,
+      "buildParsedHierarchy should complete in <100ms, took ${durationMs}ms",
     )
   }
 
@@ -234,8 +234,8 @@ class HierarchyPerformanceTest {
     val durationMs = (System.nanoTime() - start) / 1_000_000
 
     assertTrue(
-        durationMs < 100,
-        "computeMatchingIds should complete in <100ms, took ${durationMs}ms",
+      durationMs < 100,
+      "computeMatchingIds should complete in <100ms, took ${durationMs}ms",
     )
   }
 }

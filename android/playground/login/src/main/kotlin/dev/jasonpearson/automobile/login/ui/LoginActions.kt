@@ -23,18 +23,18 @@ import dev.jasonpearson.automobile.login.R
 /** Action buttons section containing sign in button, loading indicator, and guest mode button. */
 @Composable
 internal fun LoginActions(
-    isFormValid: Boolean,
-    isLoading: Boolean,
-    onSignInClick: () -> Unit,
-    onGuestModeClick: () -> Unit,
-    modifier: Modifier = Modifier,
+  isFormValid: Boolean,
+  isLoading: Boolean,
+  onSignInClick: () -> Unit,
+  onGuestModeClick: () -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
     AnimatedVisibility(visible = isFormValid && !isLoading, enter = fadeIn(), exit = fadeOut()) {
       AutoMobileButton(
-          text = stringResource(R.string.action_sign_in),
-          onClick = onSignInClick,
-          modifier = Modifier.wrapContentWidth(),
+        text = stringResource(R.string.action_sign_in),
+        onClick = onSignInClick,
+        modifier = Modifier.wrapContentWidth(),
       )
     }
 
@@ -46,18 +46,18 @@ internal fun LoginActions(
     Spacer(modifier = Modifier.height(AutoMobileDimensions.spacing4))
 
     AutoMobileOutlinedButton(
-        text = "Continue as Guest",
-        onClick = onGuestModeClick,
-        modifier = Modifier.wrapContentWidth(),
+      text = "Continue as Guest",
+      onClick = onGuestModeClick,
+      modifier = Modifier.wrapContentWidth(),
     )
   }
 }
 
 @Preview(name = "Login Actions", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Preview(
-    name = "Login Actions - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
+  name = "Login Actions - Dark",
+  showBackground = true,
+  uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun LoginActionsPreview() {

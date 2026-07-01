@@ -8,8 +8,8 @@ import com.intellij.util.xmlb.XmlSerializerUtil
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 
 @State(
-    name = "com.automobile.ide.settings.AutoMobileSettings",
-    storages = [Storage("AutoMobileSettings.xml")],
+  name = "com.automobile.ide.settings.AutoMobileSettings",
+  storages = [Storage("AutoMobileSettings.xml")],
 )
 class AutoMobileSettings : PersistentStateComponent<AutoMobileSettings>, SettingsProvider {
   override var enableYamlLinting: Boolean = true
@@ -29,6 +29,6 @@ class AutoMobileSettings : PersistentStateComponent<AutoMobileSettings>, Setting
 
   companion object {
     fun getInstance(): AutoMobileSettings =
-        ApplicationManager.getApplication().getService(AutoMobileSettings::class.java)
+      ApplicationManager.getApplication().getService(AutoMobileSettings::class.java)
   }
 }

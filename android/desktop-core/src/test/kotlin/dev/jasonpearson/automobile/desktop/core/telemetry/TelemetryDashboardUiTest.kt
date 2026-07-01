@@ -16,8 +16,8 @@ class TelemetryDashboardUiTest {
     setContent {
       MaterialTheme {
         TelemetryDashboard(
-            telemetryPushClient = null,
-            dataSourceMode = DataSourceMode.Real,
+          telemetryPushClient = null,
+          dataSourceMode = DataSourceMode.Real,
         )
       }
     }
@@ -29,8 +29,8 @@ class TelemetryDashboardUiTest {
     setContent {
       MaterialTheme {
         TelemetryDashboard(
-            telemetryPushClient = null,
-            dataSourceMode = DataSourceMode.Real,
+          telemetryPushClient = null,
+          dataSourceMode = DataSourceMode.Real,
         )
       }
     }
@@ -42,9 +42,9 @@ class TelemetryDashboardUiTest {
     setContent {
       MaterialTheme {
         TelemetryDashboard(
-            telemetryPushClient = null,
-            dataSourceMode = DataSourceMode.Real,
-            activeDeviceId = "emulator-5554",
+          telemetryPushClient = null,
+          dataSourceMode = DataSourceMode.Real,
+          activeDeviceId = "emulator-5554",
         )
       }
     }
@@ -56,8 +56,8 @@ class TelemetryDashboardUiTest {
     setContent {
       MaterialTheme {
         TelemetryDashboard(
-            telemetryPushClient = null,
-            dataSourceMode = DataSourceMode.Real,
+          telemetryPushClient = null,
+          dataSourceMode = DataSourceMode.Real,
         )
       }
     }

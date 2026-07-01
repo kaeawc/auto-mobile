@@ -7,14 +7,11 @@ import org.junit.Test
 
 class CachedAppListDataSourceTest {
 
-  private val apps =
-      listOf(
-          InstalledApp("com.example.app", "Example", false),
-      )
+  private val apps = listOf(InstalledApp("com.example.app", "Example", false))
 
   /** Counts how many times the delegate is called. */
   private class CountingAppListDataSource(
-      private val results: Iterator<Result<List<InstalledApp>>>,
+    private val results: Iterator<Result<List<InstalledApp>>>
   ) : AppListDataSource {
     var callCount = 0
 
@@ -27,7 +24,7 @@ class CachedAppListDataSourceTest {
   @Test
   fun `returns cached value on second call within TTL`() = runBlocking {
     val delegate =
-        CountingAppListDataSource(listOf(Result.Success(apps), Result.Success(apps)).iterator())
+      CountingAppListDataSource(listOf(Result.Success(apps), Result.Success(apps)).iterator())
     val cached = CachedAppListDataSource(delegate, ttlMs = 1000L)
 
     cached.getInstalledApps()
@@ -41,7 +38,7 @@ class CachedAppListDataSourceTest {
     var now = 0L
     val apps2 = listOf(InstalledApp("com.other", "Other", true))
     val delegate =
-        CountingAppListDataSource(listOf(Result.Success(apps), Result.Success(apps2)).iterator())
+      CountingAppListDataSource(listOf(Result.Success(apps), Result.Success(apps2)).iterator())
     val cached = CachedAppListDataSource(delegate, ttlMs = 100L, clock = { now })
 
     val first = cached.getInstalledApps()
@@ -58,7 +55,7 @@ class CachedAppListDataSourceTest {
   @Test
   fun `invalidate forces re-fetch`() = runBlocking {
     val delegate =
-        CountingAppListDataSource(listOf(Result.Success(apps), Result.Success(apps)).iterator())
+      CountingAppListDataSource(listOf(Result.Success(apps), Result.Success(apps)).iterator())
     val cached = CachedAppListDataSource(delegate, ttlMs = 10_000L)
 
     cached.getInstalledApps()

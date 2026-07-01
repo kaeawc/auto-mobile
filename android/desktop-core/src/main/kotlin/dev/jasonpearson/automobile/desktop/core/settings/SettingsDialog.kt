@@ -57,34 +57,34 @@ import kotlinx.serialization.json.buildJsonObject
  */
 @Composable
 fun SettingsPanel(
-    settings: SettingsProvider,
-    onClose: () -> Unit,
-    clientProvider: (() -> AutoMobileClient)? = null,
-    modifier: Modifier = Modifier,
+  settings: SettingsProvider,
+  onClose: () -> Unit,
+  clientProvider: (() -> AutoMobileClient)? = null,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
 
   Column(
-      modifier =
-          modifier
-              .fillMaxWidth()
-              .background(MaterialTheme.colorScheme.surface)
-              .padding(24.dp)
-              .verticalScroll(rememberScrollState()),
+    modifier =
+      modifier
+        .fillMaxWidth()
+        .background(MaterialTheme.colorScheme.surface)
+        .padding(24.dp)
+        .verticalScroll(rememberScrollState())
   ) {
     // Header
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       Text("Settings", fontSize = 20.sp, fontWeight = FontWeight.Bold)
       Box(
-          modifier =
-              Modifier.clickable(onClick = onClose)
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-                  .padding(horizontal = 12.dp, vertical = 6.dp),
+        modifier =
+          Modifier.clickable(onClick = onClose)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp)
       ) {
         Text("Close", fontSize = 13.sp)
       }
@@ -95,21 +95,21 @@ fun SettingsPanel(
     // === Appearance ===
     SectionHeader("Appearance")
     Text(
-        "Choose the app color theme.",
-        fontSize = 12.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
+      "Choose the app color theme.",
+      fontSize = 12.sp,
+      color = colors.text.normal.copy(alpha = 0.6f),
     )
     Spacer(Modifier.height(8.dp))
 
     var themeMode by remember { mutableStateOf(settings.themeMode) }
     IdeSelector(
-        label = "Theme",
-        value = themeMode,
-        options = listOf("dark" to "Dark", "light" to "Light", "system" to "System"),
-        onSelected = {
-          themeMode = it
-          settings.themeMode = it
-        },
+      label = "Theme",
+      value = themeMode,
+      options = listOf("dark" to "Dark", "light" to "Light", "system" to "System"),
+      onSelected = {
+        themeMode = it
+        settings.themeMode = it
+      },
     )
 
     Spacer(Modifier.height(24.dp))
@@ -119,9 +119,9 @@ fun SettingsPanel(
     // === IDE Preferences ===
     SectionHeader("IDE Preferences")
     Text(
-        "Choose which application opens source files from stack traces.",
-        fontSize = 12.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
+      "Choose which application opens source files from stack traces.",
+      fontSize = 12.sp,
+      color = colors.text.normal.copy(alpha = 0.6f),
     )
     Spacer(Modifier.height(12.dp))
 
@@ -129,29 +129,29 @@ fun SettingsPanel(
     var iosIde by remember { mutableStateOf(settings.iosIde) }
 
     IdeSelector(
-        label = "Android / Kotlin / Java",
-        value = androidIde,
-        options =
-            listOf(
-                "auto" to "Auto (Android Studio)",
-                "android-studio" to "Android Studio",
-                "intellij" to "IntelliJ IDEA",
-                "vscode" to "VS Code",
-            ),
-        onSelected = {
-          androidIde = it
-          settings.androidIde = it
-        },
+      label = "Android / Kotlin / Java",
+      value = androidIde,
+      options =
+        listOf(
+          "auto" to "Auto (Android Studio)",
+          "android-studio" to "Android Studio",
+          "intellij" to "IntelliJ IDEA",
+          "vscode" to "VS Code",
+        ),
+      onSelected = {
+        androidIde = it
+        settings.androidIde = it
+      },
     )
     Spacer(Modifier.height(8.dp))
     IdeSelector(
-        label = "Swift / Objective-C",
-        value = iosIde,
-        options = listOf("auto" to "Auto (Xcode)", "xcode" to "Xcode", "vscode" to "VS Code"),
-        onSelected = {
-          iosIde = it
-          settings.iosIde = it
-        },
+      label = "Swift / Objective-C",
+      value = iosIde,
+      options = listOf("auto" to "Auto (Xcode)", "xcode" to "Xcode", "vscode" to "VS Code"),
+      onSelected = {
+        iosIde = it
+        settings.iosIde = it
+      },
     )
 
     Spacer(Modifier.height(24.dp))
@@ -164,19 +164,19 @@ fun SettingsPanel(
     var yamlLinting by remember { mutableStateOf(settings.enableYamlLinting) }
     Row(verticalAlignment = Alignment.CenterVertically) {
       Checkbox(
-          checked = yamlLinting,
-          onCheckedChange = {
-            yamlLinting = it
-            settings.enableYamlLinting = it
-          },
+        checked = yamlLinting,
+        onCheckedChange = {
+          yamlLinting = it
+          settings.enableYamlLinting = it
+        },
       )
       Text("Enable YAML validation for test plans", fontSize = 13.sp)
     }
     Text(
-        "Validates test plan YAML files against the schema for immediate feedback on errors and deprecated fields.",
-        fontSize = 12.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
-        modifier = Modifier.padding(start = 28.dp),
+      "Validates test plan YAML files against the schema for immediate feedback on errors and deprecated fields.",
+      fontSize = 12.sp,
+      color = colors.text.normal.copy(alpha = 0.6f),
+      modifier = Modifier.padding(start = 28.dp),
     )
 
     Spacer(Modifier.height(24.dp))
@@ -188,24 +188,24 @@ fun SettingsPanel(
 
     var outputDir by remember { mutableStateOf(settings.testPlanOutputDirectory) }
     Text(
-        "Test plan output directory (relative to project root or absolute)",
-        fontSize = 12.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
+      "Test plan output directory (relative to project root or absolute)",
+      fontSize = 12.sp,
+      color = colors.text.normal.copy(alpha = 0.6f),
     )
     Spacer(Modifier.height(4.dp))
     TextField(
-        value = outputDir,
-        onValueChange = {
-          outputDir = it
-          settings.testPlanOutputDirectory = it
-        },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
+      value = outputDir,
+      onValueChange = {
+        outputDir = it
+        settings.testPlanOutputDirectory = it
+      },
+      modifier = Modifier.fillMaxWidth(),
+      singleLine = true,
     )
     Text(
-        "New recordings are saved here and opened in the editor after stopping.",
-        fontSize = 12.sp,
-        color = colors.text.normal.copy(alpha = 0.5f),
+      "New recordings are saved here and opened in the editor after stopping.",
+      fontSize = 12.sp,
+      color = colors.text.normal.copy(alpha = 0.5f),
     )
 
     Spacer(Modifier.height(24.dp))
@@ -221,24 +221,24 @@ fun SettingsPanel(
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
       listOf("1h", "24h", "3d", "7d", "30d").forEach { range ->
         Box(
-            modifier =
-                Modifier.clickable {
-                      dateRange = range
-                      settings.failuresDateRange = range
-                    }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .background(
-                        if (dateRange == range) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                        else colors.text.normal.copy(alpha = 0.05f),
-                        RoundedCornerShape(4.dp),
-                    )
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+          modifier =
+            Modifier.clickable {
+                dateRange = range
+                settings.failuresDateRange = range
+              }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .background(
+                if (dateRange == range) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                else colors.text.normal.copy(alpha = 0.05f),
+                RoundedCornerShape(4.dp),
+              )
+              .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
           Text(
-              range,
-              fontSize = 12.sp,
-              color =
-                  if (dateRange == range) MaterialTheme.colorScheme.primary else colors.text.normal,
+            range,
+            fontSize = 12.sp,
+            color =
+              if (dateRange == range) MaterialTheme.colorScheme.primary else colors.text.normal,
           )
         }
       }
@@ -269,11 +269,11 @@ private val ACCESSIBILITY_FAILURE_MODES = listOf("report", "threshold", "strict"
 private val ACCESSIBILITY_SEVERITIES = listOf("error", "warning", "info")
 
 private data class FeatureFlagsUiState(
-    val statusText: String = "Loading feature flags...",
-    val errorText: String? = null,
-    val flags: List<FeatureFlagState> = emptyList(),
-    val updatingKeys: Set<String> = emptySet(),
-    val isLoading: Boolean = true,
+  val statusText: String = "Loading feature flags...",
+  val errorText: String? = null,
+  val flags: List<FeatureFlagState> = emptyList(),
+  val updatingKeys: Set<String> = emptySet(),
+  val isLoading: Boolean = true,
 )
 
 private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
@@ -290,19 +290,19 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
         val flags = client.listFeatureFlags()
         _state.update {
           it.copy(
-              flags = flags,
-              statusText = "Loaded ${flags.size} flags",
-              errorText = null,
-              isLoading = false,
+            flags = flags,
+            statusText = "Loaded ${flags.size} flags",
+            errorText = null,
+            isLoading = false,
           )
         }
       } catch (error: Exception) {
         _state.update {
           it.copy(
-              flags = emptyList(),
-              statusText = "Unable to load feature flags",
-              errorText = error.message,
-              isLoading = false,
+            flags = emptyList(),
+            statusText = "Unable to load feature flags",
+            errorText = error.message,
+            isLoading = false,
           )
         }
       }
@@ -313,8 +313,8 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
     val previous = _state.value.flags
     _state.update {
       it.copy(
-          flags = it.flags.map { e -> if (e.key == flag.key) e.copy(enabled = enabled) else e },
-          updatingKeys = it.updatingKeys + flag.key,
+        flags = it.flags.map { e -> if (e.key == flag.key) e.copy(enabled = enabled) else e },
+        updatingKeys = it.updatingKeys + flag.key,
       )
     }
     scope.launch {
@@ -322,18 +322,18 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
         val updated = client.setFeatureFlag(flag.key, enabled)
         _state.update {
           it.copy(
-              flags = it.flags.map { e -> if (e.key == flag.key) updated else e },
-              statusText = "Updated ${flag.label}",
-              updatingKeys = it.updatingKeys - flag.key,
+            flags = it.flags.map { e -> if (e.key == flag.key) updated else e },
+            statusText = "Updated ${flag.label}",
+            updatingKeys = it.updatingKeys - flag.key,
           )
         }
       } catch (error: Exception) {
         _state.update {
           it.copy(
-              flags = previous,
-              statusText = "Update failed",
-              errorText = error.message,
-              updatingKeys = it.updatingKeys - flag.key,
+            flags = previous,
+            statusText = "Update failed",
+            errorText = error.message,
+            updatingKeys = it.updatingKeys - flag.key,
           )
         }
       }
@@ -344,8 +344,8 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
     val previous = _state.value.flags
     _state.update {
       it.copy(
-          flags = it.flags.map { e -> if (e.key == flag.key) e.copy(config = config) else e },
-          updatingKeys = it.updatingKeys + flag.key,
+        flags = it.flags.map { e -> if (e.key == flag.key) e.copy(config = config) else e },
+        updatingKeys = it.updatingKeys + flag.key,
       )
     }
     scope.launch {
@@ -353,18 +353,18 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
         val updated = client.setFeatureFlag(flag.key, flag.enabled, config)
         _state.update {
           it.copy(
-              flags = it.flags.map { e -> if (e.key == flag.key) updated else e },
-              statusText = "Updated ${flag.label}",
-              updatingKeys = it.updatingKeys - flag.key,
+            flags = it.flags.map { e -> if (e.key == flag.key) updated else e },
+            statusText = "Updated ${flag.label}",
+            updatingKeys = it.updatingKeys - flag.key,
           )
         }
       } catch (error: Exception) {
         _state.update {
           it.copy(
-              flags = previous,
-              statusText = "Update failed",
-              errorText = error.message,
-              updatingKeys = it.updatingKeys - flag.key,
+            flags = previous,
+            statusText = "Update failed",
+            errorText = error.message,
+            updatingKeys = it.updatingKeys - flag.key,
           )
         }
       }
@@ -389,16 +389,16 @@ private fun FeatureFlagsSection(clientProvider: () -> AutoMobileClient) {
   SectionHeader("Feature Flags")
 
   Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Text(uiState.statusText, fontSize = 13.sp, color = colors.text.normal.copy(alpha = 0.7f))
     Box(
-        modifier =
-            Modifier.clickable { viewModel.loadFlags() }
-                .pointerHoverIcon(PointerIcon.Hand)
-                .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+      modifier =
+        Modifier.clickable { viewModel.loadFlags() }
+          .pointerHoverIcon(PointerIcon.Hand)
+          .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+          .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
       Text("Refresh", fontSize = 12.sp)
     }
@@ -413,10 +413,10 @@ private fun FeatureFlagsSection(clientProvider: () -> AutoMobileClient) {
 
   uiState.flags.forEach { flag ->
     FeatureFlagRow(
-        flag = flag,
-        isUpdating = uiState.updatingKeys.contains(flag.key),
-        onToggle = { enabled -> viewModel.toggleFlag(flag, enabled) },
-        onUpdateConfig = { config -> viewModel.updateFlagConfig(flag, config) },
+      flag = flag,
+      isUpdating = uiState.updatingKeys.contains(flag.key),
+      onToggle = { enabled -> viewModel.toggleFlag(flag, enabled) },
+      onUpdateConfig = { config -> viewModel.updateFlagConfig(flag, config) },
     )
     Spacer(Modifier.height(8.dp))
   }
@@ -424,19 +424,19 @@ private fun FeatureFlagsSection(clientProvider: () -> AutoMobileClient) {
 
 @Composable
 private fun FeatureFlagRow(
-    flag: FeatureFlagState,
-    isUpdating: Boolean,
-    onToggle: (Boolean) -> Unit,
-    onUpdateConfig: (JsonObject) -> Unit,
+  flag: FeatureFlagState,
+  isUpdating: Boolean,
+  onToggle: (Boolean) -> Unit,
+  onUpdateConfig: (JsonObject) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
       Checkbox(
-          checked = flag.enabled,
-          onCheckedChange = { if (!isUpdating) onToggle(it) },
-          enabled = !isUpdating,
+        checked = flag.enabled,
+        onCheckedChange = { if (!isUpdating) onToggle(it) },
+        enabled = !isUpdating,
       )
       Text(flag.label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
@@ -444,18 +444,18 @@ private fun FeatureFlagRow(
     val desc = flag.description
     if (!desc.isNullOrBlank()) {
       Text(
-          desc,
-          fontSize = 12.sp,
-          color = colors.text.normal.copy(alpha = 0.6f),
-          modifier = Modifier.padding(start = 28.dp),
+        desc,
+        fontSize = 12.sp,
+        color = colors.text.normal.copy(alpha = 0.6f),
+        modifier = Modifier.padding(start = 28.dp),
       )
     }
 
     if (flag.key == "accessibility-audit") {
       AccessibilityConfigPanel(
-          flag = flag,
-          isUpdating = isUpdating,
-          onConfigChange = onUpdateConfig,
+        flag = flag,
+        isUpdating = isUpdating,
+        onConfigChange = onUpdateConfig,
       )
     }
   }
@@ -463,9 +463,9 @@ private fun FeatureFlagRow(
 
 @Composable
 private fun AccessibilityConfigPanel(
-    flag: FeatureFlagState,
-    isUpdating: Boolean,
-    onConfigChange: (JsonObject) -> Unit,
+  flag: FeatureFlagState,
+  isUpdating: Boolean,
+  onConfigChange: (JsonObject) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   var level by remember { mutableStateOf(readConfigValue(flag.config, "level", "AA")) }
@@ -488,28 +488,28 @@ private fun AccessibilityConfigPanel(
 
   fun submit() {
     onConfigChange(
-        buildJsonObject {
-          put("level", JsonPrimitive(level))
-          put("failureMode", JsonPrimitive(failureMode))
-          put("minSeverity", JsonPrimitive(minSeverity))
-          put("useBaseline", JsonPrimitive(useBaseline))
-        }
+      buildJsonObject {
+        put("level", JsonPrimitive(level))
+        put("failureMode", JsonPrimitive(failureMode))
+        put("minSeverity", JsonPrimitive(minSeverity))
+        put("useBaseline", JsonPrimitive(useBaseline))
+      }
     )
   }
 
   Column(
-      modifier = Modifier.padding(start = 28.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+    modifier = Modifier.padding(start = 28.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Text(
-        "Accessibility audit settings",
-        fontSize = 12.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
+      "Accessibility audit settings",
+      fontSize = 12.sp,
+      color = colors.text.normal.copy(alpha = 0.6f),
     )
 
     Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
       Text("Level", fontSize = 12.sp)
       OptionSelector(ACCESSIBILITY_LEVELS, level, isUpdating) {
@@ -530,14 +530,14 @@ private fun AccessibilityConfigPanel(
 
     Row(verticalAlignment = Alignment.CenterVertically) {
       Checkbox(
-          checked = useBaseline,
-          onCheckedChange = {
-            if (!isUpdating) {
-              useBaseline = it
-              submit()
-            }
-          },
-          enabled = !isUpdating,
+        checked = useBaseline,
+        onCheckedChange = {
+          if (!isUpdating) {
+            useBaseline = it
+            submit()
+          }
+        },
+        enabled = !isUpdating,
       )
       Text("Use baseline", fontSize = 12.sp)
     }
@@ -547,30 +547,30 @@ private fun AccessibilityConfigPanel(
 /** Simple option selector using chip-style buttons (replaces Jewel's ListComboBox). */
 @Composable
 private fun OptionSelector(
-    options: List<String>,
-    selected: String,
-    isUpdating: Boolean,
-    onSelect: (String) -> Unit,
+  options: List<String>,
+  selected: String,
+  isUpdating: Boolean,
+  onSelect: (String) -> Unit,
 ) {
   Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
     options.forEach { option ->
       Box(
-          modifier =
-              Modifier.clickable(enabled = !isUpdating) { onSelect(option) }
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .background(
-                      if (option == selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                      else SharedTheme.globalColors.text.normal.copy(alpha = 0.05f),
-                      RoundedCornerShape(4.dp),
-                  )
-                  .padding(horizontal = 8.dp, vertical = 4.dp),
+        modifier =
+          Modifier.clickable(enabled = !isUpdating) { onSelect(option) }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .background(
+              if (option == selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+              else SharedTheme.globalColors.text.normal.copy(alpha = 0.05f),
+              RoundedCornerShape(4.dp),
+            )
+            .padding(horizontal = 8.dp, vertical = 4.dp)
       ) {
         Text(
-            option,
-            fontSize = 11.sp,
-            color =
-                if (option == selected) MaterialTheme.colorScheme.primary
-                else SharedTheme.globalColors.text.normal,
+          option,
+          fontSize = 11.sp,
+          color =
+            if (option == selected) MaterialTheme.colorScheme.primary
+            else SharedTheme.globalColors.text.normal,
         )
       }
     }
@@ -595,34 +595,34 @@ private fun SectionHeader(title: String) {
 
 @Composable
 private fun IdeSelector(
-    label: String,
-    value: String,
-    options: List<Pair<String, String>>,
-    onSelected: (String) -> Unit,
+  label: String,
+  value: String,
+  options: List<Pair<String, String>>,
+  onSelected: (String) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   Row(
-      modifier = Modifier.fillMaxWidth(),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(label, fontSize = 13.sp, modifier = Modifier.width(200.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
       options.forEach { (key, displayName) ->
         Box(
-            modifier =
-                Modifier.clickable { onSelected(key) }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .background(
-                        if (value == key) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                        else colors.text.normal.copy(alpha = 0.05f),
-                        RoundedCornerShape(4.dp),
-                    )
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+          modifier =
+            Modifier.clickable { onSelected(key) }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .background(
+                if (value == key) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                else colors.text.normal.copy(alpha = 0.05f),
+                RoundedCornerShape(4.dp),
+              )
+              .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
           Text(
-              displayName,
-              fontSize = 12.sp,
-              color = if (value == key) MaterialTheme.colorScheme.primary else colors.text.normal,
+            displayName,
+            fontSize = 12.sp,
+            color = if (value == key) MaterialTheme.colorScheme.primary else colors.text.normal,
           )
         }
       }

@@ -77,11 +77,11 @@ class ObservationStreamClient {
 
   // Flow for performance metrics updates (use extraBufferCapacity + DROP_OLDEST to avoid blocking)
   private val _performanceUpdates =
-      MutableSharedFlow<PerformanceStreamUpdate>(
-          replay = 1,
-          extraBufferCapacity = 10,
-          onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-      )
+    MutableSharedFlow<PerformanceStreamUpdate>(
+      replay = 1,
+      extraBufferCapacity = 10,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
   val performanceUpdates: SharedFlow<PerformanceStreamUpdate> = _performanceUpdates.asSharedFlow()
 
   // Flow for device-level stream events such as control connection loss.
@@ -119,13 +119,13 @@ class ObservationStreamClient {
       val address = UnixDomainSocketAddress.of(socketPath)
       channel = SocketChannel.open(address)
       reader =
-          BufferedReader(
-              InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
-          )
+        BufferedReader(
+          InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
+        )
       writer =
-          BufferedWriter(
-              OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
-          )
+        BufferedWriter(
+          OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
+        )
 
       _connectionState.update { ConnectionState.Connected() }
       log.info("Connected to observation stream")
@@ -152,10 +152,10 @@ class ObservationStreamClient {
       // Send unsubscribe request
       if (previousState is ConnectionState.Connected && previousState.subscribed) {
         val request =
-            StreamRequest(
-                id = UUID.randomUUID().toString(),
-                command = "unsubscribe",
-            )
+          StreamRequest(
+            id = UUID.randomUUID().toString(),
+            command = "unsubscribe",
+          )
         sendRequest(request)
       }
 
@@ -183,11 +183,11 @@ class ObservationStreamClient {
 
   private fun subscribe(deviceId: String?) {
     val request =
-        StreamRequest(
-            id = UUID.randomUUID().toString(),
-            command = "subscribe",
-            deviceId = deviceId,
-        )
+      StreamRequest(
+        id = UUID.randomUUID().toString(),
+        command = "subscribe",
+        deviceId = deviceId,
+      )
 
     if (sendRequest(request)) {
       _connectionState.update { current ->
@@ -258,47 +258,47 @@ class ObservationStreamClient {
         // Extract packageName from the data if present
         val packageName = extractPackageName(response.data)
         log.info(
-            "Hierarchy update received - deviceId=${response.deviceId}, timestamp=${response.timestamp}, packageName=$packageName, dataPresent=${response.data != null}"
+          "Hierarchy update received - deviceId=${response.deviceId}, timestamp=${response.timestamp}, packageName=$packageName, dataPresent=${response.data != null}"
         )
         val update =
-            HierarchyStreamUpdate(
-                deviceId = response.deviceId,
-                timestamp = response.timestamp ?: System.currentTimeMillis(),
-                data = response.data,
-                packageName = packageName,
-            )
+          HierarchyStreamUpdate(
+            deviceId = response.deviceId,
+            timestamp = response.timestamp ?: System.currentTimeMillis(),
+            data = response.data,
+            packageName = packageName,
+          )
         _hierarchyUpdates.emit(update)
         log.info("Emitted hierarchy update to flow")
       }
       "screenshot_update" -> {
         log.info(
-            "Screenshot update received - deviceId=${response.deviceId}, hasScreenshot=${response.screenshotBase64 != null}"
+          "Screenshot update received - deviceId=${response.deviceId}, hasScreenshot=${response.screenshotBase64 != null}"
         )
         val update =
-            ScreenshotStreamUpdate(
-                deviceId = response.deviceId,
-                timestamp = response.timestamp ?: System.currentTimeMillis(),
-                screenshotBase64 = response.screenshotBase64,
-                screenWidth = response.screenWidth ?: 1080,
-                screenHeight = response.screenHeight ?: 2340,
-            )
+          ScreenshotStreamUpdate(
+            deviceId = response.deviceId,
+            timestamp = response.timestamp ?: System.currentTimeMillis(),
+            screenshotBase64 = response.screenshotBase64,
+            screenWidth = response.screenWidth ?: 1080,
+            screenHeight = response.screenHeight ?: 2340,
+          )
         _screenshotUpdates.emit(update)
         log.info("Emitted screenshot update to flow")
       }
       "navigation_update" -> {
         val navGraph = response.navigationGraph
         log.info(
-            "Navigation update received - appId=${navGraph?.appId}, nodes=${navGraph?.nodes?.size}, edges=${navGraph?.edges?.size}"
+          "Navigation update received - appId=${navGraph?.appId}, nodes=${navGraph?.nodes?.size}, edges=${navGraph?.edges?.size}"
         )
         if (navGraph != null) {
           val update =
-              NavigationGraphStreamUpdate(
-                  timestamp = response.timestamp ?: System.currentTimeMillis(),
-                  appId = navGraph.appId,
-                  nodes = navGraph.nodes,
-                  edges = navGraph.edges,
-                  currentScreen = navGraph.currentScreen,
-              )
+            NavigationGraphStreamUpdate(
+              timestamp = response.timestamp ?: System.currentTimeMillis(),
+              appId = navGraph.appId,
+              nodes = navGraph.nodes,
+              edges = navGraph.edges,
+              currentScreen = navGraph.currentScreen,
+            )
           _navigationUpdates.emit(update)
           log.info("Emitted navigation update to flow")
         }
@@ -306,7 +306,7 @@ class ObservationStreamClient {
       "performance_update" -> {
         val perfData = response.performanceData
         log.info(
-            "Performance update received - deviceId=${response.deviceId}, fps=${perfData?.fps}, jankFrames=${perfData?.jankFrames}, touchLatencyMs=${perfData?.touchLatencyMs}, ttiMs=${perfData?.timeToInteractiveMs}"
+          "Performance update received - deviceId=${response.deviceId}, fps=${perfData?.fps}, jankFrames=${perfData?.jankFrames}, touchLatencyMs=${perfData?.touchLatencyMs}, ttiMs=${perfData?.timeToInteractiveMs}"
         )
         if (perfData != null) {
           // When jank is 0 and FPS is below 60, the device is idle (no frames
@@ -316,22 +316,22 @@ class ObservationStreamClient {
           val fps = if (isIdle) 60f else perfData.fps
           val frameTimeMs = if (isIdle) 16.67f else perfData.frameTimeMs
           val update =
-              PerformanceStreamUpdate(
-                  deviceId = response.deviceId,
-                  timestamp = response.timestamp ?: System.currentTimeMillis(),
-                  fps = fps,
-                  frameTimeMs = frameTimeMs,
-                  jankFrames = perfData.jankFrames,
-                  droppedFrames = perfData.droppedFrames,
-                  memoryUsageMb = perfData.memoryUsageMb,
-                  cpuUsagePercent = perfData.cpuUsagePercent,
-                  touchLatencyMs = perfData.touchLatencyMs,
-                  timeToInteractiveMs = perfData.timeToInteractiveMs,
-                  screenName = perfData.screenName,
-                  isResponsive = perfData.isResponsive,
-                  recompositionCount = perfData.recompositionCount,
-                  recompositionRate = perfData.recompositionRate,
-              )
+            PerformanceStreamUpdate(
+              deviceId = response.deviceId,
+              timestamp = response.timestamp ?: System.currentTimeMillis(),
+              fps = fps,
+              frameTimeMs = frameTimeMs,
+              jankFrames = perfData.jankFrames,
+              droppedFrames = perfData.droppedFrames,
+              memoryUsageMb = perfData.memoryUsageMb,
+              cpuUsagePercent = perfData.cpuUsagePercent,
+              touchLatencyMs = perfData.touchLatencyMs,
+              timeToInteractiveMs = perfData.timeToInteractiveMs,
+              screenName = perfData.screenName,
+              isResponsive = perfData.isResponsive,
+              recompositionCount = perfData.recompositionCount,
+              recompositionRate = perfData.recompositionRate,
+            )
           _performanceUpdates.tryEmit(update)
           log.info("Emitted performance update to flow")
         }
@@ -360,11 +360,11 @@ class ObservationStreamClient {
     _screenshotUpdates.resetReplayCache()
     _performanceUpdates.resetReplayCache()
     _deviceEvents.emit(
-        DeviceStreamEvent.DeviceConnectionLost(
-            deviceId = deviceId,
-            timestamp = response.timestamp ?: System.currentTimeMillis(),
-            error = error,
-        )
+      DeviceStreamEvent.DeviceConnectionLost(
+        deviceId = deviceId,
+        timestamp = response.timestamp ?: System.currentTimeMillis(),
+        error = error,
+      )
     )
     log.info("Emitted device connection lost event for $deviceId")
   }
@@ -380,20 +380,20 @@ class ObservationStreamClient {
     if (!_connectionState.value.isConnected) return
 
     val request =
-        StreamRequest(
-            id = UUID.randomUUID().toString(),
-            command = "request_navigation_graph",
-            appId = appId,
-        )
+      StreamRequest(
+        id = UUID.randomUUID().toString(),
+        command = "request_navigation_graph",
+        appId = appId,
+      )
     sendRequest(request)
   }
 
   private fun sendPong() {
     val request =
-        StreamRequest(
-            id = UUID.randomUUID().toString(),
-            command = "pong",
-        )
+      StreamRequest(
+        id = UUID.randomUUID().toString(),
+        command = "pong",
+      )
     sendRequest(request)
   }
 
@@ -416,114 +416,114 @@ class ObservationStreamClient {
 
 @Serializable
 data class StreamRequest(
-    val id: String,
-    val command: String,
-    val deviceId: String? = null,
-    val appId: String? = null,
+  val id: String,
+  val command: String,
+  val deviceId: String? = null,
+  val appId: String? = null,
 )
 
 @Serializable
 data class StreamResponse(
-    val id: String? = null,
-    val type: String,
-    val success: Boolean? = null,
-    val error: String? = null,
-    val deviceId: String? = null,
-    val timestamp: Long? = null,
-    val data: JsonElement? = null,
-    val screenshotBase64: String? = null,
-    val screenWidth: Int? = null,
-    val screenHeight: Int? = null,
-    val navigationGraph: NavigationGraphStreamData? = null,
-    val performanceData: PerformanceStreamData? = null,
+  val id: String? = null,
+  val type: String,
+  val success: Boolean? = null,
+  val error: String? = null,
+  val deviceId: String? = null,
+  val timestamp: Long? = null,
+  val data: JsonElement? = null,
+  val screenshotBase64: String? = null,
+  val screenWidth: Int? = null,
+  val screenHeight: Int? = null,
+  val navigationGraph: NavigationGraphStreamData? = null,
+  val performanceData: PerformanceStreamData? = null,
 )
 
 @Serializable
 data class NavigationGraphStreamData(
-    val appId: String?,
-    val nodes: List<NavigationNodeData>,
-    val edges: List<NavigationEdgeData>,
-    val currentScreen: String?,
+  val appId: String?,
+  val nodes: List<NavigationNodeData>,
+  val edges: List<NavigationEdgeData>,
+  val currentScreen: String?,
 )
 
 @Serializable
 data class NavigationNodeData(
-    val id: Int,
-    val screenName: String,
-    val visitCount: Int,
-    val screenshotPath: String? = null,
+  val id: Int,
+  val screenName: String,
+  val visitCount: Int,
+  val screenshotPath: String? = null,
 )
 
 @Serializable
 data class NavigationEdgeData(
-    val id: Int,
-    val from: String,
-    val to: String,
-    val toolName: String? = null,
-    val traversalCount: Int = 1,
+  val id: Int,
+  val from: String,
+  val to: String,
+  val toolName: String? = null,
+  val traversalCount: Int = 1,
 )
 
 data class HierarchyStreamUpdate(
-    val deviceId: String?,
-    val timestamp: Long,
-    val data: JsonElement?,
-    val packageName: String? = null,
+  val deviceId: String?,
+  val timestamp: Long,
+  val data: JsonElement?,
+  val packageName: String? = null,
 )
 
 data class ScreenshotStreamUpdate(
-    val deviceId: String?,
-    val timestamp: Long,
-    val screenshotBase64: String?,
-    val screenWidth: Int,
-    val screenHeight: Int,
+  val deviceId: String?,
+  val timestamp: Long,
+  val screenshotBase64: String?,
+  val screenWidth: Int,
+  val screenHeight: Int,
 )
 
 data class NavigationGraphStreamUpdate(
-    val timestamp: Long,
-    val appId: String?,
-    val nodes: List<NavigationNodeData>,
-    val edges: List<NavigationEdgeData>,
-    val currentScreen: String?,
+  val timestamp: Long,
+  val appId: String?,
+  val nodes: List<NavigationNodeData>,
+  val edges: List<NavigationEdgeData>,
+  val currentScreen: String?,
 )
 
 @Serializable
 data class PerformanceStreamData(
-    val fps: Float,
-    val frameTimeMs: Float,
-    val jankFrames: Int,
-    val droppedFrames: Int,
-    val memoryUsageMb: Float,
-    val cpuUsagePercent: Float,
-    val touchLatencyMs: Float? = null,
-    val timeToInteractiveMs: Float? = null,
-    val screenName: String? = null,
-    val isResponsive: Boolean = true,
-    val recompositionCount: Int? = null,
-    val recompositionRate: Float? = null,
+  val fps: Float,
+  val frameTimeMs: Float,
+  val jankFrames: Int,
+  val droppedFrames: Int,
+  val memoryUsageMb: Float,
+  val cpuUsagePercent: Float,
+  val touchLatencyMs: Float? = null,
+  val timeToInteractiveMs: Float? = null,
+  val screenName: String? = null,
+  val isResponsive: Boolean = true,
+  val recompositionCount: Int? = null,
+  val recompositionRate: Float? = null,
 )
 
 data class PerformanceStreamUpdate(
-    val deviceId: String?,
-    val timestamp: Long,
-    val fps: Float,
-    val frameTimeMs: Float,
-    val jankFrames: Int,
-    val droppedFrames: Int,
-    val memoryUsageMb: Float,
-    val cpuUsagePercent: Float,
-    val touchLatencyMs: Float?,
-    val timeToInteractiveMs: Float?,
-    val screenName: String?,
-    val isResponsive: Boolean,
-    val recompositionCount: Int?,
-    val recompositionRate: Float?,
+  val deviceId: String?,
+  val timestamp: Long,
+  val fps: Float,
+  val frameTimeMs: Float,
+  val jankFrames: Int,
+  val droppedFrames: Int,
+  val memoryUsageMb: Float,
+  val cpuUsagePercent: Float,
+  val touchLatencyMs: Float?,
+  val timeToInteractiveMs: Float?,
+  val screenName: String?,
+  val isResponsive: Boolean,
+  val recompositionCount: Int?,
+  val recompositionRate: Float?,
 )
 
 sealed class DeviceStreamEvent {
   data class DeviceConnectionLost(
-      val deviceId: String,
-      val timestamp: Long,
-      val error: String,
+    val deviceId: String,
+    val timestamp: Long,
+    val error: String,
   ) : DeviceStreamEvent()
 }
 

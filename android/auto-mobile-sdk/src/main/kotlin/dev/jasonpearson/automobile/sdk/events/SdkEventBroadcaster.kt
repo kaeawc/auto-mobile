@@ -20,7 +20,7 @@ import dev.jasonpearson.automobile.sdk.SdkConstants
 object SdkEventBroadcaster {
 
   const val MAX_BATCH_BYTES =
-      100_000 // 100KB per Intent — lower to avoid TransactionTooLargeException
+    100_000 // 100KB per Intent — lower to avoid TransactionTooLargeException
 
   internal var retryPolicy: RetryPolicy = RetryPolicy()
   internal var retryHandler: Handler = Handler(Looper.getMainLooper())
@@ -62,9 +62,9 @@ object SdkEventBroadcaster {
    * @return List of serialized JSON strings, one per batch
    */
   internal fun splitIntoBatches(
-      events: List<SdkEvent>,
-      applicationId: String?,
-      maxBytes: Int = MAX_BATCH_BYTES,
+    events: List<SdkEvent>,
+    applicationId: String?,
+    maxBytes: Int = MAX_BATCH_BYTES,
   ): List<String> {
     if (events.isEmpty()) return emptyList()
 
@@ -80,43 +80,43 @@ object SdkEventBroadcaster {
     }
 
     return splitIntoBatches(events.subList(0, midpoint), applicationId, maxBytes) +
-        splitIntoBatches(events.subList(midpoint, events.size), applicationId, maxBytes)
+      splitIntoBatches(events.subList(midpoint, events.size), applicationId, maxBytes)
   }
 
   private fun serializeBatch(events: List<SdkEvent>, applicationId: String?): String =
-      SdkEventSerializer.toJson(
-          SdkEventBatch(
-              timestamp = System.currentTimeMillis(),
-              applicationId = applicationId,
-              events = events,
-          )
+    SdkEventSerializer.toJson(
+      SdkEventBatch(
+        timestamp = System.currentTimeMillis(),
+        applicationId = applicationId,
+        events = events,
       )
+    )
 
   private const val ACCESSIBILITY_SERVICE_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
 
   private fun sendBatchIntent(
-      context: Context,
-      batchJson: String,
-      eventCount: Int = 1,
-      attempt: Int = 0,
+    context: Context,
+    batchJson: String,
+    eventCount: Int = 1,
+    attempt: Int = 0,
   ) {
     try {
       val intent =
-          Intent(SdkEventSerializer.ACTION_SDK_EVENT_BATCH).apply {
-            putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, batchJson)
-            putExtra(
-                SdkEventSerializer.EXTRA_SDK_EVENT_TYPE,
-                SdkEventSerializer.EventTypes.EVENT_BATCH,
-            )
-            setPackage(SdkConstants.CTRL_PROXY_PACKAGE)
-          }
+        Intent(SdkEventSerializer.ACTION_SDK_EVENT_BATCH).apply {
+          putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, batchJson)
+          putExtra(
+            SdkEventSerializer.EXTRA_SDK_EVENT_TYPE,
+            SdkEventSerializer.EventTypes.EVENT_BATCH,
+          )
+          setPackage(SdkConstants.CTRL_PROXY_PACKAGE)
+        }
       context.sendBroadcast(intent)
     } catch (_: Exception) {
       if (attempt < retryPolicy.maxRetries) {
         val delayMs = retryPolicy.delayForAttempt(attempt)
         retryHandler.postDelayed(
-            { sendBatchIntent(context, batchJson, eventCount, attempt + 1) },
-            delayMs,
+          { sendBatchIntent(context, batchJson, eventCount, attempt + 1) },
+          delayMs,
         )
       } else {
         dropCounter?.increment(DropReason.DELIVERY_FAILED, eventCount)

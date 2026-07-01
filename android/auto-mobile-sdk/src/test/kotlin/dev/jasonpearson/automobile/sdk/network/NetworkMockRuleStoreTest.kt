@@ -13,26 +13,26 @@ class NetworkMockRuleStoreTest {
   }
 
   private fun rule(
-      mockId: String = "mock-1",
-      host: String = "api\\.example\\.com",
-      path: String = "/users",
-      method: String = "*",
-      limit: Int? = null,
-      remaining: Int? = null,
-      statusCode: Int = 500,
+    mockId: String = "mock-1",
+    host: String = "api\\.example\\.com",
+    path: String = "/users",
+    method: String = "*",
+    limit: Int? = null,
+    remaining: Int? = null,
+    statusCode: Int = 500,
   ) =
-      NetworkMockRuleDto(
-          mockId = mockId,
-          host = host,
-          path = path,
-          method = method,
-          limit = limit,
-          remaining = remaining,
-          statusCode = statusCode,
-          responseHeaders = mapOf("X-Mock" to "true"),
-          responseBody = """{"error":"mocked"}""",
-          contentType = "application/json",
-      )
+    NetworkMockRuleDto(
+      mockId = mockId,
+      host = host,
+      path = path,
+      method = method,
+      limit = limit,
+      remaining = remaining,
+      statusCode = statusCode,
+      responseHeaders = mapOf("X-Mock" to "true"),
+      responseBody = """{"error":"mocked"}""",
+      contentType = "application/json",
+    )
 
   @Test
   fun `matches rule by host and path`() {
@@ -148,10 +148,10 @@ class NetworkMockRuleStoreTest {
   fun `skips rules with invalid regex`() {
     val store = createStore()
     store.setRules(
-        listOf(
-            rule(mockId = "bad", host = "[invalid"),
-            rule(mockId = "good"),
-        )
+      listOf(
+        rule(mockId = "bad", host = "[invalid"),
+        rule(mockId = "good"),
+      )
     )
 
     assertEquals(1, store.getRuleCount())

@@ -21,9 +21,8 @@ import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
  * Wraps a [SettingsProvider] so that [themeMode] is backed by Compose snapshot state, enabling
  * recomposition when the user changes the theme in settings.
  */
-private class ObservableSettingsProvider(
-    private val delegate: SettingsProvider,
-) : SettingsProvider by delegate {
+private class ObservableSettingsProvider(private val delegate: SettingsProvider) :
+  SettingsProvider by delegate {
   private var _themeMode by mutableStateOf(delegate.themeMode)
   override var themeMode: String
     get() = _themeMode
@@ -40,22 +39,22 @@ fun AutoMobileDesktopApp(menuBarActions: MenuBarActions = remember { MenuBarActi
 
   AutoMobileTheme(themeMode = settings.themeMode) {
     Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
+      modifier = Modifier.fillMaxSize(),
+      color = MaterialTheme.colorScheme.background,
     ) {
       AutoMobileContent(
-          settingsProvider = settings,
-          notificationHandler = NoOpNotificationHandler,
-          onOpenSource = { fileName, lineNumber, className ->
-            SourceFileOpener.open(
-                fileName,
-                lineNumber,
-                className,
-                settings.androidIde,
-                settings.iosIde,
-            )
-          },
-          menuBarActions = menuBarActions,
+        settingsProvider = settings,
+        notificationHandler = NoOpNotificationHandler,
+        onOpenSource = { fileName, lineNumber, className ->
+          SourceFileOpener.open(
+            fileName,
+            lineNumber,
+            className,
+            settings.androidIde,
+            settings.iosIde,
+          )
+        },
+        menuBarActions = menuBarActions,
       )
     }
   }

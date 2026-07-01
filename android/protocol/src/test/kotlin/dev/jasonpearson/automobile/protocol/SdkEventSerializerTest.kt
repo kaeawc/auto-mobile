@@ -11,14 +11,14 @@ class SdkEventSerializerTest {
   @Test
   fun `toJson and fromJson roundtrip for navigation event`() {
     val event =
-        SdkNavigationEvent(
-            timestamp = 1234567890L,
-            applicationId = "com.example.app",
-            destination = "/home",
-            source = NavigationSourceType.COMPOSE_NAVIGATION,
-            arguments = mapOf("id" to "123", "name" to "test"),
-            metadata = mapOf("tag" to "main"),
-        )
+      SdkNavigationEvent(
+        timestamp = 1234567890L,
+        applicationId = "com.example.app",
+        destination = "/home",
+        source = NavigationSourceType.COMPOSE_NAVIGATION,
+        arguments = mapOf("id" to "123", "name" to "test"),
+        metadata = mapOf("tag" to "main"),
+      )
 
     val json = SdkEventSerializer.toJson(event)
     val deserialized = SdkEventSerializer.fromJson(json)
@@ -36,23 +36,23 @@ class SdkEventSerializerTest {
   @Test
   fun `toJson and fromJson roundtrip for handled exception event`() {
     val event =
-        SdkHandledExceptionEvent(
-            timestamp = 1234567890L,
-            applicationId = "com.example.app",
-            exceptionClass = "java.lang.NullPointerException",
-            exceptionMessage = "Object reference is null",
-            stackTrace = "at com.example.MyClass.method(MyClass.kt:42)",
-            customMessage = "Custom context message",
-            currentScreen = "/home",
-            appVersion = "1.0.0",
-            deviceInfo =
-                SdkDeviceInfo(
-                    model = "Pixel 6",
-                    manufacturer = "Google",
-                    osVersion = "13",
-                    sdkInt = 33,
-                ),
-        )
+      SdkHandledExceptionEvent(
+        timestamp = 1234567890L,
+        applicationId = "com.example.app",
+        exceptionClass = "java.lang.NullPointerException",
+        exceptionMessage = "Object reference is null",
+        stackTrace = "at com.example.MyClass.method(MyClass.kt:42)",
+        customMessage = "Custom context message",
+        currentScreen = "/home",
+        appVersion = "1.0.0",
+        deviceInfo =
+          SdkDeviceInfo(
+            model = "Pixel 6",
+            manufacturer = "Google",
+            osVersion = "13",
+            sdkInt = 33,
+          ),
+      )
 
     val json = SdkEventSerializer.toJson(event)
     val deserialized = SdkEventSerializer.fromJson(json)
@@ -73,13 +73,13 @@ class SdkEventSerializerTest {
   @Test
   fun `toJson and fromJson roundtrip for notification action event`() {
     val event =
-        SdkNotificationActionEvent(
-            timestamp = 1234567890L,
-            applicationId = "com.example.app",
-            notificationId = "notif-123",
-            actionId = "action-reply",
-            actionLabel = "Reply",
-        )
+      SdkNotificationActionEvent(
+        timestamp = 1234567890L,
+        applicationId = "com.example.app",
+        notificationId = "notif-123",
+        actionId = "action-reply",
+        actionLabel = "Reply",
+      )
 
     val json = SdkEventSerializer.toJson(event)
     val deserialized = SdkEventSerializer.fromJson(json)
@@ -96,11 +96,11 @@ class SdkEventSerializerTest {
   @Test
   fun `toJson and fromJson roundtrip for recomposition snapshot event`() {
     val event =
-        SdkRecompositionSnapshotEvent(
-            timestamp = 1234567890L,
-            applicationId = "com.example.app",
-            snapshotJson = """{"composables": []}""",
-        )
+      SdkRecompositionSnapshotEvent(
+        timestamp = 1234567890L,
+        applicationId = "com.example.app",
+        snapshotJson = """{"composables": []}""",
+      )
 
     val json = SdkEventSerializer.toJson(event)
     val deserialized = SdkEventSerializer.fromJson(json)
@@ -127,56 +127,56 @@ class SdkEventSerializerTest {
   @Test
   fun `getEventType returns correct type for each event`() {
     assertEquals(
-        SdkEventSerializer.EventTypes.NAVIGATION,
-        SdkEventSerializer.getEventType(
-            SdkNavigationEvent(
-                timestamp = 0L,
-                destination = "",
-                source = NavigationSourceType.CUSTOM,
-            ),
-        ),
+      SdkEventSerializer.EventTypes.NAVIGATION,
+      SdkEventSerializer.getEventType(
+        SdkNavigationEvent(
+          timestamp = 0L,
+          destination = "",
+          source = NavigationSourceType.CUSTOM,
+        )
+      ),
     )
     assertEquals(
-        SdkEventSerializer.EventTypes.HANDLED_EXCEPTION,
-        SdkEventSerializer.getEventType(
-            SdkHandledExceptionEvent(
-                timestamp = 0L,
-                exceptionClass = "",
-                exceptionMessage = null,
-                stackTrace = "",
-            ),
-        ),
+      SdkEventSerializer.EventTypes.HANDLED_EXCEPTION,
+      SdkEventSerializer.getEventType(
+        SdkHandledExceptionEvent(
+          timestamp = 0L,
+          exceptionClass = "",
+          exceptionMessage = null,
+          stackTrace = "",
+        )
+      ),
     )
     assertEquals(
-        SdkEventSerializer.EventTypes.NOTIFICATION_ACTION,
-        SdkEventSerializer.getEventType(
-            SdkNotificationActionEvent(
-                timestamp = 0L,
-                notificationId = "",
-                actionId = "",
-                actionLabel = "",
-            ),
-        ),
+      SdkEventSerializer.EventTypes.NOTIFICATION_ACTION,
+      SdkEventSerializer.getEventType(
+        SdkNotificationActionEvent(
+          timestamp = 0L,
+          notificationId = "",
+          actionId = "",
+          actionLabel = "",
+        )
+      ),
     )
     assertEquals(
-        SdkEventSerializer.EventTypes.RECOMPOSITION_SNAPSHOT,
-        SdkEventSerializer.getEventType(
-            SdkRecompositionSnapshotEvent(
-                timestamp = 0L,
-                snapshotJson = "",
-            ),
-        ),
+      SdkEventSerializer.EventTypes.RECOMPOSITION_SNAPSHOT,
+      SdkEventSerializer.getEventType(
+        SdkRecompositionSnapshotEvent(
+          timestamp = 0L,
+          snapshotJson = "",
+        )
+      ),
     )
   }
 
   @Test
   fun `navigationEventFromJson returns event for valid navigation json`() {
     val event =
-        SdkNavigationEvent(
-            timestamp = 1234567890L,
-            destination = "/home",
-            source = NavigationSourceType.COMPOSE_NAVIGATION,
-        )
+      SdkNavigationEvent(
+        timestamp = 1234567890L,
+        destination = "/home",
+        source = NavigationSourceType.COMPOSE_NAVIGATION,
+      )
     val json = SdkEventSerializer.toJson(event)
 
     val result = SdkEventSerializer.navigationEventFromJson(json)
@@ -188,12 +188,12 @@ class SdkEventSerializerTest {
   @Test
   fun `navigationEventFromJson returns null for non-navigation json`() {
     val event =
-        SdkHandledExceptionEvent(
-            timestamp = 0L,
-            exceptionClass = "Exception",
-            exceptionMessage = null,
-            stackTrace = "",
-        )
+      SdkHandledExceptionEvent(
+        timestamp = 0L,
+        exceptionClass = "Exception",
+        exceptionMessage = null,
+        stackTrace = "",
+      )
     val json = SdkEventSerializer.toJson(event)
 
     val result = SdkEventSerializer.navigationEventFromJson(json)
@@ -204,12 +204,12 @@ class SdkEventSerializerTest {
   @Test
   fun `handledExceptionEventFromJson returns event for valid exception json`() {
     val event =
-        SdkHandledExceptionEvent(
-            timestamp = 1234567890L,
-            exceptionClass = "java.lang.Exception",
-            exceptionMessage = "Test error",
-            stackTrace = "at Test.method(Test.kt:1)",
-        )
+      SdkHandledExceptionEvent(
+        timestamp = 1234567890L,
+        exceptionClass = "java.lang.Exception",
+        exceptionMessage = "Test error",
+        stackTrace = "at Test.method(Test.kt:1)",
+      )
     val json = SdkEventSerializer.toJson(event)
 
     val result = SdkEventSerializer.handledExceptionEventFromJson(json)
@@ -221,14 +221,14 @@ class SdkEventSerializerTest {
   @Test
   fun `navigation event with null optional fields serializes correctly`() {
     val event =
-        SdkNavigationEvent(
-            timestamp = 1234567890L,
-            applicationId = null,
-            destination = "/home",
-            source = NavigationSourceType.CUSTOM,
-            arguments = null,
-            metadata = null,
-        )
+      SdkNavigationEvent(
+        timestamp = 1234567890L,
+        applicationId = null,
+        destination = "/home",
+        source = NavigationSourceType.CUSTOM,
+        arguments = null,
+        metadata = null,
+      )
 
     val json = SdkEventSerializer.toJson(event)
     val deserialized = SdkEventSerializer.fromJson(json)

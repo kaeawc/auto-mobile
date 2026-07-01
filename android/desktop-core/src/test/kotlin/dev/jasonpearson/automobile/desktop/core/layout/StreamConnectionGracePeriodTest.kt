@@ -15,11 +15,11 @@ class StreamConnectionGracePeriodTest {
     val statuses = mutableListOf<ConnectionStatus>()
     var disconnected = false
     val gp =
-        StreamConnectionGracePeriod(
-            scope = backgroundScope,
-            onStatusChange = { statuses.add(it) },
-            onDisconnectConfirmed = { disconnected = true },
-        )
+      StreamConnectionGracePeriod(
+        scope = backgroundScope,
+        onStatusChange = { statuses.add(it) },
+        onDisconnectConfirmed = { disconnected = true },
+      )
 
     gp.onStreamStateChange(ConnectionState.Connected())
 
@@ -31,11 +31,11 @@ class StreamConnectionGracePeriodTest {
   fun `connecting shown during initial connection`() = runTest {
     val statuses = mutableListOf<ConnectionStatus>()
     val gp =
-        StreamConnectionGracePeriod(
-            scope = backgroundScope,
-            onStatusChange = { statuses.add(it) },
-            onDisconnectConfirmed = {},
-        )
+      StreamConnectionGracePeriod(
+        scope = backgroundScope,
+        onStatusChange = { statuses.add(it) },
+        onDisconnectConfirmed = {},
+      )
 
     gp.onStreamStateChange(ConnectionState.Connecting)
 
@@ -46,11 +46,11 @@ class StreamConnectionGracePeriodTest {
   fun `connecting suppressed during reconnection after having been connected`() = runTest {
     val statuses = mutableListOf<ConnectionStatus>()
     val gp =
-        StreamConnectionGracePeriod(
-            scope = backgroundScope,
-            onStatusChange = { statuses.add(it) },
-            onDisconnectConfirmed = {},
-        )
+      StreamConnectionGracePeriod(
+        scope = backgroundScope,
+        onStatusChange = { statuses.add(it) },
+        onDisconnectConfirmed = {},
+      )
 
     // First connect, then reconnect
     gp.onStreamStateChange(ConnectionState.Connected())
@@ -65,12 +65,12 @@ class StreamConnectionGracePeriodTest {
   fun `disconnect deferred by grace period`() = runTest {
     var disconnected = false
     val gp =
-        StreamConnectionGracePeriod(
-            scope = backgroundScope,
-            gracePeriodMs = 30_000L,
-            onStatusChange = {},
-            onDisconnectConfirmed = { disconnected = true },
-        )
+      StreamConnectionGracePeriod(
+        scope = backgroundScope,
+        gracePeriodMs = 30_000L,
+        onStatusChange = {},
+        onDisconnectConfirmed = { disconnected = true },
+      )
 
     // Connect first, then disconnect
     gp.onStreamStateChange(ConnectionState.Connected())
@@ -90,12 +90,12 @@ class StreamConnectionGracePeriodTest {
     var disconnected = false
     val statuses = mutableListOf<ConnectionStatus>()
     val gp =
-        StreamConnectionGracePeriod(
-            scope = backgroundScope,
-            gracePeriodMs = 30_000L,
-            onStatusChange = { statuses.add(it) },
-            onDisconnectConfirmed = { disconnected = true },
-        )
+      StreamConnectionGracePeriod(
+        scope = backgroundScope,
+        gracePeriodMs = 30_000L,
+        onStatusChange = { statuses.add(it) },
+        onDisconnectConfirmed = { disconnected = true },
+      )
 
     gp.onStreamStateChange(ConnectionState.Connected())
     statuses.clear()
@@ -118,12 +118,12 @@ class StreamConnectionGracePeriodTest {
   fun `disconnect confirmed after grace period expires`() = runTest {
     var disconnected = false
     val gp =
-        StreamConnectionGracePeriod(
-            scope = backgroundScope,
-            gracePeriodMs = 30_000L,
-            onStatusChange = {},
-            onDisconnectConfirmed = { disconnected = true },
-        )
+      StreamConnectionGracePeriod(
+        scope = backgroundScope,
+        gracePeriodMs = 30_000L,
+        onStatusChange = {},
+        onDisconnectConfirmed = { disconnected = true },
+      )
 
     gp.onStreamStateChange(ConnectionState.Connected())
     gp.onStreamStateChange(ConnectionState.Disconnected(reason = "gone"))
@@ -137,11 +137,11 @@ class StreamConnectionGracePeriodTest {
   fun `never-connected disconnect propagates immediately`() = runTest {
     var disconnected = false
     val gp =
-        StreamConnectionGracePeriod(
-            scope = backgroundScope,
-            onStatusChange = {},
-            onDisconnectConfirmed = { disconnected = true },
-        )
+      StreamConnectionGracePeriod(
+        scope = backgroundScope,
+        onStatusChange = {},
+        onDisconnectConfirmed = { disconnected = true },
+      )
 
     gp.onStreamStateChange(ConnectionState.Disconnected(reason = "never connected"))
 
@@ -153,12 +153,12 @@ class StreamConnectionGracePeriodTest {
     var disconnectCount = 0
     val statuses = mutableListOf<ConnectionStatus>()
     val gp =
-        StreamConnectionGracePeriod(
-            scope = backgroundScope,
-            gracePeriodMs = 30_000L,
-            onStatusChange = { statuses.add(it) },
-            onDisconnectConfirmed = { disconnectCount++ },
-        )
+      StreamConnectionGracePeriod(
+        scope = backgroundScope,
+        gracePeriodMs = 30_000L,
+        onStatusChange = { statuses.add(it) },
+        onDisconnectConfirmed = { disconnectCount++ },
+      )
 
     // Cycle 1: connect -> disconnect -> reconnect (within grace)
     gp.onStreamStateChange(ConnectionState.Connected())
@@ -176,12 +176,12 @@ class StreamConnectionGracePeriodTest {
 
     assertEquals(0, disconnectCount, "No disconnects should have been confirmed")
     assertEquals(
-        listOf(
-            ConnectionStatus.Connected,
-            ConnectionStatus.Connected,
-            ConnectionStatus.Connected,
-        ),
-        statuses,
+      listOf(
+        ConnectionStatus.Connected,
+        ConnectionStatus.Connected,
+        ConnectionStatus.Connected,
+      ),
+      statuses,
     )
   }
 
@@ -189,12 +189,12 @@ class StreamConnectionGracePeriodTest {
   fun `cancel stops pending grace period`() = runTest {
     var disconnected = false
     val gp =
-        StreamConnectionGracePeriod(
-            scope = backgroundScope,
-            gracePeriodMs = 30_000L,
-            onStatusChange = {},
-            onDisconnectConfirmed = { disconnected = true },
-        )
+      StreamConnectionGracePeriod(
+        scope = backgroundScope,
+        gracePeriodMs = 30_000L,
+        onStatusChange = {},
+        onDisconnectConfirmed = { disconnected = true },
+      )
 
     gp.onStreamStateChange(ConnectionState.Connected())
     gp.onStreamStateChange(ConnectionState.Disconnected(reason = "test"))
@@ -210,12 +210,12 @@ class StreamConnectionGracePeriodTest {
   fun `duplicate disconnect events do not start multiple grace periods`() = runTest {
     var disconnectCount = 0
     val gp =
-        StreamConnectionGracePeriod(
-            scope = backgroundScope,
-            gracePeriodMs = 30_000L,
-            onStatusChange = {},
-            onDisconnectConfirmed = { disconnectCount++ },
-        )
+      StreamConnectionGracePeriod(
+        scope = backgroundScope,
+        gracePeriodMs = 30_000L,
+        onStatusChange = {},
+        onDisconnectConfirmed = { disconnectCount++ },
+      )
 
     gp.onStreamStateChange(ConnectionState.Connected())
     gp.onStreamStateChange(ConnectionState.Disconnected(reason = "first"))

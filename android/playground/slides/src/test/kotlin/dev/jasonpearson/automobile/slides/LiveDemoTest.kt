@@ -66,7 +66,7 @@ class LiveDemoTest {
   fun `AutoMobile restart slide`() {
 
     val result =
-        AutoMobilePlan("test-plans/auto-mobile-restart-slide.yaml", { "slide" to "81" }).execute()
+      AutoMobilePlan("test-plans/auto-mobile-restart-slide.yaml", { "slide" to "81" }).execute()
 
     assertTrue(result.success)
   }
@@ -76,7 +76,7 @@ class LiveDemoTest {
   fun `Announce AutoMobile is OSS on GitHub`() {
 
     val result =
-        AutoMobilePlan("test-plans/bluesky-announcement.yaml", { "slide" to "83" }).execute()
+      AutoMobilePlan("test-plans/bluesky-announcement.yaml", { "slide" to "83" }).execute()
 
     assertTrue(result.success)
   }

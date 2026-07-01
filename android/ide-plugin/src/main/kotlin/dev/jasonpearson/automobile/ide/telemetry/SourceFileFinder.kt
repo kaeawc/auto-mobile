@@ -14,19 +14,19 @@ object SourceFileFinder {
    */
   fun findAndOpen(project: Project, fileName: String, lineNumber: Int, className: String? = null) {
     val files =
-        FilenameIndex.getVirtualFilesByName(fileName, GlobalSearchScope.projectScope(project))
+      FilenameIndex.getVirtualFilesByName(fileName, GlobalSearchScope.projectScope(project))
     if (files.isEmpty()) return
 
     val target =
-        if (files.size == 1 || className == null) {
-          files.first()
-        } else {
-          // Convert class name package to path segments for matching
-          val packagePath = className.substringBeforeLast('.').replace('.', '/')
-          files.firstOrNull { file ->
-            file.path.contains(packagePath)
-          } ?: files.first()
-        }
+      if (files.size == 1 || className == null) {
+        files.first()
+      } else {
+        // Convert class name package to path segments for matching
+        val packagePath = className.substringBeforeLast('.').replace('.', '/')
+        files.firstOrNull { file ->
+          file.path.contains(packagePath)
+        } ?: files.first()
+      }
 
     val line = (lineNumber - 1).coerceAtLeast(0)
     OpenFileDescriptor(project, target, line, 0).navigate(true)

@@ -8,8 +8,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 
 class TimelineState(
-    initialStartMs: Long = 0L,
-    initialEndMs: Long = 60_000L,
+  initialStartMs: Long = 0L,
+  initialEndMs: Long = 60_000L,
 ) {
   var visibleStartMs: Long by mutableLongStateOf(initialStartMs)
   var visibleEndMs: Long by mutableLongStateOf(initialEndMs)
@@ -46,14 +46,14 @@ class TimelineState(
   }
 
   fun timestampToFraction(timestampMs: Long): Float =
-      (timestampMs - visibleStartMs).toFloat() / visibleDurationMs().toFloat()
+    (timestampMs - visibleStartMs).toFloat() / visibleDurationMs().toFloat()
 
   fun fractionToTimestamp(fraction: Float): Long =
-      visibleStartMs + (visibleDurationMs() * fraction).toLong()
+    visibleStartMs + (visibleDurationMs() * fraction).toLong()
 }
 
 @Composable
 fun rememberTimelineState(
-    initialStartMs: Long = 0L,
-    initialEndMs: Long = 60_000L,
+  initialStartMs: Long = 0L,
+  initialEndMs: Long = 60_000L,
 ): TimelineState = remember { TimelineState(initialStartMs, initialEndMs) }

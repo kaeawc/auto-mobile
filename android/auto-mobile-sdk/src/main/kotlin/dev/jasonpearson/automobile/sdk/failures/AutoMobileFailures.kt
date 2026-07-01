@@ -75,8 +75,8 @@ object AutoMobileFailures {
    * @param message Optional additional context message
    */
   fun recordHandledException(
-      throwable: Throwable,
-      message: String? = null,
+    throwable: Throwable,
+    message: String? = null,
   ) {
     recordHandledException(throwable, message, null)
   }
@@ -91,15 +91,15 @@ object AutoMobileFailures {
    * @param currentScreen Optional current screen name (for additional context)
    */
   fun recordHandledException(
-      throwable: Throwable,
-      message: String? = null,
-      currentScreen: String? = null,
+    throwable: Throwable,
+    message: String? = null,
+    currentScreen: String? = null,
   ) {
     val ctx = context
     if (ctx == null) {
       AutoMobileSDK.logger.w(TAG) {
         "AutoMobileFailures not initialized; call AutoMobileSDK.initialize() or " +
-            "AutoMobileFailures.initialize()."
+          "AutoMobileFailures.initialize()."
       }
       return
     }
@@ -139,29 +139,29 @@ object AutoMobileFailures {
   }
 
   private fun createEvent(
-      context: Context,
-      throwable: Throwable,
-      customMessage: String?,
-      currentScreen: String?,
+    context: Context,
+    throwable: Throwable,
+    customMessage: String?,
+    currentScreen: String?,
   ): HandledExceptionEvent {
     val stackTrace = StringWriter().also { throwable.printStackTrace(PrintWriter(it)) }.toString()
 
     return HandledExceptionEvent(
-        timestamp = System.currentTimeMillis(),
-        exceptionClass = throwable.javaClass.name,
-        exceptionMessage = throwable.message,
-        stackTrace = stackTrace,
-        customMessage = customMessage,
-        currentScreen = currentScreen,
-        packageName = context.packageName,
-        appVersion = getAppVersion(context),
-        deviceInfo =
-            DeviceInfo(
-                model = Build.MODEL,
-                manufacturer = Build.MANUFACTURER,
-                osVersion = Build.VERSION.RELEASE,
-                sdkInt = Build.VERSION.SDK_INT,
-            ),
+      timestamp = System.currentTimeMillis(),
+      exceptionClass = throwable.javaClass.name,
+      exceptionMessage = throwable.message,
+      stackTrace = stackTrace,
+      customMessage = customMessage,
+      currentScreen = currentScreen,
+      packageName = context.packageName,
+      appVersion = getAppVersion(context),
+      deviceInfo =
+        DeviceInfo(
+          model = Build.MODEL,
+          manufacturer = Build.MANUFACTURER,
+          osVersion = Build.VERSION.RELEASE,
+          sdkInt = Build.VERSION.SDK_INT,
+        ),
     )
   }
 
@@ -175,57 +175,57 @@ object AutoMobileFailures {
   }
 
   private fun broadcastEvent(
-      context: Context,
-      event: HandledExceptionEvent,
+    context: Context,
+    event: HandledExceptionEvent,
   ) {
     try {
       // Create protocol event for type-safe serialization
       val sdkEvent =
-          SdkHandledExceptionEvent(
-              timestamp = event.timestamp,
-              applicationId = event.packageName,
-              exceptionClass = event.exceptionClass,
-              exceptionMessage = event.exceptionMessage,
-              stackTrace = event.stackTrace,
-              customMessage = event.customMessage,
-              currentScreen = event.currentScreen,
-              appVersion = event.appVersion,
-              deviceInfo =
-                  SdkDeviceInfo(
-                      model = event.deviceInfo.model,
-                      manufacturer = event.deviceInfo.manufacturer,
-                      osVersion = event.deviceInfo.osVersion,
-                      sdkInt = event.deviceInfo.sdkInt,
-                  ),
-          )
+        SdkHandledExceptionEvent(
+          timestamp = event.timestamp,
+          applicationId = event.packageName,
+          exceptionClass = event.exceptionClass,
+          exceptionMessage = event.exceptionMessage,
+          stackTrace = event.stackTrace,
+          customMessage = event.customMessage,
+          currentScreen = event.currentScreen,
+          appVersion = event.appVersion,
+          deviceInfo =
+            SdkDeviceInfo(
+              model = event.deviceInfo.model,
+              manufacturer = event.deviceInfo.manufacturer,
+              osVersion = event.deviceInfo.osVersion,
+              sdkInt = event.deviceInfo.sdkInt,
+            ),
+        )
 
       val intent =
-          Intent(ACTION_HANDLED_EXCEPTION).apply {
-            // Scope broadcast to only the accessibility service to prevent data leakage
-            // and spoofing from other installed apps
-            setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
+        Intent(ACTION_HANDLED_EXCEPTION).apply {
+          // Scope broadcast to only the accessibility service to prevent data leakage
+          // and spoofing from other installed apps
+          setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
 
-            // Type-safe serialized event (new protocol)
-            putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(sdkEvent))
-            putExtra(
-                SdkEventSerializer.EXTRA_SDK_EVENT_TYPE,
-                SdkEventSerializer.EventTypes.HANDLED_EXCEPTION,
-            )
+          // Type-safe serialized event (new protocol)
+          putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(sdkEvent))
+          putExtra(
+            SdkEventSerializer.EXTRA_SDK_EVENT_TYPE,
+            SdkEventSerializer.EventTypes.HANDLED_EXCEPTION,
+          )
 
-            // Legacy extras for backward compatibility with older AccessibilityService versions
-            putExtra(EXTRA_TIMESTAMP, event.timestamp)
-            putExtra(EXTRA_EXCEPTION_CLASS, event.exceptionClass)
-            putExtra(EXTRA_EXCEPTION_MESSAGE, event.exceptionMessage)
-            putExtra(EXTRA_STACK_TRACE, event.stackTrace)
-            putExtra(EXTRA_CUSTOM_MESSAGE, event.customMessage)
-            putExtra(EXTRA_CURRENT_SCREEN, event.currentScreen)
-            putExtra(EXTRA_PACKAGE_NAME, event.packageName)
-            putExtra(EXTRA_APP_VERSION, event.appVersion)
-            putExtra(EXTRA_DEVICE_MODEL, event.deviceInfo.model)
-            putExtra(EXTRA_DEVICE_MANUFACTURER, event.deviceInfo.manufacturer)
-            putExtra(EXTRA_OS_VERSION, event.deviceInfo.osVersion)
-            putExtra(EXTRA_SDK_INT, event.deviceInfo.sdkInt)
-          }
+          // Legacy extras for backward compatibility with older AccessibilityService versions
+          putExtra(EXTRA_TIMESTAMP, event.timestamp)
+          putExtra(EXTRA_EXCEPTION_CLASS, event.exceptionClass)
+          putExtra(EXTRA_EXCEPTION_MESSAGE, event.exceptionMessage)
+          putExtra(EXTRA_STACK_TRACE, event.stackTrace)
+          putExtra(EXTRA_CUSTOM_MESSAGE, event.customMessage)
+          putExtra(EXTRA_CURRENT_SCREEN, event.currentScreen)
+          putExtra(EXTRA_PACKAGE_NAME, event.packageName)
+          putExtra(EXTRA_APP_VERSION, event.appVersion)
+          putExtra(EXTRA_DEVICE_MODEL, event.deviceInfo.model)
+          putExtra(EXTRA_DEVICE_MANUFACTURER, event.deviceInfo.manufacturer)
+          putExtra(EXTRA_OS_VERSION, event.deviceInfo.osVersion)
+          putExtra(EXTRA_SDK_INT, event.deviceInfo.sdkInt)
+        }
       context.sendBroadcast(intent)
       AutoMobileSDK.logger.d(TAG) { "Broadcasted handled exception: ${event.exceptionClass}" }
     } catch (e: Exception) {
@@ -236,14 +236,14 @@ object AutoMobileFailures {
   private fun getAppVersion(context: Context): String? {
     return try {
       val packageInfo =
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.packageManager.getPackageInfo(
-                context.packageName,
-                PackageManager.PackageInfoFlags.of(0),
-            )
-          } else {
-            @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0)
-          }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.PackageInfoFlags.of(0),
+          )
+        } else {
+          @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0)
+        }
       packageInfo.versionName
     } catch (e: Exception) {
       AutoMobileSDK.logger.w(TAG, e) { "Failed to get app version" }

@@ -11,9 +11,9 @@ import dev.jasonpearson.automobile.video.wrappers.DisplayControl
  * mirrors the main display. This only works when running as shell user (UID 2000).
  */
 class ScreenCapture(
-    private val width: Int,
-    private val height: Int,
-    private val densityDpi: Int,
+  private val width: Int,
+  private val height: Int,
+  private val densityDpi: Int,
 ) {
   private var virtualDisplay: VirtualDisplay? = null
 
@@ -25,14 +25,14 @@ class ScreenCapture(
    */
   fun start(surface: Surface): VirtualDisplay {
     val display =
-        DisplayControl.createVirtualDisplay(
-            name = "automobile-mirror",
-            width = width,
-            height = height,
-            densityDpi = densityDpi,
-            surface = surface,
-            displayIdToMirror = 0, // Mirror the main display
-        )
+      DisplayControl.createVirtualDisplay(
+        name = "automobile-mirror",
+        width = width,
+        height = height,
+        densityDpi = densityDpi,
+        surface = surface,
+        displayIdToMirror = 0, // Mirror the main display
+      )
     virtualDisplay = display
     return display
   }

@@ -70,32 +70,32 @@ fun AccessibilityServiceScreen() {
   LaunchedEffect(Unit) { isServiceEnabled = checkAccessibilityServiceStatus(context) }
 
   Column(
-      modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(32.dp),
-      verticalArrangement = Arrangement.spacedBy(24.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
+    modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(32.dp),
+    verticalArrangement = Arrangement.spacedBy(24.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     // Title
     Text(
-        text = "AutoMobile Accessibility Service",
-        fontSize = 20.sp,
-        fontWeight = FontWeight.Bold,
-        textAlign = TextAlign.Center,
+      text = "AutoMobile Accessibility Service",
+      fontSize = 20.sp,
+      fontWeight = FontWeight.Bold,
+      textAlign = TextAlign.Center,
     )
 
     // Description
     Text(
-        text =
-            """
-            This service provides view hierarchy extraction capabilities for automated testing.
+      text =
+        """
+        This service provides view hierarchy extraction capabilities for automated testing.
 
-            To use this service:
-            1. Enable the accessibility service in Settings
-            2. Grant necessary permissions
-            3. The service will be available for AutoMobile testing
-            """
-                .trimIndent(),
-        textAlign = TextAlign.Start,
-        modifier = Modifier.fillMaxWidth(),
+        To use this service:
+        1. Enable the accessibility service in Settings
+        2. Grant necessary permissions
+        3. The service will be available for AutoMobile testing
+        """
+          .trimIndent(),
+      textAlign = TextAlign.Start,
+      modifier = Modifier.fillMaxWidth(),
     )
 
     // Status
@@ -111,25 +111,25 @@ fun AccessibilityServiceScreen() {
 @Composable
 fun ServiceStatusDisplay(isServiceEnabled: Boolean) {
   val statusText =
-      if (isServiceEnabled) {
-        "✅ Accessibility Service is ENABLED"
-      } else {
-        "❌ Accessibility Service is DISABLED"
-      }
+    if (isServiceEnabled) {
+      "✅ Accessibility Service is ENABLED"
+    } else {
+      "❌ Accessibility Service is DISABLED"
+    }
 
   val statusColor =
-      if (isServiceEnabled) {
-        Color(0xFF4CAF50) // Green
-      } else {
-        Color(0xFFE53935) // Red
-      }
+    if (isServiceEnabled) {
+      Color(0xFF4CAF50) // Green
+    } else {
+      Color(0xFFE53935) // Red
+    }
 
   Text(
-      text = statusText,
-      color = statusColor,
-      fontSize = 16.sp,
-      fontWeight = FontWeight.Medium,
-      textAlign = TextAlign.Center,
+    text = statusText,
+    color = statusColor,
+    fontSize = 16.sp,
+    fontWeight = FontWeight.Medium,
+    textAlign = TextAlign.Center,
   )
 }
 
@@ -142,12 +142,12 @@ private fun checkAccessibilityServiceStatus(context: android.content.Context): B
   Log.i("MainActivity", "checkAccessibilityServiceStatus")
   return try {
     val accessibilityManager =
-        context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+      context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
     val enabledServices =
-        Settings.Secure.getString(
-            context.contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-        )
+      Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+      )
 
     val serviceName = "${context.packageName}/${CtrlProxy::class.java.canonicalName}"
     enabledServices?.contains(serviceName) == true

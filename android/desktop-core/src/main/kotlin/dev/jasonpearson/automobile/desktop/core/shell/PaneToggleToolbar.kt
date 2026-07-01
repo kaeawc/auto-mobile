@@ -29,18 +29,18 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
  */
 @Composable
 fun PaneToggleToolbar(
-    showLeftPane: Boolean,
-    onToggleLeft: () -> Unit,
-    showRightPane: Boolean,
-    onToggleRight: () -> Unit,
-    showBottomPane: Boolean,
-    onToggleBottom: () -> Unit,
-    modifier: Modifier = Modifier,
+  showLeftPane: Boolean,
+  onToggleLeft: () -> Unit,
+  showRightPane: Boolean,
+  onToggleRight: () -> Unit,
+  showBottomPane: Boolean,
+  onToggleBottom: () -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   Row(
-      modifier = modifier,
-      horizontalArrangement = Arrangement.spacedBy(2.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = modifier,
+    horizontalArrangement = Arrangement.spacedBy(2.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     PaneToggleButton(symbol = "\u25EB", selected = showLeftPane, onClick = onToggleLeft)
     PaneToggleButton(symbol = "\u2B13", selected = showBottomPane, onClick = onToggleBottom)
@@ -50,45 +50,45 @@ fun PaneToggleToolbar(
 
 @Composable
 private fun PaneToggleButton(
-    symbol: String,
-    selected: Boolean,
-    onClick: () -> Unit,
+  symbol: String,
+  selected: Boolean,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val interactionSource = remember { MutableInteractionSource() }
   val isHovered by interactionSource.collectIsHoveredAsState()
 
   val bgAlpha =
-      when {
-        selected -> 0.15f
-        isHovered -> 0.1f
-        else -> 0f
-      }
+    when {
+      selected -> 0.15f
+      isHovered -> 0.1f
+      else -> 0f
+    }
 
   Box(
-      modifier =
-          Modifier.size(24.dp)
-              .clip(RoundedCornerShape(4.dp))
-              .background(colors.text.normal.copy(alpha = bgAlpha))
-              .hoverable(interactionSource)
-              .clickable(
-                  interactionSource = interactionSource,
-                  indication = null,
-                  onClick = onClick,
-              )
-              .pointerHoverIcon(PointerIcon.Hand),
-      contentAlignment = Alignment.Center,
+    modifier =
+      Modifier.size(24.dp)
+        .clip(RoundedCornerShape(4.dp))
+        .background(colors.text.normal.copy(alpha = bgAlpha))
+        .hoverable(interactionSource)
+        .clickable(
+          interactionSource = interactionSource,
+          indication = null,
+          onClick = onClick,
+        )
+        .pointerHoverIcon(PointerIcon.Hand),
+    contentAlignment = Alignment.Center,
   ) {
     Text(
-        text = symbol,
-        fontSize = 14.sp,
-        color =
-            if (selected) {
-              colors.text.info
-            } else {
-              colors.text.normal.copy(alpha = 0.6f)
-            },
-        lineHeight = 14.sp,
+      text = symbol,
+      fontSize = 14.sp,
+      color =
+        if (selected) {
+          colors.text.info
+        } else {
+          colors.text.normal.copy(alpha = 0.6f)
+        },
+      lineHeight = 14.sp,
     )
   }
 }

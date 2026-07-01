@@ -15,10 +15,10 @@ class NavigationScreenshotLoaderTest {
   @Test
   fun `load returns null when clientProvider is null`() = runBlocking {
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = null,
-            imageDecoder = FakeImageDecoder(),
-        )
+      NavigationScreenshotLoader(
+        clientProvider = null,
+        imageDecoder = FakeImageDecoder(),
+      )
 
     val result = loader.load("automobile:navigation/nodes/123/screenshot")
 
@@ -31,10 +31,10 @@ class NavigationScreenshotLoaderTest {
     client.setResourceResponse("automobile:navigation/nodes/123/screenshot", SMALL_PNG_BASE64)
 
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = { client },
-            imageDecoder = FakeImageDecoder(),
-        )
+      NavigationScreenshotLoader(
+        clientProvider = { client },
+        imageDecoder = FakeImageDecoder(),
+      )
 
     // First call - should fetch from client
     val first = loader.load("automobile:navigation/nodes/123/screenshot")
@@ -55,11 +55,11 @@ class NavigationScreenshotLoaderTest {
     client.setResourceResponse("uri3", SMALL_PNG_BASE64)
 
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = { client },
-            maxCacheSize = 2,
-            imageDecoder = FakeImageDecoder(),
-        )
+      NavigationScreenshotLoader(
+        clientProvider = { client },
+        maxCacheSize = 2,
+        imageDecoder = FakeImageDecoder(),
+      )
 
     // Load three URIs with cache size of 2
     loader.load("uri1")
@@ -91,12 +91,12 @@ class NavigationScreenshotLoaderTest {
     // Set byte limit to 79,999 so only 1 image fits (2 would be 80,000)
     val decoder = FakeImageDecoder(bitmapWidth = 100, bitmapHeight = 100)
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = { client },
-            maxCacheSize = 50, // Count limit won't trigger
-            maxCacheBytes = 79_999L,
-            imageDecoder = decoder,
-        )
+      NavigationScreenshotLoader(
+        clientProvider = { client },
+        maxCacheSize = 50, // Count limit won't trigger
+        maxCacheBytes = 79_999L,
+        imageDecoder = decoder,
+      )
 
     loader.load("uri1")
     assertEquals(1, loader.cacheSize())
@@ -119,12 +119,12 @@ class NavigationScreenshotLoaderTest {
     // Each 100x100 image = 40,000 bytes, byte limit allows 2
     val decoder = FakeImageDecoder(bitmapWidth = 100, bitmapHeight = 100)
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = { client },
-            maxCacheSize = 50,
-            maxCacheBytes = 80_000L,
-            imageDecoder = decoder,
-        )
+      NavigationScreenshotLoader(
+        clientProvider = { client },
+        maxCacheSize = 50,
+        maxCacheBytes = 80_000L,
+        imageDecoder = decoder,
+      )
 
     loader.load("uri1")
     loader.load("uri2")
@@ -146,10 +146,10 @@ class NavigationScreenshotLoaderTest {
     client.throwOnReadResource = McpConnectionException("Connection failed")
 
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = { client },
-            imageDecoder = FakeImageDecoder(),
-        )
+      NavigationScreenshotLoader(
+        clientProvider = { client },
+        imageDecoder = FakeImageDecoder(),
+      )
 
     val result = loader.load("automobile:navigation/nodes/123/screenshot")
 
@@ -161,15 +161,15 @@ class NavigationScreenshotLoaderTest {
   fun `load returns null when resource has no blob content`() = runBlocking {
     val client = FakeAutoMobileClient()
     client.setResourceResponseWithText(
-        "automobile:navigation/nodes/123/screenshot",
-        "text content only",
+      "automobile:navigation/nodes/123/screenshot",
+      "text content only",
     )
 
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = { client },
-            imageDecoder = FakeImageDecoder(),
-        )
+      NavigationScreenshotLoader(
+        clientProvider = { client },
+        imageDecoder = FakeImageDecoder(),
+      )
 
     val result = loader.load("automobile:navigation/nodes/123/screenshot")
 
@@ -182,10 +182,10 @@ class NavigationScreenshotLoaderTest {
     client.setResourceResponse("automobile:navigation/nodes/123/screenshot", SMALL_PNG_BASE64)
 
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = { client },
-            imageDecoder = FakeImageDecoder(),
-        )
+      NavigationScreenshotLoader(
+        clientProvider = { client },
+        imageDecoder = FakeImageDecoder(),
+      )
 
     // Load to populate cache
     loader.load("automobile:navigation/nodes/123/screenshot")
@@ -208,10 +208,10 @@ class NavigationScreenshotLoaderTest {
     client.setResourceResponse("uri2", SMALL_PNG_BASE64)
 
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = { client },
-            imageDecoder = FakeImageDecoder(),
-        )
+      NavigationScreenshotLoader(
+        clientProvider = { client },
+        imageDecoder = FakeImageDecoder(),
+      )
 
     // Load multiple entries
     loader.load("uri1")
@@ -236,12 +236,12 @@ class NavigationScreenshotLoaderTest {
     // 200x200x4 = 160,000 bytes per image; set limit below that
     val decoder = FakeImageDecoder(bitmapWidth = 200, bitmapHeight = 200)
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = { client },
-            maxCacheSize = 50,
-            maxCacheBytes = 100_000L, // Less than a single 200x200 image
-            imageDecoder = decoder,
-        )
+      NavigationScreenshotLoader(
+        clientProvider = { client },
+        maxCacheSize = 50,
+        maxCacheBytes = 100_000L, // Less than a single 200x200 image
+        imageDecoder = decoder,
+      )
 
     // Load should succeed (returns bitmap) but not cache it
     val result = loader.load("uri1")
@@ -262,12 +262,12 @@ class NavigationScreenshotLoaderTest {
     // Each 100x100 image = 40,000 bytes; limit fits exactly 2
     val decoder = FakeImageDecoder(bitmapWidth = 100, bitmapHeight = 100)
     val loader =
-        NavigationScreenshotLoader(
-            clientProvider = { client },
-            maxCacheSize = 50,
-            maxCacheBytes = 80_000L,
-            imageDecoder = decoder,
-        )
+      NavigationScreenshotLoader(
+        clientProvider = { client },
+        maxCacheSize = 50,
+        maxCacheBytes = 80_000L,
+        imageDecoder = decoder,
+      )
 
     loader.load("uri1")
     assertEquals(1, loader.cacheSize())
@@ -285,9 +285,9 @@ class NavigationScreenshotLoaderTest {
   companion object {
     // Minimal valid PNG base64 - only used to simulate blob content
     private const val SMALL_PNG_BASE64 =
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
     private const val SMALL_PNG_BASE64_ALT =
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
   }
 }
 
@@ -296,8 +296,8 @@ class NavigationScreenshotLoaderTest {
  * a unique bitmap per byte array content for identity checks.
  */
 class FakeImageDecoder(
-    private val bitmapWidth: Int = 1,
-    private val bitmapHeight: Int = 1,
+  private val bitmapWidth: Int = 1,
+  private val bitmapHeight: Int = 1,
 ) : ImageDecoder {
   private val bitmapCache = mutableMapOf<String, ImageBitmap>()
 
@@ -313,8 +313,8 @@ class FakeImageDecoder(
  * identity/null checks.
  */
 class FakeImageBitmap(
-    override val width: Int = 1,
-    override val height: Int = 1,
+  override val width: Int = 1,
+  override val height: Int = 1,
 ) : ImageBitmap {
   override val colorSpace
     get() = throw NotImplementedError("Stub")
@@ -328,13 +328,13 @@ class FakeImageBitmap(
   override fun prepareToDraw() {}
 
   override fun readPixels(
-      buffer: IntArray,
-      startX: Int,
-      startY: Int,
-      width: Int,
-      height: Int,
-      bufferOffset: Int,
-      stride: Int,
+    buffer: IntArray,
+    startX: Int,
+    startY: Int,
+    width: Int,
+    height: Int,
+    bufferOffset: Int,
+    stride: Int,
   ) {}
 }
 
@@ -353,20 +353,20 @@ class FakeAutoMobileClient : AutoMobileClient {
 
   fun setResourceResponse(uri: String, blobBase64: String) {
     resourceResponses[uri] =
-        McpResourceContent(
-            uri = uri,
-            mimeType = "image/png",
-            blob = blobBase64,
-        )
+      McpResourceContent(
+        uri = uri,
+        mimeType = "image/png",
+        blob = blobBase64,
+      )
   }
 
   fun setResourceResponseWithText(uri: String, text: String) {
     resourceResponses[uri] =
-        McpResourceContent(
-            uri = uri,
-            mimeType = "text/plain",
-            text = text,
-        )
+      McpResourceContent(
+        uri = uri,
+        mimeType = "text/plain",
+        text = text,
+      )
   }
 
   override fun readResource(uri: String): List<McpResourceContent> {
@@ -389,20 +389,20 @@ class FakeAutoMobileClient : AutoMobileClient {
   override fun listFeatureFlags() = notImplemented()
 
   override fun setFeatureFlag(
-      key: String,
-      enabled: Boolean,
-      config: kotlinx.serialization.json.JsonObject?,
+    key: String,
+    enabled: Boolean,
+    config: kotlinx.serialization.json.JsonObject?,
   ) = notImplemented()
 
   override fun listPerformanceAuditResults(
-      startTime: String?,
-      endTime: String?,
-      limit: Int?,
-      offset: Int?,
+    startTime: String?,
+    endTime: String?,
+    limit: Int?,
+    offset: Int?,
   ) = notImplemented()
 
   override fun getTestTimings(
-      query: dev.jasonpearson.automobile.desktop.core.daemon.TestTimingQuery
+    query: dev.jasonpearson.automobile.desktop.core.daemon.TestTimingQuery
   ) = notImplemented()
 
   override fun startTestRecording(platform: String) = notImplemented()
@@ -410,10 +410,10 @@ class FakeAutoMobileClient : AutoMobileClient {
   override fun stopTestRecording(recordingId: String?, planName: String?) = notImplemented()
 
   override fun executePlan(
-      planContent: String,
-      platform: String,
-      startStep: Int?,
-      sessionUuid: String?,
+    planContent: String,
+    platform: String,
+    startStep: Int?,
+    sessionUuid: String?,
   ) = notImplemented()
 
   override fun startDevice(name: String, platform: String, deviceId: String?) = notImplemented()
@@ -421,7 +421,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   override fun setActiveDevice(deviceId: String, platform: String) = notImplemented()
 
   override fun getTestRuns(query: dev.jasonpearson.automobile.desktop.core.daemon.TestRunQuery) =
-      notImplemented()
+    notImplemented()
 
   override fun observe(platform: String) = notImplemented()
 
@@ -432,23 +432,23 @@ class FakeAutoMobileClient : AutoMobileClient {
   override fun updateService(deviceId: String, platform: String) = notImplemented()
 
   override fun setKeyValue(
-      deviceId: String,
-      appId: String,
-      fileName: String,
-      key: String,
-      value: String?,
-      type: String,
+    deviceId: String,
+    appId: String,
+    fileName: String,
+    key: String,
+    value: String?,
+    type: String,
   ) = notImplemented()
 
   override fun removeKeyValue(deviceId: String, appId: String, fileName: String, key: String) =
-      notImplemented()
+    notImplemented()
 
   override fun clearKeyValueFile(deviceId: String, appId: String, fileName: String) =
-      notImplemented()
+    notImplemented()
 
   override fun callTool(name: String, arguments: kotlinx.serialization.json.JsonObject) =
-      notImplemented()
+    notImplemented()
 
   private fun notImplemented(): Nothing =
-      throw NotImplementedError("FakeAutoMobileClient: method not implemented for testing")
+    throw NotImplementedError("FakeAutoMobileClient: method not implemented for testing")
 }

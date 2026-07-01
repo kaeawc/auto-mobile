@@ -18,12 +18,12 @@ class FakeAppListDataSource : AppListDataSource {
   override suspend fun getInstalledApps(): Result<List<InstalledApp>> {
     delay(100)
     return Result.Success(
-        listOf(
-            InstalledApp("com.example.playground", "Playground", true),
-            InstalledApp("com.example.myapp", "My App", false),
-            InstalledApp("com.google.android.gms", "Google Play Services", false),
-            InstalledApp("com.android.settings", "Settings", false),
-        )
+      listOf(
+        InstalledApp("com.example.playground", "Playground", true),
+        InstalledApp("com.example.myapp", "My App", false),
+        InstalledApp("com.google.android.gms", "Google Play Services", false),
+        InstalledApp("com.android.settings", "Settings", false),
+      )
     )
   }
 }
@@ -35,8 +35,8 @@ class FakeAppListDataSource : AppListDataSource {
  * @param deviceId The device ID to fetch apps for
  */
 class RealAppListDataSource(
-    private val clientProvider: (() -> AutoMobileClient)? = null,
-    private val deviceId: String? = null,
+  private val clientProvider: (() -> AutoMobileClient)? = null,
+  private val deviceId: String? = null,
 ) : AppListDataSource {
   private val json = Json { ignoreUnknownKeys = true }
 
@@ -57,15 +57,15 @@ class RealAppListDataSource(
 
       // Flatten apps from all devices (usually just one)
       val apps =
-          response.devices.flatMap { deviceContent ->
-            deviceContent.apps.map { app ->
-              InstalledApp(
-                  packageName = app.packageName,
-                  displayName = app.displayName,
-                  isForeground = app.foreground,
-              )
-            }
+        response.devices.flatMap { deviceContent ->
+          deviceContent.apps.map { app ->
+            InstalledApp(
+              packageName = app.packageName,
+              displayName = app.displayName,
+              isForeground = app.foreground,
+            )
           }
+        }
 
       Result.Success(apps)
     } catch (e: McpConnectionException) {
@@ -80,39 +80,39 @@ class RealAppListDataSource(
 
 @Serializable
 private data class McpAppsQueryResponse(
-    val query: McpAppsQueryOptions? = null,
-    val totalCount: Int = 0,
-    val deviceCount: Int = 0,
-    val lastUpdated: String? = null,
-    val devices: List<McpAppsDeviceContent> = emptyList(),
+  val query: McpAppsQueryOptions? = null,
+  val totalCount: Int = 0,
+  val deviceCount: Int = 0,
+  val lastUpdated: String? = null,
+  val devices: List<McpAppsDeviceContent> = emptyList(),
 )
 
 @Serializable
 private data class McpAppsQueryOptions(
-    val platform: String? = null,
-    val search: String? = null,
-    val type: String? = null,
-    val profile: Int? = null,
-    val deviceId: String? = null,
+  val platform: String? = null,
+  val search: String? = null,
+  val type: String? = null,
+  val profile: Int? = null,
+  val deviceId: String? = null,
 )
 
 @Serializable
 private data class McpAppsDeviceContent(
-    val deviceId: String,
-    val platform: String,
-    val totalCount: Int = 0,
-    val lastUpdated: String? = null,
-    val apps: List<McpAppInfo> = emptyList(),
+  val deviceId: String,
+  val platform: String,
+  val totalCount: Int = 0,
+  val lastUpdated: String? = null,
+  val apps: List<McpAppInfo> = emptyList(),
 )
 
 @Serializable
 private data class McpAppInfo(
-    val packageName: String,
-    val type: String? = null,
-    val foreground: Boolean = false,
-    val recent: Boolean = false,
-    val userId: Int? = null,
-    val userProfile: String? = null,
-    val userIds: List<Int>? = null,
-    val displayName: String? = null,
+  val packageName: String,
+  val type: String? = null,
+  val foreground: Boolean = false,
+  val recent: Boolean = false,
+  val userId: Int? = null,
+  val userProfile: String? = null,
+  val userIds: List<Int>? = null,
+  val displayName: String? = null,
 )

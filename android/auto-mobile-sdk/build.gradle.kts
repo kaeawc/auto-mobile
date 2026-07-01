@@ -83,12 +83,10 @@ dependencies {
 tasks.withType<KotlinCompile>().configureEach {
   compilerOptions {
     jvmTarget.set(
-        org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(libs.versions.build.java.target.get())
+      org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(libs.versions.build.java.target.get())
     )
     languageVersion.set(
-        KotlinVersion.valueOf(
-            "KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}"
-        )
+      KotlinVersion.valueOf("KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}")
     )
   }
 }
@@ -102,24 +100,24 @@ tasks.withType<KotlinCompile>().configureEach {
 fun generateApiSignature(classesDir: FileCollection): String {
   val classpath = classesDir.files.joinToString(":") { it.path }
   val classNames =
-      classesDir.asFileTree
-          .matching { include("**/*.class") }
-          .files
-          .sortedBy { it.path }
-          .mapNotNull { classFile ->
-            val relativePath =
-                classesDir.files.firstNotNullOfOrNull { root ->
-                  if (classFile.startsWith(root)) classFile.relativeTo(root).path else null
-                } ?: return@mapNotNull null
-            if ("\$\$" in relativePath || "BuildConfig" in relativePath) return@mapNotNull null
-            relativePath.removeSuffix(".class").replace('/', '.')
-          }
+    classesDir.asFileTree
+      .matching { include("**/*.class") }
+      .files
+      .sortedBy { it.path }
+      .mapNotNull { classFile ->
+        val relativePath =
+          classesDir.files.firstNotNullOfOrNull { root ->
+            if (classFile.startsWith(root)) classFile.relativeTo(root).path else null
+          } ?: return@mapNotNull null
+        if ("\$\$" in relativePath || "BuildConfig" in relativePath) return@mapNotNull null
+        relativePath.removeSuffix(".class").replace('/', '.')
+      }
   if (classNames.isEmpty()) return ""
   // Run javap once with all class names for efficiency
   val proc =
-      ProcessBuilder(listOf("javap", "-public", "-classpath", classpath) + classNames)
-          .redirectErrorStream(true)
-          .start()
+    ProcessBuilder(listOf("javap", "-public", "-classpath", classpath) + classNames)
+      .redirectErrorStream(true)
+      .start()
   val output = proc.inputStream.bufferedReader().readText()
   val exited = proc.waitFor(60, TimeUnit.SECONDS)
   if (!exited) {
@@ -134,7 +132,7 @@ fun generateApiSignature(classesDir: FileCollection): String {
 
 val apiFile = layout.projectDirectory.file("api/auto-mobile-sdk.api")
 val kotlinReleaseClassesDir =
-    layout.buildDirectory.dir("intermediates/built_in_kotlinc/release/compileReleaseKotlin/classes")
+  layout.buildDirectory.dir("intermediates/built_in_kotlinc/release/compileReleaseKotlin/classes")
 
 tasks.register("apiDump") {
   description = "Generate public API signature file from release classes"
@@ -161,15 +159,15 @@ tasks.register("apiCheck") {
     val expected = apiFile.asFile
     if (!expected.exists()) {
       throw GradleException(
-          "API file ${expected.relativeTo(projectDir)} does not exist. " +
-              "Run :auto-mobile-sdk:apiDump first."
+        "API file ${expected.relativeTo(projectDir)} does not exist. " +
+          "Run :auto-mobile-sdk:apiDump first."
       )
     }
     val current = generateApiSignature(files(kotlinReleaseClassesDir))
     if (current != expected.readText()) {
       throw GradleException(
-          "Public API has changed! Run :auto-mobile-sdk:apiDump to update the API file.\n" +
-              "Expected file: ${expected.relativeTo(projectDir)}"
+        "Public API has changed! Run :auto-mobile-sdk:apiDump to update the API file.\n" +
+          "Expected file: ${expected.relativeTo(projectDir)}"
       )
     }
     logger.lifecycle("API check passed: public API matches ${expected.relativeTo(projectDir)}")
@@ -179,9 +177,9 @@ tasks.register("apiCheck") {
 mavenPublishing {
   // Coordinates: group and version from root, artifact from local gradle.properties
   coordinates(
-      property("GROUP").toString(),
-      property("POM_ARTIFACT_ID").toString(),
-      version.toString(),
+    property("GROUP").toString(),
+    property("POM_ARTIFACT_ID").toString(),
+    version.toString(),
   )
 
   pom {

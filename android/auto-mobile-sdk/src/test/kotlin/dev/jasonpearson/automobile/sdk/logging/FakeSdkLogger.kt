@@ -9,10 +9,10 @@ package dev.jasonpearson.automobile.sdk.logging
 internal class FakeSdkLogger : SdkLogger {
 
   data class LogEntry(
-      val level: String,
-      val tag: String,
-      val message: String,
-      val throwable: Throwable? = null,
+    val level: String,
+    val tag: String,
+    val message: String,
+    val throwable: Throwable? = null,
   )
 
   private val _entries = mutableListOf<LogEntry>()

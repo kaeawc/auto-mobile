@@ -41,8 +41,8 @@ class ResultExtensionsTest {
       emit(42)
       throw error
     }
-        .asResult()
-        .toList()
+      .asResult()
+      .toList()
 
     assertEquals(3, results.size)
     assertTrue(results[0] is Result.Loading)

@@ -18,36 +18,35 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 /** Reusable collapsible section header with chevron, title, and an optional trailing slot. */
 @Composable
 fun CollapsibleSectionHeader(
-    title: String,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    modifier: Modifier = Modifier,
-    trailing: @Composable (() -> Unit)? = null,
+  title: String,
+  expanded: Boolean,
+  onToggle: () -> Unit,
+  modifier: Modifier = Modifier,
+  trailing: @Composable (() -> Unit)? = null,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier =
-          modifier.fillMaxWidth().clickable { onToggle() }.pointerHoverIcon(PointerIcon.Hand),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = modifier.fillMaxWidth().clickable { onToggle() }.pointerHoverIcon(PointerIcon.Hand),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(
-          if (expanded) "\u25BE" else "\u25B8",
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
+        if (expanded) "\u25BE" else "\u25B8",
+        fontSize = 11.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
       )
       Text(
-          title,
-          fontSize = 14.sp,
-          fontWeight = FontWeight.Medium,
-          color = colors.text.normal,
-          maxLines = 1,
-          softWrap = false,
+        title,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Medium,
+        color = colors.text.normal,
+        maxLines = 1,
+        softWrap = false,
       )
     }
     trailing?.invoke()

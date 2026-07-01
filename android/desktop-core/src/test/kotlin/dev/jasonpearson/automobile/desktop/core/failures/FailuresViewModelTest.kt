@@ -17,27 +17,27 @@ class FailuresViewModelTest {
   private val testScope = TestScope(testDispatcher)
 
   private fun createTestFailureGroup(id: String, type: FailureType = FailureType.Crash) =
-      FailureGroup(
-          id = id,
-          type = type,
-          signature = "Test signature $id",
-          title = "Test title $id",
-          message = "Test message $id",
-          firstOccurrence = 0L,
-          lastOccurrence = 0L,
-          totalCount = 1,
-          uniqueSessions = 1,
-          severity = FailureSeverity.Medium,
-          deviceBreakdown = emptyList(),
-          versionBreakdown = emptyList(),
-          screenBreakdown = emptyList(),
-          failureScreens = emptyMap(),
-          stackTraceElements = emptyList(),
-          toolCallInfo = null,
-          affectedTests = emptyMap(),
-          recentCaptures = emptyList(),
-          sampleOccurrences = emptyList(),
-      )
+    FailureGroup(
+      id = id,
+      type = type,
+      signature = "Test signature $id",
+      title = "Test title $id",
+      message = "Test message $id",
+      firstOccurrence = 0L,
+      lastOccurrence = 0L,
+      totalCount = 1,
+      uniqueSessions = 1,
+      severity = FailureSeverity.Medium,
+      deviceBreakdown = emptyList(),
+      versionBreakdown = emptyList(),
+      screenBreakdown = emptyList(),
+      failureScreens = emptyMap(),
+      stackTraceElements = emptyList(),
+      toolCallInfo = null,
+      affectedTests = emptyMap(),
+      recentCaptures = emptyList(),
+      sampleOccurrences = emptyList(),
+    )
 
   @Test
   fun `initial state transitions to Content on success`() = testScope.runTest {
@@ -101,10 +101,10 @@ class FailuresViewModelTest {
   @Test
   fun `FilterByType sets filterType`() = testScope.runTest {
     val groups =
-        listOf(
-            createTestFailureGroup("g1", FailureType.Crash),
-            createTestFailureGroup("g2", FailureType.ANR),
-        )
+      listOf(
+        createTestFailureGroup("g1", FailureType.Crash),
+        createTestFailureGroup("g2", FailureType.ANR),
+      )
     val dataSource = FakeFailuresDataSourceImpl(Result.Success(groups))
     val vm = FailuresViewModel(dataSource, this)
 
@@ -130,10 +130,10 @@ class FailuresViewModelTest {
   @Test
   fun `SelectFailureById finds and selects failure`() = testScope.runTest {
     val groups =
-        listOf(
-            createTestFailureGroup("g1"),
-            createTestFailureGroup("g2"),
-        )
+      listOf(
+        createTestFailureGroup("g1"),
+        createTestFailureGroup("g2"),
+      )
     val dataSource = FakeFailuresDataSourceImpl(Result.Success(groups))
     val vm = FailuresViewModel(dataSource, this)
 
@@ -158,17 +158,17 @@ class FailuresViewModelTest {
   @Test
   fun `Refresh reloads data`() = testScope.runTest {
     val dataSource =
-        FakeFailuresDataSourceImpl(Result.Success(listOf(createTestFailureGroup("g1"))))
+      FakeFailuresDataSourceImpl(Result.Success(listOf(createTestFailureGroup("g1"))))
     val vm = FailuresViewModel(dataSource, this)
 
     dataSource.result =
-        Result.Success(
-            listOf(
-                createTestFailureGroup("g1"),
-                createTestFailureGroup("g2"),
-                createTestFailureGroup("g3"),
-            )
+      Result.Success(
+        listOf(
+          createTestFailureGroup("g1"),
+          createTestFailureGroup("g2"),
+          createTestFailureGroup("g3"),
         )
+      )
     vm.onAction(FailuresAction.Refresh)
 
     val state = vm.state.value as FailuresUiState.Content
@@ -178,7 +178,7 @@ class FailuresViewModelTest {
   @Test
   fun `UpdateGroups replaces failure groups in Content state`() = testScope.runTest {
     val dataSource =
-        FakeFailuresDataSourceImpl(Result.Success(listOf(createTestFailureGroup("g1"))))
+      FakeFailuresDataSourceImpl(Result.Success(listOf(createTestFailureGroup("g1"))))
     val vm = FailuresViewModel(dataSource, this)
 
     val newGroups = listOf(createTestFailureGroup("g2"), createTestFailureGroup("g3"))
@@ -204,25 +204,22 @@ class FailuresViewModelTest {
 
   // -- Fakes --
 
-  private class FakeFailuresDataSourceImpl(
-      var result: Result<List<FailureGroup>>,
-  ) : FailuresDataSource {
+  private class FakeFailuresDataSourceImpl(var result: Result<List<FailureGroup>>) :
+    FailuresDataSource {
     override suspend fun getFailureGroups(): Result<List<FailureGroup>> = result
 
     override suspend fun getTimelineData(
-        dateRange: DateRange,
-        aggregation: TimeAggregation,
+      dateRange: DateRange,
+      aggregation: TimeAggregation,
     ): Result<TimelineData> = Result.Success(TimelineData(emptyList(), PeriodTotals(0, 0, 0, 0)))
   }
 
-  private class ThrowingFailuresDataSource(
-      private val exception: Exception,
-  ) : FailuresDataSource {
+  private class ThrowingFailuresDataSource(private val exception: Exception) : FailuresDataSource {
     override suspend fun getFailureGroups(): Result<List<FailureGroup>> = throw exception
 
     override suspend fun getTimelineData(
-        dateRange: DateRange,
-        aggregation: TimeAggregation,
+      dateRange: DateRange,
+      aggregation: TimeAggregation,
     ): Result<TimelineData> = throw exception
   }
 }

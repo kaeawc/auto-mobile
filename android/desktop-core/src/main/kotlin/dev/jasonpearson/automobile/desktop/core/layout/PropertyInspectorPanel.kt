@@ -36,8 +36,8 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
  */
 @Composable
 fun PropertyInspectorPanel(
-    element: UIElementInfo?,
-    modifier: Modifier = Modifier,
+  element: UIElementInfo?,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   val verticalScrollState = rememberScrollState()
@@ -45,27 +45,26 @@ fun PropertyInspectorPanel(
 
   Box(modifier = modifier.fillMaxSize().horizontalScroll(horizontalScrollState)) {
     Column(
-        modifier =
-            Modifier.widthIn(min = 180.dp).verticalScroll(verticalScrollState).padding(12.dp),
+      modifier = Modifier.widthIn(min = 180.dp).verticalScroll(verticalScrollState).padding(12.dp)
     ) {
       if (element == null) {
         Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+          modifier = Modifier.fillMaxSize(),
+          contentAlignment = Alignment.Center,
         ) {
           Column(
-              horizontalAlignment = Alignment.CenterHorizontally,
-              verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
           ) {
             Text(
-                "No element selected",
-                color = colors.text.normal.copy(alpha = 0.5f),
-                fontSize = 12.sp,
+              "No element selected",
+              color = colors.text.normal.copy(alpha = 0.5f),
+              fontSize = 12.sp,
             )
             Text(
-                "Click on the screen or tree to select",
-                color = colors.text.normal.copy(alpha = 0.3f),
-                fontSize = 11.sp,
+              "Click on the screen or tree to select",
+              color = colors.text.normal.copy(alpha = 0.3f),
+              fontSize = 11.sp,
             )
           }
         }
@@ -88,9 +87,9 @@ fun PropertyInspectorPanel(
           PropertyRow("Right", "${element.bounds.right}", isSecondary = true)
           PropertyRow("Bottom", "${element.bounds.bottom}", isSecondary = true)
           PropertyRow(
-              "Center",
-              "${element.bounds.centerX}, ${element.bounds.centerY}",
-              isSecondary = true,
+            "Center",
+            "${element.bounds.centerX}, ${element.bounds.centerY}",
+            isSecondary = true,
           )
         }
 
@@ -126,24 +125,24 @@ fun PropertyInspectorPanel(
           PropertySection(title = "Content") {
             Column {
               Text(
-                  "Text",
-                  fontSize = 10.sp,
-                  color = colors.text.normal.copy(alpha = 0.5f),
+                "Text",
+                fontSize = 10.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
               )
               Box(
-                  modifier =
-                      Modifier.fillMaxWidth()
-                          .padding(top = 4.dp)
-                          .background(
-                              colors.text.normal.copy(alpha = 0.05f),
-                              RoundedCornerShape(4.dp),
-                          )
-                          .padding(8.dp),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .background(
+                      colors.text.normal.copy(alpha = 0.05f),
+                      RoundedCornerShape(4.dp),
+                    )
+                    .padding(8.dp)
               ) {
                 Text(
-                    element.text!!,
-                    fontSize = 11.sp,
-                    color = colors.text.normal,
+                  element.text!!,
+                  fontSize = 11.sp,
+                  color = colors.text.normal,
                 )
               }
             }
@@ -163,29 +162,29 @@ fun PropertyInspectorPanel(
 
 @Composable
 private fun PropertySection(
-    title: String,
-    content: @Composable () -> Unit,
+  title: String,
+  content: @Composable () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Column(modifier = Modifier.fillMaxWidth()) {
     Text(
-        title,
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = 0.7f),
-        maxLines = 1,
-        softWrap = false,
+      title,
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = 0.7f),
+      maxLines = 1,
+      softWrap = false,
     )
     Box(
-        modifier =
-            Modifier.fillMaxWidth()
-                .padding(top = 2.dp, bottom = 4.dp)
-                .height(1.dp)
-                .background(colors.text.normal.copy(alpha = 0.1f))
+      modifier =
+        Modifier.fillMaxWidth()
+          .padding(top = 2.dp, bottom = 4.dp)
+          .height(1.dp)
+          .background(colors.text.normal.copy(alpha = 0.1f))
     )
     Column(
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = Modifier.padding(top = 4.dp),
+      verticalArrangement = Arrangement.spacedBy(4.dp),
+      modifier = Modifier.padding(top = 4.dp),
     ) {
       content()
     }
@@ -194,68 +193,68 @@ private fun PropertySection(
 
 @Composable
 private fun PropertyRow(
-    label: String,
-    value: String,
-    isSecondary: Boolean = false,
+  label: String,
+  value: String,
+  isSecondary: Boolean = false,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier = Modifier.fillMaxWidth(),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
-        label,
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = if (isSecondary) 0.4f else 0.6f),
-        maxLines = 1,
-        softWrap = false,
-        modifier = Modifier.width(80.dp),
+      label,
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = if (isSecondary) 0.4f else 0.6f),
+      maxLines = 1,
+      softWrap = false,
+      modifier = Modifier.width(80.dp),
     )
     Text(
-        value,
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = if (isSecondary) 0.6f else 1f),
-        maxLines = 1,
-        softWrap = false,
+      value,
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = if (isSecondary) 0.6f else 1f),
+      maxLines = 1,
+      softWrap = false,
     )
   }
 }
 
 @Composable
 private fun StateCheckbox(
-    label: String,
-    isChecked: Boolean,
+  label: String,
+  isChecked: Boolean,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
-        label,
-        fontSize = 11.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
-        maxLines = 1,
-        softWrap = false,
+      label,
+      fontSize = 11.sp,
+      color = colors.text.normal.copy(alpha = 0.6f),
+      maxLines = 1,
+      softWrap = false,
     )
     Box(
-        modifier =
-            Modifier.size(14.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(
-                    if (isChecked) Color(0xFF4CAF50).copy(alpha = 0.2f)
-                    else colors.text.normal.copy(alpha = 0.05f)
-                ),
-        contentAlignment = Alignment.Center,
+      modifier =
+        Modifier.size(14.dp)
+          .clip(RoundedCornerShape(3.dp))
+          .background(
+            if (isChecked) Color(0xFF4CAF50).copy(alpha = 0.2f)
+            else colors.text.normal.copy(alpha = 0.05f)
+          ),
+      contentAlignment = Alignment.Center,
     ) {
       if (isChecked) {
         Text(
-            "\u2713", // Checkmark
-            fontSize = 10.sp,
-            color = Color(0xFF4CAF50),
+          "\u2713", // Checkmark
+          fontSize = 10.sp,
+          color = Color(0xFF4CAF50),
         )
       }
     }

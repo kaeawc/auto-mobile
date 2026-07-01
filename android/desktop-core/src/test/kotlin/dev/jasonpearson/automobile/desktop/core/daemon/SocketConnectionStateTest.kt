@@ -67,9 +67,9 @@ class SocketConnectionStateTest {
   @Test
   fun `Reconnecting to Connected transition`() {
     val state =
-        MutableStateFlow<ConnectionState>(
-            ConnectionState.Reconnecting(attempt = 2, nextRetryMs = 2000)
-        )
+      MutableStateFlow<ConnectionState>(
+        ConnectionState.Reconnecting(attempt = 2, nextRetryMs = 2000)
+      )
     state.update { ConnectionState.Connected(subscribed = false) }
     assertTrue(state.value is ConnectionState.Connected)
   }
@@ -77,9 +77,9 @@ class SocketConnectionStateTest {
   @Test
   fun `Reconnecting to Disconnected transition`() {
     val state =
-        MutableStateFlow<ConnectionState>(
-            ConnectionState.Reconnecting(attempt = 3, nextRetryMs = 4000)
-        )
+      MutableStateFlow<ConnectionState>(
+        ConnectionState.Reconnecting(attempt = 3, nextRetryMs = 4000)
+      )
     state.update { ConnectionState.Disconnected("Stopped") }
     val value = state.value
     assertTrue(value is ConnectionState.Disconnected)

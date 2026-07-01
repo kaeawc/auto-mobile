@@ -61,10 +61,10 @@ import org.jetbrains.jewel.ui.icon.PathIconKey
 
 @Composable
 fun TestTimingPanel(
-    project: Project,
-    client: AutoMobileClient,
-    isConnected: Boolean,
-    onShowNavigationGraph: () -> Unit,
+  project: Project,
+  client: AutoMobileClient,
+  isConnected: Boolean,
+  onShowNavigationGraph: () -> Unit,
 ) {
   val scope = rememberCoroutineScope()
   var summary by remember { mutableStateOf<TestTimingSummary?>(null) }
@@ -110,7 +110,7 @@ fun TestTimingPanel(
 
     error = null
     val lookbackDays =
-        parseOptionalInt("Lookback days", lookbackDaysText.text.toString(), minValue = 1)
+      parseOptionalInt("Lookback days", lookbackDaysText.text.toString(), minValue = 1)
     val minSamples = parseOptionalInt("Min samples", minSamplesText.text.toString(), minValue = 0)
     val limit = parseOptionalInt("Limit", limitText.text.toString(), minValue = 1)
     if (error != null) {
@@ -121,13 +121,13 @@ fun TestTimingPanel(
     status = "Refreshing..."
     try {
       val query =
-          TestTimingQuery(
-              lookbackDays = lookbackDays,
-              minSamples = minSamples,
-              limit = limit,
-              orderBy = sortKey.toOrderByOrNull(),
-              orderDirection = sortDirection.toOrderDirection(),
-          )
+        TestTimingQuery(
+          lookbackDays = lookbackDays,
+          minSamples = minSamples,
+          limit = limit,
+          orderBy = sortKey.toOrderByOrNull(),
+          orderDirection = sortDirection.toOrderDirection(),
+        )
       val response = withContext(Dispatchers.IO) { client.getTestTimings(query) }
       summary = response
       timings = response.testTimings
@@ -154,9 +154,9 @@ fun TestTimingPanel(
   }
 
   val queryKey =
-      "${lookbackDaysText.text.toString().trim()}:" +
-          "${minSamplesText.text.toString().trim()}:" +
-          "${limitText.text.toString().trim()}:${sortKey.name}:${sortDirection.name}"
+    "${lookbackDaysText.text.toString().trim()}:" +
+      "${minSamplesText.text.toString().trim()}:" +
+      "${limitText.text.toString().trim()}:${sortKey.name}:${sortDirection.name}"
 
   LaunchedEffect(autoPollEnabled, isConnected, client, queryKey) {
     if (!autoPollEnabled || !isConnected) {
@@ -169,21 +169,21 @@ fun TestTimingPanel(
   }
 
   val filteredTimings =
-      remember(timings, filterText.text, sortKey, sortDirection) {
-        val filter = filterText.text.toString().trim().lowercase()
-        val filtered =
-            if (filter.isBlank()) {
-              timings
-            } else {
-              timings.filter { entry ->
-                val combined = "${entry.testClass}.${entry.testMethod}".lowercase()
-                entry.testClass.lowercase().contains(filter) ||
-                    entry.testMethod.lowercase().contains(filter) ||
-                    combined.contains(filter)
-              }
-            }
-        filtered.sortedWith(buildTestTimingComparator(sortKey, sortDirection))
-      }
+    remember(timings, filterText.text, sortKey, sortDirection) {
+      val filter = filterText.text.toString().trim().lowercase()
+      val filtered =
+        if (filter.isBlank()) {
+          timings
+        } else {
+          timings.filter { entry ->
+            val combined = "${entry.testClass}.${entry.testMethod}".lowercase()
+            entry.testClass.lowercase().contains(filter) ||
+              entry.testMethod.lowercase().contains(filter) ||
+              combined.contains(filter)
+          }
+        }
+      filtered.sortedWith(buildTestTimingComparator(sortKey, sortDirection))
+    }
 
   val maxDuration = filteredTimings.maxOfOrNull { it.averageDurationMs } ?: 0
   val totalSamples = filteredTimings.sumOf { it.sampleSize }
@@ -191,32 +191,32 @@ fun TestTimingPanel(
     it.statusCounts?.passed ?: (it.successRate * it.sampleSize).roundToInt()
   }
   val overallSuccessRate =
-      if (totalSamples > 0) totalPassed.toDouble() / totalSamples.toDouble() else 0.0
+    if (totalSamples > 0) totalPassed.toDouble() / totalSamples.toDouble() else 0.0
   val averageDuration =
-      if (filteredTimings.isNotEmpty()) {
-        filteredTimings.map { it.averageDurationMs }.average()
-      } else {
-        0.0
-      }
+    if (filteredTimings.isNotEmpty()) {
+      filteredTimings.map { it.averageDurationMs }.average()
+    } else {
+      0.0
+    }
 
   val sortOptions =
-      listOf(
-          TestTimingSortOption(TestTimingSortKey.AVG_DURATION, "Avg duration"),
-          TestTimingSortOption(TestTimingSortKey.SAMPLE_SIZE, "Runs"),
-          TestTimingSortOption(TestTimingSortKey.LAST_RUN, "Last run"),
-          TestTimingSortOption(TestTimingSortKey.NAME, "Test name"),
-      )
+    listOf(
+      TestTimingSortOption(TestTimingSortKey.AVG_DURATION, "Avg duration"),
+      TestTimingSortOption(TestTimingSortKey.SAMPLE_SIZE, "Runs"),
+      TestTimingSortOption(TestTimingSortKey.LAST_RUN, "Last run"),
+      TestTimingSortOption(TestTimingSortKey.NAME, "Test name"),
+    )
   val sortLabels = sortOptions.map { it.label }
   val selectedSortIndex = sortOptions.indexOfFirst { it.key == sortKey }.coerceAtLeast(0)
 
   val directionOptions =
-      listOf(
-          TestTimingDirectionOption(TestTimingSortDirection.DESC, "Desc"),
-          TestTimingDirectionOption(TestTimingSortDirection.ASC, "Asc"),
-      )
+    listOf(
+      TestTimingDirectionOption(TestTimingSortDirection.DESC, "Desc"),
+      TestTimingDirectionOption(TestTimingSortDirection.ASC, "Asc"),
+    )
   val directionLabels = directionOptions.map { it.label }
   val selectedDirectionIndex =
-      directionOptions.indexOfFirst { it.direction == sortDirection }.coerceAtLeast(0)
+    directionOptions.indexOfFirst { it.direction == sortDirection }.coerceAtLeast(0)
 
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     Text("Test Timings")
@@ -226,23 +226,23 @@ fun TestTimingPanel(
     }
 
     Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       LabeledTextField(
-          label = "Lookback days",
-          state = lookbackDaysText,
-          modifier = Modifier.width(140.dp),
+        label = "Lookback days",
+        state = lookbackDaysText,
+        modifier = Modifier.width(140.dp),
       )
       LabeledTextField(
-          label = "Min samples",
-          state = minSamplesText,
-          modifier = Modifier.width(120.dp),
+        label = "Min samples",
+        state = minSamplesText,
+        modifier = Modifier.width(120.dp),
       )
       LabeledTextField(
-          label = "Limit",
-          state = limitText,
-          modifier = Modifier.width(100.dp),
+        label = "Limit",
+        state = limitText,
+        modifier = Modifier.width(100.dp),
       )
       OutlinedButton(onClick = { autoPollEnabled = !autoPollEnabled }) {
         Text(if (autoPollEnabled) "Pause polling" else "Resume polling")
@@ -251,28 +251,28 @@ fun TestTimingPanel(
     }
 
     Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       LabeledTextField(
-          label = "Filter (class/method)",
-          state = filterText,
-          modifier = Modifier.width(280.dp),
+        label = "Filter (class/method)",
+        state = filterText,
+        modifier = Modifier.width(280.dp),
       )
       ListComboBox(
-          sortLabels,
-          selectedSortIndex,
-          { index ->
-            sortKey = sortOptions.getOrNull(index)?.key ?: TestTimingSortKey.AVG_DURATION
-          },
+        sortLabels,
+        selectedSortIndex,
+        { index ->
+          sortKey = sortOptions.getOrNull(index)?.key ?: TestTimingSortKey.AVG_DURATION
+        },
       )
       ListComboBox(
-          directionLabels,
-          selectedDirectionIndex,
-          { index ->
-            sortDirection =
-                directionOptions.getOrNull(index)?.direction ?: TestTimingSortDirection.DESC
-          },
+        directionLabels,
+        selectedDirectionIndex,
+        { index ->
+          sortDirection =
+            directionOptions.getOrNull(index)?.direction ?: TestTimingSortDirection.DESC
+        },
       )
       OutlinedButton(onClick = { filterText.setTextAndPlaceCursorAtEnd("") }) {
         Text("Clear filter")
@@ -280,28 +280,28 @@ fun TestTimingPanel(
     }
 
     Text(
-        "Showing ${filteredTimings.size} tests | " +
-            "Samples: $totalSamples | " +
-            "Avg duration: ${formatDuration(averageDuration.roundToInt())} | " +
-            "Success: ${formatRate(overallSuccessRate)}",
-        color = palette.labelMuted,
-        fontSize = 11.sp,
+      "Showing ${filteredTimings.size} tests | " +
+        "Samples: $totalSamples | " +
+        "Avg duration: ${formatDuration(averageDuration.roundToInt())} | " +
+        "Success: ${formatRate(overallSuccessRate)}",
+      color = palette.labelMuted,
+      fontSize = 11.sp,
     )
     Text("Click a test row to open source.", color = palette.labelMuted, fontSize = 11.sp)
 
     selectedEntry?.let { entry ->
       Column(
-          modifier = Modifier.fillMaxWidth().background(palette.detailBackground).padding(8.dp),
-          verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth().background(palette.detailBackground).padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
       ) {
         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
           Text("Selected test", color = palette.labelMuted, fontSize = 11.sp)
           OutlinedButton(onClick = onShowNavigationGraph) {
             Row(verticalAlignment = Alignment.CenterVertically) {
               Icon(
-                  navigationIcon,
-                  contentDescription = "Show navigation graph",
-                  modifier = Modifier.width(14.dp).height(14.dp),
+                navigationIcon,
+                contentDescription = "Show navigation graph",
+                modifier = Modifier.width(14.dp).height(14.dp),
               )
               Spacer(modifier = Modifier.width(6.dp))
               Text("Show graph")
@@ -309,9 +309,9 @@ fun TestTimingPanel(
           }
         }
         Text(
-            "${entry.testClass}.${entry.testMethod}",
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+          "${entry.testClass}.${entry.testMethod}",
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
           Text("Avg: ${formatDuration(entry.averageDurationMs)}")
@@ -328,8 +328,8 @@ fun TestTimingPanel(
 
     if (filteredTimings.isNotEmpty()) {
       Row(
-          modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         HeaderCell("Test", Modifier.weight(TEST_COL_WEIGHT), palette)
         HeaderCell("Avg", Modifier.weight(AVG_COL_WEIGHT), palette)
@@ -341,13 +341,13 @@ fun TestTimingPanel(
       LazyColumn(modifier = Modifier.fillMaxWidth().height(240.dp)) {
         items(filteredTimings, key = { "${it.testClass}#${it.testMethod}" }) { entry ->
           TestTimingRow(
-              entry = entry,
-              maxDuration = maxDuration,
-              palette = palette,
-              onOpen = {
-                selectedEntry = entry
-                navigateToTest(project, entry) { message -> error = message }
-              },
+            entry = entry,
+            maxDuration = maxDuration,
+            palette = palette,
+            onOpen = {
+              selectedEntry = entry
+              navigateToTest(project, entry) { message -> error = message }
+            },
           )
         }
       }
@@ -360,45 +360,45 @@ fun TestTimingPanel(
 @Composable
 private fun HeaderCell(text: String, modifier: Modifier, palette: TestTimingPalette) {
   Text(
-      text = text,
-      color = palette.labelMuted,
-      fontSize = 11.sp,
-      maxLines = 1,
-      overflow = TextOverflow.Ellipsis,
-      modifier = modifier,
+    text = text,
+    color = palette.labelMuted,
+    fontSize = 11.sp,
+    maxLines = 1,
+    overflow = TextOverflow.Ellipsis,
+    modifier = modifier,
   )
 }
 
 @Composable
 private fun TestTimingRow(
-    entry: TestTimingEntry,
-    maxDuration: Int,
-    palette: TestTimingPalette,
-    onOpen: () -> Unit,
+  entry: TestTimingEntry,
+  maxDuration: Int,
+  palette: TestTimingPalette,
+  onOpen: () -> Unit,
 ) {
   val durationRatio =
-      if (maxDuration > 0) {
-        (entry.averageDurationMs.toFloat() / maxDuration.toFloat()).coerceIn(0f, 1f)
-      } else {
-        0f
-      }
+    if (maxDuration > 0) {
+      (entry.averageDurationMs.toFloat() / maxDuration.toFloat()).coerceIn(0f, 1f)
+    } else {
+      0f
+    }
   val successColor =
-      when {
-        entry.successRate < 0.9 -> palette.error
-        entry.successRate < 0.97 -> palette.warning
-        else -> Color.Unspecified
-      }
+    when {
+      entry.successRate < 0.9 -> palette.error
+      entry.successRate < 0.97 -> palette.warning
+      else -> Color.Unspecified
+    }
 
   Row(
-      modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(vertical = 4.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(vertical = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Text(
-        text = "${entry.testClass}.${entry.testMethod}",
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.weight(TEST_COL_WEIGHT),
+      text = "${entry.testClass}.${entry.testMethod}",
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+      modifier = Modifier.weight(TEST_COL_WEIGHT),
     )
     Column(modifier = Modifier.weight(AVG_COL_WEIGHT)) {
       Text(formatDuration(entry.averageDurationMs), fontSize = 12.sp)
@@ -408,61 +408,60 @@ private fun TestTimingRow(
       }
     }
     Text(
-        text = entry.sampleSize.toString(),
-        modifier = Modifier.weight(RUNS_COL_WEIGHT),
+      text = entry.sampleSize.toString(),
+      modifier = Modifier.weight(RUNS_COL_WEIGHT),
     )
     Text(
-        text = formatRate(entry.successRate),
-        color = successColor,
-        modifier = Modifier.weight(SUCCESS_COL_WEIGHT),
+      text = formatRate(entry.successRate),
+      color = successColor,
+      modifier = Modifier.weight(SUCCESS_COL_WEIGHT),
     )
     Text(
-        text = formatTimestamp(entry.lastRun),
-        modifier = Modifier.weight(LAST_RUN_COL_WEIGHT),
+      text = formatTimestamp(entry.lastRun),
+      modifier = Modifier.weight(LAST_RUN_COL_WEIGHT),
     )
   }
 }
 
 private fun buildTestTimingComparator(
-    key: TestTimingSortKey,
-    direction: TestTimingSortDirection,
+  key: TestTimingSortKey,
+  direction: TestTimingSortDirection,
 ): Comparator<TestTimingEntry> {
   val comparator =
-      when (key) {
-        TestTimingSortKey.NAME ->
-            compareBy<TestTimingEntry> { it.testClass.lowercase() }
-                .thenBy { it.testMethod.lowercase() }
-        TestTimingSortKey.AVG_DURATION ->
-            compareBy<TestTimingEntry> { it.averageDurationMs }.thenBy { it.testClass.lowercase() }
-        TestTimingSortKey.SAMPLE_SIZE ->
-            compareBy<TestTimingEntry> { it.sampleSize }.thenBy { it.testClass.lowercase() }
-        TestTimingSortKey.LAST_RUN ->
-            compareBy<TestTimingEntry> { it.lastRunTimestampMs ?: 0L }
-                .thenBy { it.testClass.lowercase() }
-      }
+    when (key) {
+      TestTimingSortKey.NAME ->
+        compareBy<TestTimingEntry> { it.testClass.lowercase() }.thenBy { it.testMethod.lowercase() }
+      TestTimingSortKey.AVG_DURATION ->
+        compareBy<TestTimingEntry> { it.averageDurationMs }.thenBy { it.testClass.lowercase() }
+      TestTimingSortKey.SAMPLE_SIZE ->
+        compareBy<TestTimingEntry> { it.sampleSize }.thenBy { it.testClass.lowercase() }
+      TestTimingSortKey.LAST_RUN ->
+        compareBy<TestTimingEntry> { it.lastRunTimestampMs ?: 0L }
+          .thenBy { it.testClass.lowercase() }
+    }
 
   return if (direction == TestTimingSortDirection.DESC) comparator.reversed() else comparator
 }
 
 private fun TestTimingSortKey.toOrderByOrNull(): TestTimingOrderBy? =
-    when (this) {
-      TestTimingSortKey.AVG_DURATION -> TestTimingOrderBy.AVERAGE_DURATION
-      TestTimingSortKey.SAMPLE_SIZE -> TestTimingOrderBy.SAMPLE_SIZE
-      TestTimingSortKey.LAST_RUN -> TestTimingOrderBy.LAST_RUN
-      TestTimingSortKey.NAME -> null
-    }
+  when (this) {
+    TestTimingSortKey.AVG_DURATION -> TestTimingOrderBy.AVERAGE_DURATION
+    TestTimingSortKey.SAMPLE_SIZE -> TestTimingOrderBy.SAMPLE_SIZE
+    TestTimingSortKey.LAST_RUN -> TestTimingOrderBy.LAST_RUN
+    TestTimingSortKey.NAME -> null
+  }
 
 private fun TestTimingSortDirection.toOrderDirection(): TestTimingOrderDirection =
-    if (this == TestTimingSortDirection.ASC) {
-      TestTimingOrderDirection.ASC
-    } else {
-      TestTimingOrderDirection.DESC
-    }
+  if (this == TestTimingSortDirection.ASC) {
+    TestTimingOrderDirection.ASC
+  } else {
+    TestTimingOrderDirection.DESC
+  }
 
 private fun navigateToTest(
-    project: Project,
-    entry: TestTimingEntry,
-    onError: (String) -> Unit,
+  project: Project,
+  entry: TestTimingEntry,
+  onError: (String) -> Unit,
 ) {
   val target = resolveNavigationTarget(project, entry)
   if (target == null) {
@@ -480,9 +479,8 @@ private data class NavigationTarget(val file: VirtualFile, val offset: Int)
 private fun resolveNavigationTarget(project: Project, entry: TestTimingEntry): NavigationTarget? {
   return ReadAction.compute<NavigationTarget?, RuntimeException> {
     val psiClass =
-        JavaPsiFacade.getInstance(project)
-            .findClass(entry.testClass, GlobalSearchScope.projectScope(project))
-            ?: return@compute null
+      JavaPsiFacade.getInstance(project)
+        .findClass(entry.testClass, GlobalSearchScope.projectScope(project)) ?: return@compute null
     val methodName = normalizeTestMethodName(entry.testMethod)
     val psiMethod = psiClass.findMethodsByName(methodName, false).firstOrNull()
     val element: PsiElement = psiMethod ?: psiClass
@@ -528,8 +526,8 @@ private fun formatTimestamp(value: String?): String {
 private data class TestTimingSortOption(val key: TestTimingSortKey, val label: String)
 
 private data class TestTimingDirectionOption(
-    val direction: TestTimingSortDirection,
-    val label: String,
+  val direction: TestTimingSortDirection,
+  val label: String,
 )
 
 private enum class TestTimingSortKey {
@@ -545,24 +543,24 @@ private enum class TestTimingSortDirection {
 }
 
 private data class TestTimingPalette(
-    val barFill: Color,
-    val barTrack: Color,
-    val labelMuted: Color,
-    val detailBackground: Color,
-    val warning: Color,
-    val error: Color,
+  val barFill: Color,
+  val barTrack: Color,
+  val labelMuted: Color,
+  val detailBackground: Color,
+  val warning: Color,
+  val error: Color,
 )
 
 @Composable
 private fun rememberTestTimingPalette(): TestTimingPalette {
   val globals = JewelTheme.globalColors
   return TestTimingPalette(
-      barFill = globals.text.info.copy(alpha = 0.9f),
-      barTrack = globals.outlines.focused.copy(alpha = 0.2f),
-      labelMuted = globals.text.normal.copy(alpha = 0.65f),
-      detailBackground = globals.panelBackground.copy(alpha = 0.65f),
-      warning = globals.text.warning,
-      error = globals.text.error,
+    barFill = globals.text.info.copy(alpha = 0.9f),
+    barTrack = globals.outlines.focused.copy(alpha = 0.2f),
+    labelMuted = globals.text.normal.copy(alpha = 0.65f),
+    detailBackground = globals.panelBackground.copy(alpha = 0.65f),
+    warning = globals.text.warning,
+    error = globals.text.error,
   )
 }
 

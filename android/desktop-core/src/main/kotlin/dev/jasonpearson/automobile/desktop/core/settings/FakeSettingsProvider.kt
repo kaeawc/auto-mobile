@@ -2,12 +2,12 @@ package dev.jasonpearson.automobile.desktop.core.settings
 
 /** In-memory implementation of [SettingsProvider] for testing without IntelliJ dependencies. */
 class FakeSettingsProvider(
-    override var enableYamlLinting: Boolean = true,
-    override var testPlanOutputDirectory: String = "test/resources/test-plans",
-    override var fogModeEnabled: Boolean = true,
-    override var autoFocusEnabled: Boolean = true,
-    override var failuresDateRange: String = "24h",
-    override var androidIde: String = "auto",
-    override var iosIde: String = "auto",
-    override var themeMode: String = "dark",
+  override var enableYamlLinting: Boolean = true,
+  override var testPlanOutputDirectory: String = "test/resources/test-plans",
+  override var fogModeEnabled: Boolean = true,
+  override var autoFocusEnabled: Boolean = true,
+  override var failuresDateRange: String = "24h",
+  override var androidIde: String = "auto",
+  override var iosIde: String = "auto",
+  override var themeMode: String = "dark",
 ) : SettingsProvider

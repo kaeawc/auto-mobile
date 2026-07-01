@@ -27,19 +27,19 @@ internal object DaemonHeartbeat {
   private val backgroundHeartbeat = BackgroundHeartbeatManager()
   @JvmStatic internal var testController: DaemonHeartbeatController? = null
   private val defaultController =
-      object : DaemonHeartbeatController {
-        override fun startBackground(intervalMs: Long): Closeable {
-          return backgroundHeartbeat.start(intervalMs)
-        }
-
-        override fun registerSession(sessionId: String) {
-          backgroundHeartbeat.addSession(sessionId)
-        }
-
-        override fun unregisterSession(sessionId: String) {
-          backgroundHeartbeat.removeSession(sessionId)
-        }
+    object : DaemonHeartbeatController {
+      override fun startBackground(intervalMs: Long): Closeable {
+        return backgroundHeartbeat.start(intervalMs)
       }
+
+      override fun registerSession(sessionId: String) {
+        backgroundHeartbeat.addSession(sessionId)
+      }
+
+      override fun unregisterSession(sessionId: String) {
+        backgroundHeartbeat.removeSession(sessionId)
+      }
+    }
 
   fun startBackground(intervalMs: Long = DEFAULT_INTERVAL_MS): Closeable {
     return controller().startBackground(intervalMs)
@@ -56,21 +56,21 @@ internal object DaemonHeartbeat {
   fun start(sessionId: String, intervalMs: Long = DEFAULT_INTERVAL_MS): Closeable {
     val running = AtomicBoolean(true)
     val heartbeatThread =
-        thread(start = true, isDaemon = true, name = "auto-mobile-daemon-heartbeat") {
-          while (running.get()) {
-            try {
-              sendHeartbeat(sessionId)
-            } catch (_: Exception) {
-              // Best-effort heartbeat; ignore failures
-            }
+      thread(start = true, isDaemon = true, name = "auto-mobile-daemon-heartbeat") {
+        while (running.get()) {
+          try {
+            sendHeartbeat(sessionId)
+          } catch (_: Exception) {
+            // Best-effort heartbeat; ignore failures
+          }
 
-            try {
-              Thread.sleep(intervalMs)
-            } catch (_: InterruptedException) {
-              running.set(false)
-            }
+          try {
+            Thread.sleep(intervalMs)
+          } catch (_: InterruptedException) {
+            running.set(false)
           }
         }
+      }
 
     return Closeable {
       running.set(false)
@@ -112,9 +112,9 @@ internal object DaemonHeartbeat {
         }
         running.set(true)
         heartbeatThread =
-            thread(start = true, isDaemon = true, name = "auto-mobile-daemon-heartbeat") {
-              runLoop()
-            }
+          thread(start = true, isDaemon = true, name = "auto-mobile-daemon-heartbeat") {
+            runLoop()
+          }
       }
     }
 

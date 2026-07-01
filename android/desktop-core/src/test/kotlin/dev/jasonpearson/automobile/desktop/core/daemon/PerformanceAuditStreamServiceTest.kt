@@ -14,16 +14,16 @@ class PerformanceAuditStreamServiceTest {
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 300_000L)
     val entry = entry(id = 1, timestampMs = 9_000L)
     val client =
-        FakePerformanceAuditStreamClient(
-            listOf(
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = listOf(entry),
-                    lastTimestamp = "2024-01-01T00:00:09Z",
-                    lastId = 1L,
-                ),
-            )
+      FakePerformanceAuditStreamClient(
+        listOf(
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = listOf(entry),
+            lastTimestamp = "2024-01-01T00:00:09Z",
+            lastId = 1L,
+          )
         )
+      )
     val service = createService(client, cache, clock)
 
     val snapshot = service.poll()
@@ -37,16 +37,16 @@ class PerformanceAuditStreamServiceTest {
     val clock = FakePerformanceAuditClock(10_000L)
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 300_000L)
     val client =
-        FakePerformanceAuditStreamClient(
-            listOf(
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = listOf(entry(id = 1, timestampMs = 9_000L)),
-                    lastTimestamp = "2024-01-01T00:00:09Z",
-                    lastId = 1L,
-                ),
-            )
+      FakePerformanceAuditStreamClient(
+        listOf(
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = listOf(entry(id = 1, timestampMs = 9_000L)),
+            lastTimestamp = "2024-01-01T00:00:09Z",
+            lastId = 1L,
+          )
         )
+      )
     val service = createService(client, cache, clock)
 
     val snapshot = service.poll()
@@ -60,22 +60,22 @@ class PerformanceAuditStreamServiceTest {
     val clock = FakePerformanceAuditClock(10_000L)
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 300_000L)
     val client =
-        FakePerformanceAuditStreamClient(
-            listOf(
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = listOf(entry(id = 1, timestampMs = 9_000L)),
-                    lastTimestamp = "2024-01-01T00:00:09Z",
-                    lastId = 1L,
-                ),
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = listOf(entry(id = 2, timestampMs = 9_500L)),
-                    lastTimestamp = "2024-01-01T00:00:09.500Z",
-                    lastId = 2L,
-                ),
-            )
+      FakePerformanceAuditStreamClient(
+        listOf(
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = listOf(entry(id = 1, timestampMs = 9_000L)),
+            lastTimestamp = "2024-01-01T00:00:09Z",
+            lastId = 1L,
+          ),
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = listOf(entry(id = 2, timestampMs = 9_500L)),
+            lastTimestamp = "2024-01-01T00:00:09.500Z",
+            lastId = 2L,
+          ),
         )
+      )
     val service = createService(client, cache, clock)
 
     service.poll()
@@ -95,16 +95,16 @@ class PerformanceAuditStreamServiceTest {
     val clock = FakePerformanceAuditClock(10_000L)
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 300_000L)
     val client =
-        FakePerformanceAuditStreamClient(
-            listOf(
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = emptyList(),
-                    lastTimestamp = "2024-01-01T00:00:10Z",
-                    lastId = 10L,
-                ),
-            )
+      FakePerformanceAuditStreamClient(
+        listOf(
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = emptyList(),
+            lastTimestamp = "2024-01-01T00:00:10Z",
+            lastId = 10L,
+          )
         )
+      )
     val service = createService(client, cache, clock)
 
     service.poll(PerformanceAuditStreamFilter(deviceId = "device-a"))
@@ -127,22 +127,22 @@ class PerformanceAuditStreamServiceTest {
     val clock = FakePerformanceAuditClock(10_000L)
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 300_000L)
     val client =
-        FakePerformanceAuditStreamClient(
-            listOf(
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = emptyList(),
-                    lastTimestamp = "2024-01-01T00:00:10Z",
-                    lastId = 10L,
-                ),
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = emptyList(),
-                    lastTimestamp = "2024-01-01T00:00:12Z",
-                    lastId = 12L,
-                ),
-            )
+      FakePerformanceAuditStreamClient(
+        listOf(
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = emptyList(),
+            lastTimestamp = "2024-01-01T00:00:10Z",
+            lastId = 10L,
+          ),
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = emptyList(),
+            lastTimestamp = "2024-01-01T00:00:12Z",
+            lastId = 12L,
+          ),
         )
+      )
     val service = createService(client, cache, clock)
 
     service.poll(PerformanceAuditStreamFilter(deviceId = "device-a"))
@@ -167,16 +167,16 @@ class PerformanceAuditStreamServiceTest {
     val clock = FakePerformanceAuditClock(600_000L)
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 600_000L)
     val client =
-        FakePerformanceAuditStreamClient(
-            listOf(
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = emptyList(),
-                    lastTimestamp = null,
-                    lastId = null,
-                ),
-            )
+      FakePerformanceAuditStreamClient(
+        listOf(
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = emptyList(),
+            lastTimestamp = null,
+            lastId = null,
+          )
         )
+      )
     val service = createService(client, cache, clock, defaultWindowMs = 300_000L)
 
     // Poll with custom time window
@@ -195,16 +195,16 @@ class PerformanceAuditStreamServiceTest {
     val clock = FakePerformanceAuditClock(600_000L)
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 600_000L)
     val client =
-        FakePerformanceAuditStreamClient(
-            listOf(
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = emptyList(),
-                    lastTimestamp = null,
-                    lastId = null,
-                ),
-            )
+      FakePerformanceAuditStreamClient(
+        listOf(
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = emptyList(),
+            lastTimestamp = null,
+            lastId = null,
+          )
         )
+      )
     val defaultWindowMs = 300_000L
     val service = createService(client, cache, clock, defaultWindowMs = defaultWindowMs)
 
@@ -222,22 +222,22 @@ class PerformanceAuditStreamServiceTest {
     val clock = FakePerformanceAuditClock(10_000L)
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 300_000L)
     val client =
-        FakePerformanceAuditStreamClient(
-            listOf(
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = emptyList(),
-                    lastTimestamp = "2024-01-01T00:00:10Z",
-                    lastId = 10L,
-                ),
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = emptyList(),
-                    lastTimestamp = "2024-01-01T00:00:12Z",
-                    lastId = 12L,
-                ),
-            )
+      FakePerformanceAuditStreamClient(
+        listOf(
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = emptyList(),
+            lastTimestamp = "2024-01-01T00:00:10Z",
+            lastId = 10L,
+          ),
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = emptyList(),
+            lastTimestamp = "2024-01-01T00:00:12Z",
+            lastId = 12L,
+          ),
         )
+      )
     val service = createService(client, cache, clock)
 
     service.poll(PerformanceAuditStreamFilter(deviceId = "device-a"))
@@ -257,22 +257,22 @@ class PerformanceAuditStreamServiceTest {
     val clock = FakePerformanceAuditClock(10_000L)
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 300_000L)
     val client =
-        FakePerformanceAuditStreamClient(
-            listOf(
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = listOf(entry(id = 1, timestampMs = 9_000L)),
-                    lastTimestamp = "2024-01-01T00:00:09Z",
-                    lastId = 1L,
-                ),
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = listOf(entry(id = 2, timestampMs = 9_500L)),
-                    lastTimestamp = "2024-01-01T00:00:09.500Z",
-                    lastId = 2L,
-                ),
-            )
+      FakePerformanceAuditStreamClient(
+        listOf(
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = listOf(entry(id = 1, timestampMs = 9_000L)),
+            lastTimestamp = "2024-01-01T00:00:09Z",
+            lastId = 1L,
+          ),
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = listOf(entry(id = 2, timestampMs = 9_500L)),
+            lastTimestamp = "2024-01-01T00:00:09.500Z",
+            lastId = 2L,
+          ),
         )
+      )
     val service = createService(client, cache, clock)
 
     service.poll()
@@ -289,16 +289,16 @@ class PerformanceAuditStreamServiceTest {
     val clock = FakePerformanceAuditClock(10_000L)
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 300_000L)
     val client =
-        FakePerformanceAuditStreamClient(
-            listOf(
-                PerformanceAuditStreamResponse(
-                    success = true,
-                    results = emptyList(),
-                    lastTimestamp = "2024-01-01T00:00:10Z",
-                    lastId = 10L,
-                ),
-            )
+      FakePerformanceAuditStreamClient(
+        listOf(
+          PerformanceAuditStreamResponse(
+            success = true,
+            results = emptyList(),
+            lastTimestamp = "2024-01-01T00:00:10Z",
+            lastId = 10L,
+          )
         )
+      )
     val service = createService(client, cache, clock, maxCursors = 3)
 
     // Add cursors for devices a, b, c (fills to capacity)
@@ -332,44 +332,44 @@ class PerformanceAuditStreamServiceTest {
   }
 
   private fun createService(
-      client: FakePerformanceAuditStreamClient,
-      cache: PerformanceAuditStreamCache,
-      clock: FakePerformanceAuditClock,
-      defaultWindowMs: Long = 300_000L,
-      defaultLimit: Int = 10,
-      maxCursors: Int = PerformanceAuditStreamService.DEFAULT_MAX_CURSORS,
+    client: FakePerformanceAuditStreamClient,
+    cache: PerformanceAuditStreamCache,
+    clock: FakePerformanceAuditClock,
+    defaultWindowMs: Long = 300_000L,
+    defaultLimit: Int = 10,
+    maxCursors: Int = PerformanceAuditStreamService.DEFAULT_MAX_CURSORS,
   ): PerformanceAuditStreamService {
     return PerformanceAuditStreamService(
-        socketClient = client,
-        cache = cache,
-        clock = clock,
-        defaultWindowMs = defaultWindowMs,
-        defaultLimit = defaultLimit,
-        maxCursors = maxCursors,
+      socketClient = client,
+      cache = cache,
+      clock = clock,
+      defaultWindowMs = defaultWindowMs,
+      defaultLimit = defaultLimit,
+      maxCursors = maxCursors,
     )
   }
 
   private fun entry(
-      id: Long,
-      timestampMs: Long,
-      deviceId: String = "device",
-      sessionId: String = "session",
-      packageName: String = "package",
+    id: Long,
+    timestampMs: Long,
+    deviceId: String = "device",
+    sessionId: String = "session",
+    packageName: String = "package",
   ): PerformanceAuditHistoryEntry {
     return PerformanceAuditHistoryEntry(
-        id = id,
-        deviceId = deviceId,
-        sessionId = sessionId,
-        packageName = packageName,
-        timestamp = Instant.ofEpochMilli(timestampMs).toString(),
-        passed = true,
-        metrics = PerformanceAuditMetrics(),
-        diagnostics = null,
+      id = id,
+      deviceId = deviceId,
+      sessionId = sessionId,
+      packageName = packageName,
+      timestamp = Instant.ofEpochMilli(timestampMs).toString(),
+      passed = true,
+      metrics = PerformanceAuditMetrics(),
+      diagnostics = null,
     )
   }
 
   private class FakePerformanceAuditStreamClient(
-      private val responses: List<PerformanceAuditStreamResponse>,
+    private val responses: List<PerformanceAuditStreamResponse>
   ) : PerformanceAuditStreamClient {
     val requests = mutableListOf<PerformanceAuditStreamRequest>()
     private var index = 0

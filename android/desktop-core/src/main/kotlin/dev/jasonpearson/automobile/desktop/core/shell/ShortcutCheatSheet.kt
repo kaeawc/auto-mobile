@@ -33,49 +33,49 @@ data class ShortcutCategory(val name: String, val shortcuts: List<ShortcutEntry>
 /** Returns the full list of shortcut categories for display. */
 fun allShortcutCategories(vimModeEnabled: Boolean): List<ShortcutCategory> = buildList {
   add(
-      ShortcutCategory(
-          "Panes",
-          listOf(
-              ShortcutEntry("Cmd+0", "Toggle left pane"),
-              ShortcutEntry("Cmd+Shift+0", "Toggle right pane"),
-              ShortcutEntry("Cmd+Shift+Y", "Toggle bottom pane"),
-              ShortcutEntry("Tab", "Focus next pane"),
-              ShortcutEntry("Shift+Tab", "Focus previous pane"),
-          ),
+    ShortcutCategory(
+      "Panes",
+      listOf(
+        ShortcutEntry("Cmd+0", "Toggle left pane"),
+        ShortcutEntry("Cmd+Shift+0", "Toggle right pane"),
+        ShortcutEntry("Cmd+Shift+Y", "Toggle bottom pane"),
+        ShortcutEntry("Tab", "Focus next pane"),
+        ShortcutEntry("Shift+Tab", "Focus previous pane"),
       ),
+    )
   )
   add(
-      ShortcutCategory(
-          "Navigation",
-          listOf(
-              ShortcutEntry("Arrow Up", "Previous event"),
-              ShortcutEntry("Arrow Down", "Next event"),
-              ShortcutEntry("Enter", "Select/inspect event"),
-              ShortcutEntry("Escape", "Deselect/close inspector"),
-          ),
+    ShortcutCategory(
+      "Navigation",
+      listOf(
+        ShortcutEntry("Arrow Up", "Previous event"),
+        ShortcutEntry("Arrow Down", "Next event"),
+        ShortcutEntry("Enter", "Select/inspect event"),
+        ShortcutEntry("Escape", "Deselect/close inspector"),
       ),
+    )
   )
   add(
-      ShortcutCategory(
-          "Telemetry",
-          listOf(
-              ShortcutEntry("Cmd+K", "Quick jump to timestamp"),
-              ShortcutEntry("Cmd+/", "Show shortcut cheat sheet"),
-          ),
+    ShortcutCategory(
+      "Telemetry",
+      listOf(
+        ShortcutEntry("Cmd+K", "Quick jump to timestamp"),
+        ShortcutEntry("Cmd+/", "Show shortcut cheat sheet"),
       ),
+    )
   )
   if (vimModeEnabled) {
     add(
-        ShortcutCategory(
-            "Vim Mode",
-            listOf(
-                ShortcutEntry("j", "Move down"),
-                ShortcutEntry("k", "Move up"),
-                ShortcutEntry("g", "Jump to top"),
-                ShortcutEntry("G (Shift+g)", "Jump to bottom"),
-                ShortcutEntry("/", "Focus search"),
-            ),
+      ShortcutCategory(
+        "Vim Mode",
+        listOf(
+          ShortcutEntry("j", "Move down"),
+          ShortcutEntry("k", "Move up"),
+          ShortcutEntry("g", "Jump to top"),
+          ShortcutEntry("G (Shift+g)", "Jump to bottom"),
+          ShortcutEntry("/", "Focus search"),
         ),
+      )
     )
   }
 }
@@ -85,31 +85,31 @@ fun allShortcutCategories(vimModeEnabled: Boolean): List<ShortcutCategory> = bui
  */
 @Composable
 fun ShortcutCheatSheet(
-    vimModeEnabled: Boolean,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
+  vimModeEnabled: Boolean,
+  onDismiss: () -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   val categories = remember(vimModeEnabled) { allShortcutCategories(vimModeEnabled) }
 
   ModalBackdrop(onDismiss = onDismiss, modifier = modifier) {
     Column(
-        modifier =
-            Modifier.widthIn(max = 520.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(colors.panelBackground)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {},
-                )
-                .padding(24.dp),
+      modifier =
+        Modifier.widthIn(max = 520.dp)
+          .clip(RoundedCornerShape(12.dp))
+          .background(colors.panelBackground)
+          .clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = {},
+          )
+          .padding(24.dp)
     ) {
       Text(
-          text = "Keyboard Shortcuts",
-          fontSize = 16.sp,
-          fontWeight = FontWeight.Bold,
-          color = colors.text.normal,
+        text = "Keyboard Shortcuts",
+        fontSize = 16.sp,
+        fontWeight = FontWeight.Bold,
+        color = colors.text.normal,
       )
       Spacer(Modifier.height(16.dp))
 
@@ -118,26 +118,26 @@ fun ShortcutCheatSheet(
           Spacer(Modifier.height(12.dp))
         }
         Text(
-            text = category.name,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = colors.text.info,
+          text = category.name,
+          fontSize = 13.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = colors.text.info,
         )
         Spacer(Modifier.height(4.dp))
         category.shortcuts.forEach { shortcut ->
           ShortcutRow(
-              keys = shortcut.keys,
-              description = shortcut.description,
-              textColor = colors.text.normal,
+            keys = shortcut.keys,
+            description = shortcut.description,
+            textColor = colors.text.normal,
           )
         }
       }
 
       Spacer(Modifier.height(16.dp))
       Text(
-          text = "Press Escape or click outside to close",
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.4f),
+        text = "Press Escape or click outside to close",
+        fontSize = 11.sp,
+        color = colors.text.normal.copy(alpha = 0.4f),
       )
     }
   }
@@ -145,26 +145,26 @@ fun ShortcutCheatSheet(
 
 @Composable
 private fun ShortcutRow(
-    keys: String,
-    description: String,
-    textColor: Color,
+  keys: String,
+  description: String,
+  textColor: Color,
 ) {
   Row(
-      modifier = Modifier.padding(vertical = 2.dp),
-      horizontalArrangement = Arrangement.Start,
-      verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier.padding(vertical = 2.dp),
+    horizontalArrangement = Arrangement.Start,
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
-        text = keys,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Medium,
-        color = textColor,
-        modifier = Modifier.width(140.dp),
+      text = keys,
+      fontSize = 12.sp,
+      fontWeight = FontWeight.Medium,
+      color = textColor,
+      modifier = Modifier.width(140.dp),
     )
     Text(
-        text = description,
-        fontSize = 12.sp,
-        color = textColor.copy(alpha = 0.7f),
+      text = description,
+      fontSize = 12.sp,
+      color = textColor.copy(alpha = 0.7f),
     )
   }
 }

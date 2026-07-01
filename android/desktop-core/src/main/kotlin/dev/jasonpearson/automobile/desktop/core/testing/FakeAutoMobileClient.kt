@@ -49,25 +49,25 @@ class FakeAutoMobileClient : AutoMobileClient {
   var getNavigationGraphResult: JsonElement = JsonObject(emptyMap())
   var listFeatureFlagsResult: List<FeatureFlagState> = emptyList()
   var setFeatureFlagResult: FeatureFlagState =
-      FeatureFlagState(key = "", label = "", enabled = false)
+    FeatureFlagState(key = "", label = "", enabled = false)
   var listPerformanceAuditResultsResult: PerformanceAuditHistoryResult =
-      PerformanceAuditHistoryResult()
+    PerformanceAuditHistoryResult()
   var getTestTimingsResult: TestTimingSummary = TestTimingSummary()
   var getTestRunsResult: TestRunSummary = TestRunSummary()
   var startTestRecordingResult: TestRecordingStartResult =
-      TestRecordingStartResult(recordingId = "fake-id", startedAt = "2025-01-01T00:00:00Z")
+    TestRecordingStartResult(recordingId = "fake-id", startedAt = "2025-01-01T00:00:00Z")
   var stopTestRecordingResult: TestRecordingStopResult =
-      TestRecordingStopResult(
-          recordingId = "fake-id",
-          startedAt = "2025-01-01T00:00:00Z",
-          stoppedAt = "2025-01-01T00:00:01Z",
-          durationMs = 1000,
-          planName = "fake-plan",
-          planContent = "",
-          stepCount = 0,
-      )
+    TestRecordingStopResult(
+      recordingId = "fake-id",
+      startedAt = "2025-01-01T00:00:00Z",
+      stoppedAt = "2025-01-01T00:00:01Z",
+      durationMs = 1000,
+      planName = "fake-plan",
+      planContent = "",
+      stepCount = 0,
+    )
   var executePlanResult: ExecutePlanResult =
-      ExecutePlanResult(success = true, executedSteps = 0, totalSteps = 0)
+    ExecutePlanResult(success = true, executedSteps = 0, totalSteps = 0)
   var startDeviceResult: StartDeviceResult = StartDeviceResult(success = true)
   var setActiveDeviceResult: SetActiveDeviceResult = SetActiveDeviceResult(success = true)
   var observeResult: ObserveResult = ObserveResult()
@@ -87,9 +87,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   /** Set a text resource response for a given URI. */
   fun setResourceResponseWithText(uri: String, text: String) {
     resourceResponses[uri] =
-        listOf(
-            McpResourceContent(uri = uri, mimeType = "application/json", text = text),
-        )
+      listOf(McpResourceContent(uri = uri, mimeType = "application/json", text = text))
   }
 
   /** Set raw resource content for a given URI. */
@@ -100,25 +98,25 @@ class FakeAutoMobileClient : AutoMobileClient {
   // -- Recorded write calls --
 
   data class SetKeyValueCall(
-      val deviceId: String,
-      val appId: String,
-      val fileName: String,
-      val key: String,
-      val value: String?,
-      val type: String,
+    val deviceId: String,
+    val appId: String,
+    val fileName: String,
+    val key: String,
+    val value: String?,
+    val type: String,
   )
 
   data class RemoveKeyValueCall(
-      val deviceId: String,
-      val appId: String,
-      val fileName: String,
-      val key: String,
+    val deviceId: String,
+    val appId: String,
+    val fileName: String,
+    val key: String,
   )
 
   data class ClearKeyValueFileCall(
-      val deviceId: String,
-      val appId: String,
-      val fileName: String,
+    val deviceId: String,
+    val appId: String,
+    val fileName: String,
   )
 
   val setKeyValueCalls = mutableListOf<SetKeyValueCall>()
@@ -164,19 +162,19 @@ class FakeAutoMobileClient : AutoMobileClient {
   }
 
   override fun setFeatureFlag(
-      key: String,
-      enabled: Boolean,
-      config: JsonObject?,
+    key: String,
+    enabled: Boolean,
+    config: JsonObject?,
   ): FeatureFlagState {
     calls.add("setFeatureFlag")
     return setFeatureFlagResult
   }
 
   override fun listPerformanceAuditResults(
-      startTime: String?,
-      endTime: String?,
-      limit: Int?,
-      offset: Int?,
+    startTime: String?,
+    endTime: String?,
+    limit: Int?,
+    offset: Int?,
   ): PerformanceAuditHistoryResult {
     calls.add("listPerformanceAuditResults")
     return listPerformanceAuditResultsResult
@@ -203,10 +201,10 @@ class FakeAutoMobileClient : AutoMobileClient {
   }
 
   override fun executePlan(
-      planContent: String,
-      platform: String,
-      startStep: Int?,
-      sessionUuid: String?,
+    planContent: String,
+    platform: String,
+    startStep: Int?,
+    sessionUuid: String?,
   ): ExecutePlanResult {
     calls.add("executePlan")
     return executePlanResult
@@ -243,12 +241,12 @@ class FakeAutoMobileClient : AutoMobileClient {
   }
 
   override fun setKeyValue(
-      deviceId: String,
-      appId: String,
-      fileName: String,
-      key: String,
-      value: String?,
-      type: String,
+    deviceId: String,
+    appId: String,
+    fileName: String,
+    key: String,
+    value: String?,
+    type: String,
   ): SetKeyValueResult {
     calls.add("setKeyValue")
     setKeyValueCalls.add(SetKeyValueCall(deviceId, appId, fileName, key, value, type))
@@ -256,10 +254,10 @@ class FakeAutoMobileClient : AutoMobileClient {
   }
 
   override fun removeKeyValue(
-      deviceId: String,
-      appId: String,
-      fileName: String,
-      key: String,
+    deviceId: String,
+    appId: String,
+    fileName: String,
+    key: String,
   ): RemoveKeyValueResult {
     calls.add("removeKeyValue")
     removeKeyValueCalls.add(RemoveKeyValueCall(deviceId, appId, fileName, key))
@@ -267,9 +265,9 @@ class FakeAutoMobileClient : AutoMobileClient {
   }
 
   override fun clearKeyValueFile(
-      deviceId: String,
-      appId: String,
-      fileName: String,
+    deviceId: String,
+    appId: String,
+    fileName: String,
   ): ClearKeyValueResult {
     calls.add("clearKeyValueFile")
     clearKeyValueFileCalls.add(ClearKeyValueFileCall(deviceId, appId, fileName))

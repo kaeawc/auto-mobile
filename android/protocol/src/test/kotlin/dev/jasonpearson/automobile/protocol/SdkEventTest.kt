@@ -16,14 +16,14 @@ class SdkEventTest {
   @Test
   fun `serialize navigation event`() {
     val event: SdkEvent =
-        SdkNavigationEvent(
-            timestamp = 1234567890L,
-            applicationId = "com.example.app",
-            destination = "home",
-            source = NavigationSourceType.COMPOSE_NAVIGATION,
-            arguments = mapOf("userId" to "123"),
-            metadata = mapOf("screenType" to "main"),
-        )
+      SdkNavigationEvent(
+        timestamp = 1234567890L,
+        applicationId = "com.example.app",
+        destination = "home",
+        source = NavigationSourceType.COMPOSE_NAVIGATION,
+        arguments = mapOf("userId" to "123"),
+        metadata = mapOf("screenType" to "main"),
+      )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), event)
 
@@ -36,7 +36,7 @@ class SdkEventTest {
   @Test
   fun `deserialize navigation event`() {
     val message =
-        """{
+      """{
       "type": "navigation",
       "timestamp": 1234567890,
       "applicationId": "com.example.app",
@@ -57,23 +57,23 @@ class SdkEventTest {
   @Test
   fun `serialize handled exception event`() {
     val event: SdkEvent =
-        SdkHandledExceptionEvent(
-            timestamp = 1234567890L,
-            applicationId = "com.example.app",
-            exceptionClass = "java.lang.NullPointerException",
-            exceptionMessage = "Value cannot be null",
-            stackTrace = "at com.example.MyClass.method(MyClass.kt:42)",
-            customMessage = "Failed to load user data",
-            currentScreen = "profile",
-            appVersion = "1.2.3",
-            deviceInfo =
-                SdkDeviceInfo(
-                    model = "Pixel 6",
-                    manufacturer = "Google",
-                    osVersion = "14",
-                    sdkInt = 34,
-                ),
-        )
+      SdkHandledExceptionEvent(
+        timestamp = 1234567890L,
+        applicationId = "com.example.app",
+        exceptionClass = "java.lang.NullPointerException",
+        exceptionMessage = "Value cannot be null",
+        stackTrace = "at com.example.MyClass.method(MyClass.kt:42)",
+        customMessage = "Failed to load user data",
+        currentScreen = "profile",
+        appVersion = "1.2.3",
+        deviceInfo =
+          SdkDeviceInfo(
+            model = "Pixel 6",
+            manufacturer = "Google",
+            osVersion = "14",
+            sdkInt = 34,
+          ),
+      )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), event)
 
@@ -86,7 +86,7 @@ class SdkEventTest {
   @Test
   fun `deserialize handled exception event`() {
     val message =
-        """{
+      """{
       "type": "handled_exception",
       "timestamp": 1234567890,
       "applicationId": "com.example.app",
@@ -107,13 +107,13 @@ class SdkEventTest {
   @Test
   fun `serialize notification action event`() {
     val event: SdkEvent =
-        SdkNotificationActionEvent(
-            timestamp = 1234567890L,
-            applicationId = "com.example.app",
-            notificationId = "notif_123",
-            actionId = "reply",
-            actionLabel = "Reply",
-        )
+      SdkNotificationActionEvent(
+        timestamp = 1234567890L,
+        applicationId = "com.example.app",
+        notificationId = "notif_123",
+        actionId = "reply",
+        actionLabel = "Reply",
+      )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), event)
 
@@ -126,7 +126,7 @@ class SdkEventTest {
   @Test
   fun `deserialize notification action event`() {
     val message =
-        """{
+      """{
       "type": "notification_action",
       "timestamp": 1234567890,
       "applicationId": "com.example.app",
@@ -145,11 +145,11 @@ class SdkEventTest {
   @Test
   fun `serialize recomposition snapshot event`() {
     val event: SdkEvent =
-        SdkRecompositionSnapshotEvent(
-            timestamp = 1234567890L,
-            applicationId = "com.example.app",
-            snapshotJson = """{"composables":[{"name":"MyComposable","count":5}]}""",
-        )
+      SdkRecompositionSnapshotEvent(
+        timestamp = 1234567890L,
+        applicationId = "com.example.app",
+        snapshotJson = """{"composables":[{"name":"MyComposable","count":5}]}""",
+      )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), event)
 
@@ -160,7 +160,7 @@ class SdkEventTest {
   @Test
   fun `deserialize recomposition snapshot event`() {
     val message =
-        """{
+      """{
       "type": "recomposition_snapshot",
       "timestamp": 1234567890,
       "applicationId": "com.example.app",
@@ -177,11 +177,11 @@ class SdkEventTest {
   fun `all navigation sources are serializable`() {
     NavigationSourceType.entries.forEach { source ->
       val event: SdkEvent =
-          SdkNavigationEvent(
-              timestamp = 1234567890L,
-              destination = "test",
-              source = source,
-          )
+        SdkNavigationEvent(
+          timestamp = 1234567890L,
+          destination = "test",
+          source = source,
+        )
 
       val encoded = json.encodeToString(SdkEvent.serializer(), event)
       val decoded = json.decodeFromString<SdkEvent>(encoded)

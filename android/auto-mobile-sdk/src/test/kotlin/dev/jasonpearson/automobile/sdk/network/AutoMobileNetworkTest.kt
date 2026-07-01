@@ -19,12 +19,12 @@ class AutoMobileNetworkTest {
   private fun collectingBuffer(): Pair<SdkEventBuffer, MutableList<List<SdkEvent>>> {
     val flushed = mutableListOf<List<SdkEvent>>()
     val buffer =
-        SdkEventBuffer(
-            maxBufferSize = 1,
-            flushIntervalMs = 60_000,
-            onFlush = { flushed.add(it) },
-            executor = Executors.newSingleThreadScheduledExecutor(),
-        )
+      SdkEventBuffer(
+        maxBufferSize = 1,
+        flushIntervalMs = 60_000,
+        onFlush = { flushed.add(it) },
+        executor = Executors.newSingleThreadScheduledExecutor(),
+      )
     return buffer to flushed
   }
 
@@ -34,15 +34,15 @@ class AutoMobileNetworkTest {
     AutoMobileNetwork.initialize("com.example", buffer)
 
     AutoMobileNetwork.recordRequest(
-        NetworkRequestRecord(
-            url = "https://api.example.com/users?page=1",
-            method = "GET",
-            statusCode = 200,
-            durationMs = 42,
-            responseBodySize = 1024,
-            host = "api.example.com",
-            path = "/users",
-        )
+      NetworkRequestRecord(
+        url = "https://api.example.com/users?page=1",
+        method = "GET",
+        statusCode = 200,
+        durationMs = 42,
+        responseBodySize = 1024,
+        host = "api.example.com",
+        path = "/users",
+      )
     )
     buffer.flush()
 
@@ -65,10 +65,10 @@ class AutoMobileNetworkTest {
     AutoMobileNetwork.initialize("com.example", buffer)
 
     AutoMobileNetwork.recordRequest(
-        NetworkRequestRecord(
-            url = "https://api.example.com/v2/items",
-            method = "POST",
-        )
+      NetworkRequestRecord(
+        url = "https://api.example.com/v2/items",
+        method = "POST",
+      )
     )
     buffer.flush()
 
@@ -81,10 +81,10 @@ class AutoMobileNetworkTest {
   fun `recordRequest is no-op when not initialized`() {
     // buffer is null — should not throw
     AutoMobileNetwork.recordRequest(
-        NetworkRequestRecord(
-            url = "https://example.com",
-            method = "GET",
-        )
+      NetworkRequestRecord(
+        url = "https://example.com",
+        method = "GET",
+      )
     )
   }
 
@@ -94,14 +94,14 @@ class AutoMobileNetworkTest {
     AutoMobileNetwork.initialize("com.example", buffer)
 
     val record =
-        NetworkRequestRecord(
-            url = "https://api.example.com/users",
-            method = "POST",
-            requestHeaders = mapOf("Authorization" to "Bearer token"),
-            responseHeaders = mapOf("X-Request-Id" to "abc"),
-            requestBody = "{\"name\":\"test\"}",
-            responseBody = "{\"id\":1}",
-        )
+      NetworkRequestRecord(
+        url = "https://api.example.com/users",
+        method = "POST",
+        requestHeaders = mapOf("Authorization" to "Bearer token"),
+        responseHeaders = mapOf("X-Request-Id" to "abc"),
+        requestBody = "{\"name\":\"test\"}",
+        responseBody = "{\"id\":1}",
+      )
 
     // Without capture flags, headers and bodies should be null
     AutoMobileNetwork.recordRequest(record)
@@ -120,14 +120,14 @@ class AutoMobileNetworkTest {
     AutoMobileNetwork.initialize("com.example", buffer)
 
     val record =
-        NetworkRequestRecord(
-            url = "https://api.example.com/users",
-            method = "POST",
-            requestHeaders = mapOf("Authorization" to "Bearer token"),
-            responseHeaders = mapOf("X-Request-Id" to "abc"),
-            requestBody = "{\"name\":\"test\"}",
-            responseBody = "{\"id\":1}",
-        )
+      NetworkRequestRecord(
+        url = "https://api.example.com/users",
+        method = "POST",
+        requestHeaders = mapOf("Authorization" to "Bearer token"),
+        responseHeaders = mapOf("X-Request-Id" to "abc"),
+        requestBody = "{\"name\":\"test\"}",
+        responseBody = "{\"id\":1}",
+      )
 
     AutoMobileNetwork.recordRequest(record, captureHeaders = true, captureBodies = true)
     buffer.flush()

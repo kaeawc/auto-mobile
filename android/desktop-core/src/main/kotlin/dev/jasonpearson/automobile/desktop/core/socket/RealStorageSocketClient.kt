@@ -34,12 +34,12 @@ import kotlinx.serialization.json.jsonPrimitive
  * server's storage change stream.
  */
 class RealStorageSocketClient(
-    private val socketPathValue: String = StorageSocketPaths.socketPath(),
-    private val json: Json = Json {
-      ignoreUnknownKeys = true
-      explicitNulls = false
-    },
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+  private val socketPathValue: String = StorageSocketPaths.socketPath(),
+  private val json: Json = Json {
+    ignoreUnknownKeys = true
+    explicitNulls = false
+  },
+  private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
 ) : StorageSocketClient {
 
   private val listeners = CopyOnWriteArrayList<StorageChangeListener>()
@@ -89,13 +89,11 @@ class RealStorageSocketClient(
     val address = UnixDomainSocketAddress.of(socketPathValue)
     SocketChannel.open(address).use { channel ->
       val reader =
-          BufferedReader(
-              InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
-          )
+        BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
       val writer =
-          BufferedWriter(
-              OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
-          )
+        BufferedWriter(
+          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+        )
 
       // Send subscribe request
       val subscribeRequest = StorageStreamRequest(command = "subscribe")
@@ -105,12 +103,11 @@ class RealStorageSocketClient(
 
       // Read initial response
       val initialLine =
-          reader.readLine()
-              ?: throw McpConnectionException("Storage socket closed during handshake")
+        reader.readLine() ?: throw McpConnectionException("Storage socket closed during handshake")
       val initialResponse = json.decodeFromString<StorageStreamResponse>(initialLine)
       if (!initialResponse.success) {
         throw McpConnectionException(
-            initialResponse.error ?: "Failed to subscribe to storage changes"
+          initialResponse.error ?: "Failed to subscribe to storage changes"
         )
       }
 
@@ -123,16 +120,16 @@ class RealStorageSocketClient(
           val response = json.decodeFromString<StorageStreamResponse>(line)
           response.event?.let { event ->
             val changedEvent =
-                StorageChangedEvent(
-                    packageName = event.packageName,
-                    fileName = event.fileName,
-                    key = event.key,
-                    oldValue = null, // Not available in current protocol
-                    newValue = parseValue(event.value, event.valueType),
-                    valueType = event.valueType,
-                    timestamp = event.timestamp,
-                    sequenceNumber = event.sequenceNumber,
-                )
+              StorageChangedEvent(
+                packageName = event.packageName,
+                fileName = event.fileName,
+                key = event.key,
+                oldValue = null, // Not available in current protocol
+                newValue = parseValue(event.value, event.valueType),
+                valueType = event.valueType,
+                timestamp = event.timestamp,
+                sequenceNumber = event.sequenceNumber,
+              )
             notifyListeners(changedEvent)
           }
         } catch (e: Exception) {
@@ -200,25 +197,25 @@ object StorageSocketPaths {
 
 @Serializable
 private data class StorageStreamRequest(
-    val command: String,
-    val packageName: String? = null,
-    val fileName: String? = null,
+  val command: String,
+  val packageName: String? = null,
+  val fileName: String? = null,
 )
 
 @Serializable
 private data class StorageStreamResponse(
-    val success: Boolean,
-    val error: String? = null,
-    val event: StorageEventPayload? = null,
+  val success: Boolean,
+  val error: String? = null,
+  val event: StorageEventPayload? = null,
 )
 
 @Serializable
 private data class StorageEventPayload(
-    val packageName: String,
-    val fileName: String,
-    val key: String?,
-    val value: String?,
-    val valueType: String,
-    val timestamp: Long,
-    val sequenceNumber: Long = 0,
+  val packageName: String,
+  val fileName: String,
+  val key: String?,
+  val value: String?,
+  val valueType: String,
+  val timestamp: Long,
+  val sequenceNumber: Long = 0,
 )

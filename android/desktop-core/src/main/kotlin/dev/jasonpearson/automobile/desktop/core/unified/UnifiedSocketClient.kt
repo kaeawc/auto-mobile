@@ -51,16 +51,16 @@ interface UnifiedSocketClient {
   suspend fun disconnect()
 
   suspend fun <T> request(
-      domain: String,
-      method: String,
-      params: JsonElement? = null,
-      timeout: Duration = 30.seconds,
+    domain: String,
+    method: String,
+    params: JsonElement? = null,
+    timeout: Duration = 30.seconds,
   ): T
 
   fun subscribe(
-      domain: String,
-      event: String? = null,
-      params: JsonElement? = null,
+    domain: String,
+    event: String? = null,
+    params: JsonElement? = null,
   ): Flow<UnifiedMessage>
 
   suspend fun unsubscribe(subscriptionId: String)
@@ -123,20 +123,20 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
 
   // Active subscriptions for resubscription on reconnect
   private data class ActiveSubscription(
-      val domain: String,
-      val event: String?,
-      val params: JsonElement?,
-      val flow: MutableSharedFlow<UnifiedMessage>,
+    val domain: String,
+    val event: String?,
+    val params: JsonElement?,
+    val flow: MutableSharedFlow<UnifiedMessage>,
   )
 
   private val subscriptions = ConcurrentHashMap<String, ActiveSubscription>()
 
   // Flow for all push messages
   private val _pushMessages =
-      MutableSharedFlow<UnifiedMessage>(
-          extraBufferCapacity = 100,
-          onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-      )
+    MutableSharedFlow<UnifiedMessage>(
+      extraBufferCapacity = 100,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
 
   override suspend fun connect() {
     if (isConnected) {
@@ -168,13 +168,13 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
         val address = UnixDomainSocketAddress.of(socketPath)
         channel = SocketChannel.open(address)
         reader =
-            BufferedReader(
-                InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
-            )
+          BufferedReader(
+            InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
+          )
         writer =
-            BufferedWriter(
-                OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
-            )
+          BufferedWriter(
+            OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
+          )
 
         _connectionState.update { ConnectionState.Connected() }
         attempt = 0
@@ -208,7 +208,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
         val delayMs = calculateBackoff(attempt)
 
         log.warn(
-            "Failed to connect to unified socket (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms"
+          "Failed to connect to unified socket (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms"
         )
         _connectionState.update { ConnectionState.Reconnecting(attempt, delayMs) }
 
@@ -321,10 +321,10 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
       val deferred = pendingRequests.remove(id)
       val error = message.error
       deferred?.completeExceptionally(
-          RequestErrorException(
-              error?.code ?: "UNKNOWN",
-              error?.message ?: "Unknown error",
-          )
+        RequestErrorException(
+          error?.code ?: "UNKNOWN",
+          error?.message ?: "Unknown error",
+        )
       )
     }
   }
@@ -345,10 +345,10 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
 
   private suspend fun sendPong() {
     val pongMessage =
-        UnifiedMessage(
-            type = MessageTypes.PONG,
-            timestamp = System.currentTimeMillis(),
-        )
+      UnifiedMessage(
+        type = MessageTypes.PONG,
+        timestamp = System.currentTimeMillis(),
+      )
     sendMessage(pongMessage)
   }
 
@@ -371,10 +371,10 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
 
   @Suppress("UNCHECKED_CAST")
   override suspend fun <T> request(
-      domain: String,
-      method: String,
-      params: JsonElement?,
-      timeout: Duration,
+    domain: String,
+    method: String,
+    params: JsonElement?,
+    timeout: Duration,
   ): T {
     if (!isConnected) {
       throw NotConnectedException()
@@ -385,14 +385,14 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     pendingRequests[id] = deferred
 
     val requestMessage =
-        UnifiedMessage(
-            id = id,
-            type = MessageTypes.REQUEST,
-            domain = domain,
-            method = method,
-            params = params,
-            timestamp = System.currentTimeMillis(),
-        )
+      UnifiedMessage(
+        id = id,
+        type = MessageTypes.REQUEST,
+        domain = domain,
+        method = method,
+        params = params,
+        timestamp = System.currentTimeMillis(),
+      )
 
     if (!sendMessage(requestMessage)) {
       pendingRequests.remove(id)
@@ -400,9 +400,9 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     }
 
     val response =
-        withTimeoutOrNull(timeout.inWholeMilliseconds) {
-          deferred.await()
-        }
+      withTimeoutOrNull(timeout.inWholeMilliseconds) {
+        deferred.await()
+      }
 
     if (response == null) {
       pendingRequests.remove(id)
@@ -417,16 +417,16 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
   }
 
   override fun subscribe(
-      domain: String,
-      event: String?,
-      params: JsonElement?,
+    domain: String,
+    event: String?,
+    params: JsonElement?,
   ): Flow<UnifiedMessage> {
     val flow =
-        MutableSharedFlow<UnifiedMessage>(
-            replay = 1,
-            extraBufferCapacity = 50,
-            onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-        )
+      MutableSharedFlow<UnifiedMessage>(
+        replay = 1,
+        extraBufferCapacity = 50,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+      )
 
     scope.launch {
       try {
@@ -442,23 +442,23 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
   }
 
   private suspend fun sendSubscribe(
-      domain: String,
-      event: String?,
-      params: JsonElement?,
+    domain: String,
+    event: String?,
+    params: JsonElement?,
   ): String {
     val id = UUID.randomUUID().toString()
     val deferred = CompletableDeferred<UnifiedMessage>()
     pendingRequests[id] = deferred
 
     val subscribeMessage =
-        UnifiedMessage(
-            id = id,
-            type = MessageTypes.SUBSCRIBE,
-            domain = domain,
-            event = event,
-            params = params,
-            timestamp = System.currentTimeMillis(),
-        )
+      UnifiedMessage(
+        id = id,
+        type = MessageTypes.SUBSCRIBE,
+        domain = domain,
+        event = event,
+        params = params,
+        timestamp = System.currentTimeMillis(),
+      )
 
     if (!sendMessage(subscribeMessage)) {
       pendingRequests.remove(id)
@@ -466,9 +466,9 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     }
 
     val response =
-        withTimeoutOrNull(30_000) {
-          deferred.await()
-        }
+      withTimeoutOrNull(30_000) {
+        deferred.await()
+      }
 
     if (response == null) {
       pendingRequests.remove(id)
@@ -503,13 +503,13 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     val params = JsonObject(mapOf("subscriptionId" to JsonPrimitive(subscriptionId)))
 
     val unsubscribeMessage =
-        UnifiedMessage(
-            id = id,
-            type = MessageTypes.UNSUBSCRIBE,
-            domain = subscription?.domain,
-            params = params,
-            timestamp = System.currentTimeMillis(),
-        )
+      UnifiedMessage(
+        id = id,
+        type = MessageTypes.UNSUBSCRIBE,
+        domain = subscription?.domain,
+        params = params,
+        timestamp = System.currentTimeMillis(),
+      )
 
     sendMessage(unsubscribeMessage)
   }

@@ -11,7 +11,7 @@ class CachedNavigationDataSourceTest {
 
   /** Counts how many times the delegate is called. */
   private class CountingNavigationDataSource(
-      private val results: Iterator<Result<NavigationGraph>>,
+    private val results: Iterator<Result<NavigationGraph>>
   ) : NavigationDataSource {
     var callCount = 0
 
@@ -24,9 +24,7 @@ class CachedNavigationDataSourceTest {
   @Test
   fun `returns cached value on second call within TTL`() = runBlocking {
     val delegate =
-        CountingNavigationDataSource(
-            listOf(Result.Success(graph), Result.Success(graph)).iterator()
-        )
+      CountingNavigationDataSource(listOf(Result.Success(graph), Result.Success(graph)).iterator())
     val cached = CachedNavigationDataSource(delegate, ttlMs = 1000L)
 
     cached.getNavigationGraph()
@@ -40,9 +38,7 @@ class CachedNavigationDataSourceTest {
     var now = 0L
     val graph2 = NavigationGraph(screens = emptyList(), transitions = emptyList())
     val delegate =
-        CountingNavigationDataSource(
-            listOf(Result.Success(graph), Result.Success(graph2)).iterator()
-        )
+      CountingNavigationDataSource(listOf(Result.Success(graph), Result.Success(graph2)).iterator())
     val cached = CachedNavigationDataSource(delegate, ttlMs = 100L, clock = { now })
 
     val first = cached.getNavigationGraph()
@@ -57,9 +53,7 @@ class CachedNavigationDataSourceTest {
   @Test
   fun `invalidate forces re-fetch`() = runBlocking {
     val delegate =
-        CountingNavigationDataSource(
-            listOf(Result.Success(graph), Result.Success(graph)).iterator()
-        )
+      CountingNavigationDataSource(listOf(Result.Success(graph), Result.Success(graph)).iterator())
     val cached = CachedNavigationDataSource(delegate, ttlMs = 10_000L)
 
     cached.getNavigationGraph()
@@ -72,13 +66,13 @@ class CachedNavigationDataSourceTest {
   @Test
   fun `caches error results too`() = runBlocking {
     val delegate =
-        CountingNavigationDataSource(
-            listOf(
-                    Result.Error(RuntimeException("fail")),
-                    Result.Success(graph),
-                )
-                .iterator()
-        )
+      CountingNavigationDataSource(
+        listOf(
+            Result.Error(RuntimeException("fail")),
+            Result.Success(graph),
+          )
+          .iterator()
+      )
     val cached = CachedNavigationDataSource(delegate, ttlMs = 10_000L)
 
     val first = cached.getNavigationGraph()

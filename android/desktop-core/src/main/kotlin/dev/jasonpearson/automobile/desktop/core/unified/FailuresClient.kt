@@ -21,128 +21,130 @@ import kotlinx.serialization.json.encodeToJsonElement
  * - subscribeToFailures: Real-time failure notifications
  */
 class FailuresClient(private val client: UnifiedSocketClient) {
-    private val json = Json { ignoreUnknownKeys = true }
+  private val json = Json { ignoreUnknownKeys = true }
 
-    /**
-     * Poll for new failure notifications.
-     */
-    suspend fun pollNotifications(
-        sinceTimestamp: Long? = null,
-        sinceId: Int? = null,
-        startTime: Long? = null,
-        endTime: Long? = null,
-        dateRange: String? = null,
-        type: String? = null,
-        acknowledged: Boolean? = null,
-        limit: Int? = null,
-    ): PollNotificationsResult {
-        val params = buildMap<String, JsonElement> {
-            sinceTimestamp?.let { put("sinceTimestamp", json.encodeToJsonElement(it)) }
-            sinceId?.let { put("sinceId", json.encodeToJsonElement(it)) }
-            startTime?.let { put("startTime", json.encodeToJsonElement(it)) }
-            endTime?.let { put("endTime", json.encodeToJsonElement(it)) }
-            dateRange?.let { put("dateRange", json.encodeToJsonElement(it)) }
-            type?.let { put("type", json.encodeToJsonElement(it)) }
-            acknowledged?.let { put("acknowledged", json.encodeToJsonElement(it)) }
-            limit?.let { put("limit", json.encodeToJsonElement(it)) }
+  /** Poll for new failure notifications. */
+  suspend fun pollNotifications(
+      sinceTimestamp: Long? = null,
+      sinceId: Int? = null,
+      startTime: Long? = null,
+      endTime: Long? = null,
+      dateRange: String? = null,
+      type: String? = null,
+      acknowledged: Boolean? = null,
+      limit: Int? = null,
+  ): PollNotificationsResult {
+    val params =
+        buildMap<String, JsonElement> {
+          sinceTimestamp?.let { put("sinceTimestamp", json.encodeToJsonElement(it)) }
+          sinceId?.let { put("sinceId", json.encodeToJsonElement(it)) }
+          startTime?.let { put("startTime", json.encodeToJsonElement(it)) }
+          endTime?.let { put("endTime", json.encodeToJsonElement(it)) }
+          dateRange?.let { put("dateRange", json.encodeToJsonElement(it)) }
+          type?.let { put("type", json.encodeToJsonElement(it)) }
+          acknowledged?.let { put("acknowledged", json.encodeToJsonElement(it)) }
+          limit?.let { put("limit", json.encodeToJsonElement(it)) }
         }
 
-        val result: JsonElement = client.request(
+    val result: JsonElement =
+        client.request(
             domain = Domains.FAILURES,
             method = "poll_notifications",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
         )
 
-        return json.decodeFromJsonElement(result)
-    }
+    return json.decodeFromJsonElement(result)
+  }
 
-    /**
-     * Poll for failure groups.
-     */
-    suspend fun pollGroups(
-        startTime: Long? = null,
-        endTime: Long? = null,
-        dateRange: String? = null,
-        type: String? = null,
-        severity: String? = null,
-    ): PollGroupsResult {
-        val params = buildMap<String, JsonElement> {
-            startTime?.let { put("startTime", json.encodeToJsonElement(it)) }
-            endTime?.let { put("endTime", json.encodeToJsonElement(it)) }
-            dateRange?.let { put("dateRange", json.encodeToJsonElement(it)) }
-            type?.let { put("type", json.encodeToJsonElement(it)) }
-            severity?.let { put("severity", json.encodeToJsonElement(it)) }
+  /** Poll for failure groups. */
+  suspend fun pollGroups(
+      startTime: Long? = null,
+      endTime: Long? = null,
+      dateRange: String? = null,
+      type: String? = null,
+      severity: String? = null,
+  ): PollGroupsResult {
+    val params =
+        buildMap<String, JsonElement> {
+          startTime?.let { put("startTime", json.encodeToJsonElement(it)) }
+          endTime?.let { put("endTime", json.encodeToJsonElement(it)) }
+          dateRange?.let { put("dateRange", json.encodeToJsonElement(it)) }
+          type?.let { put("type", json.encodeToJsonElement(it)) }
+          severity?.let { put("severity", json.encodeToJsonElement(it)) }
         }
 
-        val result: JsonElement = client.request(
+    val result: JsonElement =
+        client.request(
             domain = Domains.FAILURES,
             method = "poll_groups",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
         )
 
-        return json.decodeFromJsonElement(result)
-    }
+    return json.decodeFromJsonElement(result)
+  }
 
-    /**
-     * Poll for timeline data.
-     */
-    suspend fun pollTimeline(
-        startTime: Long? = null,
-        endTime: Long? = null,
-        dateRange: String? = null,
-        aggregation: String? = null,
-    ): PollTimelineResult {
-        val params = buildMap<String, JsonElement> {
-            startTime?.let { put("startTime", json.encodeToJsonElement(it)) }
-            endTime?.let { put("endTime", json.encodeToJsonElement(it)) }
-            dateRange?.let { put("dateRange", json.encodeToJsonElement(it)) }
-            aggregation?.let { put("aggregation", json.encodeToJsonElement(it)) }
+  /** Poll for timeline data. */
+  suspend fun pollTimeline(
+      startTime: Long? = null,
+      endTime: Long? = null,
+      dateRange: String? = null,
+      aggregation: String? = null,
+  ): PollTimelineResult {
+    val params =
+        buildMap<String, JsonElement> {
+          startTime?.let { put("startTime", json.encodeToJsonElement(it)) }
+          endTime?.let { put("endTime", json.encodeToJsonElement(it)) }
+          dateRange?.let { put("dateRange", json.encodeToJsonElement(it)) }
+          aggregation?.let { put("aggregation", json.encodeToJsonElement(it)) }
         }
 
-        val result: JsonElement = client.request(
+    val result: JsonElement =
+        client.request(
             domain = Domains.FAILURES,
             method = "poll_timeline",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
         )
 
-        return json.decodeFromJsonElement(result)
-    }
+    return json.decodeFromJsonElement(result)
+  }
 
-    /**
-     * Acknowledge failure notifications.
-     */
-    suspend fun acknowledge(notificationIds: List<Int>): AcknowledgeResult {
-        val params = mapOf("notificationIds" to json.encodeToJsonElement(notificationIds))
+  /** Acknowledge failure notifications. */
+  suspend fun acknowledge(notificationIds: List<Int>): AcknowledgeResult {
+    val params = mapOf("notificationIds" to json.encodeToJsonElement(notificationIds))
 
-        val result: JsonElement = client.request(
+    val result: JsonElement =
+        client.request(
             domain = Domains.FAILURES,
             method = "acknowledge",
             params = json.encodeToJsonElement(params),
         )
 
-        return json.decodeFromJsonElement(result)
-    }
+    return json.decodeFromJsonElement(result)
+  }
 
-    /**
-     * Subscribe to real-time failure notifications.
-     */
-    fun subscribeToFailures(
-        type: String? = null,
-        severity: String? = null,
-    ): Flow<FailureNotificationEvent> {
-        val params = buildMap<String, JsonElement> {
-            type?.let { put("type", json.encodeToJsonElement(it)) }
-            severity?.let { put("severity", json.encodeToJsonElement(it)) }
+  /** Subscribe to real-time failure notifications. */
+  fun subscribeToFailures(
+      type: String? = null,
+      severity: String? = null,
+  ): Flow<FailureNotificationEvent> {
+    val params =
+        buildMap<String, JsonElement> {
+          type?.let { put("type", json.encodeToJsonElement(it)) }
+          severity?.let { put("severity", json.encodeToJsonElement(it)) }
         }
 
-        return client.subscribe(
+    return client
+        .subscribe(
             domain = Domains.FAILURES,
             event = "failure_occurred",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
-        ).map { message ->
-            json.decodeFromJsonElement(message.result ?: throw IllegalStateException("No result in push"))
+        )
+        .map { message ->
+          json.decodeFromJsonElement(
+              message.result ?: throw IllegalStateException("No result in push")
+          )
         }
-    }
+  }
 }
 
 @Serializable

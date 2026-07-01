@@ -568,10 +568,8 @@ class ViewHierarchyExtractorTest {
     // nodes participate in cross-window occlusion, they cover ~93% of the app window; together
     // with the status bar that pushes the app over the 0.95 hidden threshold and every Slack
     // node gets stripped. The fix excludes IME nodes from being occluders for other windows.
-    val toolbar =
-        elementWithBounds(resourceId = "toolbar", bounds = bounds(0, 172, 1080, 400))
-    val composer =
-        elementWithBounds(resourceId = "composer", bounds = bounds(0, 1200, 1080, 1340))
+    val toolbar = elementWithBounds(resourceId = "toolbar", bounds = bounds(0, 172, 1080, 400))
+    val composer = elementWithBounds(resourceId = "composer", bounds = bounds(0, 1200, 1080, 1340))
     val appRoot =
         elementWithBounds(
             resourceId = "app-root",
@@ -630,10 +628,8 @@ class ViewHierarchyExtractorTest {
     // App window covers full screen [0,0][1280,2856]
     // Keyboard (IME) window covers bottom half [0,1395][1280,2856]
     // App elements above the keyboard should NOT be removed
-    val toolbar =
-        elementWithBounds(resourceId = "toolbar", bounds = bounds(0, 156, 1280, 400))
-    val editText =
-        elementWithBounds(resourceId = "edit-text", bounds = bounds(0, 400, 1280, 500))
+    val toolbar = elementWithBounds(resourceId = "toolbar", bounds = bounds(0, 156, 1280, 400))
+    val editText = elementWithBounds(resourceId = "edit-text", bounds = bounds(0, 400, 1280, 500))
     val appRoot =
         elementWithBounds(
             resourceId = "app-root",
@@ -921,7 +917,8 @@ class ViewHierarchyExtractorTest {
 
   @Test
   fun `UIElementInfo with resourceId gets viewId equal to resourceId`() {
-    val element = UIElementInfo(resourceId = "com.example:id/my_button", viewId = "com.example:id/my_button")
+    val element =
+        UIElementInfo(resourceId = "com.example:id/my_button", viewId = "com.example:id/my_button")
     assertEquals("com.example:id/my_button", element.viewId)
   }
 
@@ -948,11 +945,12 @@ class ViewHierarchyExtractorTest {
 
   @Test
   fun `viewId field is serialized to JSON with correct key`() {
-    val element = UIElementInfo(
-        text = "Hello",
-        resourceId = "com.example:id/text",
-        viewId = "com.example:id/text",
-    )
+    val element =
+        UIElementInfo(
+            text = "Hello",
+            resourceId = "com.example:id/text",
+            viewId = "com.example:id/text",
+        )
     val jsonString = json.encodeToString(UIElementInfo.serializer(), element)
     assertTrue("JSON should contain view-id field", jsonString.contains("\"view-id\""))
   }

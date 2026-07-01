@@ -20,9 +20,9 @@ import androidx.navigation3.ui.*
 import androidx.navigation3.ui.NavDisplay
 import dev.jasonpearson.automobile.demos.BugReproScreen
 import dev.jasonpearson.automobile.demos.ContrastDemoScreen
+import dev.jasonpearson.automobile.demos.DemoIndexScreen
 import dev.jasonpearson.automobile.demos.HandledExceptionDemoScreen
 import dev.jasonpearson.automobile.demos.NetworkTestScreen
-import dev.jasonpearson.automobile.demos.DemoIndexScreen
 import dev.jasonpearson.automobile.demos.PerformanceDetailScreen
 import dev.jasonpearson.automobile.demos.PerformanceListScreen
 import dev.jasonpearson.automobile.demos.StartupDemoScreen
@@ -244,13 +244,14 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
   // Re-fire current navigation destination on resume (after returning from background)
   val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
   androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
-    val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-      if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-        val current = backStack.lastOrNull() ?: return@LifecycleEventObserver
-        val name = current::class.simpleName ?: return@LifecycleEventObserver
-        Navigation3Adapter.trackManually(name)
-      }
-    }
+    val observer =
+        androidx.lifecycle.LifecycleEventObserver { _, event ->
+          if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+            val current = backStack.lastOrNull() ?: return@LifecycleEventObserver
+            val name = current::class.simpleName ?: return@LifecycleEventObserver
+            Navigation3Adapter.trackManually(name)
+          }
+        }
     lifecycleOwner.lifecycle.addObserver(observer)
     onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
   }
@@ -576,7 +577,9 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
                     onNavigateToContrast = { backStack.add(DemoContrastDestination) },
                     onNavigateToTapTargets = { backStack.add(DemoTapTargetsDestination) },
                     onNavigateToBugRepro = { backStack.add(DemoBugReproDestination) },
-                    onNavigateToHandledException = { backStack.add(DemoHandledExceptionDestination) },
+                    onNavigateToHandledException = {
+                      backStack.add(DemoHandledExceptionDestination)
+                    },
                     onNavigateToNetworkTest = { backStack.add(DemoNetworkTestDestination) },
                     onNavigateBack = { backStack.removeLastOrNull() },
                 )
@@ -731,9 +734,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
                 Log.d(TAG, "Navigated to NetworkTestScreen")
                 analyticsTracker.trackScreenView("NetworkTestScreen")
               }
-              Box(
-                  modifier = Modifier.destinationSemanticModifier<DemoNetworkTestDestination>()
-              ) {
+              Box(modifier = Modifier.destinationSemanticModifier<DemoNetworkTestDestination>()) {
                 NetworkTestScreen(onNavigateBack = { backStack.removeLastOrNull() })
               }
             }

@@ -158,12 +158,13 @@ private enum class CategoryFilter(
 }
 
 /** Returns the duration of a telemetry event in milliseconds, or 0 for point events. */
-private fun TelemetryDisplayEvent.durationMs(): Long = when (this) {
-  is TelemetryDisplayEvent.Network -> durationMs
-  is TelemetryDisplayEvent.ToolCall -> durationMs
-  is TelemetryDisplayEvent.Layout -> durationMs ?: 0L
-  else -> 0L
-}
+private fun TelemetryDisplayEvent.durationMs(): Long =
+    when (this) {
+      is TelemetryDisplayEvent.Network -> durationMs
+      is TelemetryDisplayEvent.ToolCall -> durationMs
+      is TelemetryDisplayEvent.Layout -> durationMs ?: 0L
+      else -> 0L
+    }
 
 private fun groupedRowIndexForTimestamp(
     renderedRows: List<RenderedTelemetryRow>,
@@ -180,14 +181,14 @@ private fun buildRenderedRows(groupedItems: List<EventListItem>): List<RenderedT
       groupedItems.forEach { listItem ->
         when (listItem) {
           is EventListItem.Single -> {
-              val dur = listItem.event.durationMs()
-              add(
-                  RenderedTelemetryRow(
-                      event = listItem.event,
-                      startTimestamp = listItem.event.timestamp,
-                      endTimestamp = listItem.event.timestamp + dur,
-                  )
-              )
+            val dur = listItem.event.durationMs()
+            add(
+                RenderedTelemetryRow(
+                    event = listItem.event,
+                    startTimestamp = listItem.event.timestamp,
+                    endTimestamp = listItem.event.timestamp + dur,
+                )
+            )
           }
           is EventListItem.Group -> {
             val firstEvent = listItem.events.firstOrNull() ?: return@forEach
@@ -325,9 +326,10 @@ fun TelemetryDashboard(
       val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
       val totalItems = listState.layoutInfo.totalItemsCount
       totalItems - lastVisible <= 3
-    }.collect { nearBottom ->
-      autoScrollEnabled = nearBottom
     }
+        .collect { nearBottom ->
+          autoScrollEnabled = nearBottom
+        }
   }
 
   // Collect connection state
@@ -352,17 +354,17 @@ fun TelemetryDashboard(
   // Recompute filtered list via snapshotFlow so filtering runs outside composition.
   LaunchedEffect(Unit) {
     snapshotFlow {
-          FilterInputs(
-              events.size,
-              events.lastOrNull()?.timestamp,
-              selectedFilter,
-              debouncedQuery,
-              enabledSeverities,
-              isRegexEnabled,
-              showBookmarksOnly,
-              bookmarkedEvents.size,
-          )
-        }
+      FilterInputs(
+          events.size,
+          events.lastOrNull()?.timestamp,
+          selectedFilter,
+          debouncedQuery,
+          enabledSeverities,
+          isRegexEnabled,
+          showBookmarksOnly,
+          bookmarkedEvents.size,
+      )
+    }
         .collect {
           val source = if (showBookmarksOnly) bookmarkedEvents.toList() else events.toList()
           filteredEvents =
@@ -406,10 +408,12 @@ fun TelemetryDashboard(
     val ts = timelineState?.selectedTimestampMs ?: return@LaunchedEffect
     val nearestIndex =
         if (selectedFilter == CategoryFilter.Network) {
-          filteredEvents.indexOfFirst { event ->
-            val end = event.timestamp + event.durationMs()
-            ts in event.timestamp..end || event.timestamp >= ts
-          }.takeIf { it >= 0 } ?: filteredEvents.lastIndex
+          filteredEvents
+              .indexOfFirst { event ->
+                val end = event.timestamp + event.durationMs()
+                ts in event.timestamp..end || event.timestamp >= ts
+              }
+              .takeIf { it >= 0 } ?: filteredEvents.lastIndex
         } else {
           groupedRowIndexForTimestamp(renderedRows, ts)
         }
@@ -1431,14 +1435,13 @@ private fun LayoutSummary(event: TelemetryDisplayEvent.Layout, textColor: Color)
 @Composable
 private fun PerformanceSummary(event: TelemetryDisplayEvent.Performance, textColor: Color) {
   val changed = event.changedMetrics.joinToString(", ")
-  val metrics =
-      buildString {
-            event.fps?.let { append("${it.toInt()}fps ") }
-            event.frameTimeMs?.let { append("${it.toInt()}ms ") }
-            event.jankFrames?.let { if (it > 0) append("${it}jank ") }
-            event.memoryUsageMb?.let { append("${it.toInt()}MB ") }
-          }
-          .trim()
+  val metrics = buildString {
+    event.fps?.let { append("${it.toInt()}fps ") }
+    event.frameTimeMs?.let { append("${it.toInt()}ms ") }
+    event.jankFrames?.let { if (it > 0) append("${it}jank ") }
+    event.memoryUsageMb?.let { append("${it.toInt()}MB ") }
+  }
+      .trim()
   val text = "[${event.health.uppercase()}] $metrics ($changed)"
   val color =
       when (event.health) {

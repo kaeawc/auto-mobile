@@ -24,7 +24,10 @@ data class AutoMobilePlanExecutionOptions(
     val debugMode: Boolean = System.getProperty("automobile.debug", "false").toBoolean(),
 )
 
-/** Effective wait budget for a single `executePlan` daemon call (never below [MIN_EXECUTE_PLAN_TIMEOUT_MS]). */
+/**
+ * Effective wait budget for a single `executePlan` daemon call (never below
+ * [MIN_EXECUTE_PLAN_TIMEOUT_MS]).
+ */
 fun AutoMobilePlanExecutionOptions.effectiveExecutePlanTimeoutMs(): Long =
     maxOf(timeoutMs, MIN_EXECUTE_PLAN_TIMEOUT_MS)
 

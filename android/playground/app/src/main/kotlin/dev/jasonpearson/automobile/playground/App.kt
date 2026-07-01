@@ -18,9 +18,9 @@ class App : Application(), SingletonImageLoader.Factory {
     }
 
     return ImageLoader.Builder(context)
-      .components {
-        add(OkHttpNetworkFetcherFactory(callFactory = { clientBuilder.build() }))
-      }
-      .build()
+        .components {
+          add(OkHttpNetworkFetcherFactory(callFactory = { clientBuilder.build() }))
+        }
+        .build()
   }
 }

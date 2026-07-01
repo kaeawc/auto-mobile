@@ -1,8 +1,8 @@
 package dev.jasonpearson.automobile.sdk.database
 
 /**
- * Interface for database operations. Implementations provide access to app databases for
- * inspection and querying.
+ * Interface for database operations. Implementations provide access to app databases for inspection
+ * and querying.
  */
 interface DatabaseDriver {
   /** Returns a list of all accessible databases. */
@@ -26,7 +26,7 @@ data class DatabaseDescriptor(
     /** Display name of the database (typically the filename). */
     val name: String,
     /** Absolute path to the database file. */
-    val path: String
+    val path: String,
 )
 
 /** Result of querying table data. */
@@ -36,7 +36,7 @@ data class TableDataResult(
     /** Row data as list of column values. */
     val rows: List<List<Any?>>,
     /** Total number of rows in the table. */
-    val total: Int
+    val total: Int,
 )
 
 /** Result of querying table structure. */
@@ -56,7 +56,7 @@ data class ColumnInfo(
     /** Whether the column is a primary key. */
     val primaryKey: Boolean,
     /** Default value if any. */
-    val defaultValue: String?
+    val defaultValue: String?,
 )
 
 /** Result of executing a SQL statement. */

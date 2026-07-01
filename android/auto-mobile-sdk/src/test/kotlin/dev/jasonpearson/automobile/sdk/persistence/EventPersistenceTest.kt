@@ -15,46 +15,48 @@ import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
 class EventPersistenceTest {
 
-  @get:Rule
-  val tempFolder = TemporaryFolder()
+  @get:Rule val tempFolder = TemporaryFolder()
 
   private fun createPersistence(
-    clock: () -> Long = { 1000L },
-    uuidProvider: () -> String = { "test-uuid" },
-  ): FileEventPersistence = FileEventPersistence(
-    directory = tempFolder.root,
-    clock = clock,
-    uuidProvider = uuidProvider,
-  )
+      clock: () -> Long = { 1000L },
+      uuidProvider: () -> String = { "test-uuid" },
+  ): FileEventPersistence =
+      FileEventPersistence(
+          directory = tempFolder.root,
+          clock = clock,
+          uuidProvider = uuidProvider,
+      )
 
-  private fun makeLifecycleEvent(name: String, timestamp: Long = 100L) = SdkLifecycleEvent(
-    timestamp = timestamp,
-    applicationId = "com.test.app",
-    kind = name,
-    details = mapOf("key" to "value"),
-  )
+  private fun makeLifecycleEvent(name: String, timestamp: Long = 100L) =
+      SdkLifecycleEvent(
+          timestamp = timestamp,
+          applicationId = "com.test.app",
+          kind = name,
+          details = mapOf("key" to "value"),
+      )
 
-  private fun makeNavEvent(destination: String, timestamp: Long = 200L) = SdkNavigationEvent(
-    timestamp = timestamp,
-    applicationId = "com.test.app",
-    destination = destination,
-    source = NavigationSourceType.COMPOSE_NAVIGATION,
-    arguments = mapOf("id" to "42"),
-    metadata = mapOf("screen" to "home"),
-  )
+  private fun makeNavEvent(destination: String, timestamp: Long = 200L) =
+      SdkNavigationEvent(
+          timestamp = timestamp,
+          applicationId = "com.test.app",
+          destination = destination,
+          source = NavigationSourceType.COMPOSE_NAVIGATION,
+          arguments = mapOf("id" to "42"),
+          metadata = mapOf("screen" to "home"),
+      )
 
   @Test
   fun `persist returns batch ID on success`() {
@@ -107,11 +109,12 @@ class EventPersistenceTest {
   @Test
   fun `FIFO ordering by timestamp`() {
     var counter = 0
-    val persistence = FileEventPersistence(
-      directory = tempFolder.root,
-      clock = { (1000L + counter * 100).also { counter++ } },
-      uuidProvider = { "uuid-$counter" },
-    )
+    val persistence =
+        FileEventPersistence(
+            directory = tempFolder.root,
+            clock = { (1000L + counter * 100).also { counter++ } },
+            uuidProvider = { "uuid-$counter" },
+        )
 
     persistence.persist(listOf(makeLifecycleEvent("first")))
     persistence.persist(listOf(makeLifecycleEvent("second")))
@@ -144,11 +147,12 @@ class EventPersistenceTest {
   @Test
   fun `cleanup removes old batches`() {
     var now = 1_000_000_000L
-    val persistence = FileEventPersistence(
-      directory = tempFolder.root,
-      clock = { now },
-      uuidProvider = { "uuid" },
-    )
+    val persistence =
+        FileEventPersistence(
+            directory = tempFolder.root,
+            clock = { now },
+            uuidProvider = { "uuid" },
+        )
 
     // Persist an old batch (timestamp = 1_000_000_000)
     persistence.persist(listOf(makeLifecycleEvent("old")))
@@ -157,11 +161,12 @@ class EventPersistenceTest {
     now += 8 * 24 * 60 * 60 * 1000L
 
     // Persist a new batch
-    val newPersistence = FileEventPersistence(
-      directory = tempFolder.root,
-      clock = { now },
-      uuidProvider = { "uuid-new" },
-    )
+    val newPersistence =
+        FileEventPersistence(
+            directory = tempFolder.root,
+            clock = { now },
+            uuidProvider = { "uuid-new" },
+        )
     newPersistence.persist(listOf(makeLifecycleEvent("new")))
 
     // Cleanup with 7-day max age (using current time)
@@ -210,11 +215,12 @@ class EventPersistenceTest {
   @Test
   fun `multiple events in a single batch`() {
     val persistence = createPersistence()
-    val events = listOf(
-      makeLifecycleEvent("one", timestamp = 1L),
-      makeNavEvent("home", timestamp = 2L),
-      makeLifecycleEvent("two", timestamp = 3L),
-    )
+    val events =
+        listOf(
+            makeLifecycleEvent("one", timestamp = 1L),
+            makeNavEvent("home", timestamp = 2L),
+            makeLifecycleEvent("two", timestamp = 3L),
+        )
     persistence.persist(events)
 
     val loaded = persistence.loadPending()
@@ -235,15 +241,16 @@ class EventPersistenceTest {
   @Test
   fun `round-trip for log event`() {
     val persistence = createPersistence()
-    val original = SdkLogEvent(
-      timestamp = 300L,
-      applicationId = "com.test.app",
-      level = 5,
-      tag = "MyTag",
-      message = "Something happened",
-      pid = 1234,
-      tid = 5678,
-    )
+    val original =
+        SdkLogEvent(
+            timestamp = 300L,
+            applicationId = "com.test.app",
+            level = 5,
+            tag = "MyTag",
+            message = "Something happened",
+            pid = 1234,
+            tid = 5678,
+        )
     persistence.persist(listOf(original))
 
     val restored = persistence.loadPending()[0].second[0] as SdkLogEvent
@@ -258,12 +265,13 @@ class EventPersistenceTest {
   @Test
   fun `round-trip for lifecycle event`() {
     val persistence = createPersistence()
-    val original = SdkLifecycleEvent(
-      timestamp = 400L,
-      applicationId = "com.test.app",
-      kind = "foreground",
-      details = mapOf("activity" to "MainActivity"),
-    )
+    val original =
+        SdkLifecycleEvent(
+            timestamp = 400L,
+            applicationId = "com.test.app",
+            kind = "foreground",
+            details = mapOf("activity" to "MainActivity"),
+        )
     persistence.persist(listOf(original))
 
     val restored = persistence.loadPending()[0].second[0] as SdkLifecycleEvent
@@ -274,16 +282,17 @@ class EventPersistenceTest {
   @Test
   fun `round-trip for network request event`() {
     val persistence = createPersistence()
-    val original = SdkNetworkRequestEvent(
-      timestamp = 500L,
-      applicationId = "com.test.app",
-      url = "https://api.example.com/data",
-      method = "GET",
-      statusCode = 200,
-      durationMs = 150,
-      host = "api.example.com",
-      path = "/data",
-    )
+    val original =
+        SdkNetworkRequestEvent(
+            timestamp = 500L,
+            applicationId = "com.test.app",
+            url = "https://api.example.com/data",
+            method = "GET",
+            statusCode = 200,
+            durationMs = 150,
+            host = "api.example.com",
+            path = "/data",
+        )
     persistence.persist(listOf(original))
 
     val restored = persistence.loadPending()[0].second[0] as SdkNetworkRequestEvent
@@ -297,22 +306,24 @@ class EventPersistenceTest {
   @Test
   fun `round-trip for crash event with device info`() {
     val persistence = createPersistence()
-    val original = SdkCrashEvent(
-      timestamp = 600L,
-      applicationId = "com.test.app",
-      exceptionClass = "java.lang.NullPointerException",
-      exceptionMessage = "Attempt to invoke virtual method",
-      stackTrace = "at com.example.Main.run(Main.kt:42)",
-      threadName = "main",
-      currentScreen = "HomeScreen",
-      appVersion = "1.2.3",
-      deviceInfo = SdkDeviceInfo(
-        model = "Pixel 7",
-        manufacturer = "Google",
-        osVersion = "14",
-        sdkInt = 34,
-      ),
-    )
+    val original =
+        SdkCrashEvent(
+            timestamp = 600L,
+            applicationId = "com.test.app",
+            exceptionClass = "java.lang.NullPointerException",
+            exceptionMessage = "Attempt to invoke virtual method",
+            stackTrace = "at com.example.Main.run(Main.kt:42)",
+            threadName = "main",
+            currentScreen = "HomeScreen",
+            appVersion = "1.2.3",
+            deviceInfo =
+                SdkDeviceInfo(
+                    model = "Pixel 7",
+                    manufacturer = "Google",
+                    osVersion = "14",
+                    sdkInt = 34,
+                ),
+        )
     persistence.persist(listOf(original))
 
     val restored = persistence.loadPending()[0].second[0] as SdkCrashEvent
@@ -328,13 +339,14 @@ class EventPersistenceTest {
   @Test
   fun `round-trip for broadcast event`() {
     val persistence = createPersistence()
-    val original = SdkBroadcastEvent(
-      timestamp = 700L,
-      applicationId = "com.test.app",
-      action = "android.intent.action.BATTERY_LOW",
-      categories = listOf("android.intent.category.DEFAULT"),
-      extraKeys = mapOf("level" to "Int"),
-    )
+    val original =
+        SdkBroadcastEvent(
+            timestamp = 700L,
+            applicationId = "com.test.app",
+            action = "android.intent.action.BATTERY_LOW",
+            categories = listOf("android.intent.category.DEFAULT"),
+            extraKeys = mapOf("level" to "Int"),
+        )
     persistence.persist(listOf(original))
 
     val restored = persistence.loadPending()[0].second[0] as SdkBroadcastEvent
@@ -346,14 +358,15 @@ class EventPersistenceTest {
   @Test
   fun `round-trip for handled exception event`() {
     val persistence = createPersistence()
-    val original = SdkHandledExceptionEvent(
-      timestamp = 800L,
-      applicationId = "com.test.app",
-      exceptionClass = "java.io.IOException",
-      exceptionMessage = "Connection reset",
-      stackTrace = "at com.example.Net.fetch(Net.kt:10)",
-      customMessage = "Retry succeeded",
-    )
+    val original =
+        SdkHandledExceptionEvent(
+            timestamp = 800L,
+            applicationId = "com.test.app",
+            exceptionClass = "java.io.IOException",
+            exceptionMessage = "Connection reset",
+            stackTrace = "at com.example.Net.fetch(Net.kt:10)",
+            customMessage = "Retry succeeded",
+        )
     persistence.persist(listOf(original))
 
     val restored = persistence.loadPending()[0].second[0] as SdkHandledExceptionEvent
@@ -365,15 +378,16 @@ class EventPersistenceTest {
   @Test
   fun `round-trip for websocket frame event`() {
     val persistence = createPersistence()
-    val original = SdkWebSocketFrameEvent(
-      timestamp = 900L,
-      applicationId = "com.test.app",
-      connectionId = "ws-1",
-      url = "wss://example.com/ws",
-      direction = WebSocketFrameDirection.SENT,
-      frameType = WebSocketFrameType.TEXT,
-      payloadSize = 256,
-    )
+    val original =
+        SdkWebSocketFrameEvent(
+            timestamp = 900L,
+            applicationId = "com.test.app",
+            connectionId = "ws-1",
+            url = "wss://example.com/ws",
+            direction = WebSocketFrameDirection.SENT,
+            frameType = WebSocketFrameType.TEXT,
+            payloadSize = 256,
+        )
     persistence.persist(listOf(original))
 
     val restored = persistence.loadPending()[0].second[0] as SdkWebSocketFrameEvent
@@ -386,15 +400,16 @@ class EventPersistenceTest {
   @Test
   fun `round-trip for ANR event`() {
     val persistence = createPersistence()
-    val original = SdkAnrEvent(
-      timestamp = 1000L,
-      applicationId = "com.test.app",
-      pid = 12345,
-      processName = "com.test.app",
-      importance = "FOREGROUND",
-      trace = "main thread trace",
-      reason = "Input dispatching timed out",
-    )
+    val original =
+        SdkAnrEvent(
+            timestamp = 1000L,
+            applicationId = "com.test.app",
+            pid = 12345,
+            processName = "com.test.app",
+            importance = "FOREGROUND",
+            trace = "main thread trace",
+            reason = "Input dispatching timed out",
+        )
     persistence.persist(listOf(original))
 
     val restored = persistence.loadPending()[0].second[0] as SdkAnrEvent
@@ -407,13 +422,14 @@ class EventPersistenceTest {
   @Test
   fun `round-trip for notification action event`() {
     val persistence = createPersistence()
-    val original = SdkNotificationActionEvent(
-      timestamp = 1100L,
-      applicationId = "com.test.app",
-      notificationId = "notif-1",
-      actionId = "reply",
-      actionLabel = "Reply",
-    )
+    val original =
+        SdkNotificationActionEvent(
+            timestamp = 1100L,
+            applicationId = "com.test.app",
+            notificationId = "notif-1",
+            actionId = "reply",
+            actionLabel = "Reply",
+        )
     persistence.persist(listOf(original))
 
     val restored = persistence.loadPending()[0].second[0] as SdkNotificationActionEvent
@@ -425,11 +441,12 @@ class EventPersistenceTest {
   @Test
   fun `round-trip for recomposition snapshot event`() {
     val persistence = createPersistence()
-    val original = SdkRecompositionSnapshotEvent(
-      timestamp = 1200L,
-      applicationId = "com.test.app",
-      snapshotJson = """{"counts":[1,2,3]}""",
-    )
+    val original =
+        SdkRecompositionSnapshotEvent(
+            timestamp = 1200L,
+            applicationId = "com.test.app",
+            snapshotJson = """{"counts":[1,2,3]}""",
+        )
     persistence.persist(listOf(original))
 
     val restored = persistence.loadPending()[0].second[0] as SdkRecompositionSnapshotEvent
@@ -439,20 +456,50 @@ class EventPersistenceTest {
   @Test
   fun `batch with all event types round-trips`() {
     val persistence = createPersistence()
-    val events = listOf(
-      makeLifecycleEvent("c1", timestamp = 1L),
-      makeNavEvent("home", timestamp = 2L),
-      SdkLogEvent(timestamp = 3L, level = 4, tag = "T", message = "m"),
-      SdkLifecycleEvent(timestamp = 4L, kind = "background"),
-      SdkNetworkRequestEvent(timestamp = 5L, url = "https://x.com", method = "POST"),
-      SdkCrashEvent(timestamp = 6L, exceptionClass = "E", exceptionMessage = null, stackTrace = "s", threadName = "t"),
-      SdkBroadcastEvent(timestamp = 7L, action = "a"),
-      SdkHandledExceptionEvent(timestamp = 8L, exceptionClass = "E", exceptionMessage = null, stackTrace = "s"),
-      SdkWebSocketFrameEvent(timestamp = 9L, connectionId = "c", url = "wss://x", direction = WebSocketFrameDirection.RECEIVED, frameType = WebSocketFrameType.BINARY),
-      SdkAnrEvent(timestamp = 10L, pid = 1, processName = "p", importance = "I", trace = null, reason = "r"),
-      SdkNotificationActionEvent(timestamp = 11L, notificationId = "n", actionId = "a", actionLabel = "l"),
-      SdkRecompositionSnapshotEvent(timestamp = 12L, snapshotJson = "{}"),
-    )
+    val events =
+        listOf(
+            makeLifecycleEvent("c1", timestamp = 1L),
+            makeNavEvent("home", timestamp = 2L),
+            SdkLogEvent(timestamp = 3L, level = 4, tag = "T", message = "m"),
+            SdkLifecycleEvent(timestamp = 4L, kind = "background"),
+            SdkNetworkRequestEvent(timestamp = 5L, url = "https://x.com", method = "POST"),
+            SdkCrashEvent(
+                timestamp = 6L,
+                exceptionClass = "E",
+                exceptionMessage = null,
+                stackTrace = "s",
+                threadName = "t",
+            ),
+            SdkBroadcastEvent(timestamp = 7L, action = "a"),
+            SdkHandledExceptionEvent(
+                timestamp = 8L,
+                exceptionClass = "E",
+                exceptionMessage = null,
+                stackTrace = "s",
+            ),
+            SdkWebSocketFrameEvent(
+                timestamp = 9L,
+                connectionId = "c",
+                url = "wss://x",
+                direction = WebSocketFrameDirection.RECEIVED,
+                frameType = WebSocketFrameType.BINARY,
+            ),
+            SdkAnrEvent(
+                timestamp = 10L,
+                pid = 1,
+                processName = "p",
+                importance = "I",
+                trace = null,
+                reason = "r",
+            ),
+            SdkNotificationActionEvent(
+                timestamp = 11L,
+                notificationId = "n",
+                actionId = "a",
+                actionLabel = "l",
+            ),
+            SdkRecompositionSnapshotEvent(timestamp = 12L, snapshotJson = "{}"),
+        )
     persistence.persist(events)
 
     val loaded = persistence.loadPending()
@@ -479,7 +526,10 @@ class EventPersistenceTest {
 
     val file = tempFolder.root.listFiles()!!.first()
     val json = file.readText()
-    assertTrue(json.contains(""""type":"lifecycle""""), "Should use stable key 'lifecycle', not class simpleName")
+    assertTrue(
+        json.contains(""""type":"lifecycle""""),
+        "Should use stable key 'lifecycle', not class simpleName",
+    )
     assertTrue(!json.contains("SdkLifecycleEvent"), "Should not contain class name")
   }
 }

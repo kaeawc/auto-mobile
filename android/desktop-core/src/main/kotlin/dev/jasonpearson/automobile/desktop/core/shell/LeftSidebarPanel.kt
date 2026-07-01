@@ -17,8 +17,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /**
- * Left sidebar panel composing MCP connection, daemon status, device list,
- * and app filter sections.
+ * Left sidebar panel composing MCP connection, daemon status, device list, and app filter sections.
  */
 @Composable
 fun LeftSidebarPanel(
@@ -37,46 +36,47 @@ fun LeftSidebarPanel(
     onToggleFavorite: ((deviceId: String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val colors = SharedTheme.globalColors
-    val scrollState = rememberScrollState()
+  val colors = SharedTheme.globalColors
+  val scrollState = rememberScrollState()
 
-    Column(
-        modifier = modifier
-            .fillMaxHeight()
-            .background(colors.panelBackground.copy(alpha = 0.85f))
-            .verticalScroll(scrollState)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        McpConnectionSection(
-            dataSourceMode = dataSourceMode,
-            onDataSourceModeChanged = onDataSourceModeChanged,
-            onProcessConnected = onProcessConnected,
-            modifier = Modifier.fillMaxWidth(),
-        )
+  Column(
+      modifier =
+          modifier
+              .fillMaxHeight()
+              .background(colors.panelBackground.copy(alpha = 0.85f))
+              .verticalScroll(scrollState)
+              .padding(12.dp),
+      verticalArrangement = Arrangement.spacedBy(16.dp),
+  ) {
+    McpConnectionSection(
+        dataSourceMode = dataSourceMode,
+        onDataSourceModeChanged = onDataSourceModeChanged,
+        onProcessConnected = onProcessConnected,
+        modifier = Modifier.fillMaxWidth(),
+    )
 
-        DaemonStatusSection(
-            dataSourceMode = dataSourceMode,
-            modifier = Modifier.fillMaxWidth(),
-        )
+    DaemonStatusSection(
+        dataSourceMode = dataSourceMode,
+        modifier = Modifier.fillMaxWidth(),
+    )
 
-        DeviceListSection(
-            dataSourceMode = dataSourceMode,
-            connectedProcess = connectedProcess,
-            onDeviceSelected = onDeviceSelected,
-            activeDeviceId = activeDeviceId,
-            suppressAutoSelect = suppressAutoSelect,
-            onDeviceAction = onDeviceAction,
-            favoriteDeviceIds = favoriteDeviceIds,
-            onToggleFavorite = onToggleFavorite,
-            modifier = Modifier.fillMaxWidth(),
-        )
+    DeviceListSection(
+        dataSourceMode = dataSourceMode,
+        connectedProcess = connectedProcess,
+        onDeviceSelected = onDeviceSelected,
+        activeDeviceId = activeDeviceId,
+        suppressAutoSelect = suppressAutoSelect,
+        onDeviceAction = onDeviceAction,
+        favoriteDeviceIds = favoriteDeviceIds,
+        onToggleFavorite = onToggleFavorite,
+        modifier = Modifier.fillMaxWidth(),
+    )
 
-        AppFilterSection(
-            installedApps = installedApps,
-            selectedAppId = selectedAppId,
-            onAppSelected = onAppSelected,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
+    AppFilterSection(
+        installedApps = installedApps,
+        selectedAppId = selectedAppId,
+        onAppSelected = onAppSelected,
+        modifier = Modifier.fillMaxWidth(),
+    )
+  }
 }

@@ -20,11 +20,11 @@ import org.junit.runner.notification.RunNotifier
 import org.junit.runners.model.FrameworkMethod
 
 /**
- * Tests for plain two-device plans where steps run on device A and device B independently,
- * without any inter-device coordination.
+ * Tests for plain two-device plans where steps run on device A and device B independently, without
+ * any inter-device coordination.
  *
- * Demonstrates stepping through test steps on a per-device basis: launch on A, launch on B,
- * observe A, observe B, terminate A, terminate B.
+ * Demonstrates stepping through test steps on a per-device basis: launch on A, launch on B, observe
+ * A, observe B, terminate A, terminate B.
  */
 class TwoDevicePlainPlanTest {
   private val json = Json { ignoreUnknownKeys = true }
@@ -70,8 +70,7 @@ class TwoDevicePlainPlanTest {
         AutoMobilePlanExecutionOptions(aiAssistance = false),
     )
 
-    val planContent =
-      capturingClient.capturedArguments?.get("planContent")?.jsonPrimitive?.content
+    val planContent = capturingClient.capturedArguments?.get("planContent")?.jsonPrimitive?.content
     assertNotNull("Plan content should be sent to daemon", planContent)
     val decoded = decodePlanContent(planContent!!)
     assertTrue("Plan should declare device A", decoded.contains("- A"))
@@ -89,45 +88,47 @@ class TwoDevicePlainPlanTest {
     )
 
     val decoded =
-      decodePlanContent(
-        capturingClient.capturedArguments!!["planContent"]!!.jsonPrimitive.content
-      )
+        decodePlanContent(
+            capturingClient.capturedArguments!!["planContent"]!!.jsonPrimitive.content
+        )
     assertTrue("Steps should reference device A", decoded.contains("device: A"))
     assertTrue("Steps should reference device B", decoded.contains("device: B"))
   }
 
   @Test
   fun `runner succeeds when daemon reports all steps complete across both devices`() {
-    // Per-device tool results: launchApp A, launchApp B, observe A, observe B, terminate A, terminate B
+    // Per-device tool results: launchApp A, launchApp B, observe A, observe B, terminate A,
+    // terminate B
     capturingClient.setResponse(
-      "executePlan",
-      buildDaemonResponse(
-        JsonObject(
-          mapOf(
-            "success" to JsonPrimitive(true),
-            "executedSteps" to JsonPrimitive(6),
-            "totalSteps" to JsonPrimitive(6),
-            "toolResults" to
-              JsonArray(
-                listOf(
-                  perDeviceStepResult("launchApp", "A"),
-                  perDeviceStepResult("launchApp", "B"),
-                  perDeviceStepResult("observe", "A"),
-                  perDeviceStepResult("observe", "B"),
-                  perDeviceStepResult("terminateApp", "A"),
-                  perDeviceStepResult("terminateApp", "B"),
+        "executePlan",
+        buildDaemonResponse(
+            JsonObject(
+                mapOf(
+                    "success" to JsonPrimitive(true),
+                    "executedSteps" to JsonPrimitive(6),
+                    "totalSteps" to JsonPrimitive(6),
+                    "toolResults" to
+                        JsonArray(
+                            listOf(
+                                perDeviceStepResult("launchApp", "A"),
+                                perDeviceStepResult("launchApp", "B"),
+                                perDeviceStepResult("observe", "A"),
+                                perDeviceStepResult("observe", "B"),
+                                perDeviceStepResult("terminateApp", "A"),
+                                perDeviceStepResult("terminateApp", "B"),
+                            )
+                        ),
                 )
-              ),
-          )
-        )
-      ),
+            )
+        ),
     )
 
-    val result = AutoMobilePlanExecutor.execute(
-        "test-plans/dual-device-plain.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-    )
+    val result =
+        AutoMobilePlanExecutor.execute(
+            "test-plans/dual-device-plain.yaml",
+            emptyMap(),
+            AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
 
     assertTrue("Execution should succeed for two-device run", result.success)
   }
@@ -135,84 +136,86 @@ class TwoDevicePlainPlanTest {
   @Test
   fun `runner reports failure with device label when step on device B fails`() {
     capturingClient.setResponse(
-      "executePlan",
-      buildDaemonResponse(
-        JsonObject(
-          mapOf(
-            "success" to JsonPrimitive(false),
-            "executedSteps" to JsonPrimitive(3),
-            "totalSteps" to JsonPrimitive(6),
-            "failedStep" to
-              JsonObject(
+        "executePlan",
+        buildDaemonResponse(
+            JsonObject(
                 mapOf(
-                  "stepIndex" to JsonPrimitive(3),
-                  "tool" to JsonPrimitive("observe"),
-                  "error" to JsonPrimitive("Assertion failed: expected content not visible"),
-                  "device" to JsonPrimitive("B"),
+                    "success" to JsonPrimitive(false),
+                    "executedSteps" to JsonPrimitive(3),
+                    "totalSteps" to JsonPrimitive(6),
+                    "failedStep" to
+                        JsonObject(
+                            mapOf(
+                                "stepIndex" to JsonPrimitive(3),
+                                "tool" to JsonPrimitive("observe"),
+                                "error" to
+                                    JsonPrimitive("Assertion failed: expected content not visible"),
+                                "device" to JsonPrimitive("B"),
+                            )
+                        ),
                 )
-              ),
-          )
-        )
-      ),
+            )
+        ),
     )
 
-    val result = AutoMobilePlanExecutor.execute(
-        "test-plans/dual-device-plain.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-    )
+    val result =
+        AutoMobilePlanExecutor.execute(
+            "test-plans/dual-device-plain.yaml",
+            emptyMap(),
+            AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
 
     assertFalse("Execution should fail", result.success)
     val errorMessage = result.errorMessage
     assertTrue(
-      "Error should include the error text",
-      errorMessage.contains("Assertion failed: expected content not visible"),
+        "Error should include the error text",
+        errorMessage.contains("Assertion failed: expected content not visible"),
     )
   }
 
   private fun successResponse(executedSteps: Int, totalSteps: Int): DaemonResponse =
-    buildDaemonResponse(
-      JsonObject(
-        mapOf(
-          "success" to JsonPrimitive(true),
-          "executedSteps" to JsonPrimitive(executedSteps),
-          "totalSteps" to JsonPrimitive(totalSteps),
-        )
+      buildDaemonResponse(
+          JsonObject(
+              mapOf(
+                  "success" to JsonPrimitive(true),
+                  "executedSteps" to JsonPrimitive(executedSteps),
+                  "totalSteps" to JsonPrimitive(totalSteps),
+              )
+          )
       )
-    )
 
   private fun perDeviceStepResult(toolName: String, device: String): JsonObject =
-    JsonObject(
-      mapOf(
-        "toolName" to JsonPrimitive(toolName),
-        "success" to JsonPrimitive(true),
-        "device" to JsonPrimitive(device),
+      JsonObject(
+          mapOf(
+              "toolName" to JsonPrimitive(toolName),
+              "success" to JsonPrimitive(true),
+              "device" to JsonPrimitive(device),
+          )
       )
-    )
 
   private fun buildDaemonResponse(payload: JsonObject): DaemonResponse {
     val textPayload = json.encodeToString(JsonElement.serializer(), payload)
     return DaemonResponse(
-      id = "test",
-      type = "mcp_response",
-      success = true,
-      result =
-        JsonObject(
-          mapOf(
-            "content" to
-              JsonArray(
-                listOf(
-                  JsonObject(
-                    mapOf(
-                      "type" to JsonPrimitive("text"),
-                      "text" to JsonPrimitive(textPayload),
-                    )
-                  )
+        id = "test",
+        type = "mcp_response",
+        success = true,
+        result =
+            JsonObject(
+                mapOf(
+                    "content" to
+                        JsonArray(
+                            listOf(
+                                JsonObject(
+                                    mapOf(
+                                        "type" to JsonPrimitive("text"),
+                                        "text" to JsonPrimitive(textPayload),
+                                    )
+                                )
+                            )
+                        )
                 )
-              )
-          )
-        ),
-      error = null,
+            ),
+        error = null,
     )
   }
 }
@@ -261,8 +264,7 @@ class TwoDeviceCriticalSectionPlanTest {
         AutoMobilePlanExecutionOptions(aiAssistance = false),
     )
 
-    val planContent =
-      capturingClient.capturedArguments?.get("planContent")?.jsonPrimitive?.content
+    val planContent = capturingClient.capturedArguments?.get("planContent")?.jsonPrimitive?.content
     assertNotNull("Plan content should be sent to daemon", planContent)
     val decoded = decodePlanContent(planContent!!)
     assertTrue("Plan should include criticalSection tool", decoded.contains("criticalSection"))
@@ -281,36 +283,36 @@ class TwoDeviceCriticalSectionPlanTest {
     )
 
     val decoded =
-      decodePlanContent(
-        capturingClient.capturedArguments!!["planContent"]!!.jsonPrimitive.content
-      )
+        decodePlanContent(
+            capturingClient.capturedArguments!!["planContent"]!!.jsonPrimitive.content
+        )
 
     // Each device now owns its own criticalSection step that shares a lock
     // name. Split on "tool: criticalSection" and verify both occurrences,
     // each scoped to its own block (delimited by the blank-line "\n\n  - tool:"
     // separator before the next top-level step).
     val criticalSectionBlocks =
-      decoded.split("tool: criticalSection").drop(1).map { afterMarker ->
-        afterMarker.substringBefore("\n\n  - tool:")
-      }
+        decoded.split("tool: criticalSection").drop(1).map { afterMarker ->
+          afterMarker.substringBefore("\n\n  - tool:")
+        }
     assertEquals(
-      "Plan should contain a per-device criticalSection step for each device",
-      2,
-      criticalSectionBlocks.size,
+        "Plan should contain a per-device criticalSection step for each device",
+        2,
+        criticalSectionBlocks.size,
     )
 
     val joinedBlocks = criticalSectionBlocks.joinToString(separator = "\n")
     assertTrue(
-      "One criticalSection block should target device A",
-      criticalSectionBlocks.any { it.contains("device: A") },
+        "One criticalSection block should target device A",
+        criticalSectionBlocks.any { it.contains("device: A") },
     )
     assertTrue(
-      "One criticalSection block should target device B",
-      criticalSectionBlocks.any { it.contains("device: B") },
+        "One criticalSection block should target device B",
+        criticalSectionBlocks.any { it.contains("device: B") },
     )
     assertTrue(
-      "Per-device criticalSection steps must share the same lock name",
-      joinedBlocks.contains("lock: chat-sync"),
+        "Per-device criticalSection steps must share the same lock name",
+        joinedBlocks.contains("lock: chat-sync"),
     )
   }
 
@@ -320,34 +322,35 @@ class TwoDeviceCriticalSectionPlanTest {
     // terminateApp A, terminateApp B. The two per-device criticalSection steps
     // share a lock and synchronize through the coordinator.
     capturingClient.setResponse(
-      "executePlan",
-      buildDaemonResponse(
-        JsonObject(
-          mapOf(
-            "success" to JsonPrimitive(true),
-            "executedSteps" to JsonPrimitive(6),
-            "totalSteps" to JsonPrimitive(6),
-            "toolResults" to
-              JsonArray(
-                listOf(
-                  perDeviceStepResult("launchApp", "A"),
-                  perDeviceStepResult("launchApp", "B"),
-                  perDeviceStepResult("criticalSection", "A"),
-                  perDeviceStepResult("criticalSection", "B"),
-                  perDeviceStepResult("terminateApp", "A"),
-                  perDeviceStepResult("terminateApp", "B"),
+        "executePlan",
+        buildDaemonResponse(
+            JsonObject(
+                mapOf(
+                    "success" to JsonPrimitive(true),
+                    "executedSteps" to JsonPrimitive(6),
+                    "totalSteps" to JsonPrimitive(6),
+                    "toolResults" to
+                        JsonArray(
+                            listOf(
+                                perDeviceStepResult("launchApp", "A"),
+                                perDeviceStepResult("launchApp", "B"),
+                                perDeviceStepResult("criticalSection", "A"),
+                                perDeviceStepResult("criticalSection", "B"),
+                                perDeviceStepResult("terminateApp", "A"),
+                                perDeviceStepResult("terminateApp", "B"),
+                            )
+                        ),
                 )
-              ),
-          )
-        )
-      ),
+            )
+        ),
     )
 
-    val result = AutoMobilePlanExecutor.execute(
-        "test-plans/dual-device-critical-section.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-    )
+    val result =
+        AutoMobilePlanExecutor.execute(
+            "test-plans/dual-device-critical-section.yaml",
+            emptyMap(),
+            AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
 
     assertTrue("Execution should succeed for criticalSection plan", result.success)
   }
@@ -355,97 +358,96 @@ class TwoDeviceCriticalSectionPlanTest {
   @Test
   fun `runner reports failure with device context when step inside critical section fails`() {
     capturingClient.setResponse(
-      "executePlan",
-      buildDaemonResponse(
-        JsonObject(
-          mapOf(
-            "success" to JsonPrimitive(false),
-            "executedSteps" to JsonPrimitive(2),
-            "totalSteps" to JsonPrimitive(6),
-            "failedStep" to
-              JsonObject(
+        "executePlan",
+        buildDaemonResponse(
+            JsonObject(
                 mapOf(
-                  "stepIndex" to JsonPrimitive(2),
-                  "tool" to JsonPrimitive("inputText"),
-                  "error" to JsonPrimitive("Timeout waiting for input element"),
-                  "device" to JsonPrimitive("A"),
+                    "success" to JsonPrimitive(false),
+                    "executedSteps" to JsonPrimitive(2),
+                    "totalSteps" to JsonPrimitive(6),
+                    "failedStep" to
+                        JsonObject(
+                            mapOf(
+                                "stepIndex" to JsonPrimitive(2),
+                                "tool" to JsonPrimitive("inputText"),
+                                "error" to JsonPrimitive("Timeout waiting for input element"),
+                                "device" to JsonPrimitive("A"),
+                            )
+                        ),
                 )
-              ),
-          )
-        )
-      ),
+            )
+        ),
     )
 
-    val result = AutoMobilePlanExecutor.execute(
-        "test-plans/dual-device-critical-section.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(aiAssistance = false),
-    )
+    val result =
+        AutoMobilePlanExecutor.execute(
+            "test-plans/dual-device-critical-section.yaml",
+            emptyMap(),
+            AutoMobilePlanExecutionOptions(aiAssistance = false),
+        )
 
     assertFalse("Execution should fail", result.success)
     assertTrue(
-      "Error should include the error text",
-      result.errorMessage.contains("Timeout waiting for input element"),
+        "Error should include the error text",
+        result.errorMessage.contains("Timeout waiting for input element"),
     )
   }
 
   private fun successResponse(executedSteps: Int, totalSteps: Int): DaemonResponse =
-    buildDaemonResponse(
-      JsonObject(
-        mapOf(
-          "success" to JsonPrimitive(true),
-          "executedSteps" to JsonPrimitive(executedSteps),
-          "totalSteps" to JsonPrimitive(totalSteps),
-        )
+      buildDaemonResponse(
+          JsonObject(
+              mapOf(
+                  "success" to JsonPrimitive(true),
+                  "executedSteps" to JsonPrimitive(executedSteps),
+                  "totalSteps" to JsonPrimitive(totalSteps),
+              )
+          )
       )
-    )
 
   private fun perDeviceStepResult(toolName: String, device: String): JsonObject =
-    JsonObject(
-      mapOf(
-        "toolName" to JsonPrimitive(toolName),
-        "success" to JsonPrimitive(true),
-        "device" to JsonPrimitive(device),
+      JsonObject(
+          mapOf(
+              "toolName" to JsonPrimitive(toolName),
+              "success" to JsonPrimitive(true),
+              "device" to JsonPrimitive(device),
+          )
       )
-    )
 
   private fun buildDaemonResponse(payload: JsonObject): DaemonResponse {
     val textPayload = json.encodeToString(JsonElement.serializer(), payload)
     return DaemonResponse(
-      id = "test",
-      type = "mcp_response",
-      success = true,
-      result =
-        JsonObject(
-          mapOf(
-            "content" to
-              JsonArray(
-                listOf(
-                  JsonObject(
-                    mapOf(
-                      "type" to JsonPrimitive("text"),
-                      "text" to JsonPrimitive(textPayload),
-                    )
-                  )
+        id = "test",
+        type = "mcp_response",
+        success = true,
+        result =
+            JsonObject(
+                mapOf(
+                    "content" to
+                        JsonArray(
+                            listOf(
+                                JsonObject(
+                                    mapOf(
+                                        "type" to JsonPrimitive("text"),
+                                        "text" to JsonPrimitive(textPayload),
+                                    )
+                                )
+                            )
+                        )
                 )
-              )
-          )
-        ),
-      error = null,
+            ),
+        error = null,
     )
   }
 }
 
 /** Target class for plain two-device plan tests. */
 class TwoDevicePlainTestTarget {
-  @Test
-  fun testParallelDeviceOps() {}
+  @Test fun testParallelDeviceOps() {}
 }
 
 /** Target class for criticalSection two-device plan tests. */
 class TwoDeviceCriticalSectionTestTarget {
-  @Test
-  fun testCriticalSectionCoordination() {}
+  @Test fun testCriticalSectionCoordination() {}
 }
 
 // Shared test infrastructure
@@ -461,14 +463,14 @@ private class MultiDeviceCapturingFakeDaemonToolClient : DaemonToolClient {
   }
 
   override fun callTool(
-    toolName: String,
-    arguments: JsonObject,
-    timeoutMs: Long,
+      toolName: String,
+      arguments: JsonObject,
+      timeoutMs: Long,
   ): DaemonResponse {
     capturedToolName = toolName
     capturedArguments = arguments
     return responses[toolName]
-      ?: throw IllegalStateException("No response configured for tool: $toolName")
+        ?: throw IllegalStateException("No response configured for tool: $toolName")
   }
 
   override fun readResource(uri: String, timeoutMs: Long): DaemonResponse {
@@ -517,14 +519,14 @@ private class MultiDeviceRecordingRunNotifier : RunNotifier() {
 }
 
 private fun invokeRunChild(
-  runner: AutoMobileRunner,
-  method: FrameworkMethod,
-  notifier: RunNotifier,
+    runner: AutoMobileRunner,
+    method: FrameworkMethod,
+    notifier: RunNotifier,
 ) {
   val runChildMethod =
-    AutoMobileRunner::class
-      .java
-      .getDeclaredMethod("runChild", FrameworkMethod::class.java, RunNotifier::class.java)
+      AutoMobileRunner::class
+          .java
+          .getDeclaredMethod("runChild", FrameworkMethod::class.java, RunNotifier::class.java)
   runChildMethod.isAccessible = true
   runChildMethod.invoke(runner, method, notifier)
 }

@@ -149,8 +149,7 @@ private fun checkAccessibilityServiceStatus(context: android.content.Context): B
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
         )
 
-    val serviceName =
-        "${context.packageName}/${CtrlProxy::class.java.canonicalName}"
+    val serviceName = "${context.packageName}/${CtrlProxy::class.java.canonicalName}"
     enabledServices?.contains(serviceName) == true
   } catch (e: Exception) {
     Log.e("MainActivity", "Error checking accessibility service status", e)

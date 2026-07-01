@@ -4,7 +4,7 @@ package dev.jasonpearson.automobile.sdk.storage
 sealed class SharedPreferencesError(message: String) : Exception(message) {
   /** Preferences file was not found. */
   class FileNotFound(fileName: String) :
-    SharedPreferencesError("Preferences file not found: $fileName")
+      SharedPreferencesError("Preferences file not found: $fileName")
 
   /** Path is outside the app's data directory. */
   class InvalidPath(path: String) : SharedPreferencesError("Invalid preferences path: $path")
@@ -17,5 +17,5 @@ sealed class SharedPreferencesError(message: String) : Exception(message) {
 
   /** Invalid type for value. */
   class InvalidType(type: String, reason: String) :
-    SharedPreferencesError("Invalid type $type: $reason")
+      SharedPreferencesError("Invalid type $type: $reason")
 }

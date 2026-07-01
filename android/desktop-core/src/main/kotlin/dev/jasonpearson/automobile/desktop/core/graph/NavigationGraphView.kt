@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -28,14 +29,12 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 @Composable
 fun NavigationGraphView(
@@ -364,5 +363,4 @@ private fun rememberGraphPalette(): GraphPalette {
       labelMuted = baseText.copy(alpha = 0.65f),
       error = error,
   )
-
 }

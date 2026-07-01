@@ -48,9 +48,9 @@ private const val PLAYHEAD_WIDTH = 1.5f
 private const val CLICK_TOLERANCE_MS = 5L
 
 private val laneLabels: Map<Int, String> by lazy {
-    TimelineCategory.entries
-        .groupBy { it.laneIndex }
-        .mapValues { (_, cats) -> cats.joinToString("/") { it.label } }
+  TimelineCategory.entries
+      .groupBy { it.laneIndex }
+      .mapValues { (_, cats) -> cats.joinToString("/") { it.label } }
 }
 
 // SimpleDateFormat is not thread-safe; use ThreadLocal to avoid races across compositions.
@@ -64,133 +64,146 @@ fun TimelineCanvas(
     onEventClicked: (TelemetryDisplayEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = SharedTheme.globalColors
-    val textColor = colors.text.normal
-    val panelBg = colors.panelBackground
-    val infoColor = colors.text.info
-    val textMeasurer = rememberTextMeasurer()
+  val colors = SharedTheme.globalColors
+  val textColor = colors.text.normal
+  val panelBg = colors.panelBackground
+  val infoColor = colors.text.info
+  val textMeasurer = rememberTextMeasurer()
 
-    Box(
-        modifier = modifier
-            .onPointerEvent(PointerEventType.Scroll) { event ->
+  Box(
+      modifier =
+          modifier
+              .onPointerEvent(PointerEventType.Scroll) { event ->
                 val change = event.changes.firstOrNull() ?: return@onPointerEvent
                 if (event.isZoomModifierPressed()) {
-                    val chartWidth = (size.width - LANE_LABEL_WIDTH).coerceAtLeast(1f)
-                    val pivotFraction = (change.position.x - LANE_LABEL_WIDTH) / chartWidth
-                    state.scrollZoom(change.scrollDelta.y, pivotFraction.coerceIn(0f, 1f))
-                    change.consume()
+                  val chartWidth = (size.width - LANE_LABEL_WIDTH).coerceAtLeast(1f)
+                  val pivotFraction = (change.position.x - LANE_LABEL_WIDTH) / chartWidth
+                  state.scrollZoom(change.scrollDelta.y, pivotFraction.coerceIn(0f, 1f))
+                  change.consume()
                 }
-            }
-            .pointerInput(Unit) {
+              }
+              .pointerInput(Unit) {
                 detectDragGestures { _, dragAmount ->
-                    state.panBy(-dragAmount.x / size.width.toFloat())
+                  state.panBy(-dragAmount.x / size.width.toFloat())
                 }
-            }
-            .pointerInput(spans, state) {
+              }
+              .pointerInput(spans, state) {
                 detectTapGestures { offset ->
-                    val fraction = offset.x / size.width.toFloat()
-                    val clickedTimestamp = state.fractionToTimestamp(fraction)
-                    state.selectedTimestampMs = clickedTimestamp
+                  val fraction = offset.x / size.width.toFloat()
+                  val clickedTimestamp = state.fractionToTimestamp(fraction)
+                  state.selectedTimestampMs = clickedTimestamp
 
-                    val nearest = spans
-                        .filter { span ->
+                  val nearest =
+                      spans
+                          .filter { span ->
                             val startFrac = state.timestampToFraction(span.startMs)
                             val endFrac = state.timestampToFraction(span.endMs)
                             val startX = startFrac * size.width
                             val rawEndX = endFrac * size.width
-                            val endX = if (rawEndX - startX < MIN_SPAN_WIDTH_PX) startX + MIN_SPAN_WIDTH_PX else rawEndX
+                            val endX =
+                                if (rawEndX - startX < MIN_SPAN_WIDTH_PX) startX + MIN_SPAN_WIDTH_PX
+                                else rawEndX
                             offset.x in startX..endX
-                        }
-                        .minByOrNull { abs(it.startMs - clickedTimestamp) }
-                        ?: spans.minByOrNull { minOf(abs(it.startMs - clickedTimestamp), abs(it.endMs - clickedTimestamp)) }
-                            ?.takeIf {
-                                minOf(abs(it.startMs - clickedTimestamp), abs(it.endMs - clickedTimestamp)) <= CLICK_TOLERANCE_MS
-                            }
+                          }
+                          .minByOrNull { abs(it.startMs - clickedTimestamp) }
+                          ?: spans
+                              .minByOrNull {
+                                minOf(
+                                    abs(it.startMs - clickedTimestamp),
+                                    abs(it.endMs - clickedTimestamp),
+                                )
+                              }
+                              ?.takeIf {
+                                minOf(
+                                    abs(it.startMs - clickedTimestamp),
+                                    abs(it.endMs - clickedTimestamp),
+                                ) <= CLICK_TOLERANCE_MS
+                              }
 
-                    if (nearest != null) {
-                        onEventClicked(nearest.event)
-                    }
+                  if (nearest != null) {
+                    onEventClicked(nearest.event)
+                  }
                 }
-            }
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val canvasWidth = size.width
-            val canvasHeight = size.height
-            val drawableHeight = canvasHeight - TIME_AXIS_HEIGHT
-            val laneCount = activeLanes.size.coerceAtLeast(1)
-            val laneHeight = drawableHeight / laneCount
+              }
+  ) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+      val canvasWidth = size.width
+      val canvasHeight = size.height
+      val drawableHeight = canvasHeight - TIME_AXIS_HEIGHT
+      val laneCount = activeLanes.size.coerceAtLeast(1)
+      val laneHeight = drawableHeight / laneCount
 
-            // Lane backgrounds
-            activeLanes.forEachIndexed { index, _ ->
-                val y = index * laneHeight
-                val alpha = if (index % 2 == 0) 0.03f else 0.06f
-                drawRect(
-                    color = panelBg,
-                    topLeft = Offset(0f, y),
-                    size = Size(canvasWidth, laneHeight),
-                    alpha = alpha,
-                )
-            }
+      // Lane backgrounds
+      activeLanes.forEachIndexed { index, _ ->
+        val y = index * laneHeight
+        val alpha = if (index % 2 == 0) 0.03f else 0.06f
+        drawRect(
+            color = panelBg,
+            topLeft = Offset(0f, y),
+            size = Size(canvasWidth, laneHeight),
+            alpha = alpha,
+        )
+      }
 
-            // Lane labels
-            val labelStyle = TextStyle(fontSize = 9.sp, color = textColor.copy(alpha = 0.4f))
-            activeLanes.forEachIndexed { index, laneIndex ->
-                val y = index * laneHeight
-                val label = laneLabels[laneIndex] ?: ""
-                val measured = textMeasurer.measure(label, labelStyle)
-                drawText(
-                    textLayoutResult = measured,
-                    topLeft = Offset(LABEL_PADDING, y + (laneHeight - measured.size.height) / 2f),
-                )
-            }
+      // Lane labels
+      val labelStyle = TextStyle(fontSize = 9.sp, color = textColor.copy(alpha = 0.4f))
+      activeLanes.forEachIndexed { index, laneIndex ->
+        val y = index * laneHeight
+        val label = laneLabels[laneIndex] ?: ""
+        val measured = textMeasurer.measure(label, labelStyle)
+        drawText(
+            textLayoutResult = measured,
+            topLeft = Offset(LABEL_PADDING, y + (laneHeight - measured.size.height) / 2f),
+        )
+      }
 
-            val laneToRow = activeLanes.withIndex().associate { (row, lane) -> lane to row }
+      val laneToRow = activeLanes.withIndex().associate { (row, lane) -> lane to row }
 
-            for (span in spans) {
-                val row = laneToRow[span.category.laneIndex] ?: continue
-                val startFrac = state.timestampToFraction(span.startMs)
-                val endFrac = state.timestampToFraction(span.endMs)
-                val x1 = startFrac * canvasWidth
-                val x2Raw = endFrac * canvasWidth
-                val x2 = if (x2Raw - x1 < MIN_SPAN_WIDTH_PX) x1 + MIN_SPAN_WIDTH_PX else x2Raw
+      for (span in spans) {
+        val row = laneToRow[span.category.laneIndex] ?: continue
+        val startFrac = state.timestampToFraction(span.startMs)
+        val endFrac = state.timestampToFraction(span.endMs)
+        val x1 = startFrac * canvasWidth
+        val x2Raw = endFrac * canvasWidth
+        val x2 = if (x2Raw - x1 < MIN_SPAN_WIDTH_PX) x1 + MIN_SPAN_WIDTH_PX else x2Raw
 
-                val rowY = row * laneHeight
-                val spanH = laneHeight * SPAN_HEIGHT_FRACTION
-                val spanY = rowY + (laneHeight - spanH) / 2f
-                val alpha = if (span.isFiltered) 0.2f else 1.0f
+        val rowY = row * laneHeight
+        val spanH = laneHeight * SPAN_HEIGHT_FRACTION
+        val spanY = rowY + (laneHeight - spanH) / 2f
+        val alpha = if (span.isFiltered) 0.2f else 1.0f
 
-                drawRoundRect(
-                    color = span.category.color,
-                    topLeft = Offset(x1, spanY),
-                    size = Size(x2 - x1, spanH),
-                    cornerRadius = CornerRadius(CORNER_RADIUS, CORNER_RADIUS),
-                    alpha = alpha,
-                )
-            }
+        drawRoundRect(
+            color = span.category.color,
+            topLeft = Offset(x1, spanY),
+            size = Size(x2 - x1, spanH),
+            cornerRadius = CornerRadius(CORNER_RADIUS, CORNER_RADIUS),
+            alpha = alpha,
+        )
+      }
 
-            // Time axis
-            drawTimeAxis(
-                canvasWidth = canvasWidth,
-                canvasHeight = canvasHeight,
-                state = state,
-                textMeasurer = textMeasurer,
-                textColor = textColor,
-            )
+      // Time axis
+      drawTimeAxis(
+          canvasWidth = canvasWidth,
+          canvasHeight = canvasHeight,
+          state = state,
+          textMeasurer = textMeasurer,
+          textColor = textColor,
+      )
 
-            // Playhead
-            val selectedMs = state.selectedTimestampMs
-            if (selectedMs != null) {
-                val frac = state.timestampToFraction(selectedMs)
-                val x = frac * canvasWidth
-                drawLine(
-                    color = infoColor.copy(alpha = 0.8f),
-                    start = Offset(x, 0f),
-                    end = Offset(x, canvasHeight),
-                    strokeWidth = PLAYHEAD_WIDTH,
-                )
-            }
-        }
+      // Playhead
+      val selectedMs = state.selectedTimestampMs
+      if (selectedMs != null) {
+        val frac = state.timestampToFraction(selectedMs)
+        val x = frac * canvasWidth
+        drawLine(
+            color = infoColor.copy(alpha = 0.8f),
+            start = Offset(x, 0f),
+            end = Offset(x, canvasHeight),
+            strokeWidth = PLAYHEAD_WIDTH,
+        )
+      }
     }
+  }
 }
 
 private fun DrawScope.drawTimeAxis(
@@ -200,48 +213,65 @@ private fun DrawScope.drawTimeAxis(
     textMeasurer: TextMeasurer,
     textColor: Color,
 ) {
-    val axisY = canvasHeight - TIME_AXIS_HEIGHT
-    val duration = state.visibleDurationMs()
+  val axisY = canvasHeight - TIME_AXIS_HEIGHT
+  val duration = state.visibleDurationMs()
 
-    // Choose a tick interval that gives roughly 6-10 ticks
-    val rawInterval = duration / 8.0
-    val tickIntervalMs = snapToNiceInterval(rawInterval)
-    if (tickIntervalMs <= 0) return
+  // Choose a tick interval that gives roughly 6-10 ticks
+  val rawInterval = duration / 8.0
+  val tickIntervalMs = snapToNiceInterval(rawInterval)
+  if (tickIntervalMs <= 0) return
 
-    val firstTick = ((state.visibleStartMs / tickIntervalMs) + 1) * tickIntervalMs
-    val tickStyle = TextStyle(fontSize = 9.sp, color = textColor.copy(alpha = 0.4f))
-    var tick = firstTick
+  val firstTick = ((state.visibleStartMs / tickIntervalMs) + 1) * tickIntervalMs
+  val tickStyle = TextStyle(fontSize = 9.sp, color = textColor.copy(alpha = 0.4f))
+  var tick = firstTick
 
-    while (tick <= state.visibleEndMs) {
-        val frac = state.timestampToFraction(tick)
-        val x = frac * canvasWidth
+  while (tick <= state.visibleEndMs) {
+    val frac = state.timestampToFraction(tick)
+    val x = frac * canvasWidth
 
-        // Tick mark
-        drawLine(
-            color = textColor.copy(alpha = 0.2f),
-            start = Offset(x, axisY),
-            end = Offset(x, axisY + 4f),
-            strokeWidth = 1f,
-        )
+    // Tick mark
+    drawLine(
+        color = textColor.copy(alpha = 0.2f),
+        start = Offset(x, axisY),
+        end = Offset(x, axisY + 4f),
+        strokeWidth = 1f,
+    )
 
-        // Time label
-        val label = timeFormat.get().format(Date(tick))
-        val measured = textMeasurer.measure(label, tickStyle)
-        drawText(
-            textLayoutResult = measured,
-            topLeft = Offset(x - measured.size.width / 2f, axisY + 4f),
-        )
+    // Time label
+    val label = timeFormat.get().format(Date(tick))
+    val measured = textMeasurer.measure(label, tickStyle)
+    drawText(
+        textLayoutResult = measured,
+        topLeft = Offset(x - measured.size.width / 2f, axisY + 4f),
+    )
 
-        tick += tickIntervalMs
-    }
+    tick += tickIntervalMs
+  }
 }
 
 private fun snapToNiceInterval(rawMs: Double): Long {
-    val nice = longArrayOf(
-        100, 200, 500,
-        1_000, 2_000, 5_000, 10_000, 15_000, 30_000,
-        60_000, 120_000, 300_000, 600_000, 900_000, 1_800_000,
-        3_600_000, 7_200_000, 14_400_000, 28_800_000, 86_400_000,
-    )
-    return nice.firstOrNull { it >= rawMs } ?: nice.last()
+  val nice =
+      longArrayOf(
+          100,
+          200,
+          500,
+          1_000,
+          2_000,
+          5_000,
+          10_000,
+          15_000,
+          30_000,
+          60_000,
+          120_000,
+          300_000,
+          600_000,
+          900_000,
+          1_800_000,
+          3_600_000,
+          7_200_000,
+          14_400_000,
+          28_800_000,
+          86_400_000,
+      )
+  return nice.firstOrNull { it >= rawMs } ?: nice.last()
 }

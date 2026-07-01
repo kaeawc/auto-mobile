@@ -97,7 +97,7 @@ object AutoMobileNotifications {
     val ctx = context
     if (ctx == null) {
       AutoMobileSDK.logger.w(TAG) {
-          "AutoMobileNotifications not initialized; call AutoMobileSDK.initialize() or AutoMobileNotifications.initialize()."
+        "AutoMobileNotifications not initialized; call AutoMobileSDK.initialize() or AutoMobileNotifications.initialize()."
       }
       return false
     }
@@ -138,7 +138,9 @@ object AutoMobileNotifications {
                 .setStyle(NotificationCompat.BigPictureStyle().bigPicture(bitmap))
                 .setLargeIcon(bitmap)
           } else {
-            AutoMobileSDK.logger.w(TAG) { "Big picture style requested but image could not be loaded." }
+            AutoMobileSDK.logger.w(TAG) {
+              "Big picture style requested but image could not be loaded."
+            }
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(body))
           }
         }

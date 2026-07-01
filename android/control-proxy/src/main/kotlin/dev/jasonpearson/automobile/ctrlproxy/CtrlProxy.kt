@@ -17,8 +17,8 @@ import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
-import android.provider.Settings
 import android.os.PowerManager
+import android.provider.Settings
 import android.util.Base64
 import android.util.DisplayMetrics
 import android.util.Log
@@ -580,15 +580,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // Ensure we receive ALL accessibility event types and include not-important views
     // (XML config may be cached). flagIncludeNotImportantViews exposes interactive nodes
     // (e.g. long-clickable ImageViews) that Android otherwise filters as decorative.
-    serviceInfo =
-        serviceInfo?.apply {
-          eventTypes = AccessibilityEvent.TYPES_ALL_MASK
-          flags =
-              flags or
-                  AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
-                  AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-                  AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-        }
+    serviceInfo = serviceInfo?.apply {
+      eventTypes = AccessibilityEvent.TYPES_ALL_MASK
+      flags =
+          flags or
+              AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
+              AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+              AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+    }
 
     try {
       overlayDrawer = OverlayDrawer(screenDimensionsProvider = { getScreenDimensions() })
@@ -973,7 +972,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       distanceEnd: Int,
       rotationDegrees: Float,
       duration: Long,
-  ) = performPinch(requestId, centerX, centerY, distanceStart, distanceEnd, rotationDegrees, duration)
+  ) =
+      performPinch(
+          requestId,
+          centerX,
+          centerY,
+          distanceStart,
+          distanceEnd,
+          rotationDegrees,
+          duration,
+      )
 
   override fun requestSetText(
       requestId: String?,
@@ -1125,44 +1133,49 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private fun applyAccessibilityFlags(
-    includeNotImportantViews: Boolean,
-    reportViewIds: Boolean,
-    retrieveInteractiveWindows: Boolean
+      includeNotImportantViews: Boolean,
+      reportViewIds: Boolean,
+      retrieveInteractiveWindows: Boolean,
   ) {
-    val info = serviceInfo ?: run {
-      Log.w(TAG, "Cannot apply accessibility flags — serviceInfo is null")
-      return
-    }
+    val info =
+        serviceInfo
+            ?: run {
+              Log.w(TAG, "Cannot apply accessibility flags — serviceInfo is null")
+              return
+            }
 
     var flags = info.flags
 
-    flags = if (includeNotImportantViews) {
-      flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-    } else {
-      flags and AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv()
-    }
+    flags =
+        if (includeNotImportantViews) {
+          flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+        } else {
+          flags and AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv()
+        }
 
-    flags = if (reportViewIds) {
-      flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
-    } else {
-      flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS.inv()
-    }
+    flags =
+        if (reportViewIds) {
+          flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+        } else {
+          flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS.inv()
+        }
 
-    flags = if (retrieveInteractiveWindows) {
-      flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-    } else {
-      flags and AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS.inv()
-    }
+    flags =
+        if (retrieveInteractiveWindows) {
+          flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        } else {
+          flags and AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS.inv()
+        }
 
     info.flags = flags
     serviceInfo = info
 
     Log.i(
-      TAG,
-      "Applied accessibility flags: " +
-          "includeNotImportantViews=$includeNotImportantViews, " +
-          "reportViewIds=$reportViewIds, " +
-          "retrieveInteractiveWindows=$retrieveInteractiveWindows"
+        TAG,
+        "Applied accessibility flags: " +
+            "includeNotImportantViews=$includeNotImportantViews, " +
+            "reportViewIds=$reportViewIds, " +
+            "retrieveInteractiveWindows=$retrieveInteractiveWindows",
     )
   }
 
@@ -1294,16 +1307,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         } catch (_: Exception) {
           null
         }
-    val bounds =
-        source?.let {
-          try {
-            val rect = Rect()
-            it.getBoundsInScreen(rect)
-            ElementBounds(rect)
-          } catch (_: Exception) {
-            null
-          }
-        }
+    val bounds = source?.let {
+      try {
+        val rect = Rect()
+        it.getBoundsInScreen(rect)
+        ElementBounds(rect)
+      } catch (_: Exception) {
+        null
+      }
+    }
     // Build element from source node, falling back to event-level data
     val element =
         if (source != null) {
@@ -3298,15 +3310,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       perfProvider.startOperation("readSetting")
-      value = when (namespace) {
-        "system" -> Settings.System.getString(contentResolver, key)
-        "secure" -> Settings.Secure.getString(contentResolver, key)
-        "global" -> Settings.Global.getString(contentResolver, key)
-        else -> {
-          error = "Unknown namespace: $namespace"
-          null
-        }
-      }
+      value =
+          when (namespace) {
+            "system" -> Settings.System.getString(contentResolver, key)
+            "secure" -> Settings.Secure.getString(contentResolver, key)
+            "global" -> Settings.Global.getString(contentResolver, key)
+            else -> {
+              error = "Unknown namespace: $namespace"
+              null
+            }
+          }
       perfProvider.endOperation("readSetting")
       if (error == null) {
         success = true
@@ -3323,7 +3336,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.end()
       val totalTime = System.currentTimeMillis() - startTime
       kotlinx.coroutines.runBlocking {
-        broadcastSettingsGetResult(requestId, namespace, key, success, value, found, error, totalTime)
+        broadcastSettingsGetResult(
+            requestId,
+            namespace,
+            key,
+            success,
+            value,
+            found,
+            error,
+            totalTime,
+        )
       }
     }
   }
@@ -3347,36 +3369,37 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       if (value == null) {
         success = writeSettingString(namespace, key, null)
       } else {
-        success = when (valueType) {
-          "int" -> {
-            val intVal = value.toIntOrNull()
-            if (intVal == null) {
-              error = "Invalid int value: $value"
-              false
-            } else {
-              writeSettingInt(namespace, key, intVal)
+        success =
+            when (valueType) {
+              "int" -> {
+                val intVal = value.toIntOrNull()
+                if (intVal == null) {
+                  error = "Invalid int value: $value"
+                  false
+                } else {
+                  writeSettingInt(namespace, key, intVal)
+                }
+              }
+              "long" -> {
+                val longVal = value.toLongOrNull()
+                if (longVal == null) {
+                  error = "Invalid long value: $value"
+                  false
+                } else {
+                  writeSettingLong(namespace, key, longVal)
+                }
+              }
+              "float" -> {
+                val floatVal = value.toFloatOrNull()
+                if (floatVal == null) {
+                  error = "Invalid float value: $value"
+                  false
+                } else {
+                  writeSettingFloat(namespace, key, floatVal)
+                }
+              }
+              else -> writeSettingString(namespace, key, value)
             }
-          }
-          "long" -> {
-            val longVal = value.toLongOrNull()
-            if (longVal == null) {
-              error = "Invalid long value: $value"
-              false
-            } else {
-              writeSettingLong(namespace, key, longVal)
-            }
-          }
-          "float" -> {
-            val floatVal = value.toFloatOrNull()
-            if (floatVal == null) {
-              error = "Invalid float value: $value"
-              false
-            } else {
-              writeSettingFloat(namespace, key, floatVal)
-            }
-          }
-          else -> writeSettingString(namespace, key, value)
-        }
       }
       perfProvider.endOperation("writeSetting")
       if (!success && error == null) {
@@ -3410,12 +3433,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       perfProvider.startOperation("listSettings")
-      val uri = when (namespace) {
-        "system" -> Settings.System.CONTENT_URI
-        "secure" -> Settings.Secure.CONTENT_URI
-        "global" -> Settings.Global.CONTENT_URI
-        else -> null
-      }
+      val uri =
+          when (namespace) {
+            "system" -> Settings.System.CONTENT_URI
+            "secure" -> Settings.Secure.CONTENT_URI
+            "global" -> Settings.Global.CONTENT_URI
+            else -> null
+          }
       if (uri == null) {
         error = "Unknown namespace: $namespace"
       } else {
@@ -3487,9 +3511,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Enumerate installed packages via PackageManager.
-   * Returns over WebSocket so callers can avoid the per-call ADB round-trip cost
-   * of `pm list packages`.
+   * Enumerate installed packages via PackageManager. Returns over WebSocket so callers can avoid
+   * the per-call ADB round-trip cost of `pm list packages`.
    */
   private fun performInstalledPackages(requestId: String?, includeSystem: Boolean, userId: Int?) {
     val startTime = System.currentTimeMillis()
@@ -3505,12 +3528,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (userId != null && userId != currentUserId) {
       kotlinx.coroutines.runBlocking {
         broadcastInstalledPackagesResult(
-          requestId = requestId,
-          success = false,
-          userId = currentUserId,
-          packages = emptyList(),
-          error = "Requested userId=$userId differs from service userId=$currentUserId; ADB fallback required",
-          totalTimeMs = System.currentTimeMillis() - startTime,
+            requestId = requestId,
+            success = false,
+            userId = currentUserId,
+            packages = emptyList(),
+            error =
+                "Requested userId=$userId differs from service userId=$currentUserId; ADB fallback required",
+            totalTimeMs = System.currentTimeMillis() - startTime,
         )
       }
       return
@@ -3546,24 +3570,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val totalTime = System.currentTimeMillis() - startTime
       kotlinx.coroutines.runBlocking {
         broadcastInstalledPackagesResult(
-          requestId = requestId,
-          success = true,
-          userId = currentUserId,
-          packages = records,
-          error = null,
-          totalTimeMs = totalTime,
+            requestId = requestId,
+            success = true,
+            userId = currentUserId,
+            packages = records,
+            error = null,
+            totalTimeMs = totalTime,
         )
       }
     } catch (e: Exception) {
       Log.e(TAG, "performInstalledPackages failed", e)
       kotlinx.coroutines.runBlocking {
         broadcastInstalledPackagesResult(
-          requestId = requestId,
-          success = false,
-          userId = currentUserId,
-          packages = emptyList(),
-          error = "Failed to enumerate packages: ${e.message}",
-          totalTimeMs = System.currentTimeMillis() - startTime,
+            requestId = requestId,
+            success = false,
+            userId = currentUserId,
+            packages = emptyList(),
+            error = "Failed to enumerate packages: ${e.message}",
+            totalTimeMs = System.currentTimeMillis() - startTime,
         )
       }
     }
@@ -3606,8 +3630,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           } catch (e: Exception) {
             null
           }
-      val allowBackup =
-          appInfo?.let { (it.flags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0 }
+      val allowBackup = appInfo?.let { (it.flags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0 }
       val requested = info.requestedPermissions?.toList().orEmpty()
       val flagsArray = info.requestedPermissionsFlags
       val granted = mutableMapOf<String, Boolean>()
@@ -3615,8 +3638,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         for (i in requested.indices) {
           val isGranted =
               if (i < flagsArray.size) {
-                (flagsArray[i] and
-                    android.content.pm.PackageInfo.REQUESTED_PERMISSION_GRANTED) != 0
+                (flagsArray[i] and android.content.pm.PackageInfo.REQUESTED_PERMISSION_GRANTED) != 0
               } else false
           granted[requested[i]] = isGranted
         }
@@ -3631,65 +3653,65 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val totalTime = System.currentTimeMillis() - startTime
       kotlinx.coroutines.runBlocking {
         broadcastPackageInfoResult(
-          requestId = requestId,
-          success = true,
-          packageName = packageName,
-          isSystem = isSystem,
-          applicationLabel = applicationLabel,
-          versionName = info.versionName,
-          versionCode = versionCode,
-          installerPackage = installerPackage,
-          firstInstallTime = info.firstInstallTime,
-          lastUpdateTime = info.lastUpdateTime,
-          allowBackup = allowBackup,
-          requestedPermissions = requested,
-          grantedPermissions = granted,
-          mainActivity = mainActivity,
-          error = null,
-          totalTimeMs = totalTime,
+            requestId = requestId,
+            success = true,
+            packageName = packageName,
+            isSystem = isSystem,
+            applicationLabel = applicationLabel,
+            versionName = info.versionName,
+            versionCode = versionCode,
+            installerPackage = installerPackage,
+            firstInstallTime = info.firstInstallTime,
+            lastUpdateTime = info.lastUpdateTime,
+            allowBackup = allowBackup,
+            requestedPermissions = requested,
+            grantedPermissions = granted,
+            mainActivity = mainActivity,
+            error = null,
+            totalTimeMs = totalTime,
         )
       }
     } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
       kotlinx.coroutines.runBlocking {
         broadcastPackageInfoResult(
-          requestId = requestId,
-          success = false,
-          packageName = packageName,
-          isSystem = false,
-          applicationLabel = null,
-          versionName = null,
-          versionCode = null,
-          installerPackage = null,
-          firstInstallTime = null,
-          lastUpdateTime = null,
-          allowBackup = null,
-          requestedPermissions = emptyList(),
-          grantedPermissions = emptyMap(),
-          mainActivity = null,
-          error = "Package not installed or not visible: $packageName",
-          totalTimeMs = System.currentTimeMillis() - startTime,
+            requestId = requestId,
+            success = false,
+            packageName = packageName,
+            isSystem = false,
+            applicationLabel = null,
+            versionName = null,
+            versionCode = null,
+            installerPackage = null,
+            firstInstallTime = null,
+            lastUpdateTime = null,
+            allowBackup = null,
+            requestedPermissions = emptyList(),
+            grantedPermissions = emptyMap(),
+            mainActivity = null,
+            error = "Package not installed or not visible: $packageName",
+            totalTimeMs = System.currentTimeMillis() - startTime,
         )
       }
     } catch (e: Exception) {
       Log.e(TAG, "performPackageInfo failed for $packageName", e)
       kotlinx.coroutines.runBlocking {
         broadcastPackageInfoResult(
-          requestId = requestId,
-          success = false,
-          packageName = packageName,
-          isSystem = false,
-          applicationLabel = null,
-          versionName = null,
-          versionCode = null,
-          installerPackage = null,
-          firstInstallTime = null,
-          lastUpdateTime = null,
-          allowBackup = null,
-          requestedPermissions = emptyList(),
-          grantedPermissions = emptyMap(),
-          mainActivity = null,
-          error = "Failed to read package info: ${e.message}",
-          totalTimeMs = System.currentTimeMillis() - startTime,
+            requestId = requestId,
+            success = false,
+            packageName = packageName,
+            isSystem = false,
+            applicationLabel = null,
+            versionName = null,
+            versionCode = null,
+            installerPackage = null,
+            firstInstallTime = null,
+            lastUpdateTime = null,
+            allowBackup = null,
+            requestedPermissions = emptyList(),
+            grantedPermissions = emptyMap(),
+            mainActivity = null,
+            error = "Failed to read package info: ${e.message}",
+            totalTimeMs = System.currentTimeMillis() - startTime,
         )
       }
     }
@@ -3705,24 +3727,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val success = component != null
       kotlinx.coroutines.runBlocking {
         broadcastLaunchIntentResult(
-          requestId = requestId,
-          success = success,
-          packageName = packageName,
-          componentName = component,
-          error = if (!success) "No launch intent for $packageName" else null,
-          totalTimeMs = totalTime,
+            requestId = requestId,
+            success = success,
+            packageName = packageName,
+            componentName = component,
+            error = if (!success) "No launch intent for $packageName" else null,
+            totalTimeMs = totalTime,
         )
       }
     } catch (e: Exception) {
       Log.e(TAG, "performLaunchIntent failed for $packageName", e)
       kotlinx.coroutines.runBlocking {
         broadcastLaunchIntentResult(
-          requestId = requestId,
-          success = false,
-          packageName = packageName,
-          componentName = null,
-          error = "Failed to resolve launch intent: ${e.message}",
-          totalTimeMs = System.currentTimeMillis() - startTime,
+            requestId = requestId,
+            success = false,
+            packageName = packageName,
+            componentName = null,
+            error = "Failed to resolve launch intent: ${e.message}",
+            totalTimeMs = System.currentTimeMillis() - startTime,
         )
       }
     }

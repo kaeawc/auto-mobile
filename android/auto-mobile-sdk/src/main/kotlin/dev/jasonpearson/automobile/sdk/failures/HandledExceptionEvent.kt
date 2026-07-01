@@ -1,8 +1,6 @@
 package dev.jasonpearson.automobile.sdk.failures
 
-/**
- * Device information captured at the time of the exception.
- */
+/** Device information captured at the time of the exception. */
 data class DeviceInfo(
     val model: String,
     val manufacturer: String,
@@ -13,8 +11,8 @@ data class DeviceInfo(
 /**
  * Represents a handled (non-fatal) exception that was caught and reported by the app.
  *
- * This event is broadcasted to the AccessibilityService which forwards it to the MCP server
- * for recording in the failures database.
+ * This event is broadcasted to the AccessibilityService which forwards it to the MCP server for
+ * recording in the failures database.
  */
 data class HandledExceptionEvent(
     /** Unix timestamp when the exception was recorded */

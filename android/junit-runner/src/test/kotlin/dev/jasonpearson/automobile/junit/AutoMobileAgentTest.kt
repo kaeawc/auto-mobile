@@ -183,17 +183,19 @@ class AutoMobileAgentTest {
   @Test
   fun `attemptAiRecovery returns success when agent completes and observe succeeds`() {
     // Arrange
-    val context = FailedStepContext(
-        failedStepIndex = 2,
-        failedTool = "tapOn",
-        error = "Element not found",
-        succeededSteps = listOf(
-            SucceededStepSummary(0, "observe"),
-            SucceededStepSummary(1, "tapOn"),
-        ),
-        planContent = "name: test\nsteps: []",
-        deviceId = "emulator-5554",
-    )
+    val context =
+        FailedStepContext(
+            failedStepIndex = 2,
+            failedTool = "tapOn",
+            error = "Element not found",
+            succeededSteps =
+                listOf(
+                    SucceededStepSummary(0, "observe"),
+                    SucceededStepSummary(1, "tapOn"),
+                ),
+            planContent = "name: test\nsteps: []",
+            deviceId = "emulator-5554",
+        )
     val startTime = 1000L
     val endTime = 2000L
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
@@ -223,14 +225,15 @@ class AutoMobileAgentTest {
   @Test
   fun `attemptAiRecovery returns failure when agent throws exception`() {
     // Arrange
-    val context = FailedStepContext(
-        failedStepIndex = 0,
-        failedTool = "tapOn",
-        error = "Element not found",
-        succeededSteps = emptyList(),
-        planContent = "name: test\nsteps: []",
-        deviceId = null,
-    )
+    val context =
+        FailedStepContext(
+            failedStepIndex = 0,
+            failedTool = "tapOn",
+            error = "Element not found",
+            succeededSteps = emptyList(),
+            planContent = "name: test\nsteps: []",
+            deviceId = null,
+        )
     val startTime = 1000L
     val endTime = 2000L
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
@@ -257,14 +260,15 @@ class AutoMobileAgentTest {
   @Test
   fun `attemptAiRecovery returns failure when config provider throws exception`() {
     // Arrange
-    val context = FailedStepContext(
-        failedStepIndex = 0,
-        failedTool = "tapOn",
-        error = "Element not found",
-        succeededSteps = emptyList(),
-        planContent = "name: test\nsteps: []",
-        deviceId = null,
-    )
+    val context =
+        FailedStepContext(
+            failedStepIndex = 0,
+            failedTool = "tapOn",
+            error = "Element not found",
+            succeededSteps = emptyList(),
+            planContent = "name: test\nsteps: []",
+            deviceId = null,
+        )
     val startTime = 1000L
     val endTime = 2000L
 
@@ -290,16 +294,18 @@ class AutoMobileAgentTest {
             aiAgentFactory = mockAiAgentFactory,
             timeProvider = mockTimeProvider,
             mcpClient = mockMcpClient,
-            recoveryConfigProvider = StaticRecoveryConfigProvider(maxToolCalls = customMaxToolCalls),
+            recoveryConfigProvider =
+                StaticRecoveryConfigProvider(maxToolCalls = customMaxToolCalls),
         )
-    val context = FailedStepContext(
-        failedStepIndex = 0,
-        failedTool = "tapOn",
-        error = "Element not found",
-        succeededSteps = emptyList(),
-        planContent = "name: test\nsteps: []",
-        deviceId = null,
-    )
+    val context =
+        FailedStepContext(
+            failedStepIndex = 0,
+            failedTool = "tapOn",
+            error = "Element not found",
+            succeededSteps = emptyList(),
+            planContent = "name: test\nsteps: []",
+            deviceId = null,
+        )
     val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
 
     every { mockTimeProvider.currentTimeMillis() } returns 1000L andThen 2000L
@@ -308,8 +314,9 @@ class AutoMobileAgentTest {
     every { mockMcpClient.connect("http://localhost:3000") } just runs
     every { mockMcpClient.disconnect() } just runs
     every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, customMaxToolCalls) } returns
-        mockAIAgent
+    every {
+      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, customMaxToolCalls)
+    } returns mockAIAgent
     every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
 
     coEvery { mockAIAgent.run(any()) } returns "Done"
@@ -318,7 +325,9 @@ class AutoMobileAgentTest {
     customAgent.attemptAiRecovery(context)
 
     // Assert - verify factory was called with the custom max tool calls
-    verify { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, customMaxToolCalls) }
+    verify {
+      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, customMaxToolCalls)
+    }
   }
 
   @Test

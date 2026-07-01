@@ -11,25 +11,25 @@ import dev.zacsweers.metro.DependencyGraph
 /**
  * Application-level dependency graph for the AutoMobile desktop app.
  *
- * This graph is the root of the dependency tree and lives for the entire app lifecycle.
- * All dependencies contributed with `@ContributesTo(AppScope::class)` will be included here.
+ * This graph is the root of the dependency tree and lives for the entire app lifecycle. All
+ * dependencies contributed with `@ContributesTo(AppScope::class)` will be included here.
  */
 @DependencyGraph(scope = AppScope::class)
 @SingleIn(AppScope::class)
 interface AutoMobileGraph : AutoMobileGraphProvider {
 
-    /** The MCP client for communicating with the AutoMobile daemon. */
-    override val autoMobileClient: AutoMobileClient
+  /** The MCP client for communicating with the AutoMobile daemon. */
+  override val autoMobileClient: AutoMobileClient
 
-    /** Application settings provider. */
-    override val settingsProvider: SettingsProvider
+  /** Application settings provider. */
+  override val settingsProvider: SettingsProvider
 
-    /** Factory for creating data source instances. */
-    override val dataSourceFactory: DataSourceFactory
+  /** Factory for creating data source instances. */
+  override val dataSourceFactory: DataSourceFactory
 
-    /** Factory for creating the graph. Metro generates the implementation. */
-    @DependencyGraph.Factory
-    fun interface Factory {
-        fun create(): AutoMobileGraph
-    }
+  /** Factory for creating the graph. Metro generates the implementation. */
+  @DependencyGraph.Factory
+  fun interface Factory {
+    fun create(): AutoMobileGraph
+  }
 }

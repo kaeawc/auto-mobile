@@ -601,13 +601,12 @@ private fun PressDurationTracker() {
                       finalDurationMs = null
                       val start = SystemClock.elapsedRealtime()
                       updateJob?.cancel()
-                      updateJob =
-                          coroutineScope.launch {
-                            while (isActive) {
-                              currentDurationMs = SystemClock.elapsedRealtime() - start
-                              delay(16)
-                            }
-                          }
+                      updateJob = coroutineScope.launch {
+                        while (isActive) {
+                          currentDurationMs = SystemClock.elapsedRealtime() - start
+                          delay(16)
+                        }
+                      }
 
                       val released = tryAwaitRelease()
                       updateJob?.cancel()

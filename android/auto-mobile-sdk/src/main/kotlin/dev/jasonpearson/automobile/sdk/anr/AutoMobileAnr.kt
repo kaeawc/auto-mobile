@@ -8,20 +8,20 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.annotation.RequiresApi
-import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.SdkConstants
 
 /**
  * SDK API for detecting ANRs (Application Not Responding) from previous sessions.
  *
- * Uses Android's ApplicationExitInfo API (Android 11+) to detect ANRs that occurred
- * in previous sessions and broadcasts them to the AutoMobile accessibility service.
+ * Uses Android's ApplicationExitInfo API (Android 11+) to detect ANRs that occurred in previous
+ * sessions and broadcasts them to the AutoMobile accessibility service.
  *
- * Unlike crash detection which happens in real-time, ANR detection happens on app
- * restart because ApplicationExitInfo only provides historical data about past exits.
+ * Unlike crash detection which happens in real-time, ANR detection happens on app restart because
+ * ApplicationExitInfo only provides historical data about past exits.
  *
  * Usage:
  * ```kotlin
@@ -35,141 +35,154 @@ import dev.jasonpearson.automobile.sdk.SdkConstants
  * 3. The ANR PID is persisted to avoid duplicate reporting
  */
 object AutoMobileAnr {
-    private const val TAG = "AutoMobileAnr"
+  private const val TAG = "AutoMobileAnr"
 
-    private const val ACCESSIBILITY_SERVICE_PACKAGE = SdkConstants.CTRL_PROXY_PACKAGE
+  private const val ACCESSIBILITY_SERVICE_PACKAGE = SdkConstants.CTRL_PROXY_PACKAGE
 
-    const val ACTION_ANR = "dev.jasonpearson.automobile.sdk.ANR"
+  const val ACTION_ANR = "dev.jasonpearson.automobile.sdk.ANR"
 
-    private const val PREFS_NAME = "automobile_anr_prefs"
-    private const val KEY_LAST_REPORTED_TIMESTAMP = "last_reported_anr_timestamp"
+  private const val PREFS_NAME = "automobile_anr_prefs"
+  private const val KEY_LAST_REPORTED_TIMESTAMP = "last_reported_anr_timestamp"
 
-    /** Maximum number of historical exit reasons to query */
-    private const val MAX_EXIT_REASONS = 5
+  /** Maximum number of historical exit reasons to query */
+  private const val MAX_EXIT_REASONS = 5
 
-    private var context: Context? = null
+  private var context: Context? = null
 
-    /**
-     * Initialize ANR detection with application context.
-     *
-     * This will query ApplicationExitInfo for any ANRs that occurred in previous
-     * sessions and broadcast them to the accessibility service.
-     *
-     * Does nothing on Android versions below 11 (API 30).
-     *
-     * @param context Application context (use applicationContext, not activity context)
-     */
-    fun initialize(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            AutoMobileSDK.logger.d(TAG) { "ANR detection requires Android 11+ (API 30)" }
-            return
-        }
-
-        this.context = context.applicationContext
-        AutoMobileSDK.logger.d(TAG) { "AutoMobileAnr initialized, checking for previous ANRs..." }
-        checkForPreviousAnrs()
+  /**
+   * Initialize ANR detection with application context.
+   *
+   * This will query ApplicationExitInfo for any ANRs that occurred in previous sessions and
+   * broadcast them to the accessibility service.
+   *
+   * Does nothing on Android versions below 11 (API 30).
+   *
+   * @param context Application context (use applicationContext, not activity context)
+   */
+  fun initialize(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+      AutoMobileSDK.logger.d(TAG) { "ANR detection requires Android 11+ (API 30)" }
+      return
     }
 
-    /**
-     * Check if ANR detection is available on this device.
-     */
-    fun isAvailable(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+    this.context = context.applicationContext
+    AutoMobileSDK.logger.d(TAG) { "AutoMobileAnr initialized, checking for previous ANRs..." }
+    checkForPreviousAnrs()
+  }
 
-    @RequiresApi(Build.VERSION_CODES.R)
-    private fun checkForPreviousAnrs() {
-        val ctx = context ?: return
+  /** Check if ANR detection is available on this device. */
+  fun isAvailable(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
-        try {
-            val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            if (am == null) {
-                AutoMobileSDK.logger.w(TAG) { "ActivityManager not available" }
-                return
-            }
+  @RequiresApi(Build.VERSION_CODES.R)
+  private fun checkForPreviousAnrs() {
+    val ctx = context ?: return
 
-            // Get exit reasons for our own package (null = current package)
-            val exitInfos = am.getHistoricalProcessExitReasons(null, 0, MAX_EXIT_REASONS)
-            AutoMobileSDK.logger.d(TAG) { "Found ${exitInfos.size} historical exit reasons" }
+    try {
+      val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+      if (am == null) {
+        AutoMobileSDK.logger.w(TAG) { "ActivityManager not available" }
+        return
+      }
 
-            val lastReportedTimestamp = getLastReportedTimestamp(ctx)
-            AutoMobileSDK.logger.d(TAG) { "Last reported ANR timestamp: $lastReportedTimestamp" }
-            var newestReportedTimestamp = lastReportedTimestamp
-            var anrCount = 0
+      // Get exit reasons for our own package (null = current package)
+      val exitInfos = am.getHistoricalProcessExitReasons(null, 0, MAX_EXIT_REASONS)
+      AutoMobileSDK.logger.d(TAG) { "Found ${exitInfos.size} historical exit reasons" }
 
-            for (exitInfo in exitInfos) {
-                AutoMobileSDK.logger.d(TAG) { "Exit reason: ${exitInfo.reason} (ANR=${ApplicationExitInfo.REASON_ANR}), pid=${exitInfo.pid}, timestamp=${exitInfo.timestamp}" }
-                if (exitInfo.reason == ApplicationExitInfo.REASON_ANR) {
-                    anrCount++
-                    // Only report ANRs we haven't seen before
-                    if (exitInfo.timestamp > lastReportedTimestamp) {
-                        AutoMobileSDK.logger.d(TAG) { "Detected NEW previous ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}" }
-                        broadcastAnr(ctx, exitInfo)
+      val lastReportedTimestamp = getLastReportedTimestamp(ctx)
+      AutoMobileSDK.logger.d(TAG) { "Last reported ANR timestamp: $lastReportedTimestamp" }
+      var newestReportedTimestamp = lastReportedTimestamp
+      var anrCount = 0
 
-                        if (exitInfo.timestamp > newestReportedTimestamp) {
-                            newestReportedTimestamp = exitInfo.timestamp
-                        }
-                    } else {
-                        AutoMobileSDK.logger.d(TAG) { "Skipping already reported ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}" }
-                    }
-                }
-            }
-
-            AutoMobileSDK.logger.d(TAG) { "Found $anrCount ANR(s) in exit history" }
-
-            // Update the last reported timestamp
-            if (newestReportedTimestamp > lastReportedTimestamp) {
-                setLastReportedTimestamp(ctx, newestReportedTimestamp)
-                AutoMobileSDK.logger.d(TAG) { "Updated last reported timestamp to $newestReportedTimestamp" }
-            }
-        } catch (e: Exception) {
-            AutoMobileSDK.logger.e(TAG, e) { "Error checking for previous ANRs" }
+      for (exitInfo in exitInfos) {
+        AutoMobileSDK.logger.d(TAG) {
+          "Exit reason: ${exitInfo.reason} (ANR=${ApplicationExitInfo.REASON_ANR}), pid=${exitInfo.pid}, timestamp=${exitInfo.timestamp}"
         }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.R)
-    private fun broadcastAnr(context: Context, exitInfo: ApplicationExitInfo) {
-        try {
-            // Read the trace from the input stream
-            val trace = try {
-                exitInfo.traceInputStream?.bufferedReader()?.use { it.readText() }
-            } catch (e: Exception) {
-                AutoMobileSDK.logger.w(TAG, e) { "Failed to read ANR trace" }
-                null
+        if (exitInfo.reason == ApplicationExitInfo.REASON_ANR) {
+          anrCount++
+          // Only report ANRs we haven't seen before
+          if (exitInfo.timestamp > lastReportedTimestamp) {
+            AutoMobileSDK.logger.d(TAG) {
+              "Detected NEW previous ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}"
             }
+            broadcastAnr(ctx, exitInfo)
 
-            val event = SdkAnrEvent(
-                timestamp = exitInfo.timestamp,
-                applicationId = context.packageName,
-                pid = exitInfo.pid,
-                processName = exitInfo.processName,
-                importance = getImportanceName(exitInfo.importance),
-                trace = trace,
-                reason = "Application Not Responding",
-                appVersion = getAppVersion(context),
-                deviceInfo = SdkDeviceInfo(
-                    model = Build.MODEL,
-                    manufacturer = Build.MANUFACTURER,
-                    osVersion = Build.VERSION.RELEASE,
-                    sdkInt = Build.VERSION.SDK_INT,
-                ),
-            )
-
-            val intent = Intent(ACTION_ANR).apply {
-                // Scope broadcast to only the accessibility service
-                setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
-
-                // Type-safe serialized event
-                putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(event))
-                putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.ANR)
+            if (exitInfo.timestamp > newestReportedTimestamp) {
+              newestReportedTimestamp = exitInfo.timestamp
             }
-
-            context.sendBroadcast(intent)
-            AutoMobileSDK.logger.i(TAG) { "Broadcasted ANR: pid=${exitInfo.pid}, process=${exitInfo.processName}" }
-        } catch (e: Exception) {
-            AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast ANR" }
+          } else {
+            AutoMobileSDK.logger.d(TAG) {
+              "Skipping already reported ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}"
+            }
+          }
         }
-    }
+      }
 
-    private fun getImportanceName(importance: Int): String = when (importance) {
+      AutoMobileSDK.logger.d(TAG) { "Found $anrCount ANR(s) in exit history" }
+
+      // Update the last reported timestamp
+      if (newestReportedTimestamp > lastReportedTimestamp) {
+        setLastReportedTimestamp(ctx, newestReportedTimestamp)
+        AutoMobileSDK.logger.d(TAG) {
+          "Updated last reported timestamp to $newestReportedTimestamp"
+        }
+      }
+    } catch (e: Exception) {
+      AutoMobileSDK.logger.e(TAG, e) { "Error checking for previous ANRs" }
+    }
+  }
+
+  @RequiresApi(Build.VERSION_CODES.R)
+  private fun broadcastAnr(context: Context, exitInfo: ApplicationExitInfo) {
+    try {
+      // Read the trace from the input stream
+      val trace =
+          try {
+            exitInfo.traceInputStream?.bufferedReader()?.use { it.readText() }
+          } catch (e: Exception) {
+            AutoMobileSDK.logger.w(TAG, e) { "Failed to read ANR trace" }
+            null
+          }
+
+      val event =
+          SdkAnrEvent(
+              timestamp = exitInfo.timestamp,
+              applicationId = context.packageName,
+              pid = exitInfo.pid,
+              processName = exitInfo.processName,
+              importance = getImportanceName(exitInfo.importance),
+              trace = trace,
+              reason = "Application Not Responding",
+              appVersion = getAppVersion(context),
+              deviceInfo =
+                  SdkDeviceInfo(
+                      model = Build.MODEL,
+                      manufacturer = Build.MANUFACTURER,
+                      osVersion = Build.VERSION.RELEASE,
+                      sdkInt = Build.VERSION.SDK_INT,
+                  ),
+          )
+
+      val intent =
+          Intent(ACTION_ANR).apply {
+            // Scope broadcast to only the accessibility service
+            setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
+
+            // Type-safe serialized event
+            putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(event))
+            putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.ANR)
+          }
+
+      context.sendBroadcast(intent)
+      AutoMobileSDK.logger.i(TAG) {
+        "Broadcasted ANR: pid=${exitInfo.pid}, process=${exitInfo.processName}"
+      }
+    } catch (e: Exception) {
+      AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast ANR" }
+    }
+  }
+
+  private fun getImportanceName(importance: Int): String =
+      when (importance) {
         ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND -> "FOREGROUND"
         ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE -> "FOREGROUND_SERVICE"
         ActivityManager.RunningAppProcessInfo.IMPORTANCE_TOP_SLEEPING -> "TOP_SLEEPING"
@@ -181,35 +194,35 @@ object AutoMobileAnr {
         ActivityManager.RunningAppProcessInfo.IMPORTANCE_CACHED -> "CACHED"
         ActivityManager.RunningAppProcessInfo.IMPORTANCE_GONE -> "GONE"
         else -> "UNKNOWN"
-    }
+      }
 
-    private fun getAppVersion(context: Context): String? {
-        return try {
-            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.getPackageInfo(
-                    context.packageName,
-                    PackageManager.PackageInfoFlags.of(0),
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(context.packageName, 0)
-            }
-            packageInfo.versionName
-        } catch (e: Exception) {
-            AutoMobileSDK.logger.w(TAG, e) { "Failed to get app version" }
-            null
-        }
+  private fun getAppVersion(context: Context): String? {
+    return try {
+      val packageInfo =
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.PackageInfoFlags.of(0),
+            )
+          } else {
+            @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0)
+          }
+      packageInfo.versionName
+    } catch (e: Exception) {
+      AutoMobileSDK.logger.w(TAG, e) { "Failed to get app version" }
+      null
     }
+  }
 
-    private fun getPrefs(context: Context): SharedPreferences {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    }
+  private fun getPrefs(context: Context): SharedPreferences {
+    return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+  }
 
-    private fun getLastReportedTimestamp(context: Context): Long {
-        return getPrefs(context).getLong(KEY_LAST_REPORTED_TIMESTAMP, 0L)
-    }
+  private fun getLastReportedTimestamp(context: Context): Long {
+    return getPrefs(context).getLong(KEY_LAST_REPORTED_TIMESTAMP, 0L)
+  }
 
-    private fun setLastReportedTimestamp(context: Context, timestamp: Long) {
-        getPrefs(context).edit().putLong(KEY_LAST_REPORTED_TIMESTAMP, timestamp).apply()
-    }
+  private fun setLastReportedTimestamp(context: Context, timestamp: Long) {
+    getPrefs(context).edit().putLong(KEY_LAST_REPORTED_TIMESTAMP, timestamp).apply()
+  }
 }

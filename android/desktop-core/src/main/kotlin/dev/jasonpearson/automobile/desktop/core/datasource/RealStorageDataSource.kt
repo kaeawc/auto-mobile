@@ -1,9 +1,9 @@
 package dev.jasonpearson.automobile.desktop.core.datasource
 
-import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.decodeToolResponse
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.storage.ColumnInfo
 import dev.jasonpearson.automobile.desktop.core.storage.DatabaseInfo
 import dev.jasonpearson.automobile.desktop.core.storage.KeyValueEntry
@@ -39,435 +39,478 @@ class RealStorageDataSource(
     private val packageName: String? = null,
     private val platform: StoragePlatform = StoragePlatform.Android,
 ) : StorageDataSource {
-    private val json = Json { ignoreUnknownKeys = true }
+  private val json = Json { ignoreUnknownKeys = true }
 
-    override suspend fun getDatabases(): Result<List<DatabaseInfo>> {
-        LOG.info("getDatabases: deviceId=$deviceId, packageName=$packageName")
+  override suspend fun getDatabases(): Result<List<DatabaseInfo>> {
+    LOG.info("getDatabases: deviceId=$deviceId, packageName=$packageName")
 
-        val provider = clientProvider ?: run {
-            LOG.warn("getDatabases: No clientProvider")
-            return Result.Error(IllegalStateException("Not connected to MCP server. Please select a device first."))
-        }
-        val device = deviceId ?: run {
-            LOG.warn("getDatabases: No deviceId provided")
-            return Result.Error(IllegalStateException("No device ID provided"))
-        }
-        val pkg = packageName ?: run {
-            LOG.warn("getDatabases: No packageName provided")
-            return Result.Error(IllegalStateException("No package name provided"))
-        }
-
-        return try {
-            val client = provider()
-
-            // 1. List databases
-            val dbsUri = buildDatabasesUri(device, pkg)
-            LOG.info("getDatabases: Fetching from URI: $dbsUri")
-            val dbsContents = client.readResource(dbsUri)
-            val dbsText = dbsContents.firstOrNull()?.text ?: return Result.Success(emptyList())
-            val dbsResponse = json.decodeFromString(McpDatabasesResponse.serializer(), dbsText)
-
-            if (dbsResponse.error != null) {
-                LOG.warn("getDatabases: Response error: ${dbsResponse.error}")
-                return Result.Error(RuntimeException(dbsResponse.error))
+    val provider =
+        clientProvider
+            ?: run {
+              LOG.warn("getDatabases: No clientProvider")
+              return Result.Error(
+                  IllegalStateException(
+                      "Not connected to MCP server. Please select a device first."
+                  )
+              )
+            }
+    val device =
+        deviceId
+            ?: run {
+              LOG.warn("getDatabases: No deviceId provided")
+              return Result.Error(IllegalStateException("No device ID provided"))
+            }
+    val pkg =
+        packageName
+            ?: run {
+              LOG.warn("getDatabases: No packageName provided")
+              return Result.Error(IllegalStateException("No package name provided"))
             }
 
-            LOG.info("getDatabases: Found ${dbsResponse.databases.size} databases")
+    return try {
+      val client = provider()
 
-            // 2. For each database, get tables and their structure
-            val databases = dbsResponse.databases.map { dbEntry ->
-                val tablesUri = buildTablesUri(device, dbEntry.path, pkg)
-                val tablesContents = client.readResource(tablesUri)
-                val tablesText = tablesContents.firstOrNull()?.text
-                val tableNames = if (tablesText != null) {
-                    val tablesResponse = json.decodeFromString(McpTablesResponse.serializer(), tablesText)
-                    tablesResponse.tables
+      // 1. List databases
+      val dbsUri = buildDatabasesUri(device, pkg)
+      LOG.info("getDatabases: Fetching from URI: $dbsUri")
+      val dbsContents = client.readResource(dbsUri)
+      val dbsText = dbsContents.firstOrNull()?.text ?: return Result.Success(emptyList())
+      val dbsResponse = json.decodeFromString(McpDatabasesResponse.serializer(), dbsText)
+
+      if (dbsResponse.error != null) {
+        LOG.warn("getDatabases: Response error: ${dbsResponse.error}")
+        return Result.Error(RuntimeException(dbsResponse.error))
+      }
+
+      LOG.info("getDatabases: Found ${dbsResponse.databases.size} databases")
+
+      // 2. For each database, get tables and their structure
+      val databases =
+          dbsResponse.databases.map { dbEntry ->
+            val tablesUri = buildTablesUri(device, dbEntry.path, pkg)
+            val tablesContents = client.readResource(tablesUri)
+            val tablesText = tablesContents.firstOrNull()?.text
+            val tableNames =
+                if (tablesText != null) {
+                  val tablesResponse =
+                      json.decodeFromString(McpTablesResponse.serializer(), tablesText)
+                  tablesResponse.tables
                 } else {
-                    emptyList()
+                  emptyList()
                 }
 
-                LOG.info("getDatabases: DB ${dbEntry.name} has ${tableNames.size} tables")
+            LOG.info("getDatabases: DB ${dbEntry.name} has ${tableNames.size} tables")
 
-                // 3. For each table, get structure
-                val tables = tableNames.map { tableName ->
-                    val structUri = buildTableStructureUri(device, dbEntry.path, tableName, pkg)
-                    val structContents = client.readResource(structUri)
-                    val structText = structContents.firstOrNull()?.text
-                    val columns = if (structText != null) {
-                        val structResponse =
-                            json.decodeFromString(McpTableStructureResponse.serializer(), structText)
-                        structResponse.columns.map { col ->
-                            ColumnInfo(
-                                name = col.name,
-                                type = col.type,
-                                isPrimaryKey = col.primaryKey,
-                                isNullable = col.nullable,
-                                defaultValue = col.defaultValue,
-                            )
-                        }
-                    } else {
-                        emptyList()
+            // 3. For each table, get structure
+            val tables = tableNames.map { tableName ->
+              val structUri = buildTableStructureUri(device, dbEntry.path, tableName, pkg)
+              val structContents = client.readResource(structUri)
+              val structText = structContents.firstOrNull()?.text
+              val columns =
+                  if (structText != null) {
+                    val structResponse =
+                        json.decodeFromString(McpTableStructureResponse.serializer(), structText)
+                    structResponse.columns.map { col ->
+                      ColumnInfo(
+                          name = col.name,
+                          type = col.type,
+                          isPrimaryKey = col.primaryKey,
+                          isNullable = col.nullable,
+                          defaultValue = col.defaultValue,
+                      )
                     }
-                    TableInfo(name = tableName, rowCount = 0, columns = columns)
-                }
-
-                DatabaseInfo(
-                    name = dbEntry.name,
-                    path = dbEntry.path,
-                    sizeBytes = dbEntry.sizeBytes,
-                    tables = tables,
-                )
+                  } else {
+                    emptyList()
+                  }
+              TableInfo(name = tableName, rowCount = 0, columns = columns)
             }
 
-            LOG.info("getDatabases: Returning ${databases.size} databases")
-            Result.Success(databases)
-        } catch (e: McpConnectionException) {
-            LOG.warn("getDatabases: MCP connection error: ${e.message}", e)
-            Result.Error(e, "MCP server not available: ${e.message}")
-        } catch (e: Exception) {
-            LOG.warn("getDatabases: Exception: ${e.message}", e)
-            Result.Error(e, "Failed to load databases: ${e.message}")
-        }
-    }
-
-    override suspend fun getTableData(
-        databasePath: String,
-        table: String,
-        limit: Int,
-        offset: Int,
-    ): Result<QueryResult> {
-        LOG.info("getTableData: databasePath=$databasePath, table=$table, limit=$limit, offset=$offset")
-
-        val provider = clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
-        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
-        val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
-
-        return try {
-            val client = provider()
-            val uri = buildTableDataUri(device, databasePath, table, pkg, limit, offset)
-            LOG.info("getTableData: Fetching from URI: $uri")
-            val contents = client.readResource(uri)
-            val text = contents.firstOrNull()?.text
-                ?: return Result.Success(QueryResult(emptyList(), emptyList(), 0, 0))
-
-            val response = json.decodeFromString(McpTableDataResponse.serializer(), text)
-
-            if (response.error != null) {
-                return Result.Error(RuntimeException(response.error))
-            }
-
-            val rows = response.rows.map { row -> row.map { jsonElementToAny(it) } }
-            Result.Success(
-                QueryResult(
-                    columns = response.columns,
-                    rows = rows,
-                    rowCount = response.total,
-                    executionTimeMs = 0,
-                )
+            DatabaseInfo(
+                name = dbEntry.name,
+                path = dbEntry.path,
+                sizeBytes = dbEntry.sizeBytes,
+                tables = tables,
             )
-        } catch (e: McpConnectionException) {
-            LOG.warn("getTableData: MCP connection error: ${e.message}", e)
-            Result.Error(e, "MCP server not available: ${e.message}")
-        } catch (e: Exception) {
-            LOG.warn("getTableData: Exception: ${e.message}", e)
-            Result.Error(e, "Failed to load table data: ${e.message}")
-        }
+          }
+
+      LOG.info("getDatabases: Returning ${databases.size} databases")
+      Result.Success(databases)
+    } catch (e: McpConnectionException) {
+      LOG.warn("getDatabases: MCP connection error: ${e.message}", e)
+      Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: Exception) {
+      LOG.warn("getDatabases: Exception: ${e.message}", e)
+      Result.Error(e, "Failed to load databases: ${e.message}")
     }
+  }
 
-    override suspend fun executeSQL(databasePath: String, query: String): Result<QueryResult> {
-        LOG.info("executeSQL: databasePath=$databasePath, query=$query")
+  override suspend fun getTableData(
+      databasePath: String,
+      table: String,
+      limit: Int,
+      offset: Int,
+  ): Result<QueryResult> {
+    LOG.info("getTableData: databasePath=$databasePath, table=$table, limit=$limit, offset=$offset")
 
-        val provider = clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
-        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
-        val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
+    val provider =
+        clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+    val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+    val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
-        return try {
-            val client = provider()
-            val arguments = buildJsonObject {
-                put("deviceId", device)
-                put("appId", pkg)
-                put("databasePath", databasePath)
-                put("query", query)
-            }
-            val toolElement = client.callTool("sqlQuery", arguments)
-            val sqlResult = decodeToolResponse(json, toolElement, McpSqlResult.serializer())
+    return try {
+      val client = provider()
+      val uri = buildTableDataUri(device, databasePath, table, pkg, limit, offset)
+      LOG.info("getTableData: Fetching from URI: $uri")
+      val contents = client.readResource(uri)
+      val text =
+          contents.firstOrNull()?.text
+              ?: return Result.Success(QueryResult(emptyList(), emptyList(), 0, 0))
 
-            if (sqlResult.error != null) {
-                return Result.Success(
-                    QueryResult(emptyList(), emptyList(), 0, 0, error = sqlResult.error)
-                )
-            }
+      val response = json.decodeFromString(McpTableDataResponse.serializer(), text)
 
-            val queryResult = if (sqlResult.type == "mutation") {
-                val rowsAffected = sqlResult.rowsAffected ?: 0
-                QueryResult(
-                    columns = listOf("rows_affected"),
-                    rows = listOf(listOf(rowsAffected)),
-                    rowCount = rowsAffected,
-                    executionTimeMs = 0,
-                )
-            } else {
-                val rows = sqlResult.rows.map { row -> row.map { jsonElementToAny(it) } }
-                QueryResult(
-                    columns = sqlResult.columns,
-                    rows = rows,
-                    rowCount = rows.size,
-                    executionTimeMs = 0,
-                )
-            }
-            Result.Success(queryResult)
-        } catch (e: McpConnectionException) {
-            LOG.warn("executeSQL: MCP connection error: ${e.message}", e)
-            Result.Error(e, "MCP server not available: ${e.message}")
-        } catch (e: Exception) {
-            LOG.warn("executeSQL: Exception: ${e.message}", e)
-            Result.Error(e, "Failed to execute SQL: ${e.message}")
-        }
+      if (response.error != null) {
+        return Result.Error(RuntimeException(response.error))
+      }
+
+      val rows = response.rows.map { row -> row.map { jsonElementToAny(it) } }
+      Result.Success(
+          QueryResult(
+              columns = response.columns,
+              rows = rows,
+              rowCount = response.total,
+              executionTimeMs = 0,
+          )
+      )
+    } catch (e: McpConnectionException) {
+      LOG.warn("getTableData: MCP connection error: ${e.message}", e)
+      Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: Exception) {
+      LOG.warn("getTableData: Exception: ${e.message}", e)
+      Result.Error(e, "Failed to load table data: ${e.message}")
     }
+  }
 
-    override suspend fun getKeyValueFiles(): Result<List<KeyValueFile>> {
-        LOG.info("getKeyValueFiles: clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName")
+  override suspend fun executeSQL(databasePath: String, query: String): Result<QueryResult> {
+    LOG.info("executeSQL: databasePath=$databasePath, query=$query")
 
-        val provider = clientProvider ?: run {
-            LOG.warn("getKeyValueFiles: No clientProvider")
-            return Result.Error(IllegalStateException("Not connected to MCP server. Please select a device first."))
-        }
-        val device = deviceId ?: run {
-            LOG.warn("getKeyValueFiles: No deviceId provided")
-            return Result.Error(IllegalStateException("No device ID provided"))
-        }
-        val pkg = packageName ?: run {
-            LOG.warn("getKeyValueFiles: No packageName provided")
-            return Result.Error(IllegalStateException("No package name provided"))
-        }
+    val provider =
+        clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+    val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+    val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
-        return try {
-            val client = provider()
-            LOG.info("getKeyValueFiles: Got client: ${client::class.simpleName}")
+    return try {
+      val client = provider()
+      val arguments = buildJsonObject {
+        put("deviceId", device)
+        put("appId", pkg)
+        put("databasePath", databasePath)
+        put("query", query)
+      }
+      val toolElement = client.callTool("sqlQuery", arguments)
+      val sqlResult = decodeToolResponse(json, toolElement, McpSqlResult.serializer())
 
-            // First, get the list of storage files
-            val filesUri = buildStorageFilesUri(device, pkg)
-            LOG.info("getKeyValueFiles: Fetching files from URI: $filesUri")
-            val filesContents = client.readResource(filesUri)
-            LOG.info("getKeyValueFiles: Got ${filesContents.size} content items")
-            val filesText = filesContents.firstOrNull()?.text
-            if (filesText == null) {
-                LOG.warn("getKeyValueFiles: No text content in response")
-                return Result.Success(emptyList())
+      if (sqlResult.error != null) {
+        return Result.Success(QueryResult(emptyList(), emptyList(), 0, 0, error = sqlResult.error))
+      }
+
+      val queryResult =
+          if (sqlResult.type == "mutation") {
+            val rowsAffected = sqlResult.rowsAffected ?: 0
+            QueryResult(
+                columns = listOf("rows_affected"),
+                rows = listOf(listOf(rowsAffected)),
+                rowCount = rowsAffected,
+                executionTimeMs = 0,
+            )
+          } else {
+            val rows = sqlResult.rows.map { row -> row.map { jsonElementToAny(it) } }
+            QueryResult(
+                columns = sqlResult.columns,
+                rows = rows,
+                rowCount = rows.size,
+                executionTimeMs = 0,
+            )
+          }
+      Result.Success(queryResult)
+    } catch (e: McpConnectionException) {
+      LOG.warn("executeSQL: MCP connection error: ${e.message}", e)
+      Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: Exception) {
+      LOG.warn("executeSQL: Exception: ${e.message}", e)
+      Result.Error(e, "Failed to execute SQL: ${e.message}")
+    }
+  }
+
+  override suspend fun getKeyValueFiles(): Result<List<KeyValueFile>> {
+    LOG.info(
+        "getKeyValueFiles: clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName"
+    )
+
+    val provider =
+        clientProvider
+            ?: run {
+              LOG.warn("getKeyValueFiles: No clientProvider")
+              return Result.Error(
+                  IllegalStateException(
+                      "Not connected to MCP server. Please select a device first."
+                  )
+              )
             }
-            LOG.info("getKeyValueFiles: Response text (first 500 chars): ${filesText.take(500)}")
-
-            val filesResponse = json.decodeFromString(McpStorageFilesResponse.serializer(), filesText)
-            LOG.info("getKeyValueFiles: Parsed response, files count=${filesResponse.files.size}, error=${filesResponse.error}")
-
-            // Check for error in response
-            if (filesResponse.error != null) {
-                LOG.warn("getKeyValueFiles: Response contains error: ${filesResponse.error}")
-                return Result.Error(RuntimeException(filesResponse.error))
+    val device =
+        deviceId
+            ?: run {
+              LOG.warn("getKeyValueFiles: No deviceId provided")
+              return Result.Error(IllegalStateException("No device ID provided"))
+            }
+    val pkg =
+        packageName
+            ?: run {
+              LOG.warn("getKeyValueFiles: No packageName provided")
+              return Result.Error(IllegalStateException("No package name provided"))
             }
 
-            // For each file, fetch its entries
-            val keyValueFiles = filesResponse.files.map { file ->
-                val entriesUri = buildStorageEntriesUri(device, pkg, file.name)
-                LOG.info("getKeyValueFiles: Fetching entries for ${file.name} from: $entriesUri")
-                val entriesContents = client.readResource(entriesUri)
-                val entriesText = entriesContents.firstOrNull()?.text
+    return try {
+      val client = provider()
+      LOG.info("getKeyValueFiles: Got client: ${client::class.simpleName}")
 
-                val entries = if (entriesText != null) {
-                    val entriesResponse = json.decodeFromString(
-                        McpStorageEntriesResponse.serializer(),
-                        entriesText
+      // First, get the list of storage files
+      val filesUri = buildStorageFilesUri(device, pkg)
+      LOG.info("getKeyValueFiles: Fetching files from URI: $filesUri")
+      val filesContents = client.readResource(filesUri)
+      LOG.info("getKeyValueFiles: Got ${filesContents.size} content items")
+      val filesText = filesContents.firstOrNull()?.text
+      if (filesText == null) {
+        LOG.warn("getKeyValueFiles: No text content in response")
+        return Result.Success(emptyList())
+      }
+      LOG.info("getKeyValueFiles: Response text (first 500 chars): ${filesText.take(500)}")
+
+      val filesResponse = json.decodeFromString(McpStorageFilesResponse.serializer(), filesText)
+      LOG.info(
+          "getKeyValueFiles: Parsed response, files count=${filesResponse.files.size}, error=${filesResponse.error}"
+      )
+
+      // Check for error in response
+      if (filesResponse.error != null) {
+        LOG.warn("getKeyValueFiles: Response contains error: ${filesResponse.error}")
+        return Result.Error(RuntimeException(filesResponse.error))
+      }
+
+      // For each file, fetch its entries
+      val keyValueFiles =
+          filesResponse.files.map { file ->
+            val entriesUri = buildStorageEntriesUri(device, pkg, file.name)
+            LOG.info("getKeyValueFiles: Fetching entries for ${file.name} from: $entriesUri")
+            val entriesContents = client.readResource(entriesUri)
+            val entriesText = entriesContents.firstOrNull()?.text
+
+            val entries =
+                if (entriesText != null) {
+                  val entriesResponse =
+                      json.decodeFromString(
+                          McpStorageEntriesResponse.serializer(),
+                          entriesText,
+                      )
+                  LOG.info(
+                      "getKeyValueFiles: File ${file.name} has ${entriesResponse.entries.size} entries"
+                  )
+                  entriesResponse.entries.map { entry ->
+                    KeyValueEntry(
+                        key = entry.key,
+                        value = parseValue(entry.value, entry.type),
+                        type = mapKeyValueType(entry.type),
                     )
-                    LOG.info("getKeyValueFiles: File ${file.name} has ${entriesResponse.entries.size} entries")
-                    entriesResponse.entries.map { entry ->
-                        KeyValueEntry(
-                            key = entry.key,
-                            value = parseValue(entry.value, entry.type),
-                            type = mapKeyValueType(entry.type),
-                        )
-                    }
+                  }
                 } else {
-                    LOG.warn("getKeyValueFiles: No entries text for ${file.name}")
-                    emptyList()
+                  LOG.warn("getKeyValueFiles: No entries text for ${file.name}")
+                  emptyList()
                 }
 
-                KeyValueFile(
-                    name = file.name,
-                    path = file.path,
-                    platform = platform,
-                    entries = entries,
-                )
-            }
+            KeyValueFile(
+                name = file.name,
+                path = file.path,
+                platform = platform,
+                entries = entries,
+            )
+          }
 
-            LOG.info("getKeyValueFiles: Returning ${keyValueFiles.size} files")
-            Result.Success(keyValueFiles)
-        } catch (e: McpConnectionException) {
-            LOG.warn("getKeyValueFiles: MCP connection error: ${e.message}", e)
-            Result.Error(e, "MCP server not available: ${e.message}")
-        } catch (e: Exception) {
-            LOG.warn("getKeyValueFiles: Exception during fetch: ${e.message}", e)
-            Result.Error(e, "Failed to load storage data: ${e.message}")
+      LOG.info("getKeyValueFiles: Returning ${keyValueFiles.size} files")
+      Result.Success(keyValueFiles)
+    } catch (e: McpConnectionException) {
+      LOG.warn("getKeyValueFiles: MCP connection error: ${e.message}", e)
+      Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: Exception) {
+      LOG.warn("getKeyValueFiles: Exception during fetch: ${e.message}", e)
+      Result.Error(e, "Failed to load storage data: ${e.message}")
+    }
+  }
+
+  override suspend fun setKeyValue(
+      fileName: String,
+      key: String,
+      value: String?,
+      type: KeyValueType,
+  ): Result<Unit> {
+    val provider =
+        clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+    val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+    val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
+
+    return try {
+      val client = provider()
+      withContext(Dispatchers.IO) {
+        val result = client.setKeyValue(device, pkg, fileName, key, value, type.protocolName)
+        if (result.success) Result.Success(Unit)
+        else Result.Error(RuntimeException(result.message ?: "Failed to set key value"))
+      }
+    } catch (e: McpConnectionException) {
+      Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: Exception) {
+      Result.Error(e, "Failed to set key value: ${e.message}")
+    }
+  }
+
+  override suspend fun removeKeyValue(fileName: String, key: String): Result<Unit> {
+    val provider =
+        clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+    val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+    val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
+
+    return try {
+      val client = provider()
+      withContext(Dispatchers.IO) {
+        val result = client.removeKeyValue(device, pkg, fileName, key)
+        if (result.success) Result.Success(Unit)
+        else Result.Error(RuntimeException(result.message ?: "Failed to remove key value"))
+      }
+    } catch (e: McpConnectionException) {
+      Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: Exception) {
+      Result.Error(e, "Failed to remove key value: ${e.message}")
+    }
+  }
+
+  override suspend fun clearKeyValueFile(fileName: String): Result<Unit> {
+    val provider =
+        clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+    val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+    val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
+
+    return try {
+      val client = provider()
+      withContext(Dispatchers.IO) {
+        val result = client.clearKeyValueFile(device, pkg, fileName)
+        if (result.success) Result.Success(Unit)
+        else Result.Error(RuntimeException(result.message ?: "Failed to clear key value file"))
+      }
+    } catch (e: McpConnectionException) {
+      Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: Exception) {
+      Result.Error(e, "Failed to clear key value file: ${e.message}")
+    }
+  }
+
+  private fun buildDatabasesUri(deviceId: String, packageName: String): String {
+    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    return "automobile:devices/$deviceId/databases?appId=$encodedPackage"
+  }
+
+  private fun buildTablesUri(deviceId: String, databasePath: String, packageName: String): String {
+    val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
+    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    return "automobile:devices/$deviceId/databases/$encodedPath/tables?appId=$encodedPackage"
+  }
+
+  private fun buildTableStructureUri(
+      deviceId: String,
+      databasePath: String,
+      table: String,
+      packageName: String,
+  ): String {
+    val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
+    val encodedTable = java.net.URLEncoder.encode(table, "UTF-8")
+    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    return "automobile:devices/$deviceId/databases/$encodedPath/tables/$encodedTable/structure?appId=$encodedPackage"
+  }
+
+  private fun buildTableDataUri(
+      deviceId: String,
+      databasePath: String,
+      table: String,
+      packageName: String,
+      limit: Int,
+      offset: Int,
+  ): String {
+    val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
+    val encodedTable = java.net.URLEncoder.encode(table, "UTF-8")
+    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    return "automobile:devices/$deviceId/databases/$encodedPath/tables/$encodedTable/data?appId=$encodedPackage&limit=$limit&offset=$offset"
+  }
+
+  private fun buildStorageFilesUri(deviceId: String, packageName: String): String {
+    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    return "automobile:devices/$deviceId/storage/$encodedPackage/files"
+  }
+
+  private fun buildStorageEntriesUri(
+      deviceId: String,
+      packageName: String,
+      fileName: String,
+  ): String {
+    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    val encodedFile = java.net.URLEncoder.encode(fileName, "UTF-8")
+    return "automobile:devices/$deviceId/storage/$encodedPackage/$encodedFile/entries"
+  }
+
+  private fun jsonElementToAny(element: JsonElement): Any? {
+    return when (element) {
+      is JsonNull -> null
+      is JsonPrimitive ->
+          when {
+            element.isString -> element.content
+            element.content == "true" || element.content == "false" ->
+                element.content.toBooleanStrictOrNull() ?: element.content
+            element.content.toLongOrNull() != null -> element.content.toLong()
+            element.content.toDoubleOrNull() != null -> element.content.toDouble()
+            else -> element.content
+          }
+      else -> element.toString()
+    }
+  }
+
+  private fun mapKeyValueType(type: String): KeyValueType {
+    return when (type.uppercase()) {
+      "STRING" -> KeyValueType.String
+      "INT" -> KeyValueType.Int
+      "LONG" -> KeyValueType.Long
+      "FLOAT" -> KeyValueType.Float
+      "BOOLEAN" -> KeyValueType.Boolean
+      "STRING_SET" -> KeyValueType.StringSet
+      else -> KeyValueType.Unknown
+    }
+  }
+
+  private fun parseValue(jsonValue: String?, type: String): Any? {
+    if (jsonValue == null) return null
+
+    return try {
+      when (type.uppercase()) {
+        "STRING" -> jsonValue
+        "INT" -> jsonValue.toIntOrNull() ?: jsonValue
+        "LONG" -> jsonValue.toLongOrNull() ?: jsonValue
+        "FLOAT" -> jsonValue.toFloatOrNull() ?: jsonValue
+        "BOOLEAN" -> jsonValue.toBooleanStrictOrNull() ?: jsonValue
+        "STRING_SET" -> {
+          // Parse JSON array of strings to Set<String>
+          val element = json.parseToJsonElement(jsonValue)
+          element.jsonArray.map { it.jsonPrimitive.content }.toSet()
         }
+        else -> jsonValue
+      }
+    } catch (e: Exception) {
+      jsonValue
     }
-
-    override suspend fun setKeyValue(
-        fileName: String,
-        key: String,
-        value: String?,
-        type: KeyValueType,
-    ): Result<Unit> {
-        val provider = clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
-        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
-        val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
-
-        return try {
-            val client = provider()
-            withContext(Dispatchers.IO) {
-                val result = client.setKeyValue(device, pkg, fileName, key, value, type.protocolName)
-                if (result.success) Result.Success(Unit)
-                else Result.Error(RuntimeException(result.message ?: "Failed to set key value"))
-            }
-        } catch (e: McpConnectionException) {
-            Result.Error(e, "MCP server not available: ${e.message}")
-        } catch (e: Exception) {
-            Result.Error(e, "Failed to set key value: ${e.message}")
-        }
-    }
-
-    override suspend fun removeKeyValue(fileName: String, key: String): Result<Unit> {
-        val provider = clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
-        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
-        val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
-
-        return try {
-            val client = provider()
-            withContext(Dispatchers.IO) {
-                val result = client.removeKeyValue(device, pkg, fileName, key)
-                if (result.success) Result.Success(Unit)
-                else Result.Error(RuntimeException(result.message ?: "Failed to remove key value"))
-            }
-        } catch (e: McpConnectionException) {
-            Result.Error(e, "MCP server not available: ${e.message}")
-        } catch (e: Exception) {
-            Result.Error(e, "Failed to remove key value: ${e.message}")
-        }
-    }
-
-    override suspend fun clearKeyValueFile(fileName: String): Result<Unit> {
-        val provider = clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
-        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
-        val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
-
-        return try {
-            val client = provider()
-            withContext(Dispatchers.IO) {
-                val result = client.clearKeyValueFile(device, pkg, fileName)
-                if (result.success) Result.Success(Unit)
-                else Result.Error(RuntimeException(result.message ?: "Failed to clear key value file"))
-            }
-        } catch (e: McpConnectionException) {
-            Result.Error(e, "MCP server not available: ${e.message}")
-        } catch (e: Exception) {
-            Result.Error(e, "Failed to clear key value file: ${e.message}")
-        }
-    }
-
-    private fun buildDatabasesUri(deviceId: String, packageName: String): String {
-        val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
-        return "automobile:devices/$deviceId/databases?appId=$encodedPackage"
-    }
-
-    private fun buildTablesUri(deviceId: String, databasePath: String, packageName: String): String {
-        val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
-        val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
-        return "automobile:devices/$deviceId/databases/$encodedPath/tables?appId=$encodedPackage"
-    }
-
-    private fun buildTableStructureUri(
-        deviceId: String,
-        databasePath: String,
-        table: String,
-        packageName: String,
-    ): String {
-        val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
-        val encodedTable = java.net.URLEncoder.encode(table, "UTF-8")
-        val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
-        return "automobile:devices/$deviceId/databases/$encodedPath/tables/$encodedTable/structure?appId=$encodedPackage"
-    }
-
-    private fun buildTableDataUri(
-        deviceId: String,
-        databasePath: String,
-        table: String,
-        packageName: String,
-        limit: Int,
-        offset: Int,
-    ): String {
-        val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
-        val encodedTable = java.net.URLEncoder.encode(table, "UTF-8")
-        val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
-        return "automobile:devices/$deviceId/databases/$encodedPath/tables/$encodedTable/data?appId=$encodedPackage&limit=$limit&offset=$offset"
-    }
-
-    private fun buildStorageFilesUri(deviceId: String, packageName: String): String {
-        val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
-        return "automobile:devices/$deviceId/storage/$encodedPackage/files"
-    }
-
-    private fun buildStorageEntriesUri(deviceId: String, packageName: String, fileName: String): String {
-        val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
-        val encodedFile = java.net.URLEncoder.encode(fileName, "UTF-8")
-        return "automobile:devices/$deviceId/storage/$encodedPackage/$encodedFile/entries"
-    }
-
-    private fun jsonElementToAny(element: JsonElement): Any? {
-        return when (element) {
-            is JsonNull -> null
-            is JsonPrimitive -> when {
-                element.isString -> element.content
-                element.content == "true" || element.content == "false" ->
-                    element.content.toBooleanStrictOrNull() ?: element.content
-                element.content.toLongOrNull() != null -> element.content.toLong()
-                element.content.toDoubleOrNull() != null -> element.content.toDouble()
-                else -> element.content
-            }
-            else -> element.toString()
-        }
-    }
-
-    private fun mapKeyValueType(type: String): KeyValueType {
-        return when (type.uppercase()) {
-            "STRING" -> KeyValueType.String
-            "INT" -> KeyValueType.Int
-            "LONG" -> KeyValueType.Long
-            "FLOAT" -> KeyValueType.Float
-            "BOOLEAN" -> KeyValueType.Boolean
-            "STRING_SET" -> KeyValueType.StringSet
-            else -> KeyValueType.Unknown
-        }
-    }
-
-    private fun parseValue(jsonValue: String?, type: String): Any? {
-        if (jsonValue == null) return null
-
-        return try {
-            when (type.uppercase()) {
-                "STRING" -> jsonValue
-                "INT" -> jsonValue.toIntOrNull() ?: jsonValue
-                "LONG" -> jsonValue.toLongOrNull() ?: jsonValue
-                "FLOAT" -> jsonValue.toFloatOrNull() ?: jsonValue
-                "BOOLEAN" -> jsonValue.toBooleanStrictOrNull() ?: jsonValue
-                "STRING_SET" -> {
-                    // Parse JSON array of strings to Set<String>
-                    val element = json.parseToJsonElement(jsonValue)
-                    element.jsonArray.map { it.jsonPrimitive.content }.toSet()
-                }
-                else -> jsonValue
-            }
-        } catch (e: Exception) {
-            jsonValue
-        }
-    }
+  }
 }
 
 // MCP response models for database resources

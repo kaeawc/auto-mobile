@@ -26,19 +26,18 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-/**
- * Interface for failures stream operations
- */
+/** Interface for failures stream operations */
 interface FailuresStreamClient {
-    fun pollNotifications(request: FailuresNotificationsRequest): FailuresNotificationsResponse
-    fun pollGroups(request: FailuresGroupsRequest): FailuresGroupsResponse
-    fun pollTimeline(request: FailuresTimelineRequest): FailuresTimelineResponse
-    fun acknowledge(notificationIds: List<Int>): AcknowledgeResponse
+  fun pollNotifications(request: FailuresNotificationsRequest): FailuresNotificationsResponse
+
+  fun pollGroups(request: FailuresGroupsRequest): FailuresGroupsResponse
+
+  fun pollTimeline(request: FailuresTimelineRequest): FailuresTimelineResponse
+
+  fun acknowledge(notificationIds: List<Int>): AcknowledgeResponse
 }
 
-/**
- * Request for polling failure notifications
- */
+/** Request for polling failure notifications */
 @Serializable
 data class FailuresNotificationsRequest(
     val command: String = "poll_notifications",
@@ -52,9 +51,7 @@ data class FailuresNotificationsRequest(
     val limit: Int? = null,
 )
 
-/**
- * Request for polling failure groups
- */
+/** Request for polling failure groups */
 @Serializable
 data class FailuresGroupsRequest(
     val command: String = "poll_groups",
@@ -65,9 +62,7 @@ data class FailuresGroupsRequest(
     val severity: String? = null,
 )
 
-/**
- * Request for polling timeline data
- */
+/** Request for polling timeline data */
 @Serializable
 data class FailuresTimelineRequest(
     val command: String = "poll_timeline",
@@ -77,18 +72,14 @@ data class FailuresTimelineRequest(
     val aggregation: String? = null,
 )
 
-/**
- * Request for acknowledging notifications
- */
+/** Request for acknowledging notifications */
 @Serializable
 data class AcknowledgeRequest(
     val command: String = "acknowledge",
     val notificationIds: List<Int>,
 )
 
-/**
- * Notification entry from the stream
- */
+/** Notification entry from the stream */
 @Serializable
 data class FailureNotificationEntry(
     val id: Int,
@@ -101,9 +92,7 @@ data class FailureNotificationEntry(
     val acknowledged: Boolean,
 )
 
-/**
- * Response for notifications poll
- */
+/** Response for notifications poll */
 @Serializable
 data class FailuresNotificationsResponse(
     val success: Boolean,
@@ -113,9 +102,7 @@ data class FailuresNotificationsResponse(
     val lastId: Long? = null,
 )
 
-/**
- * Response for groups poll
- */
+/** Response for groups poll */
 @Serializable
 data class FailuresGroupsResponse(
     val success: Boolean,
@@ -132,9 +119,7 @@ data class FailureTotals(
     val nonfatals: Int = 0,
 )
 
-/**
- * Response for timeline poll
- */
+/** Response for timeline poll */
 @Serializable
 data class FailuresTimelineResponse(
     val success: Boolean,
@@ -160,9 +145,7 @@ data class PeriodTotalsDto(
     val nonfatals: Int = 0,
 )
 
-/**
- * Response for acknowledge
- */
+/** Response for acknowledge */
 @Serializable
 data class AcknowledgeResponse(
     val success: Boolean,
@@ -194,78 +177,103 @@ data class FailureGroupDto(
     val recentCaptures: List<FailureCaptureDto>,
     val sampleOccurrences: List<FailureOccurrenceDto>,
 ) {
-    fun toModel(): FailureGroup = FailureGroup(
-        id = id,
-        type = when (type) {
-            "crash" -> FailureType.Crash
-            "anr" -> FailureType.ANR
-            "tool_failure" -> FailureType.ToolCallFailure
-            "nonfatal" -> FailureType.NonFatal
-            else -> FailureType.Crash
-        },
-        signature = signature,
-        title = title,
-        message = message,
-        firstOccurrence = firstOccurrence,
-        lastOccurrence = lastOccurrence,
-        totalCount = totalCount,
-        uniqueSessions = uniqueSessions,
-        severity = when (severity) {
-            "critical" -> FailureSeverity.Critical
-            "high" -> FailureSeverity.High
-            "medium" -> FailureSeverity.Medium
-            "low" -> FailureSeverity.Low
-            else -> FailureSeverity.Medium
-        },
-        deviceBreakdown = deviceBreakdown.map {
-            DeviceBreakdown(it.deviceModel, it.os, it.count, it.percentage)
-        },
-        versionBreakdown = versionBreakdown.map {
-            VersionBreakdown(it.version, it.count, it.percentage)
-        },
-        screenBreakdown = screenBreakdown.map {
-            ScreenBreakdown(it.screenName, it.visitCount, it.failureCount, it.visitPercentage)
-        },
-        failureScreens = failureScreens,
-        stackTraceElements = stackTraceElements.map {
-            StackTraceElement(it.className, it.methodName, it.fileName, it.lineNumber, it.isAppCode)
-        },
-        toolCallInfo = toolCallInfo?.let {
-            AggregatedToolCallInfo(
-                toolName = it.toolName,
-                errorCodes = it.errorCodes,
-                parameterVariants = it.parameterVariants,
-                durationStats = it.durationStats?.let { stats ->
-                    DurationStats(stats.minMs, stats.maxMs, stats.avgMs, stats.medianMs, stats.p95Ms)
-                },
-            )
-        },
-        affectedTests = affectedTests,
-        recentCaptures = recentCaptures.map {
-            FailureCapture(
-                it.id,
-                if (it.type == "video") CaptureType.Video else CaptureType.Screenshot,
-                it.path,
-                it.timestamp,
-                it.deviceModel,
-            )
-        },
-        sampleOccurrences = sampleOccurrences.map {
-            FailureOccurrence(
-                it.id,
-                it.timestamp,
-                it.deviceModel,
-                it.os,
-                it.appVersion,
-                it.sessionId,
-                it.screenAtFailure,
-                it.screensVisited,
-                it.testName,
-                it.capturePath,
-                it.captureType?.let { type -> if (type == "video") CaptureType.Video else CaptureType.Screenshot },
-            )
-        },
-    )
+  fun toModel(): FailureGroup =
+      FailureGroup(
+          id = id,
+          type =
+              when (type) {
+                "crash" -> FailureType.Crash
+                "anr" -> FailureType.ANR
+                "tool_failure" -> FailureType.ToolCallFailure
+                "nonfatal" -> FailureType.NonFatal
+                else -> FailureType.Crash
+              },
+          signature = signature,
+          title = title,
+          message = message,
+          firstOccurrence = firstOccurrence,
+          lastOccurrence = lastOccurrence,
+          totalCount = totalCount,
+          uniqueSessions = uniqueSessions,
+          severity =
+              when (severity) {
+                "critical" -> FailureSeverity.Critical
+                "high" -> FailureSeverity.High
+                "medium" -> FailureSeverity.Medium
+                "low" -> FailureSeverity.Low
+                else -> FailureSeverity.Medium
+              },
+          deviceBreakdown =
+              deviceBreakdown.map {
+                DeviceBreakdown(it.deviceModel, it.os, it.count, it.percentage)
+              },
+          versionBreakdown =
+              versionBreakdown.map {
+                VersionBreakdown(it.version, it.count, it.percentage)
+              },
+          screenBreakdown =
+              screenBreakdown.map {
+                ScreenBreakdown(it.screenName, it.visitCount, it.failureCount, it.visitPercentage)
+              },
+          failureScreens = failureScreens,
+          stackTraceElements =
+              stackTraceElements.map {
+                StackTraceElement(
+                    it.className,
+                    it.methodName,
+                    it.fileName,
+                    it.lineNumber,
+                    it.isAppCode,
+                )
+              },
+          toolCallInfo =
+              toolCallInfo?.let {
+                AggregatedToolCallInfo(
+                    toolName = it.toolName,
+                    errorCodes = it.errorCodes,
+                    parameterVariants = it.parameterVariants,
+                    durationStats =
+                        it.durationStats?.let { stats ->
+                          DurationStats(
+                              stats.minMs,
+                              stats.maxMs,
+                              stats.avgMs,
+                              stats.medianMs,
+                              stats.p95Ms,
+                          )
+                        },
+                )
+              },
+          affectedTests = affectedTests,
+          recentCaptures =
+              recentCaptures.map {
+                FailureCapture(
+                    it.id,
+                    if (it.type == "video") CaptureType.Video else CaptureType.Screenshot,
+                    it.path,
+                    it.timestamp,
+                    it.deviceModel,
+                )
+              },
+          sampleOccurrences =
+              sampleOccurrences.map {
+                FailureOccurrence(
+                    it.id,
+                    it.timestamp,
+                    it.deviceModel,
+                    it.os,
+                    it.appVersion,
+                    it.sessionId,
+                    it.screenAtFailure,
+                    it.screensVisited,
+                    it.testName,
+                    it.capturePath,
+                    it.captureType?.let { type ->
+                      if (type == "video") CaptureType.Video else CaptureType.Screenshot
+                    },
+                )
+              },
+      )
 }
 
 @Serializable
@@ -341,92 +349,91 @@ data class FailureOccurrenceDto(
     val captureType: String? = null,
 )
 
-/**
- * Socket client for failures streaming
- */
+/** Socket client for failures streaming */
 class FailuresStreamSocketClient(
     private val socketPathValue: String = FailuresStreamSocketPaths.socketPath(),
     private val json: Json = Json {
-        ignoreUnknownKeys = true
-        explicitNulls = false
-        encodeDefaults = true  // Required to include command field with default value
+      ignoreUnknownKeys = true
+      explicitNulls = false
+      encodeDefaults = true // Required to include command field with default value
     },
 ) : FailuresStreamClient {
 
-    override fun pollNotifications(request: FailuresNotificationsRequest): FailuresNotificationsResponse {
-        val response = sendRequest<FailuresNotificationsResponse>(json.encodeToString(request))
-        if (!response.success) {
-            throw McpConnectionException(response.error ?: "Failures notifications poll failed")
-        }
-        return response
+  override fun pollNotifications(
+      request: FailuresNotificationsRequest
+  ): FailuresNotificationsResponse {
+    val response = sendRequest<FailuresNotificationsResponse>(json.encodeToString(request))
+    if (!response.success) {
+      throw McpConnectionException(response.error ?: "Failures notifications poll failed")
     }
+    return response
+  }
 
-    override fun pollGroups(request: FailuresGroupsRequest): FailuresGroupsResponse {
-        val response = sendRequest<FailuresGroupsResponse>(json.encodeToString(request))
-        if (!response.success) {
-            throw McpConnectionException(response.error ?: "Failures groups poll failed")
-        }
-        return response
+  override fun pollGroups(request: FailuresGroupsRequest): FailuresGroupsResponse {
+    val response = sendRequest<FailuresGroupsResponse>(json.encodeToString(request))
+    if (!response.success) {
+      throw McpConnectionException(response.error ?: "Failures groups poll failed")
     }
+    return response
+  }
 
-    override fun pollTimeline(request: FailuresTimelineRequest): FailuresTimelineResponse {
-        val response = sendRequest<FailuresTimelineResponse>(json.encodeToString(request))
-        if (!response.success) {
-            throw McpConnectionException(response.error ?: "Failures timeline poll failed")
-        }
-        return response
+  override fun pollTimeline(request: FailuresTimelineRequest): FailuresTimelineResponse {
+    val response = sendRequest<FailuresTimelineResponse>(json.encodeToString(request))
+    if (!response.success) {
+      throw McpConnectionException(response.error ?: "Failures timeline poll failed")
     }
+    return response
+  }
 
-    override fun acknowledge(notificationIds: List<Int>): AcknowledgeResponse {
-        val request = AcknowledgeRequest(notificationIds = notificationIds)
-        val response = sendRequest<AcknowledgeResponse>(json.encodeToString(request))
-        if (!response.success) {
-            throw McpConnectionException(response.error ?: "Failures acknowledge failed")
-        }
-        return response
+  override fun acknowledge(notificationIds: List<Int>): AcknowledgeResponse {
+    val request = AcknowledgeRequest(notificationIds = notificationIds)
+    val response = sendRequest<AcknowledgeResponse>(json.encodeToString(request))
+    if (!response.success) {
+      throw McpConnectionException(response.error ?: "Failures acknowledge failed")
     }
+    return response
+  }
 
-    private inline fun <reified T> sendRequest(requestJson: String): T {
-        ensureSocketExists()
+  private inline fun <reified T> sendRequest(requestJson: String): T {
+    ensureSocketExists()
 
-        val address = UnixDomainSocketAddress.of(socketPathValue)
-        SocketChannel.open(address).use { channel ->
-            val reader =
-                BufferedReader(
-                    InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
-                )
-            val writer =
-                BufferedWriter(
-                    OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
-                )
+    val address = UnixDomainSocketAddress.of(socketPathValue)
+    SocketChannel.open(address).use { channel ->
+      val reader =
+          BufferedReader(
+              InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
+          )
+      val writer =
+          BufferedWriter(
+              OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+          )
 
-            writer.write(requestJson)
-            writer.newLine()
-            writer.flush()
+      writer.write(requestJson)
+      writer.newLine()
+      writer.flush()
 
-            val line = reader.readLine()
-                ?: throw McpConnectionException("Failures stream socket closed")
-            return json.decodeFromString(line)
-        }
+      val line = reader.readLine() ?: throw McpConnectionException("Failures stream socket closed")
+      return json.decodeFromString(line)
     }
+  }
 
-    private fun ensureSocketExists() {
-        val path = File(socketPathValue).toPath()
-        if (!Files.exists(path)) {
-            throw McpConnectionException("Failures stream socket not found at $socketPathValue")
-        }
+  private fun ensureSocketExists() {
+    val path = File(socketPathValue).toPath()
+    if (!Files.exists(path)) {
+      throw McpConnectionException("Failures stream socket not found at $socketPathValue")
     }
+  }
 }
 
 object FailuresStreamSocketPaths {
-    fun socketPath(): String {
-        // Check for external mode (matches the server's logic)
-        val isExternalMode = System.getenv("AUTOMOBILE_EMULATOR_EXTERNAL") == "true"
-        return if (isExternalMode) {
-            "/tmp/auto-mobile-failures-stream.sock"
-        } else {
-            val home = System.getProperty("user.home", "").ifBlank { "." }
-            File(home, ".auto-mobile/failures-stream.sock").path
-        }
+  fun socketPath(): String {
+    // Check for external mode (matches the server's logic)
+    val isExternalMode = System.getenv("AUTOMOBILE_EMULATOR_EXTERNAL") == "true"
+    return if (isExternalMode) {
+      "/tmp/auto-mobile-failures-stream.sock"
+    } else {
+      val home = System.getProperty("user.home", "").ifBlank { "." }
+      File(home, ".auto-mobile/failures-stream.sock").path
     }
+  }
 }

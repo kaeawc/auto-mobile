@@ -17,88 +17,85 @@ import kotlinx.serialization.json.encodeToJsonElement
  * - setVideoConfig: Update video recording configuration
  */
 class RecordingClient(private val client: UnifiedSocketClient) {
-    private val json = Json { ignoreUnknownKeys = true }
+  private val json = Json { ignoreUnknownKeys = true }
 
-    /**
-     * Start test recording.
-     */
-    suspend fun startTest(
-        deviceId: String? = null,
-        platform: String? = null,
-    ): StartRecordingResult {
-        val params = buildMap<String, JsonElement> {
-            deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
-            platform?.let { put("platform", json.encodeToJsonElement(it)) }
+  /** Start test recording. */
+  suspend fun startTest(
+      deviceId: String? = null,
+      platform: String? = null,
+  ): StartRecordingResult {
+    val params =
+        buildMap<String, JsonElement> {
+          deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
+          platform?.let { put("platform", json.encodeToJsonElement(it)) }
         }
 
-        val result: JsonElement = client.request(
+    val result: JsonElement =
+        client.request(
             domain = Domains.RECORDING,
             method = "test/start",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
         )
 
-        return json.decodeFromJsonElement(result)
-    }
+    return json.decodeFromJsonElement(result)
+  }
 
-    /**
-     * Stop test recording.
-     */
-    suspend fun stopTest(
-        recordingId: String? = null,
-        planName: String? = null,
-    ): StopRecordingResult {
-        val params = buildMap<String, JsonElement> {
-            recordingId?.let { put("recordingId", json.encodeToJsonElement(it)) }
-            planName?.let { put("planName", json.encodeToJsonElement(it)) }
+  /** Stop test recording. */
+  suspend fun stopTest(
+      recordingId: String? = null,
+      planName: String? = null,
+  ): StopRecordingResult {
+    val params =
+        buildMap<String, JsonElement> {
+          recordingId?.let { put("recordingId", json.encodeToJsonElement(it)) }
+          planName?.let { put("planName", json.encodeToJsonElement(it)) }
         }
 
-        val result: JsonElement = client.request(
+    val result: JsonElement =
+        client.request(
             domain = Domains.RECORDING,
             method = "test/stop",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
         )
 
-        return json.decodeFromJsonElement(result)
-    }
+    return json.decodeFromJsonElement(result)
+  }
 
-    /**
-     * Get current recording status.
-     */
-    suspend fun getStatus(): RecordingStatusResult {
-        val result: JsonElement = client.request(
+  /** Get current recording status. */
+  suspend fun getStatus(): RecordingStatusResult {
+    val result: JsonElement =
+        client.request(
             domain = Domains.RECORDING,
             method = "test/status",
         )
 
-        return json.decodeFromJsonElement(result)
-    }
+    return json.decodeFromJsonElement(result)
+  }
 
-    /**
-     * Get video recording configuration.
-     */
-    suspend fun getVideoConfig(): VideoConfigResult {
-        val result: JsonElement = client.request(
+  /** Get video recording configuration. */
+  suspend fun getVideoConfig(): VideoConfigResult {
+    val result: JsonElement =
+        client.request(
             domain = Domains.RECORDING,
             method = "video/config/get",
         )
 
-        return json.decodeFromJsonElement(result)
-    }
+    return json.decodeFromJsonElement(result)
+  }
 
-    /**
-     * Set video recording configuration.
-     */
-    suspend fun setVideoConfig(config: VideoRecordingConfig): VideoConfigSetResult {
-        val params = mapOf("config" to json.encodeToJsonElement(config))
+  /** Set video recording configuration. */
+  suspend fun setVideoConfig(config: VideoRecordingConfig): VideoConfigSetResult {
+    val params = mapOf("config" to json.encodeToJsonElement(config))
 
-        val result: JsonElement = client.request(
+    val result: JsonElement =
+        client.request(
             domain = Domains.RECORDING,
             method = "video/config/set",
             params = json.encodeToJsonElement(params),
         )
 
-        return json.decodeFromJsonElement(result)
-    }
+    return json.decodeFromJsonElement(result)
+  }
 }
 
 @Serializable

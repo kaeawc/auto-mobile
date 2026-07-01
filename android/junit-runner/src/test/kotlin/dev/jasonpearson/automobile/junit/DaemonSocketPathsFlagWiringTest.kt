@@ -10,13 +10,14 @@ import org.junit.Test
 
 class DaemonSocketPathsFlagWiringTest {
 
-  private val flagProperties = listOf(
-      "automobile.daemon.dismiss.keyboard.after.input",
-      "automobile.daemon.no.ui.perf.mode",
-      "automobile.daemon.no.navigation.screenshots",
-      "automobile.daemon.no.waitfor.polling.overhead",
-      "automobile.daemon.package.version",
-  )
+  private val flagProperties =
+      listOf(
+          "automobile.daemon.dismiss.keyboard.after.input",
+          "automobile.daemon.no.ui.perf.mode",
+          "automobile.daemon.no.navigation.screenshots",
+          "automobile.daemon.no.waitfor.polling.overhead",
+          "automobile.daemon.package.version",
+      )
 
   @Before
   fun setUp() {
@@ -152,8 +153,7 @@ class DaemonSocketPathsFlagWiringTest {
 
   @Test
   fun `bunx package command pins configured AutoMobile version`() {
-    val command =
-        DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "0.0.32")
+    val command = DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "0.0.32")
 
     assertEquals(
         listOf("bunx", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
@@ -163,8 +163,7 @@ class DaemonSocketPathsFlagWiringTest {
 
   @Test
   fun `npx package command pins configured AutoMobile version with yes flag`() {
-    val command =
-        DaemonSocketPaths.buildPackageDaemonCommand("npx", "restart", "0.0.32")
+    val command = DaemonSocketPaths.buildPackageDaemonCommand("npx", "restart", "0.0.32")
 
     assertEquals(
         listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.32", "--daemon", "restart"),

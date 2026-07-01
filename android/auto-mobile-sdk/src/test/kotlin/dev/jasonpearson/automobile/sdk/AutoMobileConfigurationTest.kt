@@ -17,12 +17,13 @@ class AutoMobileConfigurationTest {
 
   @Test
   fun `builder fluent chaining works`() {
-    val config = AutoMobileConfiguration.Builder()
-      .bufferSize(200)
-      .flushIntervalMs(1000)
-      .maxBreadcrumbs(50)
-      .sessionTimeoutMs(60_000)
-      .build()
+    val config =
+        AutoMobileConfiguration.Builder()
+            .bufferSize(200)
+            .flushIntervalMs(1000)
+            .maxBreadcrumbs(50)
+            .sessionTimeoutMs(60_000)
+            .build()
 
     assertEquals(200, config.bufferSize)
     assertEquals(1000L, config.flushIntervalMs)
@@ -72,12 +73,13 @@ class AutoMobileConfigurationTest {
 
   @Test
   fun `configuration is a data class with correct equals and copy`() {
-    val config = AutoMobileConfiguration.Builder()
-      .bufferSize(100)
-      .flushIntervalMs(200)
-      .maxBreadcrumbs(300)
-      .sessionTimeoutMs(400)
-      .build()
+    val config =
+        AutoMobileConfiguration.Builder()
+            .bufferSize(100)
+            .flushIntervalMs(200)
+            .maxBreadcrumbs(300)
+            .sessionTimeoutMs(400)
+            .build()
 
     val copy = config.copy(bufferSize = 999)
 

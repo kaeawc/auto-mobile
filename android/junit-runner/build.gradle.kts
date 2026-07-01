@@ -25,10 +25,13 @@ java {
 // release, scripts/ci/verify-release-integrity.sh asserts the SNAPSHOT-stripped
 // base version here matches package.json and the git tag.
 val npmPackageVersion =
-    providers.fileContents(rootProject.layout.projectDirectory.file("../package.json")).asText.map { packageJson ->
-      val parsed = JsonSlurper().parseText(packageJson) as Map<*, *>
-      parsed["version"].toString()
-    }
+    providers
+        .fileContents(rootProject.layout.projectDirectory.file("../package.json"))
+        .asText
+        .map { packageJson ->
+          val parsed = JsonSlurper().parseText(packageJson) as Map<*, *>
+          parsed["version"].toString()
+        }
 
 dependencies {
   // Shared validation module
@@ -122,7 +125,10 @@ tasks.withType<Test> {
   systemProperty("automobile.ctrl.proxy.apk.path", accessibilityApk.get().asFile.absolutePath)
   systemProperty("automobile.daemon.package.version", npmPackageVersion.get())
   systemProperty("automobile.daemon.force.restart", "true")
-  systemProperty("automobile.daemon.local.project.path", rootProject.rootDir.parentFile.absolutePath)
+  systemProperty(
+      "automobile.daemon.local.project.path",
+      rootProject.rootDir.parentFile.absolutePath,
+  )
 
   testLogging {
     // Show standard output and error for tests

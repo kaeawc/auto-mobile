@@ -20,8 +20,8 @@ fun Modifier.autoMobileRecompositionId(id: String): Modifier {
 }
 
 /**
- * Modifier that attaches a recomposition tracking ID via semantics and records each
- * recomposition while tracking is enabled.
+ * Modifier that attaches a recomposition tracking ID via semantics and records each recomposition
+ * while tracking is enabled.
  *
  * @param id Stable identifier for this composable (e.g. screen or component name)
  * @param composableName Optional human-readable composable function name

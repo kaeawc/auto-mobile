@@ -14,8 +14,7 @@ data class PerformanceAuditStreamSnapshot(
 )
 
 class PerformanceAuditStreamService(
-    private val socketClient: PerformanceAuditStreamClient =
-        PerformanceAuditStreamSocketClient(),
+    private val socketClient: PerformanceAuditStreamClient = PerformanceAuditStreamSocketClient(),
     private val cache: PerformanceAuditStreamCache = PerformanceAuditStreamCacheStore.shared,
     private val clock: PerformanceAuditClock = SystemPerformanceAuditClock(),
     private val defaultWindowMs: Long = PerformanceAuditStreamCache.DEFAULT_TTL_MS,
@@ -32,11 +31,11 @@ class PerformanceAuditStreamService(
       val packageName: String?,
   )
 
-  private val cursors =
-      LinkedHashMap<FilterKey, PerformanceAuditStreamCursor>(16, 0.75f, true)
+  private val cursors = LinkedHashMap<FilterKey, PerformanceAuditStreamCursor>(16, 0.75f, true)
 
-  fun poll(filter: PerformanceAuditStreamFilter = PerformanceAuditStreamFilter()):
-      PerformanceAuditStreamSnapshot {
+  fun poll(
+      filter: PerformanceAuditStreamFilter = PerformanceAuditStreamFilter()
+  ): PerformanceAuditStreamSnapshot {
     val windowMs = filter.timeWindowMs ?: defaultWindowMs
     val startTime = formatTimestamp(clock.nowMs() - windowMs)
     val key = FilterKey(filter.deviceId, filter.sessionId, filter.packageName)

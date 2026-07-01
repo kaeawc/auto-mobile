@@ -18,61 +18,64 @@ import kotlinx.serialization.json.encodeToJsonElement
  * - subscribeToMetrics: Real-time performance data
  */
 class PerformanceClient(private val client: UnifiedSocketClient) {
-    private val json = Json { ignoreUnknownKeys = true }
+  private val json = Json { ignoreUnknownKeys = true }
 
-    /**
-     * Poll for performance audit results.
-     */
-    suspend fun poll(
-        sinceTimestamp: String? = null,
-        sinceId: Int? = null,
-        startTime: String? = null,
-        endTime: String? = null,
-        limit: Int? = null,
-        deviceId: String? = null,
-        sessionId: String? = null,
-        packageName: String? = null,
-    ): PollPerformanceResult {
-        val params = buildMap<String, JsonElement> {
-            sinceTimestamp?.let { put("sinceTimestamp", json.encodeToJsonElement(it)) }
-            sinceId?.let { put("sinceId", json.encodeToJsonElement(it)) }
-            startTime?.let { put("startTime", json.encodeToJsonElement(it)) }
-            endTime?.let { put("endTime", json.encodeToJsonElement(it)) }
-            limit?.let { put("limit", json.encodeToJsonElement(it)) }
-            deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
-            sessionId?.let { put("sessionId", json.encodeToJsonElement(it)) }
-            packageName?.let { put("packageName", json.encodeToJsonElement(it)) }
+  /** Poll for performance audit results. */
+  suspend fun poll(
+      sinceTimestamp: String? = null,
+      sinceId: Int? = null,
+      startTime: String? = null,
+      endTime: String? = null,
+      limit: Int? = null,
+      deviceId: String? = null,
+      sessionId: String? = null,
+      packageName: String? = null,
+  ): PollPerformanceResult {
+    val params =
+        buildMap<String, JsonElement> {
+          sinceTimestamp?.let { put("sinceTimestamp", json.encodeToJsonElement(it)) }
+          sinceId?.let { put("sinceId", json.encodeToJsonElement(it)) }
+          startTime?.let { put("startTime", json.encodeToJsonElement(it)) }
+          endTime?.let { put("endTime", json.encodeToJsonElement(it)) }
+          limit?.let { put("limit", json.encodeToJsonElement(it)) }
+          deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
+          sessionId?.let { put("sessionId", json.encodeToJsonElement(it)) }
+          packageName?.let { put("packageName", json.encodeToJsonElement(it)) }
         }
 
-        val result: JsonElement = client.request(
+    val result: JsonElement =
+        client.request(
             domain = Domains.PERFORMANCE,
             method = "poll",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
         )
 
-        return json.decodeFromJsonElement(result)
-    }
+    return json.decodeFromJsonElement(result)
+  }
 
-    /**
-     * Subscribe to real-time performance metrics.
-     */
-    fun subscribeToMetrics(
-        deviceId: String? = null,
-        packageName: String? = null,
-    ): Flow<LivePerformanceEvent> {
-        val params = buildMap<String, JsonElement> {
-            deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
-            packageName?.let { put("packageName", json.encodeToJsonElement(it)) }
+  /** Subscribe to real-time performance metrics. */
+  fun subscribeToMetrics(
+      deviceId: String? = null,
+      packageName: String? = null,
+  ): Flow<LivePerformanceEvent> {
+    val params =
+        buildMap<String, JsonElement> {
+          deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
+          packageName?.let { put("packageName", json.encodeToJsonElement(it)) }
         }
 
-        return client.subscribe(
+    return client
+        .subscribe(
             domain = Domains.PERFORMANCE,
             event = "performance_push",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
-        ).map { message ->
-            json.decodeFromJsonElement(message.result ?: throw IllegalStateException("No result in push"))
+        )
+        .map { message ->
+          json.decodeFromJsonElement(
+              message.result ?: throw IllegalStateException("No result in push")
+          )
         }
-    }
+  }
 }
 
 @Serializable

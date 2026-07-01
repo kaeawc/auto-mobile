@@ -177,14 +177,13 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
     }
 
     val className = klass.simpleName
-    val candidates =
-        children.mapIndexed { index, method ->
-          TimingCandidate(
-              method = method,
-              index = index,
-              durationMs = TestTimingCache.getTiming(className, method.name)?.averageDurationMs,
-          )
-        }
+    val candidates = children.mapIndexed { index, method ->
+      TimingCandidate(
+          method = method,
+          index = index,
+          durationMs = TestTimingCache.getTiming(className, method.name)?.averageDurationMs,
+      )
+    }
 
     val withTiming = candidates.filter { it.durationMs != null }
     val withoutTiming = candidates.filter { it.durationMs == null }
@@ -256,18 +255,17 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         val executor = Executors.newFixedThreadPool(maxParallelForks.coerceAtMost(children.size))
 
         try {
-          val futures =
-              children.map { child ->
-                executor.submit {
-                  println(
-                      "[${Thread.currentThread().name}] Starting test: ${describeChild(child).methodName}"
-                  )
-                  runChild(child, SynchronizedRunNotifier(notifier))
-                  println(
-                      "[${Thread.currentThread().name}] Finished test: ${describeChild(child).methodName}"
-                  )
-                }
-              }
+          val futures = children.map { child ->
+            executor.submit {
+              println(
+                  "[${Thread.currentThread().name}] Starting test: ${describeChild(child).methodName}"
+              )
+              runChild(child, SynchronizedRunNotifier(notifier))
+              println(
+                  "[${Thread.currentThread().name}] Finished test: ${describeChild(child).methodName}"
+              )
+            }
+          }
 
           val exceptions = mutableListOf<Throwable>()
           futures.forEach { future ->

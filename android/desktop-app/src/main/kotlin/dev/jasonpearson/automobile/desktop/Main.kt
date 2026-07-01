@@ -22,20 +22,19 @@ import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
 import dev.zacsweers.metro.createGraphFactory
 import java.io.IOException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import java.nio.file.Path
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /** True when running on macOS; used to pick Meta (Cmd) vs Ctrl for accelerators. */
-private val IS_MACOS: Boolean =
-    System.getProperty("os.name")?.lowercase()?.contains("mac") == true
+private val IS_MACOS: Boolean = System.getProperty("os.name")?.lowercase()?.contains("mac") == true
 
 /**
- * Creates a [KeyShortcut] that uses Meta (Cmd) on macOS and Ctrl on other platforms,
- * matching the convention already used in [AutoMobileContent] keyboard handlers.
+ * Creates a [KeyShortcut] that uses Meta (Cmd) on macOS and Ctrl on other platforms, matching the
+ * convention already used in [AutoMobileContent] keyboard handlers.
  */
 private fun platformShortcut(
     key: Key,
@@ -43,12 +42,13 @@ private fun platformShortcut(
 ): KeyShortcut = KeyShortcut(key, meta = IS_MACOS, ctrl = !IS_MACOS, shift = shift)
 
 /** Lock file ensuring only one instance of the desktop app runs at a time. */
-private val LOCK_FILE: Path = Path.of(System.getProperty("java.io.tmpdir"), "automobile-desktop.lock")
+private val LOCK_FILE: Path =
+    Path.of(System.getProperty("java.io.tmpdir"), "automobile-desktop.lock")
 private var lock: FileLock? = null
 
 /**
- * Acquire an exclusive file lock. Returns true if this is the only instance;
- * returns false if another instance already holds the lock.
+ * Acquire an exclusive file lock. Returns true if this is the only instance; returns false if
+ * another instance already holds the lock.
  */
 private fun acquireSingleInstanceLock(): Boolean {
   return try {
@@ -76,8 +76,8 @@ fun main() {
 
   // Enable macOS native transparent title bar
   if (System.getProperty("os.name")?.lowercase()?.contains("mac") == true) {
-      System.setProperty("apple.awt.fullWindowContent", "true")
-      System.setProperty("apple.awt.transparentTitleBar", "true")
+    System.setProperty("apple.awt.fullWindowContent", "true")
+    System.setProperty("apple.awt.transparentTitleBar", "true")
   }
 
   application {
@@ -87,31 +87,33 @@ fun main() {
     // Poll daemon connection state every 5 seconds using the DI graph's client.
     LaunchedEffect(Unit) {
       while (true) {
-        isDaemonConnected = try {
-          withContext(Dispatchers.IO) {
-            graph.autoMobileClient.getDaemonStatus()
-          }
-          true
-        } catch (_: IOException) {
-          false
-        } catch (_: McpConnectionException) {
-          false
-        }
+        isDaemonConnected =
+            try {
+              withContext(Dispatchers.IO) {
+                graph.autoMobileClient.getDaemonStatus()
+              }
+              true
+            } catch (_: IOException) {
+              false
+            } catch (_: McpConnectionException) {
+              false
+            }
         delay(5_000L)
       }
     }
 
     AutoMobileSystemTray(
-      isConnected = isDaemonConnected,
-      isWindowVisible = isWindowVisible,
-      onToggleWindow = { isWindowVisible = !isWindowVisible },
-      onQuit = ::exitApplication,
+        isConnected = isDaemonConnected,
+        isWindowVisible = isWindowVisible,
+        onToggleWindow = { isWindowVisible = !isWindowVisible },
+        onQuit = ::exitApplication,
     )
 
-    val windowState = rememberWindowState(
-      size = DpSize(1440.dp, 900.dp),
-      position = WindowPosition(Alignment.Center),
-    )
+    val windowState =
+        rememberWindowState(
+            size = DpSize(1440.dp, 900.dp),
+            position = WindowPosition(Alignment.Center),
+        )
 
     // Shared callback bridge between the native MenuBar and the Compose UI tree.
     // AutoMobileContent wires pane-visibility state and action callbacks into this
@@ -119,71 +121,71 @@ fun main() {
     val menuBarActions = remember { MenuBarActions() }
 
     Window(
-      onCloseRequest = { isWindowVisible = false },
-      title = "AutoMobile",
-      state = windowState,
-      visible = isWindowVisible,
+        onCloseRequest = { isWindowVisible = false },
+        title = "AutoMobile",
+        state = windowState,
+        visible = isWindowVisible,
     ) {
       CompositionLocalProvider(LocalAutoMobileGraph provides graph) {
         MenuBar {
           Menu("File", mnemonic = 'F') {
             Item(
-              "Settings",
-              onClick = { menuBarActions.showSettings = true },
-              shortcut = platformShortcut(Key.Comma),
+                "Settings",
+                onClick = { menuBarActions.showSettings = true },
+                shortcut = platformShortcut(Key.Comma),
             )
             Separator()
             Item(
-              "Quit",
-              onClick = { exitApplication() },
-              shortcut = platformShortcut(Key.Q),
+                "Quit",
+                onClick = { exitApplication() },
+                shortcut = platformShortcut(Key.Q),
             )
           }
           Menu("View", mnemonic = 'V') {
             Item(
-              "Toggle Left Pane",
-              onClick = { menuBarActions.showLeftPane = !menuBarActions.showLeftPane },
-              shortcut = platformShortcut(Key.Zero),
+                "Toggle Left Pane",
+                onClick = { menuBarActions.showLeftPane = !menuBarActions.showLeftPane },
+                shortcut = platformShortcut(Key.Zero),
             )
             Item(
-              "Toggle Right Pane",
-              onClick = { menuBarActions.showRightPane = !menuBarActions.showRightPane },
-              shortcut = platformShortcut(Key.Zero, shift = true),
+                "Toggle Right Pane",
+                onClick = { menuBarActions.showRightPane = !menuBarActions.showRightPane },
+                shortcut = platformShortcut(Key.Zero, shift = true),
             )
             Item(
-              "Toggle Bottom Pane",
-              onClick = { menuBarActions.showBottomPane = !menuBarActions.showBottomPane },
-              shortcut = platformShortcut(Key.Y, shift = true),
+                "Toggle Bottom Pane",
+                onClick = { menuBarActions.showBottomPane = !menuBarActions.showBottomPane },
+                shortcut = platformShortcut(Key.Y, shift = true),
             )
           }
           Menu("Tools", mnemonic = 'T') {
             Item(
-              "Command Palette",
-              onClick = { menuBarActions.showCommandPalette = true },
-              shortcut = platformShortcut(Key.P, shift = true),
+                "Command Palette",
+                onClick = { menuBarActions.showCommandPalette = true },
+                shortcut = platformShortcut(Key.P, shift = true),
             )
             Item(
-              "Global Search",
-              onClick = { menuBarActions.showGlobalSearch = true },
-              shortcut = platformShortcut(Key.F, shift = true),
+                "Global Search",
+                onClick = { menuBarActions.showGlobalSearch = true },
+                shortcut = platformShortcut(Key.F, shift = true),
             )
             Item(
-              "Quick Jump",
-              onClick = { menuBarActions.showQuickJump = true },
-              shortcut = platformShortcut(Key.K),
+                "Quick Jump",
+                onClick = { menuBarActions.showQuickJump = true },
+                shortcut = platformShortcut(Key.K),
             )
             Separator()
             Item(
-              "Take Screenshot",
-              onClick = { menuBarActions.onTakeScreenshot?.invoke() },
-              shortcut = platformShortcut(Key.S, shift = true),
+                "Take Screenshot",
+                onClick = { menuBarActions.onTakeScreenshot?.invoke() },
+                shortcut = platformShortcut(Key.S, shift = true),
             )
           }
           Menu("Help", mnemonic = 'H') {
             Item(
-              "Keyboard Shortcuts",
-              onClick = { menuBarActions.showCheatSheet = true },
-              shortcut = platformShortcut(Key.Slash),
+                "Keyboard Shortcuts",
+                onClick = { menuBarActions.showCheatSheet = true },
+                shortcut = platformShortcut(Key.Slash),
             )
             Separator()
             Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })

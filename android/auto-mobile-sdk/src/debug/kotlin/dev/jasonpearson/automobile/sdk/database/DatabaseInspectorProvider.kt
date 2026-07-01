@@ -85,7 +85,8 @@ class DatabaseInspectorProvider : ContentProvider() {
           JSONObject().apply {
             put("name", db.name)
             put("path", db.path)
-          })
+          }
+      )
     }
 
     return JSONObject().put("databases", jsonArray)
@@ -144,7 +145,8 @@ class DatabaseInspectorProvider : ContentProvider() {
             put("nullable", col.nullable)
             put("primaryKey", col.primaryKey)
             put("defaultValue", col.defaultValue ?: JSONObject.NULL)
-          })
+          }
+      )
     }
 
     return JSONObject().put("columns", columnsArray)
@@ -188,7 +190,7 @@ class DatabaseInspectorProvider : ContentProvider() {
       projection: Array<String>?,
       selection: String?,
       selectionArgs: Array<String>?,
-      sortOrder: String?
+      sortOrder: String?,
   ): Cursor? = null
 
   override fun getType(uri: Uri): String? = null
@@ -201,6 +203,6 @@ class DatabaseInspectorProvider : ContentProvider() {
       uri: Uri,
       values: ContentValues?,
       selection: String?,
-      selectionArgs: Array<String>?
+      selectionArgs: Array<String>?,
   ): Int = 0
 }

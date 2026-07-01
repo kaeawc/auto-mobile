@@ -401,8 +401,9 @@ class TestPlanValidatorTest {
     val result = TestPlanValidator.validateYaml(yaml)
     // Deprecated fields should still validate but may have warnings
     val warningErrors = result.errors.filter { it.severity == ValidationSeverity.WARNING }
-    val hasDeprecatedWarning =
-        warningErrors.any { it.message.contains("generated") || it.message.contains("deprecated") }
+    val hasDeprecatedWarning = warningErrors.any {
+      it.message.contains("generated") || it.message.contains("deprecated")
+    }
     assertTrue(
         hasDeprecatedWarning || result.valid,
         "Plan with deprecated 'generated' field should be valid or have warning",
@@ -423,8 +424,9 @@ class TestPlanValidatorTest {
     val result = TestPlanValidator.validateYaml(yaml)
     // Deprecated fields should still validate but may have warnings
     val warningErrors = result.errors.filter { it.severity == ValidationSeverity.WARNING }
-    val hasDeprecatedWarning =
-        warningErrors.any { it.message.contains("appId") || it.message.contains("deprecated") }
+    val hasDeprecatedWarning = warningErrors.any {
+      it.message.contains("appId") || it.message.contains("deprecated")
+    }
     assertTrue(
         hasDeprecatedWarning || result.valid,
         "Plan with deprecated 'appId' field should be valid or have warning",
@@ -447,8 +449,9 @@ class TestPlanValidatorTest {
     val result = TestPlanValidator.validateYaml(yaml)
     // Deprecated fields should still validate but may have warnings
     val warningErrors = result.errors.filter { it.severity == ValidationSeverity.WARNING }
-    val hasDeprecatedWarning =
-        warningErrors.any { it.message.contains("parameters") || it.message.contains("deprecated") }
+    val hasDeprecatedWarning = warningErrors.any {
+      it.message.contains("parameters") || it.message.contains("deprecated")
+    }
     assertTrue(
         hasDeprecatedWarning || result.valid,
         "Plan with deprecated 'parameters' field should be valid or have warning",
@@ -469,10 +472,9 @@ class TestPlanValidatorTest {
     val result = TestPlanValidator.validateYaml(yaml)
     // Deprecated fields should still validate but may have warnings
     val warningErrors = result.errors.filter { it.severity == ValidationSeverity.WARNING }
-    val hasDeprecatedWarning =
-        warningErrors.any {
-          it.message.contains("description") || it.message.contains("deprecated")
-        }
+    val hasDeprecatedWarning = warningErrors.any {
+      it.message.contains("description") || it.message.contains("deprecated")
+    }
     assertTrue(
         hasDeprecatedWarning || result.valid,
         "Plan with deprecated step 'description' should be valid or have warning",

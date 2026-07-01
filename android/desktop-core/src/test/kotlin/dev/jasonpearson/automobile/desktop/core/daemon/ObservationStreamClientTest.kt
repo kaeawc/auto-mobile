@@ -6,26 +6,27 @@ import kotlin.test.assertEquals
 import kotlinx.coroutines.test.runTest
 
 class ObservationStreamClientTest {
-    @Test
-    fun `emits device connection lost event for disconnect error message`() = runTest {
-        val client = ObservationStreamClient()
+  @Test
+  fun `emits device connection lost event for disconnect error message`() = runTest {
+    val client = ObservationStreamClient()
 
-        client.deviceEvents.test {
-            client.handleMessage(deviceConnectionLostMessage())
+    client.deviceEvents.test {
+      client.handleMessage(deviceConnectionLostMessage())
 
-            assertEquals(
-                DeviceStreamEvent.DeviceConnectionLost(
-                    deviceId = "emulator-5554",
-                    timestamp = 1234,
-                    error = "device connection lost",
-                ),
-                awaitItem(),
-            )
-        }
+      assertEquals(
+          DeviceStreamEvent.DeviceConnectionLost(
+              deviceId = "emulator-5554",
+              timestamp = 1234,
+              error = "device connection lost",
+          ),
+          awaitItem(),
+      )
     }
+  }
 
-    @Test
-    fun `clears replayed hierarchy screenshot and performance data when device connection is lost`() = runTest {
+  @Test
+  fun `clears replayed hierarchy screenshot and performance data when device connection is lost`() =
+      runTest {
         val client = ObservationStreamClient()
 
         client.handleMessage(
@@ -36,7 +37,8 @@ class ObservationStreamClientTest {
               "timestamp": 1000,
               "data": { "packageName": "com.example" }
             }
-            """.trimIndent()
+            """
+                .trimIndent()
         )
         client.handleMessage(
             """
@@ -48,7 +50,8 @@ class ObservationStreamClientTest {
               "screenWidth": 100,
               "screenHeight": 200
             }
-            """.trimIndent()
+            """
+                .trimIndent()
         )
         client.handleMessage(
             """
@@ -65,40 +68,42 @@ class ObservationStreamClientTest {
                 "cpuUsagePercent": 10.0
               }
             }
-            """.trimIndent()
+            """
+                .trimIndent()
         )
 
         client.hierarchyUpdates.test {
-            assertEquals("emulator-5554", awaitItem().deviceId)
+          assertEquals("emulator-5554", awaitItem().deviceId)
         }
         client.screenshotUpdates.test {
-            assertEquals("emulator-5554", awaitItem().deviceId)
+          assertEquals("emulator-5554", awaitItem().deviceId)
         }
         client.performanceUpdates.test {
-            assertEquals("emulator-5554", awaitItem().deviceId)
+          assertEquals("emulator-5554", awaitItem().deviceId)
         }
 
         client.handleMessage(deviceConnectionLostMessage())
 
         client.hierarchyUpdates.test {
-            expectNoEvents()
+          expectNoEvents()
         }
         client.screenshotUpdates.test {
-            expectNoEvents()
+          expectNoEvents()
         }
         client.performanceUpdates.test {
-            expectNoEvents()
+          expectNoEvents()
         }
-    }
+      }
 
-    private fun deviceConnectionLostMessage(): String =
-        """
-        {
-          "type": "error",
-          "success": false,
-          "deviceId": "emulator-5554",
-          "timestamp": 1234,
-          "error": "device connection lost"
-        }
-        """.trimIndent()
+  private fun deviceConnectionLostMessage(): String =
+      """
+      {
+        "type": "error",
+        "success": false,
+        "deviceId": "emulator-5554",
+        "timestamp": 1234,
+        "error": "device connection lost"
+      }
+      """
+          .trimIndent()
 }

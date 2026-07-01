@@ -29,7 +29,8 @@ class SessionTrackerTest {
 
   @Test
   fun `new session on first foreground`() {
-    val tracker = SessionTracker(uuidProvider = fakeUuidProvider, timerFactory = FakeTimer().factory)
+    val tracker =
+        SessionTracker(uuidProvider = fakeUuidProvider, timerFactory = FakeTimer().factory)
 
     assertNull(tracker.currentSessionId())
     tracker.onForeground()
@@ -54,11 +55,12 @@ class SessionTrackerTest {
   @Test
   fun `new session after timeout expires`() {
     val timer = FakeTimer()
-    val tracker = SessionTracker(
-      timeoutMs = 30_000L,
-      uuidProvider = fakeUuidProvider,
-      timerFactory = timer.factory,
-    )
+    val tracker =
+        SessionTracker(
+            timeoutMs = 30_000L,
+            uuidProvider = fakeUuidProvider,
+            timerFactory = timer.factory,
+        )
 
     tracker.onForeground()
     assertEquals("session-1", tracker.currentSessionId())
@@ -74,11 +76,12 @@ class SessionTrackerTest {
   @Test
   fun `timeout schedules with correct delay`() {
     val timer = FakeTimer()
-    val tracker = SessionTracker(
-      timeoutMs = 45_000L,
-      uuidProvider = fakeUuidProvider,
-      timerFactory = timer.factory,
-    )
+    val tracker =
+        SessionTracker(
+            timeoutMs = 45_000L,
+            uuidProvider = fakeUuidProvider,
+            timerFactory = timer.factory,
+        )
 
     tracker.onForeground()
     tracker.onBackground()
@@ -127,7 +130,8 @@ class SessionTrackerTest {
 
   @Test
   fun `duplicate foreground calls do not generate new session`() {
-    val tracker = SessionTracker(uuidProvider = fakeUuidProvider, timerFactory = FakeTimer().factory)
+    val tracker =
+        SessionTracker(uuidProvider = fakeUuidProvider, timerFactory = FakeTimer().factory)
 
     tracker.onForeground()
     assertEquals("session-1", tracker.currentSessionId())
@@ -162,7 +166,8 @@ class SessionTrackerTest {
 
   @Test
   fun `shutdown is safe to call multiple times`() {
-    val tracker = SessionTracker(uuidProvider = fakeUuidProvider, timerFactory = FakeTimer().factory)
+    val tracker =
+        SessionTracker(uuidProvider = fakeUuidProvider, timerFactory = FakeTimer().factory)
 
     tracker.onForeground()
     tracker.shutdown()

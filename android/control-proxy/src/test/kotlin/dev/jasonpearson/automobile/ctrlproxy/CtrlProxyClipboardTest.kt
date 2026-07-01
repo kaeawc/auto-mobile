@@ -37,7 +37,8 @@ class CtrlProxyClipboardTest {
   fun `returns clipboard text when a primary clip is readable`() {
     val clip = ClipData.newPlainText("AutoMobile", "CLIPMARKER777")
 
-    val result = CtrlProxyClipboard.readResultFromPrimaryClip(clip, Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    val result =
+        CtrlProxyClipboard.readResultFromPrimaryClip(clip, Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 
     assertTrue(result.success)
     assertEquals("CLIPMARKER777", result.text)

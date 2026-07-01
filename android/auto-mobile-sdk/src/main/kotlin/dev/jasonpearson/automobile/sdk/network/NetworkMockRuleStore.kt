@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.sdk.network
 
-import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -17,8 +16,8 @@ import kotlinx.serialization.json.Json
 /**
  * Thread-safe store for network mock rules and error simulation config.
  *
- * Updated via BroadcastReceiver from control-proxy process.
- * Queried by [AutoMobileNetworkInterceptor] on every HTTP request.
+ * Updated via BroadcastReceiver from control-proxy process. Queried by
+ * [AutoMobileNetworkInterceptor] on every HTTP request.
  */
 class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeMillis() }) {
 
@@ -37,7 +36,8 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     @Volatile private var instance: NetworkMockRuleStore? = null
 
     fun getInstance(): NetworkMockRuleStore {
-      return instance ?: synchronized(this) { instance ?: NetworkMockRuleStore().also { instance = it } }
+      return instance
+          ?: synchronized(this) { instance ?: NetworkMockRuleStore().also { instance = it } }
     }
 
     fun initialize(context: Context) {
@@ -48,6 +48,7 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
   /** Interface for the interceptor to query rules without depending on the full store. */
   interface RuleMatcher {
     fun findMatchingRule(host: String, path: String, method: String): MatchedMockRule?
+
     fun getErrorSimulation(): ErrorSimulationConfig?
   }
 
@@ -89,7 +90,7 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
         override fun findMatchingRule(
             host: String,
             path: String,
-            method: String
+            method: String,
         ): MatchedMockRule? {
           return this@NetworkMockRuleStore.findMatchingRule(host, path, method)
         }
@@ -115,9 +116,12 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
                 responseHeaders = dto.responseHeaders,
                 responseBody = dto.responseBody,
                 contentType = dto.contentType,
-            ))
+            )
+        )
       } catch (e: Exception) {
-        AutoMobileSDK.logger.w(TAG) { "Skipping mock rule ${dto.mockId}: invalid regex: ${e.message}" }
+        AutoMobileSDK.logger.w(TAG) {
+          "Skipping mock rule ${dto.mockId}: invalid regex: ${e.message}"
+        }
       }
     }
     AutoMobileSDK.logger.d(TAG) { "Updated mock rules: ${rules.size} active" }
@@ -127,7 +131,7 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
       enabled: Boolean,
       errorType: String?,
       limit: Int?,
-      expiresAtEpochMs: Long?
+      expiresAtEpochMs: Long?,
   ) {
     errorSimulation =
         if (enabled && errorType != null && expiresAtEpochMs != null) {
@@ -199,11 +203,18 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
         }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       context.registerReceiver(
-          receiver, filter, PERMISSION_NETWORK_CONTROL, null, Context.RECEIVER_EXPORTED)
+          receiver,
+          filter,
+          PERMISSION_NETWORK_CONTROL,
+          null,
+          Context.RECEIVER_EXPORTED,
+      )
     } else {
       context.registerReceiver(receiver, filter, PERMISSION_NETWORK_CONTROL, null)
     }
-    AutoMobileSDK.logger.d(TAG) { "Registered broadcast receiver for network mock rules (permission-gated)" }
+    AutoMobileSDK.logger.d(TAG) {
+      "Registered broadcast receiver for network mock rules (permission-gated)"
+    }
   }
 
   fun unregisterReceiver(context: Context) {
@@ -222,7 +233,9 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
               try {
                 val dtos =
                     json.decodeFromString(
-                        ListSerializer(NetworkMockRuleDto.serializer()), rulesJson)
+                        ListSerializer(NetworkMockRuleDto.serializer()),
+                        rulesJson,
+                    )
                 setRules(dtos)
               } catch (e: Exception) {
                 AutoMobileSDK.logger.e(TAG) { "Failed to parse mock rules: ${e.message}" }

@@ -34,8 +34,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     private const val OCCLUSION_FILTER_ENABLED = true
     private const val OCCLUSION_THRESHOLD = 0.95
     private const val DEFAULT_WINDOW_KEY = -1
-    private const val CONTENT_HIDDEN_REASON_COMPOSE_INTEROP =
-        "compose-interop-no-hide-descendants"
+    private const val CONTENT_HIDDEN_REASON_COMPOSE_INTEROP = "compose-interop-no-hide-descendants"
     private const val MIN_HIDDEN_REGION_SCREEN_AREA = 0.25
     private const val MAX_VISIBLE_CHILD_COVERAGE = 0.25
 
@@ -57,8 +56,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    * @param textFilter Optional text filter
    * @param screenDimensions Optional screen dimensions for offscreen filtering
    * @param dedupeTextContentDesc When true, omit content-desc when it equals text (default: true)
-   * @param disableAllFiltering When true, disable all optimizations and filtering (for
-   *   observe with raw:true)
+   * @param disableAllFiltering When true, disable all optimizations and filtering (for observe with
+   *   raw:true)
    */
   fun extractFromActiveWindow(
       rootNode: AccessibilityNodeInfo?,
@@ -85,8 +84,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               dedupeTextContentDesc,
               accessibilityFocusedNode,
           )
-      val contentHiddenRegions =
-          rootElement?.let { detectContentHiddenRegions(listOf(it), screenDimensions) }
+      val contentHiddenRegions = rootElement?.let {
+        detectContentHiddenRegions(listOf(it), screenDimensions)
+      }
 
       // Skip optimization and filtering if disableAllFiltering is true
       val processedElement =
@@ -103,39 +103,37 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
                 "[PROCESS] After wrapOptimizedElements: hasElement=${wrappedElement != null}, textNodes=$wrappedTextCount",
             )
 
-            val finalElement =
-                wrappedElement?.let {
-                  if (OCCLUSION_FILTER_ENABLED) {
-                    val filtered = applyOcclusionFilteringSingleWindow(it)
-                    val filteredTextCount = filtered?.let { countTextNodes(it) } ?: 0
-                    Log.d(
-                        TAG,
-                        "[PROCESS] After applyOcclusionFiltering: hasElement=${filtered != null}, textNodes=$filteredTextCount",
-                    )
-                    filtered
-                  } else {
-                    it
-                  }
-                }
+            val finalElement = wrappedElement?.let {
+              if (OCCLUSION_FILTER_ENABLED) {
+                val filtered = applyOcclusionFilteringSingleWindow(it)
+                val filteredTextCount = filtered?.let { countTextNodes(it) } ?: 0
+                Log.d(
+                    TAG,
+                    "[PROCESS] After applyOcclusionFiltering: hasElement=${filtered != null}, textNodes=$filteredTextCount",
+                )
+                filtered
+              } else {
+                it
+              }
+            }
             finalElement
           }
 
       val intentChooserDetected =
           processedElement?.let { detectIntentChooserIndicators(it) } ?: false
-      val notificationPermissionDetected =
-          processedElement?.let {
-            detectNotificationPermissionDialog(it, rootNode.packageName?.toString())
-          }
+      val notificationPermissionDetected = processedElement?.let {
+        detectNotificationPermissionDialog(it, rootNode.packageName?.toString())
+      }
 
-      val unifiedHierarchy =
-          processedElement?.let {
-            val nodeElement = encodeChildrenToNodeElement(listOf(it))
-            nodeElement?.let { root -> UIElementInfo(node = root) }
-          }
+      val unifiedHierarchy = processedElement?.let {
+        val nodeElement = encodeChildrenToNodeElement(listOf(it))
+        nodeElement?.let { root -> UIElementInfo(node = root) }
+      }
 
       // Find the accessibility-focused element in the unified hierarchy
-      val accessibilityFocusedElement =
-          unifiedHierarchy?.let { findAccessibilityFocusedElement(it) }
+      val accessibilityFocusedElement = unifiedHierarchy?.let {
+        findAccessibilityFocusedElement(it)
+      }
 
       ViewHierarchy(
           packageName = rootNode.packageName?.toString(),
@@ -160,8 +158,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    * @param textFilter Optional text filter
    * @param screenDimensions Optional screen dimensions for offscreen filtering
    * @param dedupeTextContentDesc When true, omit content-desc when it equals text (default: true)
-   * @param disableAllFiltering When true, disable all optimizations and filtering (for
-   *   observe with raw:true)
+   * @param disableAllFiltering When true, disable all optimizations and filtering (for observe with
+   *   raw:true)
    */
   fun extractFromAllWindows(
       windows: List<AccessibilityWindowInfo>,
@@ -378,18 +376,17 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     // keyguard_message_area_container incorrectly strips content in system UI)
     if (!disableAllFiltering && OCCLUSION_FILTER_ENABLED && windowEntries.size > 1) {
       val occlusionInfo = buildOcclusionInfo(windowEntries)
-      val filteredEntries =
-          windowEntries.mapNotNull { windowEntry ->
-            val hierarchy =
-                filterOccludedHierarchy(
-                    windowEntry.hierarchy,
-                    occlusionInfo,
-                    windowEntry.windowId,
-                    path = "",
-                    isRoot = true,
-                )
-            hierarchy?.let { windowEntry.copy(hierarchy = it) }
-          }
+      val filteredEntries = windowEntries.mapNotNull { windowEntry ->
+        val hierarchy =
+            filterOccludedHierarchy(
+                windowEntry.hierarchy,
+                occlusionInfo,
+                windowEntry.windowId,
+                path = "",
+                isRoot = true,
+            )
+        hierarchy?.let { windowEntry.copy(hierarchy = it) }
+      }
       windowEntries.clear()
       windowEntries.addAll(filteredEntries)
       // Re-select main hierarchy after occlusion filtering. When IME is up, the IME entry is
@@ -397,11 +394,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       mainHierarchy =
           windowEntries
               .firstOrNull {
-                if (primaryAppWindowId != null) it.windowId == primaryAppWindowId
-                else it.isActive
+                if (primaryAppWindowId != null) it.windowId == primaryAppWindowId else it.isActive
               }
-              ?.hierarchy
-              ?: mainHierarchy
+              ?.hierarchy ?: mainHierarchy
 
       // Debug: Check if Tab text survives occlusion filtering
       mainHierarchy?.let {
@@ -453,7 +448,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         notificationPermissionDetected = notificationPermissionDetected,
         accessibilityFocusedElement = accessibilityFocusedElement,
         ctrlProxyIncomplete = if (ctrlProxyIncomplete) true else null,
-        contentHiddenRegions = detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
+        contentHiddenRegions =
+            detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
     )
   }
 
@@ -560,10 +556,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         node.isScrollable ||
         node.isLongClickable ||
         actions.any {
-          it == "click" ||
-              it == "long_click" ||
-              it == "scroll_forward" ||
-              it == "scroll_backward"
+          it == "click" || it == "long_click" || it == "scroll_forward" || it == "scroll_backward"
         }
   }
 
@@ -574,17 +567,16 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     if (children.isEmpty()) {
       return 0.0
     }
-    val coveredArea =
-        children.sumOf { child ->
-          val childBounds = child.bounds ?: return@sumOf 0
-          val left = max(parentBounds.left, childBounds.left)
-          val top = max(parentBounds.top, childBounds.top)
-          val right = min(parentBounds.right, childBounds.right)
-          val bottom = min(parentBounds.bottom, childBounds.bottom)
-          val width = max(0, right - left)
-          val height = max(0, bottom - top)
-          width * height
-        }
+    val coveredArea = children.sumOf { child ->
+      val childBounds = child.bounds ?: return@sumOf 0
+      val left = max(parentBounds.left, childBounds.left)
+      val top = max(parentBounds.top, childBounds.top)
+      val right = min(parentBounds.right, childBounds.right)
+      val bottom = min(parentBounds.bottom, childBounds.bottom)
+      val width = max(0, right - left)
+      val height = max(0, bottom - top)
+      width * height
+    }
     return coveredArea.toDouble() / parentBounds.area().toDouble()
   }
 
@@ -688,12 +680,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
   /**
    * Selects the window id that hierarchy extraction should treat as the "primary" user-facing
-   * window when an IME is visible. Returns null when no IME with a root is present (callers
-   * should fall back to `window.isActive`).
+   * window when an IME is visible. Returns null when no IME with a root is present (callers should
+   * fall back to `window.isActive`).
    *
    * Android marks the IME's [AccessibilityWindowInfo.isActive] as true while the keyboard is
-   * showing, which would otherwise cause `mainHierarchy` selection to pick the keyboard
-   * instead of the app underneath it.
+   * showing, which would otherwise cause `mainHierarchy` selection to pick the keyboard instead of
+   * the app underneath it.
    */
   private fun pickPrimaryAppWindowId(windows: List<AccessibilityWindowInfo>): Int? =
       pickPrimaryAppWindowId(
@@ -702,8 +694,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           },
       )
 
-  /** Test-only metadata shape so primary-window selection can be unit-tested without mocking
-   *  [AccessibilityWindowInfo]. */
+  /**
+   * Test-only metadata shape so primary-window selection can be unit-tested without mocking
+   * [AccessibilityWindowInfo].
+   */
   internal data class WindowMeta(
       val id: Int,
       val type: Int,
@@ -778,11 +772,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       // filter zero-area bounds and completely offscreen nodes above, which is sufficient.
 
       // Build deterministic path for viewId generation
-      val segment = if (node.viewIdResourceName != null) {
-        "$childIndex:${node.viewIdResourceName}"
-      } else {
-        childIndex.toString()
-      }
+      val segment =
+          if (node.viewIdResourceName != null) {
+            "$childIndex:${node.viewIdResourceName}"
+          } else {
+            childIndex.toString()
+          }
       val currentPath = if (parentPath.isEmpty()) segment else "$parentPath/$segment"
 
       val children = mutableListOf<UIElementInfo>()
@@ -839,37 +834,35 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       // Extract accessibility actions
       val actionList = node.actionList
       if (actionList != null && actionList.isNotEmpty()) {
-        actions =
-            actionList.mapNotNull { action ->
-              when (action.id) {
-                AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "accessibility_focus"
-                AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS ->
-                    "clear_accessibility_focus"
-                AccessibilityNodeInfo.ACTION_CLEAR_FOCUS -> "clear_focus"
-                AccessibilityNodeInfo.ACTION_CLEAR_SELECTION -> "clear_selection"
-                AccessibilityNodeInfo.ACTION_CLICK -> "click"
-                AccessibilityNodeInfo.ACTION_COLLAPSE -> "collapse"
-                AccessibilityNodeInfo.ACTION_COPY -> "copy"
-                AccessibilityNodeInfo.ACTION_CUT -> "cut"
-                AccessibilityNodeInfo.ACTION_DISMISS -> "dismiss"
-                AccessibilityNodeInfo.ACTION_EXPAND -> "expand"
-                AccessibilityNodeInfo.ACTION_FOCUS -> "focus"
-                AccessibilityNodeInfo.ACTION_LONG_CLICK -> "long_click"
-                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY ->
-                    "next_at_movement_granularity"
-                AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT -> "next_html_element"
-                AccessibilityNodeInfo.ACTION_PASTE -> "paste"
-                AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY ->
-                    "previous_at_movement_granularity"
-                AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT -> "previous_html_element"
-                AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "scroll_backward"
-                AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "scroll_forward"
-                AccessibilityNodeInfo.ACTION_SELECT -> "select"
-                AccessibilityNodeInfo.ACTION_SET_SELECTION -> "set_selection"
-                AccessibilityNodeInfo.ACTION_SET_TEXT -> "set_text"
-                else -> null
-              }
-            }
+        actions = actionList.mapNotNull { action ->
+          when (action.id) {
+            AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "accessibility_focus"
+            AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS -> "clear_accessibility_focus"
+            AccessibilityNodeInfo.ACTION_CLEAR_FOCUS -> "clear_focus"
+            AccessibilityNodeInfo.ACTION_CLEAR_SELECTION -> "clear_selection"
+            AccessibilityNodeInfo.ACTION_CLICK -> "click"
+            AccessibilityNodeInfo.ACTION_COLLAPSE -> "collapse"
+            AccessibilityNodeInfo.ACTION_COPY -> "copy"
+            AccessibilityNodeInfo.ACTION_CUT -> "cut"
+            AccessibilityNodeInfo.ACTION_DISMISS -> "dismiss"
+            AccessibilityNodeInfo.ACTION_EXPAND -> "expand"
+            AccessibilityNodeInfo.ACTION_FOCUS -> "focus"
+            AccessibilityNodeInfo.ACTION_LONG_CLICK -> "long_click"
+            AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY ->
+                "next_at_movement_granularity"
+            AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT -> "next_html_element"
+            AccessibilityNodeInfo.ACTION_PASTE -> "paste"
+            AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY ->
+                "previous_at_movement_granularity"
+            AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT -> "previous_html_element"
+            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "scroll_backward"
+            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "scroll_forward"
+            AccessibilityNodeInfo.ACTION_SELECT -> "select"
+            AccessibilityNodeInfo.ACTION_SET_SELECTION -> "set_selection"
+            AccessibilityNodeInfo.ACTION_SET_TEXT -> "set_text"
+            else -> null
+          }
+        }
 
         if (actions.isEmpty()) {
           actions = null
@@ -1478,9 +1471,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
   ): Map<NodeKey, OcclusionInfo> {
     val nodes = mutableListOf<OcclusionNode>()
     val imeWindowKeys =
-        windowEntries.asSequence().filter { it.windowType == "input_method" }.mapTo(
-            mutableSetOf(),
-        ) { it.windowId }
+        windowEntries
+            .asSequence()
+            .filter { it.windowType == "input_method" }
+            .mapTo(
+                mutableSetOf(),
+            ) {
+              it.windowId
+            }
     for (windowEntry in windowEntries) {
       val hierarchy = windowEntry.hierarchy
       val windowKey = windowEntry.windowId
@@ -1660,11 +1658,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     }
 
     val children = decodeChildrenFromNode(element.node)
-    val filteredChildren =
-        children.mapIndexedNotNull { index, child ->
-          val childPath = if (path.isBlank()) index.toString() else "$path.$index"
-          filterOccludedHierarchy(child, occlusionInfo, windowKey, childPath, isRoot = false)
-        }
+    val filteredChildren = children.mapIndexedNotNull { index, child ->
+      val childPath = if (path.isBlank()) index.toString() else "$path.$index"
+      filterOccludedHierarchy(child, occlusionInfo, windowKey, childPath, isRoot = false)
+    }
 
     val filteredNodeElement = encodeChildrenToNodeElement(filteredChildren)
 

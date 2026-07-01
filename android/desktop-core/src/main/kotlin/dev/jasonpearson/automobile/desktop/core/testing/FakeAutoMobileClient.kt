@@ -29,251 +29,259 @@ import kotlinx.serialization.json.JsonObject
 /**
  * Reusable fake implementation of [AutoMobileClient] for testing.
  *
- * All methods record their call name in [calls] and return configurable values.
- * Resource responses can be set per-URI via [setResourceResponseWithText].
+ * All methods record their call name in [calls] and return configurable values. Resource responses
+ * can be set per-URI via [setResourceResponseWithText].
  */
 class FakeAutoMobileClient : AutoMobileClient {
 
-    /** Ordered list of method names that were called. */
-    val calls = mutableListOf<String>()
+  /** Ordered list of method names that were called. */
+  val calls = mutableListOf<String>()
 
-    // -- Configurable return values --
+  // -- Configurable return values --
 
-    override var transportName: String = "fake"
-    override var connectionDescription: String = "Fake client for testing"
+  override var transportName: String = "fake"
+  override var connectionDescription: String = "Fake client for testing"
 
-    var pingResult: () -> Unit = {}
-    var listResourcesResult: List<McpResource> = emptyList()
-    var listResourceTemplatesResult: List<McpResourceTemplate> = emptyList()
-    var listToolsResult: List<McpTool> = emptyList()
-    var getNavigationGraphResult: JsonElement = JsonObject(emptyMap())
-    var listFeatureFlagsResult: List<FeatureFlagState> = emptyList()
-    var setFeatureFlagResult: FeatureFlagState = FeatureFlagState(key = "", label = "", enabled = false)
-    var listPerformanceAuditResultsResult: PerformanceAuditHistoryResult =
-        PerformanceAuditHistoryResult()
-    var getTestTimingsResult: TestTimingSummary = TestTimingSummary()
-    var getTestRunsResult: TestRunSummary = TestRunSummary()
-    var startTestRecordingResult: TestRecordingStartResult =
-        TestRecordingStartResult(recordingId = "fake-id", startedAt = "2025-01-01T00:00:00Z")
-    var stopTestRecordingResult: TestRecordingStopResult = TestRecordingStopResult(
-        recordingId = "fake-id",
-        startedAt = "2025-01-01T00:00:00Z",
-        stoppedAt = "2025-01-01T00:00:01Z",
-        durationMs = 1000,
-        planName = "fake-plan",
-        planContent = "",
-        stepCount = 0,
-    )
-    var executePlanResult: ExecutePlanResult = ExecutePlanResult(success = true, executedSteps = 0, totalSteps = 0)
-    var startDeviceResult: StartDeviceResult = StartDeviceResult(success = true)
-    var setActiveDeviceResult: SetActiveDeviceResult = SetActiveDeviceResult(success = true)
-    var observeResult: ObserveResult = ObserveResult()
-    var killDeviceResult: KillDeviceResult = KillDeviceResult(success = true)
-    var getDaemonStatusResult: DaemonStatusResponse = DaemonStatusResponse()
-    var updateServiceResult: UpdateServiceResult = UpdateServiceResult(success = true)
-    var setKeyValueResult: SetKeyValueResult = SetKeyValueResult(success = true)
-    var removeKeyValueResult: RemoveKeyValueResult = RemoveKeyValueResult(success = true)
-    var clearKeyValueFileResult: ClearKeyValueResult = ClearKeyValueResult(success = true)
-    var callToolResult: JsonElement = JsonObject(emptyMap())
-    var throwOnReadResource: Exception? = null
+  var pingResult: () -> Unit = {}
+  var listResourcesResult: List<McpResource> = emptyList()
+  var listResourceTemplatesResult: List<McpResourceTemplate> = emptyList()
+  var listToolsResult: List<McpTool> = emptyList()
+  var getNavigationGraphResult: JsonElement = JsonObject(emptyMap())
+  var listFeatureFlagsResult: List<FeatureFlagState> = emptyList()
+  var setFeatureFlagResult: FeatureFlagState =
+      FeatureFlagState(key = "", label = "", enabled = false)
+  var listPerformanceAuditResultsResult: PerformanceAuditHistoryResult =
+      PerformanceAuditHistoryResult()
+  var getTestTimingsResult: TestTimingSummary = TestTimingSummary()
+  var getTestRunsResult: TestRunSummary = TestRunSummary()
+  var startTestRecordingResult: TestRecordingStartResult =
+      TestRecordingStartResult(recordingId = "fake-id", startedAt = "2025-01-01T00:00:00Z")
+  var stopTestRecordingResult: TestRecordingStopResult =
+      TestRecordingStopResult(
+          recordingId = "fake-id",
+          startedAt = "2025-01-01T00:00:00Z",
+          stoppedAt = "2025-01-01T00:00:01Z",
+          durationMs = 1000,
+          planName = "fake-plan",
+          planContent = "",
+          stepCount = 0,
+      )
+  var executePlanResult: ExecutePlanResult =
+      ExecutePlanResult(success = true, executedSteps = 0, totalSteps = 0)
+  var startDeviceResult: StartDeviceResult = StartDeviceResult(success = true)
+  var setActiveDeviceResult: SetActiveDeviceResult = SetActiveDeviceResult(success = true)
+  var observeResult: ObserveResult = ObserveResult()
+  var killDeviceResult: KillDeviceResult = KillDeviceResult(success = true)
+  var getDaemonStatusResult: DaemonStatusResponse = DaemonStatusResponse()
+  var updateServiceResult: UpdateServiceResult = UpdateServiceResult(success = true)
+  var setKeyValueResult: SetKeyValueResult = SetKeyValueResult(success = true)
+  var removeKeyValueResult: RemoveKeyValueResult = RemoveKeyValueResult(success = true)
+  var clearKeyValueFileResult: ClearKeyValueResult = ClearKeyValueResult(success = true)
+  var callToolResult: JsonElement = JsonObject(emptyMap())
+  var throwOnReadResource: Exception? = null
 
-    // -- Resource response mapping --
+  // -- Resource response mapping --
 
-    private val resourceResponses = mutableMapOf<String, List<McpResourceContent>>()
+  private val resourceResponses = mutableMapOf<String, List<McpResourceContent>>()
 
-    /** Set a text resource response for a given URI. */
-    fun setResourceResponseWithText(uri: String, text: String) {
-        resourceResponses[uri] = listOf(
+  /** Set a text resource response for a given URI. */
+  fun setResourceResponseWithText(uri: String, text: String) {
+    resourceResponses[uri] =
+        listOf(
             McpResourceContent(uri = uri, mimeType = "application/json", text = text),
         )
-    }
+  }
 
-    /** Set raw resource content for a given URI. */
-    fun setResourceResponse(uri: String, contents: List<McpResourceContent>) {
-        resourceResponses[uri] = contents
-    }
+  /** Set raw resource content for a given URI. */
+  fun setResourceResponse(uri: String, contents: List<McpResourceContent>) {
+    resourceResponses[uri] = contents
+  }
 
-    // -- Recorded write calls --
+  // -- Recorded write calls --
 
-    data class SetKeyValueCall(
-        val deviceId: String,
-        val appId: String,
-        val fileName: String,
-        val key: String,
-        val value: String?,
-        val type: String,
-    )
+  data class SetKeyValueCall(
+      val deviceId: String,
+      val appId: String,
+      val fileName: String,
+      val key: String,
+      val value: String?,
+      val type: String,
+  )
 
-    data class RemoveKeyValueCall(
-        val deviceId: String,
-        val appId: String,
-        val fileName: String,
-        val key: String,
-    )
+  data class RemoveKeyValueCall(
+      val deviceId: String,
+      val appId: String,
+      val fileName: String,
+      val key: String,
+  )
 
-    data class ClearKeyValueFileCall(
-        val deviceId: String,
-        val appId: String,
-        val fileName: String,
-    )
+  data class ClearKeyValueFileCall(
+      val deviceId: String,
+      val appId: String,
+      val fileName: String,
+  )
 
-    val setKeyValueCalls = mutableListOf<SetKeyValueCall>()
-    val removeKeyValueCalls = mutableListOf<RemoveKeyValueCall>()
-    val clearKeyValueFileCalls = mutableListOf<ClearKeyValueFileCall>()
+  val setKeyValueCalls = mutableListOf<SetKeyValueCall>()
+  val removeKeyValueCalls = mutableListOf<RemoveKeyValueCall>()
+  val clearKeyValueFileCalls = mutableListOf<ClearKeyValueFileCall>()
 
-    // -- AutoMobileClient implementation --
+  // -- AutoMobileClient implementation --
 
-    override fun ping() {
-        calls.add("ping")
-        pingResult()
-    }
+  override fun ping() {
+    calls.add("ping")
+    pingResult()
+  }
 
-    override fun listResources(): List<McpResource> {
-        calls.add("listResources")
-        return listResourcesResult
-    }
+  override fun listResources(): List<McpResource> {
+    calls.add("listResources")
+    return listResourcesResult
+  }
 
-    override fun listResourceTemplates(): List<McpResourceTemplate> {
-        calls.add("listResourceTemplates")
-        return listResourceTemplatesResult
-    }
+  override fun listResourceTemplates(): List<McpResourceTemplate> {
+    calls.add("listResourceTemplates")
+    return listResourceTemplatesResult
+  }
 
-    override fun listTools(): List<McpTool> {
-        calls.add("listTools")
-        return listToolsResult
-    }
+  override fun listTools(): List<McpTool> {
+    calls.add("listTools")
+    return listToolsResult
+  }
 
-    override fun readResource(uri: String): List<McpResourceContent> {
-        calls.add("readResource")
-        throwOnReadResource?.let { throw it }
-        return resourceResponses[uri] ?: emptyList()
-    }
+  override fun readResource(uri: String): List<McpResourceContent> {
+    calls.add("readResource")
+    throwOnReadResource?.let { throw it }
+    return resourceResponses[uri] ?: emptyList()
+  }
 
-    override fun getNavigationGraph(platform: String): JsonElement {
-        calls.add("getNavigationGraph")
-        return getNavigationGraphResult
-    }
+  override fun getNavigationGraph(platform: String): JsonElement {
+    calls.add("getNavigationGraph")
+    return getNavigationGraphResult
+  }
 
-    override fun listFeatureFlags(): List<FeatureFlagState> {
-        calls.add("listFeatureFlags")
-        return listFeatureFlagsResult
-    }
+  override fun listFeatureFlags(): List<FeatureFlagState> {
+    calls.add("listFeatureFlags")
+    return listFeatureFlagsResult
+  }
 
-    override fun setFeatureFlag(key: String, enabled: Boolean, config: JsonObject?): FeatureFlagState {
-        calls.add("setFeatureFlag")
-        return setFeatureFlagResult
-    }
+  override fun setFeatureFlag(
+      key: String,
+      enabled: Boolean,
+      config: JsonObject?,
+  ): FeatureFlagState {
+    calls.add("setFeatureFlag")
+    return setFeatureFlagResult
+  }
 
-    override fun listPerformanceAuditResults(
-        startTime: String?,
-        endTime: String?,
-        limit: Int?,
-        offset: Int?,
-    ): PerformanceAuditHistoryResult {
-        calls.add("listPerformanceAuditResults")
-        return listPerformanceAuditResultsResult
-    }
+  override fun listPerformanceAuditResults(
+      startTime: String?,
+      endTime: String?,
+      limit: Int?,
+      offset: Int?,
+  ): PerformanceAuditHistoryResult {
+    calls.add("listPerformanceAuditResults")
+    return listPerformanceAuditResultsResult
+  }
 
-    override fun getTestTimings(query: TestTimingQuery): TestTimingSummary {
-        calls.add("getTestTimings")
-        return getTestTimingsResult
-    }
+  override fun getTestTimings(query: TestTimingQuery): TestTimingSummary {
+    calls.add("getTestTimings")
+    return getTestTimingsResult
+  }
 
-    override fun getTestRuns(query: TestRunQuery): TestRunSummary {
-        calls.add("getTestRuns")
-        return getTestRunsResult
-    }
+  override fun getTestRuns(query: TestRunQuery): TestRunSummary {
+    calls.add("getTestRuns")
+    return getTestRunsResult
+  }
 
-    override fun startTestRecording(platform: String): TestRecordingStartResult {
-        calls.add("startTestRecording")
-        return startTestRecordingResult
-    }
+  override fun startTestRecording(platform: String): TestRecordingStartResult {
+    calls.add("startTestRecording")
+    return startTestRecordingResult
+  }
 
-    override fun stopTestRecording(recordingId: String?, planName: String?): TestRecordingStopResult {
-        calls.add("stopTestRecording")
-        return stopTestRecordingResult
-    }
+  override fun stopTestRecording(recordingId: String?, planName: String?): TestRecordingStopResult {
+    calls.add("stopTestRecording")
+    return stopTestRecordingResult
+  }
 
-    override fun executePlan(
-        planContent: String,
-        platform: String,
-        startStep: Int?,
-        sessionUuid: String?,
-    ): ExecutePlanResult {
-        calls.add("executePlan")
-        return executePlanResult
-    }
+  override fun executePlan(
+      planContent: String,
+      platform: String,
+      startStep: Int?,
+      sessionUuid: String?,
+  ): ExecutePlanResult {
+    calls.add("executePlan")
+    return executePlanResult
+  }
 
-    override fun startDevice(name: String, platform: String, deviceId: String?): StartDeviceResult {
-        calls.add("startDevice")
-        return startDeviceResult
-    }
+  override fun startDevice(name: String, platform: String, deviceId: String?): StartDeviceResult {
+    calls.add("startDevice")
+    return startDeviceResult
+  }
 
-    override fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult {
-        calls.add("setActiveDevice")
-        return setActiveDeviceResult
-    }
+  override fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult {
+    calls.add("setActiveDevice")
+    return setActiveDeviceResult
+  }
 
-    override fun observe(platform: String): ObserveResult {
-        calls.add("observe")
-        return observeResult
-    }
+  override fun observe(platform: String): ObserveResult {
+    calls.add("observe")
+    return observeResult
+  }
 
-    override fun killDevice(name: String, deviceId: String, platform: String): KillDeviceResult {
-        calls.add("killDevice")
-        return killDeviceResult
-    }
+  override fun killDevice(name: String, deviceId: String, platform: String): KillDeviceResult {
+    calls.add("killDevice")
+    return killDeviceResult
+  }
 
-    override fun getDaemonStatus(): DaemonStatusResponse {
-        calls.add("getDaemonStatus")
-        return getDaemonStatusResult
-    }
+  override fun getDaemonStatus(): DaemonStatusResponse {
+    calls.add("getDaemonStatus")
+    return getDaemonStatusResult
+  }
 
-    override fun updateService(deviceId: String, platform: String): UpdateServiceResult {
-        calls.add("updateService")
-        return updateServiceResult
-    }
+  override fun updateService(deviceId: String, platform: String): UpdateServiceResult {
+    calls.add("updateService")
+    return updateServiceResult
+  }
 
-    override fun setKeyValue(
-        deviceId: String,
-        appId: String,
-        fileName: String,
-        key: String,
-        value: String?,
-        type: String,
-    ): SetKeyValueResult {
-        calls.add("setKeyValue")
-        setKeyValueCalls.add(SetKeyValueCall(deviceId, appId, fileName, key, value, type))
-        return setKeyValueResult
-    }
+  override fun setKeyValue(
+      deviceId: String,
+      appId: String,
+      fileName: String,
+      key: String,
+      value: String?,
+      type: String,
+  ): SetKeyValueResult {
+    calls.add("setKeyValue")
+    setKeyValueCalls.add(SetKeyValueCall(deviceId, appId, fileName, key, value, type))
+    return setKeyValueResult
+  }
 
-    override fun removeKeyValue(
-        deviceId: String,
-        appId: String,
-        fileName: String,
-        key: String,
-    ): RemoveKeyValueResult {
-        calls.add("removeKeyValue")
-        removeKeyValueCalls.add(RemoveKeyValueCall(deviceId, appId, fileName, key))
-        return removeKeyValueResult
-    }
+  override fun removeKeyValue(
+      deviceId: String,
+      appId: String,
+      fileName: String,
+      key: String,
+  ): RemoveKeyValueResult {
+    calls.add("removeKeyValue")
+    removeKeyValueCalls.add(RemoveKeyValueCall(deviceId, appId, fileName, key))
+    return removeKeyValueResult
+  }
 
-    override fun clearKeyValueFile(
-        deviceId: String,
-        appId: String,
-        fileName: String,
-    ): ClearKeyValueResult {
-        calls.add("clearKeyValueFile")
-        clearKeyValueFileCalls.add(ClearKeyValueFileCall(deviceId, appId, fileName))
-        return clearKeyValueFileResult
-    }
+  override fun clearKeyValueFile(
+      deviceId: String,
+      appId: String,
+      fileName: String,
+  ): ClearKeyValueResult {
+    calls.add("clearKeyValueFile")
+    clearKeyValueFileCalls.add(ClearKeyValueFileCall(deviceId, appId, fileName))
+    return clearKeyValueFileResult
+  }
 
-    override fun callTool(name: String, arguments: JsonObject): JsonElement {
-        calls.add("callTool")
-        return callToolResult
-    }
+  override fun callTool(name: String, arguments: JsonObject): JsonElement {
+    calls.add("callTool")
+    return callToolResult
+  }
 
-    override fun close() {
-        calls.add("close")
-    }
+  override fun close() {
+    calls.add("close")
+  }
 }

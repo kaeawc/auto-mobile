@@ -1,17 +1,17 @@
 package dev.jasonpearson.automobile.desktop.domain
 
 public enum class FailureType(public val label: String, public val icon: String) {
-    Crash("Crash", "\uD83D\uDCA5"),
-    ANR("ANR", "\uD83D\uDD04"),
-    ToolCallFailure("Tool Failure", "\uD83D\uDD27"),
-    NonFatal("Non-Fatal", "\u26A0\uFE0F"),
+  Crash("Crash", "\uD83D\uDCA5"),
+  ANR("ANR", "\uD83D\uDD04"),
+  ToolCallFailure("Tool Failure", "\uD83D\uDD27"),
+  NonFatal("Non-Fatal", "\u26A0\uFE0F"),
 }
 
 public enum class FailureSeverity(public val label: String) {
-    Critical("Critical"),
-    High("High"),
-    Medium("Medium"),
-    Low("Low"),
+  Critical("Critical"),
+  High("High"),
+  Medium("Medium"),
+  Low("Low"),
 }
 
 public data class StackTraceElement(
@@ -65,7 +65,10 @@ public data class FailureCapture(
     val deviceModel: String,
 )
 
-public enum class CaptureType { Screenshot, Video }
+public enum class CaptureType {
+  Screenshot,
+  Video,
+}
 
 public data class FailureOccurrence(
     val id: String,
@@ -115,7 +118,8 @@ public data class TimelineDataPoint(
     val toolFailures: Int,
     val nonfatals: Int = 0,
 ) {
-    public val total: Int get() = crashes + anrs + toolFailures + nonfatals
+  public val total: Int
+    get() = crashes + anrs + toolFailures + nonfatals
 }
 
 public data class PeriodTotals(
@@ -126,23 +130,22 @@ public data class PeriodTotals(
 )
 
 public enum class DateRange(public val label: String, public val durationMs: Long) {
-    OneHour("1h", 60 * 60 * 1000L),
-    TwentyFourHours("24h", 24 * 60 * 60 * 1000L),
-    ThreeDays("3d", 3 * 24 * 60 * 60 * 1000L),
-    SevenDays("7d", 7 * 24 * 60 * 60 * 1000L),
-    ThirtyDays("30d", 30 * 24 * 60 * 60 * 1000L),
-    ;
+  OneHour("1h", 60 * 60 * 1000L),
+  TwentyFourHours("24h", 24 * 60 * 60 * 1000L),
+  ThreeDays("3d", 3 * 24 * 60 * 60 * 1000L),
+  SevenDays("7d", 7 * 24 * 60 * 60 * 1000L),
+  ThirtyDays("30d", 30 * 24 * 60 * 60 * 1000L),
+  ;
 
-    public fun toQueryParam(): String = label
+  public fun toQueryParam(): String = label
 }
 
 public enum class TimeAggregation(public val label: String, public val durationMs: Long) {
-    Minute("Min", 60 * 1000L),
-    Hour("Hour", 60 * 60 * 1000L),
-    Day("Day", 24 * 60 * 60 * 1000L),
-    Week("Week", 7 * 24 * 60 * 60 * 1000L),
-    ;
+  Minute("Min", 60 * 1000L),
+  Hour("Hour", 60 * 60 * 1000L),
+  Day("Day", 24 * 60 * 60 * 1000L),
+  Week("Week", 7 * 24 * 60 * 60 * 1000L),
+  ;
 
-    public fun toQueryParam(): String = name.lowercase()
+  public fun toQueryParam(): String = name.lowercase()
 }
-

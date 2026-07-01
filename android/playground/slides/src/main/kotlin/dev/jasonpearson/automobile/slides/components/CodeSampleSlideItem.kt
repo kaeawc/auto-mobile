@@ -156,10 +156,9 @@ internal fun processCodeWithHighlighting(
 
   return codeLines.joinToString("\n") { line ->
     val escapedLine = line.replace("<", "&lt;").replace(">", "&gt;")
-    val isHighlighted =
-        highlightLines.any { highlightLine ->
-          line.trim().contains(highlightLine.trim(), ignoreCase = false)
-        }
+    val isHighlighted = highlightLines.any { highlightLine ->
+      line.trim().contains(highlightLine.trim(), ignoreCase = false)
+    }
 
     if (isHighlighted) {
       "<span class=\"highlighted-line\">$escapedLine</span>"

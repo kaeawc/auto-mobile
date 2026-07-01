@@ -421,10 +421,9 @@ private fun CancelableLongPress() {
                     onPress = {
                       statusText = "Holding..."
                       progress.snapTo(0f)
-                      val animation =
-                          coroutineScope.launch {
-                            progress.animateTo(1f, tween(requiredDurationMs, easing = LinearEasing))
-                          }
+                      val animation = coroutineScope.launch {
+                        progress.animateTo(1f, tween(requiredDurationMs, easing = LinearEasing))
+                      }
 
                       val released = tryAwaitRelease()
                       if (!released) {

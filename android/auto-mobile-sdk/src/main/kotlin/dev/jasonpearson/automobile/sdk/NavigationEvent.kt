@@ -42,7 +42,8 @@ enum class NavigationSource(
 
   companion object {
     /** Look up a [NavigationSource] by its cross-platform wire value. */
-    fun fromWireValue(value: String): NavigationSource? =
-        entries.firstOrNull { it.wireValue == value }
+    fun fromWireValue(value: String): NavigationSource? = entries.firstOrNull {
+      it.wireValue == value
+    }
   }
 }

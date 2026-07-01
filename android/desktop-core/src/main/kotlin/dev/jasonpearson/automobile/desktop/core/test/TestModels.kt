@@ -1,12 +1,19 @@
 package dev.jasonpearson.automobile.desktop.core.test
 
 typealias TestCase = dev.jasonpearson.automobile.desktop.domain.TestCase
+
 typealias TestStatus = dev.jasonpearson.automobile.desktop.domain.TestStatus
+
 typealias TestPlatform = dev.jasonpearson.automobile.desktop.domain.TestPlatform
+
 typealias TestRun = dev.jasonpearson.automobile.desktop.domain.TestRun
+
 typealias TestStep = dev.jasonpearson.automobile.desktop.domain.TestStep
+
 typealias RecordedAction = dev.jasonpearson.automobile.desktop.domain.RecordedAction
+
 typealias GradleModule = dev.jasonpearson.automobile.desktop.domain.GradleModule
+
 typealias ExportedPlan = dev.jasonpearson.automobile.desktop.domain.ExportedPlan
 
 // Mock data for development

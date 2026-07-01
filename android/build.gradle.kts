@@ -110,9 +110,7 @@ subprojects {
   plugins.withType<JavaBasePlugin>().configureEach {
     extensions.configure<JavaPluginExtension> {
       toolchain {
-        languageVersion.set(
-            JavaLanguageVersion.of(libs.versions.build.java.target.get().toInt())
-        )
+        languageVersion.set(JavaLanguageVersion.of(libs.versions.build.java.target.get().toInt()))
       }
     }
   }

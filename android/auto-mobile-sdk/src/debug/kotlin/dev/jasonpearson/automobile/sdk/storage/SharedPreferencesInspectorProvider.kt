@@ -55,19 +55,19 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
 
       val driver = SharedPreferencesInspector.getDriver()
       val responseJson =
-        when (method) {
-          "listFiles" -> handleListFiles(driver)
-          "getPreferences" -> handleGetPreferences(driver, extras)
-          "getPreference" -> handleGetPreference(driver, extras)
-          "setValue" -> handleSetValue(driver, extras)
-          "removeValue" -> handleRemoveValue(driver, extras)
-          "clearFile" -> handleClearFile(driver, extras)
-          "subscribeToFile" -> handleSubscribeToFile(driver, extras)
-          "unsubscribeFromFile" -> handleUnsubscribeFromFile(driver, extras)
-          "getChanges" -> handleGetChanges(driver, extras)
-          "getListenedFiles" -> handleGetListenedFiles(driver)
-          else -> throw IllegalArgumentException("Unknown method: $method")
-        }
+          when (method) {
+            "listFiles" -> handleListFiles(driver)
+            "getPreferences" -> handleGetPreferences(driver, extras)
+            "getPreference" -> handleGetPreference(driver, extras)
+            "setValue" -> handleSetValue(driver, extras)
+            "removeValue" -> handleRemoveValue(driver, extras)
+            "clearFile" -> handleClearFile(driver, extras)
+            "subscribeToFile" -> handleSubscribeToFile(driver, extras)
+            "unsubscribeFromFile" -> handleUnsubscribeFromFile(driver, extras)
+            "getChanges" -> handleGetChanges(driver, extras)
+            "getListenedFiles" -> handleGetListenedFiles(driver)
+            else -> throw IllegalArgumentException("Unknown method: $method")
+          }
       result.putBoolean("success", true)
       result.putString("result", responseJson)
     } catch (e: SharedPreferencesError) {
@@ -91,9 +91,9 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
     val files = driver.getPreferenceFiles()
     val protocolFiles = files.map { file ->
       StorageFileInfo(
-        name = file.name,
-        path = file.path,
-        entryCount = file.entryCount,
+          name = file.name,
+          path = file.path,
+          entryCount = file.entryCount,
       )
     }
     val response = StorageResponse.FileList(files = protocolFiles)
@@ -102,14 +102,14 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
 
   private fun handleGetPreferences(driver: SharedPreferencesDriver, extras: Bundle?): String {
     val fileName =
-      extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
+        extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
 
     val entries = driver.getPreferences(fileName)
     val protocolEntries = entries.map { entry ->
       StorageEntry(
-        key = entry.key,
-        value = serializeValue(entry.value, entry.type),
-        type = entry.type.name,
+          key = entry.key,
+          value = serializeValue(entry.value, entry.type),
+          type = entry.type.name,
       )
     }
 
@@ -118,16 +118,17 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
     val fileDescriptor = files.find { it.name == fileName }
     val protocolFile = fileDescriptor?.let {
       StorageFileInfo(
-        name = it.name,
-        path = it.path,
-        entryCount = it.entryCount,
+          name = it.name,
+          path = it.path,
+          entryCount = it.entryCount,
       )
     }
 
-    val response = StorageResponse.Preferences(
-      file = protocolFile,
-      entries = protocolEntries,
-    )
+    val response =
+        StorageResponse.Preferences(
+            file = protocolFile,
+            entries = protocolEntries,
+        )
     return StorageProtocolSerializer.responseToJson(response)
   }
 
@@ -135,8 +136,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
     return when {
       value == null -> null
       type == KeyValueType.STRING_SET -> {
-        @Suppress("UNCHECKED_CAST")
-        val set = value as? Set<String> ?: return null
+        @Suppress("UNCHECKED_CAST") val set = value as? Set<String> ?: return null
         // Serialize as JSON array string
         "[" + set.joinToString(",") { "\"$it\"" } + "]"
       }
@@ -152,24 +152,24 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
    */
   private fun handleGetPreference(driver: SharedPreferencesDriver, extras: Bundle?): String {
     val fileName =
-      extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
-    val key =
-      extras.getString("key") ?: throw IllegalArgumentException("key required")
+        extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
+    val key = extras.getString("key") ?: throw IllegalArgumentException("key required")
 
     val entry = driver.getPreference(fileName, key)
     val protocolEntry = entry?.let {
       StorageEntry(
-        key = it.key,
-        value = serializeValue(it.value, it.type),
-        type = it.type.name,
+          key = it.key,
+          value = serializeValue(it.value, it.type),
+          type = it.type.name,
       )
     }
 
-    val response = StorageResponse.SinglePreference(
-      fileName = fileName,
-      key = key,
-      entry = protocolEntry,
-    )
+    val response =
+        StorageResponse.SinglePreference(
+            fileName = fileName,
+            key = key,
+            entry = protocolEntry,
+        )
     return StorageProtocolSerializer.responseToJson(response)
   }
 
@@ -181,27 +181,27 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
    */
   private fun handleSetValue(driver: SharedPreferencesDriver, extras: Bundle?): String {
     val fileName =
-      extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
-    val key =
-      extras.getString("key") ?: throw IllegalArgumentException("key required")
+        extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
+    val key = extras.getString("key") ?: throw IllegalArgumentException("key required")
     val valueStr = extras.getString("value")
-    val typeStr =
-      extras.getString("type") ?: throw IllegalArgumentException("type required")
+    val typeStr = extras.getString("type") ?: throw IllegalArgumentException("type required")
 
-    val type = try {
-      KeyValueType.valueOf(typeStr)
-    } catch (e: IllegalArgumentException) {
-      throw IllegalArgumentException("Invalid type: $typeStr")
-    }
+    val type =
+        try {
+          KeyValueType.valueOf(typeStr)
+        } catch (e: IllegalArgumentException) {
+          throw IllegalArgumentException("Invalid type: $typeStr")
+        }
 
     val value = deserializeValue(valueStr, type)
     driver.setValue(fileName, key, value, type)
 
-    val response = StorageResponse.OperationSuccess(
-      operation = "setValue",
-      fileName = fileName,
-      key = key,
-    )
+    val response =
+        StorageResponse.OperationSuccess(
+            operation = "setValue",
+            fileName = fileName,
+            key = key,
+        )
     return StorageProtocolSerializer.responseToJson(response)
   }
 
@@ -213,17 +213,17 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
    */
   private fun handleRemoveValue(driver: SharedPreferencesDriver, extras: Bundle?): String {
     val fileName =
-      extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
-    val key =
-      extras.getString("key") ?: throw IllegalArgumentException("key required")
+        extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
+    val key = extras.getString("key") ?: throw IllegalArgumentException("key required")
 
     driver.removeValue(fileName, key)
 
-    val response = StorageResponse.OperationSuccess(
-      operation = "removeValue",
-      fileName = fileName,
-      key = key,
-    )
+    val response =
+        StorageResponse.OperationSuccess(
+            operation = "removeValue",
+            fileName = fileName,
+            key = key,
+        )
     return StorageProtocolSerializer.responseToJson(response)
   }
 
@@ -235,30 +235,35 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
    */
   private fun handleClearFile(driver: SharedPreferencesDriver, extras: Bundle?): String {
     val fileName =
-      extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
+        extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
 
     driver.clear(fileName)
 
-    val response = StorageResponse.OperationSuccess(
-      operation = "clearFile",
-      fileName = fileName,
-      key = null,
-    )
+    val response =
+        StorageResponse.OperationSuccess(
+            operation = "clearFile",
+            fileName = fileName,
+            key = null,
+        )
     return StorageProtocolSerializer.responseToJson(response)
   }
 
-  /**
-   * Deserializes a string value to the appropriate type.
-   */
+  /** Deserializes a string value to the appropriate type. */
   private fun deserializeValue(valueStr: String?, type: KeyValueType): Any? {
     if (valueStr == null) return null
 
     return when (type) {
       KeyValueType.STRING -> valueStr
-      KeyValueType.INT -> valueStr.toIntOrNull() ?: throw IllegalArgumentException("Invalid INT value: $valueStr")
-      KeyValueType.LONG -> valueStr.toLongOrNull() ?: throw IllegalArgumentException("Invalid LONG value: $valueStr")
-      KeyValueType.FLOAT -> valueStr.toFloatOrNull() ?: throw IllegalArgumentException("Invalid FLOAT value: $valueStr")
-      KeyValueType.BOOLEAN -> valueStr.toBooleanStrictOrNull() ?: throw IllegalArgumentException("Invalid BOOLEAN value: $valueStr")
+      KeyValueType.INT ->
+          valueStr.toIntOrNull() ?: throw IllegalArgumentException("Invalid INT value: $valueStr")
+      KeyValueType.LONG ->
+          valueStr.toLongOrNull() ?: throw IllegalArgumentException("Invalid LONG value: $valueStr")
+      KeyValueType.FLOAT ->
+          valueStr.toFloatOrNull()
+              ?: throw IllegalArgumentException("Invalid FLOAT value: $valueStr")
+      KeyValueType.BOOLEAN ->
+          valueStr.toBooleanStrictOrNull()
+              ?: throw IllegalArgumentException("Invalid BOOLEAN value: $valueStr")
       KeyValueType.STRING_SET -> {
         // Parse JSON array format: ["a","b","c"]
         val trimmed = valueStr.trim()
@@ -269,9 +274,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
         if (inner.isBlank()) {
           emptySet<String>()
         } else {
-          inner.split(",")
-            .map { it.trim().removeSurrounding("\"") }
-            .toSet()
+          inner.split(",").map { it.trim().removeSurrounding("\"") }.toSet()
         }
       }
       KeyValueType.UNKNOWN -> throw IllegalArgumentException("Cannot deserialize UNKNOWN type")
@@ -286,10 +289,11 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
    * - version: API version number for compatibility checking
    */
   private fun handleCheckAvailability(): String {
-    val response = StorageResponse.Availability(
-      available = true,
-      version = 1,
-    )
+    val response =
+        StorageResponse.Availability(
+            available = true,
+            version = 1,
+        )
     return StorageProtocolSerializer.responseToJson(response)
   }
 
@@ -301,18 +305,19 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
    */
   private fun handleSubscribeToFile(driver: SharedPreferencesDriver, extras: Bundle?): String {
     val fileName =
-      extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
+        extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
 
     val driverImpl =
-      driver as? SharedPreferencesDriverImpl
-        ?: throw IllegalStateException("Driver must be SharedPreferencesDriverImpl")
+        driver as? SharedPreferencesDriverImpl
+            ?: throw IllegalStateException("Driver must be SharedPreferencesDriverImpl")
 
     driverImpl.startListening(fileName)
 
-    val response = StorageResponse.SubscriptionResult(
-      fileName = fileName,
-      subscribed = true,
-    )
+    val response =
+        StorageResponse.SubscriptionResult(
+            fileName = fileName,
+            subscribed = true,
+        )
     return StorageProtocolSerializer.responseToJson(response)
   }
 
@@ -323,22 +328,23 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
    * @return JSON with success status
    */
   private fun handleUnsubscribeFromFile(
-    driver: SharedPreferencesDriver,
-    extras: Bundle?,
+      driver: SharedPreferencesDriver,
+      extras: Bundle?,
   ): String {
     val fileName =
-      extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
+        extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
 
     val driverImpl =
-      driver as? SharedPreferencesDriverImpl
-        ?: throw IllegalStateException("Driver must be SharedPreferencesDriverImpl")
+        driver as? SharedPreferencesDriverImpl
+            ?: throw IllegalStateException("Driver must be SharedPreferencesDriverImpl")
 
     driverImpl.stopListening(fileName)
 
-    val response = StorageResponse.SubscriptionResult(
-      fileName = fileName,
-      subscribed = false,
-    )
+    val response =
+        StorageResponse.SubscriptionResult(
+            fileName = fileName,
+            subscribed = false,
+        )
     return StorageProtocolSerializer.responseToJson(response)
   }
 
@@ -350,29 +356,30 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
    */
   private fun handleGetChanges(driver: SharedPreferencesDriver, extras: Bundle?): String {
     val fileName =
-      extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
+        extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
     val sinceSequence = extras?.getLong("sinceSequence", 0L) ?: 0L
 
     val driverImpl =
-      driver as? SharedPreferencesDriverImpl
-        ?: throw IllegalStateException("Driver must be SharedPreferencesDriverImpl")
+        driver as? SharedPreferencesDriverImpl
+            ?: throw IllegalStateException("Driver must be SharedPreferencesDriverImpl")
 
     val changes = driverImpl.getQueuedChanges(fileName, sinceSequence)
     val protocolChanges = changes.map { change ->
       StorageChangeEvent(
-        fileName = change.fileName,
-        key = change.key,
-        value = serializeValue(change.newValue, change.type),
-        type = change.type.name,
-        timestamp = change.timestamp,
-        sequenceNumber = change.sequenceNumber,
+          fileName = change.fileName,
+          key = change.key,
+          value = serializeValue(change.newValue, change.type),
+          type = change.type.name,
+          timestamp = change.timestamp,
+          sequenceNumber = change.sequenceNumber,
       )
     }
 
-    val response = StorageResponse.Changes(
-      fileName = fileName,
-      changes = protocolChanges,
-    )
+    val response =
+        StorageResponse.Changes(
+            fileName = fileName,
+            changes = protocolChanges,
+        )
     return StorageProtocolSerializer.responseToJson(response)
   }
 
@@ -383,8 +390,8 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
    */
   private fun handleGetListenedFiles(driver: SharedPreferencesDriver): String {
     val driverImpl =
-      driver as? SharedPreferencesDriverImpl
-        ?: throw IllegalStateException("Driver must be SharedPreferencesDriverImpl")
+        driver as? SharedPreferencesDriverImpl
+            ?: throw IllegalStateException("Driver must be SharedPreferencesDriverImpl")
 
     val files = driverImpl.getListenedFiles()
 
@@ -394,11 +401,11 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
 
   // Required ContentProvider methods - not used for content call
   override fun query(
-    uri: Uri,
-    projection: Array<String>?,
-    selection: String?,
-    selectionArgs: Array<String>?,
-    sortOrder: String?,
+      uri: Uri,
+      projection: Array<String>?,
+      selection: String?,
+      selectionArgs: Array<String>?,
+      sortOrder: String?,
   ): Cursor? = null
 
   override fun getType(uri: Uri): String? = null
@@ -408,9 +415,9 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
   override fun delete(uri: Uri, selection: String?, selectionArgs: Array<String>?): Int = 0
 
   override fun update(
-    uri: Uri,
-    values: ContentValues?,
-    selection: String?,
-    selectionArgs: Array<String>?,
+      uri: Uri,
+      values: ContentValues?,
+      selection: String?,
+      selectionArgs: Array<String>?,
   ): Int = 0
 }

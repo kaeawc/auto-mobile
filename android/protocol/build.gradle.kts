@@ -66,9 +66,9 @@ mavenPublishing {
 tasks.withType<KotlinCompile>().configureEach {
   compilerOptions {
     languageVersion.set(
-      KotlinVersion.valueOf(
-        "KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}"
-      )
+        KotlinVersion.valueOf(
+            "KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}"
+        )
     )
   }
 }

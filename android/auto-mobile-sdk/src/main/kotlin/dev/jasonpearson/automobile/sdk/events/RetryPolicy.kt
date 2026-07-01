@@ -8,15 +8,15 @@ package dev.jasonpearson.automobile.sdk.events
  * @param maxDelayMs Upper bound on computed delay (default 2000)
  */
 internal data class RetryPolicy(
-  val maxRetries: Int = 3,
-  val baseDelayMs: Long = 100,
-  val maxDelayMs: Long = 2000,
+    val maxRetries: Int = 3,
+    val baseDelayMs: Long = 100,
+    val maxDelayMs: Long = 2000,
 ) {
   /**
    * Compute the delay for a given retry attempt (0-indexed).
    *
-   * Uses exponential backoff (`baseDelayMs * 2^attempt`) clamped to [maxDelayMs],
-   * plus random jitter of up to 25% of the clamped delay.
+   * Uses exponential backoff (`baseDelayMs * 2^attempt`) clamped to [maxDelayMs], plus random
+   * jitter of up to 25% of the clamped delay.
    */
   fun delayForAttempt(attempt: Int): Long {
     val clamped = attempt.coerceIn(0, 30)

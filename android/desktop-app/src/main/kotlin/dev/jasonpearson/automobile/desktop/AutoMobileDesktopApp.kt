@@ -18,8 +18,8 @@ import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 
 /**
- * Wraps a [SettingsProvider] so that [themeMode] is backed by Compose snapshot state,
- * enabling recomposition when the user changes the theme in settings.
+ * Wraps a [SettingsProvider] so that [themeMode] is backed by Compose snapshot state, enabling
+ * recomposition when the user changes the theme in settings.
  */
 private class ObservableSettingsProvider(
     private val delegate: SettingsProvider,
@@ -27,7 +27,10 @@ private class ObservableSettingsProvider(
   private var _themeMode by mutableStateOf(delegate.themeMode)
   override var themeMode: String
     get() = _themeMode
-    set(value) { _themeMode = value; delegate.themeMode = value }
+    set(value) {
+      _themeMode = value
+      delegate.themeMode = value
+    }
 }
 
 @Composable
@@ -44,7 +47,13 @@ fun AutoMobileDesktopApp(menuBarActions: MenuBarActions = remember { MenuBarActi
           settingsProvider = settings,
           notificationHandler = NoOpNotificationHandler,
           onOpenSource = { fileName, lineNumber, className ->
-            SourceFileOpener.open(fileName, lineNumber, className, settings.androidIde, settings.iosIde)
+            SourceFileOpener.open(
+                fileName,
+                lineNumber,
+                className,
+                settings.androidIde,
+                settings.iosIde,
+            )
           },
           menuBarActions = menuBarActions,
       )

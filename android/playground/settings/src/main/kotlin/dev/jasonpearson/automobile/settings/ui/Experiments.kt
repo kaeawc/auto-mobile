@@ -140,12 +140,11 @@ fun ExperimentsSection(
       ExperimentBottomSheetContent(
           experiment = selectedExperiment!!,
           onTreatmentSelected = { treatment ->
-            val updatedExperiments =
-                experiments.map { exp ->
-                  if (exp.name == selectedExperiment!!.name) {
-                    exp.copy(treatment = treatment)
-                  } else exp
-                }
+            val updatedExperiments = experiments.map { exp ->
+              if (exp.name == selectedExperiment!!.name) {
+                exp.copy(treatment = treatment)
+              } else exp
+            }
             onExperimentsUpdated(updatedExperiments)
             showBottomSheet = false
           },

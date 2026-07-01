@@ -62,23 +62,23 @@ public data class KeyValueEntry(
 )
 
 public enum class KeyValueType(public val protocolName: kotlin.String) {
-    String("STRING"),
-    Int("INT"),
-    Long("LONG"),
-    Float("FLOAT"),
-    Boolean("BOOLEAN"),
-    StringSet("STRING_SET"),
-    Unknown("UNKNOWN"),
+  String("STRING"),
+  Int("INT"),
+  Long("LONG"),
+  Float("FLOAT"),
+  Boolean("BOOLEAN"),
+  StringSet("STRING_SET"),
+  Unknown("UNKNOWN"),
 }
 
 public enum class StoragePlatform {
-    Android,
-    iOS,
+  Android,
+  iOS,
 }
 
 public enum class DatabaseViewMode {
-    Data,
-    Structure,
-    SQL,
-    QueryHistory,
+  Data,
+  Structure,
+  SQL,
+  QueryHistory,
 }

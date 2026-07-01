@@ -42,7 +42,8 @@ class StorageSubscriptionManager(
   )
 
   private val subscriptions = mutableMapOf<String, SubscriptionState>() // subscriptionId -> state
-  private val packageObservers = mutableMapOf<String, PackageObserverState>() // packageName -> state
+  private val packageObservers =
+      mutableMapOf<String, PackageObserverState>() // packageName -> state
 
   private val _changeEvents = MutableSharedFlow<PreferenceChangeEvent>(extraBufferCapacity = 64)
   val changeEvents: SharedFlow<PreferenceChangeEvent> = _changeEvents.asSharedFlow()
@@ -75,12 +76,13 @@ class StorageSubscriptionManager(
         val responseJson = result.getString("result") ?: "{}"
         val response = StorageProtocolSerializer.responseFromJson(responseJson)
         when (response) {
-          is StorageResponse.Availability -> Result.success(
-            SdkAvailabilityInfo(
-              available = response.available,
-              version = response.version,
-            )
-          )
+          is StorageResponse.Availability ->
+              Result.success(
+                  SdkAvailabilityInfo(
+                      available = response.available,
+                      version = response.version,
+                  )
+              )
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
         }
       }
@@ -120,21 +122,28 @@ class StorageSubscriptionManager(
         val responseJson = result.getString("result") ?: "{}"
         Log.d(TAG, "listPreferenceFiles: responseJson=$responseJson")
         val response = StorageProtocolSerializer.responseFromJson(responseJson)
-        Log.d(TAG, "listPreferenceFiles: parsed response type=${response?.let { it::class.simpleName } ?: "null"}")
+        Log.d(
+            TAG,
+            "listPreferenceFiles: parsed response type=${response?.let { it::class.simpleName } ?: "null"}",
+        )
         when (response) {
           is StorageResponse.FileList -> {
-            val files = response.files.map { file ->
-              PreferenceFileInfo(
-                name = file.name,
-                path = file.path,
-                entryCount = file.entryCount,
-              )
-            }
+            val files =
+                response.files.map { file ->
+                  PreferenceFileInfo(
+                      name = file.name,
+                      path = file.path,
+                      entryCount = file.entryCount,
+                  )
+                }
             Log.d(TAG, "listPreferenceFiles: returning ${files.size} files")
             Result.success(files)
           }
           else -> {
-            Log.w(TAG, "listPreferenceFiles: unexpected response type: ${response?.let { it::class.simpleName } ?: "null"}")
+            Log.w(
+                TAG,
+                "listPreferenceFiles: unexpected response type: ${response?.let { it::class.simpleName } ?: "null"}",
+            )
             Result.failure(StorageError.SdkError("Unexpected response type"))
           }
         }
@@ -177,13 +186,14 @@ class StorageSubscriptionManager(
         val response = StorageProtocolSerializer.responseFromJson(responseJson)
         when (response) {
           is StorageResponse.Preferences -> {
-            val entries = response.entries.map { entry ->
-              PreferenceEntry(
-                key = entry.key,
-                value = entry.value,
-                type = entry.type,
-              )
-            }
+            val entries =
+                response.entries.map { entry ->
+                  PreferenceEntry(
+                      key = entry.key,
+                      value = entry.value,
+                      type = entry.type,
+                  )
+                }
             Result.success(entries)
           }
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
@@ -293,10 +303,11 @@ class StorageSubscriptionManager(
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
-      val extras = Bundle().apply {
-        putString("fileName", fileName)
-        putString("key", key)
-      }
+      val extras =
+          Bundle().apply {
+            putString("fileName", fileName)
+            putString("key", key)
+          }
       val result = context.contentResolver.call(uri, "getPreference", null, extras)
 
       if (result == null) {
@@ -314,13 +325,14 @@ class StorageSubscriptionManager(
         val response = StorageProtocolSerializer.responseFromJson(responseJson)
         when (response) {
           is StorageResponse.SinglePreference -> {
-            val entry = response.entry?.let {
-              PreferenceEntry(
-                key = it.key,
-                value = it.value,
-                type = it.type,
-              )
-            }
+            val entry =
+                response.entry?.let {
+                  PreferenceEntry(
+                      key = it.key,
+                      value = it.value,
+                      type = it.type,
+                  )
+                }
             Result.success(entry)
           }
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
@@ -345,21 +357,22 @@ class StorageSubscriptionManager(
    * @return Result with success or error
    */
   fun setPreference(
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
+      packageName: String,
+      fileName: String,
+      key: String,
+      value: String?,
+      type: String,
   ): Result<Unit> {
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
-      val extras = Bundle().apply {
-        putString("fileName", fileName)
-        putString("key", key)
-        if (value != null) putString("value", value)
-        putString("type", type)
-      }
+      val extras =
+          Bundle().apply {
+            putString("fileName", fileName)
+            putString("key", key)
+            if (value != null) putString("value", value)
+            putString("type", type)
+          }
       val result = context.contentResolver.call(uri, "setValue", null, extras)
 
       if (result == null) {
@@ -396,10 +409,11 @@ class StorageSubscriptionManager(
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
-      val extras = Bundle().apply {
-        putString("fileName", fileName)
-        putString("key", key)
-      }
+      val extras =
+          Bundle().apply {
+            putString("fileName", fileName)
+            putString("key", key)
+          }
       val result = context.contentResolver.call(uri, "removeValue", null, extras)
 
       if (result == null) {
@@ -435,9 +449,10 @@ class StorageSubscriptionManager(
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
-      val extras = Bundle().apply {
-        putString("fileName", fileName)
-      }
+      val extras =
+          Bundle().apply {
+            putString("fileName", fileName)
+          }
       val result = context.contentResolver.call(uri, "clearFile", null, extras)
 
       if (result == null) {
@@ -498,8 +513,7 @@ class StorageSubscriptionManager(
 
     try {
       context.contentResolver.registerContentObserver(changesUri, false, observer)
-      packageObservers[packageName] =
-          PackageObserverState(observer, mutableSetOf(fileName))
+      packageObservers[packageName] = PackageObserverState(observer, mutableSetOf(fileName))
       Log.d(TAG, "Registered ContentObserver for $packageName")
     } catch (e: Exception) {
       Log.e(TAG, "Failed to register ContentObserver for $packageName", e)

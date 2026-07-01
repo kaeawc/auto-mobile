@@ -52,8 +52,8 @@ class PerformanceAuditStreamSocketClient(
       writer.newLine()
       writer.flush()
 
-      val line = reader.readLine()
-          ?: throw McpConnectionException("Performance stream socket closed")
+      val line =
+          reader.readLine() ?: throw McpConnectionException("Performance stream socket closed")
       return json.decodeFromString(line)
     }
   }

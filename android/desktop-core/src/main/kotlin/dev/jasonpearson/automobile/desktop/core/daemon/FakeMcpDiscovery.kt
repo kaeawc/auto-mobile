@@ -23,9 +23,7 @@ class FakeWorktreeLister : WorktreeLister {
   }
 }
 
-/**
- * Fake implementation of PortScanner for testing. Returns configurable ports and tracks calls.
- */
+/** Fake implementation of PortScanner for testing. Returns configurable ports and tracks calls. */
 class FakePortScanner : PortScanner {
   private val _scanListeningPortsCalls = mutableListOf<Unit>()
 

@@ -14,18 +14,18 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 
 /**
- * OkHttp Application-level Interceptor that captures HTTP request/response metadata
- * and enforces network mock rules and error simulation.
+ * OkHttp Application-level Interceptor that captures HTTP request/response metadata and enforces
+ * network mock rules and error simulation.
  *
- * Records URL, method, status, duration, body sizes, and optionally headers and bodies.
- * Header/body capture is opt-in to avoid leaking auth tokens by default.
+ * Records URL, method, status, duration, body sizes, and optionally headers and bodies. Header/body
+ * capture is opt-in to avoid leaking auth tokens by default.
  *
- * When a [ruleStore] is provided, the interceptor checks for matching mock rules
- * and active error simulations before making real HTTP calls. Matching requests are
- * short-circuited with synthetic responses.
+ * When a [ruleStore] is provided, the interceptor checks for matching mock rules and active error
+ * simulations before making real HTTP calls. Matching requests are short-circuited with synthetic
+ * responses.
  *
- * This class references OkHttp types which must be on the classpath. The SDK declares
- * OkHttp as `compileOnly` so consumers must bring their own OkHttp dependency.
+ * This class references OkHttp types which must be on the classpath. The SDK declares OkHttp as
+ * `compileOnly` so consumers must bring their own OkHttp dependency.
  */
 internal class AutoMobileNetworkInterceptor(
     private val buffer: SdkEventBuffer,
@@ -102,7 +102,8 @@ internal class AutoMobileNetworkInterceptor(
               requestBody = reqBody,
               responseBody = mockRule.responseBody,
               contentType = mockRule.contentType,
-          ))
+          )
+      )
       return buildMockResponse(request, mockRule)
     }
 
@@ -134,7 +135,8 @@ internal class AutoMobileNetworkInterceptor(
               error = e.message,
               requestHeaders = reqHeaders,
               requestBody = reqBody,
-          ))
+          )
+      )
       throw e
     }
 
@@ -178,21 +180,23 @@ internal class AutoMobileNetworkInterceptor(
             requestBody = reqBody,
             responseBody = respBody,
             contentType = responseContentType,
-        ))
+        )
+    )
 
     return response
   }
 
   private fun buildMockResponse(
       request: okhttp3.Request,
-      rule: NetworkMockRuleStore.MatchedMockRule
+      rule: NetworkMockRuleStore.MatchedMockRule,
   ): Response {
     val statusCode = rule.statusCode.coerceIn(100, 599)
-    val mediaType = try {
-      rule.contentType.toMediaType()
-    } catch (_: IllegalArgumentException) {
-      "application/octet-stream".toMediaType()
-    }
+    val mediaType =
+        try {
+          rule.contentType.toMediaType()
+        } catch (_: IllegalArgumentException) {
+          "application/octet-stream".toMediaType()
+        }
     val builder =
         Response.Builder()
             .request(request)
@@ -232,7 +236,8 @@ internal class AutoMobileNetworkInterceptor(
                 error = errorMsg,
                 requestHeaders = reqHeaders,
                 requestBody = reqBody,
-            ))
+            )
+        )
         return Response.Builder()
             .request(request)
             .protocol(Protocol.HTTP_1_1)
@@ -257,7 +262,8 @@ internal class AutoMobileNetworkInterceptor(
                 error = errorMsg,
                 requestHeaders = reqHeaders,
                 requestBody = reqBody,
-            ))
+            )
+        )
         throw when (sim.errorType) {
           "timeout" -> SocketTimeoutException("Simulated timeout (AutoMobile)")
           "connectionRefused" -> ConnectException("Simulated connection refused (AutoMobile)")

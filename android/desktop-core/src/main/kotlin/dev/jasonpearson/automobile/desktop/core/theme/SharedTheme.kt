@@ -8,11 +8,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
 
 /**
- * Compatibility layer that maps MaterialTheme colors to a structure matching the Jewel
- * globalColors API surface used throughout the shared dashboards.
+ * Compatibility layer that maps MaterialTheme colors to a structure matching the Jewel globalColors
+ * API surface used throughout the shared dashboards.
  *
- * This lets both the IDE plugin (via Jewel theme) and the desktop app (via Material3 theme)
- * provide colors through a single abstraction.
+ * This lets both the IDE plugin (via Jewel theme) and the desktop app (via Material3 theme) provide
+ * colors through a single abstraction.
  */
 data class SharedTextColors(
     val normal: Color,
@@ -32,9 +32,7 @@ data class SharedGlobalColors(
     val panelBackground: Color,
 )
 
-/**
- * Named text styles for consistent typography across the desktop app.
- */
+/** Named text styles for consistent typography across the desktop app. */
 object DesktopTypography {
   val caption = TextStyle(fontSize = 9.sp)
   val label = TextStyle(fontSize = 10.sp)
@@ -46,7 +44,8 @@ object DesktopTypography {
 
 object SharedTheme {
   val globalColors: SharedGlobalColors
-    @Composable @ReadOnlyComposable
+    @Composable
+    @ReadOnlyComposable
     get() =
         SharedGlobalColors(
             text =

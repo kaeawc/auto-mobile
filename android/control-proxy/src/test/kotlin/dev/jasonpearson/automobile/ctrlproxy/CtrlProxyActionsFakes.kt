@@ -82,7 +82,11 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun getDeviceOwnerStatus(requestId: String?) {}
 
-  override fun getPermission(requestId: String?, permission: String?, requestPermission: Boolean?) {}
+  override fun getPermission(
+      requestId: String?,
+      permission: String?,
+      requestPermission: Boolean?,
+  ) {}
 
   override fun setRecompositionTracking(enabled: Boolean) {}
 
@@ -168,8 +172,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 }
 
 /**
- * Recording [CtrlProxyActions] fake: every call is appended to [calls] as `(methodName, args)`, so a
- * dispatch test can assert both which action fired and the exact arguments it received.
+ * Recording [CtrlProxyActions] fake: every call is appended to [calls] as `(methodName, args)`, so
+ * a dispatch test can assert both which action fired and the exact arguments it received.
  */
 class RecordingCtrlProxyActions : CtrlProxyActions {
   val calls = mutableListOf<Pair<String, List<Any?>>>()
@@ -217,7 +221,18 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
       pressDurationMs: Long,
       dragDurationMs: Long,
       holdDurationMs: Long,
-  ) = record("requestDrag", requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+  ) =
+      record(
+          "requestDrag",
+          requestId,
+          x1,
+          y1,
+          x2,
+          y2,
+          pressDurationMs,
+          dragDurationMs,
+          holdDurationMs,
+      )
 
   override fun requestPinch(
       requestId: String?,
@@ -227,7 +242,17 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
       distanceEnd: Int,
       rotationDegrees: Float,
       duration: Long,
-  ) = record("requestPinch", requestId, centerX, centerY, distanceStart, distanceEnd, rotationDegrees, duration)
+  ) =
+      record(
+          "requestPinch",
+          requestId,
+          centerX,
+          centerY,
+          distanceStart,
+          distanceEnd,
+          rotationDegrees,
+          duration,
+      )
 
   override fun requestSetText(
       requestId: String?,
@@ -276,7 +301,13 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
       includeNotImportantViews: Boolean,
       reportViewIds: Boolean,
       retrieveInteractiveWindows: Boolean,
-  ) = record("setAccessibilityFlags", includeNotImportantViews, reportViewIds, retrieveInteractiveWindows)
+  ) =
+      record(
+          "setAccessibilityFlags",
+          includeNotImportantViews,
+          reportViewIds,
+          retrieveInteractiveWindows,
+      )
 
   override fun setNetworkMockRules(rulesJson: String) = record("setNetworkMockRules", rulesJson)
 

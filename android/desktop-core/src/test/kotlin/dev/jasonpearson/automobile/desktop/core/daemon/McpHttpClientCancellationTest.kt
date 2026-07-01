@@ -15,17 +15,13 @@ class McpHttpClientCancellationTest {
   @Test
   fun httpTimeoutIsRetryable() {
     assertTrue(
-        McpHttpClient.isRetryableError(
-            java.net.http.HttpTimeoutException("request timed out")
-        )
+        McpHttpClient.isRetryableError(java.net.http.HttpTimeoutException("request timed out"))
     )
   }
 
   @Test
   fun serverErrorIsRetryable() {
-    assertTrue(
-        McpHttpClient.isRetryableError(McpConnectionException("MCP HTTP server error 503"))
-    )
+    assertTrue(McpHttpClient.isRetryableError(McpConnectionException("MCP HTTP server error 503")))
   }
 
   @Test
@@ -38,9 +34,7 @@ class McpHttpClientCancellationTest {
   @Test
   fun deserializationErrorIsNotRetryable() {
     assertFalse(
-        McpHttpClient.isRetryableError(
-            RuntimeException("kotlinx.serialization: unknown key")
-        )
+        McpHttpClient.isRetryableError(RuntimeException("kotlinx.serialization: unknown key"))
     )
   }
 

@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.junit
 
-import java.io.File
 import java.util.Base64
 import org.junit.After
 import org.junit.AfterClass

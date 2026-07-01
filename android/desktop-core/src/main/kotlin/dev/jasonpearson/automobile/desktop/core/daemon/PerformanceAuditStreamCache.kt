@@ -61,8 +61,9 @@ class PerformanceAuditStreamCache(
   }
 
   @Synchronized
-  fun snapshot(filter: PerformanceAuditStreamFilter = PerformanceAuditStreamFilter()):
-      List<PerformanceAuditHistoryEntry> {
+  fun snapshot(
+      filter: PerformanceAuditStreamFilter = PerformanceAuditStreamFilter()
+  ): List<PerformanceAuditHistoryEntry> {
     pruneExpiredLocked()
     val windowMs = filter.timeWindowMs ?: ttlMs
     val cutoff = clock.nowMs() - windowMs

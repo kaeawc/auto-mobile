@@ -1,7 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.unified
 
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -20,87 +19,101 @@ import kotlinx.serialization.json.encodeToJsonElement
  * - subscribeToStorage: Storage change events
  */
 class ObservationClient(private val client: UnifiedSocketClient) {
-    private val json = Json { ignoreUnknownKeys = true }
+  private val json = Json { ignoreUnknownKeys = true }
 
-    /**
-     * Subscribe to hierarchy updates.
-     */
-    fun subscribeToHierarchy(deviceId: String? = null): Flow<HierarchyUpdateEvent> {
-        val params = buildMap<String, JsonElement> {
-            deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
+  /** Subscribe to hierarchy updates. */
+  fun subscribeToHierarchy(deviceId: String? = null): Flow<HierarchyUpdateEvent> {
+    val params =
+        buildMap<String, JsonElement> {
+          deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
         }
 
-        return client.subscribe(
+    return client
+        .subscribe(
             domain = Domains.OBSERVATION,
             event = "hierarchy_update",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
-        ).map { message ->
-            json.decodeFromJsonElement(message.result ?: throw IllegalStateException("No result in push"))
+        )
+        .map { message ->
+          json.decodeFromJsonElement(
+              message.result ?: throw IllegalStateException("No result in push")
+          )
         }
-    }
+  }
 
-    /**
-     * Subscribe to screenshot updates.
-     */
-    fun subscribeToScreenshots(deviceId: String? = null): Flow<ScreenshotUpdateEvent> {
-        val params = buildMap<String, JsonElement> {
-            deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
+  /** Subscribe to screenshot updates. */
+  fun subscribeToScreenshots(deviceId: String? = null): Flow<ScreenshotUpdateEvent> {
+    val params =
+        buildMap<String, JsonElement> {
+          deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
         }
 
-        return client.subscribe(
+    return client
+        .subscribe(
             domain = Domains.OBSERVATION,
             event = "screenshot_update",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
-        ).map { message ->
-            json.decodeFromJsonElement(message.result ?: throw IllegalStateException("No result in push"))
+        )
+        .map { message ->
+          json.decodeFromJsonElement(
+              message.result ?: throw IllegalStateException("No result in push")
+          )
         }
-    }
+  }
 
-    /**
-     * Subscribe to navigation graph updates.
-     */
-    fun subscribeToNavigation(): Flow<NavigationUpdateEvent> {
-        return client.subscribe(
+  /** Subscribe to navigation graph updates. */
+  fun subscribeToNavigation(): Flow<NavigationUpdateEvent> {
+    return client
+        .subscribe(
             domain = Domains.OBSERVATION,
             event = "navigation_update",
-        ).map { message ->
-            json.decodeFromJsonElement(message.result ?: throw IllegalStateException("No result in push"))
+        )
+        .map { message ->
+          json.decodeFromJsonElement(
+              message.result ?: throw IllegalStateException("No result in push")
+          )
         }
-    }
+  }
 
-    /**
-     * Subscribe to performance updates from device observation.
-     */
-    fun subscribeToPerformance(deviceId: String? = null): Flow<PerformanceUpdateEvent> {
-        val params = buildMap<String, JsonElement> {
-            deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
+  /** Subscribe to performance updates from device observation. */
+  fun subscribeToPerformance(deviceId: String? = null): Flow<PerformanceUpdateEvent> {
+    val params =
+        buildMap<String, JsonElement> {
+          deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
         }
 
-        return client.subscribe(
+    return client
+        .subscribe(
             domain = Domains.OBSERVATION,
             event = "performance_update",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
-        ).map { message ->
-            json.decodeFromJsonElement(message.result ?: throw IllegalStateException("No result in push"))
+        )
+        .map { message ->
+          json.decodeFromJsonElement(
+              message.result ?: throw IllegalStateException("No result in push")
+          )
         }
-    }
+  }
 
-    /**
-     * Subscribe to storage change events.
-     */
-    fun subscribeToStorage(deviceId: String? = null): Flow<StorageUpdateEvent> {
-        val params = buildMap<String, JsonElement> {
-            deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
+  /** Subscribe to storage change events. */
+  fun subscribeToStorage(deviceId: String? = null): Flow<StorageUpdateEvent> {
+    val params =
+        buildMap<String, JsonElement> {
+          deviceId?.let { put("deviceId", json.encodeToJsonElement(it)) }
         }
 
-        return client.subscribe(
+    return client
+        .subscribe(
             domain = Domains.OBSERVATION,
             event = "storage_update",
             params = if (params.isEmpty()) null else json.encodeToJsonElement(params),
-        ).map { message ->
-            json.decodeFromJsonElement(message.result ?: throw IllegalStateException("No result in push"))
+        )
+        .map { message ->
+          json.decodeFromJsonElement(
+              message.result ?: throw IllegalStateException("No result in push")
+          )
         }
-    }
+  }
 }
 
 @Serializable

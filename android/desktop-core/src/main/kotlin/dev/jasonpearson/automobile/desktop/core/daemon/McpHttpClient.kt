@@ -242,7 +242,8 @@ class McpHttpClient(
     }
   }
 
-  override fun getDaemonStatus(): dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
+  override fun getDaemonStatus():
+      dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
     // For HTTP client, use the status tool
     val response =
         callTool(

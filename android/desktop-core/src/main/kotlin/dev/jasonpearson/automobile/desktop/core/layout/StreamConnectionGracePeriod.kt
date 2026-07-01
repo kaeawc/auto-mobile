@@ -7,16 +7,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Mediates between raw [ConnectionState] events and UI status updates,
- * absorbing brief disconnections during reconnection to prevent the UI from
- * flashing "Device Disconnected" on transient interruptions.
+ * Mediates between raw [ConnectionState] events and UI status updates, absorbing brief
+ * disconnections during reconnection to prevent the UI from flashing "Device Disconnected" on
+ * transient interruptions.
  *
  * Key behaviors:
  * - **Connected**: propagated immediately; cancels any pending grace period.
  * - **Connecting (after having been connected)**: suppressed — UI keeps showing Connected.
  * - **Connecting (initial, never connected)**: propagated normally.
- * - **Disconnected (after having been connected)**: starts a grace period; only confirms
- *   disconnect if the period expires without reconnection.
+ * - **Disconnected (after having been connected)**: starts a grace period; only confirms disconnect
+ *   if the period expires without reconnection.
  * - **Disconnected (never connected)**: propagated immediately.
  */
 class StreamConnectionGracePeriod(
@@ -25,40 +25,42 @@ class StreamConnectionGracePeriod(
     private val onStatusChange: (ConnectionStatus) -> Unit,
     private val onDisconnectConfirmed: () -> Unit,
 ) {
-    private var hasBeenConnected = false
-    private var gracePeriodJob: Job? = null
+  private var hasBeenConnected = false
+  private var gracePeriodJob: Job? = null
 
-    fun onStreamStateChange(state: ConnectionState) {
-        when (state) {
-            is ConnectionState.Connected -> {
-                gracePeriodJob?.cancel()
-                gracePeriodJob = null
-                hasBeenConnected = true
-                onStatusChange(ConnectionStatus.Connected)
-            }
-            is ConnectionState.Connecting, is ConnectionState.Reconnecting -> {
-                if (!hasBeenConnected) {
-                    onStatusChange(ConnectionStatus.Connecting)
-                }
-                // If previously connected, suppress — keep showing Connected
-            }
-            is ConnectionState.Disconnected, is ConnectionState.Error -> {
-                if (!hasBeenConnected) {
-                    onDisconnectConfirmed()
-                    return
-                }
-                // Already have a grace period running — don't start another
-                if (gracePeriodJob?.isActive == true) return
-                gracePeriodJob = scope.launch {
-                    delay(gracePeriodMs)
-                    onDisconnectConfirmed()
-                }
-            }
-        }
-    }
-
-    fun cancel() {
+  fun onStreamStateChange(state: ConnectionState) {
+    when (state) {
+      is ConnectionState.Connected -> {
         gracePeriodJob?.cancel()
         gracePeriodJob = null
+        hasBeenConnected = true
+        onStatusChange(ConnectionStatus.Connected)
+      }
+      is ConnectionState.Connecting,
+      is ConnectionState.Reconnecting -> {
+        if (!hasBeenConnected) {
+          onStatusChange(ConnectionStatus.Connecting)
+        }
+        // If previously connected, suppress — keep showing Connected
+      }
+      is ConnectionState.Disconnected,
+      is ConnectionState.Error -> {
+        if (!hasBeenConnected) {
+          onDisconnectConfirmed()
+          return
+        }
+        // Already have a grace period running — don't start another
+        if (gracePeriodJob?.isActive == true) return
+        gracePeriodJob = scope.launch {
+          delay(gracePeriodMs)
+          onDisconnectConfirmed()
+        }
+      }
     }
+  }
+
+  fun cancel() {
+    gracePeriodJob?.cancel()
+    gracePeriodJob = null
+  }
 }

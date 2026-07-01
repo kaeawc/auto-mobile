@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -14,13 +15,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.Text
 import dev.jasonpearson.automobile.desktop.core.theme.DesktopTypography
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
-/**
- * Small colored dot indicating connection status with an optional label.
- */
+/** Small colored dot indicating connection status with an optional label. */
 @Composable
 fun ConnectionStatusIndicator(
     isConnected: Boolean,
@@ -28,31 +26,29 @@ fun ConnectionStatusIndicator(
     label: String? = null,
     modifier: Modifier = Modifier,
 ) {
-    val dotColor = when {
+  val dotColor =
+      when {
         isConnected -> Color(0xFF4CAF50) // green
         isReconnecting -> Color(0xFFFFC107) // yellow
         else -> Color(0xFFF44336) // red
-    }
-    val textColor = SharedTheme.globalColors.text.normal
+      }
+  val textColor = SharedTheme.globalColors.text.normal
 
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(dotColor),
-        )
-        if (label != null) {
-            Spacer(modifier = Modifier.width(3.dp))
-            Text(
-                text = label,
-                style = DesktopTypography.label,
-                color = textColor.copy(alpha = 0.7f),
-                lineHeight = 10.sp,
-            )
-        }
+  Row(
+      modifier = modifier,
+      verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Box(
+        modifier = Modifier.size(6.dp).clip(CircleShape).background(dotColor),
+    )
+    if (label != null) {
+      Spacer(modifier = Modifier.width(3.dp))
+      Text(
+          text = label,
+          style = DesktopTypography.label,
+          color = textColor.copy(alpha = 0.7f),
+          lineHeight = 10.sp,
+      )
     }
+  }
 }

@@ -34,365 +34,384 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 /**
- * Client for the observation stream Unix socket server.
- * Subscribes to receive real-time hierarchy and screenshot updates from the MCP server.
+ * Client for the observation stream Unix socket server. Subscribes to receive real-time hierarchy
+ * and screenshot updates from the MCP server.
  *
- * Socket path: ~/.auto-mobile/observation-stream.sock
- * or /tmp/auto-mobile-observation-stream.sock (in external mode)
+ * Socket path: ~/.auto-mobile/observation-stream.sock or /tmp/auto-mobile-observation-stream.sock
+ * (in external mode)
  */
 class ObservationStreamClient {
-    companion object {
-        internal fun getSocketPath(): String {
-            // Check for external mode (matches the server's logic)
-            val isExternalMode = System.getenv("AUTOMOBILE_EMULATOR_EXTERNAL") == "true"
-            return if (isExternalMode) {
-                "/tmp/auto-mobile-observation-stream.sock"
-            } else {
-                "${System.getProperty("user.home")}/.auto-mobile/observation-stream.sock"
-            }
-        }
-
-        fun socketExists(): Boolean = Files.exists(Path.of(getSocketPath()))
+  companion object {
+    internal fun getSocketPath(): String {
+      // Check for external mode (matches the server's logic)
+      val isExternalMode = System.getenv("AUTOMOBILE_EMULATOR_EXTERNAL") == "true"
+      return if (isExternalMode) {
+        "/tmp/auto-mobile-observation-stream.sock"
+      } else {
+        "${System.getProperty("user.home")}/.auto-mobile/observation-stream.sock"
+      }
     }
 
-    private val log = LoggerFactory.getLogger(ObservationStreamClient::class.java)
-    private val json = Json { ignoreUnknownKeys = true }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    fun socketExists(): Boolean = Files.exists(Path.of(getSocketPath()))
+  }
 
-    private var channel: SocketChannel? = null
-    private var reader: BufferedReader? = null
-    private var writer: BufferedWriter? = null
+  private val log = LoggerFactory.getLogger(ObservationStreamClient::class.java)
+  private val json = Json { ignoreUnknownKeys = true }
+  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // Flow for hierarchy updates
-    private val _hierarchyUpdates = MutableSharedFlow<HierarchyStreamUpdate>(replay = 1)
-    val hierarchyUpdates: SharedFlow<HierarchyStreamUpdate> = _hierarchyUpdates.asSharedFlow()
+  private var channel: SocketChannel? = null
+  private var reader: BufferedReader? = null
+  private var writer: BufferedWriter? = null
 
-    // Flow for screenshot updates
-    private val _screenshotUpdates = MutableSharedFlow<ScreenshotStreamUpdate>(replay = 1)
-    val screenshotUpdates: SharedFlow<ScreenshotStreamUpdate> = _screenshotUpdates.asSharedFlow()
+  // Flow for hierarchy updates
+  private val _hierarchyUpdates = MutableSharedFlow<HierarchyStreamUpdate>(replay = 1)
+  val hierarchyUpdates: SharedFlow<HierarchyStreamUpdate> = _hierarchyUpdates.asSharedFlow()
 
-    // Flow for navigation graph updates
-    private val _navigationUpdates = MutableSharedFlow<NavigationGraphStreamUpdate>(replay = 1)
-    val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate> = _navigationUpdates.asSharedFlow()
+  // Flow for screenshot updates
+  private val _screenshotUpdates = MutableSharedFlow<ScreenshotStreamUpdate>(replay = 1)
+  val screenshotUpdates: SharedFlow<ScreenshotStreamUpdate> = _screenshotUpdates.asSharedFlow()
 
-    // Flow for performance metrics updates (use extraBufferCapacity + DROP_OLDEST to avoid blocking)
-    private val _performanceUpdates = MutableSharedFlow<PerformanceStreamUpdate>(
-        replay = 1,
-        extraBufferCapacity = 10,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-    )
-    val performanceUpdates: SharedFlow<PerformanceStreamUpdate> = _performanceUpdates.asSharedFlow()
+  // Flow for navigation graph updates
+  private val _navigationUpdates = MutableSharedFlow<NavigationGraphStreamUpdate>(replay = 1)
+  val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate> = _navigationUpdates.asSharedFlow()
 
-    // Flow for device-level stream events such as control connection loss.
-    private val _deviceEvents = MutableSharedFlow<DeviceStreamEvent>(replay = 1)
-    val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
+  // Flow for performance metrics updates (use extraBufferCapacity + DROP_OLDEST to avoid blocking)
+  private val _performanceUpdates =
+      MutableSharedFlow<PerformanceStreamUpdate>(
+          replay = 1,
+          extraBufferCapacity = 10,
+          onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+      )
+  val performanceUpdates: SharedFlow<PerformanceStreamUpdate> = _performanceUpdates.asSharedFlow()
 
-    // Flow for connection state
-    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
-    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+  // Flow for device-level stream events such as control connection loss.
+  private val _deviceEvents = MutableSharedFlow<DeviceStreamEvent>(replay = 1)
+  val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
 
-    /**
-     * Connect to the observation stream socket and subscribe to updates.
-     * @param deviceId Optional device ID to subscribe to. If null, subscribes to all devices.
-     */
-    fun connect(deviceId: String? = null) {
-        if (_connectionState.value.isConnected) {
-            log.info("Already connected to observation stream")
-            return
-        }
+  // Flow for connection state
+  private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
+  val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-        val socketPath = getSocketPath()
-        log.info("Connecting to observation stream at $socketPath")
+  /**
+   * Connect to the observation stream socket and subscribe to updates.
+   *
+   * @param deviceId Optional device ID to subscribe to. If null, subscribes to all devices.
+   */
+  fun connect(deviceId: String? = null) {
+    if (_connectionState.value.isConnected) {
+      log.info("Already connected to observation stream")
+      return
+    }
 
-        _connectionState.update { ConnectionState.Connecting }
+    val socketPath = getSocketPath()
+    log.info("Connecting to observation stream at $socketPath")
 
-        try {
-            val path = Path.of(socketPath)
-            if (!Files.exists(path)) {
-                log.warn("Observation stream socket not found at $socketPath")
-                _connectionState.update { ConnectionState.Disconnected("Socket not found") }
-                return
-            }
+    _connectionState.update { ConnectionState.Connecting }
 
-            val address = UnixDomainSocketAddress.of(socketPath)
-            channel = SocketChannel.open(address)
-            reader = BufferedReader(
-                InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
+    try {
+      val path = Path.of(socketPath)
+      if (!Files.exists(path)) {
+        log.warn("Observation stream socket not found at $socketPath")
+        _connectionState.update { ConnectionState.Disconnected("Socket not found") }
+        return
+      }
+
+      val address = UnixDomainSocketAddress.of(socketPath)
+      channel = SocketChannel.open(address)
+      reader =
+          BufferedReader(
+              InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
+          )
+      writer =
+          BufferedWriter(
+              OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
+          )
+
+      _connectionState.update { ConnectionState.Connected() }
+      log.info("Connected to observation stream")
+
+      // Send subscribe request
+      subscribe(deviceId)
+
+      // Start reading messages
+      scope.launch {
+        readMessages()
+      }
+    } catch (e: Exception) {
+      log.warn("Failed to connect to observation stream: ${e.message}")
+      _connectionState.update { ConnectionState.Disconnected(e.message) }
+    }
+  }
+
+  fun disconnect() {
+    if (!_connectionState.value.isConnected) return
+
+    val previousState = _connectionState.value
+
+    try {
+      // Send unsubscribe request
+      if (previousState is ConnectionState.Connected && previousState.subscribed) {
+        val request =
+            StreamRequest(
+                id = UUID.randomUUID().toString(),
+                command = "unsubscribe",
             )
-            writer = BufferedWriter(
-                OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
-            )
+        sendRequest(request)
+      }
 
-            _connectionState.update { ConnectionState.Connected() }
-            log.info("Connected to observation stream")
-
-            // Send subscribe request
-            subscribe(deviceId)
-
-            // Start reading messages
-            scope.launch {
-                readMessages()
-            }
-
-        } catch (e: Exception) {
-            log.warn("Failed to connect to observation stream: ${e.message}")
-            _connectionState.update { ConnectionState.Disconnected(e.message) }
-        }
+      channel?.close()
+    } catch (e: Exception) {
+      log.warn("Error disconnecting from observation stream: ${e.message}")
     }
 
-    fun disconnect() {
-        if (!_connectionState.value.isConnected) return
+    channel = null
+    reader = null
+    writer = null
+    _connectionState.update { ConnectionState.Disconnected() }
+  }
 
-        val previousState = _connectionState.value
+  fun isConnected(): Boolean = _connectionState.value.isConnected
 
-        try {
-            // Send unsubscribe request
-            if (previousState is ConnectionState.Connected && previousState.subscribed) {
-                val request = StreamRequest(
-                    id = UUID.randomUUID().toString(),
-                    command = "unsubscribe",
-                )
-                sendRequest(request)
-            }
+  /**
+   * Disconnect and cancel the internal coroutine scope. After calling dispose(), this client
+   * instance should not be reused.
+   */
+  fun dispose() {
+    disconnect()
+    scope.coroutineContext[Job]?.cancel()
+  }
 
-            channel?.close()
-        } catch (e: Exception) {
-            log.warn("Error disconnecting from observation stream: ${e.message}")
-        }
-
-        channel = null
-        reader = null
-        writer = null
-        _connectionState.update { ConnectionState.Disconnected() }
-    }
-
-    fun isConnected(): Boolean = _connectionState.value.isConnected
-
-    /**
-     * Disconnect and cancel the internal coroutine scope.
-     * After calling dispose(), this client instance should not be reused.
-     */
-    fun dispose() {
-        disconnect()
-        scope.coroutineContext[Job]?.cancel()
-    }
-
-    private fun subscribe(deviceId: String?) {
-        val request = StreamRequest(
+  private fun subscribe(deviceId: String?) {
+    val request =
+        StreamRequest(
             id = UUID.randomUUID().toString(),
             command = "subscribe",
             deviceId = deviceId,
         )
 
-        if (sendRequest(request)) {
-            _connectionState.update { current ->
-                if (current is ConnectionState.Connected) {
-                    current.copy(subscribed = true)
-                } else {
-                    current
-                }
-            }
-            log.info("Subscribed to observation stream (device: ${deviceId ?: "all"})")
+    if (sendRequest(request)) {
+      _connectionState.update { current ->
+        if (current is ConnectionState.Connected) {
+          current.copy(subscribed = true)
+        } else {
+          current
         }
+      }
+      log.info("Subscribed to observation stream (device: ${deviceId ?: "all"})")
     }
+  }
 
-    private fun sendRequest(request: StreamRequest): Boolean {
-        val currentWriter = writer ?: return false
+  private fun sendRequest(request: StreamRequest): Boolean {
+    val currentWriter = writer ?: return false
 
-        return try {
-            val message = json.encodeToString(StreamRequest.serializer(), request)
-            currentWriter.write(message)
-            currentWriter.newLine()
-            currentWriter.flush()
-            true
-        } catch (e: Exception) {
-            log.warn("Failed to send request: ${e.message}")
-            false
-        }
+    return try {
+      val message = json.encodeToString(StreamRequest.serializer(), request)
+      currentWriter.write(message)
+      currentWriter.newLine()
+      currentWriter.flush()
+      true
+    } catch (e: Exception) {
+      log.warn("Failed to send request: ${e.message}")
+      false
     }
+  }
 
-    private suspend fun readMessages() {
-        val currentReader = reader ?: return
+  private suspend fun readMessages() {
+    val currentReader = reader ?: return
+
+    try {
+      log.info("Starting message read loop")
+
+      while (_connectionState.value.isConnected) {
+        val line = currentReader.readLine() ?: break
+        if (line.isBlank()) continue
+
+        log.info("Received message (${line.length} chars): ${line.take(200)}...")
 
         try {
-            log.info("Starting message read loop")
-
-            while (_connectionState.value.isConnected) {
-                val line = currentReader.readLine() ?: break
-                if (line.isBlank()) continue
-
-                log.info("Received message (${line.length} chars): ${line.take(200)}...")
-
-                try {
-                    handleMessage(line)
-                } catch (e: Exception) {
-                    log.warn("Failed to parse observation stream message: ${e.message}", e)
-                }
-            }
-            log.info("Read loop ended - connected=${_connectionState.value.isConnected}")
+          handleMessage(line)
         } catch (e: Exception) {
-            log.warn("Error reading from observation stream: ${e.message}", e)
+          log.warn("Failed to parse observation stream message: ${e.message}", e)
         }
-
-        _connectionState.update { ConnectionState.Disconnected("Stream ended") }
-        log.info("Observation stream disconnected")
+      }
+      log.info("Read loop ended - connected=${_connectionState.value.isConnected}")
+    } catch (e: Exception) {
+      log.warn("Error reading from observation stream: ${e.message}", e)
     }
 
-    internal suspend fun handleMessage(message: String) {
-        val response = json.decodeFromString(StreamResponse.serializer(), message)
-        log.info("Handling message type: ${response.type}")
+    _connectionState.update { ConnectionState.Disconnected("Stream ended") }
+    log.info("Observation stream disconnected")
+  }
 
-        when (response.type) {
-            "subscription_response" -> {
-                log.info("Subscription response: success=${response.success}")
-                if (response.success != true) {
-                    log.warn("Subscription failed: ${response.error}")
-                }
-            }
-            "hierarchy_update" -> {
-                // Extract packageName from the data if present
-                val packageName = extractPackageName(response.data)
-                log.info("Hierarchy update received - deviceId=${response.deviceId}, timestamp=${response.timestamp}, packageName=$packageName, dataPresent=${response.data != null}")
-                val update = HierarchyStreamUpdate(
-                    deviceId = response.deviceId,
-                    timestamp = response.timestamp ?: System.currentTimeMillis(),
-                    data = response.data,
-                    packageName = packageName,
-                )
-                _hierarchyUpdates.emit(update)
-                log.info("Emitted hierarchy update to flow")
-            }
-            "screenshot_update" -> {
-                log.info("Screenshot update received - deviceId=${response.deviceId}, hasScreenshot=${response.screenshotBase64 != null}")
-                val update = ScreenshotStreamUpdate(
-                    deviceId = response.deviceId,
-                    timestamp = response.timestamp ?: System.currentTimeMillis(),
-                    screenshotBase64 = response.screenshotBase64,
-                    screenWidth = response.screenWidth ?: 1080,
-                    screenHeight = response.screenHeight ?: 2340,
-                )
-                _screenshotUpdates.emit(update)
-                log.info("Emitted screenshot update to flow")
-            }
-            "navigation_update" -> {
-                val navGraph = response.navigationGraph
-                log.info("Navigation update received - appId=${navGraph?.appId}, nodes=${navGraph?.nodes?.size}, edges=${navGraph?.edges?.size}")
-                if (navGraph != null) {
-                    val update = NavigationGraphStreamUpdate(
-                        timestamp = response.timestamp ?: System.currentTimeMillis(),
-                        appId = navGraph.appId,
-                        nodes = navGraph.nodes,
-                        edges = navGraph.edges,
-                        currentScreen = navGraph.currentScreen,
-                    )
-                    _navigationUpdates.emit(update)
-                    log.info("Emitted navigation update to flow")
-                }
-            }
-            "performance_update" -> {
-                val perfData = response.performanceData
-                log.info("Performance update received - deviceId=${response.deviceId}, fps=${perfData?.fps}, jankFrames=${perfData?.jankFrames}, touchLatencyMs=${perfData?.touchLatencyMs}, ttiMs=${perfData?.timeToInteractiveMs}")
-                if (perfData != null) {
-                    // When jank is 0 and FPS is below 60, the device is idle (no frames
-                    // being rendered). The reported FPS gets stuck at a stale value.
-                    // Assume 60 FPS / 16.67ms frame time since nothing is janking.
-                    val isIdle = perfData.jankFrames == 0 && perfData.fps < 60f
-                    val fps = if (isIdle) 60f else perfData.fps
-                    val frameTimeMs = if (isIdle) 16.67f else perfData.frameTimeMs
-                    val update = PerformanceStreamUpdate(
-                        deviceId = response.deviceId,
-                        timestamp = response.timestamp ?: System.currentTimeMillis(),
-                        fps = fps,
-                        frameTimeMs = frameTimeMs,
-                        jankFrames = perfData.jankFrames,
-                        droppedFrames = perfData.droppedFrames,
-                        memoryUsageMb = perfData.memoryUsageMb,
-                        cpuUsagePercent = perfData.cpuUsagePercent,
-                        touchLatencyMs = perfData.touchLatencyMs,
-                        timeToInteractiveMs = perfData.timeToInteractiveMs,
-                        screenName = perfData.screenName,
-                        isResponsive = perfData.isResponsive,
-                        recompositionCount = perfData.recompositionCount,
-                        recompositionRate = perfData.recompositionRate,
-                    )
-                    _performanceUpdates.tryEmit(update)
-                    log.info("Emitted performance update to flow")
-                }
-            }
-            "ping" -> {
-                log.info("Received ping, sending pong")
-                sendPong()
-            }
-            "error" -> {
-                log.warn("Observation stream error: ${response.error}")
-                emitDeviceEvent(response)
-            }
-            else -> {
-                log.warn("Unknown message type: ${response.type}")
-            }
+  internal suspend fun handleMessage(message: String) {
+    val response = json.decodeFromString(StreamResponse.serializer(), message)
+    log.info("Handling message type: ${response.type}")
+
+    when (response.type) {
+      "subscription_response" -> {
+        log.info("Subscription response: success=${response.success}")
+        if (response.success != true) {
+          log.warn("Subscription failed: ${response.error}")
         }
-    }
-
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    private suspend fun emitDeviceEvent(response: StreamResponse) {
-        val deviceId = response.deviceId ?: return
-        val error = response.error ?: return
-        if (error != DEVICE_CONNECTION_LOST_ERROR) return
-
-        _hierarchyUpdates.resetReplayCache()
-        _screenshotUpdates.resetReplayCache()
-        _performanceUpdates.resetReplayCache()
-        _deviceEvents.emit(
-            DeviceStreamEvent.DeviceConnectionLost(
-                deviceId = deviceId,
-                timestamp = response.timestamp ?: System.currentTimeMillis(),
-                error = error,
-            )
+      }
+      "hierarchy_update" -> {
+        // Extract packageName from the data if present
+        val packageName = extractPackageName(response.data)
+        log.info(
+            "Hierarchy update received - deviceId=${response.deviceId}, timestamp=${response.timestamp}, packageName=$packageName, dataPresent=${response.data != null}"
         )
-        log.info("Emitted device connection lost event for $deviceId")
+        val update =
+            HierarchyStreamUpdate(
+                deviceId = response.deviceId,
+                timestamp = response.timestamp ?: System.currentTimeMillis(),
+                data = response.data,
+                packageName = packageName,
+            )
+        _hierarchyUpdates.emit(update)
+        log.info("Emitted hierarchy update to flow")
+      }
+      "screenshot_update" -> {
+        log.info(
+            "Screenshot update received - deviceId=${response.deviceId}, hasScreenshot=${response.screenshotBase64 != null}"
+        )
+        val update =
+            ScreenshotStreamUpdate(
+                deviceId = response.deviceId,
+                timestamp = response.timestamp ?: System.currentTimeMillis(),
+                screenshotBase64 = response.screenshotBase64,
+                screenWidth = response.screenWidth ?: 1080,
+                screenHeight = response.screenHeight ?: 2340,
+            )
+        _screenshotUpdates.emit(update)
+        log.info("Emitted screenshot update to flow")
+      }
+      "navigation_update" -> {
+        val navGraph = response.navigationGraph
+        log.info(
+            "Navigation update received - appId=${navGraph?.appId}, nodes=${navGraph?.nodes?.size}, edges=${navGraph?.edges?.size}"
+        )
+        if (navGraph != null) {
+          val update =
+              NavigationGraphStreamUpdate(
+                  timestamp = response.timestamp ?: System.currentTimeMillis(),
+                  appId = navGraph.appId,
+                  nodes = navGraph.nodes,
+                  edges = navGraph.edges,
+                  currentScreen = navGraph.currentScreen,
+              )
+          _navigationUpdates.emit(update)
+          log.info("Emitted navigation update to flow")
+        }
+      }
+      "performance_update" -> {
+        val perfData = response.performanceData
+        log.info(
+            "Performance update received - deviceId=${response.deviceId}, fps=${perfData?.fps}, jankFrames=${perfData?.jankFrames}, touchLatencyMs=${perfData?.touchLatencyMs}, ttiMs=${perfData?.timeToInteractiveMs}"
+        )
+        if (perfData != null) {
+          // When jank is 0 and FPS is below 60, the device is idle (no frames
+          // being rendered). The reported FPS gets stuck at a stale value.
+          // Assume 60 FPS / 16.67ms frame time since nothing is janking.
+          val isIdle = perfData.jankFrames == 0 && perfData.fps < 60f
+          val fps = if (isIdle) 60f else perfData.fps
+          val frameTimeMs = if (isIdle) 16.67f else perfData.frameTimeMs
+          val update =
+              PerformanceStreamUpdate(
+                  deviceId = response.deviceId,
+                  timestamp = response.timestamp ?: System.currentTimeMillis(),
+                  fps = fps,
+                  frameTimeMs = frameTimeMs,
+                  jankFrames = perfData.jankFrames,
+                  droppedFrames = perfData.droppedFrames,
+                  memoryUsageMb = perfData.memoryUsageMb,
+                  cpuUsagePercent = perfData.cpuUsagePercent,
+                  touchLatencyMs = perfData.touchLatencyMs,
+                  timeToInteractiveMs = perfData.timeToInteractiveMs,
+                  screenName = perfData.screenName,
+                  isResponsive = perfData.isResponsive,
+                  recompositionCount = perfData.recompositionCount,
+                  recompositionRate = perfData.recompositionRate,
+              )
+          _performanceUpdates.tryEmit(update)
+          log.info("Emitted performance update to flow")
+        }
+      }
+      "ping" -> {
+        log.info("Received ping, sending pong")
+        sendPong()
+      }
+      "error" -> {
+        log.warn("Observation stream error: ${response.error}")
+        emitDeviceEvent(response)
+      }
+      else -> {
+        log.warn("Unknown message type: ${response.type}")
+      }
     }
+  }
 
-    /**
-     * Request the current navigation graph from the server.
-     * The response arrives through the existing navigation_update flow.
-     *
-     * @param appId Optional app ID to request the graph for a specific app.
-     *              If null, the server returns the graph for the current foreground app.
-     */
-    fun requestNavigationGraph(appId: String? = null) {
-        if (!_connectionState.value.isConnected) return
+  @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+  private suspend fun emitDeviceEvent(response: StreamResponse) {
+    val deviceId = response.deviceId ?: return
+    val error = response.error ?: return
+    if (error != DEVICE_CONNECTION_LOST_ERROR) return
 
-        val request = StreamRequest(
+    _hierarchyUpdates.resetReplayCache()
+    _screenshotUpdates.resetReplayCache()
+    _performanceUpdates.resetReplayCache()
+    _deviceEvents.emit(
+        DeviceStreamEvent.DeviceConnectionLost(
+            deviceId = deviceId,
+            timestamp = response.timestamp ?: System.currentTimeMillis(),
+            error = error,
+        )
+    )
+    log.info("Emitted device connection lost event for $deviceId")
+  }
+
+  /**
+   * Request the current navigation graph from the server. The response arrives through the existing
+   * navigation_update flow.
+   *
+   * @param appId Optional app ID to request the graph for a specific app. If null, the server
+   *   returns the graph for the current foreground app.
+   */
+  fun requestNavigationGraph(appId: String? = null) {
+    if (!_connectionState.value.isConnected) return
+
+    val request =
+        StreamRequest(
             id = UUID.randomUUID().toString(),
             command = "request_navigation_graph",
             appId = appId,
         )
-        sendRequest(request)
-    }
+    sendRequest(request)
+  }
 
-    private fun sendPong() {
-        val request = StreamRequest(
+  private fun sendPong() {
+    val request =
+        StreamRequest(
             id = UUID.randomUUID().toString(),
             command = "pong",
         )
-        sendRequest(request)
-    }
+    sendRequest(request)
+  }
 
-    /**
-     * Extract packageName from the hierarchy data.
-     * The data structure is: { "hierarchy": {...}, "packageName": "com.example.app", ... }
-     */
-    private fun extractPackageName(data: JsonElement?): String? {
-        if (data == null) return null
-        return try {
-            val obj = data as? JsonObject ?: return null
-            val packageNameElement = obj["packageName"] as? JsonPrimitive
-            packageNameElement?.contentOrNull?.takeIf { it.isNotEmpty() }
-        } catch (e: Exception) {
-            log.warn("Failed to extract packageName: ${e.message}")
-            null
-        }
+  /**
+   * Extract packageName from the hierarchy data. The data structure is: { "hierarchy": {...},
+   * "packageName": "com.example.app", ... }
+   */
+  private fun extractPackageName(data: JsonElement?): String? {
+    if (data == null) return null
+    return try {
+      val obj = data as? JsonObject ?: return null
+      val packageNameElement = obj["packageName"] as? JsonPrimitive
+      packageNameElement?.contentOrNull?.takeIf { it.isNotEmpty() }
+    } catch (e: Exception) {
+      log.warn("Failed to extract packageName: ${e.message}")
+      null
     }
+  }
 }
 
 @Serializable
@@ -501,11 +520,11 @@ data class PerformanceStreamUpdate(
 )
 
 sealed class DeviceStreamEvent {
-    data class DeviceConnectionLost(
-        val deviceId: String,
-        val timestamp: Long,
-        val error: String,
-    ) : DeviceStreamEvent()
+  data class DeviceConnectionLost(
+      val deviceId: String,
+      val timestamp: Long,
+      val error: String,
+  ) : DeviceStreamEvent()
 }
 
 private const val DEVICE_CONNECTION_LOST_ERROR = "device connection lost"

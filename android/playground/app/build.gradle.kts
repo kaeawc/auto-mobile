@@ -15,11 +15,10 @@ val releaseKeyAlias: String? =
     System.getenv("RELEASE_KEY_ALIAS") ?: findProperty("RELEASE_KEY_ALIAS") as String?
 val releaseKeyPassword: String? =
     System.getenv("RELEASE_KEY_PASSWORD") ?: findProperty("RELEASE_KEY_PASSWORD") as String?
-val releaseStoreFile: File? =
-    releaseStoreFilePath?.let { path ->
-      val file = File(path)
-      if (file.isAbsolute) file else rootProject.file(path)
-    }
+val releaseStoreFile: File? = releaseStoreFilePath?.let { path ->
+  val file = File(path)
+  if (file.isAbsolute) file else rootProject.file(path)
+}
 val hasReleaseSigning =
     releaseStoreFile?.exists() == true &&
         !releaseStorePassword.isNullOrBlank() &&

@@ -56,7 +56,12 @@ interface CtrlProxyActions {
       duration: Long,
   )
 
-  fun requestSetText(requestId: String?, text: String, resourceId: String?, dismissKeyboard: Boolean)
+  fun requestSetText(
+      requestId: String?,
+      text: String,
+      resourceId: String?,
+      dismissKeyboard: Boolean,
+  )
 
   fun requestImeAction(requestId: String?, action: String)
 

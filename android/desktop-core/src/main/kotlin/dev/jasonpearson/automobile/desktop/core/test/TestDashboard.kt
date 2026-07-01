@@ -21,6 +21,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,29 +42,23 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
-import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
-import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
+import dev.jasonpearson.automobile.desktop.core.components.Link
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.TestRecordingClient
-import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
+import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
+import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Button
-import dev.jasonpearson.automobile.desktop.core.components.Link
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import org.jetbrains.skia.Image
-import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 private val LOG = LoggerFactory.getLogger("TestDashboard")
 
@@ -168,7 +166,8 @@ fun TestDashboard(
     error = null
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       try {
-        val dataSource = graph.dataSourceFactory.createTestDataSource(dataSourceMode, clientProvider)
+        val dataSource =
+            graph.dataSourceFactory.createTestDataSource(dataSourceMode, clientProvider)
         when (val result = dataSource.getTestRuns()) {
           is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {
             testRuns = result.data
@@ -1197,7 +1196,9 @@ private fun PlanReviewPanel(
             savePlanToFile(
                 plan,
                 fileSaver,
-            ) { path -> saveSuccess = path }
+            ) { path ->
+              saveSuccess = path
+            }
             onSave()
           },
           modifier = Modifier.weight(1f),
@@ -1425,7 +1426,8 @@ private fun ModuleSelectionScreen(
 
     // Search field
     TextField(
-        value = searchText, onValueChange = { searchText = it },
+        value = searchText,
+        onValueChange = { searchText = it },
         modifier = Modifier.fillMaxWidth(),
     )
 
@@ -2512,5 +2514,4 @@ private fun extractVideoFrame(videoPath: String, timeMs: Long): org.jetbrains.sk
     frameCache[cacheKey] = null
     null
   }
-
 }

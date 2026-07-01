@@ -24,47 +24,51 @@ fun EventTimeline(
     onEventClicked: (TelemetryDisplayEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = SharedTheme.globalColors
-    val filteredCategories by remember(activeFilterCategory) {
+  val colors = SharedTheme.globalColors
+  val filteredCategories by
+      remember(activeFilterCategory) {
         derivedStateOf {
-            if (activeFilterCategory == null) emptySet()
-            else TimelineCategory.entries
-                .filter { it.label.equals(activeFilterCategory, ignoreCase = true) }
-                .toSet()
+          if (activeFilterCategory == null) emptySet()
+          else
+              TimelineCategory.entries
+                  .filter { it.label.equals(activeFilterCategory, ignoreCase = true) }
+                  .toSet()
         }
-    }
-    val latestTimestamp = events.lastOrNull()?.timestamp ?: 0L
-    val spans by remember(events.size, latestTimestamp, filteredCategories) {
+      }
+  val latestTimestamp = events.lastOrNull()?.timestamp ?: 0L
+  val spans by
+      remember(events.size, latestTimestamp, filteredCategories) {
         derivedStateOf { buildTimelineSpans(events, filteredCategories) }
-    }
-    val lanes by remember(spans) {
+      }
+  val lanes by
+      remember(spans) {
         derivedStateOf { activeLanes(spans) }
-    }
+      }
 
-    LaunchedEffect(spans.isNotEmpty()) {
-        if (spans.isNotEmpty() && state.visibleStartMs == 0L && state.visibleEndMs == 1L) {
-            state.fitToEvents(spans)
-        }
+  LaunchedEffect(spans.isNotEmpty()) {
+    if (spans.isNotEmpty() && state.visibleStartMs == 0L && state.visibleEndMs == 1L) {
+      state.fitToEvents(spans)
     }
+  }
 
-    if (events.isEmpty()) {
-        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Event Timeline", color = colors.text.normal.copy(alpha = 0.5f), fontSize = 12.sp)
-        }
-    } else {
-        Column(modifier.fillMaxSize()) {
-            TimelineToolbar(
-                state = state,
-                spanCount = spans.size,
-                onFitAll = { state.fitToEvents(spans) },
-            )
-            TimelineCanvas(
-                spans = spans,
-                activeLanes = lanes,
-                state = state,
-                onEventClicked = onEventClicked,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            )
-        }
+  if (events.isEmpty()) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+      Text("Event Timeline", color = colors.text.normal.copy(alpha = 0.5f), fontSize = 12.sp)
     }
+  } else {
+    Column(modifier.fillMaxSize()) {
+      TimelineToolbar(
+          state = state,
+          spanCount = spans.size,
+          onFitAll = { state.fitToEvents(spans) },
+      )
+      TimelineCanvas(
+          spans = spans,
+          activeLanes = lanes,
+          state = state,
+          onEventClicked = onEventClicked,
+          modifier = Modifier.weight(1f).fillMaxWidth(),
+      )
+    }
+  }
 }

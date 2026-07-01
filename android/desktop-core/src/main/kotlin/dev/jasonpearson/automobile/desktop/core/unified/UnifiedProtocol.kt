@@ -3,35 +3,29 @@ package dev.jasonpearson.automobile.desktop.core.unified
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
-/**
- * Unified socket message types.
- */
+/** Unified socket message types. */
 object MessageTypes {
-    const val REQUEST = "request"
-    const val RESPONSE = "response"
-    const val SUBSCRIBE = "subscribe"
-    const val UNSUBSCRIBE = "unsubscribe"
-    const val PUSH = "push"
-    const val PING = "ping"
-    const val PONG = "pong"
-    const val ERROR = "error"
+  const val REQUEST = "request"
+  const val RESPONSE = "response"
+  const val SUBSCRIBE = "subscribe"
+  const val UNSUBSCRIBE = "unsubscribe"
+  const val PUSH = "push"
+  const val PING = "ping"
+  const val PONG = "pong"
+  const val ERROR = "error"
 }
 
-/**
- * Unified socket domain names.
- */
+/** Unified socket domain names. */
 object Domains {
-    const val FAILURES = "failures"
-    const val PERFORMANCE = "performance"
-    const val OBSERVATION = "observation"
-    const val RECORDING = "recording"
-    const val APPEARANCE = "appearance"
-    const val DEVICE = "device"
+  const val FAILURES = "failures"
+  const val PERFORMANCE = "performance"
+  const val OBSERVATION = "observation"
+  const val RECORDING = "recording"
+  const val APPEARANCE = "appearance"
+  const val DEVICE = "device"
 }
 
-/**
- * Error payload for error responses.
- */
+/** Error payload for error responses. */
 @Serializable
 data class ErrorPayload(
     val code: String,
@@ -63,25 +57,17 @@ data class UnifiedMessage(
     val timestamp: Long = System.currentTimeMillis(),
 )
 
-/**
- * Subscription result returned when subscribing.
- */
+/** Subscription result returned when subscribing. */
 @Serializable
 data class SubscriptionResult(
     val subscriptionId: String,
 )
 
-/**
- * Exception thrown when a request times out.
- */
+/** Exception thrown when a request times out. */
 class RequestTimeoutException(message: String) : Exception(message)
 
-/**
- * Exception thrown when a request fails with an error response.
- */
+/** Exception thrown when a request fails with an error response. */
 class RequestErrorException(val code: String, message: String) : Exception(message)
 
-/**
- * Exception thrown when the socket is not connected.
- */
+/** Exception thrown when the socket is not connected. */
 class NotConnectedException : Exception("Socket is not connected")

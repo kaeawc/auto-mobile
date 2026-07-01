@@ -65,7 +65,10 @@ class DaemonVersionHandshakeTest {
     val pidFile = File.createTempFile("automobile-pid", ".pid")
     try {
       pidFile.writeText("""{"pid":123,"port":3000,"version":"0.0.40+gabc123"}""")
-      assertEquals("0.0.40+gabc123", DaemonSocketPaths.readDaemonVersionFromPidFile(pidFile.absolutePath))
+      assertEquals(
+          "0.0.40+gabc123",
+          DaemonSocketPaths.readDaemonVersionFromPidFile(pidFile.absolutePath),
+      )
     } finally {
       pidFile.delete()
     }
@@ -94,11 +97,12 @@ class DaemonVersionHandshakeTest {
 
   @Test
   fun `resolveClientVersion derives local checkout version when local override active`() {
-    val projectRoot = File.createTempFile("automobile-local", "").let { file ->
-      file.delete()
-      file.mkdirs()
-      file
-    }
+    val projectRoot =
+        File.createTempFile("automobile-local", "").let { file ->
+          file.delete()
+          file.mkdirs()
+          file
+        }
     try {
       File(projectRoot, "dist/src").mkdirs()
       File(projectRoot, "dist/src/index.js").writeText("// entry")
@@ -117,11 +121,12 @@ class DaemonVersionHandshakeTest {
 
   @Test
   fun `resolveClientVersion omits version when local override lacks a readable package json`() {
-    val projectRoot = File.createTempFile("automobile-local-nopkg", "").let { file ->
-      file.delete()
-      file.mkdirs()
-      file
-    }
+    val projectRoot =
+        File.createTempFile("automobile-local-nopkg", "").let { file ->
+          file.delete()
+          file.mkdirs()
+          file
+        }
     try {
       File(projectRoot, "dist/src").mkdirs()
       File(projectRoot, "dist/src/index.js").writeText("// entry")
@@ -137,11 +142,12 @@ class DaemonVersionHandshakeTest {
 
   @Test
   fun `resolveClientVersion ignores local override when built daemon entrypoint is absent`() {
-    val projectRoot = File.createTempFile("automobile-local-nodist", "").let { file ->
-      file.delete()
-      file.mkdirs()
-      file
-    }
+    val projectRoot =
+        File.createTempFile("automobile-local-nodist", "").let { file ->
+          file.delete()
+          file.mkdirs()
+          file
+        }
     try {
       // dist/src/index.js missing → local command is NOT used → fall back to package version path.
       File(projectRoot, "package.json")
@@ -180,11 +186,12 @@ class DaemonVersionHandshakeTest {
 
   @Test
   fun `resolveClientBuildId hashes the local daemon entry script`() {
-    val projectRoot = File.createTempFile("automobile-local-build", "").let { file ->
-      file.delete()
-      file.mkdirs()
-      file
-    }
+    val projectRoot =
+        File.createTempFile("automobile-local-build", "").let { file ->
+          file.delete()
+          file.mkdirs()
+          file
+        }
     try {
       File(projectRoot, "dist/src").mkdirs()
       val entryContent = "// entry contents v1"
@@ -212,7 +219,9 @@ class DaemonVersionHandshakeTest {
   fun `requiresBuildSkewRestart compares known build ids`() {
     // Both hashes known -> compare hashes (entry scripts irrelevant).
     assertTrue(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", "bbbb2222", "/c.js"))
-    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", "aaaa1111", "/c.js"))
+    assertFalse(
+        DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", "aaaa1111", "/c.js")
+    )
     assertFalse(DaemonSocketPaths.requiresBuildSkewRestart(null, null, "aaaa1111", "/c.js"))
     assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", null, null))
   }
@@ -223,13 +232,27 @@ class DaemonVersionHandshakeTest {
     // mirroring the daemon's buildIdentitiesMatch fallback.
     assertTrue(
         DaemonSocketPaths.requiresBuildSkewRestart(
-            "unknown", "/other/dist/src/index.js", "aaaa1111", "/local/dist/src/index.js"))
+            "unknown",
+            "/other/dist/src/index.js",
+            "aaaa1111",
+            "/local/dist/src/index.js",
+        )
+    )
     assertFalse(
         DaemonSocketPaths.requiresBuildSkewRestart(
-            "unknown", "/local/dist/src/index.js", "aaaa1111", "/local/dist/src/index.js"))
+            "unknown",
+            "/local/dist/src/index.js",
+            "aaaa1111",
+            "/local/dist/src/index.js",
+        )
+    )
     // Neither hash nor both entry scripts available -> cannot prove skew, no restart.
-    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("unknown", null, "aaaa1111", "/local.js"))
-    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("unknown", "/other.js", "aaaa1111", null))
+    assertFalse(
+        DaemonSocketPaths.requiresBuildSkewRestart("unknown", null, "aaaa1111", "/local.js")
+    )
+    assertFalse(
+        DaemonSocketPaths.requiresBuildSkewRestart("unknown", "/other.js", "aaaa1111", null)
+    )
   }
 
   @Test
@@ -237,7 +260,8 @@ class DaemonVersionHandshakeTest {
     val pidFile = File.createTempFile("automobile-pid-build", ".pid")
     try {
       pidFile.writeText(
-          """{"pid":123,"version":"0.0.40","buildId":"abcdef0123456789","entryScript":"/x/dist/src/index.js"}""")
+          """{"pid":123,"version":"0.0.40","buildId":"abcdef0123456789","entryScript":"/x/dist/src/index.js"}"""
+      )
       assertEquals(
           "abcdef0123456789",
           DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFile.absolutePath),
@@ -262,7 +286,10 @@ class DaemonVersionHandshakeTest {
             clientVersion = "0.0.40",
         )
     val encoded = json.encodeToString(request)
-    assertTrue("payload should carry clientVersion", encoded.contains("\"clientVersion\":\"0.0.40\""))
+    assertTrue(
+        "payload should carry clientVersion",
+        encoded.contains("\"clientVersion\":\"0.0.40\""),
+    )
   }
 
   @Test

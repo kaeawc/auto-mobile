@@ -274,10 +274,11 @@ class DefaultPortScanner(
     val osName = platformInfo.osName
     val commands = buildCommandList(osName)
 
-    val outputs = commands
-        .map { cmd -> async(Dispatchers.IO) { commandRunner.runCommand(cmd) } }
-        .awaitAll()
-        .filterNotNull()
+    val outputs =
+        commands
+            .map { cmd -> async(Dispatchers.IO) { commandRunner.runCommand(cmd) } }
+            .awaitAll()
+            .filterNotNull()
 
     outputs.flatMap { parsePorts(it) }.toSet()
   }
@@ -286,9 +287,10 @@ class DefaultPortScanner(
     return if (osName.contains("win")) {
       listOf(listOf("netstat", "-ano", "-p", "tcp"))
     } else {
-      val commands = mutableListOf(
-          listOf("lsof", "-iTCP", "-sTCP:LISTEN", "-n", "-P"),
-      )
+      val commands =
+          mutableListOf(
+              listOf("lsof", "-iTCP", "-sTCP:LISTEN", "-n", "-P"),
+          )
       // ss is not available on macOS — skip it to avoid a 2s timeout
       if (!osName.contains("mac") && !osName.contains("darwin")) {
         commands.add(listOf("ss", "-ltn"))

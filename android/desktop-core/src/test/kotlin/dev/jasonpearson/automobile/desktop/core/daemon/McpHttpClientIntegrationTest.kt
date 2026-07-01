@@ -35,7 +35,12 @@ class McpHttpClientIntegrationTest {
     put(
         "content",
         buildJsonArray {
-          add(buildJsonObject { put("type", "text"); put("text", textJson) })
+          add(
+              buildJsonObject {
+                put("type", "text")
+                put("text", textJson)
+              }
+          )
         },
     )
   }

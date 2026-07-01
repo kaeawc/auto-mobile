@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -20,7 +21,6 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.Text
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /**
@@ -37,15 +37,15 @@ fun PaneToggleToolbar(
     onToggleBottom: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        PaneToggleButton(symbol = "\u25EB", selected = showLeftPane, onClick = onToggleLeft)
-        PaneToggleButton(symbol = "\u2B13", selected = showBottomPane, onClick = onToggleBottom)
-        PaneToggleButton(symbol = "\u25E8", selected = showRightPane, onClick = onToggleRight)
-    }
+  Row(
+      modifier = modifier,
+      horizontalArrangement = Arrangement.spacedBy(2.dp),
+      verticalAlignment = Alignment.CenterVertically,
+  ) {
+    PaneToggleButton(symbol = "\u25EB", selected = showLeftPane, onClick = onToggleLeft)
+    PaneToggleButton(symbol = "\u2B13", selected = showBottomPane, onClick = onToggleBottom)
+    PaneToggleButton(symbol = "\u25E8", selected = showRightPane, onClick = onToggleRight)
+  }
 }
 
 @Composable
@@ -54,39 +54,41 @@ private fun PaneToggleButton(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val colors = SharedTheme.globalColors
-    val interactionSource = remember { MutableInteractionSource() }
-    val isHovered by interactionSource.collectIsHoveredAsState()
+  val colors = SharedTheme.globalColors
+  val interactionSource = remember { MutableInteractionSource() }
+  val isHovered by interactionSource.collectIsHoveredAsState()
 
-    val bgAlpha = when {
+  val bgAlpha =
+      when {
         selected -> 0.15f
         isHovered -> 0.1f
         else -> 0f
-    }
+      }
 
-    Box(
-        modifier = Modifier
-            .size(24.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(colors.text.normal.copy(alpha = bgAlpha))
-            .hoverable(interactionSource)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            )
-            .pointerHoverIcon(PointerIcon.Hand),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = symbol,
-            fontSize = 14.sp,
-            color = if (selected) {
-                colors.text.info
+  Box(
+      modifier =
+          Modifier.size(24.dp)
+              .clip(RoundedCornerShape(4.dp))
+              .background(colors.text.normal.copy(alpha = bgAlpha))
+              .hoverable(interactionSource)
+              .clickable(
+                  interactionSource = interactionSource,
+                  indication = null,
+                  onClick = onClick,
+              )
+              .pointerHoverIcon(PointerIcon.Hand),
+      contentAlignment = Alignment.Center,
+  ) {
+    Text(
+        text = symbol,
+        fontSize = 14.sp,
+        color =
+            if (selected) {
+              colors.text.info
             } else {
-                colors.text.normal.copy(alpha = 0.6f)
+              colors.text.normal.copy(alpha = 0.6f)
             },
-            lineHeight = 14.sp,
-        )
-    }
+        lineHeight = 14.sp,
+    )
+  }
 }

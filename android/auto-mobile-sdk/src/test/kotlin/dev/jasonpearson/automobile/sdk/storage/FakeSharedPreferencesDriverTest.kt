@@ -37,8 +37,8 @@ class FakeSharedPreferencesDriverTest {
   @Test
   fun `getPreferences returns all entries for a file`() {
     driver.setPreferences(
-      "user_prefs",
-      mapOf("name" to "John", "age" to 30, "premium" to true, "score" to 95.5f),
+        "user_prefs",
+        mapOf("name" to "John", "age" to 30, "premium" to true, "score" to 95.5f),
     )
 
     val prefs = driver.getPreferences("user_prefs")
@@ -179,16 +179,16 @@ class FakeSharedPreferencesDriverTest {
   @Test
   fun `type detection works for all supported types`() {
     driver.setPreferences(
-      "types",
-      mapOf(
-        "string" to "hello",
-        "int" to 42,
-        "long" to 9999999999L,
-        "float" to 3.14f,
-        "boolean" to false,
-        "stringSet" to setOf("a", "b", "c"),
-        "null" to null,
-      ),
+        "types",
+        mapOf(
+            "string" to "hello",
+            "int" to 42,
+            "long" to 9999999999L,
+            "float" to 3.14f,
+            "boolean" to false,
+            "stringSet" to setOf("a", "b", "c"),
+            "null" to null,
+        ),
     )
 
     val prefs = driver.getPreferences("types")

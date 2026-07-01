@@ -15,15 +15,15 @@ public data class TestCase(
 )
 
 public enum class TestStatus {
-    Passed,
-    Failed,
-    Skipped,
-    Running,
+  Passed,
+  Failed,
+  Skipped,
+  Running,
 }
 
 public enum class TestPlatform {
-    Android,
-    iOS,
+  Android,
+  iOS,
 }
 
 public data class TestRun(

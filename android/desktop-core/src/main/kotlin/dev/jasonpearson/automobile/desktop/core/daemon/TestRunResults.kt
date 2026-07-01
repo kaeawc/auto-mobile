@@ -58,34 +58,34 @@ data class TestRunSummary(
 private const val TEST_RUN_RESOURCE_URI = "automobile:test-runs"
 
 fun TestRunQuery.toResourceUri(): String {
-    val params = mutableListOf<Pair<String, String>>()
-    fun addParam(key: String, value: String?) {
-        if (!value.isNullOrBlank()) {
-            params.add(key to value)
-        }
+  val params = mutableListOf<Pair<String, String>>()
+  fun addParam(key: String, value: String?) {
+    if (!value.isNullOrBlank()) {
+      params.add(key to value)
     }
-    fun addInt(key: String, value: Int?) {
-        if (value != null) {
-            params.add(key to value.toString())
-        }
+  }
+  fun addInt(key: String, value: Int?) {
+    if (value != null) {
+      params.add(key to value.toString())
     }
-    fun addBool(key: String, value: Boolean?) {
-        if (value != null) {
-            params.add(key to value.toString())
-        }
+  }
+  fun addBool(key: String, value: Boolean?) {
+    if (value != null) {
+      params.add(key to value.toString())
     }
+  }
 
-    addInt("lookbackDays", lookbackDays)
-    addInt("limit", limit)
-    addParam("orderDirection", orderDirection)
-    addBool("latestOnly", latestOnly)
+  addInt("lookbackDays", lookbackDays)
+  addInt("limit", limit)
+  addParam("orderDirection", orderDirection)
+  addBool("latestOnly", latestOnly)
 
-    if (params.isEmpty()) {
-        return TEST_RUN_RESOURCE_URI
-    }
+  if (params.isEmpty()) {
+    return TEST_RUN_RESOURCE_URI
+  }
 
-    val query = params.joinToString("&") { (key, value) -> "$key=${encodeQueryParam(value)}" }
-    return "$TEST_RUN_RESOURCE_URI?$query"
+  val query = params.joinToString("&") { (key, value) -> "$key=${encodeQueryParam(value)}" }
+  return "$TEST_RUN_RESOURCE_URI?$query"
 }
 
 private fun encodeQueryParam(value: String): String =

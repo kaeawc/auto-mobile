@@ -121,11 +121,10 @@ class HierarchyDebouncer(
 
     // Cancel previous debounce and start new one
     debounceJob?.cancel()
-    debounceJob =
-        scope.launch {
-          delay(quickDebounceMs)
-          extractAndCompare()
-        }
+    debounceJob = scope.launch {
+      delay(quickDebounceMs)
+      extractAndCompare()
+    }
   }
 
   /**

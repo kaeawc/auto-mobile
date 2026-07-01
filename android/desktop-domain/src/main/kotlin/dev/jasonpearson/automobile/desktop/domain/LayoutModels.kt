@@ -25,14 +25,22 @@ public data class ElementBounds(
     val right: Int,
     val bottom: Int,
 ) {
-    public val width: Int get() = right - left
-    public val height: Int get() = bottom - top
-    public val centerX: Int get() = left + width / 2
-    public val centerY: Int get() = top + height / 2
-    public val area: Long get() = width.toLong() * height.toLong()
+  public val width: Int
+    get() = right - left
 
-    public fun contains(x: Int, y: Int): Boolean =
-        x >= left && x < right && y >= top && y < bottom
+  public val height: Int
+    get() = bottom - top
+
+  public val centerX: Int
+    get() = left + width / 2
+
+  public val centerY: Int
+    get() = top + height / 2
+
+  public val area: Long
+    get() = width.toLong() * height.toLong()
+
+  public fun contains(x: Int, y: Int): Boolean = x >= left && x < right && y >= top && y < bottom
 }
 
 public data class ScreenshotFrame(
@@ -41,30 +49,30 @@ public data class ScreenshotFrame(
     val height: Int,
     val timestamp: Long,
 ) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is ScreenshotFrame) return false
-        return timestamp == other.timestamp && width == other.width && height == other.height
-    }
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is ScreenshotFrame) return false
+    return timestamp == other.timestamp && width == other.width && height == other.height
+  }
 
-    override fun hashCode(): Int {
-        var result = timestamp.hashCode()
-        result = 31 * result + width
-        result = 31 * result + height
-        return result
-    }
+  override fun hashCode(): Int {
+    var result = timestamp.hashCode()
+    result = 31 * result + width
+    result = 31 * result + height
+    return result
+  }
 }
 
 public enum class ConnectionStatus {
-    Disconnected,
-    Connecting,
-    Connected,
-    Error,
+  Disconnected,
+  Connecting,
+  Connected,
+  Error,
 }
 
 public enum class StreamingMode {
-    Paused,
-    Live,
+  Paused,
+  Live,
 }
 
 public data class ParsedHierarchy(
@@ -82,26 +90,26 @@ public data class ObservationData(
     val timestamp: Long = System.currentTimeMillis(),
     val rotation: Int = 0,
 ) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is ObservationData) return false
-        return hierarchy == other.hierarchy &&
-            screenshotData.contentEquals(other.screenshotData) &&
-            screenWidth == other.screenWidth &&
-            screenHeight == other.screenHeight &&
-            timestamp == other.timestamp &&
-            rotation == other.rotation
-    }
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is ObservationData) return false
+    return hierarchy == other.hierarchy &&
+        screenshotData.contentEquals(other.screenshotData) &&
+        screenWidth == other.screenWidth &&
+        screenHeight == other.screenHeight &&
+        timestamp == other.timestamp &&
+        rotation == other.rotation
+  }
 
-    override fun hashCode(): Int {
-        var result = hierarchy.hashCode()
-        result = 31 * result + (screenshotData?.contentHashCode() ?: 0)
-        result = 31 * result + screenWidth
-        result = 31 * result + screenHeight
-        result = 31 * result + timestamp.hashCode()
-        result = 31 * result + rotation
-        return result
-    }
+  override fun hashCode(): Int {
+    var result = hierarchy.hashCode()
+    result = 31 * result + (screenshotData?.contentHashCode() ?: 0)
+    result = 31 * result + screenWidth
+    result = 31 * result + screenHeight
+    result = 31 * result + timestamp.hashCode()
+    result = 31 * result + rotation
+    return result
+  }
 }
 
 public data class InstalledApp(

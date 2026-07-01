@@ -3,9 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.mcp
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/**
- * Response from automobile:devices/booted resource
- */
+/** Response from automobile:devices/booted resource */
 @Serializable
 data class BootedDevicesResponse(
     val totalCount: Int,
@@ -61,9 +59,7 @@ data class DaemonStatusResponse(
     val ios: DaemonPlatformInfo? = null,
 )
 
-/**
- * Response from automobile:devices/images resource
- */
+/** Response from automobile:devices/images resource */
 @Serializable
 data class DeviceImagesResponse(
     val totalCount: Int,
@@ -90,28 +86,26 @@ data class DeviceImageInfo(
     val deviceType: String? = null,
 )
 
-/**
- * Parser for device resource responses
- */
+/** Parser for device resource responses */
 object DeviceResourceParser {
-    private val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-    }
+  private val json = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+  }
 
-    fun parseBootedDevices(jsonString: String): BootedDevicesResponse? {
-        return try {
-            json.decodeFromString<BootedDevicesResponse>(jsonString)
-        } catch (e: Exception) {
-            null
-        }
+  fun parseBootedDevices(jsonString: String): BootedDevicesResponse? {
+    return try {
+      json.decodeFromString<BootedDevicesResponse>(jsonString)
+    } catch (e: Exception) {
+      null
     }
+  }
 
-    fun parseDeviceImages(jsonString: String): DeviceImagesResponse? {
-        return try {
-            json.decodeFromString<DeviceImagesResponse>(jsonString)
-        } catch (e: Exception) {
-            null
-        }
+  fun parseDeviceImages(jsonString: String): DeviceImagesResponse? {
+    return try {
+      json.decodeFromString<DeviceImagesResponse>(jsonString)
+    } catch (e: Exception) {
+      null
     }
+  }
 }

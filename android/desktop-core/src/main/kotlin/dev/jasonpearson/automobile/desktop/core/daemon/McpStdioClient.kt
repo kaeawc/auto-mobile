@@ -234,7 +234,8 @@ class McpStdioClient(
     }
   }
 
-  override fun getDaemonStatus(): dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
+  override fun getDaemonStatus():
+      dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
     val response =
         callTool(
             "getDaemonStatus",
@@ -284,7 +285,10 @@ class McpStdioClient(
               put("appId", JsonPrimitive(appId))
               put("fileName", JsonPrimitive(fileName))
               put("key", JsonPrimitive(key))
-              put("value", if (value != null) JsonPrimitive(value) else kotlinx.serialization.json.JsonNull)
+              put(
+                  "value",
+                  if (value != null) JsonPrimitive(value) else kotlinx.serialization.json.JsonNull,
+              )
               put("type", JsonPrimitive(type))
             },
         )

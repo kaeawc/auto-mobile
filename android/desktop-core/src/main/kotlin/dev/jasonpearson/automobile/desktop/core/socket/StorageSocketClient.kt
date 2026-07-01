@@ -1,54 +1,44 @@
 package dev.jasonpearson.automobile.desktop.core.socket
 
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
-/**
- * Client for receiving real-time storage change events via Unix socket.
- */
+/** Client for receiving real-time storage change events via Unix socket. */
 interface StorageSocketClient {
-    /**
-     * Subscribe to storage change events.
-     * @param listener Callback invoked when storage changes occur
-     */
-    fun subscribe(listener: StorageChangeListener)
+  /**
+   * Subscribe to storage change events.
+   *
+   * @param listener Callback invoked when storage changes occur
+   */
+  fun subscribe(listener: StorageChangeListener)
 
-    /**
-     * Unsubscribe from storage change events.
-     * @param listener The listener to remove
-     */
-    fun unsubscribe(listener: StorageChangeListener)
+  /**
+   * Unsubscribe from storage change events.
+   *
+   * @param listener The listener to remove
+   */
+  fun unsubscribe(listener: StorageChangeListener)
 
-    /**
-     * Connect to the storage socket.
-     */
-    fun connect()
+  /** Connect to the storage socket. */
+  fun connect()
 
-    /**
-     * Disconnect from the storage socket.
-     */
-    fun disconnect()
+  /** Disconnect from the storage socket. */
+  fun disconnect()
 
-    /**
-     * Flow indicating whether the socket is currently connected.
-     */
-    val isConnected: StateFlow<Boolean>
+  /** Flow indicating whether the socket is currently connected. */
+  val isConnected: StateFlow<Boolean>
 }
 
-/**
- * Listener for storage change events.
- */
+/** Listener for storage change events. */
 fun interface StorageChangeListener {
-    /**
-     * Called when a storage value changes.
-     * @param event The change event details
-     */
-    fun onStorageChanged(event: StorageChangedEvent)
+  /**
+   * Called when a storage value changes.
+   *
+   * @param event The change event details
+   */
+  fun onStorageChanged(event: StorageChangedEvent)
 }
 
-/**
- * Event emitted when a storage value changes.
- */
+/** Event emitted when a storage value changes. */
 data class StorageChangedEvent(
     /** Package name of the app where the change occurred */
     val packageName: String,

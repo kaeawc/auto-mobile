@@ -187,10 +187,9 @@ fun TestTimingPanel(
 
   val maxDuration = filteredTimings.maxOfOrNull { it.averageDurationMs } ?: 0
   val totalSamples = filteredTimings.sumOf { it.sampleSize }
-  val totalPassed =
-      filteredTimings.sumOf {
-        it.statusCounts?.passed ?: (it.successRate * it.sampleSize).roundToInt()
-      }
+  val totalPassed = filteredTimings.sumOf {
+    it.statusCounts?.passed ?: (it.successRate * it.sampleSize).roundToInt()
+  }
   val overallSuccessRate =
       if (totalSamples > 0) totalPassed.toDouble() / totalSamples.toDouble() else 0.0
   val averageDuration =

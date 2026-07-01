@@ -8,28 +8,24 @@ import kotlinx.serialization.json.Json
 
 typealias InstalledApp = dev.jasonpearson.automobile.desktop.domain.InstalledApp
 
-/**
- * Data source interface for fetching installed apps from the device.
- */
+/** Data source interface for fetching installed apps from the device. */
 interface AppListDataSource {
-    suspend fun getInstalledApps(): Result<List<InstalledApp>>
+  suspend fun getInstalledApps(): Result<List<InstalledApp>>
 }
 
-/**
- * Fake app list data source returning mock data for UI development.
- */
+/** Fake app list data source returning mock data for UI development. */
 class FakeAppListDataSource : AppListDataSource {
-    override suspend fun getInstalledApps(): Result<List<InstalledApp>> {
-        delay(100)
-        return Result.Success(
-            listOf(
-                InstalledApp("com.example.playground", "Playground", true),
-                InstalledApp("com.example.myapp", "My App", false),
-                InstalledApp("com.google.android.gms", "Google Play Services", false),
-                InstalledApp("com.android.settings", "Settings", false),
-            )
+  override suspend fun getInstalledApps(): Result<List<InstalledApp>> {
+    delay(100)
+    return Result.Success(
+        listOf(
+            InstalledApp("com.example.playground", "Playground", true),
+            InstalledApp("com.example.myapp", "My App", false),
+            InstalledApp("com.google.android.gms", "Google Play Services", false),
+            InstalledApp("com.android.settings", "Settings", false),
         )
-    }
+    )
+  }
 }
 
 /**
@@ -42,42 +38,42 @@ class RealAppListDataSource(
     private val clientProvider: (() -> AutoMobileClient)? = null,
     private val deviceId: String? = null,
 ) : AppListDataSource {
-    private val json = Json { ignoreUnknownKeys = true }
+  private val json = Json { ignoreUnknownKeys = true }
 
-    override suspend fun getInstalledApps(): Result<List<InstalledApp>> {
-        val provider = clientProvider ?: return Result.Success(emptyList())
-        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+  override suspend fun getInstalledApps(): Result<List<InstalledApp>> {
+    val provider = clientProvider ?: return Result.Success(emptyList())
+    val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
 
-        return try {
-            val client = provider()
+    return try {
+      val client = provider()
 
-            // Read from MCP resource
-            val uri = "automobile:apps?deviceId=${java.net.URLEncoder.encode(device, "UTF-8")}"
-            val contents = client.readResource(uri)
-            val responseText = contents.firstOrNull()?.text
-                ?: return Result.Success(emptyList())
+      // Read from MCP resource
+      val uri = "automobile:apps?deviceId=${java.net.URLEncoder.encode(device, "UTF-8")}"
+      val contents = client.readResource(uri)
+      val responseText = contents.firstOrNull()?.text ?: return Result.Success(emptyList())
 
-            // Parse the MCP apps query response
-            val response = json.decodeFromString(McpAppsQueryResponse.serializer(), responseText)
+      // Parse the MCP apps query response
+      val response = json.decodeFromString(McpAppsQueryResponse.serializer(), responseText)
 
-            // Flatten apps from all devices (usually just one)
-            val apps = response.devices.flatMap { deviceContent ->
-                deviceContent.apps.map { app ->
-                    InstalledApp(
-                        packageName = app.packageName,
-                        displayName = app.displayName,
-                        isForeground = app.foreground,
-                    )
-                }
+      // Flatten apps from all devices (usually just one)
+      val apps =
+          response.devices.flatMap { deviceContent ->
+            deviceContent.apps.map { app ->
+              InstalledApp(
+                  packageName = app.packageName,
+                  displayName = app.displayName,
+                  isForeground = app.foreground,
+              )
             }
+          }
 
-            Result.Success(apps)
-        } catch (e: McpConnectionException) {
-            Result.Error(e, "MCP server not available: ${e.message}")
-        } catch (e: Exception) {
-            Result.Error(e, "Failed to load installed apps: ${e.message}")
-        }
+      Result.Success(apps)
+    } catch (e: McpConnectionException) {
+      Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: Exception) {
+      Result.Error(e, "Failed to load installed apps: ${e.message}")
     }
+  }
 }
 
 // MCP response models - matches the AppsQueryResourceContent from appResources.ts

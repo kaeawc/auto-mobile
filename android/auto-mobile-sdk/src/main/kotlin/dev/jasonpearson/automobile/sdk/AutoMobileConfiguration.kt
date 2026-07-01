@@ -15,19 +15,29 @@ import dev.jasonpearson.automobile.sdk.events.EventProcessor
  * ```
  */
 @ConsistentCopyVisibility
-data class AutoMobileConfiguration internal constructor(
-  val bufferSize: Int,
-  val flushIntervalMs: Long,
-  /** Maximum breadcrumbs retained in the ring buffer. Consumed by the breadcrumb trail feature (#1698). */
-  val maxBreadcrumbs: Int,
-  /** Background inactivity timeout before a session is rotated, in milliseconds. Consumed by the session tracker (#1695). */
-  val sessionTimeoutMs: Long,
-  /** Event processors invoked in order before an event is buffered. Returning null drops the event. */
-  val eventProcessors: List<EventProcessor> = emptyList(),
-  /** Hard cap on pending events in the buffer. Oldest events are evicted when exceeded. */
-  val maxPendingEvents: Int = DEFAULT_MAX_PENDING_EVENTS,
-  /** Strategy for handling events when the buffer is full. */
-  val backPressureStrategy: BackPressureStrategy = BackPressureStrategy.DROP_OLDEST,
+data class AutoMobileConfiguration
+internal constructor(
+    val bufferSize: Int,
+    val flushIntervalMs: Long,
+    /**
+     * Maximum breadcrumbs retained in the ring buffer. Consumed by the breadcrumb trail feature
+     * (#1698).
+     */
+    val maxBreadcrumbs: Int,
+    /**
+     * Background inactivity timeout before a session is rotated, in milliseconds. Consumed by the
+     * session tracker (#1695).
+     */
+    val sessionTimeoutMs: Long,
+    /**
+     * Event processors invoked in order before an event is buffered. Returning null drops the
+     * event.
+     */
+    val eventProcessors: List<EventProcessor> = emptyList(),
+    /** Hard cap on pending events in the buffer. Oldest events are evicted when exceeded. */
+    val maxPendingEvents: Int = DEFAULT_MAX_PENDING_EVENTS,
+    /** Strategy for handling events when the buffer is full. */
+    val backPressureStrategy: BackPressureStrategy = BackPressureStrategy.DROP_OLDEST,
 ) {
 
   class Builder {
@@ -58,7 +68,9 @@ data class AutoMobileConfiguration internal constructor(
     fun maxPendingEvents(value: Int) = apply { this.maxPendingEvents = value }
 
     /** Strategy for handling events when the buffer is full. */
-    fun backPressureStrategy(value: BackPressureStrategy) = apply { this.backPressureStrategy = value }
+    fun backPressureStrategy(value: BackPressureStrategy) = apply {
+      this.backPressureStrategy = value
+    }
 
     fun build(): AutoMobileConfiguration {
       require(bufferSize > 0) { "bufferSize must be > 0, was $bufferSize" }
@@ -68,13 +80,13 @@ data class AutoMobileConfiguration internal constructor(
       require(maxPendingEvents > 0) { "maxPendingEvents must be > 0, was $maxPendingEvents" }
 
       return AutoMobileConfiguration(
-        bufferSize = bufferSize,
-        flushIntervalMs = flushIntervalMs,
-        maxBreadcrumbs = maxBreadcrumbs,
-        sessionTimeoutMs = sessionTimeoutMs,
-        eventProcessors = eventProcessors,
-        maxPendingEvents = maxPendingEvents,
-        backPressureStrategy = backPressureStrategy,
+          bufferSize = bufferSize,
+          flushIntervalMs = flushIntervalMs,
+          maxBreadcrumbs = maxBreadcrumbs,
+          sessionTimeoutMs = sessionTimeoutMs,
+          eventProcessors = eventProcessors,
+          maxPendingEvents = maxPendingEvents,
+          backPressureStrategy = backPressureStrategy,
       )
     }
   }

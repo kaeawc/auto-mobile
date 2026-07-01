@@ -5,8 +5,8 @@ import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 
 object McpClientFactory {
   /**
-   * Creates a client bound to the given [McpProcess], using its connection type and address.
-   * Falls back to [createPreferred] when [process] is null.
+   * Creates a client bound to the given [McpProcess], using its connection type and address. Falls
+   * back to [createPreferred] when [process] is null.
    */
   fun createFromProcess(process: McpProcess?): AutoMobileClient {
     if (process == null) return createPreferred(null)

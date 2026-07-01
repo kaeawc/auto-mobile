@@ -15,8 +15,8 @@ import java.util.concurrent.atomic.AtomicLong
  * @param fileSystemOperations File system abstraction for listing preference files
  */
 internal class SharedPreferencesDriverImpl(
-  private val context: Context,
-  private val fileSystemOperations: FileSystemOperations = RealFileSystemOperations(),
+    private val context: Context,
+    private val fileSystemOperations: FileSystemOperations = RealFileSystemOperations(),
 ) : SharedPreferencesDriver {
 
   companion object {
@@ -29,7 +29,7 @@ internal class SharedPreferencesDriverImpl(
 
   private val listeners = CopyOnWriteArrayList<OnPreferenceChangeListener>()
   private val sharedPrefsListeners =
-    mutableMapOf<String, SharedPreferences.OnSharedPreferenceChangeListener>()
+      mutableMapOf<String, SharedPreferences.OnSharedPreferenceChangeListener>()
 
   /** Per-file change queues for push-based notifications. */
   private val changeQueues = mutableMapOf<String, CopyOnWriteArrayList<PreferenceChange>>()
@@ -42,12 +42,16 @@ internal class SharedPreferencesDriverImpl(
     val files = fileSystemOperations.listFiles(sharedPrefsDir)
 
     return files
-      .filter { it.name.endsWith(".xml") }
-      .map { file ->
-        val name = file.name.removeSuffix(".xml")
-        val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-        PreferenceFileDescriptor(name = name, path = file.absolutePath, entryCount = prefs.all.size)
-      }
+        .filter { it.name.endsWith(".xml") }
+        .map { file ->
+          val name = file.name.removeSuffix(".xml")
+          val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+          PreferenceFileDescriptor(
+              name = name,
+              path = file.absolutePath,
+              entryCount = prefs.all.size,
+          )
+        }
   }
 
   override fun getPreferences(fileName: String): List<KeyValuePair> {
@@ -91,23 +95,23 @@ internal class SharedPreferencesDriverImpl(
 
     val prefs = context.getSharedPreferences(fileName, Context.MODE_PRIVATE)
     val sharedPrefsListener =
-      SharedPreferences.OnSharedPreferenceChangeListener { sharedPrefs, key ->
-        // Capture the new value
-        val newValue = if (key != null) sharedPrefs.all[key] else null
-        val type = detectType(newValue)
-        val timestamp = System.currentTimeMillis()
-        val sequence = sequenceCounter.incrementAndGet()
+        SharedPreferences.OnSharedPreferenceChangeListener { sharedPrefs, key ->
+          // Capture the new value
+          val newValue = if (key != null) sharedPrefs.all[key] else null
+          val type = detectType(newValue)
+          val timestamp = System.currentTimeMillis()
+          val sequence = sequenceCounter.incrementAndGet()
 
-        // Queue the change
-        val change = PreferenceChange(fileName, key, newValue, type, timestamp, sequence)
-        changeQueues[fileName]?.add(change)
+          // Queue the change
+          val change = PreferenceChange(fileName, key, newValue, type, timestamp, sequence)
+          changeQueues[fileName]?.add(change)
 
-        // Notify registered listeners
-        listeners.forEach { it.onPreferenceChanged(fileName, key) }
+          // Notify registered listeners
+          listeners.forEach { it.onPreferenceChanged(fileName, key) }
 
-        // Signal ContentObserver watchers
-        notifyChangesAvailable()
-      }
+          // Signal ContentObserver watchers
+          notifyChangesAvailable()
+        }
 
     prefs.registerOnSharedPreferenceChangeListener(sharedPrefsListener)
     sharedPrefsListeners[fileName] = sharedPrefsListener
@@ -221,10 +225,13 @@ internal class SharedPreferencesDriverImpl(
       KeyValueType.BOOLEAN -> editor.putBoolean(key, value as Boolean)
       KeyValueType.STRING_SET -> {
         @Suppress("UNCHECKED_CAST")
-        val set = value as? Set<String> ?: throw SharedPreferencesError.InvalidType(type.name, "value is not a Set<String>")
+        val set =
+            value as? Set<String>
+                ?: throw SharedPreferencesError.InvalidType(type.name, "value is not a Set<String>")
         editor.putStringSet(key, set)
       }
-      KeyValueType.UNKNOWN -> throw SharedPreferencesError.InvalidType(type.name, "cannot set value with UNKNOWN type")
+      KeyValueType.UNKNOWN ->
+          throw SharedPreferencesError.InvalidType(type.name, "cannot set value with UNKNOWN type")
     }
 
     editor.apply()

@@ -101,22 +101,25 @@ tasks.withType<KotlinCompile>().configureEach {
 
 fun generateApiSignature(classesDir: FileCollection): String {
   val classpath = classesDir.files.joinToString(":") { it.path }
-  val classNames = classesDir.asFileTree
-      .matching { include("**/*.class") }
-      .files
-      .sortedBy { it.path }
-      .mapNotNull { classFile ->
-        val relativePath = classesDir.files.firstNotNullOfOrNull { root ->
-          if (classFile.startsWith(root)) classFile.relativeTo(root).path else null
-        } ?: return@mapNotNull null
-        if ("\$\$" in relativePath || "BuildConfig" in relativePath) return@mapNotNull null
-        relativePath.removeSuffix(".class").replace('/', '.')
-      }
+  val classNames =
+      classesDir.asFileTree
+          .matching { include("**/*.class") }
+          .files
+          .sortedBy { it.path }
+          .mapNotNull { classFile ->
+            val relativePath =
+                classesDir.files.firstNotNullOfOrNull { root ->
+                  if (classFile.startsWith(root)) classFile.relativeTo(root).path else null
+                } ?: return@mapNotNull null
+            if ("\$\$" in relativePath || "BuildConfig" in relativePath) return@mapNotNull null
+            relativePath.removeSuffix(".class").replace('/', '.')
+          }
   if (classNames.isEmpty()) return ""
   // Run javap once with all class names for efficiency
-  val proc = ProcessBuilder(
-      listOf("javap", "-public", "-classpath", classpath) + classNames
-  ).redirectErrorStream(true).start()
+  val proc =
+      ProcessBuilder(listOf("javap", "-public", "-classpath", classpath) + classNames)
+          .redirectErrorStream(true)
+          .start()
   val output = proc.inputStream.bufferedReader().readText()
   val exited = proc.waitFor(60, TimeUnit.SECONDS)
   if (!exited) {
@@ -130,9 +133,8 @@ fun generateApiSignature(classesDir: FileCollection): String {
 }
 
 val apiFile = layout.projectDirectory.file("api/auto-mobile-sdk.api")
-val kotlinReleaseClassesDir = layout.buildDirectory.dir(
-    "intermediates/built_in_kotlinc/release/compileReleaseKotlin/classes"
-)
+val kotlinReleaseClassesDir =
+    layout.buildDirectory.dir("intermediates/built_in_kotlinc/release/compileReleaseKotlin/classes")
 
 tasks.register("apiDump") {
   description = "Generate public API signature file from release classes"

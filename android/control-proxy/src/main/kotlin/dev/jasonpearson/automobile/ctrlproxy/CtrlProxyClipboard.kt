@@ -24,6 +24,10 @@ object CtrlProxyClipboard {
       }
     }
 
-    return ReadResult(success = true, text = clip.getItemAt(0)?.text?.toString() ?: "", error = null)
+    return ReadResult(
+        success = true,
+        text = clip.getItemAt(0)?.text?.toString() ?: "",
+        error = null,
+    )
   }
 }

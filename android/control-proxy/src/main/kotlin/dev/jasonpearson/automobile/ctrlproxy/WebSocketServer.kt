@@ -4,6 +4,7 @@ import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
+import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
@@ -22,7 +23,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
 
 /**
  * WebSocket server that streams view hierarchy updates to connected clients and dispatches inbound
@@ -36,7 +36,9 @@ class WebSocketServer(
     private val port: Int = 8765,
     private val scope: CoroutineScope,
     private val perfProvider: PerfProvider = PerfProvider.instance,
-    /** Type-safe handler that receives decoded requests. When null, inbound messages are ignored. */
+    /**
+     * Type-safe handler that receives decoded requests. When null, inbound messages are ignored.
+     */
     private val messageHandler: WebSocketMessageHandler? = null,
 ) {
   companion object {
@@ -203,9 +205,7 @@ class WebSocketServer(
   // Type-Safe Broadcast API (Protocol Types)
   // =============================================================================
 
-  /**
-   * Broadcast mode for controlling message delivery.
-   */
+  /** Broadcast mode for controlling message delivery. */
   sealed interface BroadcastMode {
     /** Async broadcast via SharedFlow - non-blocking, best for event-driven updates */
     data object Async : BroadcastMode

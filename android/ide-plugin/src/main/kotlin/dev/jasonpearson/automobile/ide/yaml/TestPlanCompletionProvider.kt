@@ -100,8 +100,9 @@ class TestPlanCompletionProvider : CompletionProvider<CompletionParameters>() {
           path.isEmpty() -> TestPlanSchemaStore.getStepProperties()
           path.firstOrNull()?.key == "params" -> {
             val toolName = getToolName(stepMapping)
-            val toolSchema =
-                toolName?.let { ToolDefinitionStore.getToolDefinitions()[it]?.inputSchema }
+            val toolSchema = toolName?.let {
+              ToolDefinitionStore.getToolDefinitions()[it]?.inputSchema
+            }
             toolSchema
                 ?.let { JsonSchemaIntrospector.collectProperties(it, stripParamsPrefix(path)) }
                 .orEmpty()

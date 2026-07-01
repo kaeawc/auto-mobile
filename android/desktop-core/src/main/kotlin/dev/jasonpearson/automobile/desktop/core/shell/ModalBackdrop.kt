@@ -12,8 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 
 /**
- * Semi-transparent dark backdrop that dismisses on click.
- * Shared by ShortcutCheatSheet and QuickJumpDialog.
+ * Semi-transparent dark backdrop that dismisses on click. Shared by ShortcutCheatSheet and
+ * QuickJumpDialog.
  */
 @Composable
 fun ModalBackdrop(
@@ -22,17 +22,18 @@ fun ModalBackdrop(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = backdropAlpha))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onDismiss,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        content()
-    }
+  Box(
+      modifier =
+          modifier
+              .fillMaxSize()
+              .background(Color.Black.copy(alpha = backdropAlpha))
+              .clickable(
+                  interactionSource = remember { MutableInteractionSource() },
+                  indication = null,
+                  onClick = onDismiss,
+              ),
+      contentAlignment = Alignment.Center,
+  ) {
+    content()
+  }
 }

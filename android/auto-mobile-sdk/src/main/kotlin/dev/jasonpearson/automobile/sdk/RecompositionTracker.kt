@@ -139,11 +139,16 @@ internal object RecompositionTracker {
           filter,
           SdkConstants.PERMISSION_NETWORK_CONTROL,
           null,
-          Context.RECEIVER_EXPORTED)
+          Context.RECEIVER_EXPORTED,
+      )
     } else {
       @SuppressLint("UnspecifiedRegisterReceiverFlag")
       context.registerReceiver(
-          controlReceiver, filter, SdkConstants.PERMISSION_NETWORK_CONTROL, null)
+          controlReceiver,
+          filter,
+          SdkConstants.PERMISSION_NETWORK_CONTROL,
+          null,
+      )
     }
   }
 

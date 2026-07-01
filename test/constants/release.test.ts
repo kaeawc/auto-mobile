@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   APK_SHA256_CHECKSUM,
   APK_URL,
   DAEMON_PACKAGE_NAME,
   DEFAULT_ASSET_BASE_URL,
   IOS_CTRL_PROXY_IPA_URL,
+  IOS_CTRL_PROXY_RUNNER_SHA256,
   IOS_CTRL_PROXY_SHA256_CHECKSUM,
   RELEASE_CHECKSUM_REGISTRY,
   isExplicitPin,
@@ -296,5 +299,29 @@ describe("resolveApkUrl / resolveIpaUrl with an injected registry", function() {
     expect(resolveIpaUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am" }, [])).toBe(
       "https://mirror.test/am/latest/control-proxy.ipa"
     );
+  });
+});
+
+describe("package.json as canonical version source", function() {
+  // The npm version (package.json) is the canonical release version. The
+  // checksum registry's newest entry must name that same version, or "latest"
+  // resolves assets for a version that npm never published. The release gate
+  // (scripts/ci/verify-release-integrity.sh) enforces this across every
+  // manifest at release time; this test enforces it in the checked-in source.
+  const pkg = JSON.parse(
+    readFileSync(join(import.meta.dir, "../../package.json"), "utf8")
+  ) as { version: string };
+
+  test("resolveLatestVersion() equals package.json version", function() {
+    expect(resolveLatestVersion()).toBe(pkg.version);
+  });
+});
+
+describe("iOS runner-binary checksum", function() {
+  test("is empty or a well-formed 64-char sha256", function() {
+    // Empty is the local-dev default (verification skipped). When populated by
+    // the release pipeline it must be a lowercase 64-hex sha256 so the runner
+    // integrity check in IOSCtrlProxyBuilder can actually run.
+    expect(IOS_CTRL_PROXY_RUNNER_SHA256 === "" || /^[a-f0-9]{64}$/.test(IOS_CTRL_PROXY_RUNNER_SHA256)).toBe(true);
   });
 });

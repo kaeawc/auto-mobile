@@ -861,6 +861,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
       });
 
@@ -891,6 +892,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
       });
 
@@ -918,6 +920,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
       });
 
@@ -948,6 +951,7 @@ describe("DaemonMcpProxy", () => {
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
       });
 

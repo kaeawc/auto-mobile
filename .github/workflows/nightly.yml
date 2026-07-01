@@ -57,10 +57,13 @@ jobs:
         run: |
           APK_CURRENT=$(grep 'apkSha256' src/constants/release.ts | head -1 | sed 's/.*"\([a-f0-9]\{64\}\)".*/\1/')
           IPA_CURRENT=$(grep 'ipaSha256' src/constants/release.ts | head -1 | sed 's/.*"\([a-f0-9]\{64\}\)".*/\1/')
+          RUNNER_CURRENT=$(grep '^export const IOS_CTRL_PROXY_RUNNER_SHA256' src/constants/release.ts | sed 's/.*= "\([a-f0-9]*\)".*/\1/')
           echo "apk_sha256=$APK_CURRENT" >> $GITHUB_OUTPUT
           echo "ipa_sha256=$IPA_CURRENT" >> $GITHUB_OUTPUT
+          echo "runner_sha256=$RUNNER_CURRENT" >> $GITHUB_OUTPUT
           echo "Current APK SHA256: ${APK_CURRENT:-(empty)}"
           echo "Current IPA SHA256: ${IPA_CURRENT:-(empty)}"
+          echo "Current runner SHA256: ${RUNNER_CURRENT:-(empty)}"
 
       - name: "Check if updates needed"
         id: check
@@ -69,9 +72,12 @@ jobs:
           OLD_APK="${{ steps.current.outputs.apk_sha256 }}"
           NEW_IPA="${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}"
           OLD_IPA="${{ steps.current.outputs.ipa_sha256 }}"
+          NEW_RUNNER="${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}"
+          OLD_RUNNER="${{ steps.current.outputs.runner_sha256 }}"
 
           APK_CHANGED="false"
           IPA_CHANGED="false"
+          RUNNER_CHANGED="false"
 
           if [ "$NEW_APK" != "$OLD_APK" ]; then
             APK_CHANGED="true"
@@ -91,10 +97,24 @@ jobs:
             echo "IPA SHA256 unchanged"
           fi
 
+          # The runner binary lives inside the IPA, so a runner change usually
+          # also changes the IPA sha — but detect it independently so an empty
+          # or stale runner sha (e.g. a registry entry cut before the runner-sha
+          # wiring) is backfilled even when the IPA is byte-identical.
+          if [ "$NEW_RUNNER" != "$OLD_RUNNER" ]; then
+            RUNNER_CHANGED="true"
+            echo "Runner SHA256 changed"
+            echo "  Previous: ${OLD_RUNNER:-(empty)}"
+            echo "  New:      $NEW_RUNNER"
+          else
+            echo "Runner SHA256 unchanged"
+          fi
+
           echo "apk_changed=$APK_CHANGED" >> $GITHUB_OUTPUT
           echo "ipa_changed=$IPA_CHANGED" >> $GITHUB_OUTPUT
+          echo "runner_changed=$RUNNER_CHANGED" >> $GITHUB_OUTPUT
 
-          if [ "$APK_CHANGED" = "true" ] || [ "$IPA_CHANGED" = "true" ]; then
+          if [ "$APK_CHANGED" = "true" ] || [ "$IPA_CHANGED" = "true" ] || [ "$RUNNER_CHANGED" = "true" ]; then
             echo "needed=true" >> $GITHUB_OUTPUT
           else
             echo "needed=false" >> $GITHUB_OUTPUT
@@ -105,6 +125,7 @@ jobs:
         env:
           APK_SHA256_CHECKSUM: ${{ needs.build-control-proxy-apk.outputs.sha256 }}
           IOS_CTRL_PROXY_SHA256_CHECKSUM: ${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}
+          IOS_CTRL_PROXY_RUNNER_SHA256: ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
         run: bash scripts/generate-release-constants.sh
 
       - name: "Build PR title"

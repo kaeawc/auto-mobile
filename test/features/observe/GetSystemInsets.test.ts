@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { GetSystemInsets } from "../../../src/features/observe/GetSystemInsets";
 import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 describe("GetSystemInsets", function() {
   describe("Unit Tests for Extracted Methods", function() {
@@ -18,7 +19,7 @@ describe("GetSystemInsets", function() {
 
       fakeAdb = new FakeAdbExecutor();
 
-      getSystemInsets = new GetSystemInsets(testDevice, fakeAdb);
+      getSystemInsets = new GetSystemInsets(testDevice, new FakeAdbClientFactory(fakeAdb));
     });
 
     test("should parse status bar height correctly", function() {
@@ -149,7 +150,7 @@ describe("GetSystemInsets", function() {
       });
 
       // Create GetSystemInsets with mocked dependencies
-      getSystemInsets = new GetSystemInsets(testDevice, fakeAdb);
+      getSystemInsets = new GetSystemInsets(testDevice, new FakeAdbClientFactory(fakeAdb));
 
       // Check for available devices (mocked to return empty list)
       try {

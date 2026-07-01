@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Idle } from "../../../src/features/observe/Idle";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../src/models";
 
 describe("Idle - Unit Tests", function() {
@@ -14,7 +15,7 @@ describe("Idle - Unit Tests", function() {
       platform: "android"
     };
     const fakeAdb = new FakeAdbExecutor();
-    idle = new Idle(mockDevice, fakeAdb as any);
+    idle = new Idle(mockDevice, new FakeAdbClientFactory(fakeAdb));
   });
 
   describe("getTouchStatus", function() {

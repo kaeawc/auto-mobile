@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ObserveResult } from "../../../src/models/ObserveResult";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
@@ -23,7 +24,7 @@ describe("ObserveScreen", function() {
         platform: "android"
       };
       fakeAdb = new FakeAdbExecutor();
-      observeScreen = new RealObserveScreen(mockDevice, fakeAdb);
+      observeScreen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb));
     });
 
     test("should create base result with correct structure", function() {
@@ -137,7 +138,7 @@ describe("ObserveScreen", function() {
       } as any);
 
       try {
-        const screen = new RealObserveScreen(mockDevice, fakeAdb, {
+        const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
           viewHierarchy,
           cacheStore: new FakeObserveCacheStore(new FakeTimer()),
           performanceAuditor: { run: async () => undefined } as any,
@@ -168,7 +169,7 @@ describe("ObserveScreen", function() {
         platform: "android"
       };
       const fakeAdb = new FakeAdbExecutor();
-      const observeScreen = new RealObserveScreen(mockDevice, fakeAdb);
+      const observeScreen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb));
       viewHierarchy = (observeScreen as any).viewHierarchy;
     });
 
@@ -470,7 +471,7 @@ describe("ObserveScreen", function() {
         platform: "android"
       };
       // Pass fakeAdb to avoid creating real AdbClient
-      const invalidObserveScreen = new RealObserveScreen(invalidDevice, fakeAdb as any);
+      const invalidObserveScreen = new RealObserveScreen(invalidDevice, new FakeAdbClientFactory(fakeAdb));
 
       // Should still return a result object with error info
       const result = await invalidObserveScreen.execute();
@@ -506,7 +507,7 @@ describe("ObserveScreen", function() {
       RealObserveScreen.clearCache();
       observeScreen = new RealObserveScreen(
         { deviceId: "test", name: "Test", platform: "android" },
-        new FakeAdbExecutor()
+        new FakeAdbClientFactory(new FakeAdbExecutor())
       );
     });
 
@@ -564,8 +565,8 @@ describe("ObserveScreen", function() {
     });
 
     test("getRecentCachedResultForDevice returns only that device's entries", async function() {
-      const screenA = new RealObserveScreen(deviceA, new FakeAdbExecutor());
-      const screenB = new RealObserveScreen(deviceB, new FakeAdbExecutor());
+      const screenA = new RealObserveScreen(deviceA, new FakeAdbClientFactory(new FakeAdbExecutor()));
+      const screenB = new RealObserveScreen(deviceB, new FakeAdbClientFactory(new FakeAdbExecutor()));
 
       const resultA: ObserveResult = {
         ...screenA.createBaseResult(),
@@ -592,8 +593,8 @@ describe("ObserveScreen", function() {
       timerA.setCurrentTime(now - 1000);
       const timerB = new FakeTimer();
       timerB.setCurrentTime(now);
-      const screenA = new RealObserveScreen(deviceA, new FakeAdbExecutor(), undefined, timerA);
-      const screenB = new RealObserveScreen(deviceB, new FakeAdbExecutor(), undefined, timerB);
+      const screenA = new RealObserveScreen(deviceA, new FakeAdbClientFactory(new FakeAdbExecutor()), undefined, timerA);
+      const screenB = new RealObserveScreen(deviceB, new FakeAdbClientFactory(new FakeAdbExecutor()), undefined, timerB);
 
       await screenA.cacheObserveResult({ ...screenA.createBaseResult(), viewHierarchy: "A" });
       await screenB.cacheObserveResult({ ...screenB.createBaseResult(), viewHierarchy: "B" });
@@ -604,8 +605,8 @@ describe("ObserveScreen", function() {
     });
 
     test("clearCache with deviceId only clears that device", async function() {
-      const screenA = new RealObserveScreen(deviceA, new FakeAdbExecutor());
-      const screenB = new RealObserveScreen(deviceB, new FakeAdbExecutor());
+      const screenA = new RealObserveScreen(deviceA, new FakeAdbClientFactory(new FakeAdbExecutor()));
+      const screenB = new RealObserveScreen(deviceB, new FakeAdbClientFactory(new FakeAdbExecutor()));
 
       await screenA.cacheObserveResult(screenA.createBaseResult());
       await screenB.cacheObserveResult(screenB.createBaseResult());
@@ -617,8 +618,8 @@ describe("ObserveScreen", function() {
     });
 
     test("clearCache without deviceId clears all devices", async function() {
-      const screenA = new RealObserveScreen(deviceA, new FakeAdbExecutor());
-      const screenB = new RealObserveScreen(deviceB, new FakeAdbExecutor());
+      const screenA = new RealObserveScreen(deviceA, new FakeAdbClientFactory(new FakeAdbExecutor()));
+      const screenB = new RealObserveScreen(deviceB, new FakeAdbClientFactory(new FakeAdbExecutor()));
 
       await screenA.cacheObserveResult(screenA.createBaseResult());
       await screenB.cacheObserveResult(screenB.createBaseResult());
@@ -630,8 +631,8 @@ describe("ObserveScreen", function() {
     });
 
     test("getMostRecentCachedObserveResult returns only own device results", async function() {
-      const screenA = new RealObserveScreen(deviceA, new FakeAdbExecutor());
-      const screenB = new RealObserveScreen(deviceB, new FakeAdbExecutor());
+      const screenA = new RealObserveScreen(deviceA, new FakeAdbClientFactory(new FakeAdbExecutor()));
+      const screenB = new RealObserveScreen(deviceB, new FakeAdbClientFactory(new FakeAdbExecutor()));
 
       const resultA: ObserveResult = { ...screenA.createBaseResult(), viewHierarchy: "A-hierarchy" };
       await screenA.cacheObserveResult(resultA);

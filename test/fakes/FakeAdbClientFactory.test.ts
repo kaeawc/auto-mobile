@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { FakeAdbClientFactory } from "./FakeAdbClientFactory";
 import { FakeAdbClient } from "./FakeAdbClient";
+import { FakeAdbExecutor } from "./FakeAdbExecutor";
 import type { BootedDevice } from "../../src/models";
 
 describe("FakeAdbClientFactory", () => {
@@ -80,6 +81,21 @@ describe("FakeAdbClientFactory", () => {
 
       const client = factory.create(testDevice);
       expect(client).toBe(customFake);
+    });
+  });
+
+  describe("wrapping a configured AdbExecutor", () => {
+    it("returns the exact executor it was constructed with", async () => {
+      const executor = new FakeAdbExecutor();
+      const wrapping = new FakeAdbClientFactory(executor);
+
+      const client = wrapping.create(testDevice);
+
+      // create() must return the SAME object so command config / assertions land on it.
+      expect(client).toBe(executor);
+      await client.executeCommand("shell echo hi");
+      expect(executor.wasCommandExecuted("shell echo hi")).toBe(true);
+      expect(wrapping.getCallCount()).toBe(1);
     });
   });
 

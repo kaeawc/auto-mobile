@@ -123,22 +123,13 @@ export class RealObserveScreen implements ObserveScreen {
 
   constructor(
     device: BootedDevice,
-    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
     dependencies?: ObserveScreenDependencies,
     timer: Timer = defaultTimer
   ) {
     this.device = device;
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
-      this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    } else if (adbFactoryOrExecutor) {
-      const executor = adbFactoryOrExecutor as AdbExecutor;
-      this.adb = executor;
-      this.adbFactory = { create: () => executor };
-    } else {
-      this.adbFactory = defaultAdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    }
+    this.adbFactory = adbFactory;
+    this.adb = adbFactory.create(device);
     this.timer = timer;
 
     // Data sources (either injected or default)
@@ -148,7 +139,7 @@ export class RealObserveScreen implements ObserveScreen {
     const window = dependencies?.window ?? new Window(device, this.adbFactory);
     const screenshotUtil = dependencies?.screenshot ?? new TakeScreenshot(device, this.adbFactory);
     this.dumpsysWindow = dependencies?.dumpsysWindow ?? new GetDumpsysWindow(device, this.adbFactory);
-    const backStack = dependencies?.backStack ?? new GetBackStack(this.adbFactory, device);
+    const backStack = dependencies?.backStack ?? new GetBackStack(device, this.adbFactory);
     this.predictiveUIState = dependencies?.predictiveUIState ?? new PredictiveUIState();
 
     // Caches: install injected stores into the registry so instance methods AND

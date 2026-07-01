@@ -8,6 +8,7 @@ import { z } from "zod";
 import { ScreenshotJobTracker } from "../../../src/utils/ScreenshotJobTracker";
 import { setScreenshotFileSystem, resetScreenshotFileSystem } from "../../../src/server/observationResources";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
@@ -183,7 +184,7 @@ describe("MCP Resources Read", () => {
       name: "Test Device",
       platform: "android"
     };
-    const observeScreen = new RealObserveScreen(mockDevice, new FakeAdbExecutor());
+    const observeScreen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(new FakeAdbExecutor()));
     await observeScreen.cacheObserveResult(observeScreen.createBaseResult());
 
     // Clear any pre-existing screenshot state

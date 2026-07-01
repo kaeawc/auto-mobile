@@ -19,23 +19,12 @@ export class AwaitIdle implements AwaitIdleInterface {
 
   /**
    * Create a AwaitIdle instance
-   * @param device - Optional device
-   * @param adbFactoryOrExecutor - Factory for creating AdbClient instances, or an AdbExecutor for testing
+   * @param device - Device to run ADB commands against
+   * @param adbFactory - Factory for creating AdbClient instances
    */
-  constructor(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory, timer: Timer = defaultTimer) {
-    // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
-      this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    } else if (adbFactoryOrExecutor) {
-      // Legacy path: wrap the executor in a factory for downstream dependencies
-      const executor = adbFactoryOrExecutor as AdbExecutor;
-      this.adb = executor;
-      this.adbFactory = { create: () => executor };
-    } else {
-      this.adbFactory = defaultAdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    }
+  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory, timer: Timer = defaultTimer) {
+    this.adbFactory = adbFactory;
+    this.adb = adbFactory.create(device);
     this.idle = new Idle(device, this.adbFactory);
     this.timer = timer;
   }

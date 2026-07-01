@@ -17,11 +17,16 @@ interface RecordedFactoryCall {
  */
 export class FakeAdbClientFactory implements AdbClientFactory {
   private calls: RecordedFactoryCall[] = [];
-  private fakeClient: FakeAdbClient;
-  private clientsByDevice: Map<string, FakeAdbClient> = new Map();
+  private fakeClient: AdbExecutor;
+  private clientsByDevice: Map<string, AdbExecutor> = new Map();
   private useSharedClient = true;
 
-  constructor(fakeClient?: FakeAdbClient) {
+  /**
+   * @param fakeClient - Optional executor to return from create(). Accepts either a
+   *   FakeAdbClient or any AdbExecutor (e.g. a pre-configured FakeAdbExecutor), so a test
+   *   can wrap an executor it already configured and have create() return that same object.
+   */
+  constructor(fakeClient?: FakeAdbClient | AdbExecutor) {
     this.fakeClient = fakeClient ?? new FakeAdbClient();
   }
 
@@ -52,14 +57,14 @@ export class FakeAdbClientFactory implements AdbClientFactory {
    * Get the shared fake client.
    */
   getFakeClient(): FakeAdbClient {
-    return this.fakeClient;
+    return this.fakeClient as FakeAdbClient;
   }
 
   /**
    * Get a fake client for a specific device.
    */
   getClientForDevice(deviceId: string): FakeAdbClient | undefined {
-    return this.clientsByDevice.get(deviceId);
+    return this.clientsByDevice.get(deviceId) as FakeAdbClient | undefined;
   }
 
   /**

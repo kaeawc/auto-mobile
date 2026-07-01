@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { GetScreenSize } from "../../../src/features/observe/GetScreenSize";
 import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 describe("GetScreenSize", function() {
   describe("Unit Tests for Extracted Methods", function() {
@@ -16,7 +17,7 @@ describe("GetScreenSize", function() {
         platform: "android",
         deviceId: "test-device"
       } as BootedDevice;
-      getScreenSize = new GetScreenSize(mockDevice, fakeAdb);
+      getScreenSize = new GetScreenSize(mockDevice, new FakeAdbClientFactory(fakeAdb));
     });
 
     test("should parse physical dimensions correctly", function() {

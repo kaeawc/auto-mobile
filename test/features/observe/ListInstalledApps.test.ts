@@ -1,6 +1,7 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import { ListInstalledApps } from "../../../src/features/observe/ListInstalledApps";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice, AndroidUser } from "../../../src/models";
 import type { NewInstalledApp } from "../../../src/db/types";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
@@ -20,7 +21,7 @@ describe("ListInstalledApps", function() {
     fakeAdb = new FakeAdbExecutor();
     // Note: Don't set default command responses here - tests will configure as needed
 
-    listInstalledApps = new ListInstalledApps(mockDevice, fakeAdb);
+    listInstalledApps = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb));
   });
 
   describe("execute", function() {
@@ -270,7 +271,7 @@ describe("ListInstalledApps", function() {
         platform: "ios"
       } as BootedDevice;
 
-      const iosListApps = new ListInstalledApps(iosDevice, fakeAdb);
+      const iosListApps = new ListInstalledApps(iosDevice, new FakeAdbClientFactory(fakeAdb));
       const result = await iosListApps.executeDetailed();
 
       expect(result).toEqual({ profiles: {}, system: [] });
@@ -307,7 +308,7 @@ describe("ListInstalledApps", function() {
 
       const cachedList = new ListInstalledApps(
         mockDevice,
-        fakeAdb as unknown as any,
+        new FakeAdbClientFactory(fakeAdb),
         null,
         { cacheEnabled: true, installedAppsRepository: repo, timer }
       );
@@ -347,7 +348,7 @@ describe("ListInstalledApps", function() {
 
       const cachedList = new ListInstalledApps(
         mockDevice,
-        fakeAdb as unknown as any,
+        new FakeAdbClientFactory(fakeAdb),
         null,
         { cacheEnabled: true, installedAppsRepository: repo, timer }
       );

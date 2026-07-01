@@ -62,28 +62,17 @@ export class TakeScreenshot implements ScreenshotService {
 
   /**
    * Create a TakeScreenshot instance
-   * @param device - Optional device
-   * @param adbFactoryOrExecutor - Factory for creating AdbClient instances, or an AdbExecutor for testing
+   * @param device - Device to run ADB commands against
+   * @param adbFactory - Factory for creating AdbClient instances
    */
   constructor(
     device: BootedDevice,
-    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
   ) {
     this.device = device;
-    // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
-      this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    } else if (adbFactoryOrExecutor) {
-      // Legacy path: wrap the executor in a factory for downstream dependencies
-      const executor = adbFactoryOrExecutor as AdbExecutor;
-      this.adb = executor;
-      this.adbFactory = { create: () => executor };
-    } else {
-      this.adbFactory = defaultAdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    }
+    this.adbFactory = adbFactory;
+    this.adb = adbFactory.create(device);
     this.window = new Window(device, this.adbFactory);
     this.timer = timer;
 

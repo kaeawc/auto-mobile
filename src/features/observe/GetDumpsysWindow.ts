@@ -20,19 +20,12 @@ export class GetDumpsysWindow implements DumpsysWindow {
 
   /**
    * Create a GetDumpsysWindow instance
-   * @param device - Optional device
-   * @param adbFactoryOrExecutor - Factory for creating AdbClient instances, or an AdbExecutor for testing
+   * @param device - Device to run ADB commands against
+   * @param adbFactory - Factory for creating AdbClient instances
    */
-  constructor(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory, timer: Timer = defaultTimer) {
+  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory, timer: Timer = defaultTimer) {
     this.device = device;
-    // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
-      this.adb = (adbFactoryOrExecutor as AdbClientFactory).create(device);
-    } else if (adbFactoryOrExecutor) {
-      this.adb = adbFactoryOrExecutor as AdbExecutor;
-    } else {
-      this.adb = defaultAdbClientFactory.create(device);
-    }
+    this.adb = adbFactory.create(device);
     this.cacheDir = getTempDir(TEMP_SUBDIRS.CACHE);
     this.cacheFilePath = path.join(this.cacheDir, `dumpsys-window-${device.deviceId}.json`);
     this.timer = timer;

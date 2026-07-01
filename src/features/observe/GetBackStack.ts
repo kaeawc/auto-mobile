@@ -13,15 +13,8 @@ export class GetBackStack implements BackStack {
   private adb: AdbExecutor;
   private timer: Timer;
 
-  constructor(adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory, device?: BootedDevice, timer: Timer = defaultTimer) {
-    // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
-      this.adb = (adbFactoryOrExecutor as AdbClientFactory).create(device);
-    } else if (adbFactoryOrExecutor) {
-      this.adb = adbFactoryOrExecutor as AdbExecutor;
-    } else {
-      this.adb = defaultAdbClientFactory.create(device);
-    }
+  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory, timer: Timer = defaultTimer) {
+    this.adb = adbFactory.create(device);
     this.timer = timer;
   }
 

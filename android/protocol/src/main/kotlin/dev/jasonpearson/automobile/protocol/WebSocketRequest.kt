@@ -310,9 +310,9 @@ data class SubscribeStorage(
 data class UnsubscribeStorage(
   override val requestId: String? = null,
   // The TS client sends only `subscriptionId` (formatted as "packageName:fileName"); packageName
-  // and fileName are kept nullable so the real wire message decodes without throwing. The device
-  // handler needs packageName/fileName, so when only subscriptionId is present the request is a
-  // no-op (matching the pre-migration behavior). See CtrlProxyMessageHandler for details.
+  // and fileName are kept nullable so the real wire message decodes without throwing. When only
+  // subscriptionId is present, CtrlProxyMessageHandler splits it on the first ':' to recover
+  // packageName/fileName before dispatching the unsubscribe. See CtrlProxyMessageHandler for details.
   val subscriptionId: String? = null,
   val packageName: String? = null,
   val fileName: String? = null,

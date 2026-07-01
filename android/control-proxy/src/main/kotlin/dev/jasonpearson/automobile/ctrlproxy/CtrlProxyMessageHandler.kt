@@ -64,8 +64,8 @@ import kotlinx.serialization.json.Json
  * @param actions the device actions to dispatch to (the [CtrlProxy] service in production, a fake
  *   in tests).
  * @param log diagnostic sink for the few requests with no wired action (an ahead-of-need request
- *   type, or a storage message the device can't resolve). Defaults to a no-op so tests stay
- *   Android-free; production wires it to `Log`.
+ *   type, or a malformed storage message the device can't resolve). Defaults to a no-op so tests
+ *   stay Android-free; production wires it to `Log`.
  */
 class CtrlProxyMessageHandler(
     private val actions: CtrlProxyActions,
@@ -194,12 +194,26 @@ class CtrlProxyMessageHandler(
       is UnsubscribeStorage -> {
         val packageName = request.packageName
         val fileName = request.fileName
-        if (packageName != null && fileName != null) {
-          actions.unsubscribeStorage(request.requestId, packageName, fileName)
-        } else {
-          // Pre-existing behavior: the TS client sends only `subscriptionId`, so the device cannot
-          // resolve packageName/fileName and the unsubscribe is a no-op. Tracked as a follow-up.
-          log("unsubscribe_storage received subscriptionId=${request.subscriptionId} without packageName/fileName; ignoring")
+        val subscriptionId = request.subscriptionId
+        when {
+          packageName != null && fileName != null ->
+              actions.unsubscribeStorage(request.requestId, packageName, fileName)
+          // Real TS traffic sends only `subscriptionId`, formatted as "packageName:fileName" by
+          // StorageSubscriptionManager.subscribe(). Package names never contain ':', so split on the
+          // FIRST ':' to recover packageName/fileName (a file name could theoretically contain ':').
+          subscriptionId != null -> {
+            val separator = subscriptionId.indexOf(':')
+            if (separator > 0 && separator < subscriptionId.length - 1) {
+              actions.unsubscribeStorage(
+                  request.requestId,
+                  subscriptionId.substring(0, separator),
+                  subscriptionId.substring(separator + 1),
+              )
+            } else {
+              log("unsubscribe_storage received malformed subscriptionId=$subscriptionId; ignoring")
+            }
+          }
+          else -> log("unsubscribe_storage received without subscriptionId or packageName/fileName; ignoring")
         }
       }
       is GetPreference ->

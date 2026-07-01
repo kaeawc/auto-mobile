@@ -16,7 +16,14 @@ java {
   withSourcesJar()
 }
 
-// Version comes from root project's gradle.properties (VERSION_NAME)
+// The jar's Implementation-Version tracks the npm package version (package.json),
+// the canonical release version. The Maven publish coordinate, by contrast, uses
+// the Gradle `version` (VERSION_NAME in gradle.properties), which carries a
+// -SNAPSHOT suffix locally and is normalized to the tag via -PVERSION_NAME at
+// release. So a plain local `:junit-runner:jar` still yields Implementation-Version
+// 0.0.40 with a 0.0.40-SNAPSHOT coordinate — that suffix is intentional. At
+// release, scripts/ci/verify-release-integrity.sh asserts the SNAPSHOT-stripped
+// base version here matches package.json and the git tag.
 val npmPackageVersion =
     providers.fileContents(rootProject.layout.projectDirectory.file("../package.json")).asText.map { packageJson ->
       val parsed = JsonSlurper().parseText(packageJson) as Map<*, *>

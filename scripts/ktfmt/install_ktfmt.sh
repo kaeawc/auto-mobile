@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-KTFMT_VERSION="0.55" # Change this to the desired version
+KTFMT_VERSION="0.64" # Change this to the desired version
 
 # Colors for output
 RED='\033[0;31m'
@@ -123,11 +123,14 @@ install_manual() {
     install_dir="$HOME/.local/bin"
     mkdir -p "$install_dir"
 
-    # Download ktfmt JAR from Maven Central
-    jar_file="ktfmt-${KTFMT_VERSION}-jar-with-dependencies.jar"
-    jar_url="https://repo1.maven.org/maven2/com/facebook/ktfmt/${KTFMT_VERSION}/${jar_file}"
+    # Download ktfmt fat JAR from GitHub Releases.
+    # Meta stopped publishing the "-jar-with-dependencies" classifier to Maven
+    # Central after 0.54, so 0.55+ runnable fat jars only live on GitHub
+    # Releases, named "ktfmt-<version>-with-dependencies.jar" (no "jar-" prefix).
+    jar_file="ktfmt-${KTFMT_VERSION}-with-dependencies.jar"
+    jar_url="https://github.com/facebook/ktfmt/releases/download/v${KTFMT_VERSION}/${jar_file}"
 
-    echo -e "${GREEN}Downloading ktfmt JAR from Maven Central...${NC}"
+    echo -e "${GREEN}Downloading ktfmt JAR from GitHub Releases...${NC}"
 
     if command_exists curl; then
         curl -L -o "$install_dir/$jar_file" "$jar_url"

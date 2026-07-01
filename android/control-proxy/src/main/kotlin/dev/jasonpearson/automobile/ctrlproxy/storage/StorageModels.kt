@@ -8,7 +8,26 @@ data class StorageSubscription(
     val packageName: String,
     val fileName: String,
     val subscriptionId: String = "$packageName:$fileName",
-)
+) {
+  companion object {
+    /**
+     * Inverts the [subscriptionId] format back into its `(packageName, fileName)` parts. This is the
+     * single canonical parse for the `"$packageName:$fileName"` format built above — both the
+     * inbound `unsubscribe_storage` dispatch (which receives only a subscriptionId from the TS
+     * client) and [StorageSubscriptionManager.destroy] resolve ids through here, so the format lives
+     * in one place.
+     *
+     * Package names never contain `:`, so the FIRST `:` delimits packageName from fileName (a file
+     * name could theoretically contain `:`). Returns null when [subscriptionId] has no `:` or an
+     * empty package/file segment — i.e. it could not have been produced by a real subscription.
+     */
+    fun parseId(subscriptionId: String): Pair<String, String>? {
+      val separator = subscriptionId.indexOf(':')
+      if (separator <= 0 || separator >= subscriptionId.length - 1) return null
+      return subscriptionId.substring(0, separator) to subscriptionId.substring(separator + 1)
+    }
+  }
+}
 
 /** Information about a SharedPreferences file. */
 @Serializable

@@ -109,7 +109,9 @@ internal object DaemonSocketClientManager {
         daemonAvailable &&
             DaemonSocketPaths.requiresBuildSkewRestart(
                 DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
+                DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
                 DaemonSocketPaths.resolveClientBuildId(),
+                DaemonSocketPaths.resolveLocalDaemonEntryScript(),
             )
     val skew = versionSkew || buildSkew
 
@@ -163,7 +165,9 @@ internal object DaemonSocketClientManager {
     val stillBuildSkewed =
         DaemonSocketPaths.requiresBuildSkewRestart(
             DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
+            DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
             DaemonSocketPaths.resolveClientBuildId(),
+            DaemonSocketPaths.resolveLocalDaemonEntryScript(),
         )
     if (stillVersionSkewed || stillBuildSkewed) {
       throw DaemonUnavailableException(
@@ -513,6 +517,10 @@ internal object DaemonSocketPaths {
   internal fun readDaemonBuildIdFromPidFile(path: String): String? =
       readPidFileString(path, "buildId")
 
+  /** Read the daemon's recorded entry-script path from its PID file, or null. */
+  internal fun readDaemonEntryScriptFromPidFile(path: String): String? =
+      readPidFileString(path, "entryScript")
+
   private fun readPidFileString(path: String, field: String): String? {
     return try {
       val file = File(path)
@@ -559,17 +567,30 @@ internal object DaemonSocketPaths {
   /**
    * Whether an already-running daemon must be restarted because its recorded build identity differs
    * from this runner's — two checkouts at the *same* release version (e.g. `0.0.40+gold` vs a local
-   * `0.0.40`) that the release-only version check cannot tell apart (#2744). Only meaningful when
-   * both sides expose a known hash (the local-override case), mirroring the daemon's
-   * `buildIdentitiesMatch`: an unknown id on either side is treated as a match to avoid thrash.
+   * `0.0.40`) that the release-only version check cannot tell apart (#2744). Mirrors the daemon's
+   * `buildIdentitiesMatch`: compare content hashes when both are known, else fall back to comparing
+   * entry-script paths (so a daemon whose hash is `unknown` but whose recorded entry script differs
+   * still triggers a restart), else treat as a match to avoid thrashing an unidentifiable daemon.
    */
-  internal fun requiresBuildSkewRestart(daemonBuildId: String?, clientBuildId: String?): Boolean {
-    val daemon = daemonBuildId?.trim().orEmpty()
-    val client = clientBuildId?.trim().orEmpty()
-    if (daemon.isEmpty() || client.isEmpty() || daemon == "unknown" || client == "unknown") {
-      return false
+  internal fun requiresBuildSkewRestart(
+      daemonBuildId: String?,
+      daemonEntryScript: String?,
+      clientBuildId: String?,
+      clientEntryScript: String?,
+  ): Boolean {
+    val daemonHash = daemonBuildId?.trim().orEmpty()
+    val clientHash = clientBuildId?.trim().orEmpty()
+    val daemonHashKnown = daemonHash.isNotEmpty() && daemonHash != "unknown"
+    val clientHashKnown = clientHash.isNotEmpty() && clientHash != "unknown"
+    if (daemonHashKnown && clientHashKnown) {
+      return daemonHash != clientHash
     }
-    return daemon != client
+    val daemonEntry = daemonEntryScript?.trim().orEmpty()
+    val clientEntry = clientEntryScript?.trim().orEmpty()
+    if (daemonEntry.isNotEmpty() && clientEntry.isNotEmpty()) {
+      return daemonEntry != clientEntry
+    }
+    return false
   }
 
   /**

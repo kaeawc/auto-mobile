@@ -210,22 +210,41 @@ class DaemonVersionHandshakeTest {
 
   @Test
   fun `requiresBuildSkewRestart compares known build ids`() {
-    assertTrue(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "bbbb2222"))
-    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "aaaa1111"))
-    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart(null, "aaaa1111"))
-    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", null))
-    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("unknown", "aaaa1111"))
-    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("", "aaaa1111"))
+    // Both hashes known -> compare hashes (entry scripts irrelevant).
+    assertTrue(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", "bbbb2222", "/c.js"))
+    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", "aaaa1111", "/c.js"))
+    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart(null, null, "aaaa1111", "/c.js"))
+    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", null, null))
   }
 
   @Test
-  fun `readDaemonBuildIdFromPidFile reads buildId field`() {
+  fun `requiresBuildSkewRestart falls back to entry script when a hash is unknown`() {
+    // Daemon hash unknown but entry scripts recorded on both sides -> compare entry-script paths,
+    // mirroring the daemon's buildIdentitiesMatch fallback.
+    assertTrue(
+        DaemonSocketPaths.requiresBuildSkewRestart(
+            "unknown", "/other/dist/src/index.js", "aaaa1111", "/local/dist/src/index.js"))
+    assertFalse(
+        DaemonSocketPaths.requiresBuildSkewRestart(
+            "unknown", "/local/dist/src/index.js", "aaaa1111", "/local/dist/src/index.js"))
+    // Neither hash nor both entry scripts available -> cannot prove skew, no restart.
+    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("unknown", null, "aaaa1111", "/local.js"))
+    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("unknown", "/other.js", "aaaa1111", null))
+  }
+
+  @Test
+  fun `readDaemonBuildIdFromPidFile reads buildId and entryScript fields`() {
     val pidFile = File.createTempFile("automobile-pid-build", ".pid")
     try {
-      pidFile.writeText("""{"pid":123,"version":"0.0.40","buildId":"abcdef0123456789"}""")
+      pidFile.writeText(
+          """{"pid":123,"version":"0.0.40","buildId":"abcdef0123456789","entryScript":"/x/dist/src/index.js"}""")
       assertEquals(
           "abcdef0123456789",
           DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFile.absolutePath),
+      )
+      assertEquals(
+          "/x/dist/src/index.js",
+          DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFile.absolutePath),
       )
     } finally {
       pidFile.delete()

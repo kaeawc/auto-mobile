@@ -1,0 +1,90 @@
+/**
+ * Reusable measurement harness for the MCP output-context reduction effort
+ * (issue #2755). Later reduction issues import these helpers to quantify a
+ * change against the fixed baseline instead of re-implementing the math.
+ *
+ * The reduction effort exists because an observe result exceeds the MCP
+ * tool-output *token* cap, so token count — not just bytes — is the quantity
+ * the constraint is enforced in. `measureObserveBreakdown` reports both, using
+ * the same cl100k_base tokenizer the rest of the repo's context tooling uses
+ * (see scripts/estimate-context-usage.ts) so numbers line up across tools.
+ *
+ * Baseline fixture: `android-home.json` — a real Android home-screen `observe`
+ * result captured from an emulator (Medium_Phone_API_35, sdk 35) with
+ * performance auditing enabled. Regenerate with the `observe` MCP tool (or
+ * `homeScreen`, unwrapping `.observation`) against an Android home screen and
+ * re-commit the pretty-printed JSON. It is meant to be a frozen baseline, so
+ * only refresh it deliberately when the observe output format changes.
+ */
+import { readFileSync } from "fs";
+import { join } from "path";
+import { Tiktoken } from "js-tiktoken/lite";
+import cl100k_base from "js-tiktoken/ranks/cl100k_base";
+import type { ObserveResult } from "../../../src/models/ObserveResult";
+import { stringifyToolResponse } from "../../../src/utils/toolUtils";
+
+const tokenizer = new Tiktoken(cl100k_base);
+
+/** Absolute path to the committed baseline home-screen observe fixture. */
+export const ANDROID_HOME_FIXTURE_PATH = join(import.meta.dir, "android-home.json");
+
+/** Load the baseline fixture as raw text and a parsed `ObserveResult`. */
+export function loadAndroidHomeObserve(): { raw: string; observe: ObserveResult } {
+  const raw = readFileSync(ANDROID_HOME_FIXTURE_PATH, "utf8");
+  return { raw, observe: JSON.parse(raw) as ObserveResult };
+}
+
+/** UTF-8 byte length and cl100k_base token count of a value serialized exactly
+ *  the way the observe tool emits it: `stringifyToolResponse` — pretty-printed
+ *  (2-space) with `extras` keys stripped, the production formatter used by
+ *  `createStructuredToolResponse` in src/utils/toolUtils.ts. Measuring the real
+ *  formatter (not a compact `JSON.stringify`) is what makes a reduction test's
+ *  "does this fit under the cap?" check trustworthy — compact undercounts the
+ *  actual tool-response text by ~40%. */
+export function measureValue(value: unknown): { bytes: number; tokens: number } {
+  const serialized = stringifyToolResponse(value) ?? "";
+  return {
+    bytes: Buffer.byteLength(serialized, "utf8"),
+    tokens: tokenizer.encode(serialized).length,
+  };
+}
+
+export interface FieldMeasurement {
+  key: string;
+  bytes: number;
+  tokens: number;
+}
+
+export interface ObserveBreakdown {
+  totalBytes: number;
+  totalTokens: number;
+  /** Top-level fields, largest first (by bytes). */
+  fields: FieldMeasurement[];
+  /** viewHierarchy sub-keys, largest first (by bytes). Empty when absent. */
+  viewHierarchy: FieldMeasurement[];
+}
+
+function breakdownOf(obj: Record<string, unknown> | undefined): FieldMeasurement[] {
+  if (!obj || typeof obj !== "object") {
+    return [];
+  }
+  return Object.entries(obj)
+    .map(([key, value]) => ({ key, ...measureValue(value) }))
+    .sort((a, b) => b.bytes - a.bytes);
+}
+
+/**
+ * Byte + token breakdown of an observe result by top-level field and by
+ * viewHierarchy sub-key. Mirrors what `scripts/observe-byte-breakdown.sh`
+ * prints, but returns structured data (with tokens) that unit tests can assert.
+ */
+export function measureObserveBreakdown(observe: ObserveResult): ObserveBreakdown {
+  const total = measureValue(observe);
+  const viewHierarchy = (observe as { viewHierarchy?: Record<string, unknown> }).viewHierarchy;
+  return {
+    totalBytes: total.bytes,
+    totalTokens: total.tokens,
+    fields: breakdownOf(observe as unknown as Record<string, unknown>),
+    viewHierarchy: breakdownOf(viewHierarchy),
+  };
+}

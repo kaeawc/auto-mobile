@@ -74,6 +74,46 @@ Thresholds are defined in `scripts/context-thresholds.json`:
 
 Current thresholds are manually set to allow headroom for resource and template growth while preventing significant regressions.
 
+### Observe Output Byte Breakdown
+
+Measure the byte breakdown of an `observe` (or `homeScreen`) tool result so
+output-context reductions can be quantified against a fixed baseline:
+
+```bash
+scripts/observe-byte-breakdown.sh test/fixtures/observe/android-home.json
+# or from stdin
+cat result.json | scripts/observe-byte-breakdown.sh
+```
+
+**Output:**
+- Total byte count of the observe result
+- Per top-level field bytes and % of total (sorted largest first)
+- Per `viewHierarchy` sub-key bytes and % of `viewHierarchy`
+- gfxinfo duplication check (`performanceAudit.metrics.gfxinfoRaw` vs the copy
+  embedded in `performanceAudit.diagnostics`)
+
+Byte counts use the UTF-8 length of each value's **compact** JSON
+serialization — a fast relative view of which fields dominate. This
+under-counts the real wire size: the observe tool emits a larger pretty-printed
+form with `extras` keys stripped (`stringifyToolResponse`), which for this
+fixture is ~84.5 KB / ~21.9k tokens versus ~50 KB compact. The script
+auto-unwraps `homeScreen`-style payloads that nest the result under
+`.observation`, and rejects non-object / malformed JSON with a clean error.
+
+**Baseline fixture & cap-accurate token measurement.**
+`test/fixtures/observe/android-home.json` is the committed baseline home-screen
+capture (Android only for now) that later reduction work is measured against.
+Because the reduction effort is gated on the MCP output **token** cap, the
+authoritative measurement lives in `test/fixtures/observe/observeFixture.ts` —
+`measureObserveBreakdown()` serializes with the **production formatter**
+(`stringifyToolResponse`, pretty-printed + `extras` stripped) and reports both
+bytes and cl100k_base tokens per field (same tokenizer as
+`estimate-context-usage.ts`). The baseline measures ~84.5 KB / ~21.9k tokens.
+Later reduction unit tests import this helper to quantify token wins.
+Regenerate the fixture by re-running the `observe` MCP tool against an Android
+home screen and re-committing the pretty-printed JSON; treat it as a frozen
+baseline and only refresh it deliberately when the observe output format changes.
+
 ## Startup Benchmark
 
 Measure MCP server and daemon startup time (cold/warm) with optional baseline comparison:

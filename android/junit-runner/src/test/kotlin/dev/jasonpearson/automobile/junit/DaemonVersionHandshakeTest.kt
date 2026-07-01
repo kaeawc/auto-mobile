@@ -4,15 +4,29 @@ import java.io.File
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 class DaemonVersionHandshakeTest {
 
   private val json = Json { ignoreUnknownKeys = true }
+
+  @Before
+  fun setUp() {
+    System.clearProperty("automobile.daemon.local.project.path")
+    SystemPropertyCache.clear()
+  }
+
+  @After
+  fun tearDown() {
+    System.clearProperty("automobile.daemon.local.project.path")
+    SystemPropertyCache.clear()
+  }
 
   @Test
   fun `releaseVersion strips git stamp`() {
@@ -71,6 +85,74 @@ class DaemonVersionHandshakeTest {
       assertNull(DaemonSocketPaths.readDaemonVersionFromPidFile(noVersion.absolutePath))
     } finally {
       noVersion.delete()
+    }
+  }
+
+  @Test
+  fun `resolveClientVersion derives local checkout version when local override active`() {
+    val projectRoot = File.createTempFile("automobile-local", "").let { file ->
+      file.delete()
+      file.mkdirs()
+      file
+    }
+    try {
+      File(projectRoot, "dist/src").mkdirs()
+      File(projectRoot, "dist/src/index.js").writeText("// entry")
+      File(projectRoot, "package.json")
+          .writeText("""{"name":"@kaeawc/auto-mobile","version":"9.9.9"}""")
+      System.setProperty("automobile.daemon.local.project.path", projectRoot.absolutePath)
+      SystemPropertyCache.clear()
+
+      // The local override starts <local>/dist/src/index.js (version 9.9.9), so the runner must
+      // declare 9.9.9 — not the jar Implementation-Version — or the daemon rejects every request.
+      assertEquals("9.9.9", DaemonSocketPaths.resolveClientVersion())
+    } finally {
+      projectRoot.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun `resolveClientVersion omits version when local override lacks a readable package json`() {
+    val projectRoot = File.createTempFile("automobile-local-nopkg", "").let { file ->
+      file.delete()
+      file.mkdirs()
+      file
+    }
+    try {
+      File(projectRoot, "dist/src").mkdirs()
+      File(projectRoot, "dist/src/index.js").writeText("// entry")
+      // No package.json → cannot identify the local daemon version → declare nothing (legacy).
+      System.setProperty("automobile.daemon.local.project.path", projectRoot.absolutePath)
+      SystemPropertyCache.clear()
+
+      assertNull(DaemonSocketPaths.resolveClientVersion())
+    } finally {
+      projectRoot.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun `resolveClientVersion ignores local override when built daemon entrypoint is absent`() {
+    val projectRoot = File.createTempFile("automobile-local-nodist", "").let { file ->
+      file.delete()
+      file.mkdirs()
+      file
+    }
+    try {
+      // dist/src/index.js missing → local command is NOT used → fall back to package version path.
+      File(projectRoot, "package.json")
+          .writeText("""{"name":"@kaeawc/auto-mobile","version":"9.9.9"}""")
+      System.setProperty("automobile.daemon.local.project.path", projectRoot.absolutePath)
+      SystemPropertyCache.clear()
+
+      // Local override is ignored (no built entrypoint) → falls through to the package-version
+      // path, whatever that resolves to in this environment — never the local 9.9.9.
+      assertEquals(
+          DaemonSocketPaths.resolveDaemonPackageVersion(),
+          DaemonSocketPaths.resolveClientVersion(),
+      )
+    } finally {
+      projectRoot.deleteRecursively()
     }
   }
 

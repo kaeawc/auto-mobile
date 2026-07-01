@@ -317,11 +317,38 @@ internal object DaemonSocketPaths {
   }
 
   private fun resolveLocalCommand(subCommand: String): List<String>? {
-    val localPath = resolveLocalProjectPath() ?: return null
-    val entryPoint = File(localPath, "dist/src/index.js")
-    if (!entryPoint.exists()) return null
+    val projectRoot = resolveLocalDaemonProjectRoot() ?: return null
     val runtime = resolveRuntimePath()
-    return listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand)
+    return listOf(runtime, File(projectRoot, "dist/src/index.js").absolutePath, "--daemon", subCommand)
+  }
+
+  /**
+   * The local checkout root when `automobile.daemon.local.project.path` (or its env) points at a
+   * directory whose built daemon entrypoint exists — i.e. when [buildDaemonCommand] will actually
+   * start the *local* daemon instead of the published package. Null otherwise.
+   */
+  private fun resolveLocalDaemonProjectRoot(): File? {
+    val localPath = resolveLocalProjectPath() ?: return null
+    val projectRoot = File(localPath)
+    if (!File(projectRoot, "dist/src/index.js").exists()) return null
+    return projectRoot
+  }
+
+  /** Read the `version` field from a checkout's `package.json`, or null if absent/unreadable. */
+  private fun resolveLocalPackageVersion(projectRoot: File): String? {
+    return try {
+      val packageJson = File(projectRoot, "package.json")
+      if (!packageJson.exists()) return null
+      Json { ignoreUnknownKeys = true }
+          .parseToJsonElement(packageJson.readText())
+          .jsonObject["version"]
+          ?.jsonPrimitive
+          ?.contentOrNull
+          ?.trim()
+          ?.takeIf { it.isNotEmpty() }
+    } catch (e: Exception) {
+      null
+    }
   }
 
   private fun resolvePackageCommand(subCommand: String): List<String>? {
@@ -365,10 +392,21 @@ internal object DaemonSocketPaths {
 
   /**
    * Version this runner declares to the daemon for the server-side handshake gate (#2744).
-   * Same source as the pinned spawn version (jar `Implementation-Version`), so a reused
-   * daemon is measured against the exact version this runner would otherwise start.
+   *
+   * Must describe the daemon this runner will actually *start*, else the daemon rejects every
+   * request. When a local project override is active, [buildDaemonCommand] starts
+   * `<local>/dist/src/index.js` — whose version is the local checkout's, not this runner jar's —
+   * so declare the local `package.json` version (falling back to omitting, i.e. a legacy ungated
+   * client, when it can't be read) rather than the jar `Implementation-Version` the published
+   * package path would use. This was the #2749 review's local-override rejection.
    */
-  internal fun resolveClientVersion(): String? = resolveDaemonPackageVersion()
+  internal fun resolveClientVersion(): String? {
+    val localProjectRoot = resolveLocalDaemonProjectRoot()
+    if (localProjectRoot != null) {
+      return resolveLocalPackageVersion(localProjectRoot)
+    }
+    return resolveDaemonPackageVersion()
+  }
 
   /**
    * Resolve whether to force a daemon restart before reuse. Explicit configuration wins

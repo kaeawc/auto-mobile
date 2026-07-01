@@ -8,7 +8,7 @@
 ![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Platform: Linux](https://img.shields.io/badge/platform-Linux-lightgrey)
 
-![TypeScript tests: 5,209](https://img.shields.io/badge/TypeScript_tests-5%2C209-3178C6)
+![TypeScript tests: 5,213](https://img.shields.io/badge/TypeScript_tests-5%2C213-3178C6)
 ![Kotlin tests: 1,239](https://img.shields.io/badge/Kotlin_tests-1%2C239-7F52FF)
 ![Swift tests: 520](https://img.shields.io/badge/Swift_tests-520-F05138)
 ![Kotlin coverage](https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile/kotlin-coverage-badge.json)

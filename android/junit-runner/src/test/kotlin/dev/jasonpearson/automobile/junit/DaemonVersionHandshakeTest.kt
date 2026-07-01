@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.junit
 
 import java.io.File
+import java.security.MessageDigest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -175,6 +176,60 @@ class DaemonVersionHandshakeTest {
     System.setProperty("automobile.daemon.package.version", "UNKNOWN")
     SystemPropertyCache.clear()
     assertNull("unknown is not a real version", DaemonSocketPaths.resolveClientVersion())
+  }
+
+  @Test
+  fun `resolveClientBuildId hashes the local daemon entry script`() {
+    val projectRoot = File.createTempFile("automobile-local-build", "").let { file ->
+      file.delete()
+      file.mkdirs()
+      file
+    }
+    try {
+      File(projectRoot, "dist/src").mkdirs()
+      val entryContent = "// entry contents v1"
+      File(projectRoot, "dist/src/index.js").writeText(entryContent)
+      System.setProperty("automobile.daemon.local.project.path", projectRoot.absolutePath)
+      SystemPropertyCache.clear()
+
+      val expected =
+          MessageDigest.getInstance("SHA-256")
+              .digest(entryContent.toByteArray())
+              .joinToString("") { "%02x".format(it) }
+              .substring(0, 16)
+      assertEquals(expected, DaemonSocketPaths.resolveClientBuildId())
+    } finally {
+      projectRoot.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun `resolveClientBuildId is null without a local override`() {
+    assertNull(DaemonSocketPaths.resolveClientBuildId())
+  }
+
+  @Test
+  fun `requiresBuildSkewRestart compares known build ids`() {
+    assertTrue(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "bbbb2222"))
+    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "aaaa1111"))
+    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart(null, "aaaa1111"))
+    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", null))
+    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("unknown", "aaaa1111"))
+    assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("", "aaaa1111"))
+  }
+
+  @Test
+  fun `readDaemonBuildIdFromPidFile reads buildId field`() {
+    val pidFile = File.createTempFile("automobile-pid-build", ".pid")
+    try {
+      pidFile.writeText("""{"pid":123,"version":"0.0.40","buildId":"abcdef0123456789"}""")
+      assertEquals(
+          "abcdef0123456789",
+          DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFile.absolutePath),
+      )
+    } finally {
+      pidFile.delete()
+    }
   }
 
   @Test

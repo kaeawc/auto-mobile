@@ -11,6 +11,7 @@ import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -92,28 +93,39 @@ internal object DaemonSocketClientManager {
 
     // A daemon of a different build already owning the shared per-uid socket would
     // silently serve the wrong tool set (#2744). Before reusing it, compare the version
-    // it recorded in its PID file against this runner's and restart on skew, mirroring
-    // the MCP proxy's ensureVersionMatches.
+    // (and, for local overrides, the entry-script build identity) it recorded in its PID
+    // file against this runner's and restart on skew, mirroring the MCP proxy's
+    // ensureVersionMatches/ensureBuildMatches.
+    val pidFilePath = DaemonSocketPaths.pidFilePath()
     val versionSkew =
         daemonAvailable &&
             DaemonSocketPaths.requiresVersionSkewRestart(
-                DaemonSocketPaths.readDaemonVersionFromPidFile(DaemonSocketPaths.pidFilePath()),
+                DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
                 DaemonSocketPaths.resolveClientVersion(),
             )
+    // Two checkouts at the same release version (e.g. a stale `0.0.40+gold` daemon vs this
+    // local `0.0.40`) are indistinguishable by release alone; the entry-script hash catches them.
+    val buildSkew =
+        daemonAvailable &&
+            DaemonSocketPaths.requiresBuildSkewRestart(
+                DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
+                DaemonSocketPaths.resolveClientBuildId(),
+            )
+    val skew = versionSkew || buildSkew
 
-    if (!forceRestart && daemonAvailable && !versionSkew) {
+    if (!forceRestart && daemonAvailable && !skew) {
       return
     }
 
     val startCommand =
-        if (forceRestart || versionSkew) {
+        if (forceRestart || skew) {
           DaemonSocketPaths.buildDaemonRestartCommand()
         } else {
           DaemonSocketPaths.buildDaemonStartCommand()
         }
     val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
-    if (versionSkew && debugMode) {
-      println("Restarting AutoMobile daemon due to version skew with runner")
+    if (skew && debugMode) {
+      println("Restarting AutoMobile daemon due to version/build skew with runner")
     }
     if (debugMode) {
       println("Starting AutoMobile daemon with: ${startCommand.joinToString(" ")}")
@@ -140,17 +152,24 @@ internal object DaemonSocketClientManager {
     // executeCommand returns a CommandResult rather than throwing, and waitForAvailability only
     // confirms socket liveness — a failed versioned bunx/npx restart that leaves the stale socket
     // up, or a PATH `auto-mobile` fallback of a different version, would look "ready" while the
-    // daemon's handshake gate (#2744) rejects every request carrying clientVersion. Confirm the
-    // running daemon's version matches this runner before marking it ensured; a daemon that records
-    // no version is accepted (a skew cannot be proven).
-    if (DaemonSocketPaths.requiresVersionSkewRestart(
-        DaemonSocketPaths.readDaemonVersionFromPidFile(DaemonSocketPaths.pidFilePath()),
-        DaemonSocketPaths.resolveClientVersion(),
-    )) {
+    // daemon's handshake gate (#2744) rejects every request carrying clientVersion/clientBuildId.
+    // Confirm the running daemon's version AND build identity match this runner before marking it
+    // ensured; a daemon that records no version/build id is accepted (a skew cannot be proven).
+    val stillVersionSkewed =
+        DaemonSocketPaths.requiresVersionSkewRestart(
+            DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
+            DaemonSocketPaths.resolveClientVersion(),
+        )
+    val stillBuildSkewed =
+        DaemonSocketPaths.requiresBuildSkewRestart(
+            DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
+            DaemonSocketPaths.resolveClientBuildId(),
+        )
+    if (stillVersionSkewed || stillBuildSkewed) {
       throw DaemonUnavailableException(
-          "AutoMobile daemon version still differs from this runner after (re)start; the shared " +
-              "socket is served by a different build. Ensure the same @kaeawc/auto-mobile version " +
-              "starts the daemon and runs the tests (e.g. set automobile.daemon.package.version)."
+          "AutoMobile daemon still differs from this runner after (re)start; the shared socket is " +
+              "served by a different build. Ensure the same @kaeawc/auto-mobile version starts the " +
+              "daemon and runs the tests (e.g. set automobile.daemon.package.version)."
       )
     }
 
@@ -487,14 +506,20 @@ internal object DaemonSocketPaths {
   internal fun releaseVersion(version: String): String = version.substringBefore('+')
 
   /** Read the daemon's recorded version from its PID file, or null if absent/unreadable. */
-  internal fun readDaemonVersionFromPidFile(path: String): String? {
+  internal fun readDaemonVersionFromPidFile(path: String): String? =
+      readPidFileString(path, "version")
+
+  /** Read the daemon's recorded build-identity hash from its PID file, or null. */
+  internal fun readDaemonBuildIdFromPidFile(path: String): String? =
+      readPidFileString(path, "buildId")
+
+  private fun readPidFileString(path: String, field: String): String? {
     return try {
       val file = File(path)
       if (!file.exists()) return null
-      val json = Json { ignoreUnknownKeys = true }
-      json
+      Json { ignoreUnknownKeys = true }
           .parseToJsonElement(file.readText())
-          .jsonObject["version"]
+          .jsonObject[field]
           ?.jsonPrimitive
           ?.contentOrNull
           ?.trim()
@@ -502,6 +527,49 @@ internal object DaemonSocketPaths {
     } catch (e: Exception) {
       null
     }
+  }
+
+  /**
+   * Entry script the local-override daemon runs (`<local>/dist/src/index.js`), or null when no
+   * local override is active. This is the file whose content hash forms the build identity.
+   */
+  internal fun resolveLocalDaemonEntryScript(): String? =
+      resolveLocalDaemonProjectRoot()?.let { File(it, "dist/src/index.js").absolutePath }
+
+  /**
+   * Build identity (short content hash of the started daemon's entry script) this runner declares
+   * for the handshake gate. Only resolvable for a local override — the published-package daemon's
+   * entry script lives in an npm cache this runner cannot hash — so a package-path runner stays a
+   * version-only client. Mirrors the TS `computeBuildIdentity` (sha256, first 16 hex chars) so the
+   * daemon's own build id compares equal.
+   */
+  internal fun resolveClientBuildId(): String? =
+      resolveLocalDaemonEntryScript()?.let { computeBuildId(File(it)) }
+
+  private fun computeBuildId(entryScript: File): String? {
+    return try {
+      if (!entryScript.exists()) return null
+      val digest = MessageDigest.getInstance("SHA-256").digest(entryScript.readBytes())
+      digest.joinToString("") { "%02x".format(it) }.substring(0, 16)
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  /**
+   * Whether an already-running daemon must be restarted because its recorded build identity differs
+   * from this runner's — two checkouts at the *same* release version (e.g. `0.0.40+gold` vs a local
+   * `0.0.40`) that the release-only version check cannot tell apart (#2744). Only meaningful when
+   * both sides expose a known hash (the local-override case), mirroring the daemon's
+   * `buildIdentitiesMatch`: an unknown id on either side is treated as a match to avoid thrash.
+   */
+  internal fun requiresBuildSkewRestart(daemonBuildId: String?, clientBuildId: String?): Boolean {
+    val daemon = daemonBuildId?.trim().orEmpty()
+    val client = clientBuildId?.trim().orEmpty()
+    if (daemon.isEmpty() || client.isEmpty() || daemon == "unknown" || client == "unknown") {
+      return false
+    }
+    return daemon != client
   }
 
   /**
@@ -755,6 +823,8 @@ internal object DaemonSocketPaths {
 internal class DaemonSocketClient(
     private val socketPath: String,
     private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
+    private val clientBuildId: String? = DaemonSocketPaths.resolveClientBuildId(),
+    private val clientEntryScript: String? = DaemonSocketPaths.resolveLocalDaemonEntryScript(),
 ) : Closeable, DaemonToolClient {
   private val json = Json { ignoreUnknownKeys = true }
   private val pending = ConcurrentHashMap<String, CompletableFuture<DaemonResponse>>()
@@ -798,6 +868,8 @@ internal class DaemonSocketClient(
             params = buildJsonParams(toolName, arguments),
             timeoutMs = timeoutMs,
             clientVersion = clientVersion,
+            clientBuildId = clientBuildId,
+            clientEntryScript = clientEntryScript,
         )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
@@ -827,6 +899,8 @@ internal class DaemonSocketClient(
             params = JsonObject(mapOf("uri" to JsonPrimitive(uri))),
             timeoutMs = timeoutMs,
             clientVersion = clientVersion,
+            clientBuildId = clientBuildId,
+            clientEntryScript = clientEntryScript,
         )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
@@ -859,6 +933,8 @@ internal class DaemonSocketClient(
             method = method,
             params = params,
             clientVersion = clientVersion,
+            clientBuildId = clientBuildId,
+            clientEntryScript = clientEntryScript,
         )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
@@ -987,6 +1063,10 @@ internal data class DaemonRequest(
     // Declared for the daemon's server-side version handshake gate (#2744). Null on
     // legacy runners; the daemon allows those through.
     val clientVersion: String? = null,
+    // Build identity (entry-script content hash + path) for the local-override case, so the gate
+    // can distinguish two checkouts at the same release version. Null for the package path.
+    val clientBuildId: String? = null,
+    val clientEntryScript: String? = null,
 )
 
 @Serializable

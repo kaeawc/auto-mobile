@@ -560,6 +560,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // failure is transient (e.g. service just restarted by hot-reload). Skip the
       // full setup/download cycle — just reset attempts and retry the connection.
       const alreadyRunning = await manager.isRunning();
+      // Diagnostic: the decisive state for why a reused session's observe fails.
+      // alreadyRunning=false ⇒ the runner is gone since a prior session ⇒ a slow
+      // cold setup happens inside the caller's bounded waitFor. alreadyRunning=true
+      // ⇒ the runner lives and only the WebSocket needs re-opening (fast). (#2825)
+      logger.info(
+        `[IOSCtrlProxyClient] auto-setup decision: alreadyRunning(health)=${alreadyRunning}, ` +
+        `port=${this.port}, hadOpenWs=${!!this.ws}, device=${this.device.deviceId}`
+      );
       if (alreadyRunning) {
         logger.info(`[IOSCtrlProxyClient] Service is running but WebSocket failed — transient issue, retrying connection`);
         this.syncPortFromManager(manager);

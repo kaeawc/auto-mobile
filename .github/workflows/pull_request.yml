@@ -1274,6 +1274,18 @@ jobs:
           cd ios/XCTestRunner
           swift test --filter RemindersLaunchPlanTests 2>&1
 
+      # Daemon-internal logs (CtrlProxy attach/teardown, observe timing) are the
+      # only way to diagnose iOS observe failures — the swift-test stdout doesn't
+      # include them. Upload always so we can see why observe timed out.
+      - name: "Upload AutoMobile daemon logs"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: automobile-daemon-logs-xctestrunner
+          path: ~/.auto-mobile/logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
   ios-spm-root-package-build:
     name: "Build Root SPM Package"
     runs-on: macos-26

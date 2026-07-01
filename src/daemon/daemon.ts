@@ -24,10 +24,8 @@ import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from 
 import { executionTracker } from "../server/executionTracker";
 import { closeDatabase, getMigrationsError } from "../db";
 import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
-import { classifyDatabaseFailure } from "../db/databaseFailureClassification";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
-import { exponentialBackoff } from "../utils/Backoff";
-import { toActionableError } from "../models/ActionableError";
+import { handleFatalDatabaseStartupFailure } from "./daemonStartupGuard";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } from "./videoRecordingSocketServer";
 import { startTestRecordingSocketServer, stopTestRecordingSocketServer } from "./testRecordingSocketServer";
@@ -1147,35 +1145,11 @@ export class Daemon {
       logger.info(`[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`);
       this.startupFailureTracker.reset();
     } catch (error) {
-      await this.handleFatalDatabaseInitFailure(error);
+      // Delegate to the shared startup guard so this path and the earlier
+      // feature-flag DB touch (guarded in main() before start()) funnel through
+      // the identical classify/record/backoff/rethrow circuit breaker.
+      await handleFatalDatabaseStartupFailure(error, this.startupFailureTracker, this.timer);
     }
-  }
-
-  private async handleFatalDatabaseInitFailure(error: unknown): Promise<never> {
-    const kind = classifyDatabaseFailure(error);
-    const recentFailures = this.startupFailureTracker.recordFailure(kind, this.timer.now());
-    logger.error(
-      `Fatal: database initialization failed (${kind}; ${recentFailures} recent failure(s)); ` +
-        `daemon cannot serve queries and will exit for a clean restart: ${describeUnknownError(error)}`
-    );
-
-    if (kind === "permanent" && recentFailures > 1) {
-      // Circuit breaker: a permanent failure that keeps reproducing would hot-loop
-      // the process manager. Park with an increasing backoff (via the shared
-      // Backoff primitive) so the effective restart cadence converges to a stable,
-      // low-frequency dead state rather than pinning CPU.
-      const backoffMs = exponentialBackoff({
-        initialDelayMs: 1000,
-        multiplier: 2,
-        maxDelayMs: 60_000,
-      }).delayForAttempt(recentFailures - 1);
-      logger.error(
-        `Database initialization has failed ${recentFailures} times; backing off ${backoffMs}ms before exit to avoid a restart hot-loop.`
-      );
-      await this.timer.sleep(backoffMs);
-    }
-
-    throw toActionableError(error, "Database initialization failed at daemon startup");
   }
 
   /**

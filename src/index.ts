@@ -374,6 +374,7 @@ async function main() {
   const { runCliCommand } = await import("./cli");
   const { runDaemonCommand } = await import("./daemon/manager");
   const { startDaemon } = await import("./daemon/daemon");
+  const { guardDatabaseStartup } = await import("./daemon/daemonStartupGuard");
   const videoRecordingSocketServer = await import("./daemon/videoRecordingSocketServer");
   const testRecordingSocketServer = await import("./daemon/testRecordingSocketServer");
   const deviceSnapshotSocketServer = await import("./daemon/deviceSnapshotSocketServer");
@@ -463,6 +464,15 @@ async function main() {
     if (process.platform === "darwin") {
       await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup();
       IOSCtrlProxyBuilder.prefetchBuild();
+    }
+
+    if (daemonMode) {
+      // Pre-flight the database under the startup circuit breaker BEFORE any
+      // DB-backed service (feature flags below) touches it. Otherwise a permanent
+      // DB/migration failure surfaces in FeatureFlagService.initialize() and exits
+      // via main().catch before the daemon's own fatal handler can record it or
+      // back off — re-spawning in a tight loop (issue #2784).
+      await guardDatabaseStartup();
     }
 
     const featureFlagService = FeatureFlagService.getInstance();

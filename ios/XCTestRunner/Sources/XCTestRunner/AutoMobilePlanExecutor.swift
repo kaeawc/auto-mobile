@@ -820,6 +820,7 @@ public final class AutoMobilePlanExecutor {
                 let shouldRetry = shouldRetry(error: error, attempt: attempt)
                 logger.warn("Plan execution attempt \(attempt + 1) failed: \(error)")
                 if shouldRetry {
+                    recoverDaemonBeforeRetry()
                     timer.sleep(seconds: configuration.retryDelaySeconds)
                 } else {
                     break
@@ -831,6 +832,19 @@ public final class AutoMobilePlanExecutor {
             throw error
         }
         throw ExecutorError.executionFailed("Unknown failure")
+    }
+
+    /// Before retrying a failed plan execution over the daemon socket, restart a version-skewed
+    /// daemon via the version-matched ensure path (#2744) and drop the stale session, so a handshake
+    /// rejection self-heals instead of failing every retry against the same wrong-version daemon.
+    /// No-op for HTTP transport, which does not share the per-uid daemon socket.
+    private func recoverDaemonBeforeRetry() {
+        guard case .daemonUnixSocket = configuration.transport else {
+            return
+        }
+        if DaemonManager.ensureDaemonRunning() {
+            mcpClient.resetSession()
+        }
     }
 
     private func executeOnce(testMetadata: TestMetadata?) throws -> ExecutePlanResult {

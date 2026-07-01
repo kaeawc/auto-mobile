@@ -300,6 +300,44 @@ final class XCTestRunnerTests: XCTestCase {
         }
     }
 
+    func testDaemonStartupResultReadyIsTheOnlyReadyCase() {
+        XCTAssertTrue(DaemonStartupResult.ready.isReady)
+        for result: DaemonStartupResult in [.executableNotFound, .launchFailed, .readinessTimeout, .versionSkew] {
+            XCTAssertFalse(result.isReady, "\(result) must not report ready")
+        }
+    }
+
+    func testDaemonStartupResultDiagnosticsNameTheRealCause() {
+        // The executable-not-found message must point at the fix (install + PATH), which is the
+        // regression this replaces the generic "install and on PATH" skip note with (#2730).
+        let notFound = DaemonStartupResult.executableNotFound.diagnosticMessage
+        XCTAssertTrue(notFound.contains("auto-mobile"))
+        XCTAssertTrue(notFound.contains("PATH"))
+        XCTAssertTrue(notFound.contains("bun add -g"))
+
+        XCTAssertTrue(DaemonStartupResult.launchFailed.diagnosticMessage.contains("exited non-zero"))
+        XCTAssertTrue(DaemonStartupResult.readinessTimeout.diagnosticMessage.contains("did not"))
+        XCTAssertTrue(DaemonStartupResult.versionSkew.diagnosticMessage.contains("different-version"))
+
+        // Each failure reason is distinct so a CI log names the specific cause.
+        let messages = [
+            DaemonStartupResult.executableNotFound,
+            DaemonStartupResult.launchFailed,
+            DaemonStartupResult.readinessTimeout,
+            DaemonStartupResult.versionSkew,
+        ].map { $0.diagnosticMessage }
+        XCTAssertEqual(Set(messages).count, messages.count)
+    }
+
+    func testStartupFailureMapsLaunchOutcomesToTheRealCause() {
+        // A clean launch is not a failure — the readiness path proceeds to wait for the socket.
+        XCTAssertNil(DaemonManager.startupFailure(for: .launched))
+        // A missing CLI and a non-zero launch must map to *distinct* causes, not collapse into one
+        // (this is the switch-arm-typo guard the enum-message test can't catch).
+        XCTAssertEqual(DaemonManager.startupFailure(for: .executableNotFound), .executableNotFound)
+        XCTAssertEqual(DaemonManager.startupFailure(for: .failed), .launchFailed)
+    }
+
     func testExecutePlanFailureFallsBackToErrorWhenNoFailedStep() throws {
         let planContent = "name: Fail Plan\nsteps:\n  - tool: observe"
         let planLoader = FakePlanLoader(content: planContent)

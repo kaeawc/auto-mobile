@@ -1217,6 +1217,18 @@ jobs:
       - name: "Boot iOS Simulator (Xcode 26.2)"
         run: ./scripts/ios/boot-simulator.sh
 
+      # Put `auto-mobile` (installed to ~/.bun/bin by `bun add -g .`) on PATH for
+      # the swift-test step, and pre-start + wait for the daemon so a startup
+      # failure surfaces loudly here instead of silently skipping the test (#2730).
+      - name: "Ensure AutoMobile daemon ready"
+        run: ./scripts/ci/ensure-daemon-ready.sh
+
+      # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)
+      # so the test's first `observe` doesn't pay that cost inside its short
+      # waitFor window and time out (#2730 follow-up).
+      - name: "Warm up iOS CtrlProxy"
+        run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+
       - name: "Run Reminders integration tests (Xcode 26.2)"
         timeout-minutes: 10
         env:
@@ -1245,6 +1257,14 @@ jobs:
         run: |
           brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
           ./scripts/ios/video-recording-start-stop-integration.sh
+
+      # This is a freshly-booted sim, so re-confirm the daemon and warm CtrlProxy
+      # again before the second Reminders run (same rationale as the 26.2 block).
+      - name: "Ensure AutoMobile daemon ready (Xcode 26.3)"
+        run: ./scripts/ci/ensure-daemon-ready.sh
+
+      - name: "Warm up iOS CtrlProxy (Xcode 26.3)"
+        run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
       - name: "Run Reminders integration tests (Xcode 26.3)"
         timeout-minutes: 10

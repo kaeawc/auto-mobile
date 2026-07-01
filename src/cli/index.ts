@@ -1,8 +1,8 @@
 import { ToolRegistry } from "../server/toolRegistry";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
-import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
-import { DaemonManager } from "../daemon/manager";
+import { DaemonUnavailableError } from "../daemon/client";
+import { DaemonMcpProxy } from "../daemon/daemonMcpProxy";
 
 // Import all tool registration functions
 import { registerObserveTools } from "../server/observeTools";
@@ -94,44 +94,21 @@ function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string;
 }
 
 /**
- * Ensure daemon is running, starting it if necessary
- * with a timeout for startup
- */
-async function ensureDaemonRunning(timeout: number = 10000): Promise<void> {
-  const available = await DaemonClient.isAvailable();
-  if (available) {
-    return; // Daemon already running and responsive
-  }
-
-  logger.debug("Daemon not available, attempting to start...");
-
-  const manager = new DaemonManager();
-  try {
-    await manager.start();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new ActionableError(
-      `Failed to start daemon: ${message}. ` +
-      `Try running: bunx @kaeawc/auto-mobile@latest --daemon restart`
-    );
-  }
-}
-
-/**
- * Execute tool via daemon (mandatory - no fallback)
- * Daemon must be available or this will throw
+ * Execute tool via daemon (mandatory - no fallback).
+ *
+ * Routes through {@link DaemonMcpProxy} rather than a raw `DaemonClient` so the
+ * daemon is auto-started AND its version/build identity is reconciled before the
+ * call (#2744): a stale different-version/build daemon on the shared socket is
+ * restarted to this CLI's build instead of rejecting the request with no self-heal.
  */
 async function runToolViaDaemon(
   toolName: string,
   params: Record<string, any>
 ): Promise<any> {
-  // Ensure daemon is running before attempting to call
-  await ensureDaemonRunning();
-
-  const client = new DaemonClient();
+  const proxy = new DaemonMcpProxy();
 
   try {
-    const result = await client.callTool(toolName, params);
+    const result = await proxy.callTool(toolName, params);
     if (result === null) {
       throw new ActionableError(
         "Daemon returned null result. This may indicate a daemon connectivity issue. " +
@@ -155,8 +132,8 @@ async function runToolViaDaemon(
       `Try: auto-mobile --daemon restart`
     );
   } finally {
-    // Always close the client connection to prevent connection leaks
-    await client.close();
+    // Always close the proxy connection to prevent connection leaks
+    await proxy.close();
   }
 }
 

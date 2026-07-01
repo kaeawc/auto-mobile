@@ -1,0 +1,1945 @@
+{
+  "updatedAt": 1782909171267,
+  "screenSize": {
+    "width": 1080,
+    "height": 2400
+  },
+  "systemInsets": {
+    "top": 63,
+    "bottom": 63,
+    "left": 0,
+    "right": 0
+  },
+  "viewHierarchy": {
+    "hierarchy": {
+      "node": [
+        {
+          "view-id": "5e820074-c905-0fac-79a1-600c3c315868",
+          "occlusionState": "partial",
+          "occludedBy": "unlabeled view",
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 1080,
+            "bottom": 2400
+          },
+          "node": {
+            "view-id": "f3e4fd33-074e-2e7c-59f1-4556e367164b",
+            "className": "android.widget.LinearLayout",
+            "occlusionState": "partial",
+            "occludedBy": "unlabeled view",
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 1080,
+              "bottom": 2400
+            },
+            "node": {
+              "resource-id": "android:id/content",
+              "view-id": "android:id/content",
+              "occlusionState": "partial",
+              "occludedBy": "unlabeled view",
+              "bounds": {
+                "left": 0,
+                "top": 0,
+                "right": 1080,
+                "bottom": 2400
+              },
+              "node": {
+                "resource-id": "com.google.android.apps.nexuslauncher:id/launcher",
+                "view-id": "com.google.android.apps.nexuslauncher:id/launcher",
+                "occlusionState": "partial",
+                "occludedBy": "unlabeled view",
+                "bounds": {
+                  "left": 0,
+                  "top": 0,
+                  "right": 1080,
+                  "bottom": 2400
+                },
+                "node": {
+                  "resource-id": "com.google.android.apps.nexuslauncher:id/drag_layer",
+                  "view-id": "com.google.android.apps.nexuslauncher:id/drag_layer",
+                  "occlusionState": "partial",
+                  "occludedBy": "unlabeled view",
+                  "bounds": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 1080,
+                    "bottom": 2400
+                  },
+                  "node": [
+                    {
+                      "resource-id": "com.google.android.apps.nexuslauncher:id/scrim_view",
+                      "view-id": "com.google.android.apps.nexuslauncher:id/scrim_view",
+                      "occlusionState": "partial",
+                      "occludedBy": "android.view.ViewGroup",
+                      "bounds": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 1080,
+                        "bottom": 2400
+                      }
+                    },
+                    {
+                      "resource-id": "com.google.android.apps.nexuslauncher:id/workspace",
+                      "view-id": "com.google.android.apps.nexuslauncher:id/workspace",
+                      "scrollable": "true",
+                      "occlusionState": "partial",
+                      "occludedBy": "android.view.ViewGroup",
+                      "bounds": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 1080,
+                        "bottom": 2400
+                      },
+                      "node": {
+                        "view-id": "17d1413d-5e40-3c0d-91b5-7661ba0c8809",
+                        "className": "android.view.ViewGroup",
+                        "bounds": {
+                          "left": 39,
+                          "top": 66,
+                          "right": 1041,
+                          "bottom": 1720
+                        },
+                        "node": {
+                          "view-id": "9b602e43-775a-10a3-cfc1-dde0b307a865",
+                          "className": "android.view.ViewGroup",
+                          "bounds": {
+                            "left": 67,
+                            "top": 94,
+                            "right": 1013,
+                            "bottom": 1692
+                          },
+                          "node": [
+                            {
+                              "resource-id": "com.google.android.apps.nexuslauncher:id/search_container_workspace",
+                              "view-id": "com.google.android.apps.nexuslauncher:id/search_container_workspace",
+                              "bounds": {
+                                "left": 67,
+                                "top": 94,
+                                "right": 1013,
+                                "bottom": 380
+                              },
+                              "node": {
+                                "resource-id": "com.google.android.apps.nexuslauncher:id/bc_smartspace_view",
+                                "view-id": "com.google.android.apps.nexuslauncher:id/bc_smartspace_view",
+                                "bounds": {
+                                  "left": 83,
+                                  "top": 100,
+                                  "right": 997,
+                                  "bottom": 373
+                                },
+                                "node": {
+                                  "content-desc": "At a glance",
+                                  "resource-id": "com.google.android.apps.nexuslauncher:id/smartspace_card_pager",
+                                  "view-id": "com.google.android.apps.nexuslauncher:id/smartspace_card_pager",
+                                  "className": "androidx.viewpager.widget.ViewPager",
+                                  "focusable": "true",
+                                  "long-clickable": "true",
+                                  "extras": {
+                                    "AccessibilityNodeInfo.roleDescription": "View"
+                                  },
+                                  "bounds": {
+                                    "left": 83,
+                                    "top": 100,
+                                    "right": 997,
+                                    "bottom": 373
+                                  },
+                                  "node": {
+                                    "resource-id": "com.google.android.apps.nexuslauncher:id/base_template_card_with_date",
+                                    "view-id": "com.google.android.apps.nexuslauncher:id/base_template_card_with_date",
+                                    "className": "android.view.ViewGroup",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "extras": {
+                                      "AccessibilityNodeInfo.roleDescription": " "
+                                    },
+                                    "bounds": {
+                                      "left": 83,
+                                      "top": 100,
+                                      "right": 997,
+                                      "bottom": 373
+                                    },
+                                    "node": {
+                                      "resource-id": "com.google.android.apps.nexuslauncher:id/text_group",
+                                      "view-id": "com.google.android.apps.nexuslauncher:id/text_group",
+                                      "className": "android.widget.RelativeLayout",
+                                      "bounds": {
+                                        "left": 83,
+                                        "top": 199,
+                                        "right": 997,
+                                        "bottom": 274
+                                      },
+                                      "node": {
+                                        "text": "Wed, Jul 1",
+                                        "resource-id": "com.google.android.apps.nexuslauncher:id/date",
+                                        "view-id": "com.google.android.apps.nexuslauncher:id/date",
+                                        "clickable": "true",
+                                        "focusable": "true",
+                                        "bounds": {
+                                          "left": 83,
+                                          "top": 199,
+                                          "right": 325,
+                                          "bottom": 261
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "text": "Play Store",
+                              "view-id": "e6c37e17-b925-1706-98c3-5b836bf147ee",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "long-clickable": "true",
+                              "bounds": {
+                                "left": 67,
+                                "top": 1406,
+                                "right": 272,
+                                "bottom": 1692
+                              }
+                            },
+                            {
+                              "text": "Gmail",
+                              "view-id": "0a822ce5-b7fd-37de-1722-eb7a16db8e10",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "long-clickable": "true",
+                              "bounds": {
+                                "left": 314,
+                                "top": 1406,
+                                "right": 519,
+                                "bottom": 1692
+                              }
+                            },
+                            {
+                              "text": "Photos",
+                              "view-id": "bc83d8d7-7dd9-87bb-a897-b1f78f901892",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "long-clickable": "true",
+                              "bounds": {
+                                "left": 561,
+                                "top": 1406,
+                                "right": 766,
+                                "bottom": 1692
+                              }
+                            },
+                            {
+                              "text": "YouTube",
+                              "view-id": "be42cd52-a1d9-6a66-8cf4-ced053d928b3",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "long-clickable": "true",
+                              "bounds": {
+                                "left": 808,
+                                "top": 1406,
+                                "right": 1013,
+                                "bottom": 1692
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "content-desc": "Home",
+                      "view-id": "54becc6c-60c9-03ff-c31c-e97546fde8a6",
+                      "occlusionState": "partial",
+                      "occludedBy": "android.view.ViewGroup",
+                      "bounds": {
+                        "left": 0,
+                        "top": 63,
+                        "right": 1080,
+                        "bottom": 2337
+                      }
+                    },
+                    {
+                      "resource-id": "com.google.android.apps.nexuslauncher:id/page_indicator",
+                      "view-id": "com.google.android.apps.nexuslauncher:id/page_indicator",
+                      "bounds": {
+                        "left": 0,
+                        "top": 1810,
+                        "right": 1080,
+                        "bottom": 1873
+                      }
+                    },
+                    {
+                      "resource-id": "com.google.android.apps.nexuslauncher:id/hotseat",
+                      "view-id": "com.google.android.apps.nexuslauncher:id/hotseat",
+                      "className": "android.view.ViewGroup",
+                      "bounds": {
+                        "left": 0,
+                        "top": 1873,
+                        "right": 1080,
+                        "bottom": 2400
+                      },
+                      "node": [
+                        {
+                          "view-id": "5bfd078b-e7c2-8b14-3d7c-0a6004c8a203",
+                          "className": "android.view.ViewGroup",
+                          "bounds": {
+                            "left": 83,
+                            "top": 1873,
+                            "right": 997,
+                            "bottom": 2068
+                          },
+                          "node": [
+                            {
+                              "text": "Phone",
+                              "view-id": "7433f4c5-fb23-05e7-f058-1fb3746194d3",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "long-clickable": "true",
+                              "bounds": {
+                                "left": 83,
+                                "top": 1873,
+                                "right": 256,
+                                "bottom": 2068
+                              }
+                            },
+                            {
+                              "text": "Messages",
+                              "view-id": "854bcfdc-132d-01a8-8fc5-149ea7d96991",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "long-clickable": "true",
+                              "bounds": {
+                                "left": 330,
+                                "top": 1873,
+                                "right": 503,
+                                "bottom": 2068
+                              }
+                            },
+                            {
+                              "text": "Chrome",
+                              "view-id": "4af3e4c2-83e5-dd77-1909-33554a1721fd",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "long-clickable": "true",
+                              "bounds": {
+                                "left": 577,
+                                "top": 1873,
+                                "right": 750,
+                                "bottom": 2068
+                              }
+                            },
+                            {
+                              "text": "AutoMobile Playground",
+                              "content-desc": "Predicted app: AutoMobile Playground",
+                              "view-id": "c8ca6700-9b24-2675-c0bc-89738048b4cb",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "long-clickable": "true",
+                              "bounds": {
+                                "left": 824,
+                                "top": 1873,
+                                "right": 997,
+                                "bottom": 2068
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "content-desc": "Google search",
+                          "resource-id": "com.google.android.apps.nexuslauncher:id/search_container_hotseat",
+                          "view-id": "com.google.android.apps.nexuslauncher:id/search_container_hotseat",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "bounds": {
+                            "left": 90,
+                            "top": 2125,
+                            "right": 990,
+                            "bottom": 2290
+                          },
+                          "node": [
+                            {
+                              "content-desc": "Google app",
+                              "resource-id": "com.google.android.apps.nexuslauncher:id/g_icon",
+                              "view-id": "com.google.android.apps.nexuslauncher:id/g_icon",
+                              "className": "android.widget.ImageView",
+                              "clickable": "true",
+                              "focusable": "true",
+                              "bounds": {
+                                "left": 101,
+                                "top": 2144,
+                                "right": 227,
+                                "bottom": 2270
+                              }
+                            },
+                            {
+                              "resource-id": "com.google.android.apps.nexuslauncher:id/end_part",
+                              "view-id": "com.google.android.apps.nexuslauncher:id/end_part",
+                              "className": "android.widget.LinearLayout",
+                              "bounds": {
+                                "left": 727,
+                                "top": 2125,
+                                "right": 979,
+                                "bottom": 2290
+                              },
+                              "node": [
+                                {
+                                  "content-desc": "Voice search",
+                                  "resource-id": "com.google.android.apps.nexuslauncher:id/mic_icon",
+                                  "view-id": "com.google.android.apps.nexuslauncher:id/mic_icon",
+                                  "className": "android.widget.ImageView",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": {
+                                    "left": 727,
+                                    "top": 2125,
+                                    "right": 853,
+                                    "bottom": 2290
+                                  }
+                                },
+                                {
+                                  "content-desc": "Google Lens",
+                                  "resource-id": "com.google.android.apps.nexuslauncher:id/lens_icon",
+                                  "view-id": "com.google.android.apps.nexuslauncher:id/lens_icon",
+                                  "className": "android.widget.ImageButton",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": {
+                                    "left": 853,
+                                    "top": 2125,
+                                    "right": 979,
+                                    "bottom": 2290
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "resource-id": "com.google.android.apps.nexuslauncher:id/overview_actions_view",
+                      "view-id": "com.google.android.apps.nexuslauncher:id/overview_actions_view",
+                      "bounds": {
+                        "left": 0,
+                        "top": 1973,
+                        "right": 1080,
+                        "bottom": 2400
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "view-id": "56f22b88-d68a-d45b-92d9-2cc35338bde6",
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 1080,
+            "bottom": 63
+          },
+          "node": {
+            "resource-id": "com.android.systemui:id/status_bar_container",
+            "view-id": "com.android.systemui:id/status_bar_container",
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 1080,
+              "bottom": 63
+            },
+            "node": {
+              "resource-id": "com.android.systemui:id/status_bar",
+              "view-id": "com.android.systemui:id/status_bar",
+              "bounds": {
+                "left": 0,
+                "top": 0,
+                "right": 1080,
+                "bottom": 63
+              },
+              "node": {
+                "resource-id": "com.android.systemui:id/status_bar_contents",
+                "view-id": "com.android.systemui:id/status_bar_contents",
+                "className": "android.widget.LinearLayout",
+                "bounds": {
+                  "left": 0,
+                  "top": 0,
+                  "right": 1027,
+                  "bottom": 63
+                },
+                "node": [
+                  {
+                    "resource-id": "com.android.systemui:id/status_bar_start_side_container",
+                    "view-id": "com.android.systemui:id/status_bar_start_side_container",
+                    "bounds": {
+                      "left": 11,
+                      "top": 0,
+                      "right": 513,
+                      "bottom": 63
+                    },
+                    "node": {
+                      "resource-id": "com.android.systemui:id/status_bar_start_side_content",
+                      "view-id": "com.android.systemui:id/status_bar_start_side_content",
+                      "bounds": {
+                        "left": 11,
+                        "top": 0,
+                        "right": 173,
+                        "bottom": 63
+                      },
+                      "node": {
+                        "resource-id": "com.android.systemui:id/status_bar_start_side_except_heads_up",
+                        "view-id": "com.android.systemui:id/status_bar_start_side_except_heads_up",
+                        "className": "android.widget.LinearLayout",
+                        "bounds": {
+                          "left": 11,
+                          "top": 0,
+                          "right": 173,
+                          "bottom": 63
+                        },
+                        "node": [
+                          {
+                            "text": "7:32",
+                            "content-desc": "7:32 AM",
+                            "resource-id": "com.android.systemui:id/clock",
+                            "view-id": "com.android.systemui:id/clock",
+                            "bounds": {
+                              "left": 11,
+                              "top": 10,
+                              "right": 115,
+                              "bottom": 53
+                            }
+                          },
+                          {
+                            "resource-id": "com.android.systemui:id/notification_icon_area",
+                            "view-id": "com.android.systemui:id/notification_icon_area",
+                            "bounds": {
+                              "left": 115,
+                              "top": 0,
+                              "right": 173,
+                              "bottom": 63
+                            },
+                            "node": {
+                              "resource-id": "com.android.systemui:id/notificationIcons",
+                              "view-id": "com.android.systemui:id/notificationIcons",
+                              "className": "android.view.ViewGroup",
+                              "bounds": {
+                                "left": 115,
+                                "top": 0,
+                                "right": 173,
+                                "bottom": 63
+                              },
+                              "node": {
+                                "content-desc": "Google Play services notification: Account action required",
+                                "view-id": "574c1491-66ae-6120-d32e-ca3370efd174",
+                                "className": "android.widget.ImageView",
+                                "bounds": {
+                                  "left": 115,
+                                  "top": 0,
+                                  "right": 173,
+                                  "bottom": 63
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "resource-id": "com.android.systemui:id/status_bar_end_side_container",
+                    "view-id": "com.android.systemui:id/status_bar_end_side_container",
+                    "bounds": {
+                      "left": 513,
+                      "top": 0,
+                      "right": 1016,
+                      "bottom": 63
+                    },
+                    "node": {
+                      "resource-id": "com.android.systemui:id/status_bar_end_side_content",
+                      "view-id": "com.android.systemui:id/status_bar_end_side_content",
+                      "className": "android.widget.LinearLayout",
+                      "bounds": {
+                        "left": 876,
+                        "top": 0,
+                        "right": 1016,
+                        "bottom": 63
+                      },
+                      "node": {
+                        "resource-id": "com.android.systemui:id/system_icons",
+                        "view-id": "com.android.systemui:id/system_icons",
+                        "className": "android.widget.LinearLayout",
+                        "bounds": {
+                          "left": 876,
+                          "top": 2,
+                          "right": 1016,
+                          "bottom": 60
+                        },
+                        "node": [
+                          {
+                            "resource-id": "com.android.systemui:id/statusIcons",
+                            "view-id": "com.android.systemui:id/statusIcons",
+                            "className": "android.widget.LinearLayout",
+                            "bounds": {
+                              "left": 884,
+                              "top": 2,
+                              "right": 985,
+                              "bottom": 60
+                            },
+                            "node": [
+                              {
+                                "resource-id": "com.android.systemui:id/wifi_combo",
+                                "view-id": "com.android.systemui:id/wifi_combo",
+                                "bounds": {
+                                  "left": 884,
+                                  "top": 2,
+                                  "right": 930,
+                                  "bottom": 60
+                                },
+                                "node": {
+                                  "resource-id": "com.android.systemui:id/wifi_group",
+                                  "view-id": "com.android.systemui:id/wifi_group",
+                                  "className": "android.widget.LinearLayout",
+                                  "bounds": {
+                                    "left": 891,
+                                    "top": 2,
+                                    "right": 930,
+                                    "bottom": 60
+                                  },
+                                  "node": {
+                                    "resource-id": "com.android.systemui:id/wifi_combo",
+                                    "view-id": "com.android.systemui:id/wifi_combo",
+                                    "bounds": {
+                                      "left": 891,
+                                      "top": 11,
+                                      "right": 930,
+                                      "bottom": 50
+                                    },
+                                    "node": {
+                                      "content-desc": "Wifi signal full.",
+                                      "resource-id": "com.android.systemui:id/wifi_signal",
+                                      "view-id": "com.android.systemui:id/wifi_signal",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": {
+                                        "left": 891,
+                                        "top": 11,
+                                        "right": 930,
+                                        "bottom": 50
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "content-desc": "Phone two bars.",
+                                "resource-id": "com.android.systemui:id/mobile_combo",
+                                "view-id": "com.android.systemui:id/mobile_combo",
+                                "bounds": {
+                                  "left": 930,
+                                  "top": 2,
+                                  "right": 969,
+                                  "bottom": 60
+                                },
+                                "node": {
+                                  "resource-id": "com.android.systemui:id/mobile_group",
+                                  "view-id": "com.android.systemui:id/mobile_group",
+                                  "className": "android.widget.LinearLayout",
+                                  "bounds": {
+                                    "left": 930,
+                                    "top": 2,
+                                    "right": 969,
+                                    "bottom": 60
+                                  },
+                                  "node": {
+                                    "view-id": "e6df4251-1fe0-4e88-852c-5c9b0684cc91",
+                                    "bounds": {
+                                      "left": 930,
+                                      "top": 11,
+                                      "right": 969,
+                                      "bottom": 50
+                                    },
+                                    "node": {
+                                      "resource-id": "com.android.systemui:id/mobile_signal",
+                                      "view-id": "com.android.systemui:id/mobile_signal",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": {
+                                        "left": 930,
+                                        "top": 11,
+                                        "right": 969,
+                                        "bottom": 50
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "content-desc": "Battery 100 percent.",
+                            "resource-id": "com.android.systemui:id/battery",
+                            "view-id": "com.android.systemui:id/battery",
+                            "className": "android.widget.LinearLayout",
+                            "bounds": {
+                              "left": 985,
+                              "top": 14,
+                              "right": 1005,
+                              "bottom": 48
+                            },
+                            "node": {
+                              "view-id": "2a712312-fcd0-79d2-e383-9f967e666359",
+                              "className": "android.widget.ImageView",
+                              "bounds": {
+                                "left": 985,
+                                "top": 14,
+                                "right": 1005,
+                                "bottom": 48
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "packageName": "com.google.android.apps.nexuslauncher",
+    "windows": [
+      {
+        "id": 67,
+        "type": 3,
+        "isActive": false,
+        "isFocused": false,
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 63
+        }
+      },
+      {
+        "id": 63,
+        "type": 1,
+        "isActive": true,
+        "isFocused": true,
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        }
+      }
+    ],
+    "contentHiddenRegions": null,
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "ctrlProxyIncomplete": null,
+    "sources": [
+      "control-proxy"
+    ],
+    "screenWidth": 1080,
+    "screenHeight": 2400,
+    "rotation": 0,
+    "systemInsets": {
+      "top": 63,
+      "bottom": 63,
+      "left": 0,
+      "right": 0
+    },
+    "wakefulness": "Awake",
+    "foregroundActivity": "com.google.android.apps.nexuslauncher/.NexusLauncherActivity",
+    "density": 420,
+    "sdkInt": 35,
+    "deviceModel": "sdk_gphone64_arm64",
+    "isEmulator": true,
+    "updatedAt": 1782909171267
+  },
+  "intentChooserDetected": false,
+  "notificationPermissionDetected": false,
+  "rotation": 0,
+  "activeWindow": {
+    "appId": "com.google.android.apps.nexuslauncher",
+    "activityName": "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+    "layoutSeqSum": 0
+  },
+  "wakefulness": "Awake",
+  "backStack": {
+    "depth": 0,
+    "activities": [],
+    "tasks": [],
+    "currentActivity": {
+      "name": "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+      "taskId": 320
+    },
+    "currentTaskId": 320,
+    "capturedAt": 1782909172534,
+    "source": "adb"
+  },
+  "elements": {
+    "clickable": [
+      {
+        "resource-id": "com.google.android.apps.nexuslauncher:id/base_template_card_with_date",
+        "view-id": "com.google.android.apps.nexuslauncher:id/base_template_card_with_date",
+        "className": "android.view.ViewGroup",
+        "clickable": "true",
+        "focusable": "true",
+        "extras": {
+          "AccessibilityNodeInfo.roleDescription": " "
+        },
+        "bounds": {
+          "left": 83,
+          "top": 100,
+          "right": 997,
+          "bottom": 373
+        },
+        "node": {
+          "resource-id": "com.google.android.apps.nexuslauncher:id/text_group",
+          "view-id": "com.google.android.apps.nexuslauncher:id/text_group",
+          "className": "android.widget.RelativeLayout",
+          "bounds": {
+            "left": 83,
+            "top": 199,
+            "right": 997,
+            "bottom": 274
+          },
+          "node": {
+            "text": "Wed, Jul 1",
+            "resource-id": "com.google.android.apps.nexuslauncher:id/date",
+            "view-id": "com.google.android.apps.nexuslauncher:id/date",
+            "clickable": "true",
+            "focusable": "true",
+            "bounds": {
+              "left": 83,
+              "top": 199,
+              "right": 325,
+              "bottom": 261
+            }
+          }
+        }
+      },
+      {
+        "text": "Wed, Jul 1",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/date",
+        "view-id": "com.google.android.apps.nexuslauncher:id/date",
+        "clickable": "true",
+        "focusable": "true",
+        "bounds": {
+          "left": 83,
+          "top": 199,
+          "right": 325,
+          "bottom": 261
+        }
+      },
+      {
+        "text": "Play Store",
+        "view-id": "e6c37e17-b925-1706-98c3-5b836bf147ee",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 67,
+          "top": 1406,
+          "right": 272,
+          "bottom": 1692
+        }
+      },
+      {
+        "text": "Gmail",
+        "view-id": "0a822ce5-b7fd-37de-1722-eb7a16db8e10",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 314,
+          "top": 1406,
+          "right": 519,
+          "bottom": 1692
+        }
+      },
+      {
+        "text": "Photos",
+        "view-id": "bc83d8d7-7dd9-87bb-a897-b1f78f901892",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 561,
+          "top": 1406,
+          "right": 766,
+          "bottom": 1692
+        }
+      },
+      {
+        "text": "YouTube",
+        "view-id": "be42cd52-a1d9-6a66-8cf4-ced053d928b3",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 808,
+          "top": 1406,
+          "right": 1013,
+          "bottom": 1692
+        }
+      },
+      {
+        "text": "Phone",
+        "view-id": "7433f4c5-fb23-05e7-f058-1fb3746194d3",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 83,
+          "top": 1873,
+          "right": 256,
+          "bottom": 2068
+        }
+      },
+      {
+        "text": "Messages",
+        "view-id": "854bcfdc-132d-01a8-8fc5-149ea7d96991",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 330,
+          "top": 1873,
+          "right": 503,
+          "bottom": 2068
+        }
+      },
+      {
+        "text": "Chrome",
+        "view-id": "4af3e4c2-83e5-dd77-1909-33554a1721fd",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 577,
+          "top": 1873,
+          "right": 750,
+          "bottom": 2068
+        }
+      },
+      {
+        "text": "AutoMobile Playground",
+        "content-desc": "Predicted app: AutoMobile Playground",
+        "view-id": "c8ca6700-9b24-2675-c0bc-89738048b4cb",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 824,
+          "top": 1873,
+          "right": 997,
+          "bottom": 2068
+        }
+      },
+      {
+        "content-desc": "Google search",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/search_container_hotseat",
+        "view-id": "com.google.android.apps.nexuslauncher:id/search_container_hotseat",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 90,
+          "top": 2125,
+          "right": 990,
+          "bottom": 2290
+        },
+        "node": [
+          {
+            "content-desc": "Google app",
+            "resource-id": "com.google.android.apps.nexuslauncher:id/g_icon",
+            "view-id": "com.google.android.apps.nexuslauncher:id/g_icon",
+            "className": "android.widget.ImageView",
+            "clickable": "true",
+            "focusable": "true",
+            "bounds": {
+              "left": 101,
+              "top": 2144,
+              "right": 227,
+              "bottom": 2270
+            }
+          },
+          {
+            "resource-id": "com.google.android.apps.nexuslauncher:id/end_part",
+            "view-id": "com.google.android.apps.nexuslauncher:id/end_part",
+            "className": "android.widget.LinearLayout",
+            "bounds": {
+              "left": 727,
+              "top": 2125,
+              "right": 979,
+              "bottom": 2290
+            },
+            "node": [
+              {
+                "content-desc": "Voice search",
+                "resource-id": "com.google.android.apps.nexuslauncher:id/mic_icon",
+                "view-id": "com.google.android.apps.nexuslauncher:id/mic_icon",
+                "className": "android.widget.ImageView",
+                "clickable": "true",
+                "focusable": "true",
+                "bounds": {
+                  "left": 727,
+                  "top": 2125,
+                  "right": 853,
+                  "bottom": 2290
+                }
+              },
+              {
+                "content-desc": "Google Lens",
+                "resource-id": "com.google.android.apps.nexuslauncher:id/lens_icon",
+                "view-id": "com.google.android.apps.nexuslauncher:id/lens_icon",
+                "className": "android.widget.ImageButton",
+                "clickable": "true",
+                "focusable": "true",
+                "bounds": {
+                  "left": 853,
+                  "top": 2125,
+                  "right": 979,
+                  "bottom": 2290
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "content-desc": "Google app",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/g_icon",
+        "view-id": "com.google.android.apps.nexuslauncher:id/g_icon",
+        "className": "android.widget.ImageView",
+        "clickable": "true",
+        "focusable": "true",
+        "bounds": {
+          "left": 101,
+          "top": 2144,
+          "right": 227,
+          "bottom": 2270
+        }
+      },
+      {
+        "content-desc": "Voice search",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/mic_icon",
+        "view-id": "com.google.android.apps.nexuslauncher:id/mic_icon",
+        "className": "android.widget.ImageView",
+        "clickable": "true",
+        "focusable": "true",
+        "bounds": {
+          "left": 727,
+          "top": 2125,
+          "right": 853,
+          "bottom": 2290
+        }
+      },
+      {
+        "content-desc": "Google Lens",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/lens_icon",
+        "view-id": "com.google.android.apps.nexuslauncher:id/lens_icon",
+        "className": "android.widget.ImageButton",
+        "clickable": "true",
+        "focusable": "true",
+        "bounds": {
+          "left": 853,
+          "top": 2125,
+          "right": 979,
+          "bottom": 2290
+        }
+      }
+    ],
+    "scrollable": [
+      {
+        "resource-id": "com.google.android.apps.nexuslauncher:id/workspace",
+        "view-id": "com.google.android.apps.nexuslauncher:id/workspace",
+        "scrollable": "true",
+        "occlusionState": "partial",
+        "occludedBy": "android.view.ViewGroup",
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "node": {
+          "view-id": "17d1413d-5e40-3c0d-91b5-7661ba0c8809",
+          "className": "android.view.ViewGroup",
+          "bounds": {
+            "left": 39,
+            "top": 66,
+            "right": 1041,
+            "bottom": 1720
+          },
+          "node": {
+            "view-id": "9b602e43-775a-10a3-cfc1-dde0b307a865",
+            "className": "android.view.ViewGroup",
+            "bounds": {
+              "left": 67,
+              "top": 94,
+              "right": 1013,
+              "bottom": 1692
+            },
+            "node": [
+              {
+                "resource-id": "com.google.android.apps.nexuslauncher:id/search_container_workspace",
+                "view-id": "com.google.android.apps.nexuslauncher:id/search_container_workspace",
+                "bounds": {
+                  "left": 67,
+                  "top": 94,
+                  "right": 1013,
+                  "bottom": 380
+                },
+                "node": {
+                  "resource-id": "com.google.android.apps.nexuslauncher:id/bc_smartspace_view",
+                  "view-id": "com.google.android.apps.nexuslauncher:id/bc_smartspace_view",
+                  "bounds": {
+                    "left": 83,
+                    "top": 100,
+                    "right": 997,
+                    "bottom": 373
+                  },
+                  "node": {
+                    "content-desc": "At a glance",
+                    "resource-id": "com.google.android.apps.nexuslauncher:id/smartspace_card_pager",
+                    "view-id": "com.google.android.apps.nexuslauncher:id/smartspace_card_pager",
+                    "className": "androidx.viewpager.widget.ViewPager",
+                    "focusable": "true",
+                    "long-clickable": "true",
+                    "extras": {
+                      "AccessibilityNodeInfo.roleDescription": "View"
+                    },
+                    "bounds": {
+                      "left": 83,
+                      "top": 100,
+                      "right": 997,
+                      "bottom": 373
+                    },
+                    "node": {
+                      "resource-id": "com.google.android.apps.nexuslauncher:id/base_template_card_with_date",
+                      "view-id": "com.google.android.apps.nexuslauncher:id/base_template_card_with_date",
+                      "className": "android.view.ViewGroup",
+                      "clickable": "true",
+                      "focusable": "true",
+                      "extras": {
+                        "AccessibilityNodeInfo.roleDescription": " "
+                      },
+                      "bounds": {
+                        "left": 83,
+                        "top": 100,
+                        "right": 997,
+                        "bottom": 373
+                      },
+                      "node": {
+                        "resource-id": "com.google.android.apps.nexuslauncher:id/text_group",
+                        "view-id": "com.google.android.apps.nexuslauncher:id/text_group",
+                        "className": "android.widget.RelativeLayout",
+                        "bounds": {
+                          "left": 83,
+                          "top": 199,
+                          "right": 997,
+                          "bottom": 274
+                        },
+                        "node": {
+                          "text": "Wed, Jul 1",
+                          "resource-id": "com.google.android.apps.nexuslauncher:id/date",
+                          "view-id": "com.google.android.apps.nexuslauncher:id/date",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "bounds": {
+                            "left": 83,
+                            "top": 199,
+                            "right": 325,
+                            "bottom": 261
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "text": "Play Store",
+                "view-id": "e6c37e17-b925-1706-98c3-5b836bf147ee",
+                "clickable": "true",
+                "focusable": "true",
+                "long-clickable": "true",
+                "bounds": {
+                  "left": 67,
+                  "top": 1406,
+                  "right": 272,
+                  "bottom": 1692
+                }
+              },
+              {
+                "text": "Gmail",
+                "view-id": "0a822ce5-b7fd-37de-1722-eb7a16db8e10",
+                "clickable": "true",
+                "focusable": "true",
+                "long-clickable": "true",
+                "bounds": {
+                  "left": 314,
+                  "top": 1406,
+                  "right": 519,
+                  "bottom": 1692
+                }
+              },
+              {
+                "text": "Photos",
+                "view-id": "bc83d8d7-7dd9-87bb-a897-b1f78f901892",
+                "clickable": "true",
+                "focusable": "true",
+                "long-clickable": "true",
+                "bounds": {
+                  "left": 561,
+                  "top": 1406,
+                  "right": 766,
+                  "bottom": 1692
+                }
+              },
+              {
+                "text": "YouTube",
+                "view-id": "be42cd52-a1d9-6a66-8cf4-ced053d928b3",
+                "clickable": "true",
+                "focusable": "true",
+                "long-clickable": "true",
+                "bounds": {
+                  "left": 808,
+                  "top": 1406,
+                  "right": 1013,
+                  "bottom": 1692
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "text": [
+      {
+        "content-desc": "At a glance",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/smartspace_card_pager",
+        "view-id": "com.google.android.apps.nexuslauncher:id/smartspace_card_pager",
+        "className": "androidx.viewpager.widget.ViewPager",
+        "focusable": "true",
+        "long-clickable": "true",
+        "extras": {
+          "AccessibilityNodeInfo.roleDescription": "View"
+        },
+        "bounds": {
+          "left": 83,
+          "top": 100,
+          "right": 997,
+          "bottom": 373
+        },
+        "node": {
+          "resource-id": "com.google.android.apps.nexuslauncher:id/base_template_card_with_date",
+          "view-id": "com.google.android.apps.nexuslauncher:id/base_template_card_with_date",
+          "className": "android.view.ViewGroup",
+          "clickable": "true",
+          "focusable": "true",
+          "extras": {
+            "AccessibilityNodeInfo.roleDescription": " "
+          },
+          "bounds": {
+            "left": 83,
+            "top": 100,
+            "right": 997,
+            "bottom": 373
+          },
+          "node": {
+            "resource-id": "com.google.android.apps.nexuslauncher:id/text_group",
+            "view-id": "com.google.android.apps.nexuslauncher:id/text_group",
+            "className": "android.widget.RelativeLayout",
+            "bounds": {
+              "left": 83,
+              "top": 199,
+              "right": 997,
+              "bottom": 274
+            },
+            "node": {
+              "text": "Wed, Jul 1",
+              "resource-id": "com.google.android.apps.nexuslauncher:id/date",
+              "view-id": "com.google.android.apps.nexuslauncher:id/date",
+              "clickable": "true",
+              "focusable": "true",
+              "bounds": {
+                "left": 83,
+                "top": 199,
+                "right": 325,
+                "bottom": 261
+              }
+            }
+          }
+        }
+      },
+      {
+        "text": "Wed, Jul 1",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/date",
+        "view-id": "com.google.android.apps.nexuslauncher:id/date",
+        "clickable": "true",
+        "focusable": "true",
+        "bounds": {
+          "left": 83,
+          "top": 199,
+          "right": 325,
+          "bottom": 261
+        }
+      },
+      {
+        "text": "Play Store",
+        "view-id": "e6c37e17-b925-1706-98c3-5b836bf147ee",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 67,
+          "top": 1406,
+          "right": 272,
+          "bottom": 1692
+        }
+      },
+      {
+        "text": "Gmail",
+        "view-id": "0a822ce5-b7fd-37de-1722-eb7a16db8e10",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 314,
+          "top": 1406,
+          "right": 519,
+          "bottom": 1692
+        }
+      },
+      {
+        "text": "Photos",
+        "view-id": "bc83d8d7-7dd9-87bb-a897-b1f78f901892",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 561,
+          "top": 1406,
+          "right": 766,
+          "bottom": 1692
+        }
+      },
+      {
+        "text": "YouTube",
+        "view-id": "be42cd52-a1d9-6a66-8cf4-ced053d928b3",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 808,
+          "top": 1406,
+          "right": 1013,
+          "bottom": 1692
+        }
+      },
+      {
+        "content-desc": "Home",
+        "view-id": "54becc6c-60c9-03ff-c31c-e97546fde8a6",
+        "occlusionState": "partial",
+        "occludedBy": "android.view.ViewGroup",
+        "bounds": {
+          "left": 0,
+          "top": 63,
+          "right": 1080,
+          "bottom": 2337
+        }
+      },
+      {
+        "text": "Phone",
+        "view-id": "7433f4c5-fb23-05e7-f058-1fb3746194d3",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 83,
+          "top": 1873,
+          "right": 256,
+          "bottom": 2068
+        }
+      },
+      {
+        "text": "Messages",
+        "view-id": "854bcfdc-132d-01a8-8fc5-149ea7d96991",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 330,
+          "top": 1873,
+          "right": 503,
+          "bottom": 2068
+        }
+      },
+      {
+        "text": "Chrome",
+        "view-id": "4af3e4c2-83e5-dd77-1909-33554a1721fd",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 577,
+          "top": 1873,
+          "right": 750,
+          "bottom": 2068
+        }
+      },
+      {
+        "text": "AutoMobile Playground",
+        "content-desc": "Predicted app: AutoMobile Playground",
+        "view-id": "c8ca6700-9b24-2675-c0bc-89738048b4cb",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 824,
+          "top": 1873,
+          "right": 997,
+          "bottom": 2068
+        }
+      },
+      {
+        "content-desc": "Google search",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/search_container_hotseat",
+        "view-id": "com.google.android.apps.nexuslauncher:id/search_container_hotseat",
+        "clickable": "true",
+        "focusable": "true",
+        "long-clickable": "true",
+        "bounds": {
+          "left": 90,
+          "top": 2125,
+          "right": 990,
+          "bottom": 2290
+        },
+        "node": [
+          {
+            "content-desc": "Google app",
+            "resource-id": "com.google.android.apps.nexuslauncher:id/g_icon",
+            "view-id": "com.google.android.apps.nexuslauncher:id/g_icon",
+            "className": "android.widget.ImageView",
+            "clickable": "true",
+            "focusable": "true",
+            "bounds": {
+              "left": 101,
+              "top": 2144,
+              "right": 227,
+              "bottom": 2270
+            }
+          },
+          {
+            "resource-id": "com.google.android.apps.nexuslauncher:id/end_part",
+            "view-id": "com.google.android.apps.nexuslauncher:id/end_part",
+            "className": "android.widget.LinearLayout",
+            "bounds": {
+              "left": 727,
+              "top": 2125,
+              "right": 979,
+              "bottom": 2290
+            },
+            "node": [
+              {
+                "content-desc": "Voice search",
+                "resource-id": "com.google.android.apps.nexuslauncher:id/mic_icon",
+                "view-id": "com.google.android.apps.nexuslauncher:id/mic_icon",
+                "className": "android.widget.ImageView",
+                "clickable": "true",
+                "focusable": "true",
+                "bounds": {
+                  "left": 727,
+                  "top": 2125,
+                  "right": 853,
+                  "bottom": 2290
+                }
+              },
+              {
+                "content-desc": "Google Lens",
+                "resource-id": "com.google.android.apps.nexuslauncher:id/lens_icon",
+                "view-id": "com.google.android.apps.nexuslauncher:id/lens_icon",
+                "className": "android.widget.ImageButton",
+                "clickable": "true",
+                "focusable": "true",
+                "bounds": {
+                  "left": 853,
+                  "top": 2125,
+                  "right": 979,
+                  "bottom": 2290
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "content-desc": "Google app",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/g_icon",
+        "view-id": "com.google.android.apps.nexuslauncher:id/g_icon",
+        "className": "android.widget.ImageView",
+        "clickable": "true",
+        "focusable": "true",
+        "bounds": {
+          "left": 101,
+          "top": 2144,
+          "right": 227,
+          "bottom": 2270
+        }
+      },
+      {
+        "content-desc": "Voice search",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/mic_icon",
+        "view-id": "com.google.android.apps.nexuslauncher:id/mic_icon",
+        "className": "android.widget.ImageView",
+        "clickable": "true",
+        "focusable": "true",
+        "bounds": {
+          "left": 727,
+          "top": 2125,
+          "right": 853,
+          "bottom": 2290
+        }
+      },
+      {
+        "content-desc": "Google Lens",
+        "resource-id": "com.google.android.apps.nexuslauncher:id/lens_icon",
+        "view-id": "com.google.android.apps.nexuslauncher:id/lens_icon",
+        "className": "android.widget.ImageButton",
+        "clickable": "true",
+        "focusable": "true",
+        "bounds": {
+          "left": 853,
+          "top": 2125,
+          "right": 979,
+          "bottom": 2290
+        }
+      },
+      {
+        "text": "7:32",
+        "content-desc": "7:32 AM",
+        "resource-id": "com.android.systemui:id/clock",
+        "view-id": "com.android.systemui:id/clock",
+        "bounds": {
+          "left": 11,
+          "top": 10,
+          "right": 115,
+          "bottom": 53
+        }
+      },
+      {
+        "content-desc": "Google Play services notification: Account action required",
+        "view-id": "574c1491-66ae-6120-d32e-ca3370efd174",
+        "className": "android.widget.ImageView",
+        "bounds": {
+          "left": 115,
+          "top": 0,
+          "right": 173,
+          "bottom": 63
+        }
+      },
+      {
+        "content-desc": "Wifi signal full.",
+        "resource-id": "com.android.systemui:id/wifi_signal",
+        "view-id": "com.android.systemui:id/wifi_signal",
+        "className": "android.widget.ImageView",
+        "bounds": {
+          "left": 891,
+          "top": 11,
+          "right": 930,
+          "bottom": 50
+        }
+      },
+      {
+        "content-desc": "Phone two bars.",
+        "resource-id": "com.android.systemui:id/mobile_combo",
+        "view-id": "com.android.systemui:id/mobile_combo",
+        "bounds": {
+          "left": 930,
+          "top": 2,
+          "right": 969,
+          "bottom": 60
+        },
+        "node": {
+          "resource-id": "com.android.systemui:id/mobile_group",
+          "view-id": "com.android.systemui:id/mobile_group",
+          "className": "android.widget.LinearLayout",
+          "bounds": {
+            "left": 930,
+            "top": 2,
+            "right": 969,
+            "bottom": 60
+          },
+          "node": {
+            "view-id": "e6df4251-1fe0-4e88-852c-5c9b0684cc91",
+            "bounds": {
+              "left": 930,
+              "top": 11,
+              "right": 969,
+              "bottom": 50
+            },
+            "node": {
+              "resource-id": "com.android.systemui:id/mobile_signal",
+              "view-id": "com.android.systemui:id/mobile_signal",
+              "className": "android.widget.ImageView",
+              "bounds": {
+                "left": 930,
+                "top": 11,
+                "right": 969,
+                "bottom": 50
+              }
+            }
+          }
+        }
+      },
+      {
+        "content-desc": "Battery 100 percent.",
+        "resource-id": "com.android.systemui:id/battery",
+        "view-id": "com.android.systemui:id/battery",
+        "className": "android.widget.LinearLayout",
+        "bounds": {
+          "left": 985,
+          "top": 14,
+          "right": 1005,
+          "bottom": 48
+        },
+        "node": {
+          "view-id": "2a712312-fcd0-79d2-e383-9f967e666359",
+          "className": "android.widget.ImageView",
+          "bounds": {
+            "left": 985,
+            "top": 14,
+            "right": 1005,
+            "bottom": 48
+          }
+        }
+      }
+    ],
+    "media": [
+      {
+        "className": "android.widget.ImageView",
+        "mediaType": "image",
+        "bounds": {
+          "left": 101,
+          "top": 2144,
+          "right": 227,
+          "bottom": 2270
+        },
+        "viewId": "com.google.android.apps.nexuslauncher:id/g_icon",
+        "contentDescription": "Google app",
+        "resourceId": "com.google.android.apps.nexuslauncher:id/g_icon"
+      },
+      {
+        "className": "android.widget.ImageView",
+        "mediaType": "image",
+        "bounds": {
+          "left": 727,
+          "top": 2125,
+          "right": 853,
+          "bottom": 2290
+        },
+        "viewId": "com.google.android.apps.nexuslauncher:id/mic_icon",
+        "contentDescription": "Voice search",
+        "resourceId": "com.google.android.apps.nexuslauncher:id/mic_icon"
+      },
+      {
+        "className": "android.widget.ImageView",
+        "mediaType": "image",
+        "bounds": {
+          "left": 115,
+          "top": 0,
+          "right": 173,
+          "bottom": 63
+        },
+        "viewId": "574c1491-66ae-6120-d32e-ca3370efd174",
+        "contentDescription": "Google Play services notification: Account action required"
+      },
+      {
+        "className": "android.widget.ImageView",
+        "mediaType": "image",
+        "bounds": {
+          "left": 891,
+          "top": 11,
+          "right": 930,
+          "bottom": 50
+        },
+        "viewId": "com.android.systemui:id/wifi_signal",
+        "contentDescription": "Wifi signal full.",
+        "resourceId": "com.android.systemui:id/wifi_signal"
+      },
+      {
+        "className": "android.widget.ImageView",
+        "mediaType": "image",
+        "bounds": {
+          "left": 930,
+          "top": 11,
+          "right": 969,
+          "bottom": 50
+        },
+        "viewId": "com.android.systemui:id/mobile_signal",
+        "resourceId": "com.android.systemui:id/mobile_signal"
+      },
+      {
+        "className": "android.widget.ImageView",
+        "mediaType": "image",
+        "bounds": {
+          "left": 985,
+          "top": 14,
+          "right": 1005,
+          "bottom": 48
+        },
+        "viewId": "2a712312-fcd0-79d2-e383-9f967e666359"
+      }
+    ]
+  },
+  "performanceAudit": {
+    "passed": false,
+    "metrics": {
+      "p50Ms": 4950,
+      "p90Ms": 4950,
+      "p95Ms": 4950,
+      "p99Ms": 4950,
+      "jankCount": 0,
+      "missedVsyncCount": 0,
+      "slowUiThreadCount": 0,
+      "frameDeadlineMissedCount": 0,
+      "cpuUsagePercent": 0.11411323571043924,
+      "threadCount": 48,
+      "touchLatencyMs": null,
+      "anrDetected": false,
+      "anrDetails": null,
+      "timeToFirstFrameMs": null,
+      "timeToInteractiveMs": null,
+      "frameRateFps": null,
+      "gfxinfoRaw": "Applications Graphics Acceleration Info:\nUptime: 74390962 Realtime: 74390962\n\n** Graphics info for pid 1220 [com.google.android.apps.nexuslauncher] **\n\nStats since: 74390916202438ns\nTotal frames rendered: 0\nJanky frames: 0 (0.00%)\nJanky frames (legacy): 0 (0.00%)\n50th percentile: 4950ms\n90th percentile: 4950ms\n95th percentile: 4950ms\n99th percentile: 4950ms\nNumber Missed Vsync: 0\nNumber High input latency: 0\nNumber Slow UI thread: 0\nNumber Slow bitmap uploads: 0\nNumber Slow issue draw commands: 0\nNumber Frame deadline missed: 0\nNumber Frame deadline missed (legacy): 0\nHISTOGRAM: 5ms=0 6ms=0 7ms=0 8ms=0 9ms=0 10ms=0 11ms=0 12ms=0 13ms=0 14ms=0 15ms=0 16ms=0 17ms=0 18ms=0 19ms=0 20ms=0 21ms=0 22ms=0 23ms=0 24ms=0 25ms=0 26ms=0 27ms=0 28ms=0 29ms=0 30ms=0 31ms=0 32ms=0 34ms=0 36ms=0 38ms=0 40ms=0 42ms=0 44ms=0 46ms=0 48ms=0 53ms=0 57ms=0 61ms=0 65ms=0 69ms=0 73ms=0 77ms=0 81ms=0 85ms=0 89ms=0 93ms=0 97ms=0 101ms=0 105ms=0 109ms=0 113ms=0 117ms=0 121ms=0 125ms=0 129ms=0 133ms=0 150ms=0 200ms=0 250ms=0 300ms=0 350ms=0 400ms=0 450ms=0 500ms=0 550ms=0 600ms=0 650ms=0 700ms=0 750ms=0 800ms=0 850ms=0 900ms=0 950ms=0 1000ms=0 1050ms=0 1100ms=0 1150ms=0 1200ms=0 1250ms=0 1300ms=0 1350ms=0 1400ms=0 1450ms=0 1500ms=0 1550ms=0 1600ms=0 1650ms=0 1700ms=0 1750ms=0 1800ms=0 1850ms=0 1900ms=0 1950ms=0 2000ms=0 2050ms=0 2100ms=0 2150ms=0 2200ms=0 2250ms=0 2300ms=0 2350ms=0 2400ms=0 2450ms=0 2500ms=0 2550ms=0 2600ms=0 2650ms=0 2700ms=0 2750ms=0 2800ms=0 2850ms=0 2900ms=0 2950ms=0 3000ms=0 3050ms=0 3100ms=0 3150ms=0 3200ms=0 3250ms=0 3300ms=0 3350ms=0 3400ms=0 3450ms=0 3500ms=0 3550ms=0 3600ms=0 3650ms=0 3700ms=0 3750ms=0 3800ms=0 3850ms=0 3900ms=0 3950ms=0 4000ms=0 4050ms=0 4100ms=0 4150ms=0 4200ms=0 4250ms=0 4300ms=0 4350ms=0 4400ms=0 4450ms=0 4500ms=0 4550ms=0 4600ms=0 4650ms=0 4700ms=0 4750ms=0 4800ms=0 4850ms=0 4900ms=0 4950ms=0\n50th gpu percentile: 4950ms\n90th gpu percentile: 4950ms\n95th gpu percentile: 4950ms\n99th gpu percentile: 4950ms\nGPU HISTOGRAM: 1ms=0 2ms=0 3ms=0 4ms=0 5ms=0 6ms=0 7ms=0 8ms=0 9ms=0 10ms=0 11ms=0 12ms=0 13ms=0 14ms=0 15ms=0 16ms=0 17ms=0 18ms=0 19ms=0 20ms=0 21ms=0 22ms=0 23ms=0 24ms=0 25ms=0 4950ms=0\n\nPipeline=Skia (OpenGL)\nMemory policy:\n  Max surface area: 2592000\n  Max resource usage: 124.42MB (x48)\n  Background retention: 50% (altUiHidden = true)\n  GPU Context timeout: 10\nContexts: 2 (stopped = 0)\nCPU Caches:\n  Glyph Cache: 214.02 KB (1 entry)\n  Glyph Count: 33 \nTotal CPU memory usage:\n  219159 bytes, 214.02 KB (0.00 bytes is purgeable)\nGPU Caches:\n  Other:\n    Other: 11.12 KB (1 entry)\n    Buffer Object: 464.00 bytes (2 entries)\n    StencilAttachment: 772.00 KB (3 entries)\n  Scratch:\n    Texture: 2.00 MB (2 entries)\n    Buffer Object: 142.00 KB (4 entries)\n    RenderTarget: 23.62 MB (28 entries)\n  Image:\n    Texture: 1.46 MB (42 entries)\nTotal GPU memory usage:\n  29351676 bytes, 27.99 MB (24.28 MB is purgeable)\n\nGraphicBufferAllocator buffers:\n        Handle |        Size |     W (Stride) x H | Layers |   Format |      Usage | Requestor\n0xb400007148c9e7f0 |     unknown |   42 (   0) x   42 |      1 |        1 | 0x     b00 | ImageReader-42x42f1u2816m2-1220-1\n0xb400007148c9e880 |     unknown |   48 (   0) x   48 |      1 |        1 | 0x     b00 | ImageReader-48x48f1u2816m2-1220-0\n0xb400007148c9f9f0 |     unknown | 1080 (   0) x 2400 |      1 |        1 | 0x     b00 | VRI[NexusLauncherActivity]#4(BLAST Consumer)4\n0xb400007148ca12b0 |     unknown | 1080 (   0) x   63 |      1 |        1 | 0x     b00 | VRI[Taskbar]#0(BLAST Consumer)0\n0xb400007148ca18e0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     b00 | ImageReader-173x173f1u2816m2-1220-3\n0xb400007148cafcb0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cb3bb0 |     unknown | 1080 (   0) x   63 |      1 |        1 | 0x     b00 | VRI[Taskbar]#0(BLAST Consumer)0\n0xb400007148cb3f10 |     unknown | 1080 (   0) x   63 |      1 |        1 | 0x     b00 | VRI[Taskbar]#0(BLAST Consumer)0\n0xb400007148cbdb70 |     unknown | 1080 (   0) x 2400 |      1 |        1 | 0x     b00 | VRI[NexusLauncherActivity]#4(BLAST Consumer)4\n0xb400007148cc02d0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc3060 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc3210 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc33c0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc4020 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc4140 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc42f0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc4920 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc4bf0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc4da0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc5580 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc58e0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc5f10 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc5fa0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc64b0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc7980 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     b00 | ImageReader-173x173f1u2816m2-1220-4\n0xb400007148cc7f20 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cca050 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cce4f0 |     unknown |  178 (   0) x  178 |      1 |        1 | 0x     b00 | ImageReader-178x178f1u2816m2-1220-7\n0xb400007148ccfb70 |     unknown | 1080 (   0) x 2400 |      1 |        1 | 0x     b00 | VRI[NexusLauncherActivity]#4(BLAST Consumer)4\n0xb400007148cd0350 |     unknown |    2 (   0) x    2 |      1 |        1 | 0x     b00 | ImageReader-2x2f1u2816m2-1220-6\n0xb400007148cd1ca0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148ce04f0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148ce2740 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148ce7a80 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cec670 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148ceda20 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cf04e0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\nTotal allocated by GraphicBufferAllocator (estimate): 0.00 KB\nGoldfishAllocator::dumpDebugInfo is not implemented\nProfile data in ms:\n\n\tTaskbar/android.view.ViewRootImpl@c6f65e9 (visibility=0)\n\tcom.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity/android.view.ViewRootImpl@7b1926e (visibility=0)\nView hierarchy:\n\n  Taskbar/android.view.ViewRootImpl@c6f65e9\n  15 views, 21.95 kB of render nodes\n\n  com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity/android.view.ViewRootImpl@7b1926e\n  103 views, 161.95 kB of render nodes\n\n\nTotal ViewRootImpl   : 2\nTotal attached Views : 118\nTotal RenderNode     : 183.90 kB (used) / 342.69 kB (capacity)\n\n",
+      "cpuStatsRaw": "1220 (s.nexuslauncher) S 369 369 0 0 -1 4194624 807072 0 43471 0 3430 5059 0 0 10 -10 48 0 875 17444777984 28855 18446744073709551615 1 1 0 0 0 0 4612 1 1073775864 0 0 0 17 2 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+    },
+    "violations": [
+      {
+        "metric": "p50",
+        "threshold": 15.000000000000002,
+        "actual": 4950,
+        "severity": "warning",
+        "contributionWeight": 0.6
+      },
+      {
+        "metric": "p90",
+        "threshold": 16.666666666666668,
+        "actual": 4950,
+        "severity": "warning",
+        "contributionWeight": 0.7
+      },
+      {
+        "metric": "p95",
+        "threshold": 20,
+        "actual": 4950,
+        "severity": "critical",
+        "contributionWeight": 0.8
+      },
+      {
+        "metric": "p99",
+        "threshold": 25,
+        "actual": 4950,
+        "severity": "warning",
+        "contributionWeight": 0.4
+      }
+    ],
+    "diagnostics": "Performance issues detected:\n\nTop contributors:\n- p95: 4950.00 (threshold: 20.00) [critical]\n- p90: 4950.00 (threshold: 16.67) [warning]\n- p50: 4950.00 (threshold: 15.00) [warning]\n\nDiagnostic details:\n\n--- GFXINFO DUMP ---\nApplications Graphics Acceleration Info:\nUptime: 74390962 Realtime: 74390962\n\n** Graphics info for pid 1220 [com.google.android.apps.nexuslauncher] **\n\nStats since: 74390916202438ns\nTotal frames rendered: 0\nJanky frames: 0 (0.00%)\nJanky frames (legacy): 0 (0.00%)\n50th percentile: 4950ms\n90th percentile: 4950ms\n95th percentile: 4950ms\n99th percentile: 4950ms\nNumber Missed Vsync: 0\nNumber High input latency: 0\nNumber Slow UI thread: 0\nNumber Slow bitmap uploads: 0\nNumber Slow issue draw commands: 0\nNumber Frame deadline missed: 0\nNumber Frame deadline missed (legacy): 0\nHISTOGRAM: 5ms=0 6ms=0 7ms=0 8ms=0 9ms=0 10ms=0 11ms=0 12ms=0 13ms=0 14ms=0 15ms=0 16ms=0 17ms=0 18ms=0 19ms=0 20ms=0 21ms=0 22ms=0 23ms=0 24ms=0 25ms=0 26ms=0 27ms=0 28ms=0 29ms=0 30ms=0 31ms=0 32ms=0 34ms=0 36ms=0 38ms=0 40ms=0 42ms=0 44ms=0 46ms=0 48ms=0 53ms=0 57ms=0 61ms=0 65ms=0 69ms=0 73ms=0 77ms=0 81ms=0 85ms=0 89ms=0 93ms=0 97ms=0 101ms=0 105ms=0 109ms=0 113ms=0 117ms=0 121ms=0 125ms=0 129ms=0 133ms=0 150ms=0 200ms=0 250ms=0 300ms=0 350ms=0 400ms=0 450ms=0 500ms=0 550ms=0 600ms=0 650ms=0 700ms=0 750ms=0 800ms=0 850ms=0 900ms=0 950ms=0 1000ms=0 1050ms=0 1100ms=0 1150ms=0 1200ms=0 1250ms=0 1300ms=0 1350ms=0 1400ms=0 1450ms=0 1500ms=0 1550ms=0 1600ms=0 1650ms=0 1700ms=0 1750ms=0 1800ms=0 1850ms=0 1900ms=0 1950ms=0 2000ms=0 2050ms=0 2100ms=0 2150ms=0 2200ms=0 2250ms=0 2300ms=0 2350ms=0 2400ms=0 2450ms=0 2500ms=0 2550ms=0 2600ms=0 2650ms=0 2700ms=0 2750ms=0 2800ms=0 2850ms=0 2900ms=0 2950ms=0 3000ms=0 3050ms=0 3100ms=0 3150ms=0 3200ms=0 3250ms=0 3300ms=0 3350ms=0 3400ms=0 3450ms=0 3500ms=0 3550ms=0 3600ms=0 3650ms=0 3700ms=0 3750ms=0 3800ms=0 3850ms=0 3900ms=0 3950ms=0 4000ms=0 4050ms=0 4100ms=0 4150ms=0 4200ms=0 4250ms=0 4300ms=0 4350ms=0 4400ms=0 4450ms=0 4500ms=0 4550ms=0 4600ms=0 4650ms=0 4700ms=0 4750ms=0 4800ms=0 4850ms=0 4900ms=0 4950ms=0\n50th gpu percentile: 4950ms\n90th gpu percentile: 4950ms\n95th gpu percentile: 4950ms\n99th gpu percentile: 4950ms\nGPU HISTOGRAM: 1ms=0 2ms=0 3ms=0 4ms=0 5ms=0 6ms=0 7ms=0 8ms=0 9ms=0 10ms=0 11ms=0 12ms=0 13ms=0 14ms=0 15ms=0 16ms=0 17ms=0 18ms=0 19ms=0 20ms=0 21ms=0 22ms=0 23ms=0 24ms=0 25ms=0 4950ms=0\n\nPipeline=Skia (OpenGL)\nMemory policy:\n  Max surface area: 2592000\n  Max resource usage: 124.42MB (x48)\n  Background retention: 50% (altUiHidden = true)\n  GPU Context timeout: 10\nContexts: 2 (stopped = 0)\nCPU Caches:\n  Glyph Cache: 214.02 KB (1 entry)\n  Glyph Count: 33 \nTotal CPU memory usage:\n  219159 bytes, 214.02 KB (0.00 bytes is purgeable)\nGPU Caches:\n  Other:\n    Other: 11.12 KB (1 entry)\n    Buffer Object: 464.00 bytes (2 entries)\n    StencilAttachment: 772.00 KB (3 entries)\n  Scratch:\n    Texture: 2.00 MB (2 entries)\n    Buffer Object: 142.00 KB (4 entries)\n    RenderTarget: 23.62 MB (28 entries)\n  Image:\n    Texture: 1.46 MB (42 entries)\nTotal GPU memory usage:\n  29351676 bytes, 27.99 MB (24.28 MB is purgeable)\n\nGraphicBufferAllocator buffers:\n        Handle |        Size |     W (Stride) x H | Layers |   Format |      Usage | Requestor\n0xb400007148c9e7f0 |     unknown |   42 (   0) x   42 |      1 |        1 | 0x     b00 | ImageReader-42x42f1u2816m2-1220-1\n0xb400007148c9e880 |     unknown |   48 (   0) x   48 |      1 |        1 | 0x     b00 | ImageReader-48x48f1u2816m2-1220-0\n0xb400007148c9f9f0 |     unknown | 1080 (   0) x 2400 |      1 |        1 | 0x     b00 | VRI[NexusLauncherActivity]#4(BLAST Consumer)4\n0xb400007148ca12b0 |     unknown | 1080 (   0) x   63 |      1 |        1 | 0x     b00 | VRI[Taskbar]#0(BLAST Consumer)0\n0xb400007148ca18e0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     b00 | ImageReader-173x173f1u2816m2-1220-3\n0xb400007148cafcb0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cb3bb0 |     unknown | 1080 (   0) x   63 |      1 |        1 | 0x     b00 | VRI[Taskbar]#0(BLAST Consumer)0\n0xb400007148cb3f10 |     unknown | 1080 (   0) x   63 |      1 |        1 | 0x     b00 | VRI[Taskbar]#0(BLAST Consumer)0\n0xb400007148cbdb70 |     unknown | 1080 (   0) x 2400 |      1 |        1 | 0x     b00 | VRI[NexusLauncherActivity]#4(BLAST Consumer)4\n0xb400007148cc02d0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc3060 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc3210 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc33c0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc4020 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc4140 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc42f0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc4920 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc4bf0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc4da0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc5580 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc58e0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc5f10 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc5fa0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc64b0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cc7980 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     b00 | ImageReader-173x173f1u2816m2-1220-4\n0xb400007148cc7f20 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cca050 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cce4f0 |     unknown |  178 (   0) x  178 |      1 |        1 | 0x     b00 | ImageReader-178x178f1u2816m2-1220-7\n0xb400007148ccfb70 |     unknown | 1080 (   0) x 2400 |      1 |        1 | 0x     b00 | VRI[NexusLauncherActivity]#4(BLAST Consumer)4\n0xb400007148cd0350 |     unknown |    2 (   0) x    2 |      1 |        1 | 0x     b00 | ImageReader-2x2f1u2816m2-1220-6\n0xb400007148cd1ca0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148ce04f0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148ce2740 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148ce7a80 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cec670 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148ceda20 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\n0xb400007148cf04e0 |     unknown |  173 (   0) x  173 |      1 |        1 | 0x     100 | AHardwareBuffer pid [1220]\nTotal allocated by GraphicBufferAllocator (estimate): 0.00 KB\nGoldfishAllocator::dumpDebugInfo is not implemented\nProfile data in ms:\n\n\tTaskbar/android.view.ViewRootImpl@c6f65e9 (visibility=0)\n\tcom.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity/android.view.ViewRootImpl@7b1926e (visibility=0)\nView hierarchy:\n\n  Taskbar/android.view.ViewRootImpl@c6f65e9\n  15 views, 21.95 kB of render nodes\n\n  com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity/android.view.ViewRootImpl@7b1926e\n  103 views, 161.95 kB of render nodes\n\n\nTotal ViewRootImpl   : 2\nTotal attached Views : 118\nTotal RenderNode     : 183.90 kB (used) / 342.69 kB (capacity)\n\n\n--- END GFXINFO ---\n",
+    "deviceCapabilities": {
+      "refreshRate": 60,
+      "frameTimeMs": 16.666666666666668
+    }
+  },
+  "accessibilityState": {
+    "enabled": true,
+    "service": "unknown"
+  },
+  "freshness": {
+    "actualTimestamp": 1782909171267,
+    "isFresh": true
+  },
+  "perfTiming": [
+    {
+      "name": "observe",
+      "durationMs": 1479,
+      "children": [
+        {
+          "name": "dumpsysActivities",
+          "durationMs": 21
+        },
+        {
+          "name": "backStack",
+          "durationMs": 21
+        },
+        {
+          "name": "adbCheckAnr",
+          "durationMs": 26
+        },
+        {
+          "name": "adbGfxinfo",
+          "durationMs": 27
+        },
+        {
+          "name": "adbGfxinfoFrameRate",
+          "durationMs": 27
+        },
+        {
+          "name": "adbGetPid",
+          "durationMs": 29
+        },
+        {
+          "name": "adbThreadCount",
+          "durationMs": 25
+        },
+        {
+          "name": "adbCpuStat",
+          "durationMs": 17
+        },
+        {
+          "name": "adbUptime",
+          "durationMs": 18
+        },
+        {
+          "name": "adbGfxinfoReset",
+          "durationMs": 20
+        },
+        {
+          "name": "adbGfxinfoBaseline",
+          "durationMs": 20
+        },
+        {
+          "name": "adbInputTap",
+          "durationMs": 23
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 20
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 20
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 20
+        },
+        {
+          "name": "adbGfxinfoReset",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoBaseline",
+          "durationMs": 22
+        },
+        {
+          "name": "adbInputTap",
+          "durationMs": 23
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 23
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 20
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 20
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 24
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "screenshot",
+          "durationMs": 1046
+        },
+        {
+          "name": "adbGfxinfoReset",
+          "durationMs": 26
+        },
+        {
+          "name": "adbGfxinfoBaseline",
+          "durationMs": 21
+        },
+        {
+          "name": "adbInputTap",
+          "durationMs": 22
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 20
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 20
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 21
+        },
+        {
+          "name": "adbGfxinfoCheck",
+          "durationMs": 20
+        },
+        {
+          "name": "touchLatencyMeasurement",
+          "durationMs": 1227
+        },
+        {
+          "name": "performanceAudit",
+          "durationMs": 1457
+        },
+        {
+          "name": "cacheResult",
+          "durationMs": 1
+        }
+      ]
+    }
+  ]
+}

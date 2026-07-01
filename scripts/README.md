@@ -74,6 +74,28 @@ Thresholds are defined in `scripts/context-thresholds.json`:
 
 Current thresholds are manually set to allow headroom for resource and template growth while preventing significant regressions.
 
+### Observe Output Byte Breakdown
+
+Measure the byte breakdown of an `observe` (or `homeScreen`) tool result so
+output-context reductions can be quantified against a fixed baseline:
+
+```bash
+scripts/observe-byte-breakdown.sh test/fixtures/observe/android-home-66k.json
+# or from stdin
+cat result.json | scripts/observe-byte-breakdown.sh
+```
+
+**Output:**
+- Total byte count of the observe result
+- Per top-level field bytes and % of total (sorted largest first)
+- Per `viewHierarchy` sub-key bytes and % of `viewHierarchy`
+- gfxinfo duplication check (`performanceAudit.metrics.gfxinfoRaw` vs the copy
+  embedded in `performanceAudit.diagnostics`)
+
+The script auto-unwraps `homeScreen`-style payloads that nest the result under
+`.observation`. `test/fixtures/observe/android-home-66k.json` is the committed
+baseline home-screen capture that later reduction work is measured against.
+
 ## Startup Benchmark
 
 Measure MCP server and daemon startup time (cold/warm) with optional baseline comparison:

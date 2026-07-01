@@ -797,155 +797,168 @@ class CtrlProxy : AccessibilityService() {
           WebSocketServer(
               port = 8765,
               scope = serviceScope,
-              onRequestHierarchy = { disableAllFiltering ->
-                extractHierarchyNow(disableAllFiltering)
-              },
-              onRequestHierarchyIfStale = { sinceTimestamp ->
-                hierarchyDebouncer.extractIfStale(sinceTimestamp)
-              },
-              onRequestScreenshot = { requestId -> broadcastScreenshot(requestId) },
-              onRequestSwipe = { requestId, x1, y1, x2, y2, duration ->
-                performSwipe(requestId, x1, y1, x2, y2, duration)
-              },
-              onRequestTapCoordinates = { requestId, x, y, duration ->
-                performTapCoordinates(requestId, x, y, duration)
-              },
-              onRequestTwoFingerSwipe = { requestId, x1, y1, x2, y2, duration, offset ->
-                performTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset)
-              },
-              onRequestDrag = {
-                  requestId,
-                  x1,
-                  y1,
-                  x2,
-                  y2,
-                  pressDurationMs,
-                  dragDurationMs,
-                  holdDurationMs ->
-                performDrag(
-                    requestId,
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    pressDurationMs,
-                    dragDurationMs,
-                    holdDurationMs,
-                )
-              },
-              onRequestPinch = {
-                  requestId,
-                  centerX,
-                  centerY,
-                  distanceStart,
-                  distanceEnd,
-                  rotationDegrees,
-                  duration ->
-                performPinch(
-                    requestId,
-                    centerX,
-                    centerY,
-                    distanceStart,
-                    distanceEnd,
-                    rotationDegrees,
-                    duration,
-                )
-              },
-              onRequestSetText = { requestId, text, resourceId, dismissKeyboard ->
-                performSetText(requestId, text, resourceId, dismissKeyboard)
-              },
-              onRequestImeAction = { requestId, action -> performImeAction(requestId, action) },
-              onRequestSelectAll = { requestId -> performSelectAll(requestId) },
-              onRequestAction = { requestId, action, resourceId ->
-                performNodeAction(requestId, action, resourceId)
-              },
-              onRequestClipboard = { requestId, action, text ->
-                performClipboard(requestId, action, text)
-              },
-              onRequestInstallCaCert = { requestId, certificate ->
-                performInstallCaCertificate(requestId, certificate)
-              },
-              onRequestInstallCaCertFromPath = { requestId, devicePath ->
-                performInstallCaCertificateFromPath(requestId, devicePath)
-              },
-              onRequestRemoveCaCert = { requestId, alias, certificate ->
-                performRemoveCaCertificate(requestId, alias, certificate)
-              },
-              onGetDeviceOwnerStatus = { requestId -> performGetDeviceOwnerStatus(requestId) },
-              onGetPermission = { requestId, permission, requestPermission ->
-                handleGetPermission(requestId, permission, requestPermission)
-              },
-              onRequestGlobalAction = { requestId, action ->
-                performGlobalActionRequest(requestId, action)
-              },
-              onRequestDeviceInfo = { requestId -> performDeviceInfoRequest(requestId) },
-              onSetRecompositionTracking = { enabled -> setRecompositionTrackingEnabled(enabled) },
-              onSetAccessibilityFlags = { includeNotImportant, reportViewIds, retrieveInteractive ->
-                applyAccessibilityFlags(
-                  includeNotImportantViews = includeNotImportant,
-                  reportViewIds = reportViewIds,
-                  retrieveInteractiveWindows = retrieveInteractive
-                )
-              },
-              onSetNetworkMockRules = { rulesJson -> broadcastNetworkMockRules(rulesJson) },
-              onSetNetworkErrorSimulation = { enabled, errorType, limit, expiresAt ->
-                broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAt)
-              },
-              onGetCurrentFocus = { requestId -> handleGetCurrentFocus(requestId) },
-              onGetTraversalOrder = { requestId -> handleGetTraversalOrder(requestId) },
-              onAddHighlight = { requestId, highlightId, shape ->
-                handleAddHighlight(requestId, highlightId, shape)
-              },
-              onListPreferenceFiles = { requestId, packageName ->
-                handleListPreferenceFiles(requestId, packageName)
-              },
-              onGetPreferences = { requestId, packageName, fileName ->
-                handleGetPreferences(requestId, packageName, fileName)
-              },
-              onSubscribeStorage = { requestId, packageName, fileName ->
-                handleSubscribeStorage(requestId, packageName, fileName)
-              },
-              onUnsubscribeStorage = { requestId, packageName, fileName ->
-                handleUnsubscribeStorage(requestId, packageName, fileName)
-              },
-              onGetPreference = { requestId, packageName, fileName, key ->
-                handleGetPreference(requestId, packageName, fileName, key)
-              },
-              onSetPreference = { requestId, packageName, fileName, key, value, type ->
-                handleSetPreference(requestId, packageName, fileName, key, value, type)
-              },
-              onRemovePreference = { requestId, packageName, fileName, key ->
-                handleRemovePreference(requestId, packageName, fileName, key)
-              },
-              onClearPreferences = { requestId, packageName, fileName ->
-                handleClearPreferences(requestId, packageName, fileName)
-              },
-              onStartRecording = {
-                isRecording = true
-                Log.d(TAG, "Recording started")
-              },
-              onStopRecording = {
-                isRecording = false
-                Log.d(TAG, "Recording stopped")
-              },
-              onRequestSettingsGet = { requestId, namespace, key ->
-                performSettingsRead(requestId, namespace, key)
-              },
-              onRequestSettingsPut = { requestId, namespace, key, value, valueType ->
-                performSettingsWrite(requestId, namespace, key, value, valueType)
-              },
-              onRequestSettingsList = { requestId, namespace ->
-                performSettingsList(requestId, namespace)
-              },
-              onRequestInstalledPackages = { requestId, includeSystem, userId ->
-                performInstalledPackages(requestId, includeSystem, userId)
-              },
-              onRequestPackageInfo = { requestId, packageName, includePermissions ->
-                performPackageInfo(requestId, packageName, includePermissions)
-              },
-              onRequestLaunchIntent = { requestId, packageName ->
-                performLaunchIntent(requestId, packageName)
-              },
+              messageHandler =
+                  CtrlProxyMessageHandler(
+                      log = { message -> Log.w(TAG, message) },
+                      onRequestHierarchy = { disableAllFiltering ->
+                        extractHierarchyNow(disableAllFiltering)
+                      },
+                      onRequestHierarchyIfStale = { sinceTimestamp ->
+                        hierarchyDebouncer.extractIfStale(sinceTimestamp)
+                      },
+                      onRequestScreenshot = { requestId -> broadcastScreenshot(requestId) },
+                      onRequestSwipe = { requestId, x1, y1, x2, y2, duration ->
+                        performSwipe(requestId, x1, y1, x2, y2, duration)
+                      },
+                      onRequestTapCoordinates = { requestId, x, y, duration ->
+                        performTapCoordinates(requestId, x, y, duration)
+                      },
+                      onRequestTwoFingerSwipe = { requestId, x1, y1, x2, y2, duration, offset ->
+                        performTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset)
+                      },
+                      onRequestDrag = {
+                          requestId,
+                          x1,
+                          y1,
+                          x2,
+                          y2,
+                          pressDurationMs,
+                          dragDurationMs,
+                          holdDurationMs ->
+                        performDrag(
+                            requestId,
+                            x1,
+                            y1,
+                            x2,
+                            y2,
+                            pressDurationMs,
+                            dragDurationMs,
+                            holdDurationMs,
+                        )
+                      },
+                      onRequestPinch = {
+                          requestId,
+                          centerX,
+                          centerY,
+                          distanceStart,
+                          distanceEnd,
+                          rotationDegrees,
+                          duration ->
+                        performPinch(
+                            requestId,
+                            centerX,
+                            centerY,
+                            distanceStart,
+                            distanceEnd,
+                            rotationDegrees,
+                            duration,
+                        )
+                      },
+                      onRequestSetText = { requestId, text, resourceId, dismissKeyboard ->
+                        performSetText(requestId, text, resourceId, dismissKeyboard)
+                      },
+                      onRequestImeAction = { requestId, action ->
+                        performImeAction(requestId, action)
+                      },
+                      onRequestSelectAll = { requestId -> performSelectAll(requestId) },
+                      onRequestAction = { requestId, action, resourceId ->
+                        performNodeAction(requestId, action, resourceId)
+                      },
+                      onRequestClipboard = { requestId, action, text ->
+                        performClipboard(requestId, action, text)
+                      },
+                      onRequestInstallCaCert = { requestId, certificate ->
+                        performInstallCaCertificate(requestId, certificate)
+                      },
+                      onRequestInstallCaCertFromPath = { requestId, devicePath ->
+                        performInstallCaCertificateFromPath(requestId, devicePath)
+                      },
+                      onRequestRemoveCaCert = { requestId, alias, certificate ->
+                        performRemoveCaCertificate(requestId, alias, certificate)
+                      },
+                      onGetDeviceOwnerStatus = { requestId ->
+                        performGetDeviceOwnerStatus(requestId)
+                      },
+                      onGetPermission = { requestId, permission, requestPermission ->
+                        handleGetPermission(requestId, permission, requestPermission)
+                      },
+                      onRequestGlobalAction = { requestId, action ->
+                        performGlobalActionRequest(requestId, action)
+                      },
+                      onRequestDeviceInfo = { requestId -> performDeviceInfoRequest(requestId) },
+                      onSetRecompositionTracking = { enabled ->
+                        setRecompositionTrackingEnabled(enabled)
+                      },
+                      onSetAccessibilityFlags = {
+                          includeNotImportant,
+                          reportViewIds,
+                          retrieveInteractive ->
+                        applyAccessibilityFlags(
+                            includeNotImportantViews = includeNotImportant,
+                            reportViewIds = reportViewIds,
+                            retrieveInteractiveWindows = retrieveInteractive,
+                        )
+                      },
+                      onSetNetworkMockRules = { rulesJson -> broadcastNetworkMockRules(rulesJson) },
+                      onSetNetworkErrorSimulation = { enabled, errorType, limit, expiresAt ->
+                        broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAt)
+                      },
+                      onGetCurrentFocus = { requestId -> handleGetCurrentFocus(requestId) },
+                      onGetTraversalOrder = { requestId -> handleGetTraversalOrder(requestId) },
+                      onAddHighlight = { requestId, highlightId, shape ->
+                        handleAddHighlight(requestId, highlightId, shape)
+                      },
+                      onListPreferenceFiles = { requestId, packageName ->
+                        handleListPreferenceFiles(requestId, packageName)
+                      },
+                      onGetPreferences = { requestId, packageName, fileName ->
+                        handleGetPreferences(requestId, packageName, fileName)
+                      },
+                      onSubscribeStorage = { requestId, packageName, fileName ->
+                        handleSubscribeStorage(requestId, packageName, fileName)
+                      },
+                      onUnsubscribeStorage = { requestId, packageName, fileName ->
+                        handleUnsubscribeStorage(requestId, packageName, fileName)
+                      },
+                      onGetPreference = { requestId, packageName, fileName, key ->
+                        handleGetPreference(requestId, packageName, fileName, key)
+                      },
+                      onSetPreference = { requestId, packageName, fileName, key, value, type ->
+                        handleSetPreference(requestId, packageName, fileName, key, value, type)
+                      },
+                      onRemovePreference = { requestId, packageName, fileName, key ->
+                        handleRemovePreference(requestId, packageName, fileName, key)
+                      },
+                      onClearPreferences = { requestId, packageName, fileName ->
+                        handleClearPreferences(requestId, packageName, fileName)
+                      },
+                      onStartRecording = {
+                        isRecording = true
+                        Log.d(TAG, "Recording started")
+                      },
+                      onStopRecording = {
+                        isRecording = false
+                        Log.d(TAG, "Recording stopped")
+                      },
+                      onRequestSettingsGet = { requestId, namespace, key ->
+                        performSettingsRead(requestId, namespace, key)
+                      },
+                      onRequestSettingsPut = { requestId, namespace, key, value, valueType ->
+                        performSettingsWrite(requestId, namespace, key, value, valueType)
+                      },
+                      onRequestSettingsList = { requestId, namespace ->
+                        performSettingsList(requestId, namespace)
+                      },
+                      onRequestInstalledPackages = { requestId, includeSystem, userId ->
+                        performInstalledPackages(requestId, includeSystem, userId)
+                      },
+                      onRequestPackageInfo = { requestId, packageName, includePermissions ->
+                        performPackageInfo(requestId, packageName, includePermissions)
+                      },
+                      onRequestLaunchIntent = { requestId, packageName ->
+                        performLaunchIntent(requestId, packageName)
+                      },
+                  ),
           )
       webSocketServer.start()
       Log.d(TAG, "WebSocket server started on port 8765")

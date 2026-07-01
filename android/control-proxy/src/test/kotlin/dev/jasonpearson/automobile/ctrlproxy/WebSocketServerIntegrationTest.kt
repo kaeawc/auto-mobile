@@ -56,15 +56,18 @@ class WebSocketServerIntegrationTest {
         WebSocketServer(
             port = 0,
             scope = testScope,
-            onAddHighlight = { requestId, highlightId, shape ->
-              val error =
-                  when {
-                    highlightId.isNullOrBlank() -> "Missing highlight id"
-                    shape == null -> "Missing highlight shape"
-                    else -> null
-                  }
-              enqueueHighlightResponse(requestId, error == null, error)
-            },
+            messageHandler =
+                CtrlProxyMessageHandler(
+                    onAddHighlight = { requestId, highlightId, shape ->
+                      val error =
+                          when {
+                            highlightId.isNullOrBlank() -> "Missing highlight id"
+                            shape == null -> "Missing highlight shape"
+                            else -> null
+                          }
+                      enqueueHighlightResponse(requestId, error == null, error)
+                    },
+                ),
         )
   }
 

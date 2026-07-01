@@ -279,4 +279,73 @@ class WebSocketRequestTest {
     assertEquals("li-1", request.requestId)
     assertEquals("com.example.app", request.packageName)
   }
+
+  @Test
+  fun `deserialize set_accessibility_flags`() {
+    val message =
+        """{"type":"set_accessibility_flags","includeNotImportantViews":false,"reportViewIds":true,"retrieveInteractiveWindows":false}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<SetAccessibilityFlags>(request)
+    assertEquals(null, request.requestId)
+    assertEquals(false, request.includeNotImportantViews)
+    assertEquals(true, request.reportViewIds)
+    assertEquals(false, request.retrieveInteractiveWindows)
+  }
+
+  @Test
+  fun `deserialize set_accessibility_flags defaults to true`() {
+    val message = """{"type":"set_accessibility_flags"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<SetAccessibilityFlags>(request)
+    assertEquals(true, request.includeNotImportantViews)
+    assertEquals(true, request.reportViewIds)
+    assertEquals(true, request.retrieveInteractiveWindows)
+  }
+
+  @Test
+  fun `deserialize start_recording`() {
+    val message = """{"type":"start_recording"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<StartRecording>(request)
+    assertEquals(null, request.requestId)
+  }
+
+  @Test
+  fun `deserialize stop_recording`() {
+    val message = """{"type":"stop_recording"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<StopRecording>(request)
+    assertEquals(null, request.requestId)
+  }
+
+  @Test
+  fun `deserialize subscribe_storage`() {
+    val message =
+        """{"type":"subscribe_storage","requestId":"sub-1","packageName":"com.example.app","fileName":"settings.xml"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<SubscribeStorage>(request)
+    assertEquals("sub-1", request.requestId)
+    assertEquals("com.example.app", request.packageName)
+    assertEquals("settings.xml", request.fileName)
+  }
+
+  @Test
+  fun `deserialize unsubscribe_storage with subscriptionId matches the TS wire`() {
+    // The TS client sends only subscriptionId ("packageName:fileName"). Verify the sealed class
+    // decodes it without throwing; packageName/fileName are absent (the pre-migration no-op case).
+    val message =
+        """{"type":"unsubscribe_storage","requestId":"unsub-1","subscriptionId":"com.example.app:settings.xml"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<UnsubscribeStorage>(request)
+    assertEquals("unsub-1", request.requestId)
+    assertEquals("com.example.app:settings.xml", request.subscriptionId)
+    assertEquals(null, request.packageName)
+    assertEquals(null, request.fileName)
+  }
 }

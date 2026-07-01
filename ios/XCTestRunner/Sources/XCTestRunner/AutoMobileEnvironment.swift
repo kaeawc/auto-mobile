@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -98,6 +99,7 @@ public enum DaemonManager {
         public let startedAt: Int64?
         public let version: String?
         public let entryScript: String?
+        public let buildId: String?
     }
 
     public static var pidFilePath: String {
@@ -219,13 +221,49 @@ public enum DaemonManager {
         return entryScript
     }
 
+    /// The daemon's recorded build-identity hash from its PID file, trimmed, or nil when absent.
+    static func readDaemonBuildIdFromPidFile() -> String? {
+        guard let data = FileManager.default.contents(atPath: pidFilePath),
+              let pidData = try? JSONDecoder().decode(PidFileData.self, from: data),
+              let buildId = pidData.buildId?.trimmingCharacters(in: .whitespaces),
+              !buildId.isEmpty
+        else {
+            return nil
+        }
+        return buildId
+    }
+
+    /// Short content hash of an entry script (sha256, first 16 hex chars) — matches the daemon's
+    /// `computeBuildIdentity`, so the value compares equal to the daemon's own recorded build id.
+    static func computeBuildId(_ entryScript: String) -> String? {
+        guard let data = FileManager.default.contents(atPath: entryScript) else {
+            return nil
+        }
+        let hex = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        return String(hex.prefix(16))
+    }
+
     /// When a caller supplies a repo root with a built entrypoint, whether the running daemon was
-    /// started from a *different* entry script — i.e. a same-release daemon from another checkout
-    /// that the release-only version check cannot tell apart (#2744). No-op without a repoRoot build
-    /// or when the daemon records no entry script (a skew cannot be proven).
-    static func requiresRepoRootBuildSkew(daemonEntryScript: String?, repoRoot: String?) -> Bool {
+    /// started from a *different* build (#2744). Prefers comparing the entry-script content hash
+    /// against the daemon's recorded `buildId` — this catches the same repoRoot path rebuilt or
+    /// checked out to another commit — and falls back to comparing entry-script paths when a hash is
+    /// unavailable. No-op without a repoRoot build or when neither signal is available.
+    static func requiresRepoRootBuildSkew(
+        daemonBuildId: String?,
+        daemonEntryScript: String?,
+        repoRoot: String?
+    )
+        -> Bool
+    {
         guard let expectedEntry = resolveRepoRootDaemonEntryScript(repoRoot) else {
             return false
+        }
+        let expectedHash = computeBuildId(expectedEntry)
+        let daemonHash = daemonBuildId?.trimmingCharacters(in: .whitespaces)
+        if let expectedHash = expectedHash,
+           let daemonHash = daemonHash, !daemonHash.isEmpty, daemonHash != "unknown"
+        {
+            return daemonHash != expectedHash
         }
         guard let daemonEntry = daemonEntryScript?.trimmingCharacters(in: .whitespaces), !daemonEntry.isEmpty else {
             return false
@@ -267,6 +305,7 @@ public enum DaemonManager {
                 clientVersion: AutoMobileVersion.current
             )
             if versionSkew || requiresRepoRootBuildSkew(
+                daemonBuildId: readDaemonBuildIdFromPidFile(),
                 daemonEntryScript: readDaemonEntryScriptFromPidFile(),
                 repoRoot: repoRoot
             ) {
@@ -304,7 +343,11 @@ public enum DaemonManager {
         if requiresVersionSkewRestart(
             daemonVersion: readDaemonVersionFromPidFile(),
             clientVersion: AutoMobileVersion.current
-        ) || requiresRepoRootBuildSkew(daemonEntryScript: readDaemonEntryScriptFromPidFile(), repoRoot: repoRoot) {
+        ) || requiresRepoRootBuildSkew(
+            daemonBuildId: readDaemonBuildIdFromPidFile(),
+            daemonEntryScript: readDaemonEntryScriptFromPidFile(),
+            repoRoot: repoRoot
+        ) {
             PerfTimer.log("ensureDaemonRunning: daemon still differs from runner after launch")
             return false
         }

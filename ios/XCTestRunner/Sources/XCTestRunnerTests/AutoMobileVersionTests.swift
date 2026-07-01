@@ -62,10 +62,9 @@ final class AutoMobileVersionTests: XCTestCase {
     }
 
     func testRequiresRepoRootBuildSkew() throws {
-        // No repoRoot build -> never a skew, regardless of the daemon's entry script.
+        // No repoRoot build -> never a skew, regardless of the daemon's identity.
         XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(
-            daemonEntryScript: "/x/dist/src/index.js",
-            repoRoot: nil
+            daemonBuildId: nil, daemonEntryScript: "/x/dist/src/index.js", repoRoot: nil
         ))
 
         let repoRoot = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -76,15 +75,28 @@ final class AutoMobileVersionTests: XCTestCase {
         try "// entry".write(to: entry, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: repoRoot) }
 
-        // Daemon started from a different checkout's entry script -> skew.
+        let matchingHash = try XCTUnwrap(DaemonManager.computeBuildId(entry.path))
+
+        // Content hash takes precedence: a different build id is a skew even when the entry-script
+        // path matches (the same repoRoot path rebuilt to another commit).
         XCTAssertTrue(DaemonManager.requiresRepoRootBuildSkew(
-            daemonEntryScript: "/other/dist/src/index.js", repoRoot: repoRoot.path
+            daemonBuildId: "deadbeefdeadbeef", daemonEntryScript: entry.path, repoRoot: repoRoot.path
         ))
-        // Daemon started from this repoRoot's entry script -> no skew.
+        // Matching build id -> no skew.
         XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(
-            daemonEntryScript: entry.path, repoRoot: repoRoot.path
+            daemonBuildId: matchingHash, daemonEntryScript: entry.path, repoRoot: repoRoot.path
         ))
-        // Daemon records no entry script -> cannot prove skew.
-        XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(daemonEntryScript: nil, repoRoot: repoRoot.path))
+        // No build id -> fall back to entry-script path: different path is a skew.
+        XCTAssertTrue(DaemonManager.requiresRepoRootBuildSkew(
+            daemonBuildId: nil, daemonEntryScript: "/other/dist/src/index.js", repoRoot: repoRoot.path
+        ))
+        // No build id, matching path -> no skew.
+        XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(
+            daemonBuildId: nil, daemonEntryScript: entry.path, repoRoot: repoRoot.path
+        ))
+        // No build id and no entry script -> cannot prove skew.
+        XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(
+            daemonBuildId: nil, daemonEntryScript: nil, repoRoot: repoRoot.path
+        ))
     }
 }

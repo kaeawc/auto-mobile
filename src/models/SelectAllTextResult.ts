@@ -1,10 +1,6 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of a select all text operation
  */
-export interface SelectAllTextResult {
-  success: boolean;
-  observation?: ObserveResult;
-  error?: string;
-}
+export type SelectAllTextResult = BaseActionResult;

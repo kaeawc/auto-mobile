@@ -1,14 +1,11 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of a rotate operation
  */
-export interface RotateResult {
-  success: boolean;
+export interface RotateResult extends BaseActionResult {
   orientation: string;
   value: number;
-  observation?: ObserveResult;
-  error?: string;
 
   // Enhanced fields for intelligent rotation
   currentOrientation?: string;

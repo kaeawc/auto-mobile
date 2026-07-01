@@ -4,6 +4,7 @@ export * from "./ActiveWindowInfo";
 export * from "./AndroidDeviceShellToolResult";
 export * from "./AndroidUser";
 export * from "./BackStack";
+export * from "./BaseActionResult";
 export * from "./BiometricAuthResult";
 export * from "./AppMetadataResult";
 export * from "./AppStatusResult";

@@ -1,7 +1,7 @@
 import { Element } from "./Element";
 import { ElementBounds } from "./ElementBounds";
 import { ElementSelectionStrategy } from "./ElementSelectionStrategy";
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 import { ToolDebugInfo } from "../utils/DebugContextBuilder";
 
 export interface TapOnSelectedElementBounds extends ElementBounds {
@@ -21,13 +21,10 @@ export interface TapOnSelectedElement {
 /**
  * Result of a tap on text operation
  */
-export interface TapOnElementResult {
-  success: boolean;
+export interface TapOnElementResult extends BaseActionResult {
   action: string;
   element: Element;
   selectedElement?: TapOnSelectedElement;
-  observation?: ObserveResult;
-  error?: string;
   debug?: ToolDebugInfo;
   pressRecognized?: boolean;
   contextMenuOpened?: boolean;

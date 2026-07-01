@@ -1,13 +1,11 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 import { Element } from "./Element";
 import { ToolDebugInfo } from "../utils/DebugContextBuilder";
 
 /**
  * Result of a swipeOn operation
  */
-export interface SwipeOnResult {
-  success: boolean;
-  error?: string;
+export interface SwipeOnResult extends BaseActionResult {
   warning?: string;
 
   // Context to help callers target scrollable containers
@@ -33,9 +31,6 @@ export interface SwipeOnResult {
   scrollIterations?: number; // Number of scrolls performed
   elapsedMs?: number; // Time taken to find element
   hierarchyChanged?: boolean; // Did the hierarchy change during scroll?
-
-  // Observation
-  observation?: ObserveResult;
 
   // A11y mode timing (when scrollMode="a11y")
   a11yTotalTimeMs?: number;

@@ -1,11 +1,8 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of a send key event operation
  */
-export interface SendKeyEventResult {
-  success: boolean;
+export interface SendKeyEventResult extends BaseActionResult {
   keyCode: number | string;
-  observation?: ObserveResult;
-  error?: string;
 }

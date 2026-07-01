@@ -435,4 +435,46 @@ class WebSocketServerIntegrationTest {
       }
     }
   }
+
+  @Test
+  fun `commands dispatch in wire order`() = runBlocking {
+    // Regression guard for message ordering: two synchronous commands sent back-to-back must run
+    // in the order they arrive on the wire. This holds only because the server dispatches inline on
+    // the read loop; if dispatch were launched into a background scope, these could reorder.
+    val order = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val orderedServer =
+        WebSocketServer(
+            port = 0,
+            scope = testScope,
+            messageHandler =
+                CtrlProxyMessageHandler(
+                    onSetRecompositionTracking = { order.add("flags") },
+                    onRequestScreenshot = { order.add("screenshot") },
+                ),
+        )
+    orderedServer.start()
+    try {
+      val client = HttpClient(CIO) { install(WebSockets) }
+      client.use { c ->
+        c.webSocket(
+            method = HttpMethod.Get,
+            host = "localhost",
+            port = orderedServer.getActualPort() ?: error("Server not running"),
+            path = "/ws",
+        ) {
+          incoming.receive() // connection greeting
+          send(Frame.Text("""{"type":"set_recomposition_tracking","enabled":true}"""))
+          send(Frame.Text("""{"type":"request_screenshot","requestId":"s1"}"""))
+          withTimeout(1000) {
+            while (order.size < 2) {
+              delay(10)
+            }
+          }
+          assertEquals(listOf("flags", "screenshot"), order.toList())
+        }
+      }
+    } finally {
+      orderedServer.stop()
+    }
+  }
 }

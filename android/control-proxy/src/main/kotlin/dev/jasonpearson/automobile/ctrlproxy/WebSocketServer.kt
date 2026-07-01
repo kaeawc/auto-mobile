@@ -293,7 +293,7 @@ class WebSocketServer(
   }
 
   /** Handle an incoming client message by decoding it and dispatching via [messageHandler]. */
-  private fun handleClientMessage(message: String) {
+  private suspend fun handleClientMessage(message: String) {
     val handler = messageHandler
     if (handler == null) {
       Log.w(TAG, "No message handler configured; ignoring inbound message: $message")
@@ -309,15 +309,18 @@ class WebSocketServer(
         }
 
     Log.d(TAG, "Received ${request::class.simpleName} (requestId: ${request.requestId})")
-    scope.launch {
-      try {
-        val response = handler.handleMessage(request)
-        if (response != null) {
-          broadcast(response)
-        }
-      } catch (e: Exception) {
-        Log.e(TAG, "Error handling message via handler", e)
+    // Dispatch inline on the WebSocket read loop (already a coroutine) rather than launching into
+    // `scope`, so commands execute in wire order: a synchronous command such as
+    // set_accessibility_flags fully applies before the next frame (e.g. a request_hierarchy that
+    // must observe those flags) is dispatched. Long-running actions launch their own coroutines
+    // inside the callbacks, so this does not block the read loop.
+    try {
+      val response = handler.handleMessage(request)
+      if (response != null) {
+        broadcast(response)
       }
+    } catch (e: Exception) {
+      Log.e(TAG, "Error handling message via handler", e)
     }
   }
 }

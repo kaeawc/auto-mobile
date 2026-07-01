@@ -1,4 +1,5 @@
 import { BootedDevice } from "../../models";
+import { ObserveResult } from "../../models/ObserveResult";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -14,13 +15,31 @@ import { defaultTimer } from "../../utils/SystemTimer";
  * Default implementation of UIStateSetup that handles UI state alignment
  * before navigation steps.
  */
+/**
+ * Minimal observe seam so UI-state setup can be unit-tested without driving a
+ * real ObserveScreen (WebSocket / device I/O).
+ */
+export interface ObserveScreenLike {
+  execute(): Promise<ObserveResult>;
+}
+
 export class DefaultUIStateSetup implements UIStateSetup {
   private device: BootedDevice;
   private adb: AdbClient;
+  private observeScreenProvider: () => ObserveScreenLike;
 
-  constructor(device: BootedDevice, adb: AdbClient) {
+  constructor(
+    device: BootedDevice,
+    adb: AdbClient,
+    observeScreenProvider?: () => ObserveScreenLike
+  ) {
     this.device = device;
     this.adb = adb;
+    // The setup holds a resolved AdbClient (not a factory), so wrap it in a
+    // trivial factory to satisfy ObserveScreen's factory-only contract (matches
+    // the AndroidCtrlProxyClient.getInstance call below).
+    this.observeScreenProvider = observeScreenProvider
+      ?? (() => new RealObserveScreen(this.device, { create: () => this.adb }));
   }
 
   /**
@@ -164,7 +183,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
    */
   private async getCurrentUIState(_platform: string): Promise<UIState | undefined> {
     try {
-      const observeScreen = new RealObserveScreen(this.device, this.adb);
+      const observeScreen = this.observeScreenProvider();
       const result = await observeScreen.execute();
 
       if (!result.viewHierarchy) {

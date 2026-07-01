@@ -21,6 +21,7 @@ import { join } from "path";
 import { Tiktoken } from "js-tiktoken/lite";
 import cl100k_base from "js-tiktoken/ranks/cl100k_base";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
+import { stringifyToolResponse } from "../../../src/utils/toolUtils";
 
 const tokenizer = new Tiktoken(cl100k_base);
 
@@ -33,10 +34,15 @@ export function loadAndroidHomeObserve(): { raw: string; observe: ObserveResult 
   return { raw, observe: JSON.parse(raw) as ObserveResult };
 }
 
-/** UTF-8 byte length and cl100k_base token count of a JSON value's compact
- *  serialization — the form the MCP harness measures its output in. */
+/** UTF-8 byte length and cl100k_base token count of a value serialized exactly
+ *  the way the observe tool emits it: `stringifyToolResponse` — pretty-printed
+ *  (2-space) with `extras` keys stripped, the production formatter used by
+ *  `createStructuredToolResponse` in src/utils/toolUtils.ts. Measuring the real
+ *  formatter (not a compact `JSON.stringify`) is what makes a reduction test's
+ *  "does this fit under the cap?" check trustworthy — compact undercounts the
+ *  actual tool-response text by ~40%. */
 export function measureValue(value: unknown): { bytes: number; tokens: number } {
-  const serialized = JSON.stringify(value) ?? "";
+  const serialized = stringifyToolResponse(value) ?? "";
   return {
     bytes: Buffer.byteLength(serialized, "utf8"),
     tokens: tokenizer.encode(serialized).length,

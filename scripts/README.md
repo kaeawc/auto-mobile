@@ -93,19 +93,23 @@ cat result.json | scripts/observe-byte-breakdown.sh
   embedded in `performanceAudit.diagnostics`)
 
 Byte counts use the UTF-8 length of each value's **compact** JSON
-serialization, matching how the MCP harness sizes tool output — so an
-85 KB pretty-printed fixture correctly reports ~50 KB of wire bytes. The script
+serialization — a fast relative view of which fields dominate. This
+under-counts the real wire size: the observe tool emits a larger pretty-printed
+form with `extras` keys stripped (`stringifyToolResponse`), which for this
+fixture is ~84.5 KB / ~21.9k tokens versus ~50 KB compact. The script
 auto-unwraps `homeScreen`-style payloads that nest the result under
 `.observation`, and rejects non-object / malformed JSON with a clean error.
 
-**Baseline fixture & token measurement.**
+**Baseline fixture & cap-accurate token measurement.**
 `test/fixtures/observe/android-home.json` is the committed baseline home-screen
-capture (Android only for now; ~50.5 KB / ~16.8k tokens compact) that later
-reduction work is measured against. Because the reduction effort is gated on the
-MCP output **token** cap, the reusable measurement lives in
-`test/fixtures/observe/observeFixture.ts` — `measureObserveBreakdown()` reports
-both bytes and cl100k_base tokens per field (same tokenizer as
-`estimate-context-usage.ts`) and is imported by later reduction unit tests.
+capture (Android only for now) that later reduction work is measured against.
+Because the reduction effort is gated on the MCP output **token** cap, the
+authoritative measurement lives in `test/fixtures/observe/observeFixture.ts` —
+`measureObserveBreakdown()` serializes with the **production formatter**
+(`stringifyToolResponse`, pretty-printed + `extras` stripped) and reports both
+bytes and cl100k_base tokens per field (same tokenizer as
+`estimate-context-usage.ts`). The baseline measures ~84.5 KB / ~21.9k tokens.
+Later reduction unit tests import this helper to quantify token wins.
 Regenerate the fixture by re-running the `observe` MCP tool against an Android
 home screen and re-committing the pretty-printed JSON; treat it as a frozen
 baseline and only refresh it deliberately when the observe output format changes.

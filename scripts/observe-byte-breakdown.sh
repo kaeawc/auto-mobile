@@ -13,8 +13,12 @@
 #   scripts/observe-byte-breakdown.sh -            # read JSON from stdin
 #   cat result.json | scripts/observe-byte-breakdown.sh
 #
-# Byte counts use UTF-8 byte length of each value's compact JSON serialization,
-# matching how the MCP harness measures tool output.
+# Byte counts use the UTF-8 byte length of each value's *compact* JSON
+# serialization — a fast relative view of which fields dominate. Note the
+# observe tool actually emits a larger pretty-printed form with `extras` keys
+# stripped (stringifyToolResponse), so these numbers under-count the real wire
+# size. For a cap-accurate byte+token measurement use the production formatter
+# via test/fixtures/observe/observeFixture.ts (measureObserveBreakdown).
 
 set -euo pipefail
 

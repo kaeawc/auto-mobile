@@ -15,10 +15,12 @@ import {
  * later unit tests can import — and pin the canonical baseline numbers (bytes
  * AND tokens) so a silent shrink or format change is caught.
  *
- * Canonical baseline (compact serialization): ~50.5k bytes / ~16.8k tokens.
- * The reduction exists because ~16.8k tokens exceeds the MCP tool-output token
- * cap. (The 66,560-char figure in the issue was an illustrative earlier sample;
- * this committed capture is the authoritative baseline.)
+ * Canonical baseline, measured with the production formatter the observe tool
+ * actually emits (`stringifyToolResponse`: pretty-printed, `extras` stripped):
+ * ~84.5k bytes / ~21.9k tokens. The reduction exists because that exceeds the
+ * MCP tool-output token cap. (The 66,560-char figure in the issue was an
+ * illustrative earlier sample; this committed capture is the authoritative
+ * baseline.)
  */
 describe("android-home observe baseline fixture", () => {
   const { raw, observe } = loadAndroidHomeObserve();
@@ -33,7 +35,8 @@ describe("android-home observe baseline fixture", () => {
     // file instead of returning inline. Guard against accidental shrinkage.
     expect(bytes).toBeGreaterThan(40_000);
     // Token count is the quantity the MCP output cap is actually enforced in.
-    expect(tokens).toBeGreaterThan(10_000);
+    // The production formatter puts the fixture at ~21.9k tokens.
+    expect(tokens).toBeGreaterThan(15_000);
   });
 
   test("parses into an ObserveResult with the fields the reduction targets", () => {
@@ -65,7 +68,7 @@ describe("android-home observe baseline fixture", () => {
     const breakdown = measureObserveBreakdown(observe);
 
     expect(breakdown.totalBytes).toBeGreaterThan(40_000);
-    expect(breakdown.totalTokens).toBeGreaterThan(10_000);
+    expect(breakdown.totalTokens).toBeGreaterThan(15_000);
 
     // Fields are sorted by descending bytes.
     for (let i = 1; i < breakdown.fields.length; i++) {

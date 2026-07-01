@@ -227,7 +227,7 @@ public enum DaemonManager {
                     PerfTimer.log("ensureDaemonRunning: restartDaemon failed")
                     return false
                 }
-                return waitForDaemon(timeoutSeconds: timeoutSeconds)
+                return waitForVersionMatchedDaemon(timeoutSeconds: timeoutSeconds)
             }
             PerfTimer.log("ensureDaemonRunning: daemon already running")
             return true
@@ -239,8 +239,28 @@ public enum DaemonManager {
             return false
         }
 
+        return waitForVersionMatchedDaemon(timeoutSeconds: timeoutSeconds)
+    }
+
+    /// Wait for the daemon to become ready and confirm its recorded version matches this runner's.
+    /// `start`/`restart` launch whatever `auto-mobile` is on PATH — which may be a different version
+    /// than this runner's baked `AutoMobileVersion.current` — and `waitForDaemon` only checks
+    /// pid/socket liveness, so without this a wrong-version daemon would look "ready" while its
+    /// handshake gate (#2744) rejects every subsequent request. A daemon that records no version is
+    /// accepted (a skew cannot be proven), matching the gate's lenient stance.
+    private static func waitForVersionMatchedDaemon(timeoutSeconds: TimeInterval) -> Bool {
         PerfTimer.log("ensureDaemonRunning: waiting for daemon")
-        return waitForDaemon(timeoutSeconds: timeoutSeconds)
+        guard waitForDaemon(timeoutSeconds: timeoutSeconds) else {
+            return false
+        }
+        if requiresVersionSkewRestart(
+            daemonVersion: readDaemonVersionFromPidFile(),
+            clientVersion: AutoMobileVersion.current
+        ) {
+            PerfTimer.log("ensureDaemonRunning: daemon version still differs from runner after launch")
+            return false
+        }
+        return true
     }
 
     public static func waitForDaemon(timeoutSeconds: TimeInterval) -> Bool {

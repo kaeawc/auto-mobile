@@ -371,6 +371,15 @@ export class IOSCtrlProxyBuilder {
     // wrong-version) runner without ever reaching verifyBundle's guard (#2746).
     this.assertPinnedVersionVerifiable();
 
+    // A vendored bundle override must always be (re)consumed: otherwise, on a
+    // reused host with an existing xctestrun + metadata, needsRebuild() would
+    // return false and silently keep the stale cached runner instead of the
+    // vendored IPA — the documented escape hatch would be a no-op (#2746).
+    if (this.getBundlePathOverride() !== null) {
+      logger.info("[IOSCtrlProxyBuilder] CtrlProxy bundle path override set, forcing extraction of the vendored bundle");
+      return true;
+    }
+
     const xctestrunPath = await this.getXctestrunPath(platform);
     if (!xctestrunPath) {
       logger.info("[IOSCtrlProxyBuilder] CtrlProxy artifacts missing, need download");

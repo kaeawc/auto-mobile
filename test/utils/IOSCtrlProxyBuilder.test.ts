@@ -234,20 +234,31 @@ describe("IOSCtrlProxyBuilder", function() {
       }
     });
 
-    test("a vendored IPA path exempts the unknown-pin guard (#2746)", async function() {
+    test("a vendored IPA path forces extraction even with a cached bundle on an unknown pin (#2746)", async function() {
       const prevVersion = process.env.AUTOMOBILE_VERSION;
       process.env.AUTOMOBILE_VERSION = "99.99.99";
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = path.join(tempDir, "vendored.ipa");
       try {
-        IOSCtrlProxyBuilder.resetInstances();
-        const builder = IOSCtrlProxyBuilder.getInstance({
-          derivedDataPath: path.join(tempDir, "nonexistent"),
-          projectRoot: tempDir,
-        });
+        // A cached bundle + metadata already exist (reused CI host): without the
+        // override-forces-rebuild rule, needsRebuild() would return false and the
+        // vendored IPA would be silently ignored in favor of the stale runner.
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const productsDir = path.join(derivedDataPath, "Build", "Products");
+        await fs.mkdir(productsDir, { recursive: true });
+        await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+        const cacheDir = path.join(tempDir, "cache");
+        await fs.mkdir(cacheDir, { recursive: true });
+        await fs.writeFile(
+          path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
+          JSON.stringify({ checksum: "stale", version: "latest", extractedAt: new Date().toISOString() })
+        );
 
-        // No throw: a vendored bundle is the trusted escape hatch. Build products
-        // are missing, so it simply reports a rebuild is needed.
-        const result = await builder.needsRebuild();
+        IOSCtrlProxyBuilder.resetInstances();
+        const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath, bundleCacheDir: cacheDir });
+
+        // No throw (vendored is the trusted escape hatch) AND forces a rebuild so
+        // the vendored IPA is actually consumed.
+        const result = await builder.needsRebuild("simulator");
         expect(result).toBe(true);
       } finally {
         if (prevVersion === undefined) {

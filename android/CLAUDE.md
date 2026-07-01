@@ -15,4 +15,4 @@ Quick reference for AI agents working in `android/`. Run all commands from the r
 ## Notes
 - Prefer `./gradlew -p android` to avoid changing directories.
 - Android validation scripts live under `scripts/ktfmt/`, `scripts/xml/`, and `scripts/android/`.
-- Kotlin is formatted with **ktfmt (meta/default style)**, pinned in `scripts/ktfmt/install_ktfmt.sh`. Auto-format touched files with `scripts/ktfmt/apply_ktfmt.sh`; CI enforces it tree-wide via `scripts/ktfmt/validate_ktfmt.sh`.
+- Kotlin is formatted with **ktfmt `--google-style`** (2-space block + 2-space continuation indent), pinned in `scripts/ktfmt/install_ktfmt.sh`. Auto-format touched files with `scripts/ktfmt/apply_ktfmt.sh`; CI enforces it tree-wide via `scripts/ktfmt/validate_ktfmt.sh`.

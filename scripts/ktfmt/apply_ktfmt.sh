@@ -57,11 +57,11 @@ for cmd in find xargs git; do
     fi
 done
 
-# Ensure the ktfmt on PATH understands --meta-style (introduced in ktfmt 0.51;
-# this repo pins 0.64). An older ktfmt would reject the flag below; fail fast
-# with an actionable message rather than staging files it never formatted.
-if ! printf 'fun probe() {}\n' | ktfmt --meta-style - >/dev/null 2>&1; then
-    echo -e "${RED}The ktfmt on PATH does not support --meta-style (need >= 0.51; this repo pins 0.64).${NC}"
+# Ensure the ktfmt on PATH runs and accepts --google-style before formatting.
+# If an older/broken ktfmt is already on PATH, fail fast with an actionable
+# message rather than staging files it never formatted.
+if ! printf 'fun probe() {}\n' | ktfmt --google-style - >/dev/null 2>&1; then
+    echo -e "${RED}The ktfmt on PATH does not run with --google-style (this repo pins 0.64).${NC}"
     echo -e "${RED}Update ktfmt ('brew upgrade ktfmt' or re-run scripts/ktfmt/install_ktfmt.sh) and retry.${NC}"
     exit 1
 fi
@@ -156,13 +156,12 @@ printf '%s\n' "${files_to_process[@]}" > "$temp_file"
 echo -e "${YELLOW}Applying ktfmt formatting...${NC}"
 
 if [[ -s "$temp_file" ]]; then
-    # Apply ktfmt formatting and capture output, filtering out "Done formatting" messages.
-    # --meta-style is ktfmt's default; passing it explicitly pins the style so a
-    # future ktfmt default change can't silently reformat the whole tree.
+    # Apply ktfmt formatting with --google-style (2-space block + 2-space
+    # continuation indent). This is a non-default style, so the flag is required.
     # Capture ktfmt's own exit status via PIPESTATUS[0] — without this, the
     # assignment only sees the trailing grep's status, masking a ktfmt/xargs
     # failure and letting the script stage unformatted files as "success".
-    ktfmt_output=$(xargs ktfmt --meta-style < "$temp_file" 2>&1 | grep -v "Done formatting" | grep -v "^$"; exit "${PIPESTATUS[0]}")
+    ktfmt_output=$(xargs ktfmt --google-style < "$temp_file" 2>&1 | grep -v "Done formatting" | grep -v "^$"; exit "${PIPESTATUS[0]}")
     ktfmt_status=$?
 
     # Treat a non-zero ktfmt/xargs run as a hard error; otherwise still scan the

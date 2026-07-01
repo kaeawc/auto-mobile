@@ -16,7 +16,12 @@ import {
   getCurrentBuildIdentity,
 } from "../../daemon/buildIdentity";
 import type { BuildIdentity } from "../../daemon/buildIdentity";
-import { LATEST_RELEASE_VERSION, RELEASE_VERSION, resolveAssetVersion } from "../../constants/release";
+import {
+  LATEST_RELEASE_VERSION,
+  resolveAssetVersion,
+  resolveDaemonInstallSpecifier,
+  resolvePinnedVersion,
+} from "../../constants/release";
 import { getMcpServerVersion } from "../../utils/mcpVersion";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -64,11 +69,12 @@ export function checkDaemonVersion(): CheckResult {
  * comes from the release registry.
  */
 export function checkCtrlProxyVersion(): CheckResult {
-  const resolved = resolveAssetVersion(RELEASE_VERSION);
+  const pinned = resolvePinnedVersion();
+  const resolved = resolveAssetVersion(pinned);
   return {
     name: "CtrlProxy Release Version",
     status: "pass",
-    message: `Version ${resolved}${RELEASE_VERSION === LATEST_RELEASE_VERSION ? " (latest)" : ""}`,
+    message: `Version ${resolved}${pinned === LATEST_RELEASE_VERSION ? " (latest)" : ""}`,
     value: resolved,
   };
 }
@@ -106,14 +112,14 @@ export async function checkDaemonStatus(
       name: "Daemon Status",
       status: "warn",
       message: "Daemon is not running",
-      recommendation: "Start the daemon with: bunx @kaeawc/auto-mobile@latest --daemon start",
+      recommendation: `Start the daemon with: bunx ${resolveDaemonInstallSpecifier()} --daemon start`,
     };
   } catch (error) {
     return {
       name: "Daemon Status",
       status: "warn",
       message: `Could not check daemon: ${error instanceof Error ? error.message : String(error)}`,
-      recommendation: "Try: bunx @kaeawc/auto-mobile@latest --daemon start",
+      recommendation: `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon start`,
     };
   }
 }
@@ -147,7 +153,7 @@ export async function checkDaemonConnectivity(
       name: "Daemon Connectivity",
       status: "warn",
       message: "Daemon running but not responding",
-      recommendation: report.recommendations.join("; ") || "Try: bunx @kaeawc/auto-mobile@latest --daemon restart",
+      recommendation: report.recommendations.join("; ") || `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`,
     };
   } catch (error) {
     return {
@@ -242,6 +248,19 @@ export async function checkCtrlProxy(
 
     // Check first connected device
     const device = devices[0];
+
+    // An unverifiable explicit pin is a hard configuration failure — surface it as
+    // `fail` (not the `skip` the thrown guard would otherwise become in the catch),
+    // so the documented `--cli doctor` CI gate actually blocks (#2746).
+    if (AndroidCtrlProxyManager.isPinnedVersionUnverifiable()) {
+      return {
+        name: "CtrlProxy",
+        status: "fail",
+        message: `platform=${device.platform}; device=${device.deviceId}; AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the release checksum registry`,
+        recommendation: "The pinned CtrlProxy APK cannot be integrity-verified. Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.",
+      };
+    }
+
     // Reset cached instances to ensure fresh ADB reads for doctor diagnostics
     // (getInstance memoizes isInstalled/isEnabled for 30 minutes which can report stale state)
     AndroidCtrlProxyManager.resetInstances();
@@ -425,7 +444,7 @@ export async function checkWorkProfileAccessibility(
       name: "Work Profile Accessibility",
       status: "warn",
       message: `Accessibility service not enabled for work profile(s): ${profileList}`,
-      recommendation: "The accessibility service needs to be enabled in each work profile for full app install tracking. Run bunx @kaeawc/auto-mobile@latest --cli doctor or enable manually in Settings > Accessibility.",
+      recommendation: `The accessibility service needs to be enabled in each work profile for full app install tracking. Run bunx ${resolveDaemonInstallSpecifier()} --cli doctor or enable manually in Settings > Accessibility.`,
     };
   } catch (error) {
     logger.debug(`Work profile accessibility check failed: ${error}`);

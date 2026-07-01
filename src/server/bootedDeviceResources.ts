@@ -8,11 +8,11 @@ import type { Session } from "../daemon/sessionManager";
 import type { DevicePool } from "../daemon/devicePool";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
 import { IOSCtrlProxyClient, IOS_RUNNER_FEATURE_COMMANDS } from "../features/observe/ios/IOSCtrlProxyClient";
 import {
-  IOS_CTRL_PROXY_RELEASE_VERSION,
-  RELEASE_VERSION,
-  resolveChecksum,
+  resolveApkChecksum,
+  resolveIpaChecksum,
 } from "../constants/release";
 import { defaultTimer } from "../utils/SystemTimer";
 
@@ -404,9 +404,13 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
         manager.isEnabled(),
         manager.getInstalledApkSha256(),
       ]);
-      const expectedSha256 = resolveChecksum(RELEASE_VERSION, "android");
-      const isCompatible = expectedSha256.length === 0 ||
-        (installedSha256 !== null && installedSha256.toLowerCase() === expectedSha256.toLowerCase());
+      const expectedSha256 = resolveApkChecksum();
+      // An explicit pin absent from the registry yields an empty expected checksum,
+      // which must NOT read as "compatible" — the installed APK is unverifiable (#2746).
+      const isCompatible = !AndroidCtrlProxyManager.isPinnedVersionUnverifiable() && (
+        expectedSha256.length === 0 ||
+        (installedSha256 !== null && installedSha256.toLowerCase() === expectedSha256.toLowerCase())
+      );
       return {
         installed,
         enabled,
@@ -421,7 +425,7 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
         manager.isInstalled(),
         manager.isRunning(),
       ]);
-      const expectedSha256 = resolveChecksum(IOS_CTRL_PROXY_RELEASE_VERSION, "ios");
+      const expectedSha256 = resolveIpaChecksum();
 
       // The iOS runner exposes no hash/version, so identity comes from the cached
       // `supportedCommands` handshake. Read it connection-free (this hot path must
@@ -439,8 +443,10 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
       // Only claim compatibility we can actually verify. isCompatible is true
       // *only* when the runner's advertised command set is known complete; a stale
       // runner (incomplete) or an unknown one (no cached handshake yet) is reported
-      // not-compatible rather than the previous always-true reassurance.
-      const isCompatible = supportedCommandsComplete === true;
+      // not-compatible rather than the previous always-true reassurance. An
+      // unverifiable explicit pin is never compatible (#2746).
+      const isCompatible = supportedCommandsComplete === true &&
+        !IOSCtrlProxyBuilder.isPinnedVersionUnverifiable();
 
       return {
         installed,

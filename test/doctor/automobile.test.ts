@@ -10,6 +10,7 @@ import {
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import {
   LATEST_RELEASE_VERSION,
+  RELEASE_CHECKSUM_REGISTRY,
   RELEASE_VERSION,
   resolveAssetVersion,
 } from "../../src/constants/release";
@@ -45,6 +46,22 @@ describe("checkCtrlProxyVersion", () => {
     expect(result.value).toBe(expected);
     if (RELEASE_VERSION === LATEST_RELEASE_VERSION) {
       expect(result.message).toMatch(/\(latest\)$/);
+    }
+  });
+
+  test("honors AUTOMOBILE_VERSION and drops the (latest) suffix when pinned (EC6)", () => {
+    const prev = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    try {
+      const result = checkCtrlProxyVersion();
+      expect(result.value).toBe("0.0.18");
+      expect(result.message).toBe("Version 0.0.18");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = prev;
+      }
     }
   });
 });
@@ -97,6 +114,30 @@ describe("checkDaemonStatus", () => {
     expect(result.status).toBe("pass");
     expect(result.message).toBe("Running (serving via socket)");
     expect(result.recommendation).toBeUndefined();
+  });
+
+  test("recommends a concrete pinned install command, never @latest (EC6)", async () => {
+    const result = await checkDaemonStatus({
+      daemonManager: {
+        status: async () => ({ running: false }),
+      },
+      getDaemonHealthReport: async () => ({
+        timestamp: "2026-06-29T00:00:00.000Z",
+        daemonRunning: false,
+        socketExists: false,
+        socketAccessible: false,
+        pidFileExists: false,
+        pidFileValid: false,
+        socketConnectable: false,
+        recommendations: [],
+      }),
+    });
+
+    expect(result.status).toBe("warn");
+    expect(result.recommendation).toContain("@kaeawc/auto-mobile@");
+    // Issue #2746: floating @latest advice causes silent version drift.
+    expect(result.recommendation).not.toContain("@latest");
+    expect(result.recommendation).toContain(RELEASE_CHECKSUM_REGISTRY[0].version);
   });
 });
 
@@ -219,6 +260,33 @@ describe("checkCtrlProxy", () => {
     expect(result.name).toBe("CtrlProxy");
     expect(result.status).toBe("skip");
     expect(result.message).toBe("No Android devices connected");
+  });
+
+  test("fails (not skips) when AUTOMOBILE_VERSION pins an unverifiable version (#2746)", async () => {
+    const prevVersion = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "99.99.99";
+    try {
+      fakeAdb.setDevices([{
+        deviceId: "emulator-5554",
+        platform: "android",
+        isEmulator: true,
+        name: "Pixel"
+      }]);
+
+      const result = await checkCtrlProxy(fakeFactory);
+
+      // Must be `fail` so the `--cli doctor` CI gate blocks — a thrown guard would
+      // otherwise be caught and downgraded to `skip`, which doesn't count as a failure.
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain("99.99.99");
+      expect(result.recommendation).toContain("AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM");
+    } finally {
+      if (prevVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = prevVersion;
+      }
+    }
   });
 
   test("warns when installed and enabled CtrlProxy is stale but accepted for readiness", async () => {

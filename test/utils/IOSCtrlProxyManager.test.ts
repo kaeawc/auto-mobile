@@ -259,6 +259,25 @@ describe("IOSCtrlProxyManager", function() {
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
+  describe("setup fail-closed on unverifiable pin", function() {
+    test("returns failure for an unknown pin before any reuse short-circuit (#2746)", async function() {
+      const prev = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      try {
+        const manager = IOSCtrlProxyManager.getInstance(testDevice);
+        const result = await manager.setup();
+        expect(result.success).toBe(false);
+        expect(result.message).toContain("not in the AutoMobile release");
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prev;
+        }
+      }
+    });
+  });
+
   describe("getInstance", function() {
     test("should return same instance for same device", function() {
       const instance1 = IOSCtrlProxyManager.getInstance(testDevice);

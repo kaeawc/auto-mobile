@@ -4,6 +4,7 @@ import { existsSync, openSync, closeSync, mkdirSync, readFileSync, unlinkSync, w
 import { dirname, join } from "node:path";
 import { logger } from "../utils/logger";
 import { releaseVersion } from "../utils/mcpVersion";
+import { resolveDaemonInstallSpecifier } from "../constants/release";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
 import { ActionableError } from "../models";
 import {
@@ -1142,7 +1143,7 @@ export async function runDaemonCommand(
               console.log(`  - PID ${pid}`);
             }
             console.log(
-              `\nThese can cause device pool conflicts. Run 'bunx @kaeawc/auto-mobile@latest --daemon restart' to stop them.`
+              `\nThese can cause device pool conflicts. Run 'bunx ${resolveDaemonInstallSpecifier()} --daemon restart' to stop them.`
             );
           }
         } else {

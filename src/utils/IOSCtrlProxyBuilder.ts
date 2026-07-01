@@ -6,12 +6,14 @@ import { defaultTimer, type Timer } from "./SystemTimer";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
 import {
   IOS_CTRL_PROXY_APP_HASH,
-  IOS_CTRL_PROXY_IPA_URL,
-  IOS_CTRL_PROXY_RELEASE_VERSION,
   IOS_CTRL_PROXY_RUNNER_SHA256,
-  IOS_CTRL_PROXY_SHA256_CHECKSUM,
   LATEST_RELEASE_VERSION,
-  resolveAssetVersion
+  isExplicitPin,
+  isPinnedVersionKnown,
+  resolveAssetVersion,
+  resolveIpaChecksum,
+  resolveIpaUrl,
+  resolvePinnedVersion
 } from "../constants/release";
 import {
   DefaultIOSCtrlProxyBundleDownloader,
@@ -25,7 +27,7 @@ import {
   parsePlist,
   type PlistValue
 } from "./ios-cmdline-tools/XctestrunPlist";
-import { toActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 
 /**
  * Result of CtrlProxy download/install
@@ -364,6 +366,20 @@ export class IOSCtrlProxyBuilder {
       return false;
     }
 
+    // Fail closed here too: without this, an unknown explicit pin with a cached
+    // bundle + metadata would return false and silently reuse the cached (possibly
+    // wrong-version) runner without ever reaching verifyBundle's guard (#2746).
+    this.assertPinnedVersionVerifiable();
+
+    // A vendored bundle override must always be (re)consumed: otherwise, on a
+    // reused host with an existing xctestrun + metadata, needsRebuild() would
+    // return false and silently keep the stale cached runner instead of the
+    // vendored IPA — the documented escape hatch would be a no-op (#2746).
+    if (this.getBundlePathOverride() !== null) {
+      logger.info("[IOSCtrlProxyBuilder] CtrlProxy bundle path override set, forcing extraction of the vendored bundle");
+      return true;
+    }
+
     const xctestrunPath = await this.getXctestrunPath(platform);
     if (!xctestrunPath) {
       logger.info("[IOSCtrlProxyBuilder] CtrlProxy artifacts missing, need download");
@@ -645,7 +661,7 @@ export class IOSCtrlProxyBuilder {
     if (override) {
       return override;
     }
-    return IOS_CTRL_PROXY_IPA_URL;
+    return resolveIpaUrl();
   }
 
   private getBundlePathOverride(): string | null {
@@ -661,7 +677,7 @@ export class IOSCtrlProxyBuilder {
     if (override !== null) {
       return override;
     }
-    return IOS_CTRL_PROXY_SHA256_CHECKSUM;
+    return resolveIpaChecksum();
   }
 
   public getExpectedAppHash(platform: IOSCtrlProxyPlatform): string {
@@ -703,7 +719,10 @@ export class IOSCtrlProxyBuilder {
       const bundleReady = await this.isBundleValid(bundlePath, expectedChecksum);
 
       if (!bundleReady) {
-        const isLatest = IOS_CTRL_PROXY_RELEASE_VERSION.trim().toLowerCase() === LATEST_RELEASE_VERSION;
+        // When a version is pinned (AUTOMOBILE_VERSION), hermetic mode disables the
+        // silent cached-bundle fallback so a failed download fails hard (#2746).
+        // resolvePinnedVersion already normalizes the `latest` sentinel.
+        const isLatest = resolvePinnedVersion() === LATEST_RELEASE_VERSION;
         const cachedBundleExists = await this.isBundleValid(bundlePath, "");
         try {
           logger.info("[IOSCtrlProxyBuilder] Downloading CtrlProxy bundle", {
@@ -758,8 +777,45 @@ export class IOSCtrlProxyBuilder {
       }
       logger.info("[IOSCtrlProxyBuilder] Bundle checksum verified", { checksum, source });
     } else {
+      this.assertPinnedVersionVerifiable();
       logger.warn("[IOSCtrlProxyBuilder] Bundle checksum verification skipped (no checksum provided)");
     }
+  }
+
+  /**
+   * Fail closed when a concrete `AUTOMOBILE_VERSION` is pinned to a version absent
+   * from the baked checksum registry: the bundle cannot be integrity-verified, so
+   * silently downloading or reusing it defeats the point of pinning (#2746). A
+   * vendored bundle (`AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH`) or an explicit checksum
+   * override is the trusted escape hatch.
+   */
+  private assertPinnedVersionVerifiable(): void {
+    if (IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
+      throw new ActionableError(
+        `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
+        `checksum registry, so the CtrlProxy bundle cannot be integrity-verified. ` +
+        `Pin a released version, or vendor a trusted bundle via AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH.`
+      );
+    }
+  }
+
+  /**
+   * Single source of truth for the iOS fail-closed decision: `AUTOMOBILE_VERSION`
+   * names a concrete version absent from the checksum registry, with no escape hatch
+   * (vendored IPA/bundle path or explicit checksum override), so the CtrlProxy bundle
+   * cannot be integrity-verified (#2746). Reused by the build/reuse guards,
+   * `IOSCtrlProxyManager.setup()`, `doctor --ios`, and the booted-device compat check.
+   */
+  static isPinnedVersionUnverifiable(): boolean {
+    if (IOSCtrlProxyBuilder.expectedChecksumOverride !== null) {
+      return false;
+    }
+    const ipaPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
+    const bundlePath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
+    if ((ipaPath && ipaPath.length > 0) || (bundlePath && bundlePath.length > 0)) {
+      return false;
+    }
+    return isExplicitPin() && !isPinnedVersionKnown();
   }
 
   private async extractBundle(bundlePath: string): Promise<void> {
@@ -770,7 +826,7 @@ export class IOSCtrlProxyBuilder {
     const appHashes = await this.computeAppHashes();
     const metadata: IOSCtrlProxyBundleMetadata = {
       checksum: this.getExpectedChecksum() || null,
-      version: resolveAssetVersion(IOS_CTRL_PROXY_RELEASE_VERSION),
+      version: resolveAssetVersion(resolvePinnedVersion()),
       extractedAt: new Date().toISOString(),
       appHashes
     };

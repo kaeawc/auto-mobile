@@ -631,6 +631,40 @@ describe("checkIosCtrlProxyRunner", () => {
     expect(result.message).not.toContain("missingCommands");
   });
 
+  test("fails (not passes) when AUTOMOBILE_VERSION pins an unverifiable version (#2746)", async () => {
+    const prev = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "99.99.99";
+    try {
+      // A running runner advertising the full command set would classify as
+      // `compatible` (pass); the unverifiable pin must override that to `fail`.
+      const result = await checkIosCtrlProxyRunner(withRunners([inspection()]));
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain("99.99.99");
+      expect(result.recommendation).toContain("AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = prev;
+      }
+    }
+  });
+
+  test("reports the pinned expectedVersion in the diagnostic line (#2746)", async () => {
+    const prev = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    try {
+      const result = await checkIosCtrlProxyRunner(withRunners([inspection()]));
+      expect(result.message).toContain("expectedVersion=0.0.18");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = prev;
+      }
+    }
+  });
+
   test("warns and lists missing commands when the runner is stale", async () => {
     const result = await checkIosCtrlProxyRunner(
       withRunners([inspection({ supportedCommands: [...STALE_COMMANDS] })])

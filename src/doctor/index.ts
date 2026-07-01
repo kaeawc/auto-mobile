@@ -8,7 +8,7 @@ import { runSystemChecks } from "./checks/system";
 import { runAndroidChecks } from "./checks/android";
 import { runIosChecks } from "./checks/ios";
 import { runAutoMobileChecks, checkDaemonBuildIdentity } from "./checks/automobile";
-import { RELEASE_VERSION } from "../constants/release";
+import { resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 
 /**
  * Calculate summary statistics from check results
@@ -97,7 +97,8 @@ export async function runDoctor(
 
   const report: DoctorReport = {
     timestamp: new Date().toISOString(),
-    version: RELEASE_VERSION,
+    // Concrete pinned version (honors AUTOMOBILE_VERSION), never the "latest" literal (#2746).
+    version: resolveAssetVersion(resolvePinnedVersion()),
     platform: process.platform,
     arch: process.arch,
     system: { checks: systemChecks },

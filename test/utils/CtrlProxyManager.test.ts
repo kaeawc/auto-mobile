@@ -261,6 +261,56 @@ describe("CtrlProxyManager", function() {
       includes: (searchString: string) => stdout.includes(searchString)
     });
 
+    test("fails closed on an unknown pin even when CtrlProxy is already installed (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      try {
+        // Device already has CtrlProxy installed + enabled: the readiness path
+        // would otherwise accept it (status "skipped") without ever downloading.
+        const localFakeAdb = new FakeAdbExecutor();
+        localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: ""
+        });
+
+        AndroidCtrlProxyManager.resetInstances();
+        const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => localFakeAdb });
+
+        await expect(manager.ensureCompatibleVersion()).rejects.toThrow("not in the AutoMobile release");
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
+    test("accepts a preinstalled CtrlProxy on an unknown pin when checksum skip is set (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+      try {
+        const localFakeAdb = new FakeAdbExecutor();
+        localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: ""
+        });
+
+        AndroidCtrlProxyManager.resetInstances();
+        const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => localFakeAdb });
+
+        const result = await manager.ensureCompatibleVersion();
+        expect(result.status).toBe("skipped");
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
     test("should report compatible when installed SHA matches expected", async function() {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
@@ -475,6 +525,32 @@ describe("CtrlProxyManager", function() {
       expect(result.attemptedReinstall).toBe(true);
       expect(packageCheckCalls.length).toBe(2);
       expect(localFakeAdb.wasCommandExecuted(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`)).toBe(true);
+    });
+
+    test("prefetch is skipped (no network) for an unknown pin (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
+      let downloadCalls = 0;
+      try {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+          download: async () => {
+            downloadCalls++;
+            throw new Error("download must not run for an unverifiable pin");
+          }
+        };
+
+        AndroidCtrlProxyManager.prefetchApk();
+        expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
+        expect(downloadCalls).toBe(0);
+      } finally {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
     });
 
     test("should allow background refresh to retry failed prefetches", async function() {
@@ -752,6 +828,43 @@ describe("CtrlProxyManager", function() {
     });
   });
 
+  describe("isPinnedVersionUnverifiable", () => {
+    const withVersion = (value: string | undefined, fn: () => void) => {
+      const prev = process.env.AUTOMOBILE_VERSION;
+      if (value === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = value;
+      }
+      try {
+        fn();
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prev;
+        }
+      }
+    };
+
+    test("false when no explicit pin (latest)", () => {
+      withVersion(undefined, () => expect(AndroidCtrlProxyManager.isPinnedVersionUnverifiable()).toBe(false));
+    });
+
+    test("false for a known explicit pin", () => {
+      withVersion("0.0.18", () => expect(AndroidCtrlProxyManager.isPinnedVersionUnverifiable()).toBe(false));
+    });
+
+    test("true for an unknown explicit pin", () => {
+      withVersion("99.99.99", () => expect(AndroidCtrlProxyManager.isPinnedVersionUnverifiable()).toBe(true));
+    });
+
+    test("false for an unknown pin when checksum skip is configured", () => {
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+      withVersion("99.99.99", () => expect(AndroidCtrlProxyManager.isPinnedVersionUnverifiable()).toBe(false));
+    });
+  });
+
   describe("downloadApk", () => {
     test("should copy from local APK override when provided", async function() {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-test-apk-"));
@@ -831,6 +944,67 @@ describe("CtrlProxyManager", function() {
       expect(stats.size).toBe(payload.length);
       expect(apkPath).toBe(downloadedPath);
       await accessibilityServiceClient.cleanupApk(apkPath);
+    });
+
+    test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      try {
+        const zip = new AdmZip();
+        zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+        zip.addFile("classes.dex", crypto.randomBytes(15000));
+        const payload = zip.toBuffer();
+
+        // No expected-checksum override and no APK-path/skip override: the pinned
+        // version has no registry checksum, so the download is unverifiable and
+        // must fail closed rather than install an unchecked APK (esp. from a mirror).
+        (accessibilityServiceClient as any).fileDownloader = {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          }
+        };
+
+        await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
+          "not in the AutoMobile release"
+        );
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
+    test("installs when the pinned version's checksum override is set (skip escape hatch, #2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+      try {
+        const zip = new AdmZip();
+        zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+        zip.addFile("classes.dex", crypto.randomBytes(15000));
+        const payload = zip.toBuffer();
+
+        (accessibilityServiceClient as any).fileDownloader = {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          }
+        };
+
+        const apkPath = await accessibilityServiceClient.downloadApk();
+        const stats = await fs.stat(apkPath);
+        expect(stats.size).toBe(payload.length);
+        await accessibilityServiceClient.cleanupApk(apkPath);
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
     });
 
     test("should fail when checksum does not match", async function() {

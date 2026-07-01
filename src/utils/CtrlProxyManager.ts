@@ -6,10 +6,8 @@ import * as path from "path";
 import { BootedDevice } from "../models";
 import { requireBootedDevice } from "./requireBootedDevice";
 import {
-  APK_SHA256_CHECKSUM,
-  APK_URL,
-  RELEASE_VERSION,
-  resolveChecksum
+  resolveApkChecksum,
+  resolveApkUrl
 } from "../constants/release";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
@@ -83,7 +81,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   public static readonly ACTIVITY = "dev.jasonpearson.automobile.ctrlproxy.MainActivity";
   /** Package name used before the rename to CtrlProxy — uninstalled opportunistically on device setup */
   private static readonly LEGACY_PACKAGE = "dev.jasonpearson.automobile.accessibilityservice";
-  private static readonly APK_URL = APK_URL;
 
   // Static cache for service availability
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
@@ -235,9 +232,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const apkPath = path.join(tempDir, "control-proxy.apk");
 
     try {
-      // Download the APK
-      logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: APK_URL, destination: apkPath });
-      await AndroidCtrlProxyManager.defaultFileDownloader.download(APK_URL, apkPath);
+      // Download the APK (URL honors AUTOMOBILE_VERSION + AUTOMOBILE_ASSET_BASE_URL)
+      const apkUrl = resolveApkUrl();
+      logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: apkUrl, destination: apkPath });
+      await AndroidCtrlProxyManager.defaultFileDownloader.download(apkUrl, apkPath);
 
       // Verify the file exists and has reasonable size
       const stats = await fs.stat(apkPath);
@@ -249,7 +247,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       AndroidCtrlProxyManager.verifyApkIntegrityStatic(apkPath);
 
       // Verify checksum if provided
-      const expectedChecksum = AndroidCtrlProxyManager.expectedChecksumOverride ?? APK_SHA256_CHECKSUM;
+      const expectedChecksum = AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveApkChecksum();
       if (expectedChecksum.length > 0) {
         const { checksum: actualChecksum } = await AndroidCtrlProxyManager.defaultChecksumCalculator.computeFileSha256(apkPath);
         if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
@@ -822,8 +820,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         if (usedPrefetch) {
           logger.info("Using prefetched accessibility service APK", { path: apkPath });
         } else {
-          logger.info("Downloading APK", { url: AndroidCtrlProxyManager.APK_URL, destination: apkPath });
-          await this.fileDownloader.download(AndroidCtrlProxyManager.APK_URL, apkPath);
+          const apkUrl = resolveApkUrl();
+          logger.info("Downloading APK", { url: apkUrl, destination: apkPath });
+          await this.fileDownloader.download(apkUrl, apkPath);
         }
       }
       perf.endOperation("httpDownload");
@@ -856,7 +855,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         perf.endOperation("checksumVerify");
       } else {
         logger.warn("APK checksum verification SKIPPED - no checksum provided (development mode)", {
-          apkUrl: AndroidCtrlProxyManager.APK_URL
+          apkUrl: resolveApkUrl()
         });
       }
 
@@ -1494,7 +1493,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.shouldSkipChecksum()) {
       return "";
     }
-    return AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveChecksum(RELEASE_VERSION, "android");
+    return AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveApkChecksum();
   }
 
   private getCachedVersionCheckResult(): AccessibilityVersionCheckResult | null {

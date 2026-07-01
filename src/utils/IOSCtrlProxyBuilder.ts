@@ -6,12 +6,12 @@ import { defaultTimer, type Timer } from "./SystemTimer";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
 import {
   IOS_CTRL_PROXY_APP_HASH,
-  IOS_CTRL_PROXY_IPA_URL,
-  IOS_CTRL_PROXY_RELEASE_VERSION,
   IOS_CTRL_PROXY_RUNNER_SHA256,
-  IOS_CTRL_PROXY_SHA256_CHECKSUM,
   LATEST_RELEASE_VERSION,
-  resolveAssetVersion
+  resolveAssetVersion,
+  resolveIpaChecksum,
+  resolveIpaUrl,
+  resolvePinnedVersion
 } from "../constants/release";
 import {
   DefaultIOSCtrlProxyBundleDownloader,
@@ -645,7 +645,7 @@ export class IOSCtrlProxyBuilder {
     if (override) {
       return override;
     }
-    return IOS_CTRL_PROXY_IPA_URL;
+    return resolveIpaUrl();
   }
 
   private getBundlePathOverride(): string | null {
@@ -661,7 +661,7 @@ export class IOSCtrlProxyBuilder {
     if (override !== null) {
       return override;
     }
-    return IOS_CTRL_PROXY_SHA256_CHECKSUM;
+    return resolveIpaChecksum();
   }
 
   public getExpectedAppHash(platform: IOSCtrlProxyPlatform): string {
@@ -703,7 +703,9 @@ export class IOSCtrlProxyBuilder {
       const bundleReady = await this.isBundleValid(bundlePath, expectedChecksum);
 
       if (!bundleReady) {
-        const isLatest = IOS_CTRL_PROXY_RELEASE_VERSION.trim().toLowerCase() === LATEST_RELEASE_VERSION;
+        // When a version is pinned (AUTOMOBILE_VERSION), hermetic mode disables the
+        // silent cached-bundle fallback so a failed download fails hard (#2746).
+        const isLatest = resolvePinnedVersion().trim().toLowerCase() === LATEST_RELEASE_VERSION;
         const cachedBundleExists = await this.isBundleValid(bundlePath, "");
         try {
           logger.info("[IOSCtrlProxyBuilder] Downloading CtrlProxy bundle", {
@@ -770,7 +772,7 @@ export class IOSCtrlProxyBuilder {
     const appHashes = await this.computeAppHashes();
     const metadata: IOSCtrlProxyBundleMetadata = {
       checksum: this.getExpectedChecksum() || null,
-      version: resolveAssetVersion(IOS_CTRL_PROXY_RELEASE_VERSION),
+      version: resolveAssetVersion(resolvePinnedVersion()),
       extractedAt: new Date().toISOString(),
       appHashes
     };

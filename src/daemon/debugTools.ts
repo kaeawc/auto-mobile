@@ -4,6 +4,7 @@ import { DaemonClient } from "./client";
 import { readFile } from "node:fs/promises";
 import { PidFileData } from "./types";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { resolveDaemonInstallSpecifier } from "../constants/release";
 
 /**
  * Daemon Debug Tools
@@ -125,7 +126,7 @@ export async function getDaemonHealthReport(
     if (report.daemonRunning && report.socketConnectable) {
       report.recommendations.push("Daemon is healthy and responsive.");
     } else if (!report.daemonRunning && !report.socketExists && !report.pidFileExists) {
-      report.recommendations.push("Daemon is not running. Start it with: bunx @kaeawc/auto-mobile@latest --daemon start");
+      report.recommendations.push(`Daemon is not running. Start it with: bunx ${resolveDaemonInstallSpecifier()} --daemon start`);
     }
   }
 

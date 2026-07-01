@@ -10,9 +10,8 @@ import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyClient, IOS_RUNNER_FEATURE_COMMANDS } from "../features/observe/ios/IOSCtrlProxyClient";
 import {
-  IOS_CTRL_PROXY_RELEASE_VERSION,
-  RELEASE_VERSION,
-  resolveChecksum,
+  resolveApkChecksum,
+  resolveIpaChecksum,
 } from "../constants/release";
 import { defaultTimer } from "../utils/SystemTimer";
 
@@ -404,7 +403,7 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
         manager.isEnabled(),
         manager.getInstalledApkSha256(),
       ]);
-      const expectedSha256 = resolveChecksum(RELEASE_VERSION, "android");
+      const expectedSha256 = resolveApkChecksum();
       const isCompatible = expectedSha256.length === 0 ||
         (installedSha256 !== null && installedSha256.toLowerCase() === expectedSha256.toLowerCase());
       return {
@@ -421,7 +420,7 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
         manager.isInstalled(),
         manager.isRunning(),
       ]);
-      const expectedSha256 = resolveChecksum(IOS_CTRL_PROXY_RELEASE_VERSION, "ios");
+      const expectedSha256 = resolveIpaChecksum();
 
       // The iOS runner exposes no hash/version, so identity comes from the cached
       // `supportedCommands` handshake. Read it connection-free (this hot path must

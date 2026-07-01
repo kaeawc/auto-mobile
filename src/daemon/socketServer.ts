@@ -23,12 +23,13 @@ import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagSer
 import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
-  RELEASE_VERSION,
-  APK_URL,
-  IOS_CTRL_PROXY_RELEASE_VERSION,
-  IOS_CTRL_PROXY_IPA_URL,
   IOS_CTRL_PROXY_APP_HASH,
-  resolveChecksum,
+  resolveApkChecksum,
+  resolveApkUrl,
+  resolveAssetVersion,
+  resolveIpaChecksum,
+  resolveIpaUrl,
+  resolvePinnedVersion,
 } from "../constants/release";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
@@ -558,19 +559,22 @@ export class UnixSocketServer {
       }
       case "ide/status": {
         return {
+          // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
+          // floating "latest" tag — external consumers must see exactly what the
+          // daemon will fetch (#2746).
           version: getMcpServerVersion(),
-          releaseVersion: RELEASE_VERSION,
+          releaseVersion: resolveAssetVersion(resolvePinnedVersion()),
           android: {
             ctrlProxy: {
-              expectedSha256: resolveChecksum(RELEASE_VERSION, "android"),
-              url: APK_URL,
+              expectedSha256: resolveApkChecksum(),
+              url: resolveApkUrl(),
             },
           },
           ios: {
             xcTestService: {
-              expectedSha256: resolveChecksum(IOS_CTRL_PROXY_RELEASE_VERSION, "ios"),
+              expectedSha256: resolveIpaChecksum(),
               expectedAppHash: IOS_CTRL_PROXY_APP_HASH,
-              url: IOS_CTRL_PROXY_IPA_URL,
+              url: resolveIpaUrl(),
             },
           },
         };

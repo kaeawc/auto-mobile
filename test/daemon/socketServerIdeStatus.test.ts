@@ -11,6 +11,7 @@ import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
+import { RELEASE_CHECKSUM_REGISTRY } from "../../src/constants/release";
 
 function createFakeDaemonState() {
   return {
@@ -112,6 +113,54 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     expect(typeof result.ios.xcTestService.expectedSha256).toBe("string");
     expect(typeof result.ios.xcTestService.expectedAppHash).toBe("string");
     expect(typeof result.ios.xcTestService.url).toBe("string");
+  });
+
+  test("ide/status reports a concrete releaseVersion, never the 'latest' literal (EC7)", async () => {
+    const response = await sendRequest(socketPath, "ide/status");
+    const result = response.result as {
+      releaseVersion: string;
+      android: { ctrlProxy: { url: string } };
+    };
+    // Issue #2746: external consumers must see the concrete version the daemon
+    // will actually fetch, not the floating "latest" tag.
+    expect(result.releaseVersion).not.toBe("latest");
+    expect(result.releaseVersion).toBe(RELEASE_CHECKSUM_REGISTRY[0].version);
+    expect(result.android.ctrlProxy.url).toContain(`/${RELEASE_CHECKSUM_REGISTRY[0].version}/`);
+  });
+
+  test("ide/status honors AUTOMOBILE_VERSION + AUTOMOBILE_ASSET_BASE_URL (EC7)", async () => {
+    const prevVersion = process.env.AUTOMOBILE_VERSION;
+    const prevBase = process.env.AUTOMOBILE_ASSET_BASE_URL;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    process.env.AUTOMOBILE_ASSET_BASE_URL = "https://mirror.test/am";
+    try {
+      const response = await sendRequest(socketPath, "ide/status");
+      const result = response.result as {
+        releaseVersion: string;
+        android: { ctrlProxy: { expectedSha256: string; url: string } };
+        ios: { xcTestService: { expectedSha256: string; url: string } };
+      };
+      expect(result.releaseVersion).toBe("0.0.18");
+      expect(result.android.ctrlProxy.url).toBe("https://mirror.test/am/0.0.18/control-proxy-debug.apk");
+      expect(result.android.ctrlProxy.expectedSha256).toBe(
+        "fd3c8d9f0b8542eaad56c78b18cf8e5666367b04ae8c4af74d8aa6dd1c8d1834"
+      );
+      expect(result.ios.xcTestService.url).toBe("https://mirror.test/am/0.0.18/control-proxy.ipa");
+      expect(result.ios.xcTestService.expectedSha256).toBe(
+        "2a5eec63bce2f9dfc227c0732fcce67378305e945604d5eedd0e3df48e37fd39"
+      );
+    } finally {
+      if (prevVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = prevVersion;
+      }
+      if (prevBase === undefined) {
+        delete process.env.AUTOMOBILE_ASSET_BASE_URL;
+      } else {
+        process.env.AUTOMOBILE_ASSET_BASE_URL = prevBase;
+      }
+    }
   });
 
   test("ide/updateService returns error for missing params", async () => {

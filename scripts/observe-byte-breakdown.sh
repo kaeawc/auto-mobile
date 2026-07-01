@@ -44,7 +44,12 @@ else
   input_json="$(cat)"
 fi
 
-if [ -z "${input_json//[[:space:]]/}" ]; then
+# Emptiness check via streaming grep, not shell pattern replacement. A
+# `${var//[[:space:]]/}` over a large payload is pathologically slow in
+# multibyte (UTF-8) locales and hangs on the committed fixture; grep is
+# constant-memory and locale-safe. The herestring avoids a pipe so pipefail
+# cannot misread grep's early exit.
+if ! grep -q '[^[:space:]]' <<<"$input_json"; then
   echo "ERROR: no input provided" >&2
   usage
   exit 1
@@ -55,10 +60,21 @@ if ! printf '%s' "$input_json" | jq empty >/dev/null 2>&1; then
   exit 1
 fi
 
+# The report walks the object with to_entries/has(), which error on non-object
+# JSON (array/scalar/null). Reject those up front with a clean message instead
+# of leaking a raw jq stack trace.
+if [ "$(printf '%s' "$input_json" | jq -r 'type')" != "object" ]; then
+  echo "ERROR: expected a JSON object observe result, got: $(printf '%s' "$input_json" | jq -r 'type')" >&2
+  exit 1
+fi
+
 # Unwrap homeScreen/tool wrappers: if the payload nests the observe result under
-# `.observation` and has no top-level viewHierarchy, drill into it.
+# an object `.observation` and has no top-level viewHierarchy, drill into it.
+# Guarding on `.observation | type == "object"` keeps the result an object so
+# the report below never trips over a non-object inner value.
 observe_json="$(printf '%s' "$input_json" | jq -c '
-  if (has("observation") and (has("viewHierarchy") | not)) then .observation else . end
+  if (has("observation") and (.observation | type == "object") and (has("viewHierarchy") | not))
+  then .observation else . end
 ')"
 
 # ---------------------------------------------------------------------------
@@ -103,9 +119,14 @@ echo ""
 echo "-- gfxinfo duplication (performanceAudit) --"
 if [ "$(printf '%s' "$observe_json" | jq -r 'has("performanceAudit") and (.performanceAudit | type == "object")')" = "true" ]; then
   printf '%s' "$observe_json" | jq -r '
+    # Coerce to strings so utf8bytelength / contains never crash on malformed
+    # (non-string) values; null collapses to "" so absent fields read as 0 bytes.
+    def asstr: if . == null then "" elif type == "string" then . else tojson end;
     .performanceAudit as $pa
-    | (($pa.metrics // {}).gfxinfoRaw // "") as $raw
-    | ($pa.diagnostics // "") as $diag
+    | (($pa.metrics // {}).gfxinfoRaw | asstr) as $raw
+    | ($pa.diagnostics | asstr) as $diag
+    # "embeds" is a substring test on the serialized strings: a true match means
+    # diagnostics literally inlines the raw dump. A re-escaped copy would not match.
     | "  metrics.gfxinfoRaw: \($raw | utf8bytelength) bytes",
       "  diagnostics: \($diag | utf8bytelength) bytes\(if ($raw | length) > 0 and ($diag | contains($raw)) then " (embeds gfxinfoRaw)" else "" end)"
   '

@@ -80,7 +80,7 @@ Measure the byte breakdown of an `observe` (or `homeScreen`) tool result so
 output-context reductions can be quantified against a fixed baseline:
 
 ```bash
-scripts/observe-byte-breakdown.sh test/fixtures/observe/android-home-66k.json
+scripts/observe-byte-breakdown.sh test/fixtures/observe/android-home.json
 # or from stdin
 cat result.json | scripts/observe-byte-breakdown.sh
 ```
@@ -92,9 +92,23 @@ cat result.json | scripts/observe-byte-breakdown.sh
 - gfxinfo duplication check (`performanceAudit.metrics.gfxinfoRaw` vs the copy
   embedded in `performanceAudit.diagnostics`)
 
-The script auto-unwraps `homeScreen`-style payloads that nest the result under
-`.observation`. `test/fixtures/observe/android-home-66k.json` is the committed
-baseline home-screen capture that later reduction work is measured against.
+Byte counts use the UTF-8 length of each value's **compact** JSON
+serialization, matching how the MCP harness sizes tool output — so an
+85 KB pretty-printed fixture correctly reports ~50 KB of wire bytes. The script
+auto-unwraps `homeScreen`-style payloads that nest the result under
+`.observation`, and rejects non-object / malformed JSON with a clean error.
+
+**Baseline fixture & token measurement.**
+`test/fixtures/observe/android-home.json` is the committed baseline home-screen
+capture (Android only for now; ~50.5 KB / ~16.8k tokens compact) that later
+reduction work is measured against. Because the reduction effort is gated on the
+MCP output **token** cap, the reusable measurement lives in
+`test/fixtures/observe/observeFixture.ts` — `measureObserveBreakdown()` reports
+both bytes and cl100k_base tokens per field (same tokenizer as
+`estimate-context-usage.ts`) and is imported by later reduction unit tests.
+Regenerate the fixture by re-running the `observe` MCP tool against an Android
+home screen and re-committing the pretty-printed JSON; treat it as a frozen
+baseline and only refresh it deliberately when the observe output format changes.
 
 ## Startup Benchmark
 

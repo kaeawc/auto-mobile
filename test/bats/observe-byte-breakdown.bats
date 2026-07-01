@@ -72,10 +72,10 @@ teardown() {
 @test "surfaces the gfxinfoRaw / diagnostics duplication with exact byte counts" {
   run bash "$SCRIPT" "${TEST_ROOT}/observe.json"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"gfxinfoRaw"* ]]
-  [[ "$output" == *"7 bytes"* ]]
-  [[ "$output" == *"diagnostics"* ]]
-  [[ "$output" == *"20 bytes"* ]]
+  # Full-line matches so a stray "7 bytes" elsewhere can't satisfy the assertion,
+  # and the "(embeds gfxinfoRaw)" suffix (the duplication signal) is pinned.
+  [[ "$output" == *"metrics.gfxinfoRaw: 7 bytes"* ]]
+  [[ "$output" == *"diagnostics: 20 bytes (embeds gfxinfoRaw)"* ]]
 }
 
 @test "reads observe JSON from stdin" {
@@ -96,10 +96,42 @@ teardown() {
 @test "sorts top-level fields by descending byte count" {
   run bash "$SCRIPT" "${TEST_ROOT}/observe.json"
   [ "$status" -eq 0 ]
-  # viewHierarchy is the largest field here; it must appear before screenSize.
-  vh_line="$(echo "$output" | grep -n 'viewHierarchy' | head -1 | cut -d: -f1)"
-  ss_line="$(echo "$output" | grep -n 'screenSize' | head -1 | cut -d: -f1)"
+  # Anchor to the Top-level section only: sub-key names (e.g. systemInsets) also
+  # appear in the viewHierarchy block and could otherwise fool the line compare.
+  section="$(echo "$output" | sed -n '/Top-level fields/,/^$/p')"
+  vh_line="$(echo "$section" | grep -n 'viewHierarchy' | head -1 | cut -d: -f1)"
+  ss_line="$(echo "$section" | grep -n 'screenSize' | head -1 | cut -d: -f1)"
   [ "$vh_line" -lt "$ss_line" ]
+}
+
+@test "handles a minimal observe result with no viewHierarchy or performanceAudit" {
+  echo '{"screenSize":{"width":1,"height":2}}' > "${TEST_ROOT}/minimal.json"
+  run bash "$SCRIPT" "${TEST_ROOT}/minimal.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"(no viewHierarchy)"* ]]
+  [[ "$output" == *"(no performanceAudit)"* ]]
+}
+
+@test "rejects non-object JSON (array/scalar) with a clean error" {
+  run bash -c "echo '[1,2,3]' | bash '$SCRIPT' -"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"expected a JSON object"* ]]
+}
+
+@test "does not crash on non-string gfxinfoRaw / diagnostics" {
+  echo '{"performanceAudit":{"metrics":{"gfxinfoRaw":12345},"diagnostics":{"o":1}}}' \
+    > "${TEST_ROOT}/malformed.json"
+  run bash "$SCRIPT" "${TEST_ROOT}/malformed.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"metrics.gfxinfoRaw:"* ]]
+}
+
+@test "does not hang on the large fixture in a UTF-8 locale" {
+  # Regression guard for the ${var//[[:space:]]/} perf cliff, which only
+  # manifested in a multibyte locale.
+  run env LC_ALL=en_US.UTF-8 timeout 20 bash "$SCRIPT" "test/fixtures/observe/android-home.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"performanceAudit"* ]]
 }
 
 @test "exits non-zero with a message when the file does not exist" {
@@ -116,7 +148,7 @@ teardown() {
 }
 
 @test "runs against the committed real home-screen fixture" {
-  run bash "$SCRIPT" "test/fixtures/observe/android-home-66k.json"
+  run bash "$SCRIPT" "test/fixtures/observe/android-home.json"
   [ "$status" -eq 0 ]
   [[ "$output" == *"performanceAudit"* ]]
   [[ "$output" == *"viewHierarchy sub-keys"* ]]

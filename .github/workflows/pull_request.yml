@@ -277,6 +277,9 @@ jobs:
               - 'schemas/**'
               - 'ios/**'
               - 'scripts/ios/**'
+              # The XCTestRunner job runs these readiness scripts directly, so
+              # changes to them must exercise the job (they were skipped before).
+              - 'scripts/ci/**'
               - 'package.json'
               - 'bun.lock'
 
@@ -1274,15 +1277,18 @@ jobs:
           cd ios/XCTestRunner
           swift test --filter RemindersLaunchPlanTests 2>&1
 
-      # Daemon-internal logs (CtrlProxy attach/teardown, observe timing) are the
-      # only way to diagnose iOS observe failures — the swift-test stdout doesn't
-      # include them. Upload always so we can see why observe timed out.
+      # Daemon-internal logs (CtrlProxy startup/health/observe timing) are the only
+      # way to diagnose iOS observe failures — the swift-test stdout doesn't include
+      # them. Upload on failure only (they aren't needed on green runs, and this
+      # avoids publishing env/path details from passing runs). `include-hidden-files`
+      # is required because the logs live under the dot-dir ~/.auto-mobile.
       - name: "Upload AutoMobile daemon logs"
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: automobile-daemon-logs-xctestrunner
           path: ~/.auto-mobile/logs/
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 

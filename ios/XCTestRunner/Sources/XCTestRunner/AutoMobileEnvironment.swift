@@ -140,17 +140,33 @@ public enum DaemonManager {
         return runDaemonSubcommand("restart", repoRoot: repoRoot)
     }
 
-    private static func runDaemonSubcommand(_ subcommand: String, repoRoot _: String? = nil) -> Bool {
-        PerfTimer.log("runDaemonSubcommand(\(subcommand)): searching for auto-mobile executable")
-        guard let autoMobilePath = findExecutable("auto-mobile") else {
-            PerfTimer.log("runDaemonSubcommand: ERROR - auto-mobile not found in PATH")
-            return false
+    private static func runDaemonSubcommand(_ subcommand: String, repoRoot: String? = nil) -> Bool {
+        // When a repo root with a built entrypoint is provided, launch *that* checkout's daemon
+        // (`<repoRoot>/dist/src/index.js`) rather than whatever `auto-mobile` is on PATH — so a
+        // caller that knows its source build gets a version/build-matched daemon (#2744) instead of
+        // a same-release-but-different-checkout PATH binary. Falls back to the PATH binary otherwise.
+        let executableURL: URL
+        let arguments: [String]
+        if let localEntry = resolveRepoRootDaemonEntryScript(repoRoot),
+           let runtime = findExecutable("bun") ?? findExecutable("node")
+        {
+            PerfTimer.log("runDaemonSubcommand(\(subcommand)): launching local build at \(localEntry)")
+            executableURL = URL(fileURLWithPath: runtime)
+            arguments = [localEntry, "--daemon", subcommand]
+        } else {
+            PerfTimer.log("runDaemonSubcommand(\(subcommand)): searching for auto-mobile executable")
+            guard let autoMobilePath = findExecutable("auto-mobile") else {
+                PerfTimer.log("runDaemonSubcommand: ERROR - auto-mobile not found in PATH")
+                return false
+            }
+            PerfTimer.log("runDaemonSubcommand: found auto-mobile at \(autoMobilePath)")
+            executableURL = URL(fileURLWithPath: autoMobilePath)
+            arguments = ["--daemon", subcommand]
         }
-        PerfTimer.log("runDaemonSubcommand: found auto-mobile at \(autoMobilePath)")
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: autoMobilePath)
-        process.arguments = ["--daemon", subcommand]
+        process.executableURL = executableURL
+        process.arguments = arguments
 
         // Inherit essential environment variables for device discovery
         var env = ProcessInfo.processInfo.environment
@@ -279,19 +295,15 @@ public enum DaemonManager {
         return false
     }
 
-    private static func findRepoRoot() -> String? {
-        var current = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        for _ in 0 ..< 10 {
-            let packageJson = current.appendingPathComponent("package.json")
-            let srcIndex = current.appendingPathComponent("src/index.ts")
-            if FileManager.default.fileExists(atPath: packageJson.path),
-               FileManager.default.fileExists(atPath: srcIndex.path)
-            {
-                return current.path
-            }
-            current = current.deletingLastPathComponent()
+    /// Resolve the built daemon entrypoint under a caller-provided repo root, or nil when no root
+    /// is given or the build is absent (so the caller falls back to the PATH `auto-mobile`).
+    static func resolveRepoRootDaemonEntryScript(_ repoRoot: String?) -> String? {
+        guard let repoRoot = repoRoot, !repoRoot.isEmpty else {
+            return nil
         }
-        return nil
+        let entry = URL(fileURLWithPath: repoRoot)
+            .appendingPathComponent("dist/src/index.js").path
+        return FileManager.default.fileExists(atPath: entry) ? entry : nil
     }
 
     private static func findExecutable(_ name: String) -> String? {

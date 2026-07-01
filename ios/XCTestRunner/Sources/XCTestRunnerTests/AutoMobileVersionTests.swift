@@ -40,4 +40,24 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertFalse(DaemonManager.requiresVersionSkewRestart(daemonVersion: "  ", clientVersion: "0.0.40"))
         XCTAssertFalse(DaemonManager.requiresVersionSkewRestart(daemonVersion: "0.0.40", clientVersion: ""))
     }
+
+    func testResolveRepoRootDaemonEntryScript() throws {
+        XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(nil))
+        XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(""))
+
+        let repoRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("automobile-reporoot-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: repoRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        // No built entrypoint yet -> nil.
+        XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(repoRoot.path))
+
+        let distDir = repoRoot.appendingPathComponent("dist/src")
+        try FileManager.default.createDirectory(at: distDir, withIntermediateDirectories: true)
+        let entry = distDir.appendingPathComponent("index.js")
+        try "// entry".write(to: entry, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(DaemonManager.resolveRepoRootDaemonEntryScript(repoRoot.path), entry.path)
+    }
 }

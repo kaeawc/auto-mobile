@@ -97,6 +97,7 @@ public enum DaemonManager {
         public let socketPath: String?
         public let startedAt: Int64?
         public let version: String?
+        public let entryScript: String?
     }
 
     public static var pidFilePath: String {
@@ -206,6 +207,32 @@ public enum DaemonManager {
         return version
     }
 
+    /// The daemon's recorded entry-script path from its PID file, trimmed, or nil when absent.
+    static func readDaemonEntryScriptFromPidFile() -> String? {
+        guard let data = FileManager.default.contents(atPath: pidFilePath),
+              let pidData = try? JSONDecoder().decode(PidFileData.self, from: data),
+              let entryScript = pidData.entryScript?.trimmingCharacters(in: .whitespaces),
+              !entryScript.isEmpty
+        else {
+            return nil
+        }
+        return entryScript
+    }
+
+    /// When a caller supplies a repo root with a built entrypoint, whether the running daemon was
+    /// started from a *different* entry script — i.e. a same-release daemon from another checkout
+    /// that the release-only version check cannot tell apart (#2744). No-op without a repoRoot build
+    /// or when the daemon records no entry script (a skew cannot be proven).
+    static func requiresRepoRootBuildSkew(daemonEntryScript: String?, repoRoot: String?) -> Bool {
+        guard let expectedEntry = resolveRepoRootDaemonEntryScript(repoRoot) else {
+            return false
+        }
+        guard let daemonEntry = daemonEntryScript?.trimmingCharacters(in: .whitespaces), !daemonEntry.isEmpty else {
+            return false
+        }
+        return daemonEntry != expectedEntry
+    }
+
     /// The release portion of a version string — everything before the `+g<sha>` dev stamp.
     /// Mirrors the daemon's `releaseVersion`, so a git-stamped source-checkout daemon compares
     /// equal to this runner's plain release.
@@ -233,17 +260,22 @@ public enum DaemonManager {
         if isDaemonRunning() {
             // A stale different-build daemon on the shared socket would reject this runner's
             // version handshake (#2744). Restart it before reuse so we self-heal instead of
-            // failing, mirroring the Android/TS version-skew restart.
-            if requiresVersionSkewRestart(
+            // failing, mirroring the Android/TS version-skew restart. When a repoRoot is supplied,
+            // also restart a same-release daemon started from a different checkout's entry script.
+            let versionSkew = requiresVersionSkewRestart(
                 daemonVersion: readDaemonVersionFromPidFile(),
                 clientVersion: AutoMobileVersion.current
+            )
+            if versionSkew || requiresRepoRootBuildSkew(
+                daemonEntryScript: readDaemonEntryScriptFromPidFile(),
+                repoRoot: repoRoot
             ) {
-                PerfTimer.log("ensureDaemonRunning: daemon version skew, restarting")
+                PerfTimer.log("ensureDaemonRunning: daemon version/build skew, restarting")
                 guard restartDaemon(repoRoot: repoRoot) else {
                     PerfTimer.log("ensureDaemonRunning: restartDaemon failed")
                     return false
                 }
-                return waitForVersionMatchedDaemon(timeoutSeconds: timeoutSeconds)
+                return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds)
             }
             PerfTimer.log("ensureDaemonRunning: daemon already running")
             return true
@@ -255,7 +287,7 @@ public enum DaemonManager {
             return false
         }
 
-        return waitForVersionMatchedDaemon(timeoutSeconds: timeoutSeconds)
+        return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds)
     }
 
     /// Wait for the daemon to become ready and confirm its recorded version matches this runner's.
@@ -264,7 +296,7 @@ public enum DaemonManager {
     /// pid/socket liveness, so without this a wrong-version daemon would look "ready" while its
     /// handshake gate (#2744) rejects every subsequent request. A daemon that records no version is
     /// accepted (a skew cannot be proven), matching the gate's lenient stance.
-    private static func waitForVersionMatchedDaemon(timeoutSeconds: TimeInterval) -> Bool {
+    private static func waitForVersionMatchedDaemon(repoRoot: String?, timeoutSeconds: TimeInterval) -> Bool {
         PerfTimer.log("ensureDaemonRunning: waiting for daemon")
         guard waitForDaemon(timeoutSeconds: timeoutSeconds) else {
             return false
@@ -272,8 +304,8 @@ public enum DaemonManager {
         if requiresVersionSkewRestart(
             daemonVersion: readDaemonVersionFromPidFile(),
             clientVersion: AutoMobileVersion.current
-        ) {
-            PerfTimer.log("ensureDaemonRunning: daemon version still differs from runner after launch")
+        ) || requiresRepoRootBuildSkew(daemonEntryScript: readDaemonEntryScriptFromPidFile(), repoRoot: repoRoot) {
+            PerfTimer.log("ensureDaemonRunning: daemon still differs from runner after launch")
             return false
         }
         return true

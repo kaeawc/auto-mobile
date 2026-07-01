@@ -60,4 +60,31 @@ final class AutoMobileVersionTests: XCTestCase {
 
         XCTAssertEqual(DaemonManager.resolveRepoRootDaemonEntryScript(repoRoot.path), entry.path)
     }
+
+    func testRequiresRepoRootBuildSkew() throws {
+        // No repoRoot build -> never a skew, regardless of the daemon's entry script.
+        XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(
+            daemonEntryScript: "/x/dist/src/index.js",
+            repoRoot: nil
+        ))
+
+        let repoRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("automobile-rrskew-\(UUID().uuidString)")
+        let distDir = repoRoot.appendingPathComponent("dist/src")
+        try FileManager.default.createDirectory(at: distDir, withIntermediateDirectories: true)
+        let entry = distDir.appendingPathComponent("index.js")
+        try "// entry".write(to: entry, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        // Daemon started from a different checkout's entry script -> skew.
+        XCTAssertTrue(DaemonManager.requiresRepoRootBuildSkew(
+            daemonEntryScript: "/other/dist/src/index.js", repoRoot: repoRoot.path
+        ))
+        // Daemon started from this repoRoot's entry script -> no skew.
+        XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(
+            daemonEntryScript: entry.path, repoRoot: repoRoot.path
+        ))
+        // Daemon records no entry script -> cannot prove skew.
+        XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(daemonEntryScript: nil, repoRoot: repoRoot.path))
+    }
 }

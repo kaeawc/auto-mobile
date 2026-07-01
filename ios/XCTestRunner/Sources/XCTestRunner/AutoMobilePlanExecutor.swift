@@ -809,6 +809,13 @@ public final class AutoMobilePlanExecutor {
     public func execute(testMetadata: TestMetadata? = nil) throws -> ExecutePlanResult {
         var lastError: Error?
 
+        // Preflight the daemon before the first attempt so a stale/version-skewed daemon on the
+        // shared socket is restarted even with the default retryCount of 0, which never enters the
+        // retry branch below (#2744). No-op for HTTP transport.
+        if case .daemonUnixSocket = configuration.transport {
+            _ = DaemonManager.ensureDaemonRunning()
+        }
+
         for attempt in 0 ... configuration.retryCount {
             do {
                 if attempt > 0 {

@@ -1,11 +1,8 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of a recent apps navigation operation
  */
-export interface RecentAppsResult {
-    success: boolean;
+export interface RecentAppsResult extends BaseActionResult {
     method: "gesture" | "legacy" | "hardware" | "ios_swipe";
-    observation?: ObserveResult;
-    error?: string;
 }

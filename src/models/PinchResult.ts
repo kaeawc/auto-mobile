@@ -1,10 +1,7 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
-export interface PinchResult {
-  success: boolean;
+export interface PinchResult extends BaseActionResult {
   startingMagnitude: number;
   endingMagnitude: number;
   duration: number;
-  observation?: ObserveResult;
-  error?: string;
 }

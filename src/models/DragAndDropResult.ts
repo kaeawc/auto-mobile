@@ -1,11 +1,8 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
-export interface DragAndDropResult {
-  success: boolean;
+export interface DragAndDropResult extends BaseActionResult {
   duration: number;
   distance: number;
-  observation?: ObserveResult;
-  error?: string;
   a11yTotalTimeMs?: number;
   a11yGestureTimeMs?: number;
 }

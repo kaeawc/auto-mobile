@@ -1,10 +1,9 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of an install app operation
  */
-export interface InstallAppResult {
-  success: boolean;
+export interface InstallAppResult extends BaseActionResult {
   artifactPath: string;
   /** Android user ID where the app was installed (0 for primary user, 10+ for work profiles) */
   userId?: number;
@@ -14,6 +13,4 @@ export interface InstallAppResult {
   upgrade?: boolean;
   /** Warning message when best-effort detection was required */
   warning?: string;
-  observation?: ObserveResult;
-  error?: string;
 }

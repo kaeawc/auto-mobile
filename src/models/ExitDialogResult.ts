@@ -1,15 +1,12 @@
 import { Element } from "./Element";
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of an exit dialog operation
  */
-export interface ExitDialogResult {
-  success: boolean;
+export interface ExitDialogResult extends BaseActionResult {
   elementFound: boolean;
   element?: Element;
   x?: number;
   y?: number;
-  observation?: ObserveResult;
-  error?: string;
 }

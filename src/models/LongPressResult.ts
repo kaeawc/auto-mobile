@@ -1,14 +1,11 @@
-import { ObserveResult } from "./ObserveResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /**
  * Result of a long press operation
  */
-export interface LongPressResult {
-  success: boolean;
+export interface LongPressResult extends BaseActionResult {
   x: number;
   y: number;
-  observation?: ObserveResult;
-  error?: string;
   pressRecognized?: boolean;
   contextMenuOpened?: boolean;
   selectionStarted?: boolean;

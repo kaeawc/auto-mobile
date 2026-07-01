@@ -89,14 +89,15 @@ export function hasClientHandshake(handshake: ClientHandshake): boolean {
  * - Build gate (checked first): reject when both sides expose a known build id
  *   and it differs. Version-only clients (Kotlin/Swift) skip this branch because
  *   {@link buildIdentitiesMatch} treats an unknown id as a match.
- * - Version gate: a version-only client is compared on the release portion (so a
- *   plain `0.0.40` still matches a source-checkout daemon's `0.0.40+g<sha>`). A
- *   client that supplies a build identity (the TS client) is instead held to the
- *   **full** dev-stamped version: its entry-script build hash is blind to changes
- *   in imported files (same `argv[1]`, different commit), so the git stamp is the
- *   only signal for same-entry dev-skew — the #2732 case that a TS socket client
- *   bypassing {@link DaemonMcpProxy} (e.g. the CLI's direct `DaemonClient`) would
- *   otherwise slip past.
+ * - Version gate: a client that declares a **git-stamped** version (carries
+ *   `+g<sha>` build metadata — the TS client, including the CLI's direct
+ *   `DaemonClient`) is held to the full version, catching same-entry/different-commit
+ *   dev-skew the entry-script hash is blind to (#2732). A client that declares only a
+ *   plain release (`0.0.40`) is compared on the release portion so it still matches a
+ *   source-checkout daemon's `0.0.40+g<sha>` — this holds **even when it also sends a
+ *   build id** (the Android local-override runner, which can't compute the daemon's
+ *   git stamp), so a matching local build is not rejected over the plain-vs-stamped
+ *   difference. Build identity above is the independent guard for those clients.
  */
 export function evaluateClientHandshake(
   daemon: DaemonSelfIdentity,
@@ -110,8 +111,6 @@ export function evaluateClientHandshake(
     entryScript: client.clientEntryScript ?? "",
     buildId: client.clientBuildId ?? "unknown",
   };
-  const clientDeclaresBuildId =
-    (client.clientBuildId?.length ?? 0) > 0 && client.clientBuildId !== "unknown";
 
   if (!buildIdentitiesMatch(daemon.build, clientBuild)) {
     return {
@@ -128,13 +127,20 @@ export function evaluateClientHandshake(
   const clientVersion = client.clientVersion;
   if (clientVersion) {
     const daemonFull = daemon.version.trim();
-    const versionsDiffer = clientDeclaresBuildId
+    // A client that declares a *git-stamped* version (carries `+g<sha>` build metadata) knows its
+    // exact commit, so hold it to the full version — this catches same-entry/different-commit
+    // dev-skew the entry-script hash is blind to (the CLI direct-`DaemonClient` case). A client
+    // that declares only a plain release (e.g. the Android local-override runner, which cannot
+    // compute the daemon's git stamp) is compared on the release portion *even when it also sends a
+    // build id*, so a matching local build is not rejected over a spurious plain-vs-stamped diff.
+    const clientDeclaresFullVersion = releaseVersion(clientVersion) !== clientVersion;
+    const versionsDiffer = clientDeclaresFullVersion
       ? daemonFull.length > 0 && daemonFull !== clientVersion
       : (() => {
-          const clientBase = releaseVersion(clientVersion);
-          const daemonBase = releaseVersion(daemonFull);
-          return clientBase.length > 0 && daemonBase.length > 0 && clientBase !== daemonBase;
-        })();
+        const clientBase = releaseVersion(clientVersion);
+        const daemonBase = releaseVersion(daemonFull);
+        return clientBase.length > 0 && daemonBase.length > 0 && clientBase !== daemonBase;
+      })();
     if (versionsDiffer) {
       return {
         ok: false,

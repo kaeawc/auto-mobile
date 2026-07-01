@@ -8,9 +8,16 @@
 # test ("Failed to start AutoMobile Daemon. Ensure auto-mobile is installed and
 # on PATH.") into a loud, deterministic CI gate with a clear diagnostic (#2730).
 #
-# Root cause: `bun add -g .` installs the CLI under ~/.bun/bin, which is not on
-# $GITHUB_PATH by default, so the `swift test` subprocess could not resolve
-# `auto-mobile` and skipped the test.
+# Root cause: `bun add -g .` does not reliably produce a runnable `auto-mobile`
+# bin on the CI runner — the global copy under ~/.bun/install can lack dist/,
+# leaving a dangling ~/.bun/bin/auto-mobile symlink that resolves to nothing — and
+# ~/.bun/bin is not on $GITHUB_PATH anyway. So the `swift test` subprocess could
+# not resolve `auto-mobile` and the test silently skipped.
+#
+# Fix: put ~/.bun/bin on PATH/$GITHUB_PATH, and if `auto-mobile` still does not
+# resolve, symlink it onto the freshly-built workspace entrypoint
+# (dist/src/index.js, a `#!/usr/bin/env bun` executable that version-matches this
+# checkout — the same entry scripts/ci/daemon-lifecycle.sh runs directly).
 #
 # Usage:
 #   ./scripts/ci/ensure-daemon-ready.sh
@@ -21,20 +28,35 @@
 
 set -uo pipefail
 
-# Refresh PATH — `bun add -g .` installs the CLI under ~/.bun/bin, which is the
-# exact gap that made `swift test` fail to resolve `auto-mobile`.
-export PATH="${HOME}/.bun/bin:${PATH}"
+REPO_ROOT="${GITHUB_WORKSPACE:-$PWD}"
+DIST_ENTRY="${REPO_ROOT}/dist/src/index.js"
+BUN_BIN_DIR="${HOME}/.bun/bin"
+
+# Refresh PATH — `bun add -g .` installs under ~/.bun/bin, which is not otherwise
+# on PATH here.
+export PATH="${BUN_BIN_DIR}:${PATH}"
 hash -r 2>/dev/null || true
 
 # Persist the bin dir for the *subsequent* workflow steps: `swift test` spawns
 # `auto-mobile` as a child, so it needs the same PATH.
 if [[ -n "${GITHUB_PATH:-}" ]]; then
-  echo "${HOME}/.bun/bin" >> "${GITHUB_PATH}"
+  echo "${BUN_BIN_DIR}" >> "${GITHUB_PATH}"
+fi
+
+# If the global install did not leave a runnable `auto-mobile`, link it onto the
+# built workspace entrypoint (guaranteed to exist after `turbo run build`).
+if ! command -v auto-mobile >/dev/null 2>&1; then
+  if [[ -x "${DIST_ENTRY}" ]]; then
+    echo "auto-mobile not resolvable from global install; linking ${BUN_BIN_DIR}/auto-mobile -> ${DIST_ENTRY}"
+    mkdir -p "${BUN_BIN_DIR}"
+    ln -sf "${DIST_ENTRY}" "${BUN_BIN_DIR}/auto-mobile"
+    hash -r 2>/dev/null || true
+  fi
 fi
 
 if ! command -v auto-mobile >/dev/null 2>&1; then
-  echo "::error::auto-mobile is not on PATH after global install (expected in ${HOME}/.bun/bin)." >&2
-  echo "The XCTestRunner Swift tests cannot start the daemon without it. Did 'bun add -g .' run?" >&2
+  echo "::error::auto-mobile is not on PATH and no built entrypoint at ${DIST_ENTRY}." >&2
+  echo "Did 'turbo run build' and 'bun add -g .' run in setup-auto-mobile-npm-package?" >&2
   exit 1
 fi
 echo "auto-mobile resolved at: $(command -v auto-mobile)"

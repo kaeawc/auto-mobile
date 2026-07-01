@@ -53,12 +53,34 @@ SCRIPT
   head -1 "$SCRIPT" | grep -q "bash"
 }
 
-@test "fails fast with a clear diagnostic when auto-mobile is not on PATH" {
-  # No mock created and PATH stripped to system dirs → auto-mobile is unresolvable.
-  run env PATH="/usr/bin:/bin" bash "$SCRIPT"
+@test "fails fast with a clear diagnostic when auto-mobile is unresolvable and no built entry exists" {
+  # No mock, PATH stripped, and an empty workspace → nothing to link, so it fails loudly.
+  EMPTY_WS="$(mktemp -d)"
+  run env PATH="/usr/bin:/bin" GITHUB_WORKSPACE="$EMPTY_WS" bash "$SCRIPT"
+  rm -rf "$EMPTY_WS"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"auto-mobile is not on PATH"* ]]
-  [[ "$output" == *"bun add -g"* ]]
+  [[ "$output" == *"no built entrypoint"* ]]
+}
+
+@test "links auto-mobile onto the built workspace entry when the global install is missing" {
+  # Simulate a runner where `bun add -g .` left no runnable bin, but the build did
+  # produce dist/src/index.js. The script should link to it and reach the daemon.
+  WS="$(mktemp -d)"
+  mkdir -p "${WS}/dist/src"
+  cat > "${WS}/dist/src/index.js" <<'SCRIPT'
+#!/usr/bin/env bash
+if [ "$1" = "--daemon" ] && { [ "$2" = "start" ] || [ "$2" = "health" ]; }; then
+  exit 0
+fi
+exit 0
+SCRIPT
+  chmod +x "${WS}/dist/src/index.js"
+
+  run env PATH="/usr/bin:/bin" GITHUB_WORKSPACE="$WS" bash "$SCRIPT"
+  rm -rf "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"linking"* ]]
+  [[ "$output" == *"Daemon ready"* ]]
 }
 
 @test "succeeds once the daemon reports healthy on the first poll" {

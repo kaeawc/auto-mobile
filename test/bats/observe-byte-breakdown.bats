@@ -128,8 +128,18 @@ teardown() {
 
 @test "does not hang on the large fixture in a UTF-8 locale" {
   # Regression guard for the ${var//[[:space:]]/} perf cliff, which only
-  # manifested in a multibyte locale.
-  run env LC_ALL=en_US.UTF-8 timeout 20 bash "$SCRIPT" "test/fixtures/observe/android-home.json"
+  # manifested in a multibyte locale. `timeout` is GNU coreutils and is absent
+  # on macOS (may be `gtimeout`), so detect it and fall back to a direct run
+  # where neither exists — the job-level timeout is then the backstop.
+  local timeout_bin=""
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_bin="timeout 30"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_bin="gtimeout 30"
+  fi
+  # A missing en_US.UTF-8 locale makes bash warn and fall back to C (still a
+  # valid run); where the locale exists this exercises the multibyte path.
+  run env LC_ALL=en_US.UTF-8 bash -c "${timeout_bin} bash '$SCRIPT' 'test/fixtures/observe/android-home.json'"
   [ "$status" -eq 0 ]
   [[ "$output" == *"performanceAudit"* ]]
 }

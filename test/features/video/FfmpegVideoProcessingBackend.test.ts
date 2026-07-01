@@ -686,6 +686,28 @@ describe("waitForRecordingFileReady - post-exit file finalization", function() {
     expect(calls()).toBeGreaterThan(0);
   });
 
+  test("throws a 'disappeared after appearing' diagnostic when a file vanishes and never returns", async function() {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    // File shows up with bytes, then vanishes (e.g. simctl cleanup on error) and never comes back.
+    const { probe } = scriptedProbe([1024, null]);
+
+    let thrown: unknown;
+    try {
+      await waitForRecordingFileReady("/tmp/rec-raw.mov", {
+        probe,
+        timer,
+        timeoutMs: 1000,
+        backoff: 100,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("disappeared after appearing");
+  });
+
   test("throws a 'stayed empty' diagnostic when the file never gets bytes", async function() {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

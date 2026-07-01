@@ -47,6 +47,8 @@ max_attempts="${DAEMON_READY_MAX_ATTEMPTS:-30}"
 delay="${DAEMON_READY_DELAY_SECONDS:-1}"
 attempt=1
 while (( attempt <= max_attempts )); do
+  # `--daemon health` exits 0 only when the daemon is running AND its socket is
+  # connectable (see getDaemonHealthReport in src/daemon/manager.ts); non-zero otherwise.
   if auto-mobile --daemon health >/dev/null 2>&1; then
     echo "Daemon ready after ${attempt} attempt(s)."
     exit 0
@@ -54,8 +56,8 @@ while (( attempt <= max_attempts )); do
   echo "Daemon not ready yet (attempt ${attempt}/${max_attempts}); retrying in ${delay}s..."
   sleep "${delay}"
   # Linear-capped backoff: 1s, 2s, ... up to 5s between polls.
-  (( delay < 5 )) && (( delay++ ))
-  (( attempt++ ))
+  (( delay < 5 )) && delay=$((delay + 1))
+  attempt=$((attempt + 1))
 done
 
 echo "::error::AutoMobile daemon did not become ready after ${max_attempts} attempts." >&2

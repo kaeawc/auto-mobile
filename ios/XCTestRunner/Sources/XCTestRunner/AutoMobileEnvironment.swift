@@ -184,6 +184,20 @@ public enum DaemonManager {
         return runDaemonSubcommand("start", repoRoot: repoRoot)
     }
 
+    /// Map a launch/restart outcome to the startup failure it represents, or nil when the process
+    /// launched cleanly. Pure so the failure-cause mapping is unit-testable without spawning a
+    /// process, and shared by the start and restart paths so both stay in sync.
+    static func startupFailure(for outcome: DaemonSubcommandOutcome) -> DaemonStartupResult? {
+        switch outcome {
+        case .launched:
+            return nil
+        case .executableNotFound:
+            return .executableNotFound
+        case .failed:
+            return .launchFailed
+        }
+    }
+
     /// Restart the daemon in place — used to replace a stale different-build daemon that owns
     /// the shared per-uid socket (#2744) so the runner self-heals instead of failing the
     /// version handshake. Mirrors the Android runner's PID-file version-skew restart.
@@ -368,15 +382,9 @@ public enum DaemonManager {
                 repoRoot: repoRoot
             ) {
                 PerfTimer.log("ensureDaemonRunning: daemon version/build skew, restarting")
-                switch runDaemonSubcommand("restart", repoRoot: repoRoot) {
-                case .executableNotFound:
-                    PerfTimer.log("ensureDaemonRunning: restartDaemon failed - executable not found")
-                    return .executableNotFound
-                case .failed:
-                    PerfTimer.log("ensureDaemonRunning: restartDaemon failed")
-                    return .launchFailed
-                case .launched:
-                    break
+                if let failure = startupFailure(for: runDaemonSubcommand("restart", repoRoot: repoRoot)) {
+                    PerfTimer.log("ensureDaemonRunning: restartDaemon failed - \(failure)")
+                    return failure
                 }
                 return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds)
             }
@@ -385,15 +393,9 @@ public enum DaemonManager {
         }
 
         PerfTimer.log("ensureDaemonRunning: starting daemon")
-        switch startDaemonOutcome(repoRoot: repoRoot) {
-        case .executableNotFound:
-            PerfTimer.log("ensureDaemonRunning: startDaemon failed - executable not found")
-            return .executableNotFound
-        case .failed:
-            PerfTimer.log("ensureDaemonRunning: startDaemon failed")
-            return .launchFailed
-        case .launched:
-            break
+        if let failure = startupFailure(for: startDaemonOutcome(repoRoot: repoRoot)) {
+            PerfTimer.log("ensureDaemonRunning: startDaemon failed - \(failure)")
+            return failure
         }
 
         return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds)

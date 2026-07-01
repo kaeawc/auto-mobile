@@ -329,6 +329,15 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertEqual(Set(messages).count, messages.count)
     }
 
+    func testStartupFailureMapsLaunchOutcomesToTheRealCause() {
+        // A clean launch is not a failure — the readiness path proceeds to wait for the socket.
+        XCTAssertNil(DaemonManager.startupFailure(for: .launched))
+        // A missing CLI and a non-zero launch must map to *distinct* causes, not collapse into one
+        // (this is the switch-arm-typo guard the enum-message test can't catch).
+        XCTAssertEqual(DaemonManager.startupFailure(for: .executableNotFound), .executableNotFound)
+        XCTAssertEqual(DaemonManager.startupFailure(for: .failed), .launchFailed)
+    }
+
     func testExecutePlanFailureFallsBackToErrorWhenNoFailedStep() throws {
         let planContent = "name: Fail Plan\nsteps:\n  - tool: observe"
         let planLoader = FakePlanLoader(content: planContent)

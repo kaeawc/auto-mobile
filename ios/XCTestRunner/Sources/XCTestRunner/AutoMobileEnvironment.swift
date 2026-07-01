@@ -91,7 +91,49 @@ enum SimulatorDetection {
     }
 }
 
+/// The concrete reason a daemon-startup attempt succeeded or failed. Surfaced to
+/// callers (e.g. the XCTest skip message) so a failure names the actual cause
+/// instead of a generic "install and on PATH" note that hides an executable-not-found
+/// vs. launch-failure vs. readiness-timeout distinction (#2730).
+public enum DaemonStartupResult: Equatable {
+    case ready
+    case executableNotFound
+    case launchFailed
+    case readinessTimeout
+    case versionSkew
+
+    public var isReady: Bool { self == .ready }
+
+    public var diagnosticMessage: String {
+        switch self {
+        case .ready:
+            return "AutoMobile daemon is ready."
+        case .executableNotFound:
+            return "Failed to start AutoMobile Daemon: the `auto-mobile` CLI was not found "
+                + "(checked /usr/local/bin, /opt/homebrew/bin, /usr/bin, ~/.bun/bin, ~/.local/bin and PATH). "
+                + "Install it globally (`bun add -g .`) and ensure its bin directory is on PATH."
+        case .launchFailed:
+            return "Failed to start AutoMobile Daemon: `auto-mobile --daemon start` exited non-zero. "
+                + "Check the daemon logs."
+        case .readinessTimeout:
+            return "Failed to start AutoMobile Daemon: the daemon process launched but its socket did not "
+                + "become ready before the timeout. Check the daemon logs."
+        case .versionSkew:
+            return "Failed to start AutoMobile Daemon: a different-version daemon owns the socket and could "
+                + "not be reconciled with this runner."
+        }
+    }
+}
+
 public enum DaemonManager {
+    /// Outcome of launching an `auto-mobile --daemon <subcommand>` process, distinguishing a
+    /// missing executable from a launched-but-failed process so callers can report the real cause.
+    enum DaemonSubcommandOutcome: Equatable {
+        case launched
+        case executableNotFound
+        case failed
+    }
+
     public struct PidFileData: Decodable {
         public let pid: Int
         public let port: Int?
@@ -133,6 +175,12 @@ public enum DaemonManager {
     }
 
     public static func startDaemon(repoRoot: String? = nil) -> Bool {
+        return runDaemonSubcommand("start", repoRoot: repoRoot) == .launched
+    }
+
+    /// Launch the daemon, returning the granular outcome (missing CLI vs. failed launch vs. launched)
+    /// so the readiness path can report the real cause rather than a bare bool.
+    static func startDaemonOutcome(repoRoot: String? = nil) -> DaemonSubcommandOutcome {
         return runDaemonSubcommand("start", repoRoot: repoRoot)
     }
 
@@ -140,10 +188,10 @@ public enum DaemonManager {
     /// the shared per-uid socket (#2744) so the runner self-heals instead of failing the
     /// version handshake. Mirrors the Android runner's PID-file version-skew restart.
     public static func restartDaemon(repoRoot: String? = nil) -> Bool {
-        return runDaemonSubcommand("restart", repoRoot: repoRoot)
+        return runDaemonSubcommand("restart", repoRoot: repoRoot) == .launched
     }
 
-    private static func runDaemonSubcommand(_ subcommand: String, repoRoot: String? = nil) -> Bool {
+    private static func runDaemonSubcommand(_ subcommand: String, repoRoot: String? = nil) -> DaemonSubcommandOutcome {
         // When a repo root with a built entrypoint is provided, launch *that* checkout's daemon
         // (`<repoRoot>/dist/src/index.js`) rather than whatever `auto-mobile` is on PATH — so a
         // caller that knows its source build gets a version/build-matched daemon (#2744) instead of
@@ -160,7 +208,7 @@ public enum DaemonManager {
             PerfTimer.log("runDaemonSubcommand(\(subcommand)): searching for auto-mobile executable")
             guard let autoMobilePath = findExecutable("auto-mobile") else {
                 PerfTimer.log("runDaemonSubcommand: ERROR - auto-mobile not found in PATH")
-                return false
+                return .executableNotFound
             }
             PerfTimer.log("runDaemonSubcommand: found auto-mobile at \(autoMobilePath)")
             executableURL = URL(fileURLWithPath: autoMobilePath)
@@ -190,10 +238,10 @@ public enum DaemonManager {
             process.waitUntilExit()
             let status = process.terminationStatus
             PerfTimer.log("runDaemonSubcommand: process exited with status \(status)")
-            return status == 0
+            return status == 0 ? .launched : .failed
         } catch {
             PerfTimer.log("runDaemonSubcommand: ERROR - failed to run process: \(error)")
-            return false
+            return .failed
         }
     }
 
@@ -294,6 +342,16 @@ public enum DaemonManager {
     }
 
     public static func ensureDaemonRunning(repoRoot: String? = nil, timeoutSeconds: TimeInterval = 15) -> Bool {
+        return ensureDaemonRunningResult(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds).isReady
+    }
+
+    /// Same behavior as `ensureDaemonRunning` but returns the granular `DaemonStartupResult` so
+    /// callers can report *why* startup failed (missing CLI, launch failure, readiness timeout,
+    /// version skew) instead of a generic message.
+    public static func ensureDaemonRunningResult(
+        repoRoot: String? = nil,
+        timeoutSeconds: TimeInterval = 15
+    ) -> DaemonStartupResult {
         PerfTimer.log("ensureDaemonRunning: checking isDaemonRunning")
         if isDaemonRunning() {
             // A stale different-build daemon on the shared socket would reject this runner's
@@ -310,20 +368,32 @@ public enum DaemonManager {
                 repoRoot: repoRoot
             ) {
                 PerfTimer.log("ensureDaemonRunning: daemon version/build skew, restarting")
-                guard restartDaemon(repoRoot: repoRoot) else {
+                switch runDaemonSubcommand("restart", repoRoot: repoRoot) {
+                case .executableNotFound:
+                    PerfTimer.log("ensureDaemonRunning: restartDaemon failed - executable not found")
+                    return .executableNotFound
+                case .failed:
                     PerfTimer.log("ensureDaemonRunning: restartDaemon failed")
-                    return false
+                    return .launchFailed
+                case .launched:
+                    break
                 }
                 return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds)
             }
             PerfTimer.log("ensureDaemonRunning: daemon already running")
-            return true
+            return .ready
         }
 
         PerfTimer.log("ensureDaemonRunning: starting daemon")
-        guard startDaemon(repoRoot: repoRoot) else {
+        switch startDaemonOutcome(repoRoot: repoRoot) {
+        case .executableNotFound:
+            PerfTimer.log("ensureDaemonRunning: startDaemon failed - executable not found")
+            return .executableNotFound
+        case .failed:
             PerfTimer.log("ensureDaemonRunning: startDaemon failed")
-            return false
+            return .launchFailed
+        case .launched:
+            break
         }
 
         return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds)
@@ -335,10 +405,13 @@ public enum DaemonManager {
     /// pid/socket liveness, so without this a wrong-version daemon would look "ready" while its
     /// handshake gate (#2744) rejects every subsequent request. A daemon that records no version is
     /// accepted (a skew cannot be proven), matching the gate's lenient stance.
-    private static func waitForVersionMatchedDaemon(repoRoot: String?, timeoutSeconds: TimeInterval) -> Bool {
+    private static func waitForVersionMatchedDaemon(
+        repoRoot: String?,
+        timeoutSeconds: TimeInterval
+    ) -> DaemonStartupResult {
         PerfTimer.log("ensureDaemonRunning: waiting for daemon")
         guard waitForDaemon(timeoutSeconds: timeoutSeconds) else {
-            return false
+            return .readinessTimeout
         }
         if requiresVersionSkewRestart(
             daemonVersion: readDaemonVersionFromPidFile(),
@@ -349,9 +422,9 @@ public enum DaemonManager {
             repoRoot: repoRoot
         ) {
             PerfTimer.log("ensureDaemonRunning: daemon still differs from runner after launch")
-            return false
+            return .versionSkew
         }
-        return true
+        return .ready
     }
 
     public static func waitForDaemon(timeoutSeconds: TimeInterval) -> Bool {

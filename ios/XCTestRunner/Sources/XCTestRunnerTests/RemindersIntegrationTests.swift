@@ -17,11 +17,11 @@ class RemindersIntegrationBase: AutoMobileTestCase {
             throw XCTSkip("No booted simulator found. Boot a simulator first.")
         }
 
-        let daemonRunning = PerfTimer.measure("DaemonManager.ensureDaemonRunning") {
-            DaemonManager.ensureDaemonRunning()
+        let daemonResult = PerfTimer.measure("DaemonManager.ensureDaemonRunning") {
+            DaemonManager.ensureDaemonRunningResult()
         }
-        guard daemonRunning else {
-            throw XCTSkip("Failed to start AutoMobile Daemon. Ensure auto-mobile is installed and on PATH.")
+        guard daemonResult.isReady else {
+            throw XCTSkip(daemonResult.diagnosticMessage)
         }
 
         let refreshResult = PerfTimer.measure("DaemonManager.refreshDevicePool") {

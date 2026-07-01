@@ -102,13 +102,17 @@ mirror can only serve unverified assets if you deliberately opt out of verificat
    itself. Pin it by installing the exact `@kaeawc/auto-mobile@0.0.40` on the runner's
    PATH, or start the daemon yourself before the test job. (Baking the pin into the
    Swift runner is tracked as follow-up work for #2746.)
-2. **Vendor the IPA and skip the build** so nothing is fetched or compiled at test time:
+2. **Vendor the IPA** so nothing is fetched or compiled at test time:
    ```bash
    export AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH=/opt/automobile/control-proxy.ipa
-   export AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD=1
    ```
-   (or set `AUTOMOBILE_ASSET_BASE_URL` to your mirror for a checksummed download of a
-   registry-known version).
+   The daemon copies (and extracts) this local bundle directly — no network fetch, no
+   Xcode build. **Do not also set `AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD=1`**: that flag
+   short-circuits `needsRebuild()` and returns *before* the vendored IPA is consumed, so
+   on a fresh host CtrlProxy would never be installed. Use `AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD=1`
+   only when the extracted xctestrun artifacts are *already* present on the host.
+   Alternatively, set `AUTOMOBILE_ASSET_BASE_URL` to your mirror for a checksummed
+   download of a registry-known version (leave the IPA path unset).
 3. **Gate the job** on doctor:
    ```bash
    bunx @kaeawc/auto-mobile@0.0.40 --cli doctor --ios

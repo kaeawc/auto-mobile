@@ -261,6 +261,56 @@ describe("CtrlProxyManager", function() {
       includes: (searchString: string) => stdout.includes(searchString)
     });
 
+    test("fails closed on an unknown pin even when CtrlProxy is already installed (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      try {
+        // Device already has CtrlProxy installed + enabled: the readiness path
+        // would otherwise accept it (status "skipped") without ever downloading.
+        const localFakeAdb = new FakeAdbExecutor();
+        localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: ""
+        });
+
+        AndroidCtrlProxyManager.resetInstances();
+        const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => localFakeAdb });
+
+        await expect(manager.ensureCompatibleVersion()).rejects.toThrow("not in the AutoMobile release");
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
+    test("accepts a preinstalled CtrlProxy on an unknown pin when checksum skip is set (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+      try {
+        const localFakeAdb = new FakeAdbExecutor();
+        localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: ""
+        });
+
+        AndroidCtrlProxyManager.resetInstances();
+        const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => localFakeAdb });
+
+        const result = await manager.ensureCompatibleVersion();
+        expect(result.status).toBe("skipped");
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
     test("should report compatible when installed SHA matches expected", async function() {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();

@@ -574,6 +574,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   async ensureCompatibleVersion(options: AccessibilityVersionCheckOptions = {}): Promise<AccessibilityVersionCheckResult> {
     const perf = createGlobalPerformanceTracker();
 
+    // Fail closed before any readiness shortcut (skipped/acceptedPreinstalled) can
+    // accept an unverifiable APK for an unknown explicit pin (#2746).
+    this.assertPinnedVersionVerifiable();
+
     if (!options.bypassVersionCheckCache && !options.allowDownloadWhenInstalled) {
       const cachedResult = this.getCachedVersionCheckResult();
       if (cachedResult) {
@@ -803,6 +807,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Download APK
    */
   async downloadApk(): Promise<string> {
+    // Defense-in-depth for direct callers: fail closed on an unverifiable pin
+    // before touching the filesystem or network (#2746).
+    this.assertPinnedVersionVerifiable();
     const perf = createGlobalPerformanceTracker();
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-"));
     const apkPath = path.join(tempDir, "control-proxy.apk");
@@ -856,16 +863,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
         logger.info("APK checksum verified successfully", { checksum: normalizedActual, source });
         perf.endOperation("checksumVerify");
-      } else if (isExplicitPin() && !isPinnedVersionKnown() && !this.shouldSkipChecksum()) {
-        // Fail closed: an explicitly-pinned version with no registry checksum cannot
-        // be integrity-verified. Silently downloading it (esp. from a mirror) would
-        // defeat the point of pinning (#2746). The skip override remains the escape
-        // hatch for a real-but-not-yet-baked release.
-        throw new ActionableError(
-          `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
-          `checksum registry, so the downloaded CtrlProxy APK cannot be integrity-verified. ` +
-          `Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.`
-        );
       } else {
         logger.warn("APK checksum verification SKIPPED - no checksum provided (development mode)", {
           apkUrl: resolveApkUrl()
@@ -1507,6 +1504,23 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return "";
     }
     return AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveApkChecksum();
+  }
+
+  /**
+   * Fail closed when a concrete `AUTOMOBILE_VERSION` is pinned to a version absent
+   * from the baked checksum registry: the APK cannot be integrity-verified, so
+   * silently downloading it — or accepting an already-installed APK of unknown
+   * provenance — defeats the point of pinning (#2746). `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM`
+   * (or a local APK path override) is the explicit escape hatch.
+   */
+  private assertPinnedVersionVerifiable(): void {
+    if (isExplicitPin() && !isPinnedVersionKnown() && !this.shouldSkipChecksum()) {
+      throw new ActionableError(
+        `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
+        `checksum registry, so the CtrlProxy APK cannot be integrity-verified. ` +
+        `Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.`
+      );
+    }
   }
 
   private getCachedVersionCheckResult(): AccessibilityVersionCheckResult | null {

@@ -203,6 +203,60 @@ describe("IOSCtrlProxyBuilder", function() {
       const result = await builder.needsRebuild("simulator");
       expect(result).toBe(false);
     });
+
+    test("fails closed on an unknown pin instead of reusing a cached bundle (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      try {
+        // A cached bundle + metadata exist, so without the guard needsRebuild would
+        // return false and setup would silently reuse the cached (wrong-version) runner.
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const productsDir = path.join(derivedDataPath, "Build", "Products");
+        await fs.mkdir(productsDir, { recursive: true });
+        await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+        const cacheDir = path.join(tempDir, "cache");
+        await fs.mkdir(cacheDir, { recursive: true });
+        await fs.writeFile(
+          path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
+          JSON.stringify({ checksum: "stale", version: "latest", extractedAt: new Date().toISOString() })
+        );
+
+        IOSCtrlProxyBuilder.resetInstances();
+        const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath, bundleCacheDir: cacheDir });
+
+        await expect(builder.needsRebuild("simulator")).rejects.toThrow("not in the AutoMobile release");
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
+    test("a vendored IPA path exempts the unknown-pin guard (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = path.join(tempDir, "vendored.ipa");
+      try {
+        IOSCtrlProxyBuilder.resetInstances();
+        const builder = IOSCtrlProxyBuilder.getInstance({
+          derivedDataPath: path.join(tempDir, "nonexistent"),
+          projectRoot: tempDir,
+        });
+
+        // No throw: a vendored bundle is the trusted escape hatch. Build products
+        // are missing, so it simply reports a rebuild is needed.
+        const result = await builder.needsRebuild();
+        expect(result).toBe(true);
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
   });
 
   describe("getBuildProductsPath", function() {

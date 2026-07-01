@@ -366,6 +366,11 @@ export class IOSCtrlProxyBuilder {
       return false;
     }
 
+    // Fail closed here too: without this, an unknown explicit pin with a cached
+    // bundle + metadata would return false and silently reuse the cached (possibly
+    // wrong-version) runner without ever reaching verifyBundle's guard (#2746).
+    this.assertPinnedVersionVerifiable();
+
     const xctestrunPath = await this.getXctestrunPath(platform);
     if (!xctestrunPath) {
       logger.info("[IOSCtrlProxyBuilder] CtrlProxy artifacts missing, need download");
@@ -762,22 +767,31 @@ export class IOSCtrlProxyBuilder {
         throw new Error(`CtrlProxy checksum verification failed. Expected: ${expectedChecksum}, Got: ${checksum}`);
       }
       logger.info("[IOSCtrlProxyBuilder] Bundle checksum verified", { checksum, source });
-    } else if (
+    } else {
+      this.assertPinnedVersionVerifiable();
+      logger.warn("[IOSCtrlProxyBuilder] Bundle checksum verification skipped (no checksum provided)");
+    }
+  }
+
+  /**
+   * Fail closed when a concrete `AUTOMOBILE_VERSION` is pinned to a version absent
+   * from the baked checksum registry: the bundle cannot be integrity-verified, so
+   * silently downloading or reusing it defeats the point of pinning (#2746). A
+   * vendored bundle (`AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH`) or an explicit checksum
+   * override is the trusted escape hatch.
+   */
+  private assertPinnedVersionVerifiable(): void {
+    if (
       isExplicitPin() &&
       !isPinnedVersionKnown() &&
       IOSCtrlProxyBuilder.expectedChecksumOverride === null &&
       this.getBundlePathOverride() === null
     ) {
-      // Fail closed: an explicitly-pinned version with no registry checksum cannot
-      // be integrity-verified. A vendored bundle (AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH)
-      // or an explicit checksum override is the trusted escape hatch (#2746).
       throw new ActionableError(
         `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
-        `checksum registry, so the downloaded CtrlProxy bundle cannot be integrity-verified. ` +
+        `checksum registry, so the CtrlProxy bundle cannot be integrity-verified. ` +
         `Pin a released version, or vendor a trusted bundle via AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH.`
       );
-    } else {
-      logger.warn("[IOSCtrlProxyBuilder] Bundle checksum verification skipped (no checksum provided)");
     }
   }
 

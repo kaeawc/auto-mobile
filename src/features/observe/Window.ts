@@ -21,18 +21,11 @@ export class Window implements WindowInterface {
 
   /**
    * Create a Window instance
-   * @param device - Optional device
-   * @param adbFactoryOrExecutor - Factory for creating AdbClient instances, or an AdbExecutor for testing
+   * @param device - Device to run ADB commands against
+   * @param adbFactory - Factory for creating AdbClient instances
    */
-  constructor(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory) {
-    // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
-      this.adb = (adbFactoryOrExecutor as AdbClientFactory).create(device);
-    } else if (adbFactoryOrExecutor) {
-      this.adb = adbFactoryOrExecutor as ExtendedAdbExecutor;
-    } else {
-      this.adb = defaultAdbClientFactory.create(device);
-    }
+  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
+    this.adb = adbFactory.create(device);
     this.device = device;
   }
 

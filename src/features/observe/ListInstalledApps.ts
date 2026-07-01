@@ -25,30 +25,23 @@ export class ListInstalledApps {
   private timer: Timer;
   /**
    * Create an ListInstalledApps instance
-   * @param device - Optional device
-   * @param adbFactoryOrExecutor - Factory for creating AdbClient instances, or an AdbExecutor for testing
+   * @param device - Device to run ADB commands against
+   * @param adbFactory - Factory for creating AdbClient instances
    * @param simctl - Optional SimCtlClient instance for testing
    * @param options - Optional cache configuration
    */
   constructor(
     device: BootedDevice,
-    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
     simctl: SimCtlClient | null = null,
     options: ListInstalledAppsOptions = {}
   ) {
-    // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
-      this.adb = (adbFactoryOrExecutor as AdbClientFactory).create(device);
-    } else if (adbFactoryOrExecutor) {
-      this.adb = adbFactoryOrExecutor as AdbExecutor;
-    } else {
-      this.adb = defaultAdbClientFactory.create(device);
-    }
+    this.adb = adbFactory.create(device);
     this.simctl = simctl || new SimCtlClient(device);
     this.device = device;
     this.installedAppsRepository = options.installedAppsRepository ?? new InstalledAppsRepository();
     // Enable caching by default when using the production factory
-    const defaultCacheEnabled = adbFactoryOrExecutor === defaultAdbClientFactory;
+    const defaultCacheEnabled = adbFactory === defaultAdbClientFactory;
     this.cacheEnabled = options.cacheEnabled ?? defaultCacheEnabled;
     this.timer = options.timer ?? defaultTimer;
   }

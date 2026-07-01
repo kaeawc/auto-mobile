@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Window, parseActiveWindowModern, parseActiveWindowLegacy, parseDumpsysWindowFocus } from "../../../src/features/observe/Window";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { ExecResult } from "../../../src/models/ExecResult";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import fs from "fs";
@@ -18,7 +19,7 @@ describe("Window", () => {
       platform: "android"
     };
     fakeAdb = new FakeAdbExecutor();
-    window = new Window(mockDevice, fakeAdb as any);
+    window = new Window(mockDevice, new FakeAdbClientFactory(fakeAdb));
     // Clear cache before each test to prevent stale results
     window.clearCache();
   });
@@ -31,7 +32,7 @@ describe("Window", () => {
         platform: "android"
       };
       const customAdb = new FakeAdbExecutor();
-      const windowInstance = new Window(mockDevice, customAdb as any);
+      const windowInstance = new Window(mockDevice, new FakeAdbClientFactory(customAdb));
       expect(windowInstance).toBeInstanceOf(Window);
     });
 
@@ -43,7 +44,7 @@ describe("Window", () => {
       };
       // Pass FakeAdbExecutor to avoid creating real AdbClient
       const defaultFakeAdb = new FakeAdbExecutor();
-      const windowInstance = new Window(mockDevice, defaultFakeAdb as any);
+      const windowInstance = new Window(mockDevice, new FakeAdbClientFactory(defaultFakeAdb));
       expect(windowInstance).toBeInstanceOf(Window);
     });
   });
@@ -187,7 +188,7 @@ describe("Window", () => {
           throw new Error("ADB command failed");
         }
       })();
-      const windowWithError = new Window(mockDevice, errorFakeAdb as any);
+      const windowWithError = new Window(mockDevice, new FakeAdbClientFactory(errorFakeAdb));
 
       const result = await windowWithError.getActive(true);
 

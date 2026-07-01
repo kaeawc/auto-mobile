@@ -233,8 +233,9 @@ export class NavigationScreenshotManager {
       // Ensure directory exists
       await this.fs.ensureDir(this.screenshotDir);
 
-      // 1. Capture screenshot
-      const capture = screenshotCapture ?? new TakeScreenshot(device, adb);
+      // 1. Capture screenshot. This manager holds a resolved AdbClient (not a factory),
+      // so wrap it in a trivial factory to satisfy TakeScreenshot's factory-only contract.
+      const capture = screenshotCapture ?? new TakeScreenshot(device, { create: () => adb });
       const result = await capture.execute();
 
       if (!result.success || !result.path) {

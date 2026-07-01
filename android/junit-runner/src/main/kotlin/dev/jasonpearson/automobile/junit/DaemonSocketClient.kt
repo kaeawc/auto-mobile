@@ -137,6 +137,23 @@ internal object DaemonSocketClientManager {
       )
     }
 
+    // executeCommand returns a CommandResult rather than throwing, and waitForAvailability only
+    // confirms socket liveness — a failed versioned bunx/npx restart that leaves the stale socket
+    // up, or a PATH `auto-mobile` fallback of a different version, would look "ready" while the
+    // daemon's handshake gate (#2744) rejects every request carrying clientVersion. Confirm the
+    // running daemon's version matches this runner before marking it ensured; a daemon that records
+    // no version is accepted (a skew cannot be proven).
+    if (DaemonSocketPaths.requiresVersionSkewRestart(
+        DaemonSocketPaths.readDaemonVersionFromPidFile(DaemonSocketPaths.pidFilePath()),
+        DaemonSocketPaths.resolveClientVersion(),
+    )) {
+      throw DaemonUnavailableException(
+          "AutoMobile daemon version still differs from this runner after (re)start; the shared " +
+              "socket is served by a different build. Ensure the same @kaeawc/auto-mobile version " +
+              "starts the daemon and runs the tests (e.g. set automobile.daemon.package.version)."
+      )
+    }
+
     // NOTE: Device pool initialization check removed to allow parallel test execution.
     // The daemon initializes its device pool at startup, and tests will wait for
     // devices as needed when they call executePlan.

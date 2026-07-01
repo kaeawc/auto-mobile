@@ -93,7 +93,14 @@ jobs:
           APK_SHA256_CHECKSUM: ${{ steps.verify_checksum.outputs.checksum }}
           IOS_CTRL_PROXY_SHA256_CHECKSUM:
             ${{ steps.verify_ipa_checksum.outputs.checksum }}
+          IOS_CTRL_PROXY_RUNNER_SHA256:
+            ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
         run: bash scripts/generate-release-constants.sh
+
+      - name: Verify release integrity
+        run: >
+          bash scripts/ci/verify-release-integrity.sh
+          "${{ steps.version.outputs.version }}"
 
       - name: Run tests
         env:

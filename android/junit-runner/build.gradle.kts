@@ -16,7 +16,11 @@ java {
   withSourcesJar()
 }
 
-// Version comes from root project's gradle.properties (VERSION_NAME)
+// The jar's Implementation-Version tracks the npm package version (package.json),
+// the canonical release version. The Maven publish coordinate, by contrast, uses
+// the Gradle `version` (VERSION_NAME in gradle.properties, normalized to the tag
+// via -PVERSION_NAME=<version> at release). scripts/ci/verify-release-integrity.sh
+// asserts these stay in lockstep so source/local builds can't diverge.
 val npmPackageVersion =
     providers.fileContents(rootProject.layout.projectDirectory.file("../package.json")).asText.map { packageJson ->
       val parsed = JsonSlurper().parseText(packageJson) as Map<*, *>

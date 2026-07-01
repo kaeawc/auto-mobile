@@ -86,7 +86,14 @@ jobs:
           APK_SHA256_CHECKSUM: ${{ steps.checksum.outputs.apk_sha256 }}
           IOS_CTRL_PROXY_SHA256_CHECKSUM:
             ${{ steps.checksum.outputs.ipa_sha256 }}
+          IOS_CTRL_PROXY_RUNNER_SHA256:
+            ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
         run: bash scripts/generate-release-constants.sh
+
+      - name: Verify release integrity
+        run: >
+          bash scripts/ci/verify-release-integrity.sh
+          "${{ inputs.version }}"
 
       - name: Create pull request
         id: create_pr

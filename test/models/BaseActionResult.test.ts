@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 
 import type { BaseActionResult } from "../../src/models/BaseActionResult";
@@ -156,8 +156,9 @@ describe("with-extras results extend BaseActionResult", () => {
       expect(body).not.toMatch(/^\s*success:\s*boolean;/m);
       expect(body).not.toMatch(/^\s*observation\?:\s*ObserveResult;/m);
       expect(body).not.toMatch(/^\s*error\?:\s*string;/m);
-      // Extra field preserved.
-      expect(body).toMatch(new RegExp(`\\b${extraField}\\b`));
+      // Extra field preserved — anchored to an actual property declaration so a
+      // mention inside a comment can't satisfy the assertion.
+      expect(body).toMatch(new RegExp(`^\\s*${extraField}\\??:`, "m"));
     });
   }
 
@@ -178,4 +179,34 @@ describe("out-of-scope results are left untouched", () => {
       expect(read(name)).not.toMatch(/BaseActionResult/);
     });
   }
+});
+
+describe("coverage is exhaustive (self-enforcing lists)", () => {
+  // Discover, from source, every model that adopts BaseActionResult so the
+  // hardcoded ALIAS_TYPES/EXTENDS_TYPES lists cannot silently miss a future
+  // result type — a new adopter that isn't listed fails one of these tests.
+  const modelFiles = readdirSync(MODELS_DIR).filter(
+    f => f.endsWith(".ts") && f !== "BaseActionResult.ts"
+  );
+
+  const actualAliases: string[] = [];
+  const actualExtends: string[] = [];
+  for (const file of modelFiles) {
+    const src = readFileSync(join(MODELS_DIR, file), "utf8");
+    const alias = /export type (\w+) = BaseActionResult;/.exec(src);
+    if (alias) {
+      actualAliases.push(alias[1]);
+    }
+    for (const m of src.matchAll(/interface (\w+) extends BaseActionResult\b/g)) {
+      actualExtends.push(m[1]);
+    }
+  }
+
+  test("every source-level alias is listed in ALIAS_TYPES", () => {
+    expect([...actualAliases].sort()).toEqual([...ALIAS_TYPES].sort());
+  });
+
+  test("every source-level `extends BaseActionResult` is listed in EXTENDS_TYPES", () => {
+    expect([...actualExtends].sort()).toEqual(Object.keys(EXTENDS_TYPES).sort());
+  });
 });

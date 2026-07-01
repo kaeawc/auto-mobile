@@ -66,6 +66,33 @@ run_gate() {
   run bash -c "cd '${TEST_ROOT}' && bash '${SCRIPT_ABS}' '$1'"
 }
 
+run_gate_ipa() {
+  run bash -c "cd '${TEST_ROOT}' && bash '${SCRIPT_ABS}' '$1' '$2'"
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum | cut -d' ' -f1
+  else
+    printf '%s' "$1" | shasum -a 256 | cut -d' ' -f1
+  fi
+}
+
+# make_ipa <runner-binary-content> <out.ipa> — build a zip mirroring the real
+# IPA layout (a zip of Build/Products) with the runner binary at the expected
+# path, and echo the sha256 of that binary's content.
+make_ipa() {
+  local content="$1" out="$2"
+  local stage runner_dir
+  stage="$(mktemp -d)"
+  runner_dir="${stage}/Build/Products/Debug-iphonesimulator/CtrlProxyUITests-Runner.app"
+  mkdir -p "$runner_dir"
+  printf '%s' "$content" > "${runner_dir}/CtrlProxyUITests-Runner"
+  ( cd "$stage" && zip -qr "$out" Build/Products/ )
+  rm -rf "$stage"
+  sha256_of "$content"
+}
+
 @test "passes when all versions align and runner sha is populated" {
   run_gate "$VERSION"
   [ "$status" -eq 0 ]
@@ -159,4 +186,43 @@ PY
   run_gate "$VERSION"
   [ "$status" -ne 0 ]
   [[ "$output" == *"IOS_CTRL_PROXY_RUNNER_SHA256"* ]]
+}
+
+@test "binds recorded runner sha to the runner inside the IPA (match passes)" {
+  local ipa="${TEST_ROOT}/control-proxy.ipa" sha
+  sha="$(make_ipa "fake-runner-binary-bytes" "$ipa")"
+  write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$sha"
+  run_gate_ipa "$VERSION" "$ipa"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"matches the runner inside the IPA"* ]]
+}
+
+@test "fails when recorded runner sha does not match the IPA runner (substitution)" {
+  local ipa="${TEST_ROOT}/control-proxy.ipa"
+  make_ipa "the-real-shipped-runner" "$ipa" >/dev/null
+  # Record a valid-looking but WRONG sha (as if a tampered/stale runner shipped).
+  write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA"
+  run_gate_ipa "$VERSION" "$ipa"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"does not match the runner binary shipped"* ]]
+}
+
+@test "fails when the IPA path is given but the file is missing" {
+  write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA"
+  run_gate_ipa "$VERSION" "${TEST_ROOT}/does-not-exist.ipa"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"IPA not found"* ]]
+}
+
+@test "fails when the IPA lacks the runner binary" {
+  local ipa="${TEST_ROOT}/empty.ipa" stage
+  stage="$(mktemp -d)"
+  mkdir -p "${stage}/Build/Products/Debug-iphonesimulator"
+  printf 'x' > "${stage}/Build/Products/Debug-iphonesimulator/unrelated.txt"
+  ( cd "$stage" && zip -qr "$ipa" Build/Products/ )
+  rm -rf "$stage"
+  write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA"
+  run_gate_ipa "$VERSION" "$ipa"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"CtrlProxyUITests-Runner not found inside"* ]]
 }

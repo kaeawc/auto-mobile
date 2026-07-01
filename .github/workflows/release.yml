@@ -101,6 +101,7 @@ jobs:
         run: >
           bash scripts/ci/verify-release-integrity.sh
           "${{ steps.version.outputs.version }}"
+          /tmp/control-proxy.ipa
 
       - name: Run tests
         env:

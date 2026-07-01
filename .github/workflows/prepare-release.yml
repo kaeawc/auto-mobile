@@ -94,6 +94,7 @@ jobs:
         run: >
           bash scripts/ci/verify-release-integrity.sh
           "${{ inputs.version }}"
+          /tmp/control-proxy.ipa
 
       - name: Create pull request
         id: create_pr

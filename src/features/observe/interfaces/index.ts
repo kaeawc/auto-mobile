@@ -16,3 +16,4 @@ export type { DeviceMetadataSource, DeviceMetadata } from "./DeviceMetadataSourc
 export type { GlobalActionSource, GlobalActionResult } from "./GlobalActionSource";
 export type { CtrlProxyClient } from "./CtrlProxyClient";
 export type { ObserveScreenCache } from "./ObserveScreenCache";
+export type { SdkEvent, SdkEventIngestor } from "./SdkEventIngestor";

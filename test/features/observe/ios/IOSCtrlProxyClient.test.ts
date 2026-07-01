@@ -12,6 +12,7 @@ import {
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
+import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
 
 describe("IOSCtrlProxyClient", function() {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -1762,6 +1763,94 @@ describe("IOSCtrlProxyClient", function() {
         expect(commands).toBeNull();
         expect(testClient.getCachedSupportedCommands()).toBeNull();
       } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("SDK event ingestor forwarding", function() {
+    test("forwards a hierarchy_update to the ingestor's recordLayoutTelemetryEvent", async function() {
+      const fakeIngestor = new FakeIosSdkEventIngestor();
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        fakeIngestor
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: Date.now(),
+          data: {
+            updatedAt: 1750934583218,
+            packageName: "com.example.ios",
+            hierarchy: { text: "Welcome" },
+          },
+        }));
+
+        await flushPromises();
+
+        expect(fakeIngestor.layoutEvents.length).toBe(1);
+        expect(fakeIngestor.layoutEvents[0].packageName).toBe("com.example.ios");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("forwards decoded SDK events from the /sdk-events poll to the ingestor", async function() {
+      const fakeIngestor = new FakeIosSdkEventIngestor();
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        fakeIngestor
+      );
+
+      // SDK envelopes carry a base64-encoded JSON payload; verify the client
+      // decodes the envelope (base64 → JSON, timestamp default, bundleId → applicationId)
+      // and forwards it to the ingestor.
+      const payload = { url: "https://x.test/a", method: "POST", timestamp: 4242 };
+      const encoded = Buffer.from(JSON.stringify(payload)).toString("base64");
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => [
+          { bundleId: "com.example.ios", events: [{ eventType: "network_request", payload: encoded }] },
+        ],
+      })) as unknown as typeof fetch;
+
+      try {
+        (testClient as unknown as { startSdkEventPolling(): void }).startSdkEventPolling();
+        // Auto-advance timer fires the interval via setImmediate; flush the async
+        // fetch → decode → recordSdkEvent chain.
+        await flushPromises(8);
+
+        expect(fakeIngestor.sdkEvents.length).toBe(1);
+        expect(fakeIngestor.sdkEvents[0].applicationId).toBe("com.example.ios");
+        expect(fakeIngestor.sdkEvents[0].event.type).toBe("network_request");
+        expect(fakeIngestor.sdkEvents[0].event.timestamp).toBe(4242);
+        expect(fakeIngestor.sdkEvents[0].event.payload).toMatchObject({
+          url: "https://x.test/a",
+          method: "POST",
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+        (testClient as unknown as { stopSdkEventPolling(): void }).stopSdkEventPolling();
         await testClient.close();
       }
     });

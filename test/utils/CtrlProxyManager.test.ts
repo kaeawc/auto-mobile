@@ -527,6 +527,32 @@ describe("CtrlProxyManager", function() {
       expect(localFakeAdb.wasCommandExecuted(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`)).toBe(true);
     });
 
+    test("prefetch is skipped (no network) for an unknown pin (#2746)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "99.99.99";
+      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
+      let downloadCalls = 0;
+      try {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+          download: async () => {
+            downloadCalls++;
+            throw new Error("download must not run for an unverifiable pin");
+          }
+        };
+
+        AndroidCtrlProxyManager.prefetchApk();
+        expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
+        expect(downloadCalls).toBe(0);
+      } finally {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
     test("should allow background refresh to retry failed prefetches", async function() {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
       const zip = new AdmZip();

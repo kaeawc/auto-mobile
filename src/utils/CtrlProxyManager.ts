@@ -231,6 +231,22 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Internal prefetch implementation
    */
   private static async doPrefetch(): Promise<string | null> {
+    // Fail closed before touching the network: don't background-download and cache
+    // an unverifiable APK for an unknown explicit pin (#2746). Skipping (not
+    // throwing) keeps daemon startup alive; the install path still fails closed.
+    if (
+      isExplicitPin() &&
+      !isPinnedVersionKnown() &&
+      AndroidCtrlProxyManager.expectedChecksumOverride === null &&
+      !AndroidCtrlProxyManager.isChecksumSkipConfigured()
+    ) {
+      logger.warn(
+        `[CTRL_PROXY] Prefetch skipped: AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the ` +
+        `release checksum registry, so the APK cannot be integrity-verified`
+      );
+      return null;
+    }
+
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-prefetch-"));
     const apkPath = path.join(tempDir, "control-proxy.apk");
 
@@ -1589,13 +1605,22 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private shouldSkipChecksum(): boolean {
+    return AndroidCtrlProxyManager.isChecksumSkipConfigured();
+  }
+
+  /**
+   * Env-only view of the checksum-skip escape hatches, usable from the static
+   * prefetch path (which has no instance). Mirrors {@link shouldSkipChecksum}.
+   */
+  private static isChecksumSkipConfigured(): boolean {
     // @deprecated AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK - use AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM instead
     const explicitSkip = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM ??
       process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
     if (explicitSkip && (explicitSkip === "1" || explicitSkip.toLowerCase() === "true")) {
       return true;
     }
-    return this.getApkPathOverride() !== null;
+    const apkPathOverride = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH?.trim();
+    return Boolean(apkPathOverride && apkPathOverride.length > 0);
   }
 
   private shouldSkipDownloadIfInstalled(): boolean {

@@ -175,6 +175,16 @@ export interface DaemonOptions {
   noA11yReportViewIds?: boolean;
   /** Disable FLAG_RETRIEVE_INTERACTIVE_WINDOWS on the accessibility service */
   noA11yRetrieveInteractiveWindows?: boolean;
+  /** Output reduction: drop the flattened elements array from observe results (issue #2756) */
+  observeResultDropElements?: boolean;
+  /** Output reduction: emit observe results in compact form (issue #2756) */
+  observeResultCompact?: boolean;
+  /** Output reduction: omit structuredContent from tool results (issue #2756) */
+  toolResultsNoStructuredContent?: boolean;
+  /** Output reduction: return only the observation diff after an action (issue #2756) */
+  actionsDiffObserve?: boolean;
+  /** Output reduction: skip the post-action observation entirely (issue #2756) */
+  actionsNoObserve?: boolean;
 }
 
 /**

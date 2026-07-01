@@ -184,6 +184,21 @@ export class Daemon {
     if (options.noA11yRetrieveInteractiveWindows) {
       serverConfig.setA11yRetrieveInteractiveWindows(false);
     }
+    if (options.observeResultDropElements) {
+      serverConfig.setObserveResultDropElements(true);
+    }
+    if (options.observeResultCompact) {
+      serverConfig.setObserveResultCompact(true);
+    }
+    if (options.toolResultsNoStructuredContent) {
+      serverConfig.setToolResultsNoStructuredContent(true);
+    }
+    if (options.actionsDiffObserve) {
+      serverConfig.setActionsDiffObserve(true);
+    }
+    if (options.actionsNoObserve) {
+      serverConfig.setActionsNoObserve(true);
+    }
   }
 
   /**

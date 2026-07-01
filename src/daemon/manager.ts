@@ -567,6 +567,21 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.mcpRecording) {
       args.push("--mcp-recording");
     }
+    if (options.observeResultDropElements) {
+      args.push("--observe-result-drop-elements");
+    }
+    if (options.observeResultCompact) {
+      args.push("--observe-result-compact");
+    }
+    if (options.toolResultsNoStructuredContent) {
+      args.push("--tool-results-no-structured-content");
+    }
+    if (options.actionsDiffObserve) {
+      args.push("--actions-diff-observe");
+    }
+    if (options.actionsNoObserve) {
+      args.push("--actions-no-observe");
+    }
 
     // Redirect the detached daemon's stdout/stderr into the STABLE logs dir
     // (`~/.auto-mobile/logs` by default) rather than an ephemeral
@@ -982,7 +997,7 @@ export class DaemonManager implements DaemonManagerLike {
   }
 }
 
-function parseDaemonArgs(args: string[]): DaemonOptions {
+export function parseDaemonArgs(args: string[]): DaemonOptions {
   const options: DaemonOptions = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") {
@@ -1057,6 +1072,16 @@ function parseDaemonArgs(args: string[]): DaemonOptions {
       options.skipCtrlProxyDownload = true;
     } else if (args[i] === "--mcp-recording") {
       options.mcpRecording = true;
+    } else if (args[i] === "--observe-result-drop-elements") {
+      options.observeResultDropElements = true;
+    } else if (args[i] === "--observe-result-compact") {
+      options.observeResultCompact = true;
+    } else if (args[i] === "--tool-results-no-structured-content") {
+      options.toolResultsNoStructuredContent = true;
+    } else if (args[i] === "--actions-diff-observe") {
+      options.actionsDiffObserve = true;
+    } else if (args[i] === "--actions-no-observe") {
+      options.actionsNoObserve = true;
     }
   }
   return options;

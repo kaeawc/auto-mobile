@@ -54,6 +54,21 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "navigation-screenshots":
         serverConfig.setNavigationScreenshotsEnabled(enabled);
         break;
+      case "observe-result-drop-elements":
+        serverConfig.setObserveResultDropElements(enabled);
+        break;
+      case "observe-result-compact":
+        serverConfig.setObserveResultCompact(enabled);
+        break;
+      case "tool-results-no-structured-content":
+        serverConfig.setToolResultsNoStructuredContent(enabled);
+        break;
+      case "actions-diff-observe":
+        serverConfig.setActionsDiffObserve(enabled);
+        break;
+      case "actions-no-observe":
+        serverConfig.setActionsNoObserve(enabled);
+        break;
     }
   }
 }

@@ -86,10 +86,17 @@ export function hasClientHandshake(handshake: ClientHandshake): boolean {
  * - No handshake fields -> allow (legacy client; matches the "unknown => match"
  *   philosophy of {@link buildIdentitiesMatch} so existing clients are not
  *   broken).
- * - Version gate: reject when both release portions are known and differ.
- * - Build gate: reject when both sides expose a known build id and it differs.
- *   Version-only clients (Kotlin/Swift) skip this branch automatically because
+ * - Build gate (checked first): reject when both sides expose a known build id
+ *   and it differs. Version-only clients (Kotlin/Swift) skip this branch because
  *   {@link buildIdentitiesMatch} treats an unknown id as a match.
+ * - Version gate: a version-only client is compared on the release portion (so a
+ *   plain `0.0.40` still matches a source-checkout daemon's `0.0.40+g<sha>`). A
+ *   client that supplies a build identity (the TS client) is instead held to the
+ *   **full** dev-stamped version: its entry-script build hash is blind to changes
+ *   in imported files (same `argv[1]`, different commit), so the git stamp is the
+ *   only signal for same-entry dev-skew — the #2732 case that a TS socket client
+ *   bypassing {@link DaemonMcpProxy} (e.g. the CLI's direct `DaemonClient`) would
+ *   otherwise slip past.
  */
 export function evaluateClientHandshake(
   daemon: DaemonSelfIdentity,
@@ -99,27 +106,13 @@ export function evaluateClientHandshake(
     return { ok: true };
   }
 
-  const clientVersion = client.clientVersion;
-  if (clientVersion) {
-    const clientBase = releaseVersion(clientVersion);
-    const daemonBase = releaseVersion(daemon.version.trim());
-    if (clientBase.length > 0 && daemonBase.length > 0 && clientBase !== daemonBase) {
-      return {
-        ok: false,
-        reason: "version",
-        message:
-          `AutoMobile daemon version mismatch: the shared daemon socket is served by ` +
-          `daemon=${daemon.version || "unknown"} but this client is ${clientVersion}. ` +
-          `Restart the daemon from this client's build (e.g. \`auto-mobile --daemon restart\`) ` +
-          `so the per-uid socket serves a matching version.`,
-      };
-    }
-  }
-
   const clientBuild: BuildIdentity = {
     entryScript: client.clientEntryScript ?? "",
     buildId: client.clientBuildId ?? "unknown",
   };
+  const clientDeclaresBuildId =
+    (client.clientBuildId?.length ?? 0) > 0 && client.clientBuildId !== "unknown";
+
   if (!buildIdentitiesMatch(daemon.build, clientBuild)) {
     return {
       ok: false,
@@ -130,6 +123,29 @@ export function evaluateClientHandshake(
         `client build=${describeBuildIdentity(clientBuild)}. ` +
         `Restart the daemon from this client's checkout to resolve the skew.`,
     };
+  }
+
+  const clientVersion = client.clientVersion;
+  if (clientVersion) {
+    const daemonFull = daemon.version.trim();
+    const versionsDiffer = clientDeclaresBuildId
+      ? daemonFull.length > 0 && daemonFull !== clientVersion
+      : (() => {
+          const clientBase = releaseVersion(clientVersion);
+          const daemonBase = releaseVersion(daemonFull);
+          return clientBase.length > 0 && daemonBase.length > 0 && clientBase !== daemonBase;
+        })();
+    if (versionsDiffer) {
+      return {
+        ok: false,
+        reason: "version",
+        message:
+          `AutoMobile daemon version mismatch: the shared daemon socket is served by ` +
+          `daemon=${daemon.version || "unknown"} but this client is ${clientVersion}. ` +
+          `Restart the daemon from this client's build (e.g. \`auto-mobile --daemon restart\`) ` +
+          `so the per-uid socket serves a matching version.`,
+      };
+    }
   }
 
   return { ok: true };

@@ -129,17 +129,28 @@ public enum DaemonManager {
         return kill(Int32(pid), 0) == 0
     }
 
-    public static func startDaemon(repoRoot _: String? = nil) -> Bool {
-        PerfTimer.log("startDaemon: searching for auto-mobile executable")
+    public static func startDaemon(repoRoot: String? = nil) -> Bool {
+        return runDaemonSubcommand("start", repoRoot: repoRoot)
+    }
+
+    /// Restart the daemon in place — used to replace a stale different-build daemon that owns
+    /// the shared per-uid socket (#2744) so the runner self-heals instead of failing the
+    /// version handshake. Mirrors the Android runner's PID-file version-skew restart.
+    public static func restartDaemon(repoRoot: String? = nil) -> Bool {
+        return runDaemonSubcommand("restart", repoRoot: repoRoot)
+    }
+
+    private static func runDaemonSubcommand(_ subcommand: String, repoRoot _: String? = nil) -> Bool {
+        PerfTimer.log("runDaemonSubcommand(\(subcommand)): searching for auto-mobile executable")
         guard let autoMobilePath = findExecutable("auto-mobile") else {
-            PerfTimer.log("startDaemon: ERROR - auto-mobile not found in PATH")
+            PerfTimer.log("runDaemonSubcommand: ERROR - auto-mobile not found in PATH")
             return false
         }
-        PerfTimer.log("startDaemon: found auto-mobile at \(autoMobilePath)")
+        PerfTimer.log("runDaemonSubcommand: found auto-mobile at \(autoMobilePath)")
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: autoMobilePath)
-        process.arguments = ["--daemon", "start"]
+        process.arguments = ["--daemon", subcommand]
 
         // Inherit essential environment variables for device discovery
         var env = ProcessInfo.processInfo.environment
@@ -150,26 +161,74 @@ public enum DaemonManager {
         }
         process.environment = env
 
-        PerfTimer.log("startDaemon: launching process with args: \(process.arguments ?? [])")
+        PerfTimer.log("runDaemonSubcommand: launching process with args: \(process.arguments ?? [])")
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
-            PerfTimer.log("startDaemon: process launched, waiting for exit")
+            PerfTimer.log("runDaemonSubcommand: process launched, waiting for exit")
             process.waitUntilExit()
             let status = process.terminationStatus
-            PerfTimer.log("startDaemon: process exited with status \(status)")
+            PerfTimer.log("runDaemonSubcommand: process exited with status \(status)")
             return status == 0
         } catch {
-            PerfTimer.log("startDaemon: ERROR - failed to run process: \(error)")
+            PerfTimer.log("runDaemonSubcommand: ERROR - failed to run process: \(error)")
             return false
         }
+    }
+
+    /// The daemon's recorded version from its PID file, trimmed, or nil when absent/unreadable.
+    static func readDaemonVersionFromPidFile() -> String? {
+        guard let data = FileManager.default.contents(atPath: pidFilePath),
+              let pidData = try? JSONDecoder().decode(PidFileData.self, from: data),
+              let version = pidData.version?.trimmingCharacters(in: .whitespaces),
+              !version.isEmpty
+        else {
+            return nil
+        }
+        return version
+    }
+
+    /// The release portion of a version string — everything before the `+g<sha>` dev stamp.
+    /// Mirrors the daemon's `releaseVersion`, so a git-stamped source-checkout daemon compares
+    /// equal to this runner's plain release.
+    static func releaseVersion(_ version: String) -> String {
+        return String(version.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)
+            .first ?? Substring(version))
+    }
+
+    /// Whether an already-running daemon must be restarted before reuse because its recorded
+    /// version does not match this runner's (#2744). Compares release portions; a blank/unknown
+    /// version on either side yields false so an unidentifiable daemon is not thrashed.
+    static func requiresVersionSkewRestart(daemonVersion: String?, clientVersion: String) -> Bool {
+        guard let daemonVersion = daemonVersion?.trimmingCharacters(in: .whitespaces), !daemonVersion.isEmpty else {
+            return false
+        }
+        let client = clientVersion.trimmingCharacters(in: .whitespaces)
+        if client.isEmpty {
+            return false
+        }
+        return releaseVersion(daemonVersion) != releaseVersion(client)
     }
 
     public static func ensureDaemonRunning(repoRoot: String? = nil, timeoutSeconds: TimeInterval = 15) -> Bool {
         PerfTimer.log("ensureDaemonRunning: checking isDaemonRunning")
         if isDaemonRunning() {
+            // A stale different-build daemon on the shared socket would reject this runner's
+            // version handshake (#2744). Restart it before reuse so we self-heal instead of
+            // failing, mirroring the Android/TS version-skew restart.
+            if requiresVersionSkewRestart(
+                daemonVersion: readDaemonVersionFromPidFile(),
+                clientVersion: AutoMobileVersion.current
+            ) {
+                PerfTimer.log("ensureDaemonRunning: daemon version skew, restarting")
+                guard restartDaemon(repoRoot: repoRoot) else {
+                    PerfTimer.log("ensureDaemonRunning: restartDaemon failed")
+                    return false
+                }
+                return waitForDaemon(timeoutSeconds: timeoutSeconds)
+            }
             PerfTimer.log("ensureDaemonRunning: daemon already running")
             return true
         }

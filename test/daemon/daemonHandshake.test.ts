@@ -76,15 +76,43 @@ describe("evaluateClientHandshake", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("rejects a same-release client whose build id differs (dev skew, TS client)", () => {
+  test("rejects a same-release client whose build id differs (build gate, TS client)", () => {
     const result = evaluateClientHandshake(
       daemon("0.0.40+gaaa"),
-      { clientVersion: "0.0.40+gbbb", clientBuildId: "differentbuild99", clientEntryScript: "/other/dist/index.js" }
+      { clientVersion: "0.0.40+gaaa", clientBuildId: "differentbuild99", clientEntryScript: "/other/dist/index.js" }
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toBe("build");
     }
+  });
+
+  test("rejects a TS client whose build id matches but full dev-stamped version differs", () => {
+    // Same entry-script hash (build id matches) but a different git stamp: the entry hash is
+    // blind to changes in imported files, so the full version is the only skew signal. This is
+    // the CLI direct-DaemonClient path #2732 that a release-only compare would let through.
+    const result = evaluateClientHandshake(
+      daemon("0.0.40+gaaa", { entryScript: daemonBuild.entryScript, buildId: "sharedbuildid01" }),
+      { clientVersion: "0.0.40+gbbb", clientBuildId: "sharedbuildid01", clientEntryScript: daemonBuild.entryScript }
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("version");
+    }
+  });
+
+  test("accepts a TS client whose build id and full version both match", () => {
+    const result = evaluateClientHandshake(
+      daemon("0.0.40+gaaa", { entryScript: daemonBuild.entryScript, buildId: "sharedbuildid01" }),
+      { clientVersion: "0.0.40+gaaa", clientBuildId: "sharedbuildid01", clientEntryScript: daemonBuild.entryScript }
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  test("still accepts a version-only client on release match despite differing git stamps", () => {
+    // Kotlin/Swift declare a plain release and no build id -> release-portion compare only.
+    const result = evaluateClientHandshake(daemon("0.0.40+gaaa"), { clientVersion: "0.0.40" });
+    expect(result.ok).toBe(true);
   });
 
   test("accepts a same-release client whose build id matches", () => {

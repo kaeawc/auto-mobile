@@ -3,10 +3,15 @@ import { createServer, type Server, type Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonClient } from "../../src/daemon/client";
 import type { DaemonRequest } from "../../src/daemon/types";
+
+// DaemonClient.connect() stats the socket path (existsSync), which does not hold for a
+// Unix-domain path on Windows — the same reason the other DaemonClient socket suites skip
+// there. The gate itself is covered on all platforms by socketServerHandshake.test.ts.
+const isWindows = platform() === "win32";
 
 /**
  * Stand up a tiny Unix socket server that captures the first request line and
@@ -40,7 +45,7 @@ function startCapturingServer(socketPath: string): { server: Server; firstReques
   return { server, firstRequest };
 }
 
-describe("DaemonClient handshake fields", () => {
+(isWindows ? describe.skip : describe)("DaemonClient handshake fields", () => {
   let socketPath: string;
   let server: Server;
 

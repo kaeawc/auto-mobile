@@ -124,15 +124,28 @@ describe("UnixSocketServer version/build-identity handshake gate", () => {
     expect(response.error).toContain("build mismatch");
   });
 
-  test("allows a matching build id", async () => {
+  test("allows a matching TS client (full version + build id)", async () => {
+    // A real TS DaemonClient declares its full DAEMON_VERSION alongside the build id.
     await startServer();
     const response = await sendRequest(socketPath, {
       ...PING,
-      clientVersion: "0.0.40",
+      clientVersion: "0.0.40+gdaemon",
       clientBuildId: "daemonbuild1234",
       clientEntryScript: "/repo/dist/index.js",
     });
     expect(response.success).toBe(true);
+  });
+
+  test("rejects a TS client whose build id matches but full dev-stamped version differs", async () => {
+    await startServer();
+    const response = await sendRequest(socketPath, {
+      ...PING,
+      clientVersion: "0.0.40+gother",
+      clientBuildId: "daemonbuild1234",
+      clientEntryScript: "/repo/dist/index.js",
+    });
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("version mismatch");
   });
 
   test("does not gate when enforcement is disabled", async () => {

@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -10,6 +12,15 @@ import kotlinx.serialization.json.JsonObject
 class McpDaemonClientHandshakeTest {
 
   private val json = Json { ignoreUnknownKeys = true }
+
+  @Test
+  fun `normalizeClientVersion keeps real versions and drops aliases`() {
+    assertEquals("0.0.40", DaemonSocketPaths.normalizeClientVersion(" 0.0.40 "))
+    assertNull(DaemonSocketPaths.normalizeClientVersion("latest"))
+    assertNull(DaemonSocketPaths.normalizeClientVersion("UNKNOWN"))
+    assertNull(DaemonSocketPaths.normalizeClientVersion("   "))
+    assertNull(DaemonSocketPaths.normalizeClientVersion(null))
+  }
 
   @Test
   fun `daemon request serializes clientVersion for the handshake`() {

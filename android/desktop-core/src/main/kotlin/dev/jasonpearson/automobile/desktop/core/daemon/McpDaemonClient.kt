@@ -410,6 +410,8 @@ object DaemonSocketPaths {
     return "/tmp/auto-mobile-daemon-$userId.sock"
   }
 
+  private val ignoredVersions = setOf("latest", "unknown")
+
   /**
    * Version this desktop client declares to the daemon for the server-side version handshake
    * gate (#2744), so the desktop UI can't silently execute against a wrong-build daemon on the
@@ -417,13 +419,24 @@ object DaemonSocketPaths {
    * from `package.json`. Null when unidentifiable (a legacy, ungated client).
    */
   fun resolveClientVersion(): String? {
-    val daemonPackageEnv = System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION")?.trim().orEmpty()
-    if (daemonPackageEnv.isNotEmpty()) return daemonPackageEnv
+    val raw =
+        System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION")?.takeIf { it.isNotBlank() }
+            ?: System.getenv("AUTOMOBILE_VERSION")?.takeIf { it.isNotBlank() }
+            ?: DaemonSocketPaths::class.java.`package`?.implementationVersion
+    return normalizeClientVersion(raw)
+  }
 
-    val automobileVersionEnv = System.getenv("AUTOMOBILE_VERSION")?.trim().orEmpty()
-    if (automobileVersionEnv.isNotEmpty()) return automobileVersionEnv
-
-    return DaemonSocketPaths::class.java.`package`?.implementationVersion?.trim()?.takeIf { it.isNotEmpty() }
+  /**
+   * Trim a resolved version and drop non-versions. Aliases like `latest`/`unknown` are not real
+   * versions; declaring one would make the daemon gate compare e.g. `latest` vs `0.0.40` and
+   * reject, so treat them (and blanks) as an unversioned/legacy (ungated) client.
+   */
+  internal fun normalizeClientVersion(raw: String?): String? {
+    val trimmed = raw?.trim().orEmpty()
+    if (trimmed.isEmpty() || ignoredVersions.contains(trimmed.lowercase())) {
+      return null
+    }
+    return trimmed
   }
 
   private fun getUserId(): String {

@@ -115,14 +115,45 @@ export class TapOnElement extends BaseVisualChange {
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
   private static readonly SEARCH_UNTIL_MAX_MS = 12000;
 
-  /** Android: refresh + re-find attempts before tap (includes stability requirement). */
-  private static readonly ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS = 8;
+  /**
+   * Android: the pre-tap refresh + re-find + stability loop keeps polling until BOTH
+   * a minimum number of productive polls AND a wall-clock deadline are exceeded
+   * (`refindAttempt >= minPolls && productiveElapsed >= budgetMs`).
+   *
+   * Two bounds, because neither alone is sufficient:
+   * - The **wall-clock deadline** adds patience when fetches are fast: a fixed
+   *   "N attempts × poll delay" budget expires in ~1.2s and can miss a list that
+   *   repopulates a few seconds later (#1949).
+   * - The **minimum productive-poll floor** prevents a regression in the opposite
+   *   regime: on a slow device where each hierarchy fetch costs 300–800ms, a pure
+   *   wall-clock budget would allow only ~3–5 polls, fewer than the old fixed 8.
+   *   The floor guarantees we never poll *fewer* times than the previous
+   *   attempt-count implementation, so this change is never less patient.
+   *
+   * Only *productive* polls count toward the floor and only *productive* wall-clock
+   * counts toward the deadline: time spent recovering from "no hierarchy" responses
+   * is excluded (see {@link ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE}).
+   */
+  private static readonly ANDROID_PRE_TAP_REFIND_BUDGET_MS = 2500;
+  private static readonly ANDROID_PRE_TAP_REFIND_MIN_POLLS = 8;
 
   /**
-   * When the tree shows a loading overlay (progress/shimmer), list rows may be absent for longer than
-   * {@link ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS} polling cycles; allow extra refreshes before aborting.
+   * Extended deadline + poll floor (hard ceilings) applied when the tree shows a
+   * blocking loading overlay (progress/shimmer). List rows can stay absent for
+   * several seconds while content loads; give the re-find loop more wall-clock time
+   * and more guaranteed polls before aborting.
    */
-  private static readonly ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS_WHEN_LOADING = 32;
+  private static readonly ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING = 10000;
+  private static readonly ANDROID_PRE_TAP_REFIND_MIN_POLLS_WHEN_LOADING = 32;
+
+  /**
+   * Defensive upper bound on total loop iterations (productive + no-hierarchy +
+   * deadline-grace). Real scenarios terminate far sooner via the deadline/floor,
+   * the {@link ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE} cap, or finding the
+   * target; this only guards against a future refactor making the loop spin when
+   * the injected timer stops advancing.
+   */
+  private static readonly ANDROID_PRE_TAP_MAX_ITERATIONS = 1000;
 
   /**
    * Separate budget for consecutive "ctrl-proxy returned no hierarchy" results.
@@ -391,30 +422,75 @@ export class TapOnElement extends BaseVisualChange {
       usedParent: boolean;
     } | null = null;
 
-    let maxAttempts = TapOnElement.ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS;
+    const startTime = this.timer.now();
+    // Wall-clock time NOT attributable to productive polling — the "no hierarchy"
+    // recovery sleeps AND the wall-clock the failed refreshes themselves consumed.
+    // Excluded from the deadline so a temporarily-unresponsive ctrl-proxy WebSocket
+    // doesn't consume the element's patience (that streak is bounded separately by
+    // ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE).
+    let noHierarchyTimeMs = 0;
+    let budgetMs = TapOnElement.ANDROID_PRE_TAP_REFIND_BUDGET_MS;
+    let minProductivePolls = TapOnElement.ANDROID_PRE_TAP_REFIND_MIN_POLLS;
     let consecutiveNoHierarchy = 0;
     let refindAttempt = 0;
+    let firstIteration = true;
+    let iterations = 0;
+    // Extra polls allowed past the deadline to finish confirming an already-stable
+    // candidate, so a sibling selector isn't failed at the boundary (e.g. a null
+    // streak resets stability progress right as the deadline passes). Bounded by
+    // stableMatchesRequired so a perpetually-shifting target can't extend forever.
+    let deadlineGracePolls = stableMatchesRequired;
 
-    while (refindAttempt < maxAttempts) {
+    while (true) {
       throwIfAborted(signal);
-      if (refindAttempt > 0 || consecutiveNoHierarchy > 0) {
-        const delayMs = consecutiveNoHierarchy > 0
+      if (++iterations > TapOnElement.ANDROID_PRE_TAP_MAX_ITERATIONS) {
+        break;
+      }
+
+      // Keep polling until BOTH the productive-poll floor and the wall-clock
+      // deadline are exceeded; the floor guarantees we never poll fewer times than
+      // the old fixed attempt count on a slow device.
+      const productiveElapsedMs = this.timer.now() - startTime - noHierarchyTimeMs;
+      const budgetExhausted =
+        refindAttempt >= minProductivePolls && productiveElapsedMs >= budgetMs;
+      const midStabilityRun =
+        best !== null && consecutiveStable > 0 && consecutiveStable < stableMatchesRequired;
+      if (!firstIteration && consecutiveNoHierarchy === 0 && budgetExhausted) {
+        if (midStabilityRun && deadlineGracePolls > 0) {
+          deadlineGracePolls--;
+        } else {
+          break;
+        }
+      }
+
+      if (!firstIteration) {
+        const inNoHierarchyRecovery = consecutiveNoHierarchy > 0;
+        const delayMs = inNoHierarchyRecovery
           ? TapOnElement.ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS
           : TapOnElement.ANDROID_PRE_TAP_REFIND_DELAY_MS;
         await this.timer.sleep(delayMs);
+        if (inNoHierarchyRecovery) {
+          noHierarchyTimeMs += delayMs;
+        }
       }
+      firstIteration = false;
 
+      const refreshStart = this.timer.now();
       const freshHierarchy = await this.refreshViewHierarchy(
         TapOnElement.ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
         observeResult.screenSize,
         signal
       );
       if (!freshHierarchy) {
+        // The failed refresh itself burned wall-clock (up to the timeout); exclude
+        // that from the deadline too, not just the recovery sleep, otherwise a slow
+        // unresponsive proxy still eats the element's patience.
+        noHierarchyTimeMs += this.timer.now() - refreshStart;
         consecutiveNoHierarchy++;
         logger.warn(
           `[TapOnElement] Android pre-tap refresh returned no hierarchy ` +
           `(consecutive: ${consecutiveNoHierarchy}/${TapOnElement.ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE}, ` +
-          `refind attempt: ${refindAttempt}/${maxAttempts})`
+          `refind attempt: ${refindAttempt})`
         );
         if (consecutiveNoHierarchy >= TapOnElement.ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE) {
           return {
@@ -434,18 +510,20 @@ export class TapOnElement extends BaseVisualChange {
 
       if (
         androidViewHierarchyIndicatesLikelyBlockingLoading(freshHierarchy, this.elementParser) &&
-        maxAttempts < TapOnElement.ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS_WHEN_LOADING
+        budgetMs < TapOnElement.ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING
       ) {
-        maxAttempts = TapOnElement.ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS_WHEN_LOADING;
+        budgetMs = TapOnElement.ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING;
+        minProductivePolls = TapOnElement.ANDROID_PRE_TAP_REFIND_MIN_POLLS_WHEN_LOADING;
         logger.info(
-          `[TapOnElement] Android pre-tap: loading/progress indicators present; extending refind attempts to ${maxAttempts}`
+          `[TapOnElement] Android pre-tap: loading/progress indicators present; ` +
+          `extending refind budget to ${budgetMs}ms / ${minProductivePolls} polls`
         );
       }
 
       const refind = this.findElementInHierarchy(options, freshHierarchy);
       if (!refind.selection.element) {
         logger.warn(
-          `[TapOnElement] Android pre-tap refresh attempt ${refindAttempt}/${maxAttempts} did not re-find tap target`
+          `[TapOnElement] Android pre-tap refresh attempt ${refindAttempt} did not re-find tap target`
         );
         consecutiveStable = 0;
         prevBounds = null;

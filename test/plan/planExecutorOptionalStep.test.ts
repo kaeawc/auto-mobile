@@ -68,6 +68,21 @@ describe("PlanExecutor — optional steps", () => {
       mock(async () => createStructuredToolResponse({ success: true }))
     );
     markDevice("optionalStepOk");
+
+    // A tool whose schema requires a field, so bad params throw a ZodError at parse time.
+    const strictSchema = z.object({
+      requiredField: z.string(),
+      platform: z.string().optional(),
+      deviceId: z.string().optional(),
+      sessionUuid: z.string().optional(),
+    });
+    ToolRegistry.register(
+      "optionalStepStrict",
+      "requires a field",
+      strictSchema,
+      mock(async () => createStructuredToolResponse({ success: true }))
+    );
+    markDevice("optionalStepStrict");
   });
 
   afterEach(() => {
@@ -121,6 +136,23 @@ describe("PlanExecutor — optional steps", () => {
 
     expect(result.success).toBe(true);
     expect(result.executedSteps).toBe(1);
+  });
+
+  test("a malformed optional step (schema validation error) stays fatal", async () => {
+    const plan: Plan = {
+      name: "optional-invalid-params",
+      steps: [
+        // Missing requiredField -> tool.schema.parse throws a ZodError before the handler runs.
+        { tool: "optionalStepStrict", params: {}, optional: true },
+        { tool: "optionalStepOk", params: {} },
+      ],
+    };
+
+    const result = await planExecutor.executePlan(plan, 0, "ios", "sim-1");
+
+    // Plan-authoring errors must not be silently skipped, even for optional steps.
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.tool).toBe("optionalStepStrict");
   });
 
   test("still aborts the plan when a NON-optional step fails", async () => {

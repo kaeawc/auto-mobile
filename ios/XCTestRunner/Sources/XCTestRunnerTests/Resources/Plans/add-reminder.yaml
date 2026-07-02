@@ -8,9 +8,14 @@ description: Create a basic reminder in the iOS Reminders app (English UI assume
 # the "New Reminder" control, which would break this plan.
 platform: ios
 steps:
+  # coldBoot force-terminates + relaunches so a retry (the test retries once, #2811/#2855) starts
+  # from the Reminders home rather than a partial edit screen left by a failed attempt. A warm iOS
+  # launch would resume that stale screen and then time out waiting for "New Reminder". coldBoot
+  # (unlike clearAppData) keeps the app data, so it avoids the empty-home issue noted above.
   - tool: launchApp
     appId: com.apple.reminders
-    label: Launch Reminders
+    coldBoot: true
+    label: Launch Reminders (cold, for clean retry state)
 
   - tool: observe
     waitFor:

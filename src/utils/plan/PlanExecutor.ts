@@ -15,6 +15,7 @@ import {
   type PlanExecutionOptions,
 } from "../../models/ExecutePlanResult";
 import { throwIfAborted } from "../toolUtils";
+import { ZodError } from "zod";
 import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
@@ -576,9 +577,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
           executedSteps++;
           logger.info(`[PLAN_STEP_${i + 1}] Successfully completed. Total executed: ${executedSteps}/${plan.steps.length}`);
         } catch (error) {
-          // An abort must never be swallowed as an optional skip; let it fall through to the normal
-          // failure path (and, for non-optional steps, preserve existing behavior).
-          if (step.optional && !signal?.aborted) {
+          // `optional` skips runtime UI/tool failures, NOT plan-authoring errors: a schema
+          // validation throw (ZodError from tool.schema.parse) stays fatal so a typo in an optional
+          // step surfaces instead of silently becoming a no-op. An abort must also never be swallowed
+          // as a skip.
+          if (step.optional && !signal?.aborted && !(error instanceof ZodError)) {
             this.recordSkippedOptionalStep(debugSteps, i + 1, step, this.timer.now() - stepStartTime, `${error}`);
             continue;
           }
@@ -1025,8 +1028,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
           );
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          // An abort must never be swallowed as an optional skip.
-          if (step.optional && !signal?.aborted) {
+          // Skip runtime failures only — a schema validation throw (ZodError) or an abort stays fatal.
+          if (step.optional && !signal?.aborted && !(error instanceof ZodError)) {
             logger.warn(
               `[PARALLEL_EXEC][${device}] optional step ${step.tool} threw; skipping and continuing: ${errorMessage}`
             );

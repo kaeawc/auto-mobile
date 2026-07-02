@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { classifyDatabaseFailure } from "../../src/db/databaseFailureClassification";
+import { createIncompleteExtractionError } from "../../src/db/migrationDependencyIntegrity";
 
 describe("classifyDatabaseFailure", () => {
   test("classifies a locked/busy sqlite file as transient", () => {
@@ -24,6 +25,16 @@ describe("classifyDatabaseFailure", () => {
 
   test("classifies a deterministic migration throw as permanent", () => {
     expect(classifyDatabaseFailure(new Error("migration 0007 failed: column already exists"))).toBe("permanent");
+  });
+
+  test("classifies an incomplete-extraction (missing dependency) failure as permanent", () => {
+    // Respawning reuses the SAME half-linked bunx extraction, so the failure
+    // reproduces every launch; backoff (permanent) protects against a hot-loop
+    // until the caller removes the extraction and re-runs (issue #2833).
+    expect(classifyDatabaseFailure(createIncompleteExtractionError("kysely"))).toBe("permanent");
+    expect(
+      classifyDatabaseFailure(new Error("Cannot find package 'kysely' from '/tmp/x/m.ts'"))
+    ).toBe("permanent");
   });
 
   test("defaults unknown failures to permanent (fail safe against hot loops)", () => {

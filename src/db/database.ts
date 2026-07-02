@@ -7,6 +7,11 @@ import { runMigrations } from "./migrator";
 import { logger } from "../utils/logger";
 import { BunSqliteDialect } from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import {
+  createIncompleteExtractionError,
+  extractMissingPackageName,
+  isMissingMigrationDependencyError,
+} from "./migrationDependencyIntegrity";
 
 type BunDatabaseConstructor = typeof import("bun:sqlite").Database;
 type BunDatabase = import("bun:sqlite").Database;
@@ -104,6 +109,16 @@ export const DATABASE_STARTUP_MIGRATION_FAILURE =
   "Database startup migrations failed; refusing to run queries until the daemon restarts.";
 
 function createStartupMigrationError(cause: unknown): Error {
+  // A half-linked bunx extraction (a known migration runtime dependency such as
+  // `kysely` missing from this run's node_modules) surfaces as a "Cannot find
+  // package" resolve error while the migrator dynamically imports a migration
+  // file. Map that to the distinct, recoverable incomplete-extraction error
+  // instead of the generic fatal crash so the caller knows to remove the
+  // extraction and re-run (issue #2833). Scoped to known dependencies so a
+  // genuine code-level bad import in a migration is not mislabeled.
+  if (isMissingMigrationDependencyError(cause)) {
+    return createIncompleteExtractionError(extractMissingPackageName(cause), cause);
+  }
   const causeMessage = cause instanceof Error ? cause.message : String(cause);
   return new Error(`${DATABASE_STARTUP_MIGRATION_FAILURE} Cause: ${causeMessage}`, { cause });
 }

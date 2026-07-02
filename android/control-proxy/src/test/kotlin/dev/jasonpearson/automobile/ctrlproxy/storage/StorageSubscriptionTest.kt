@@ -19,8 +19,8 @@ class StorageSubscriptionTest {
     val subscription = StorageSubscription("com.example", "settings.xml")
     assertEquals("com.example:settings.xml", subscription.subscriptionId)
     assertEquals(
-        "com.example" to "settings.xml",
-        StorageSubscription.parseId(subscription.subscriptionId),
+      "com.example" to "settings.xml",
+      StorageSubscription.parseId(subscription.subscriptionId),
     )
   }
 
@@ -28,8 +28,8 @@ class StorageSubscriptionTest {
   fun `parseId splits on the first colon only`() {
     // A file name may itself contain ':'; only the first ':' delimits packageName from fileName.
     assertEquals(
-        "com.example" to "weird:name.xml",
-        StorageSubscription.parseId("com.example:weird:name.xml"),
+      "com.example" to "weird:name.xml",
+      StorageSubscription.parseId("com.example:weird:name.xml"),
     )
   }
 

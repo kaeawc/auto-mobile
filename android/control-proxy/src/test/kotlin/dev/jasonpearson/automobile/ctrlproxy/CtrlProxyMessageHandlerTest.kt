@@ -391,8 +391,12 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `unsubscribe_storage rejects an empty package or file segment as malformed`() = runTest {
     // A real subscription can never have an empty package or file, so these are unsplittable.
-    dispatch("""{"type":"unsubscribe_storage","requestId":"unsub5","subscriptionId":":settings.xml"}""")
-    dispatch("""{"type":"unsubscribe_storage","requestId":"unsub6","subscriptionId":"com.example:"}""")
+    dispatch(
+      """{"type":"unsubscribe_storage","requestId":"unsub5","subscriptionId":":settings.xml"}"""
+    )
+    dispatch(
+      """{"type":"unsubscribe_storage","requestId":"unsub6","subscriptionId":"com.example:"}"""
+    )
     assertTrue("no action should fire for an empty-segment subscriptionId", calls.isEmpty())
     assertEquals(2, logs.size)
     assertTrue(logs[0], logs[0].contains("malformed subscriptionId=:settings.xml"))
@@ -401,16 +405,16 @@ class CtrlProxyMessageHandlerTest {
 
   @Test
   fun `unsubscribe_storage prefers explicit packageName and fileName over subscriptionId`() =
-      runTest {
-        // If a client ever sends both, the explicit fields are authoritative over the parsed id.
-        dispatch(
-            """{"type":"unsubscribe_storage","requestId":"unsub7","subscriptionId":"other.pkg:other.xml","packageName":"com.example","fileName":"settings.xml"}"""
-        )
-        assertEquals(
-            "unsubscribeStorage" to listOf<Any?>("unsub7", "com.example", "settings.xml"),
-            lastCall,
-        )
-      }
+    runTest {
+      // If a client ever sends both, the explicit fields are authoritative over the parsed id.
+      dispatch(
+        """{"type":"unsubscribe_storage","requestId":"unsub7","subscriptionId":"other.pkg:other.xml","packageName":"com.example","fileName":"settings.xml"}"""
+      )
+      assertEquals(
+        "unsubscribeStorage" to listOf<Any?>("unsub7", "com.example", "settings.xml"),
+        lastCall,
+      )
+    }
 
   @Test
   fun `unsubscribe_storage without any identifier is a logged no-op`() = runTest {

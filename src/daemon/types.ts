@@ -75,6 +75,8 @@ export interface DaemonStatus {
   socketPath?: string;
   /** Unix socket paths exposed by the daemon, keyed by purpose */
   sockets?: DaemonSocketPaths;
+  /** Absolute path to the SQLite file this daemon owns (issue #2795) */
+  dbPath?: string;
   /** Timestamp when daemon was started */
   startedAt?: number;
   /** Daemon version */
@@ -99,6 +101,12 @@ export interface PidFileData {
   sockets?: DaemonSocketPaths;
   /** HTTP port */
   port: number;
+  /**
+   * Absolute path to the SQLite file this daemon owns. Lets a direct-mode
+   * (`--no-proxy`) launch detect a same-file collision before opening a second
+   * writer on it (issue #2795).
+   */
+  dbPath?: string;
   /** Timestamp when daemon was started */
   startedAt: number;
   /** Daemon version */

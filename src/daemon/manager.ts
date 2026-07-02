@@ -810,6 +810,7 @@ export class DaemonManager implements DaemonManagerLike {
         port: pidData.port,
         socketPath: pidData.socketPath,
         sockets: pidData.sockets,
+        dbPath: pidData.dbPath,
         startedAt: pidData.startedAt,
         version: pidData.version,
         entryScript: pidData.entryScript,

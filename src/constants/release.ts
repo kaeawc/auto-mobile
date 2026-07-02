@@ -323,4 +323,4 @@ export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (
 // iOS downloads are ever wired (resolveChecksum(<pinned>, "ios")), move this to a
 // per-entry ReleaseChecksumEntry.runnerSha256 or the check would compare the
 // newest runner sha against an older IPA and reject a valid bundle.
-export const IOS_CTRL_PROXY_RUNNER_SHA256: string = "";
+export const IOS_CTRL_PROXY_RUNNER_SHA256: string = "b281f9fd516116164a76dc049a413d5123bfb7bf96c79c6ad654ba90c08ed982";

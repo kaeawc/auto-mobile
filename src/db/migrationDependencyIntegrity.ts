@@ -47,13 +47,14 @@ function getErrorCode(error: unknown): string | undefined {
 }
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
   if (typeof error === "string") {
     return error;
   }
-  return "";
+  // bun throws a `ResolveMessage` for a failed dynamic import: it carries the
+  // "Cannot find package '<x>' from '...'" text on `.message` but is NOT an
+  // `instanceof Error`, so read `.message` off any object shape (issue #2833).
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  return typeof message === "string" ? message : "";
 }
 
 const MISSING_PACKAGE_CODES = new Set(["MODULE_NOT_FOUND", "ERR_MODULE_NOT_FOUND"]);

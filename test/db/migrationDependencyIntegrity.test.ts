@@ -65,6 +65,23 @@ describe("extractMissingPackageName", () => {
   });
 });
 
+describe("bun ResolveMessage shape (not instanceof Error)", () => {
+  // bun throws a `ResolveMessage` for a failed dynamic import: a string
+  // `.message` but NOT `instanceof Error`. The detection must read `.message`
+  // off any object, or the exact kysely case this fix targets is missed.
+  const resolveMessage = {
+    code: "ERR_MODULE_NOT_FOUND",
+    message: "Cannot find package 'kysely' from 'C:\\bunx\\...\\migrations\\m.ts'",
+  };
+
+  test("is detected, its package name extracted, and matched as a known dep", () => {
+    expect(resolveMessage instanceof Error).toBe(false);
+    expect(isMissingPackageError(resolveMessage)).toBe(true);
+    expect(extractMissingPackageName(resolveMessage)).toBe("kysely");
+    expect(isMissingMigrationDependencyError(resolveMessage)).toBe(true);
+  });
+});
+
 describe("isMissingMigrationDependencyError", () => {
   test("is true only when a KNOWN migration runtime dependency is missing", () => {
     expect(

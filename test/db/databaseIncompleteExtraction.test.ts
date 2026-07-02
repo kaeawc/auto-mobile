@@ -34,13 +34,31 @@ describe("startup migration failure does not mislabel a genuine bad import", () 
     restore("AUTOMOBILE_DB_PATH", originalDbPath);
     restore("AUTOMOBILE_MIGRATIONS_DIR", originalMigrationsDir);
     if (tempDir) {
-      await rm(tempDir, { recursive: true, force: true });
+      await removeTempDirWithRetry(tempDir);
       tempDir = undefined;
     }
   });
 
   async function importFreshDatabaseModule() {
     return import(`../../src/db/database.ts?incomplete-extraction-test=${Date.now()}-${Math.random()}`);
+  }
+
+  // Windows holds the sqlite file until the handle is fully released; retry the
+  // removal past a transient EBUSY/EPERM rather than failing the test on cleanup.
+  async function removeTempDirWithRetry(dir: string): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        await rm(dir, { recursive: true, force: true });
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
+          throw error;
+        }
+        await defaultTimer.sleep(50);
+      }
+    }
+    await rm(dir, { recursive: true, force: true });
   }
 
   test("an unknown missing package surfaces the generic error, not incomplete-extraction", async () => {
@@ -66,8 +84,9 @@ describe("startup migration failure does not mislabel a genuine bad import", () 
     };
     process.on("unhandledRejection", onUnhandled);
 
+    let db: Awaited<ReturnType<typeof importFreshDatabaseModule>> | undefined;
     try {
-      const db = await importFreshDatabaseModule();
+      db = await importFreshDatabaseModule();
 
       let thrown: unknown;
       try {
@@ -89,6 +108,7 @@ describe("startup migration failure does not mislabel a genuine bad import", () 
       expect(unhandled).toEqual([]);
     } finally {
       process.off("unhandledRejection", onUnhandled);
+      await db?.closeDatabase();
     }
   });
 });

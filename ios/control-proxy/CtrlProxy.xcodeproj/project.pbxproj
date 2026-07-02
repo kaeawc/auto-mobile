@@ -11,6 +11,7 @@
 		0A4F48C4211E43B829855704 /* SdkHierarchyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */; };
 		0DCD8748EF0E74AD806385A5 /* SdkHierarchyCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 043D2CA5107B76077BA6301C /* SdkHierarchyCache.swift */; };
 		0E8A9A62BEF9C4E672D09764 /* PerfProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */; };
+		0F29D59ABFB52692F62B434F /* TypedRequestDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA84FDE08DAFEAD66F399887 /* TypedRequestDecodeTests.swift */; };
 		12D60B8E4D067E91189066AD /* CommandHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25C10BFA5B6504892F8459D7 /* CommandHandlerTests.swift */; };
 		141E5CD4FAF4509F538E736C /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA97A6C3A1240A055D9876C /* OSLogReader.swift */; };
 		158C6F3B528C02BE92AA6132 /* HierarchyMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */; };
@@ -186,6 +187,7 @@
 		DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfProviderTests.swift; sourceTree = "<group>"; };
 		E30D131E590A0CF8F9674B0E /* ClipboardResolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardResolutionTests.swift; sourceTree = "<group>"; };
 		E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyClient.swift; sourceTree = "<group>"; };
+		EA84FDE08DAFEAD66F399887 /* TypedRequestDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypedRequestDecodeTests.swift; sourceTree = "<group>"; };
 		F2144B84CD70DB35A1030624 /* GesturePerformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GesturePerformer.swift; sourceTree = "<group>"; };
 		F9D3D13C3FE12BA2CD012082 /* ObjCExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ObjCExceptionCatcher.m; sourceTree = "<group>"; };
 		FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyMerger.swift; sourceTree = "<group>"; };
@@ -250,6 +252,7 @@
 				649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */,
 				DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */,
 				5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */,
+				EA84FDE08DAFEAD66F399887 /* TypedRequestDecodeTests.swift */,
 			);
 			name = CtrlProxyTests;
 			path = Tests/CtrlProxyTests;
@@ -573,6 +576,7 @@
 				6733CA6A1FABC8D7C34F9327 /* ObjCExceptionBridgeTests.swift in Sources */,
 				0E8A9A62BEF9C4E672D09764 /* PerfProviderTests.swift in Sources */,
 				2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */,
+				0F29D59ABFB52692F62B434F /* TypedRequestDecodeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

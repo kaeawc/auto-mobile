@@ -1,10 +1,11 @@
-import { Kysely } from "kysely";
+import { Kysely, sql } from "kysely";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 import type { Database as DatabaseSchema } from "./types";
 import { runMigrations } from "./migrator";
 import { logger } from "../utils/logger";
+import { toActionableError } from "../models/ActionableError";
 import { BunSqliteDialect } from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import {
@@ -156,11 +157,35 @@ function openConfiguredSqliteDatabase(dbPath: string): BunDatabase {
   return sqliteDb;
 }
 
+/**
+ * Write a WAL-safe, timestamped backup of the database before a destructive
+ * migration reset drops user tables. Uses SQLite's `VACUUM INTO`, which writes a
+ * transactionally-consistent single-file snapshot *through the live connection* —
+ * it captures uncheckpointed WAL frames without an OS-level copy of the open (and,
+ * on Windows, locked) database file, and produces no `-wal`/`-shm` sidecars.
+ */
+export async function backupDatabaseFile(db: Kysely<unknown>, dbPath: string): Promise<void> {
+  try {
+    // Include the pid so a daemon that restart-loops on a corrupt DB (#2784) does
+    // not clobber an earlier backup written in the same millisecond.
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = `${dbPath}.corrupt-backup-${timestamp}-${process.pid}`;
+    // The interpolated path is bound as a parameter, not concatenated into SQL.
+    await sql`VACUUM INTO ${backupPath}`.execute(db);
+
+    logger.warn(`Wrote pre-reset database backup to ${backupPath}`);
+  } catch (error) {
+    throw toActionableError(error, "Failed to back up the database before migration reset");
+  }
+}
+
 async function startMigrations(dbPath: string): Promise<void> {
   const migrationDb = createSqliteKysely<unknown>(dbPath);
 
   try {
-    await runMigrations(migrationDb);
+    await runMigrations(migrationDb, {
+      backup: () => backupDatabaseFile(migrationDb, dbPath),
+    });
     migrationsRun = true;
   } catch (error) {
     logger.error("Failed to run migrations on database initialization:", error);

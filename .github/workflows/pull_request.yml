@@ -1174,11 +1174,13 @@ jobs:
     # break it while the pure-Swift build jobs skip on src-only changes.
     if: needs.detect-changes.outputs.ios_integration_should_run == 'true'
     timeout-minutes: 45
-    # CI's XCUITest cold-start routinely exceeds the default CtrlProxy health-poll
-    # budget; give the daemon a generous window (240 × 500ms = 120s) so it doesn't
-    # give up (and then kill+respawn) a runner that is still coming up (#2834).
+    # CI's XCUITest cold-start routinely exceeds the defaults; give the daemon a
+    # generous health-poll window (240 × 500ms = 120s) so it doesn't give up (and
+    # then kill+respawn) a runner still coming up, and let an `observe` request wait
+    # (150s > 120s) for that cold start instead of aborting at the 30s default (#2834).
     env:
       AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS: "240"
+      AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

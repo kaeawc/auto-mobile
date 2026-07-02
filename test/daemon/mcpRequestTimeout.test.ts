@@ -1,43 +1,50 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+  DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
   DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
+  LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
   LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
   MIN_START_DEVICE_MCP_TIMEOUT_MS,
+  OBSERVE_MCP_TIMEOUT_ENV_VAR,
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   resolveMcpRequestTimeoutMs
 } from "../../src/daemon/mcpRequestTimeout";
 import type { DaemonRequest } from "../../src/daemon/types";
 
 describe("resolveMcpRequestTimeoutMs", () => {
-  const originalOpenLinkTimeout = process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
-  const originalLegacyOpenLinkTimeout = process.env[LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
+  const timeoutEnvVars = [
+    OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+    LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+    OBSERVE_MCP_TIMEOUT_ENV_VAR,
+    LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
+  ];
+  const originalEnv = new Map(timeoutEnvVars.map(name => [name, process.env[name]]));
 
   beforeEach(() => {
-    delete process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
-    delete process.env[LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
+    for (const name of timeoutEnvVars) {
+      delete process.env[name];
+    }
   });
 
   afterEach(() => {
-    if (originalOpenLinkTimeout === undefined) {
-      delete process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
-    } else {
-      process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR] = originalOpenLinkTimeout;
-    }
-    if (originalLegacyOpenLinkTimeout === undefined) {
-      delete process.env[LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
-    } else {
-      process.env[LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR] = originalLegacyOpenLinkTimeout;
+    for (const name of timeoutEnvVars) {
+      const original = originalEnv.get(name);
+      if (original === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = original;
+      }
     }
   });
 
-  test("uses default for non-executePlan tools/call", () => {
+  test("uses default for a tool without a floor", () => {
     const request: DaemonRequest = {
       id: "1",
       type: "mcp_request",
       method: "tools/call",
-      params: { name: "observe", arguments: {} }
+      params: { name: "tapOn", arguments: {} }
     };
     expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
@@ -79,7 +86,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
       id: "1",
       type: "mcp_request",
       method: "tools/call",
-      params: { name: "observe", arguments: {} },
+      params: { name: "tapOn", arguments: {} },
       timeoutMs: NaN
     };
     expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
@@ -101,7 +108,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
       id: "1",
       type: "mcp_request",
       method: "tools/call",
-      params: { name: "observe", arguments: {} },
+      params: { name: "tapOn", arguments: {} },
       timeoutMs: -1
     };
     expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
@@ -112,10 +119,58 @@ describe("resolveMcpRequestTimeoutMs", () => {
       id: "1",
       type: "mcp_request",
       method: "tools/call",
-      params: { name: "observe", arguments: {} },
+      params: { name: "tapOn", arguments: {} },
       timeoutMs: 0
     };
     expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("default observe floor is higher than the standard request timeout", () => {
+    expect(DEFAULT_OBSERVE_MCP_TIMEOUT_MS).toBe(90_000);
+    expect(DEFAULT_OBSERVE_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("applies default observe floor when client omits timeoutMs", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "observe", arguments: {} }
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_OBSERVE_MCP_TIMEOUT_MS);
+  });
+
+  test("raises short observe timeouts to the floor (the CI cold-start case)", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "observe", arguments: {} },
+      timeoutMs: 30_000
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_OBSERVE_MCP_TIMEOUT_MS);
+  });
+
+  test("preserves observe timeouts above the floor", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "observe", arguments: {} },
+      timeoutMs: 150_000
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(150_000);
+  });
+
+  test("applies configured observe floor from environment", () => {
+    process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR] = "150000";
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "observe", arguments: {} }
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(150_000);
   });
 
   test("applies startDevice floor when client omits timeoutMs", () => {

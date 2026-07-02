@@ -41,16 +41,31 @@ export const DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS = 90_000;
 export const OPEN_LINK_MCP_TIMEOUT_ENV_VAR = "AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS";
 export const LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS";
 
-function resolveOpenLinkMcpTimeoutFloorMs(): number {
-  const raw = process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR] ??
-    process.env[LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
+/**
+ * Floor for `observe` — on iOS the first observe after a device becomes active
+ * lazily launches the CtrlProxy XCUITest runner and waits for its health endpoint,
+ * a cold start that routinely exceeds the default 30s window on a loaded CI machine
+ * (#2834). Aborting at 30s fails an observe whose runner is still coming up — and,
+ * worse, the retry then reclaims the port and kills the still-starting runner. Give
+ * observe the same generous floor as `launchApp` (which shares this dependency), and
+ * make it env-overridable so CI — where the health-poll budget is extended — can
+ * raise it in lockstep without a code change.
+ */
+export const DEFAULT_OBSERVE_MCP_TIMEOUT_MS = 90_000;
+export const OBSERVE_MCP_TIMEOUT_ENV_VAR = "AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS";
+export const LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OBSERVE_MCP_TIMEOUT_MS";
+
+function resolveEnvTimeoutFloorMs(
+  primaryEnvVar: string,
+  legacyEnvVar: string,
+  fallbackMs: number
+): number {
+  const raw = process.env[primaryEnvVar] ?? process.env[legacyEnvVar];
   if (!raw) {
-    return DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS;
+    return fallbackMs;
   }
   const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
 }
 
 function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
@@ -62,7 +77,17 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
     case "launchApp":
       return MIN_LAUNCH_APP_MCP_TIMEOUT_MS;
     case "openLink":
-      return resolveOpenLinkMcpTimeoutFloorMs();
+      return resolveEnvTimeoutFloorMs(
+        OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+        LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+        DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS
+      );
+    case "observe":
+      return resolveEnvTimeoutFloorMs(
+        OBSERVE_MCP_TIMEOUT_ENV_VAR,
+        LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
+        DEFAULT_OBSERVE_MCP_TIMEOUT_MS
+      );
     default:
       return undefined;
   }

@@ -60,6 +60,16 @@ final class RemindersAddPlanTests: RemindersIntegrationBase {
             ?? "add-reminder.yaml"
     }
 
+    // #2811: this exercises the system Reminders app, whose exact control labels and layout timing
+    // vary across iOS versions. `add-reminder.yaml`'s waitFor guards remove the common races and its
+    // optional "Not Now" step dismisses the intermittent iCloud alert, but a single retry still
+    // absorbs the residual "fails once, passes on a plain re-run" flake this issue documents. An
+    // explicit AUTOMOBILE_TEST_RETRY_COUNT always wins; a genuine break still fails on every attempt.
+    override var retryCount: Int {
+        let base = super.retryCount
+        return base > 0 ? base : 1
+    }
+
     func testAddReminderPlan() throws {
         PerfTimer.log("testAddReminderPlan START - planPath: \(planPath)")
         let result = try executePlan()

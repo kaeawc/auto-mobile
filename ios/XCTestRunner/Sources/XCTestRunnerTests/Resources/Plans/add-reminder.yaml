@@ -13,6 +13,33 @@ steps:
       timeout: 20000
     label: Wait for Reminders UI
 
+  # Reminders intermittently shows an "Enable iCloud Syncing?" alert on launch that covers the
+  # list and blocks the create/save controls. It appears on some simulators (fresh state, no iCloud
+  # account) and not others, which is the flaky-test root cause (issue #2811): when present the
+  # later taps fail, when absent the plan sails through. Dismiss it best-effort — both the wait and
+  # the tap are optional, so a run where the alert never appears skips them and continues instead of
+  # failing.
+  - tool: observe
+    waitFor:
+      text: "Not Now"
+      timeout: 5000
+    optional: true
+    label: Wait for the iCloud syncing alert (if shown)
+
+  - tool: tapOn
+    text: "Not Now"
+    action: "tap"
+    optional: true
+    label: Dismiss the iCloud syncing alert (if shown)
+
+  # Wait for the create control to render before tapping it, so the tap doesn't race the shade/list
+  # layout on a slow simulator.
+  - tool: observe
+    waitFor:
+      text: "New Reminder"
+      timeout: 10000
+    label: Wait for New Reminder control
+
   - tool: tapOn
     text: "New Reminder"
     action: "tap"
@@ -21,6 +48,15 @@ steps:
   - tool: inputText
     text: "AutoMobile XCTest demo"
     label: Type reminder title
+
+  # Wait for the "Done" save control to render before tapping it. Without this guard the tap races
+  # the keyboard/nav-bar layout and fails with "Element not found with provided text 'Done'"
+  # (issue #2811). observe waitFor polls until it appears and fails fast via awaitTimeout otherwise.
+  - tool: observe
+    waitFor:
+      text: "Done"
+      timeout: 10000
+    label: Wait for Done control
 
   - tool: tapOn
     text: "Done"

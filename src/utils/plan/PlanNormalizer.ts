@@ -28,7 +28,13 @@ export class PlanNormalizer {
 
     const inlineParams: Record<string, any> = {};
     Object.keys(step).forEach(key => {
-      if (key !== "tool" && key !== "command" && key !== "label" && key !== "params") {
+      if (
+        key !== "tool" &&
+        key !== "command" &&
+        key !== "label" &&
+        key !== "params" &&
+        key !== "optional"
+      ) {
         inlineParams[key] = step[key];
       }
     });
@@ -46,6 +52,10 @@ export class PlanNormalizer {
 
     if (typeof step.label === "string") {
       normalizedStep.label = step.label;
+    }
+
+    if (step.optional === true) {
+      normalizedStep.optional = true;
     }
 
     logger.info(`Normalized step ${index}:`, JSON.stringify(normalizedStep, null, 2));

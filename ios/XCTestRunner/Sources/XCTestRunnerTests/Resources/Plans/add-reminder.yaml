@@ -1,17 +1,54 @@
 ---
 name: add-reminder
 description: Create a basic reminder in the iOS Reminders app (English UI assumed)
+# NOTE: the system Reminders UI varies by iOS version — the "New Reminder" and "Done" control
+# labels below are pinned to the CI simulator's iOS (English). On some iOS versions the save
+# control is labelled "Add" instead of "Done". Cross-version tolerance is tracked in issue #2855.
+# Deliberately does NOT clearAppData: on newer iOS a cleared Reminders launches to a home without
+# the "New Reminder" control, which would break this plan.
 platform: ios
 steps:
+  # coldBoot force-terminates + relaunches so a retry (the test retries once, #2811/#2855) starts
+  # from the Reminders home rather than a partial edit screen left by a failed attempt. A warm iOS
+  # launch would resume that stale screen and then time out waiting for "New Reminder". coldBoot
+  # (unlike clearAppData) keeps the app data, so it avoids the empty-home issue noted above.
   - tool: launchApp
     appId: com.apple.reminders
-    label: Launch Reminders
+    coldBoot: true
+    label: Launch Reminders (cold, for clean retry state)
 
   - tool: observe
     waitFor:
       text: "Reminders"
       timeout: 20000
     label: Wait for Reminders UI
+
+  # Reminders intermittently shows an "Enable iCloud Syncing?" alert on launch that covers the
+  # list and blocks the create/save controls. It appears on some simulators (fresh state, no iCloud
+  # account) and not others, which is the flaky-test root cause (issue #2811): when present the
+  # later taps fail, when absent the plan sails through. Dismiss it best-effort — both the wait and
+  # the tap are optional, so a run where the alert never appears skips them and continues instead of
+  # failing.
+  - tool: observe
+    waitFor:
+      text: "Not Now"
+      timeout: 5000
+    optional: true
+    label: Wait for the iCloud syncing alert (if shown)
+
+  - tool: tapOn
+    text: "Not Now"
+    action: "tap"
+    optional: true
+    label: Dismiss the iCloud syncing alert (if shown)
+
+  # Wait for the create control to render before tapping it, so the tap doesn't race the shade/list
+  # layout on a slow simulator.
+  - tool: observe
+    waitFor:
+      text: "New Reminder"
+      timeout: 10000
+    label: Wait for New Reminder control
 
   - tool: tapOn
     text: "New Reminder"
@@ -21,6 +58,15 @@ steps:
   - tool: inputText
     text: "AutoMobile XCTest demo"
     label: Type reminder title
+
+  # Wait for the "Done" save control to render before tapping it. Without this guard the tap races
+  # the keyboard/nav-bar layout and fails with "Element not found with provided text 'Done'"
+  # (issue #2811). observe waitFor polls until it appears and fails fast via awaitTimeout otherwise.
+  - tool: observe
+    waitFor:
+      text: "Done"
+      timeout: 10000
+    label: Wait for Done control
 
   - tool: tapOn
     text: "Done"

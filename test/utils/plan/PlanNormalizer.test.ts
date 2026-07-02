@@ -26,4 +26,21 @@ describe("PlanNormalizer", () => {
     expect(normalized.params).toEqual({ text: "params", device: "B" });
     expect(normalized.label).toBe("Tap button");
   });
+
+  test("promotes optional flag to the step, not into tool params", () => {
+    const normalized = PlanNormalizer.normalizeStep(
+      { tool: "tapOn", text: "Not Now", optional: true },
+      0
+    );
+
+    expect(normalized.optional).toBe(true);
+    // `optional` is a step-level concern; it must not leak into the tool schema (tapOn is strict).
+    expect(normalized.params).toEqual({ text: "Not Now" });
+  });
+
+  test("omits optional when not set to true", () => {
+    const normalized = PlanNormalizer.normalizeStep({ tool: "observe" }, 0);
+
+    expect(normalized.optional).toBeUndefined();
+  });
 });

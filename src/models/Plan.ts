@@ -6,6 +6,13 @@ export interface PlanStep {
   tool: string;
   params: Record<string, any>;
   label?: string;
+  /**
+   * Best-effort step: if the tool fails (returns success:false, an observe waitFor times out, or
+   * throws), the executor logs it, records the step as skipped, and continues instead of aborting
+   * the plan. Use for steps that guard against intermittent UI (e.g. dismissing a dialog that may
+   * or may not be present).
+   */
+  optional?: boolean;
 }
 
 export interface PlanDeviceDefinition {

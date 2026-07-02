@@ -1,5 +1,6 @@
 import {
   Plan,
+  PlanStep,
   PlanExecutionResult,
   DeviceExecutionResult,
   AbortStrategy,
@@ -14,6 +15,7 @@ import {
   type PlanExecutionOptions,
 } from "../../models/ExecutePlanResult";
 import { throwIfAborted } from "../toolUtils";
+import { ZodError } from "zod";
 import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
@@ -164,6 +166,32 @@ export class DefaultPlanExecutor implements PlanExecutor {
     if (payload.tapDebug !== undefined && payload.tapDebug !== null) {
       details.tapDebug = payload.tapDebug;
     }
+  }
+
+  /**
+   * Record a failed `optional: true` step as skipped so the sequential executor can continue
+   * without aborting the plan. Returns nothing; the caller continues its loop.
+   */
+  private recordSkippedOptionalStep(
+    debugSteps: ExecutePlanStepDebugInfo[],
+    stepNumber: number,
+    step: PlanStep,
+    durationMs: number,
+    error: string,
+  ): void {
+    logger.warn(
+      `[PLAN_STEP_${stepNumber}] optional step ${step.tool} failed; skipping and continuing: ${error}`
+    );
+    debugSteps.push({
+      step: `Execute step ${stepNumber}: ${step.tool}`,
+      status: "skipped",
+      durationMs,
+      details: {
+        params: step.params,
+        error,
+        optional: true,
+      },
+    });
   }
 
   private static readonly FAILURE_OBSERVATION_TIMEOUT_MS = 3000;
@@ -446,6 +474,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           // Check if the response indicates failure
           if (toolResult && typeof toolResult === "object" && "success" in toolResult && toolResult.success === false) {
             const errorMsg = toolResult.error || "Unknown error";
+            if (step.optional) {
+              this.recordSkippedOptionalStep(debugSteps, i + 1, step, this.timer.now() - stepStartTime, String(errorMsg));
+              continue;
+            }
             logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${errorMsg}`);
             const failureObservation = await this.buildFailureObservationContext(
               step.tool,
@@ -487,6 +519,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
           if (observeTimedOut) {
             const errorMsg = `observe waitFor timed out after ${observeTimedOut.awaitDuration ?? "unknown"}ms`;
+            if (step.optional) {
+              this.recordSkippedOptionalStep(debugSteps, i + 1, step, this.timer.now() - stepStartTime, errorMsg);
+              continue;
+            }
             logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${errorMsg}`);
             debugSteps.push({
               step: `Execute step ${i + 1}: ${step.tool}`,
@@ -541,6 +577,14 @@ export class DefaultPlanExecutor implements PlanExecutor {
           executedSteps++;
           logger.info(`[PLAN_STEP_${i + 1}] Successfully completed. Total executed: ${executedSteps}/${plan.steps.length}`);
         } catch (error) {
+          // `optional` skips runtime UI/tool failures, NOT plan-authoring errors: a schema
+          // validation throw (ZodError from tool.schema.parse) stays fatal so a typo in an optional
+          // step surfaces instead of silently becoming a no-op. An abort must also never be swallowed
+          // as a skip.
+          if (step.optional && !signal?.aborted && !(error instanceof ZodError)) {
+            this.recordSkippedOptionalStep(debugSteps, i + 1, step, this.timer.now() - stepStartTime, `${error}`);
+            continue;
+          }
           logger.error(`[PLAN_STEP_${i + 1}] EXCEPTION in ${step.tool}: ${error}`);
           const failureObservation = await this.buildFailureObservationContext(
             step.tool,
@@ -921,6 +965,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
             checkResult.success === false
           ) {
             const errorMsg = "error" in checkResult ? String(checkResult.error) : "Tool execution failed";
+            if (step.optional) {
+              // Parallel tracks do not emit the unified debug-step array (see the captureObserveSteps
+              // warning in executeParallel), so — consistently with that design — a skipped optional
+              // step is logged rather than recorded as a debug step.
+              logger.warn(
+                `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${errorMsg}`
+              );
+              continue;
+            }
             logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${errorMsg}`);
 
             const failureObservation = await this.buildFailureObservationContext(
@@ -949,6 +1002,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
             step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
           if (observeTimedOutParallel) {
             const errorMsg = `observe waitFor timed out after ${observeTimedOutParallel.awaitDuration ?? "unknown"}ms`;
+            if (step.optional) {
+              logger.warn(
+                `[PARALLEL_EXEC][${device}] optional step ${step.tool} timed out; skipping and continuing: ${errorMsg}`
+              );
+              continue;
+            }
             logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${errorMsg}`);
             return {
               success: false,
@@ -969,6 +1028,13 @@ export class DefaultPlanExecutor implements PlanExecutor {
           );
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
+          // Skip runtime failures only — a schema validation throw (ZodError) or an abort stays fatal.
+          if (step.optional && !signal?.aborted && !(error instanceof ZodError)) {
+            logger.warn(
+              `[PARALLEL_EXEC][${device}] optional step ${step.tool} threw; skipping and continuing: ${errorMessage}`
+            );
+            continue;
+          }
           logger.error(`[PARALLEL_EXEC][${device}] Step execution error: ${errorMessage}`);
 
           const failureObservation = await this.buildFailureObservationContext(

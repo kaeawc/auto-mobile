@@ -34,16 +34,14 @@ describe("backupDatabaseFile", () => {
 
     await backupDatabaseFile(db, dbPath);
 
-    // The main backup is the `.db` copy; `-wal`/`-shm` sidecars are copied too.
-    const mainBackup = readdirSync(dir).filter(
-      f => f.includes(".corrupt-backup-") && !f.endsWith("-wal") && !f.endsWith("-shm")
-    );
-    expect(mainBackup.length).toBe(1);
-    expect(mainBackup[0]).toContain(String(process.pid));
+    // VACUUM INTO writes exactly one snapshot file — no -wal/-shm sidecars.
+    const backups = readdirSync(dir).filter(f => f.includes(".corrupt-backup-"));
+    expect(backups.length).toBe(1);
+    expect(backups[0]).toContain(String(process.pid));
 
-    // The backup must contain the row even though it may not have been checkpointed
-    // before the copy — the checkpoint-then-copy is what makes this WAL-safe.
-    const backupDb = new BunDatabase(path.join(dir, mainBackup[0]));
+    // The backup must contain the row even though it may still be in the -wal —
+    // VACUUM INTO snapshots through the connection, which is what makes it WAL-safe.
+    const backupDb = new BunDatabase(path.join(dir, backups[0]));
     const row = backupDb.query("select label from widgets where id = 42").get() as {
       label: string;
     } | null;

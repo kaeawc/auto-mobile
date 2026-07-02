@@ -143,29 +143,20 @@ function openConfiguredSqliteDatabase(dbPath: string): BunDatabase {
 }
 
 /**
- * Write a WAL-safe, timestamped backup of the database file before a destructive
- * migration reset drops user tables. WAL is on (see `configureSqliteDatabase`), so
- * checkpoint into the main file first — a bare copy of `auto-mobile.db` would omit
- * uncheckpointed frames still sitting in `-wal`. The `-wal`/`-shm` sidecars are
- * copied too when present as a belt-and-braces measure.
+ * Write a WAL-safe, timestamped backup of the database before a destructive
+ * migration reset drops user tables. Uses SQLite's `VACUUM INTO`, which writes a
+ * transactionally-consistent single-file snapshot *through the live connection* —
+ * it captures uncheckpointed WAL frames without an OS-level copy of the open (and,
+ * on Windows, locked) database file, and produces no `-wal`/`-shm` sidecars.
  */
 export async function backupDatabaseFile(db: Kysely<unknown>, dbPath: string): Promise<void> {
   try {
-    // Flush WAL frames into the main database file so the copy is complete.
-    await sql`PRAGMA wal_checkpoint(TRUNCATE)`.execute(db);
-
     // Include the pid so a daemon that restart-loops on a corrupt DB (#2784) does
     // not clobber an earlier backup written in the same millisecond.
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const backupPath = `${dbPath}.corrupt-backup-${timestamp}-${process.pid}`;
-    await fs.promises.copyFile(dbPath, backupPath);
-
-    for (const suffix of ["-wal", "-shm"]) {
-      const sidecar = `${dbPath}${suffix}`;
-      if (fs.existsSync(sidecar)) {
-        await fs.promises.copyFile(sidecar, `${backupPath}${suffix}`);
-      }
-    }
+    // The interpolated path is bound as a parameter, not concatenated into SQL.
+    await sql`VACUUM INTO ${backupPath}`.execute(db);
 
     logger.warn(`Wrote pre-reset database backup to ${backupPath}`);
   } catch (error) {

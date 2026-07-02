@@ -1,10 +1,11 @@
-import { Kysely } from "kysely";
+import { Kysely, sql } from "kysely";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 import type { Database as DatabaseSchema } from "./types";
 import { runMigrations } from "./migrator";
 import { logger } from "../utils/logger";
+import { toActionableError } from "../models/ActionableError";
 import { BunSqliteDialect } from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
@@ -141,11 +142,42 @@ function openConfiguredSqliteDatabase(dbPath: string): BunDatabase {
   return sqliteDb;
 }
 
+/**
+ * Write a WAL-safe, timestamped backup of the database file before a destructive
+ * migration reset drops user tables. WAL is on (see `configureSqliteDatabase`), so
+ * checkpoint into the main file first — a bare copy of `auto-mobile.db` would omit
+ * uncheckpointed frames still sitting in `-wal`. The `-wal`/`-shm` sidecars are
+ * copied too when present as a belt-and-braces measure.
+ */
+async function backupDatabaseFile(db: Kysely<unknown>, dbPath: string): Promise<void> {
+  try {
+    // Flush WAL frames into the main database file so the copy is complete.
+    await sql`PRAGMA wal_checkpoint(TRUNCATE)`.execute(db);
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = `${dbPath}.corrupt-backup-${timestamp}`;
+    await fs.promises.copyFile(dbPath, backupPath);
+
+    for (const suffix of ["-wal", "-shm"]) {
+      const sidecar = `${dbPath}${suffix}`;
+      if (fs.existsSync(sidecar)) {
+        await fs.promises.copyFile(sidecar, `${backupPath}${suffix}`);
+      }
+    }
+
+    logger.warn(`Wrote pre-reset database backup to ${backupPath}`);
+  } catch (error) {
+    throw toActionableError(error, "Failed to back up the database before migration reset");
+  }
+}
+
 async function startMigrations(dbPath: string): Promise<void> {
   const migrationDb = createSqliteKysely<unknown>(dbPath);
 
   try {
-    await runMigrations(migrationDb);
+    await runMigrations(migrationDb, {
+      backup: () => backupDatabaseFile(migrationDb, dbPath),
+    });
     migrationsRun = true;
   } catch (error) {
     logger.error("Failed to run migrations on database initialization:", error);

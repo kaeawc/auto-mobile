@@ -4,6 +4,7 @@ import * as os from "os";
 import * as fs from "fs";
 import type { Database as DatabaseSchema } from "./types";
 import { runMigrations } from "./migrator";
+import { createFileMigrationLock } from "./migrationLock";
 import { logger } from "../utils/logger";
 import { BunSqliteDialect } from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
@@ -145,7 +146,10 @@ async function startMigrations(dbPath: string): Promise<void> {
   const migrationDb = createSqliteKysely<unknown>(dbPath);
 
   try {
-    await runMigrations(migrationDb);
+    // Serialize the migration run across processes: two openers on the same DB
+    // file (override env / --no-proxy alongside a daemon) must not both enter
+    // migrateToLatest() and collide on the kysely_migration PRIMARY KEY (#2794).
+    await runMigrations(migrationDb, createFileMigrationLock(dbPath));
     migrationsRun = true;
   } catch (error) {
     logger.error("Failed to run migrations on database initialization:", error);

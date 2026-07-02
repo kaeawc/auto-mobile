@@ -6,6 +6,8 @@ import { fileURLToPath } from "url";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import type { MigrationLock } from "./migrationLock";
+import { NoOpMigrationLock } from "./migrationLock";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 const DISABLED_RECOVERY_VALUES = new Set(["0", "false", "no", "off"]);
@@ -170,41 +172,57 @@ async function recoverCorruptedMigrations(
 }
 
 /**
- * Run all pending database migrations
+ * Run all pending database migrations.
+ *
+ * The optional {@link MigrationLock} serializes the run across processes so two
+ * openers pointed at the same DB file can't both enter `migrateToLatest()` and
+ * collide on the `kysely_migration` PRIMARY KEY (issue #2794). The default is a
+ * no-op lock — correct for `:memory:` databases and the single-daemon path,
+ * which is already serialized by the in-process mutex. Production callers pass a
+ * file lock keyed to the resolved DB path (see `database.ts#startMigrations`).
+ * The lock is always released, even when the migration throws.
  */
-export async function runMigrations(db: Kysely<unknown>): Promise<void> {
-  const migrator = new Migrator({
-    db,
-    provider: new FileMigrationProvider({
-      fs,
-      path,
-      migrationFolder: resolveMigrationFolder(),
-    }),
-  });
+export async function runMigrations(
+  db: Kysely<unknown>,
+  lock: MigrationLock = new NoOpMigrationLock()
+): Promise<void> {
+  await lock.acquire();
+  try {
+    const migrator = new Migrator({
+      db,
+      provider: new FileMigrationProvider({
+        fs,
+        path,
+        migrationFolder: resolveMigrationFolder(),
+      }),
+    });
 
-  const { error } = await runMigrationsOnce(migrator);
+    const { error } = await runMigrationsOnce(migrator);
 
-  if (error) {
-    if (isCorruptedMigrationError(error) && isMigrationRecoveryEnabled()) {
-      const recoveryResult = await recoverCorruptedMigrations(db, migrator, error);
-      if (recoveryResult.error) {
-        logger.error("Failed to run migrations after recovery:", recoveryResult.error);
-        throw recoveryResult.error;
+    if (error) {
+      if (isCorruptedMigrationError(error) && isMigrationRecoveryEnabled()) {
+        const recoveryResult = await recoverCorruptedMigrations(db, migrator, error);
+        if (recoveryResult.error) {
+          logger.error("Failed to run migrations after recovery:", recoveryResult.error);
+          throw recoveryResult.error;
+        }
+        logger.info("All migrations completed successfully");
+        return;
       }
-      logger.info("All migrations completed successfully");
-      return;
+
+      if (isCorruptedMigrationError(error) && !isMigrationRecoveryEnabled()) {
+        logger.error(
+          "Corrupted migrations detected. Set AUTOMOBILE_MIGRATION_RECOVERY=1 to enable automatic " +
+            "recovery or reset the local database state."
+        );
+      }
+
+      logger.error("Failed to run migrations:", error);
+      throw error;
     }
 
-    if (isCorruptedMigrationError(error) && !isMigrationRecoveryEnabled()) {
-      logger.error(
-        "Corrupted migrations detected. Set AUTOMOBILE_MIGRATION_RECOVERY=1 to enable automatic " +
-          "recovery or reset the local database state."
-      );
-    }
-
-    logger.error("Failed to run migrations:", error);
-    throw error;
+    logger.info("All migrations completed successfully");
+  } finally {
+    await lock.release();
   }
-
-  logger.info("All migrations completed successfully");
 }

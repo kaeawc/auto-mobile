@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import {
   assertDirectModeDbOwnership,
   createDefaultDirectModeGuardDeps,
@@ -55,6 +57,35 @@ describe("findConflictingDaemons", () => {
   test("returns empty when no owners are reported (EC4)", () => {
     expect(findConflictingDaemons(depsFrom(DEFAULT_DB, []))).toEqual([]);
   });
+
+  test("canonicalizes symlinked paths so real and symlink forms match", () => {
+    // A symlinked data dir (e.g. macOS /Users vs /System/Volumes/Data/Users)
+    // must not defeat the guard: the daemon's real-path record and this
+    // process's symlink-path resolution should compare equal.
+    const root = mkdtempSync(join(tmpdir(), "directmode-guard-"));
+    try {
+      const realDir = join(root, "real-data");
+      mkdirSync(realDir);
+      const linkDir = join(root, "link-data");
+      try {
+        symlinkSync(realDir, linkDir);
+      } catch {
+        // Symlink creation is unprivileged on POSIX but can require elevation on
+        // Windows; skip the canonicalization assertion where it isn't permitted.
+        return;
+      }
+
+      const daemonDbPath = join(realDir, "auto-mobile.db"); // real form
+      const ourDbPath = join(linkDir, "auto-mobile.db"); // symlink form (DB file absent)
+
+      const conflicts = findConflictingDaemons(
+        depsFrom(ourDbPath, [{ pid: 55, dbPath: daemonDbPath }])
+      );
+      expect(conflicts.map(c => c.pid)).toEqual([55]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("assertDirectModeDbOwnership", () => {
@@ -67,7 +98,10 @@ describe("assertDirectModeDbOwnership", () => {
     }
     expect(thrown).toBeInstanceOf(ActionableError);
     const message = (thrown as Error).message;
-    expect(message).toContain(DEFAULT_DB);
+    // The message embeds the RESOLVED path (platform-specific separators), so
+    // assert against the same normalization the guard applies rather than the raw
+    // POSIX literal — otherwise this fails on Windows (C:\home\... vs /home/...).
+    expect(message).toContain(resolve(DEFAULT_DB));
     expect(message).toContain("4242");
     expect(message).toContain("--no-proxy");
     expect(message).toContain("AUTOMOBILE_DB_PATH");
@@ -149,6 +183,22 @@ describe("createDefaultDirectModeGuardDeps", () => {
       resolveDbPath: () => DEFAULT_DB,
     });
     expect(deps.findLiveDaemonDbOwners()).toEqual([{ pid: 3000, dbPath: undefined }]);
+  });
+
+  test("swallows a process-table failure and proceeds without a conflict (ps hiccup)", () => {
+    // An indeterminate `ps` is not evidence a daemon is running; the escape-hatch
+    // launch must not be hard-failed by a transient process-table error. #2795
+    const deps = createDefaultDirectModeGuardDeps({
+      manager: {
+        findLiveDaemonProcesses: () => {
+          throw new Error("ps: command failed");
+        },
+      },
+      readPidFileData: () => pidData({ pid: 1000, dbPath: DEFAULT_DB }),
+      resolveDbPath: () => DEFAULT_DB,
+    });
+    expect(deps.findLiveDaemonDbOwners()).toEqual([]);
+    expect(() => assertDirectModeDbOwnership(deps)).not.toThrow();
   });
 
   test("ignores a stale PID file whose pid is not live", () => {

@@ -37,9 +37,10 @@ describe("findConflictingDaemons", () => {
     expect(conflicts).toEqual([]);
   });
 
-  test("is file-scoped, not daemon-existence: an owner with unknown dbPath never matches (EC3)", () => {
-    // A live daemon we cannot map to a DB file (e.g. another worktree's PID file)
-    // must not falsely refuse — file, not daemon presence, is the predicate.
+  test("the same-file matcher never matches an unknown dbPath (EC3)", () => {
+    // findConflictingDaemons is the pure same-FILE matcher: an unknown path is
+    // not a same-file match here. (assertDirectModeDbOwnership separately fails
+    // closed on unknown-path live daemons — see its own tests.)
     const conflicts = findConflictingDaemons(
       depsFrom(DEFAULT_DB, [{ pid: 99, dbPath: undefined }])
     );
@@ -119,6 +120,33 @@ describe("assertDirectModeDbOwnership", () => {
     expect(() => assertDirectModeDbOwnership(depsFrom(DEFAULT_DB, []))).not.toThrow();
   });
 
+  test("fails closed when a live daemon's DB path is unknown (starting up / non-default PID)", () => {
+    // A daemon opens+migrates the DB seconds before it records its dbPath, so an
+    // unknown-path live daemon could be about to write this same file. Refuse.
+    let thrown: unknown;
+    try {
+      assertDirectModeDbOwnership(depsFrom(DEFAULT_DB, [{ pid: 777, dbPath: undefined }]));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ActionableError);
+    const message = (thrown as Error).message;
+    expect(message).toContain("777");
+    expect(message).toContain("could not be determined");
+    expect(message).toContain("--no-proxy");
+    expect(message).toContain("AUTOMOBILE_DB_PATH");
+  });
+
+  test("still allows an isolated path when another daemon owns a KNOWN different file (EC2 preserved)", () => {
+    // Fail-closed applies only to UNKNOWN paths; a resolvable, different-path
+    // daemon must not break the AUTOMOBILE_DB_PATH escape hatch.
+    expect(() =>
+      assertDirectModeDbOwnership(
+        depsFrom("/home/tester/bench/isolated.db", [{ pid: 4242, dbPath: DEFAULT_DB }])
+      )
+    ).not.toThrow();
+  });
+
   test("lists every conflicting pid in the error message", () => {
     let thrown: unknown;
     try {
@@ -174,31 +202,51 @@ describe("createDefaultDirectModeGuardDeps", () => {
     expect(deps.findLiveDaemonDbOwners()).toEqual([]);
   });
 
-  test("reports live daemons with unresolvable DB path as undefined, never a false match (EC3)", () => {
+  test("surfaces a live daemon with no resolvable DB path as unknown (fails closed downstream)", () => {
     // PID file describes a daemon (2000) that is NOT among the live pids; the live
-    // daemon (3000) has no readable DB path → reported undefined so it can't match.
+    // daemon (3000) has no readable DB path → reported undefined, and the guard
+    // then fails closed on it (it may be mid-startup on the same file).
     const deps = createDefaultDirectModeGuardDeps({
       manager: { findLiveDaemonProcesses: () => [3000] },
       readPidFileData: () => pidData({ pid: 2000, dbPath: DEFAULT_DB }),
       resolveDbPath: () => DEFAULT_DB,
     });
     expect(deps.findLiveDaemonDbOwners()).toEqual([{ pid: 3000, dbPath: undefined }]);
+    expect(() => assertDirectModeDbOwnership(deps)).toThrow(ActionableError);
   });
 
-  test("swallows a process-table failure and proceeds without a conflict (ps hiccup)", () => {
-    // An indeterminate `ps` is not evidence a daemon is running; the escape-hatch
-    // launch must not be hard-failed by a transient process-table error. #2795
+  test("on Windows, an unavailable `ps` fails OPEN so direct mode still starts", () => {
+    // `ps` is absent on Windows (the daemon manager's scan also fails there), so a
+    // scan failure is expected, not evidence of a daemon. #2795
     const deps = createDefaultDirectModeGuardDeps({
+      platform: "win32",
+      manager: {
+        findLiveDaemonProcesses: () => {
+          throw new Error("'ps' is not recognized as a command");
+        },
+      },
+      readPidFileData: () => null,
+      resolveDbPath: () => DEFAULT_DB,
+    });
+    expect(deps.findLiveDaemonDbOwners()).toEqual([]);
+    expect(() => assertDirectModeDbOwnership(deps)).not.toThrow();
+  });
+
+  test("on non-Windows, an indeterminate `ps` scan fails CLOSED (refuses)", () => {
+    // Where `ps` should work, a scan failure means we can't rule out a live daemon
+    // on this DB file — refuse rather than risk a second writer. #2795
+    const deps = createDefaultDirectModeGuardDeps({
+      platform: "linux",
       manager: {
         findLiveDaemonProcesses: () => {
           throw new Error("ps: command failed");
         },
       },
-      readPidFileData: () => pidData({ pid: 1000, dbPath: DEFAULT_DB }),
+      readPidFileData: () => null,
       resolveDbPath: () => DEFAULT_DB,
     });
-    expect(deps.findLiveDaemonDbOwners()).toEqual([]);
-    expect(() => assertDirectModeDbOwnership(deps)).not.toThrow();
+    expect(() => deps.findLiveDaemonDbOwners()).toThrow(ActionableError);
+    expect(() => assertDirectModeDbOwnership(deps)).toThrow(ActionableError);
   });
 
   test("ignores a stale PID file whose pid is not live", () => {

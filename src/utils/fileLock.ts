@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import { isProcessRunning as defaultIsProcessRunning } from "../daemon/daemonFiles";
 
@@ -80,14 +80,29 @@ export function tryAcquireExclusiveLock(
     return false;
   }
 
-  // Dead holder (or our own recycled PID under reclaimOwnPid) — reclaim it, then
-  // re-create atomically. The `wx` open below is the arbiter: two openers racing
-  // on the same dead PID can't both win — the loser's create throws and it waits.
+  // Dead holder (or our own recycled PID under reclaimOwnPid) — reclaim it.
+  //
+  // Do NOT unlink-by-path here: two openers can both read the same stale PID, and
+  // an unlink-by-path would let each delete the OTHER's freshly recreated lock and
+  // then both `wx`-create — so both would "own" it and enter migrateToLatest()
+  // concurrently, reintroducing the PRIMARY KEY collision this lock prevents.
+  //
+  // Instead claim the stale file with an atomic rename to a per-PID marker: only
+  // the opener whose rename succeeds consumed that exact stale instance; a racing
+  // opener's rename throws (the path is already gone) and it retries, finding the
+  // fresh lock held. The final `wx` create is still the arbiter against a third
+  // opener that creates a brand-new lock in the gap.
+  const reclaimMarker = `${lockFilePath}.${pid}.reclaim`;
   try {
-    unlinkSync(lockFilePath);
+    renameSync(lockFilePath, reclaimMarker);
   } catch {
-    // Someone else reclaimed it first; retry on the next attempt.
+    // Another opener reclaimed it first (path already moved/gone); retry.
     return false;
+  }
+  try {
+    unlinkSync(reclaimMarker);
+  } catch {
+    // Best-effort: the consumed stale marker is ours to remove.
   }
   return writeExclusiveLockFile(lockFilePath, pid);
 }

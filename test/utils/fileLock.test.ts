@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../../src/utils/fileLock";
 
 describe("fileLock primitive", () => {
@@ -42,6 +42,26 @@ describe("fileLock primitive", () => {
     writeFileSync(lockPath, "9999");
     expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => false })).toBe(true);
     expect(readFileSync(lockPath, "utf-8").trim()).toBe("100");
+  });
+
+  test("reclaim leaves no stray .reclaim marker behind", () => {
+    writeFileSync(lockPath, "9999");
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => false })).toBe(true);
+
+    const lockName = basename(lockPath);
+    const strays = readdirSync(dir).filter(name => name !== lockName);
+    expect(strays).toEqual([]);
+  });
+
+  test("a stale reclaim marker from a crashed reclaim does not block a later reclaim", () => {
+    // A prior reclaim by pid 100 crashed after the rename but before removing its
+    // marker. A fresh reclaim by the same pid must still succeed (rename overwrites).
+    writeFileSync(`${lockPath}.100.reclaim`, "9999");
+    writeFileSync(lockPath, "9999");
+
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => false })).toBe(true);
+    expect(readFileSync(lockPath, "utf-8").trim()).toBe("100");
+    expect(existsSync(`${lockPath}.100.reclaim`)).toBe(false);
   });
 
   test("own live PID is held by default but reclaimed under reclaimOwnPid", () => {

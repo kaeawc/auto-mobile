@@ -1,3 +1,5 @@
+import { realpathSync } from "fs";
+import { basename, dirname, join } from "path";
 import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
@@ -131,6 +133,24 @@ export class FileMigrationLock implements MigrationLock {
 }
 
 /**
+ * Resolve the lock file path for a DB path, canonicalizing symlinks/aliases so
+ * two openers reaching the *same* DB file through different path aliases (e.g. a
+ * symlinked or bind-mounted `AUTOMOBILE_DB_PATH`) derive the SAME lock file and
+ * actually contend — otherwise a string-keyed lock would let them both enter
+ * `migrateToLatest()`. The DB file itself may not exist yet on first boot, so
+ * canonicalize the (already-created) parent directory and re-append the basename.
+ */
+export function migrationLockPathFor(dbPath: string): string {
+  let canonical = dbPath;
+  try {
+    canonical = join(realpathSync(dirname(dbPath)), basename(dbPath));
+  } catch {
+    // Parent dir not resolvable yet — fall back to the raw path (best effort).
+  }
+  return `${canonical}.migrate.lock`;
+}
+
+/**
  * Default migration lock for a resolved DB file path. Keyed per-file (not
  * per-uid) because the trigger — two openers on one DB file — is per-file. The
  * busy-wait ceiling can be overridden via `AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS`
@@ -138,7 +158,7 @@ export class FileMigrationLock implements MigrationLock {
  * `src/daemon/constants.ts`.
  */
 export function createFileMigrationLock(dbPath: string): MigrationLock {
-  const lockFilePath = `${dbPath}.migrate.lock`;
+  const lockFilePath = migrationLockPathFor(dbPath);
   const override =
     process.env.AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS ??
     process.env.AUTO_MOBILE_MIGRATION_LOCK_TIMEOUT_MS;

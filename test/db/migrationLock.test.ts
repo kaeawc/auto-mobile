@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { FileMigrationLock, NoOpMigrationLock } from "../../src/db/migrationLock";
+import { FileMigrationLock, NoOpMigrationLock, migrationLockPathFor } from "../../src/db/migrationLock";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -234,4 +234,42 @@ describe("NoOpMigrationLock", () => {
     await lock.release();
     expect(true).toBe(true);
   });
+});
+
+describe("migrationLockPathFor", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "migration-lock-path-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("appends .migrate.lock to the canonicalized DB path", () => {
+    const dbPath = join(dir, "auto-mobile.db");
+    // `dir` itself may be under a symlinked tmp root (e.g. macOS /var → /private/var),
+    // so compare against the canonicalized directory rather than the raw path.
+    const expected = `${join(realpathSync(dir), "auto-mobile.db")}.migrate.lock`;
+    expect(migrationLockPathFor(dbPath)).toBe(expected);
+  });
+
+  // Symlinks require elevation on Windows; the canonicalization is a POSIX-alias fix.
+  test.skipIf(process.platform === "win32")(
+    "resolves symlinked directory aliases to the same lock path",
+    () => {
+      const realDir = join(dir, "real");
+      const linkDir = join(dir, "link");
+      mkdirSync(realDir, { recursive: true });
+      symlinkSync(realDir, linkDir);
+
+      const viaReal = migrationLockPathFor(join(realDir, "auto-mobile.db"));
+      const viaLink = migrationLockPathFor(join(linkDir, "auto-mobile.db"));
+
+      // Two aliases for the same directory must derive the SAME lock file so the
+      // openers actually contend.
+      expect(viaLink).toBe(viaReal);
+    }
+  );
 });

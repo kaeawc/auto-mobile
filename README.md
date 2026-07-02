@@ -10,7 +10,7 @@
 
 ![TypeScript tests: 5,412](https://img.shields.io/badge/TypeScript_tests-5%2C412-3178C6)
 ![Kotlin tests: 1,249](https://img.shields.io/badge/Kotlin_tests-1%2C249-7F52FF)
-![Swift tests: 523](https://img.shields.io/badge/Swift_tests-523-F05138)
+![Swift tests: 567](https://img.shields.io/badge/Swift_tests-567-F05138)
 ![Kotlin coverage](https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile/kotlin-coverage-badge.json)
 ![Swift coverage](https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile/swift-coverage-badge.json)
 

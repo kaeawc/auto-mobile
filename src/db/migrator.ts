@@ -200,10 +200,44 @@ async function dropAllTables(db: Kysely<unknown>, tableNames: string[]): Promise
   });
 }
 
+interface MigrationHistoryRow {
+  name: string;
+  timestamp: string;
+}
+
+/** Snapshot the current migration history so it can be restored if recovery refuses. */
+async function snapshotMigrationHistory(
+  db: Kysely<unknown>
+): Promise<MigrationHistoryRow[] | null> {
+  if (!(await tableExists(db, DEFAULT_MIGRATION_TABLE))) {
+    return null;
+  }
+  const rows = await db
+    .selectFrom(DEFAULT_MIGRATION_TABLE as any)
+    .select(["name", "timestamp"])
+    .execute();
+  return rows.map(row => ({ name: String(row.name), timestamp: String(row.timestamp) }));
+}
+
+/** Replace the migration history with a previously captured snapshot. */
+async function restoreMigrationHistory(
+  db: Kysely<unknown>,
+  snapshot: MigrationHistoryRow[]
+): Promise<void> {
+  await ensureMigrationTableExists(db);
+  await db.transaction().execute(async trx => {
+    await trx.deleteFrom(DEFAULT_MIGRATION_TABLE as any).execute();
+    if (snapshot.length > 0) {
+      await trx.insertInto(DEFAULT_MIGRATION_TABLE as any).values(snapshot).execute();
+    }
+  });
+}
+
 async function resetDatabaseState(
   db: Kysely<unknown>,
   options: RunMigrationsOptions,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  originalHistory: MigrationHistoryRow[] | null
 ): Promise<void> {
   const tables = await db
     .selectFrom("sqlite_master" as any)
@@ -224,11 +258,21 @@ async function resetDatabaseState(
 
   const populated = await isAnyTableNonEmpty(db, userTables);
 
+  if (populated && originalHistory) {
+    // The safe rebuild already committed a rewrite of `kysely_migration`. Put the
+    // original history back before we either refuse or back up, so a refusal leaves
+    // the database exactly as we found it (no post-refusal wedge once the operator
+    // fixes the branch) and an opted-in backup snapshots the true pre-recovery
+    // state rather than the rebuilt one.
+    await restoreMigrationHistory(db, originalHistory);
+  }
+
   if (populated && !isDestructiveResetExplicitlyOptedIn(env)) {
     throw new ActionableError(
       "Refusing to drop a populated database during migration recovery. The safe " +
         "migration-history rebuild was already attempted and the migrations are still " +
-        "corrupted (most likely an out-of-order or renamed migration). Fix the migration " +
+        "corrupted (most likely an out-of-order or renamed migration). Your data and the " +
+        "original migration history have been left untouched — fix the migration " +
         "ordering/name, or set AUTOMOBILE_MIGRATION_RECOVERY=1 to allow a destructive reset " +
         "(a timestamped backup of the database is written first)."
     );
@@ -276,6 +320,10 @@ async function recoverCorruptedMigrations(
       "Set AUTOMOBILE_MIGRATION_RECOVERY=0 to disable."
   );
 
+  // Capture the history BEFORE the rebuild rewrites it, so a later refusal on a
+  // populated DB can restore the original state instead of leaving it wedged.
+  const originalHistory = await snapshotMigrationHistory(db);
+
   const rebuildResult = await rebuildMigrationTable(db, migrator);
   if (rebuildResult.pruned.length > 0) {
     logger.warn(
@@ -291,7 +339,7 @@ async function recoverCorruptedMigrations(
   }
 
   logger.warn("Migration recovery failed after rebuild. Resetting database state (destructive).");
-  await resetDatabaseState(db, options, env);
+  await resetDatabaseState(db, options, env, originalHistory);
   result = await runMigrationsOnce(migrator);
   return result;
 }

@@ -145,6 +145,10 @@ describe("runMigrations recovery", () => {
     expect(thrown).toBeInstanceOf(ActionableError);
     expect(await sentinelSurvives(db)).toBe(true);
     expect(backupCalls).toBe(0);
+    // The safe rebuild pruned GADGETS from history; on refusal that rewrite must
+    // be rolled back so the DB is left exactly as found (otherwise reverting the
+    // rename would leave startup wedged against a table with no history row).
+    expect(await migrationNames(db)).toEqual([WIDGETS, GADGETS].sort());
   });
 
   // (C) Empty DB still auto-heals end-to-end via the destructive reset.
@@ -187,6 +191,32 @@ describe("runMigrations recovery", () => {
     // Reset happened: sentinel gone, migrations replayed clean.
     expect(await sentinelSurvives(db)).toBe(false);
     expect(await migrationNames(db)).toEqual([BACKPORT, WIDGETS, GADGETS].sort());
+  });
+
+  // Opted-in rename: the backup must snapshot the ORIGINAL history (the rebuild
+  // pruned GADGETS before the reset), so a restore of the backup is faithful.
+  test("restores original history before backing up on an opted-in rename", async () => {
+    await runMigrations(db, { provider: providerFor(baseMigrations()), env: {} });
+    await insertSentinel(db);
+
+    let historyAtBackup: string[] = [];
+    const backup = async (): Promise<void> => {
+      historyAtBackup = await migrationNames(db);
+    };
+    const renamed = {
+      [WIDGETS]: createTableMigration("widgets"),
+      [RENAMED_GADGETS]: createTableMigration("gadgets"),
+    };
+
+    await runMigrations(db, {
+      provider: providerFor(renamed),
+      env: { AUTOMOBILE_MIGRATION_RECOVERY: "1" },
+      backup,
+    });
+
+    // At backup time the history is the original [WIDGETS, GADGETS], not the
+    // rebuild's pruned [WIDGETS].
+    expect(historyAtBackup).toEqual([WIDGETS, GADGETS].sort());
   });
 
   // (I) =true keeps the non-destructive rebuild but REFUSES the destructive reset.

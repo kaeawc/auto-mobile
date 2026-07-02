@@ -216,6 +216,11 @@ private enum PlanStepSequence {
 
         for rawLine in yaml.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
             let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+            // Skip full-line comments so a comment block preceding a step isn't misattributed to the
+            // previous step's body (which would make `mentions(...)` match on comment text).
+            if trimmed.hasPrefix("#") {
+                continue
+            }
             if let tool = toolName(fromListItem: trimmed) {
                 flush()
                 currentTool = tool

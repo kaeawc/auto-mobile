@@ -963,6 +963,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
           ) {
             const errorMsg = "error" in checkResult ? String(checkResult.error) : "Tool execution failed";
             if (step.optional) {
+              // Parallel tracks do not emit the unified debug-step array (see the captureObserveSteps
+              // warning in executeParallel), so — consistently with that design — a skipped optional
+              // step is logged rather than recorded as a debug step.
               logger.warn(
                 `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${errorMsg}`
               );

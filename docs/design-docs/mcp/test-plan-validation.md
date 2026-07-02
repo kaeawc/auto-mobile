@@ -126,7 +126,39 @@ name: my-test-plan          # Required: unique plan identifier
 steps:                      # Required: at least one step
   - tool: observe           # Required: tool name
     label: Wait for app     # Optional: human-readable description
+    optional: true          # Optional: best-effort step (see below)
 ```
+
+### Optional (best-effort) steps
+
+A step marked `optional: true` becomes **best-effort**: if its tool fails —
+returns `success: false`, an `observe` `waitFor` times out, or the handler
+throws — the executor logs the failure, records the step as `skipped`, and
+**continues** instead of aborting the plan. An abort/cancellation is never
+swallowed as a skip.
+
+Use this to guard against intermittent UI that may or may not be present, so a
+plan doesn't fail on the runs where it is absent. For example, dismissing a
+system dialog that only appears sometimes:
+
+```yaml
+steps:
+  # If the "Not Now" alert isn't up on this run, both steps skip and the plan
+  # continues instead of failing.
+  - tool: observe
+    waitFor:
+      text: "Not Now"
+      timeout: 5000
+    optional: true
+    label: Wait for the alert (if shown)
+  - tool: tapOn
+    text: "Not Now"
+    optional: true
+    label: Dismiss the alert (if shown)
+```
+
+`optional` is a step-level field, not a tool parameter — it is never forwarded
+to the tool.
 
 ### Complete Example
 

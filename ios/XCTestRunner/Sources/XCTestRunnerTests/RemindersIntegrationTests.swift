@@ -65,6 +65,7 @@ final class RemindersAddPlanTests: RemindersIntegrationBase {
     // optional "Not Now" step dismisses the intermittent iCloud alert, but a single retry still
     // absorbs the residual "fails once, passes on a plain re-run" flake this issue documents. An
     // explicit AUTOMOBILE_TEST_RETRY_COUNT always wins; a genuine break still fails on every attempt.
+    // The retry is tracked for removal once the guards are proven sufficient — see issue #2855.
     override var retryCount: Int {
         let base = super.retryCount
         return base > 0 ? base : 1

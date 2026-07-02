@@ -1,6 +1,11 @@
 ---
 name: add-reminder
 description: Create a basic reminder in the iOS Reminders app (English UI assumed)
+# NOTE: the system Reminders UI varies by iOS version — the "New Reminder" and "Done" control
+# labels below are pinned to the CI simulator's iOS (English). On some iOS versions the save
+# control is labelled "Add" instead of "Done". Cross-version tolerance is tracked in issue #2855.
+# Deliberately does NOT clearAppData: on newer iOS a cleared Reminders launches to a home without
+# the "New Reminder" control, which would break this plan.
 platform: ios
 steps:
   - tool: launchApp

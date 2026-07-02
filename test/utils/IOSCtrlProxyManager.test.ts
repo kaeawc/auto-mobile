@@ -789,15 +789,19 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses().length).toBe(0);
     });
 
-    // Builds a fake ownable runner process (our xcodebuild for this device) so
-    // isOwnRunnerProcessAlive()'s PID-reuse guard treats it as genuinely ours.
+    // Builds a fake ownable runner process modelled on the REAL launch command
+    // (see startOnSimulator): xcodebuild with the CtrlProxy UI test target and this
+    // device's identity, so isOwnRunnerProcessAlive()'s CtrlProxy-ownership guard
+    // treats it as genuinely ours.
     function ownRunnerProcess(pid: number): FakeListeningProcess {
       return {
         pid,
         port: 8765,
         command: `xcodebuild test-without-building ` +
-          `-xctestrun /tmp/automobile-runner-${testDevice.deviceId}.xctestrun ` +
-          `-destination id=${testDevice.deviceId}`,
+          `-xctestrun /tmp/automobile-ctrl-proxy/automobile-runner-${testDevice.deviceId}.xctestrun ` +
+          `-destination "platform=iOS Simulator,id=${testDevice.deviceId}" ` +
+          `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+        environment: `CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
         alive: true,
       };
     }
@@ -848,6 +852,45 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 12345")).toBe(true);
       expect(runnerProcs[0].alive).toBe(false);
       expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBeNull();
+      // The auto-restart suppression latch is not left set across the throw (MINOR-2).
+      expect((manager as unknown as { isStopping: boolean }).isStopping).toBe(false);
+    });
+
+    test("start() does NOT terminate the tracked PID if it was recycled during the wait (#2834)", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+
+      // PID 12345 stays alive throughout, and health never answers.
+      fakeExecutor.setCommandHandler("kill -0", () => createExecResult("", ""));
+      fakeExecutor.setCommandHandler("ps eww", () => createExecResult("some-process", ""));
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+      // `ps -p … -o args=` reports our CtrlProxy runner at the initial wait decision, but
+      // a foreign process by the pre-terminate re-verify (the tracked PID was recycled
+      // during the long health poll). Registered first so it wins the "ps -p" match.
+      let psArgsCalls = 0;
+      fakeExecutor.setCommandHandler("ps -p", () => {
+        psArgsCalls++;
+        const command = psArgsCalls <= 1
+          ? `1 xcodebuild test-without-building ` +
+            `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService ` +
+            `-destination "platform=iOS Simulator,id=${testDevice.deviceId}"`
+          : "1 /usr/sbin/some-unrelated-daemon --serve";
+        return createExecResult(command, "");
+      });
+
+      await withHealthBudget("1", async () => {
+        fakeTimer.enableAutoAdvance();
+        await expect(manager.start()).rejects.toThrow(/failed to start within timeout/);
+      });
+
+      // The re-verify sees a foreign command, so the recycled PID is NOT killed — we only
+      // un-track it (MINOR-1). isStopping is not left latched (MINOR-2).
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 12345")).toBe(false);
+      expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBeNull();
+      expect((manager as unknown as { isStopping: boolean }).isStopping).toBe(false);
+      expect(psArgsCalls).toBeGreaterThanOrEqual(2); // wait-decision + pre-kill re-verify
     });
 
     test("start() reuses an own runner that becomes healthy during the wait (#2834)", async function() {
@@ -901,16 +944,40 @@ describe("IOSCtrlProxyManager", function() {
       expect(await callIsOwnRunnerProcessAlive(manager)).toBe(false);
     });
 
-    test("isOwnRunnerProcessAlive rejects a live xcodebuild runner for a DIFFERENT device (#2834)", async function() {
+    test("isOwnRunnerProcessAlive rejects a CtrlProxy runner for a DIFFERENT device (#2834)", async function() {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice, fakeTimer, undefined, fakeExecutor
       );
       (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
-      // An xcodebuild runner, but for a sibling simulator (different device id).
+      // A genuine CtrlProxy runner, but for a sibling simulator (different device id).
       installListeningProcessFakes(fakeExecutor, [{
         pid: 12345,
         port: 8765,
-        command: "xcodebuild test-without-building -xctestrun /tmp/automobile-runner-OTHER.xctestrun -destination id=OTHER-DEVICE-UUID",
+        command: "xcodebuild test-without-building " +
+          "-xctestrun /tmp/automobile-ctrl-proxy/automobile-runner-OTHER.xctestrun " +
+          "-destination \"platform=iOS Simulator,id=OTHER-DEVICE-UUID\" " +
+          "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
+        environment: "CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=OTHER-DEVICE-UUID",
+        alive: true,
+      }]);
+
+      expect(await callIsOwnRunnerProcessAlive(manager)).toBe(false);
+    });
+
+    test("isOwnRunnerProcessAlive rejects a user's own xcodebuild on the same simulator (#2834)", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      // The tracked PID was reused by the user's OWN app test run, which targets the
+      // same simulator (xcodebuild + our device id) but is NOT a CtrlProxy runner. It
+      // must not be mistaken for our runner — otherwise we would wait on it and later
+      // terminate it as "hung", killing the user's process (#2834 review, thread 2).
+      installListeningProcessFakes(fakeExecutor, [{
+        pid: 12345,
+        port: 8999,
+        command: `xcodebuild test -project MyApp.xcodeproj ` +
+          `-destination "platform=iOS Simulator,id=${testDevice.deviceId}"`,
         alive: true,
       }]);
 

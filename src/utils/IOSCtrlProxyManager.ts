@@ -606,45 +606,49 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // Check for externally-managed xcodebuild processes (e.g. hot-reload script)
       // before spawning our own to avoid conflicting xcodebuild instances.
       if (this.isSimulator()) {
-        // A runner WE already spawned may still be mid-startup: on a loaded CI
-        // machine XCUITest can take well past the health-poll budget to answer, so
-        // an earlier setup() gave up and this call is a retry while the same runner
-        // is still coming up. Its PID is alive but its health endpoint isn't yet.
-        // Reclaiming the port here would SIGTERM that starting runner and restart
-        // the ~30-60s clock — a livelock under repeated setup calls (#2834). Skip
-        // the port-reclaim + respawn and just wait (below) for it to become healthy.
-        if (await this.isOwnRunnerProcessAlive()) {
+        // Adopt an already-running runner BEFORE deciding to wait on or respawn the
+        // tracked one: an externally-managed runner, or ours that bound CtrlProxy's
+        // default port instead of our reallocated port (#2731). Doing this first is
+        // essential — otherwise, if our runner is healthy on the default port while we
+        // allocated a different one, the wait-branch below would poll the wrong port and
+        // eventually terminate a HEALTHY runner as "hung" instead of adopting it
+        // (#2834 review).
+        perf.startOperation("externalProcessCheck");
+        const externalProcess = await this.findExternalCtrlProxyProcess();
+        const defaultPortIsHealthyForDevice = externalProcess === null &&
+          !this.useHostControl() &&
+          this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
+          await this.checkHealthEndpointOnPortForDevice(
+            IOSCtrlProxyManager.DEFAULT_PORT,
+            this.device.deviceId
+          );
+        perf.endOperation("externalProcessCheck");
+        if (externalProcess || defaultPortIsHealthyForDevice) {
+          const externalPort = externalProcess?.port ?? IOSCtrlProxyManager.DEFAULT_PORT;
+          logger.info(
+            `[IOSCtrlProxy] External CtrlProxy process detected on port ${externalPort}, skipping spawn`
+          );
+          if (externalPort !== this.servicePort) {
+            this.adoptServicePort(externalPort);
+          }
+          // Fall through to health polling below instead of spawning
+        } else if (await this.isOwnRunnerProcessAlive()) {
+          // A runner WE already spawned is still mid-startup: on a loaded CI machine
+          // XCUITest can take well past the health-poll budget to answer, so an earlier
+          // setup() gave up and this call is a retry while the same runner is still
+          // coming up. Its PID is alive but its health endpoint isn't yet. Reclaiming
+          // the port here would SIGTERM that starting runner and restart the clock — a
+          // livelock under repeated setup calls (#2834). Wait for it instead.
           logger.info(
             `[IOSCtrlProxy] Own CtrlProxy runner (PID ${this.xcTestProcessId}) is still starting; ` +
             `waiting for its health endpoint instead of respawning`
           );
           waitedForStartingRunner = true;
         } else {
-          perf.startOperation("externalProcessCheck");
-          const externalProcess = await this.findExternalCtrlProxyProcess();
-          const defaultPortIsHealthyForDevice = externalProcess === null &&
-            !this.useHostControl() &&
-            this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
-            await this.checkHealthEndpointOnPortForDevice(
-              IOSCtrlProxyManager.DEFAULT_PORT,
-              this.device.deviceId
-            );
-          perf.endOperation("externalProcessCheck");
-          if (externalProcess || defaultPortIsHealthyForDevice) {
-            const externalPort = externalProcess?.port ?? IOSCtrlProxyManager.DEFAULT_PORT;
-            logger.info(
-              `[IOSCtrlProxy] External CtrlProxy process detected on port ${externalPort}, skipping spawn`
-            );
-            if (externalPort !== this.servicePort) {
-              this.adoptServicePort(externalPort);
-            }
-            // Fall through to health polling below instead of spawning
-          } else {
-            await this.ensureServicePortReadyForLaunch();
-            perf.startOperation("spawnRunner");
-            await this.startOnSimulator();
-            perf.endOperation("spawnRunner");
-          }
+          await this.ensureServicePortReadyForLaunch();
+          perf.startOperation("spawnRunner");
+          await this.startOnSimulator();
+          perf.endOperation("spawnRunner");
         }
       } else {
         perf.startOperation("spawnRunner");
@@ -689,24 +693,61 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     perf.endOperation("healthPolling");
 
     if (waitedForStartingRunner && this.xcTestProcessId !== null) {
-      // We deferred to an already-starting runner but it never became healthy within
-      // the budget — it is hung. Merely un-tracking it is NOT enough: the process stays
-      // alive and its environment carries AUTOMOBILE_DEVICE_ID, so on the next start()
-      // findExternalCtrlProxyProcess() would re-adopt it ("external CtrlProxy detected,
-      // skipping spawn") and we would defer to the hung runner forever, never respawning
-      // (#2834 review — restore stale-runner cleanup after the health wait). Terminate it
-      // outright so the next start() spawns a fresh runner. Set isStopping first so the
-      // process exit handler does not schedule an auto-restart of the hung runner.
-      logger.warn(
-        `[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID ${this.xcTestProcessId}) never became ` +
-        `healthy within ${timeoutSeconds}s; terminating it so the next start spawns a fresh runner`
-      );
+      // Before giving up, adopt the runner if it actually came up healthy on CtrlProxy's
+      // default port (env-injection fallback #2731) rather than our reallocated port —
+      // the health poll above only checks servicePort, so a runner that bound the default
+      // port would look "hung" here. Adopt it instead of killing a healthy runner
+      // (#2834 review).
+      if (this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
+        await this.checkHealthEndpointOnPortForDevice(IOSCtrlProxyManager.DEFAULT_PORT, this.device.deviceId)) {
+        logger.info(
+          `[IOSCtrlProxy] Deferred-to runner is healthy on default port ${IOSCtrlProxyManager.DEFAULT_PORT}; ` +
+          `adopting it instead of terminating`
+        );
+        this.adoptServicePort(IOSCtrlProxyManager.DEFAULT_PORT);
+        this.clearCaches();
+        // Mirror the normal success path's WebSocket-init settle (#2834 review — MINOR-3).
+        await this.timer.sleep(500);
+        return;
+      }
+      // Otherwise it is genuinely hung. Merely un-tracking it is NOT enough: the process
+      // stays alive and its environment carries AUTOMOBILE_DEVICE_ID, so on the next
+      // start() findExternalCtrlProxyProcess() would re-adopt it ("external CtrlProxy
+      // detected, skipping spawn") and we would defer to the hung runner forever, never
+      // respawning (#2834 review — restore stale-runner cleanup after the health wait).
+      // Terminate it outright so the next start() spawns a fresh runner.
+      //
+      // Re-verify ownership right before the kill: the multi-minute health poll above is
+      // a window in which our runner could exit and its PID be recycled to a foreign
+      // process. isOwnRunnerProcessAlive re-runs getProcessInfo + isOwnedCtrlProxyRunner
+      // Process on the tracked PID, so a recycled/foreign PID is no longer identified as
+      // ours and we skip the kill, only un-tracking (#2834 review — MINOR-1).
       const hungPid = this.xcTestProcessId;
+      const stillOurs = await this.isOwnRunnerProcessAlive();
+      // Suppress the exit-handler auto-restart across the kill + child-exit event only.
       this.isStopping = true;
-      await IOSCtrlProxyManager.terminateProcess(this.processExecutor, this.timer, hungPid);
-      this.stopProcessMonitoring();
-      this.xcTestProcessId = null;
-      this.xcTestProcess = null;
+      try {
+        if (stillOurs) {
+          logger.warn(
+            `[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID ${hungPid}) never became ` +
+            `healthy within ${timeoutSeconds}s; terminating it so the next start spawns a fresh runner`
+          );
+          await IOSCtrlProxyManager.terminateProcess(this.processExecutor, this.timer, hungPid);
+        } else {
+          logger.warn(
+            `[IOSCtrlProxy] Tracked runner PID ${hungPid} is no longer our CtrlProxy runner ` +
+            `(exited/PID-reused); un-tracking without terminating`
+          );
+        }
+        this.stopProcessMonitoring();
+        this.xcTestProcessId = null;
+        this.xcTestProcess = null;
+      } finally {
+        // Do NOT leave isStopping latched across the throw below (#2834 review — MINOR-2):
+        // a caller that does not retry start() would otherwise wedge the manager in
+        // "stopping", disabling handleProcessExit()/scheduleAutoRestart() self-heal.
+        this.isStopping = false;
+      }
     }
 
     const heldProcesses = await this.findListeningProcessesOnPort(this.servicePort);
@@ -1369,9 +1410,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (!info) {
       return false;
     }
-    const identityText = `${info.command} ${info.environment ?? ""}`;
-    return info.command.includes("xcodebuild") &&
-      IOSCtrlProxyManager.hasDeviceIdentity(identityText, this.device.deviceId);
+    // Require CtrlProxy-specific identity, not merely any xcodebuild for this device
+    // (#2834 review): a user's own `xcodebuild … -destination id=<deviceId>` on the same
+    // simulator must NOT be mistaken for our runner, or we would wait on it and later
+    // terminate it as "hung", killing an unrelated process. Our launch carries CtrlProxy
+    // markers ("-only-testing:CtrlProxyUITests…", the automobile-runner xctestrun), so the
+    // canonical isOwnedCtrlProxyRunnerProcess predicate (also used by the port-reclaim
+    // path) distinguishes it.
+    return this.isOwnedCtrlProxyRunnerProcess({
+      pid: this.xcTestProcessId,
+      port: this.servicePort,
+      command: info.command,
+      environment: info.environment,
+    });
   }
 
   /**

@@ -22,7 +22,10 @@ import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
-import { closeDatabase, getDatabase } from "../db";
+import { closeDatabase } from "../db";
+import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
+import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
+import { handleFatalDatabaseStartupFailure } from "./daemonStartupGuard";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } from "./videoRecordingSocketServer";
 import { startTestRecordingSocketServer, stopTestRecordingSocketServer } from "./testRecordingSocketServer";
@@ -104,6 +107,8 @@ export class Daemon {
   private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
   private idGenerator: IdGenerator;
+  private databaseInitializer: DatabaseInitializer;
+  private startupFailureTracker: StartupFailureTracker;
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
@@ -113,7 +118,9 @@ export class Daemon {
     installedAppsRepository?: InstalledAppsStore,
     timer: Timer = defaultTimer,
     deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
-    idGenerator: IdGenerator = defaultIdGenerator
+    idGenerator: IdGenerator = defaultIdGenerator,
+    databaseInitializer: DatabaseInitializer = new DefaultDatabaseInitializer(),
+    startupFailureTracker: StartupFailureTracker = new DefaultStartupFailureTracker()
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -124,6 +131,8 @@ export class Daemon {
     this.idGenerator = idGenerator;
     this.daemonSessionId = this.idGenerator.next();
     this.timer = timer;
+    this.databaseInitializer = databaseInitializer;
+    this.startupFailureTracker = startupFailureTracker;
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     // Register centralized cleanup for session-scoped state
@@ -296,6 +305,12 @@ export class Daemon {
     logger.info(
       `Daemon started: PID ${process.pid}, socket ${SOCKET_PATH}, HTTP port ${this.port}`
     );
+
+    // Startup fully succeeded — DB brought up AND every startup DB-backed step
+    // completed. Only now clear the crash-loop circuit breaker, so a permanent
+    // failure in any later startup step (recorded before its fatal exit) isn't
+    // erased by a preflight that merely got past migrations (issue #2784).
+    this.startupFailureTracker.reset();
   }
 
   /**
@@ -1116,9 +1131,23 @@ export class Daemon {
     }
   }
 
+  /**
+   * Bring the database to a query-ready state. Startup DB/migration failure is
+   * FATAL (issue #2784): this method rethrows so `start()` rejects → `main().catch`
+   * → `process.exit(1)`, letting the process manager restart a clean daemon
+   * instead of leaving a query-dead daemon that reports healthy.
+   *
+   * To avoid a restart hot-loop when a *permanent* failure keeps reproducing
+   * (corrupt DB, deterministic migration throw), repeated permanent failures are
+   * throttled with an exponential backoff before the fatal rethrow. Transient
+   * failures (locked file, temporary disk-full) exit fast so the next launch can
+   * retry immediately.
+   */
   private async initializeDatabase(): Promise<void> {
     try {
-      getDatabase();
+      // getDatabase() + await ensureMigrations(): a failed startup migration
+      // rejects here (rather than swallowing on a detached promise).
+      await this.databaseInitializer.initialize();
       // Clear installed apps cache from previous daemon sessions
       await this.installedAppsRepository.clearOldDaemonSessions(this.daemonSessionId);
       await this.deviceSessionRepository.markStaleActiveSessionsExpired(
@@ -1128,7 +1157,10 @@ export class Daemon {
       );
       logger.info(`[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`);
     } catch (error) {
-      logger.error(`Failed to initialize database: ${error}`);
+      // Delegate to the shared startup guard so this path and the earlier
+      // feature-flag DB touch (guarded in main() before start()) funnel through
+      // the identical classify/record/backoff/rethrow circuit breaker.
+      await handleFatalDatabaseStartupFailure(error, this.startupFailureTracker, this.timer);
     }
   }
 

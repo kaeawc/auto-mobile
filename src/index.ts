@@ -384,6 +384,8 @@ async function main() {
   const { runCliCommand } = await import("./cli");
   const { runDaemonCommand } = await import("./daemon/manager");
   const { startDaemon } = await import("./daemon/daemon");
+  const { guardDatabaseStartup } = await import("./daemon/daemonStartupGuard");
+  const { DefaultDatabaseInitializer } = await import("./db/DatabaseInitializer");
   const videoRecordingSocketServer = await import("./daemon/videoRecordingSocketServer");
   const testRecordingSocketServer = await import("./daemon/testRecordingSocketServer");
   const deviceSnapshotSocketServer = await import("./daemon/deviceSnapshotSocketServer");
@@ -477,7 +479,6 @@ async function main() {
     }
 
     const featureFlagService = FeatureFlagService.getInstance();
-    await featureFlagService.initialize();
 
     const accessibilityConfig = a11yAuditMode
       ? {
@@ -509,17 +510,37 @@ async function main() {
       ),
     ];
 
-    for (const [key, enabled, flagLabel, config] of cliOverrides) {
-      if (!enabled) {
-        continue;
-      }
-      await featureFlagService.setFlag(key, true, config);
-      logger.info(`Feature flag enabled (${flagLabel})`);
-    }
+    // All DB-touching feature-flag startup work: migration-gated initialize()
+    // reads AND the CLI-override setFlag() writes. In --daemon-mode this runs
+    // inside the circuit breaker (below) so a startup DB failure anywhere here —
+    // including a write that fails on a read-only/full DB launched with --debug,
+    // --mcp-recording, --no-navigation-screenshots — funnels through the same
+    // classify/record/backoff/rethrow path instead of escaping to main().catch
+    // and tight-respawning (issue #2784).
+    const applyFeatureFlagStartup = async (): Promise<void> => {
+      await featureFlagService.initialize();
 
-    if (!navigationScreenshots) {
-      await featureFlagService.setFlag("navigation-screenshots", false);
-      logger.info("Navigation screenshots disabled (--no-navigation-screenshots)");
+      for (const [key, enabled, flagLabel, config] of cliOverrides) {
+        if (!enabled) {
+          continue;
+        }
+        await featureFlagService.setFlag(key, true, config);
+        logger.info(`Feature flag enabled (${flagLabel})`);
+      }
+
+      if (!navigationScreenshots) {
+        await featureFlagService.setFlag("navigation-screenshots", false);
+        logger.info("Navigation screenshots disabled (--no-navigation-screenshots)");
+      }
+    };
+
+    if (daemonMode) {
+      await guardDatabaseStartup(async () => {
+        await new DefaultDatabaseInitializer().initialize();
+        await applyFeatureFlagStartup();
+      });
+    } else {
+      await applyFeatureFlagStartup();
     }
 
     if (noWaitForPollingOverhead) {

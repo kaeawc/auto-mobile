@@ -477,11 +477,11 @@ class StorageSubscriptionManager(private val context: Context) {
 
   /** Cleans up all subscriptions and observers. Call when the service is destroyed. */
   fun destroy() {
-    // Unsubscribe from all
+    // Unsubscribe from all. Resolve ids through the same canonical parse the inbound
+    // unsubscribe_storage dispatch uses, so the "packageName:fileName" format has one inverse.
     subscriptions.keys.toList().forEach { subscriptionId ->
-      val parts = subscriptionId.split(":", limit = 2)
-      if (parts.size == 2) {
-        unsubscribe(parts[0], parts[1])
+      StorageSubscription.parseId(subscriptionId)?.let { (packageName, fileName) ->
+        unsubscribe(packageName, fileName)
       }
     }
 

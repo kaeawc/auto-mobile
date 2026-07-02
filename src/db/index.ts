@@ -1,5 +1,12 @@
 // Database module exports
-export { getDatabase, closeDatabase, getDatabasePath } from "./database";
+export {
+  getDatabase,
+  closeDatabase,
+  getDatabasePath,
+  ensureMigrations,
+  getMigrationsError,
+  DATABASE_STARTUP_MIGRATION_FAILURE,
+} from "./database";
 export { runMigrations } from "./migrator";
 export type {
   Database,

@@ -11,6 +11,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { CurrentFocusResult, TraversalOrderResult, Element } from "../../../models";
 import type { DelegateContext, AccessibilityNode, A11yActionResult } from "./types";
+import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { DefaultElementParser } from "../../utility/ElementParser";
 
 /**
@@ -121,7 +122,9 @@ export class CtrlProxyFocus {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({ type: "request_action", requestId, action, resourceId });
+        const message = serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestAction({ requestId, action, resourceId })
+        );
         ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`);
       });
@@ -193,7 +196,7 @@ export class CtrlProxyFocus {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({ type: "get_current_focus", requestId });
+        const message = serializeCtrlProxyRequest(ctrlProxyRequests.getCurrentFocus({ requestId }));
         ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent current focus request (requestId: ${requestId})`);
       });
@@ -269,7 +272,7 @@ export class CtrlProxyFocus {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = JSON.stringify({ type: "get_traversal_order", requestId });
+        const message = serializeCtrlProxyRequest(ctrlProxyRequests.getTraversalOrder({ requestId }));
         ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent traversal order request (requestId: ${requestId})`);
       });

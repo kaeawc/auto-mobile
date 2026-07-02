@@ -10,6 +10,7 @@ import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SharedGestureDelegate } from "../shared/SharedGestureDelegate";
 import type { DelegateContext, A11ySwipeResult } from "./types";
 import { generateSecureId } from "./types";
+import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
   // Legacy pending request state for two-finger swipe (uses manual promise pattern)
@@ -59,16 +60,17 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       }, timeoutMs);
     });
 
-    const message = JSON.stringify({
-      type: "request_two_finger_swipe",
-      requestId,
-      x1: Math.round(x1),
-      y1: Math.round(y1),
-      x2: Math.round(x2),
-      y2: Math.round(y2),
-      duration,
-      offset
-    });
+    const message = serializeCtrlProxyRequest(
+      ctrlProxyRequests.requestTwoFingerSwipe({
+        requestId,
+        x1: Math.round(x1),
+        y1: Math.round(y1),
+        x2: Math.round(x2),
+        y2: Math.round(y2),
+        duration,
+        offset
+      })
+    );
     this.context.getWebSocket()?.send(message);
 
     return swipePromise;

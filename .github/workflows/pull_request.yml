@@ -277,6 +277,9 @@ jobs:
               - 'schemas/**'
               - 'ios/**'
               - 'scripts/ios/**'
+              # The XCTestRunner job runs these readiness scripts directly, so
+              # changes to them must exercise the job (they were skipped before).
+              - 'scripts/ci/**'
               - 'package.json'
               - 'bun.lock'
 
@@ -1171,6 +1174,13 @@ jobs:
     # break it while the pure-Swift build jobs skip on src-only changes.
     if: needs.detect-changes.outputs.ios_integration_should_run == 'true'
     timeout-minutes: 45
+    # CI's XCUITest cold-start routinely exceeds the defaults; give the daemon a
+    # generous health-poll window (240 × 500ms = 120s) so it doesn't give up (and
+    # then kill+respawn) a runner still coming up, and let an `observe` request wait
+    # (150s > 120s) for that cold start instead of aborting at the 30s default (#2834).
+    env:
+      AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS: "240"
+      AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1227,6 +1237,9 @@ jobs:
       # so the test's first `observe` doesn't pay that cost inside its short
       # waitFor window and time out (#2730 follow-up).
       - name: "Warm up iOS CtrlProxy"
+        # Worst case ≈ 3 × (observe floor 150s + delay); bound the step so a
+        # pathological hang points here instead of at the 45-min job cap.
+        timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
       - name: "Run Reminders integration tests (Xcode 26.2)"
@@ -1264,6 +1277,7 @@ jobs:
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       - name: "Warm up iOS CtrlProxy (Xcode 26.3)"
+        timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
       - name: "Run Reminders integration tests (Xcode 26.3)"
@@ -1273,6 +1287,21 @@ jobs:
         run: |
           cd ios/XCTestRunner
           swift test --filter RemindersLaunchPlanTests 2>&1
+
+      # Daemon-internal logs (CtrlProxy startup/health/observe timing) are the only
+      # way to diagnose iOS observe failures — the swift-test stdout doesn't include
+      # them. Upload on failure only (they aren't needed on green runs, and this
+      # avoids publishing env/path details from passing runs). `include-hidden-files`
+      # is required because the logs live under the dot-dir ~/.auto-mobile.
+      - name: "Upload AutoMobile daemon logs"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: automobile-daemon-logs-xctestrunner
+          path: ~/.auto-mobile/logs/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
 
   ios-spm-root-package-build:
     name: "Build Root SPM Package"

@@ -233,6 +233,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private targetBundleId: string | null = null;
 
   public static readonly DEFAULT_PORT = 8765;
+  /** Health-poll attempts (× 500ms) awaiting the runner. 60 = 30s; env-overridable. */
+  private static readonly DEFAULT_HEALTH_POLL_MAX_ATTEMPTS = 60;
   public static readonly BUNDLE_ID = "dev.jasonpearson.automobile.ctrlproxy";
   public static readonly APP_BUNDLE_ID = "dev.jasonpearson.automobile.ctrlproxy";
   /** Bundle ID used before the rename to CtrlProxy — uninstalled opportunistically on device setup */
@@ -556,6 +558,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const isAlive = await this.isCtrlProxyProcessAlive();
     perf.endOperation("processAliveCheck");
     let restartedAliveProcess = false;
+    // True when we deferred to an already-starting own runner instead of respawning;
+    // drives hung-runner recovery after the health wait below (#2834 review).
+    let waitedForStartingRunner = false;
     if (isAlive) {
       logger.info("[IOSCtrlProxy] CtrlProxy process is alive, skipping start");
       // On physical devices the iproxy tunnel may have been stopped independently
@@ -601,30 +606,50 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // Check for externally-managed xcodebuild processes (e.g. hot-reload script)
       // before spawning our own to avoid conflicting xcodebuild instances.
       if (this.isSimulator()) {
-        perf.startOperation("externalProcessCheck");
-        const externalProcess = await this.findExternalCtrlProxyProcess();
-        const defaultPortIsHealthyForDevice = externalProcess === null &&
-          !this.useHostControl() &&
-          this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
-          await this.checkHealthEndpointOnPortForDevice(
-            IOSCtrlProxyManager.DEFAULT_PORT,
-            this.device.deviceId
-          );
-        perf.endOperation("externalProcessCheck");
-        if (externalProcess || defaultPortIsHealthyForDevice) {
-          const externalPort = externalProcess?.port ?? IOSCtrlProxyManager.DEFAULT_PORT;
+        // Decide about OUR OWN tracked runner first. A runner WE already spawned may
+        // still be mid-startup: on a loaded CI machine XCUITest can take well past the
+        // health-poll budget to answer, so an earlier setup() gave up and this call is a
+        // retry while the same runner is still coming up. Its PID is alive but its health
+        // endpoint isn't yet. Reclaiming the port here would SIGTERM that starting runner
+        // and restart the clock — a livelock under repeated setup calls (#2834). Wait for
+        // it instead. Checking this BEFORE the external-process probe is important: that
+        // probe discovers our own child xcodebuild (whose PID differs from the tracked
+        // shell PID under shell:true) and would otherwise mis-classify it as "external"
+        // (#2834 review). A runner that actually came up healthy on the default port
+        // instead of our reallocated port (#2731) is handled by the health-wait recovery
+        // below, which re-checks the default port and adopts it rather than terminating.
+        if (await this.isOwnRunnerProcessAlive()) {
           logger.info(
-            `[IOSCtrlProxy] External CtrlProxy process detected on port ${externalPort}, skipping spawn`
+            `[IOSCtrlProxy] Own CtrlProxy runner (PID ${this.xcTestProcessId}) is still starting; ` +
+            `waiting for its health endpoint instead of respawning`
           );
-          if (externalPort !== this.servicePort) {
-            this.adoptServicePort(externalPort);
-          }
-          // Fall through to health polling below instead of spawning
+          waitedForStartingRunner = true;
         } else {
-          await this.ensureServicePortReadyForLaunch();
-          perf.startOperation("spawnRunner");
-          await this.startOnSimulator();
-          perf.endOperation("spawnRunner");
+          perf.startOperation("externalProcessCheck");
+          const externalProcess = await this.findExternalCtrlProxyProcess();
+          const defaultPortIsHealthyForDevice = externalProcess === null &&
+            !this.useHostControl() &&
+            this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
+            await this.checkHealthEndpointOnPortForDevice(
+              IOSCtrlProxyManager.DEFAULT_PORT,
+              this.device.deviceId
+            );
+          perf.endOperation("externalProcessCheck");
+          if (externalProcess || defaultPortIsHealthyForDevice) {
+            const externalPort = externalProcess?.port ?? IOSCtrlProxyManager.DEFAULT_PORT;
+            logger.info(
+              `[IOSCtrlProxy] External CtrlProxy process detected on port ${externalPort}, skipping spawn`
+            );
+            if (externalPort !== this.servicePort) {
+              this.adoptServicePort(externalPort);
+            }
+            // Fall through to health polling below instead of spawning
+          } else {
+            await this.ensureServicePortReadyForLaunch();
+            perf.startOperation("spawnRunner");
+            await this.startOnSimulator();
+            perf.endOperation("spawnRunner");
+          }
         }
       } else {
         perf.startOperation("spawnRunner");
@@ -633,10 +658,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
     }
 
-    // Wait for HTTP health endpoint to be ready
-    // XCUITest can take 10+ seconds to fully initialize after xcodebuild starts
-    const maxAttempts = 30;
+    // Wait for HTTP health endpoint to be ready. XCUITest can take well over 15s to
+    // fully initialize after xcodebuild starts on a loaded CI machine, so the budget
+    // is env-configurable (AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS) and defaults
+    // generous — too short a budget declares failure while the runner is still
+    // coming up, which then triggers a kill+respawn livelock (#2834).
     const delayMs = 500;
+    const maxAttempts = IOSCtrlProxyManager.resolveHealthPollMaxAttempts();
+    const timeoutSeconds = Math.round((maxAttempts * delayMs) / 1000);
 
     perf.startOperation("healthPolling");
     for (let i = 0; i < maxAttempts; i++) {
@@ -664,15 +693,105 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
     perf.endOperation("healthPolling");
 
+    if (waitedForStartingRunner && this.xcTestProcessId !== null) {
+      // Before giving up, adopt the runner if it actually came up healthy on CtrlProxy's
+      // default port (env-injection fallback #2731) rather than our reallocated port —
+      // the health poll above only checks servicePort, so a runner that bound the default
+      // port would look "hung" here. Adopt it instead of killing a healthy runner
+      // (#2834 review).
+      if (this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
+        await this.checkHealthEndpointOnPortForDevice(IOSCtrlProxyManager.DEFAULT_PORT, this.device.deviceId)) {
+        logger.info(
+          `[IOSCtrlProxy] Deferred-to runner is healthy on default port ${IOSCtrlProxyManager.DEFAULT_PORT}; ` +
+          `adopting it instead of terminating`
+        );
+        this.adoptServicePort(IOSCtrlProxyManager.DEFAULT_PORT);
+        this.clearCaches();
+        // Mirror the normal success path's WebSocket-init settle (#2834 review — MINOR-3).
+        await this.timer.sleep(500);
+        return;
+      }
+      // Otherwise it is genuinely hung. Merely un-tracking it is NOT enough: the process
+      // stays alive and its environment carries AUTOMOBILE_DEVICE_ID, so on the next
+      // start() findExternalCtrlProxyProcess() would re-adopt it ("external CtrlProxy
+      // detected, skipping spawn") and we would defer to the hung runner forever, never
+      // respawning (#2834 review — restore stale-runner cleanup after the health wait).
+      // Terminate it outright so the next start() spawns a fresh runner.
+      //
+      // Re-verify ownership right before the kill: the multi-minute health poll above is
+      // a window in which our runner could exit and its PID be recycled to a foreign
+      // process. Locally, isOwnRunnerProcessAlive re-runs getProcessInfo +
+      // isOwnedCtrlProxyRunnerProcess on the tracked PID, so a recycled/foreign PID is
+      // no longer identified as ours and we skip the kill, only un-tracking. Under host
+      // control the re-verify is PID-strict via `status.data.pid === tracked` — the
+      // host-control daemon resolves status/stop by deviceId BEFORE pid, so without the
+      // PID compare a NEWER runner for this device would alias as "ours" and the stop
+      // below could kill it (#2834 review). Residual accepted risk: the status→stop
+      // race (runner replaced between the two calls) — the daemon is the sole per-device
+      // orchestrator, so within one daemon that window is effectively empty; daemon-side
+      // pid-match enforcement is tracked as a follow-up.
+      const hungPid = this.xcTestProcessId;
+      const stillOurs = await this.isOwnRunnerProcessAlive();
+      // Suppress the exit-handler auto-restart across the kill + child-exit event only.
+      this.isStopping = true;
+      try {
+        if (stillOurs) {
+          logger.warn(
+            `[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID ${hungPid}) never became ` +
+            `healthy within ${timeoutSeconds}s; terminating it so the next start spawns a fresh runner`
+          );
+          if (this.useHostControl()) {
+            // The runner PID belongs to the macOS HOST, not this (Docker) container —
+            // a local kill would miss it (or signal an unrelated same-PID container
+            // process). Stop it through host control, matching stop() (#2834 review).
+            try {
+              await this.hostControl.stop({ deviceId: this.device.deviceId, pid: hungPid });
+            } catch (error) {
+              logger.warn(
+                `[IOSCtrlProxy] Host control stop of hung runner ${hungPid} failed: ` +
+                `${error instanceof Error ? error.message : String(error)}`
+              );
+            }
+          } else {
+            // Tree kill, not single-PID: the tracked PID is the shell wrapper, and
+            // signaling only it would orphan the xcodebuild child, which keeps the
+            // hung in-sim runner alive to be re-adopted or contend the port on the
+            // next start (#2834 review).
+            await IOSCtrlProxyManager.terminateProcessTree(this.processExecutor, this.timer, hungPid);
+          }
+        } else {
+          logger.warn(
+            `[IOSCtrlProxy] Tracked runner PID ${hungPid} is no longer our CtrlProxy runner ` +
+            `(exited/PID-reused); un-tracking without terminating`
+          );
+        }
+        this.stopProcessMonitoring();
+        this.xcTestProcessId = null;
+        this.xcTestProcess = null;
+        // Host-control mode has no local child-exit event to clear these as a side
+        // effect (handleProcessExit), so clear explicitly for both modes — otherwise
+        // cachedRunning/cachedAvailability can serve a stale positive to the next
+        // setup() for up to STATUS_CACHE_TTL (#2834 review).
+        this.clearCaches();
+      } finally {
+        // Do NOT leave isStopping latched across the throw below (#2834 review — MINOR-2):
+        // a caller that does not retry start() would otherwise wedge the manager in
+        // "stopping", disabling handleProcessExit()/scheduleAutoRestart() self-heal.
+        // A late child-exit after this reset is ignored by the untracked-exit guard on
+        // the spawn handlers (xcTestProcess was nulled above).
+        this.isStopping = false;
+      }
+    }
+
     const heldProcesses = await this.findListeningProcessesOnPort(this.servicePort);
     if (heldProcesses.length > 0) {
       throw new Error(
-        `CtrlProxy failed to start within timeout (15s); port ${this.servicePort} ` +
+        `CtrlProxy failed to start within timeout (${timeoutSeconds}s); port ${this.servicePort} ` +
         `still held by ${this.formatListeningProcesses(heldProcesses)}`
       );
     }
 
-    throw new Error("CtrlProxy failed to start within timeout (15s)");
+    throw new Error(`CtrlProxy failed to start within timeout (${timeoutSeconds}s)`);
   }
 
   /**
@@ -1077,9 +1196,20 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // this process by reading its env via `ps eww` (see findExternalXcodebuildCtrlProxyProcess
     // / isDaemonManagedSimulatorXcodebuildProcess).
     // Routed through the injected processExecutor so tests can observe/control the process.
-    const child = this.processExecutor.spawn(command, [], { shell: true, env: { ...process.env, ...runnerEnv }, stdio: ["ignore", "pipe", "pipe"] });
+    // detached:true makes the shell a process-group leader so terminateProcessTree can
+    // signal the whole group (`kill -- -pid`): under shell:true the tracked PID is the
+    // /bin/sh wrapper, and TERM to the shell alone does NOT propagate to the xcodebuild
+    // child (#2834 review) — group signaling reaches both. stdio pipes and the exit
+    // handler are unaffected by detachment.
+    const child = this.processExecutor.spawn(command, [], { shell: true, detached: true, env: { ...process.env, ...runnerEnv }, stdio: ["ignore", "pipe", "pipe"] });
 
     child.on("error", error => {
+      // Ignore events from a process we no longer track (e.g. hung-recovery already
+      // tore it down and cleared tracking) so a late error can't double-run cleanup
+      // or schedule an auto-restart of a deliberately-removed runner (#2834 review).
+      if (this.xcTestProcess !== child) {
+        return;
+      }
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);
       this.handleProcessExit();
     });
@@ -1087,6 +1217,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     child.on("exit", (code, signal) => {
       if (code !== 0 || signal) {
         logger.warn(`[IOSCtrlProxy] xcodebuild test exited: code=${code}, signal=${signal}`);
+      }
+      // Same untracked-exit guard as the error handler: after hung-recovery (or stop())
+      // has already cleaned up and untracked this child, its late exit event must not
+      // re-enter handleProcessExit and race an auto-restart against the caller.
+      if (this.xcTestProcess !== child) {
+        return;
       }
       this.handleProcessExit();
     });
@@ -1291,6 +1427,76 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * a stale xcTestProcessId that has been PID-reused by a different process does
    * not produce a false "alive" result and cause setup() to silently skip restart.
    */
+  /**
+   * Whether the runner process WE spawned is alive at the OS level, regardless of
+   * whether its health endpoint is up yet. Unlike {@link isCtrlProxyProcessAlive}
+   * this does NOT require a health response, so a runner still initializing counts
+   * as alive — used to avoid killing+respawning our own still-starting runner (#2834).
+   */
+  private async isOwnRunnerProcessAlive(): Promise<boolean> {
+    if (!this.xcTestProcessId) {
+      return false;
+    }
+    if (this.useHostControl()) {
+      try {
+        const status = await this.hostControl.status({
+          deviceId: this.device.deviceId,
+          pid: this.xcTestProcessId
+        });
+        // PID-strict: the host-control daemon resolves status by deviceId BEFORE pid,
+        // so running=true alone is not proof the TRACKED pid is alive — a newer runner
+        // for the same device aliases it, and treating it as "ours" would make us wait
+        // on (and eventually stop) that newer runner (#2834 review).
+        return status.success &&
+          (status.data?.running ?? false) &&
+          status.data?.pid === this.xcTestProcessId;
+      } catch {
+        return false;
+      }
+    }
+    if (!await this.isProcessRunning(this.xcTestProcessId)) {
+      return false;
+    }
+    // Guard against PID reuse (#2834 review): a bare `kill -0` only proves *some*
+    // process holds this PID. Confirm it is genuinely our xcodebuild-launched runner
+    // for THIS device before treating it as "still starting" — otherwise a recycled
+    // PID (our runner exited, its PID reassigned to an unrelated process) would make
+    // us defer to a health endpoint that never comes.
+    const info = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, this.xcTestProcessId);
+    if (!info) {
+      return false;
+    }
+    // Require CtrlProxy-specific identity, not merely any xcodebuild for this device
+    // (#2834 review): a user's own `xcodebuild … -destination id=<deviceId>` on the same
+    // simulator must NOT be mistaken for our runner, or we would wait on it and later
+    // terminate it as "hung", killing an unrelated process. Our launch carries CtrlProxy
+    // markers ("-only-testing:CtrlProxyUITests…", the automobile-runner xctestrun), so the
+    // canonical isOwnedCtrlProxyRunnerProcess predicate (also used by the port-reclaim
+    // path) distinguishes it.
+    return this.isOwnedCtrlProxyRunnerProcess({
+      pid: this.xcTestProcessId,
+      port: this.servicePort,
+      command: info.command,
+      environment: info.environment,
+    });
+  }
+
+  /**
+   * Resolve the health-poll attempt budget. Env-overridable so CI (where XCUITest
+   * cold-start routinely exceeds the default) can extend it without a code change.
+   */
+  private static resolveHealthPollMaxAttempts(): number {
+    const raw = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS
+      ?? process.env.AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    if (raw !== undefined) {
+      const parsed = Number.parseInt(raw, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+    return IOSCtrlProxyManager.DEFAULT_HEALTH_POLL_MAX_ATTEMPTS;
+  }
+
   private async isCtrlProxyProcessAlive(): Promise<boolean> {
     if (!this.xcTestProcessId) {
       return false;
@@ -1301,7 +1507,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           deviceId: this.device.deviceId,
           pid: this.xcTestProcessId
         });
-        return status.success && (status.data?.running ?? false);
+        // PID-strict for the same reason as isOwnRunnerProcessAlive: deviceId-first
+        // resolution in the host-control daemon means running=true may describe a
+        // NEWER runner, not the tracked one. On mismatch we return false and the
+        // host-control start path re-adopts the device's current runner via
+        // status({deviceId}) — the correct adoption point (#2834 review).
+        return status.success &&
+          (status.data?.running ?? false) &&
+          status.data?.pid === this.xcTestProcessId;
       } catch {
         return false;
       }
@@ -1662,6 +1875,36 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private static isDirectCtrlProxyRunnerCommand(command: string): boolean {
     return command.includes("CtrlProxyUITests-Runner");
+  }
+
+  /**
+   * Terminate a runner process TREE rooted at `pid` (TERM → wait → KILL), signaling the
+   * process group first and falling back to the single PID. Under `spawn(..., {shell:
+   * true, detached: true})` the tracked PID is a /bin/sh group leader whose xcodebuild
+   * child does NOT die when only the shell is signaled (#2834 review) — the group signal
+   * (`kill -- -pid`) reaches both. The single-PID fallback covers processes that predate
+   * detachment (not group leaders) or whose group is already gone. Scoped to this tree —
+   * deliberately NOT a machine-wide pkill sweep, which would hit other devices' runners.
+   */
+  private static async terminateProcessTree(
+    processExecutor: ProcessExecutor,
+    timer: Timer,
+    pid: number
+  ): Promise<void> {
+    try {
+      await processExecutor.exec(`kill -TERM -- -${pid} 2>/dev/null || kill -TERM ${pid} 2>/dev/null`);
+    } catch {
+      // Process/group may have already exited.
+    }
+
+    if (!await IOSCtrlProxyManager.waitForProcessExit(processExecutor, timer, pid)) {
+      try {
+        await processExecutor.exec(`kill -KILL -- -${pid} 2>/dev/null || kill -KILL ${pid} 2>/dev/null`);
+      } catch {
+        // Process/group may have exited between liveness check and kill.
+      }
+      await IOSCtrlProxyManager.waitForProcessExit(processExecutor, timer, pid);
+    }
   }
 
   private static async terminateProcess(

@@ -49,7 +49,9 @@ describe("DaemonClient per-request timeout", () => {
   test("regular tool uses DEFAULT_MCP_REQUEST_TIMEOUT_MS", async () => {
     const client = createConnectedClient(fakeTimer);
 
-    const promise = client.callTool("observe", {});
+    // tapOn has no per-tool floor, so it uses the standard default (unlike observe,
+    // launchApp, etc. which carry generous CtrlProxy cold-start floors — #2834).
+    const promise = client.callTool("tapOn", {});
     fakeTimer.advanceTime(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
 
     try {
@@ -58,7 +60,7 @@ describe("DaemonClient per-request timeout", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(McpTimeoutError);
       const timeoutErr = err as McpTimeoutError;
-      expect(timeoutErr.toolName).toBe("observe");
+      expect(timeoutErr.toolName).toBe("tapOn");
       expect(timeoutErr.timeoutMs).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
       expect(timeoutErr.origin).toBe("DaemonClient.sendRequest");
     } finally {

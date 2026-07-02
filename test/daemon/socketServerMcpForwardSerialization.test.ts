@@ -702,8 +702,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
       return fake;
     };
 
-    // First request: blocks in callTool until we release it
-    const first = sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1" });
+    // First request: blocks in callTool until we release it. Uses tapOn (no per-tool
+    // timeout floor) so the second request's short 500ms timeout is honored verbatim
+    // rather than raised to observe's CtrlProxy cold-start floor (#2834).
+    const first = sendToolsCallWithArgs(socketPath, "tapOn", { deviceId: "device-1" });
 
     // Yield to the real event loop so the first request enters callTool
     for (let i = 0; i < 10; i++) {
@@ -715,7 +717,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       id: randomUUID(),
       type: "mcp_request",
       method: "tools/call",
-      params: { name: "observe", arguments: { deviceId: "device-1" } },
+      params: { name: "tapOn", arguments: { deviceId: "device-1" } },
       timeoutMs: 500,
     });
 

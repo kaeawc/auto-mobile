@@ -789,6 +789,75 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses().length).toBe(0);
     });
 
+    test("start() waits for an own still-starting runner instead of killing+respawning it (#2834)", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, // simulator UUID
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+
+      // A runner we spawned in an earlier setup() whose health endpoint is not up
+      // yet (XCUITest still cold-starting on a loaded CI machine). Its PID is alive.
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      // Health endpoint does NOT respond → isRunning()/isCtrlProxyProcessAlive() are false.
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+      // The still-starting runner is alive and holding the service port.
+      const runnerProcs: FakeListeningProcess[] = [{
+        pid: 12345,
+        port: 8765,
+        command: `xcodebuild test-without-building ` +
+          `-xctestrun /tmp/automobile-runner-${testDevice.deviceId}.xctestrun ` +
+          `-destination id=${testDevice.deviceId}`,
+        alive: true,
+      }];
+      installListeningProcessFakes(fakeExecutor, runnerProcs);
+
+      // Tiny health budget so the (expected) timeout is fast; the point of the test
+      // is what happens to the runner, not the wait.
+      const prev = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+      process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = "1";
+      fakeTimer.enableAutoAdvance();
+      try {
+        await expect(manager.start()).rejects.toThrow(/failed to start within timeout/);
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+        } else {
+          process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = prev;
+        }
+      }
+
+      // The fix: our own still-starting runner is NOT terminated to reclaim the port
+      // (that SIGTERM mid-startup is the livelock), and no competing runner is spawned.
+      expect(runnerProcs[0].alive).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 12345")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("simctl")).toBe(false);
+      expect(fakeExecutor.getSpawnedProcesses().length).toBe(0);
+    });
+
+    test("health-poll budget is env-configurable with a generous default (#2834)", function() {
+      const resolve = (): number =>
+        (IOSCtrlProxyManager as unknown as { resolveHealthPollMaxAttempts(): number })
+          .resolveHealthPollMaxAttempts();
+      const prev = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+      try {
+        process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = "240";
+        expect(resolve()).toBe(240);
+        // Invalid values fall back to the default (which is well above the old 30 = 15s).
+        process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = "nonsense";
+        expect(resolve()).toBeGreaterThan(30);
+        delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+        expect(resolve()).toBeGreaterThan(30);
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+        } else {
+          process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = prev;
+        }
+      }
+    });
+
     test("start() re-establishes iproxy tunnel when CtrlProxy is alive but tunnel is gone (physical device)", async function() {
       fakeExecutor.setCommandResponse("idevice_id -l", createExecResult(`${physicalDevice.deviceId}\n`, ""));
       // Health endpoint responds → confirms the tracked PID really is CtrlProxy

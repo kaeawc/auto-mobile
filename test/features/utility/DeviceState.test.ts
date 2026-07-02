@@ -10,10 +10,21 @@ const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
 };
 
+// iOS < 18 simulator: the legacy notifyutil binary-DND path still applies.
 const iosSimulator: BootedDevice = {
   name: "iPhone 16",
   platform: "ios",
   deviceId: "12345678-1234-1234-1234-123456789ABC",
+  iosVersion: "17.5",
+};
+
+// iOS 18+ simulator: DND moved to donotdisturbd, so the write path must honestly
+// report unsupported instead of posting a non-authoritative legacy notification.
+const ios18Simulator: BootedDevice = {
+  name: "iPhone 16 Pro",
+  platform: "ios",
+  deviceId: "7B3A3792-DB53-4654-BA94-27A1D305C3B7",
+  iosVersion: "18.6",
 };
 
 describe("DeviceState", () => {
@@ -55,7 +66,7 @@ describe("DeviceState", () => {
     ]);
   });
 
-  test("sets iOS simulator Do Not Disturb on with notifyutil best-effort commands", async () => {
+  test("sets iOS <18 simulator Do Not Disturb on with notifyutil best-effort commands", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
@@ -87,7 +98,7 @@ describe("DeviceState", () => {
     ]);
   });
 
-  test("sets iOS simulator Do Not Disturb off with notifyutil best-effort commands", async () => {
+  test("sets iOS <18 simulator Do Not Disturb off with notifyutil best-effort commands", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 0 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
@@ -231,6 +242,130 @@ describe("DeviceState", () => {
     });
     expect(result.doNotDisturb?.error).toContain("simctl spawn failed");
     expect(result.error).toContain("simctl spawn failed");
+  });
+
+  test("reports iOS 18+ simulator DND enable as unsupported without issuing a notifyutil write", async () => {
+    const simctl = new FakeSimCtlClient();
+
+    const deviceState = new DeviceState(ios18Simulator, { simctl });
+    const result = await deviceState.setState({
+      doNotDisturb: { enabled: true },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      requestedMode: "none",
+      verified: false,
+    });
+    // Honest, actionable reason: DND moved to donotdisturbd; no public setter.
+    expect(result.doNotDisturb?.error).toContain("donotdisturbd");
+    expect(result.doNotDisturb?.error).toContain("iOS 18");
+    expect(result.doNotDisturb?.error).toContain("no public API");
+    expect(result.error).toContain("donotdisturbd");
+    // Critically: no misleading notifyutil command was ever posted.
+    const commands = simctl.getMethodCalls("executeCommand").map(c => c.command as string);
+    expect(commands.some(c => c.includes("notifyutil"))).toBe(false);
+  });
+
+  test("reports iOS 18+ simulator DND disable as unsupported without issuing a notifyutil write", async () => {
+    const simctl = new FakeSimCtlClient();
+
+    const deviceState = new DeviceState(ios18Simulator, { simctl });
+    const result = await deviceState.setState({
+      doNotDisturb: { enabled: false },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      requestedMode: "off",
+      verified: false,
+    });
+    const commands = simctl.getMethodCalls("executeCommand").map(c => c.command as string);
+    expect(commands.some(c => c.includes("notifyutil"))).toBe(false);
+  });
+
+  test("reports iOS 18+ simulator priority/alarms DND as unsupported", async () => {
+    const simctl = new FakeSimCtlClient();
+
+    const deviceState = new DeviceState(ios18Simulator, { simctl });
+    const result = await deviceState.setState({
+      doNotDisturb: { mode: "priority" },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      requestedMode: "priority",
+      verified: false,
+    });
+    const commands = simctl.getMethodCalls("executeCommand").map(c => c.command as string);
+    expect(commands.some(c => c.includes("notifyutil"))).toBe(false);
+  });
+
+  test("resolves iOS 18+ live via `simctl list devices` when the device omits iosVersion", async () => {
+    const bareSimulator: BootedDevice = {
+      name: "iPhone 16 Pro",
+      platform: "ios",
+      deviceId: "7B3A3792-DB53-4654-BA94-27A1D305C3B7",
+    };
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      "list devices 7B3A3792-DB53-4654-BA94-27A1D305C3B7 --json",
+      JSON.stringify({
+        devices: {
+          "com.apple.CoreSimulator.SimRuntime.iOS-18-6": [
+            { udid: "7B3A3792-DB53-4654-BA94-27A1D305C3B7", name: "iPhone 16 Pro", state: "Booted" },
+          ],
+        },
+      })
+    );
+
+    const deviceState = new DeviceState(bareSimulator, { simctl });
+    const result = await deviceState.setState({
+      doNotDisturb: { enabled: true },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb?.capability).toBe("unsupported");
+    // The version was resolved via the list query; still no notifyutil write.
+    const commands = simctl.getMethodCalls("executeCommand").map(c => c.command as string);
+    expect(commands.some(c => c.includes("notifyutil"))).toBe(false);
+    expect(commands).toContain("list devices 7B3A3792-DB53-4654-BA94-27A1D305C3B7 --json");
+  });
+
+  test("falls back to the legacy notifyutil path when the iOS version cannot be resolved", async () => {
+    const bareSimulator: BootedDevice = {
+      name: "iPhone",
+      platform: "ios",
+      deviceId: "AAAAAAAA-1111-2222-3333-444444444444",
+    };
+    const simctl = new FakeSimCtlClient();
+    // No iosVersion on the device and the list query returns nothing usable →
+    // unknown version → attempt the legacy path rather than over-refusing.
+    simctl.setCommandResult(
+      "spawn AAAAAAAA-1111-2222-3333-444444444444 notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+      "com.apple.donotdisturb.enabled 1\n"
+    );
+
+    const deviceState = new DeviceState(bareSimulator, { simctl });
+    const result = await deviceState.setState({
+      doNotDisturb: { enabled: true },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.doNotDisturb).toMatchObject({
+      supported: true,
+      capability: "binary",
+      enabled: true,
+      verified: true,
+    });
+    const commands = simctl.getMethodCalls("executeCommand").map(c => c.command as string);
+    expect(commands.some(c => c.includes("notifyutil"))).toBe(true);
   });
 
   test("reports physical iOS as unsupported with a precise no-public-API error", async () => {

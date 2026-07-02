@@ -11,6 +11,10 @@ import {
   iosNotifyutilRegisteredSetCommand,
   parseNotifyutilState
 } from "../../utils/ios-cmdline-tools/notifyutil";
+import {
+  iosMajorVersionFromSimctlListDevices,
+  parseIosMajorVersion
+} from "../../utils/ios-cmdline-tools/iosVersion";
 
 export type DoNotDisturbMode = "off" | "none" | "priority" | "alarms";
 
@@ -82,6 +86,26 @@ const IOS_PHYSICAL_DND_UNSUPPORTED_ERROR =
   "Do Not Disturb cannot be set on a physical iOS device: iOS exposes no public API to "
   + "enable/disable Focus or Do Not Disturb (only the read-only Focus Filter API). "
   + "Use an iOS Simulator for DND automation, or trigger DND manually / via a Shortcuts automation on device.";
+
+/** iOS major version at/after which the legacy binary-DND notification is dead. */
+const IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR = 17;
+
+/**
+ * iOS 18 moved Do Not Disturb / Focus to the `com.apple.donotdisturbd` daemon
+ * (Core Data store + a Focus-assertion model). The legacy
+ * `com.apple.donotdisturb.enabled` Darwin notification is no longer authoritative:
+ * its state is not persisted past the setting process (notify(3): a key's state
+ * only exists while a registration is held) and `donotdisturbd` does not consume
+ * it, so a posted toggle can never verify. Apple ships no public API to set
+ * Focus/DND, so on iOS 18+ simulators the write path honestly reports unsupported
+ * rather than posting a notification that has no effect.
+ */
+const IOS18_SIM_DND_UNSUPPORTED_ERROR =
+  "Do Not Disturb cannot be reliably set on an iOS 18+ simulator: iOS 18 moved Do Not Disturb to "
+  + "the donotdisturbd Focus daemon, and the legacy com.apple.donotdisturb.enabled notification is "
+  + "non-authoritative — its state is not persisted and donotdisturbd does not consume it, so the "
+  + "toggle cannot be verified. iOS exposes no public API to set Focus / Do Not Disturb. Use an "
+  + "iOS 17 or earlier simulator for binary DND automation, or set it manually / via a Shortcuts automation.";
 
 function parseAndroidZenMode(raw: string): DoNotDisturbState {
   const value = raw.trim();
@@ -341,6 +365,30 @@ export class DeviceState {
     }
   }
 
+  /**
+   * Resolve the simulator's major iOS version. Prefers the version already on the
+   * `BootedDevice` (populated by the daemon device pool); falls back to a live
+   * `simctl list devices <udid> --json` probe. Returns `null` when the version
+   * cannot be determined, so callers treat it as "unknown".
+   */
+  private async resolveSimulatorIosMajorVersion(simctl: IosSimulatorClient): Promise<number | null> {
+    const fromDevice = parseIosMajorVersion(this.device.iosVersion ?? this.device.osVersion);
+    if (fromDevice !== null) {
+      return fromDevice;
+    }
+    try {
+      const result = await simctl.executeCommand(`list devices ${this.device.deviceId} --json`);
+      return iosMajorVersionFromSimctlListDevices(result.stdout ?? "", this.device.deviceId);
+    } catch (error) {
+      logger.warn(
+        `[DeviceState] could not resolve iOS version for ${this.device.deviceId}: `
+        + `${error instanceof Error ? error.message : String(error)}`,
+        error
+      );
+      return null;
+    }
+  }
+
   private async setIosDoNotDisturb(input: SetDeviceStateInput["doNotDisturb"]): Promise<DoNotDisturbState> {
     const requestedMode = modeForInput(input);
 
@@ -355,7 +403,26 @@ export class DeviceState {
       };
     }
 
-    // Simulator: the only lever is the binary `com.apple.donotdisturb.enabled`
+    const simctl = this.simctl ?? new SimCtlClient(this.device);
+
+    // iOS 18+ simulators: the legacy binary-DND notification is dead (DND moved to
+    // donotdisturbd, which does not consume it, and the notify state does not
+    // persist past the setting process — so a posted toggle can never verify).
+    // Report unsupported and issue no misleading notifyutil write, mirroring the
+    // physical-device early return. iOS <18 (and unknown) keep the legacy
+    // best-effort path below.
+    const iosMajor = await this.resolveSimulatorIosMajorVersion(simctl);
+    if (iosMajor !== null && iosMajor > IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR) {
+      return {
+        supported: false,
+        capability: "unsupported",
+        requestedMode,
+        verified: false,
+        error: IOS18_SIM_DND_UNSUPPORTED_ERROR,
+      };
+    }
+
+    // Simulator (iOS <18): the only lever is the binary `com.apple.donotdisturb.enabled`
     // Darwin notification. `notifyutil -s` is a no-op unless the key has a
     // registration, so set/read/post must happen in one registered invocation.
     // There is no per-mode (priority/alarms) Darwin notification analogous to
@@ -367,7 +434,6 @@ export class DeviceState {
     const downgraded = requestedMode === "priority" || requestedMode === "alarms";
 
     try {
-      const simctl = this.simctl ?? new SimCtlClient(this.device);
       const value = requestedEnabled ? "1" : "0";
       const writeResult = await simctl.executeCommand(
         iosNotifyutilRegisteredSetCommand(this.device.deviceId, IOS_DND_NOTIFICATION, value),

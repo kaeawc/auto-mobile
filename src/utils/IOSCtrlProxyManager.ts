@@ -558,6 +558,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const isAlive = await this.isCtrlProxyProcessAlive();
     perf.endOperation("processAliveCheck");
     let restartedAliveProcess = false;
+    // True when we deferred to an already-starting own runner instead of respawning;
+    // drives hung-runner recovery after the health wait below (#2834 review).
+    let waitedForStartingRunner = false;
     if (isAlive) {
       logger.info("[IOSCtrlProxy] CtrlProxy process is alive, skipping start");
       // On physical devices the iproxy tunnel may have been stopped independently
@@ -615,6 +618,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             `[IOSCtrlProxy] Own CtrlProxy runner (PID ${this.xcTestProcessId}) is still starting; ` +
             `waiting for its health endpoint instead of respawning`
           );
+          waitedForStartingRunner = true;
         } else {
           perf.startOperation("externalProcessCheck");
           const externalProcess = await this.findExternalCtrlProxyProcess();
@@ -683,6 +687,27 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       await this.timer.sleep(delayMs);
     }
     perf.endOperation("healthPolling");
+
+    if (waitedForStartingRunner && this.xcTestProcessId !== null) {
+      // We deferred to an already-starting runner but it never became healthy within
+      // the budget — it is hung. Merely un-tracking it is NOT enough: the process stays
+      // alive and its environment carries AUTOMOBILE_DEVICE_ID, so on the next start()
+      // findExternalCtrlProxyProcess() would re-adopt it ("external CtrlProxy detected,
+      // skipping spawn") and we would defer to the hung runner forever, never respawning
+      // (#2834 review — restore stale-runner cleanup after the health wait). Terminate it
+      // outright so the next start() spawns a fresh runner. Set isStopping first so the
+      // process exit handler does not schedule an auto-restart of the hung runner.
+      logger.warn(
+        `[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID ${this.xcTestProcessId}) never became ` +
+        `healthy within ${timeoutSeconds}s; terminating it so the next start spawns a fresh runner`
+      );
+      const hungPid = this.xcTestProcessId;
+      this.isStopping = true;
+      await IOSCtrlProxyManager.terminateProcess(this.processExecutor, this.timer, hungPid);
+      this.stopProcessMonitoring();
+      this.xcTestProcessId = null;
+      this.xcTestProcess = null;
+    }
 
     const heldProcesses = await this.findListeningProcessesOnPort(this.servicePort);
     if (heldProcesses.length > 0) {
@@ -1332,7 +1357,21 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return false;
       }
     }
-    return this.isProcessRunning(this.xcTestProcessId);
+    if (!await this.isProcessRunning(this.xcTestProcessId)) {
+      return false;
+    }
+    // Guard against PID reuse (#2834 review): a bare `kill -0` only proves *some*
+    // process holds this PID. Confirm it is genuinely our xcodebuild-launched runner
+    // for THIS device before treating it as "still starting" — otherwise a recycled
+    // PID (our runner exited, its PID reassigned to an unrelated process) would make
+    // us defer to a health endpoint that never comes.
+    const info = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, this.xcTestProcessId);
+    if (!info) {
+      return false;
+    }
+    const identityText = `${info.command} ${info.environment ?? ""}`;
+    return info.command.includes("xcodebuild") &&
+      IOSCtrlProxyManager.hasDeviceIdentity(identityText, this.device.deviceId);
   }
 
   /**

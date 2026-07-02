@@ -789,7 +789,34 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses().length).toBe(0);
     });
 
-    test("start() waits for an own still-starting runner instead of killing+respawning it (#2834)", async function() {
+    // Builds a fake ownable runner process (our xcodebuild for this device) so
+    // isOwnRunnerProcessAlive()'s PID-reuse guard treats it as genuinely ours.
+    function ownRunnerProcess(pid: number): FakeListeningProcess {
+      return {
+        pid,
+        port: 8765,
+        command: `xcodebuild test-without-building ` +
+          `-xctestrun /tmp/automobile-runner-${testDevice.deviceId}.xctestrun ` +
+          `-destination id=${testDevice.deviceId}`,
+        alive: true,
+      };
+    }
+
+    async function withHealthBudget(attempts: string, fn: () => Promise<void>): Promise<void> {
+      const prev = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+      process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = attempts;
+      try {
+        await fn();
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+        } else {
+          process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = prev;
+        }
+      }
+    }
+
+    test("start() waits for an own runner then terminates it if it never becomes healthy (#2834)", async function() {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice, // simulator UUID
         fakeTimer,
@@ -800,40 +827,118 @@ describe("IOSCtrlProxyManager", function() {
       // A runner we spawned in an earlier setup() whose health endpoint is not up
       // yet (XCUITest still cold-starting on a loaded CI machine). Its PID is alive.
       (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
-      // Health endpoint does NOT respond → isRunning()/isCtrlProxyProcessAlive() are false.
+      // Health endpoint never responds within this test's tiny budget → the runner
+      // is hung, exercising the recovery path below.
       fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
-      // The still-starting runner is alive and holding the service port.
-      const runnerProcs: FakeListeningProcess[] = [{
-        pid: 12345,
-        port: 8765,
-        command: `xcodebuild test-without-building ` +
-          `-xctestrun /tmp/automobile-runner-${testDevice.deviceId}.xctestrun ` +
-          `-destination id=${testDevice.deviceId}`,
-        alive: true,
-      }];
+      const runnerProcs = [ownRunnerProcess(12345)];
       installListeningProcessFakes(fakeExecutor, runnerProcs);
 
-      // Tiny health budget so the (expected) timeout is fast; the point of the test
-      // is what happens to the runner, not the wait.
-      const prev = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
-      process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = "1";
-      fakeTimer.enableAutoAdvance();
-      try {
+      await withHealthBudget("1", async () => {
+        fakeTimer.enableAutoAdvance();
         await expect(manager.start()).rejects.toThrow(/failed to start within timeout/);
-      } finally {
-        if (prev === undefined) {
-          delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
-        } else {
-          process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = prev;
-        }
-      }
+      });
 
-      // The fix: our own still-starting runner is NOT terminated to reclaim the port
-      // (that SIGTERM mid-startup is the livelock), and no competing runner is spawned.
-      expect(runnerProcs[0].alive).toBe(true);
-      expect(fakeExecutor.wasCommandExecuted("kill -TERM 12345")).toBe(false);
+      // While it was still starting we did NOT respawn a competing runner (the original
+      // livelock was: reclaim the port + respawn mid-startup).
       expect(fakeExecutor.wasCommandExecuted("simctl")).toBe(false);
       expect(fakeExecutor.getSpawnedProcesses().length).toBe(0);
+      // Thread-3 recovery: because it never became healthy we TERMINATE the hung runner
+      // (rather than leave it alive to be re-adopted by findExternalCtrlProxyProcess on
+      // the next start), and clear our tracking so the next start spawns fresh.
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 12345")).toBe(true);
+      expect(runnerProcs[0].alive).toBe(false);
+      expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBeNull();
+    });
+
+    test("start() reuses an own runner that becomes healthy during the wait (#2834)", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      const runnerProcs = [ownRunnerProcess(12345)];
+      installListeningProcessFakes(fakeExecutor, runnerProcs);
+
+      // Health is down for the initial liveness/running checks (still starting) then
+      // comes up once the health poll begins.
+      let curlCalls = 0;
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        return createExecResult(curlCalls > 2 ? "ok" : "", "");
+      });
+
+      await withHealthBudget("30", async () => {
+        fakeTimer.enableAutoAdvance();
+        await manager.start(); // resolves — runner became healthy, no throw
+      });
+
+      // Reused the starting runner: never respawned, never killed, tracking retained.
+      expect(fakeExecutor.getSpawnedProcesses().length).toBe(0);
+      expect(fakeExecutor.wasCommandExecuted("simctl")).toBe(false);
+      expect(runnerProcs[0].alive).toBe(true);
+      expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBe(12345);
+    });
+
+    // Directly exercise the PID-reuse guard added in review (thread 2). Testing the
+    // predicate rather than a full start() keeps it precise and avoids spawning a
+    // runner (whose background monitor would leak into later tests under autoAdvance).
+    const callIsOwnRunnerProcessAlive = (m: IOSCtrlProxyManager): Promise<boolean> =>
+      (m as unknown as { isOwnRunnerProcessAlive(): Promise<boolean> }).isOwnRunnerProcessAlive();
+
+    test("isOwnRunnerProcessAlive rejects a reused PID that is not our runner (#2834)", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      // The tracked PID is alive but has been reused by an UNRELATED process
+      // (not xcodebuild, no device identity).
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [{
+        pid: 12345,
+        port: 9999,
+        command: "/usr/sbin/some-unrelated-daemon --serve",
+        alive: true,
+      }]);
+
+      expect(await callIsOwnRunnerProcessAlive(manager)).toBe(false);
+    });
+
+    test("isOwnRunnerProcessAlive rejects a live xcodebuild runner for a DIFFERENT device (#2834)", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      // An xcodebuild runner, but for a sibling simulator (different device id).
+      installListeningProcessFakes(fakeExecutor, [{
+        pid: 12345,
+        port: 8765,
+        command: "xcodebuild test-without-building -xctestrun /tmp/automobile-runner-OTHER.xctestrun -destination id=OTHER-DEVICE-UUID",
+        alive: true,
+      }]);
+
+      expect(await callIsOwnRunnerProcessAlive(manager)).toBe(false);
+    });
+
+    test("isOwnRunnerProcessAlive accepts our live xcodebuild runner for this device (#2834)", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      expect(await callIsOwnRunnerProcessAlive(manager)).toBe(true);
+    });
+
+    test("isOwnRunnerProcessAlive returns false when the tracked PID is dead (#2834)", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      // No living process with this PID (installListeningProcessFakes' kill -0 throws).
+      installListeningProcessFakes(fakeExecutor, [{
+        ...ownRunnerProcess(12345),
+        alive: false,
+      }]);
+
+      expect(await callIsOwnRunnerProcessAlive(manager)).toBe(false);
     });
 
     test("health-poll budget is env-configurable with a generous default (#2834)", function() {

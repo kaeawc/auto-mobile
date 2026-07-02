@@ -149,13 +149,15 @@ function openConfiguredSqliteDatabase(dbPath: string): BunDatabase {
  * uncheckpointed frames still sitting in `-wal`. The `-wal`/`-shm` sidecars are
  * copied too when present as a belt-and-braces measure.
  */
-async function backupDatabaseFile(db: Kysely<unknown>, dbPath: string): Promise<void> {
+export async function backupDatabaseFile(db: Kysely<unknown>, dbPath: string): Promise<void> {
   try {
     // Flush WAL frames into the main database file so the copy is complete.
     await sql`PRAGMA wal_checkpoint(TRUNCATE)`.execute(db);
 
+    // Include the pid so a daemon that restart-loops on a corrupt DB (#2784) does
+    // not clobber an earlier backup written in the same millisecond.
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const backupPath = `${dbPath}.corrupt-backup-${timestamp}`;
+    const backupPath = `${dbPath}.corrupt-backup-${timestamp}-${process.pid}`;
     await fs.promises.copyFile(dbPath, backupPath);
 
     for (const suffix of ["-wal", "-shm"]) {

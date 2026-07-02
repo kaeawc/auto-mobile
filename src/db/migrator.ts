@@ -20,10 +20,10 @@ const MIGRATION_LOCK_TABLE = `${DEFAULT_MIGRATION_TABLE}_lock`;
  * user tables. Injected so unit tests (and `:memory:` databases, which have no
  * file) can assert "backup was called" without touching the filesystem.
  */
-export type BackupDatabase = () => Promise<void>;
+type BackupDatabase = () => Promise<void>;
 
 /** Count rows in a single table. Seam so the fail-safe path can be unit-tested. */
-export type CountTableRows = (db: Kysely<unknown>, tableName: string) => Promise<number>;
+type CountTableRows = (db: Kysely<unknown>, tableName: string) => Promise<number>;
 
 export interface RunMigrationsOptions {
   /** Override the migration source (defaults to the on-disk migration folder). */
@@ -32,8 +32,6 @@ export interface RunMigrationsOptions {
   backup?: BackupDatabase;
   /** Environment to read recovery gates from (defaults to `process.env`). */
   env?: NodeJS.ProcessEnv;
-  /** Timer seam for the history-rebuild timestamps. */
-  timer?: Timer;
 }
 
 export function resolveMigrationFolder(): string {
@@ -56,7 +54,7 @@ export function resolveMigrationFolder(): string {
 }
 
 function readRecoveryEnv(env: NodeJS.ProcessEnv): string | undefined {
-  return env.AUTOMOBILE_MIGRATION_RECOVERY ?? env.AUTO_MOBILE_MIGRATION_RECOVERY;
+  return (env.AUTOMOBILE_MIGRATION_RECOVERY ?? env.AUTO_MOBILE_MIGRATION_RECOVERY)?.trim();
 }
 
 function isMigrationRecoveryEnabled(env: NodeJS.ProcessEnv): boolean {
@@ -74,7 +72,7 @@ function isMigrationRecoveryEnabled(env: NodeJS.ProcessEnv): boolean {
  * history rebuild enabled but REFUSES the destructive reset, while `=1` allows both.
  */
 function isDestructiveResetExplicitlyOptedIn(env: NodeJS.ProcessEnv): boolean {
-  return readRecoveryEnv(env)?.trim() === "1";
+  return readRecoveryEnv(env) === "1";
 }
 
 function isCorruptedMigrationError(error: unknown): error is Error {
@@ -182,9 +180,30 @@ export async function isAnyTableNonEmpty(
   return false;
 }
 
+/**
+ * Drop every user + bookkeeping table so the migrations can replay from scratch.
+ * Production connections run with `PRAGMA foreign_keys = ON` (see
+ * `configureSqliteDatabase`) and the schema has non-cascade FKs (e.g.
+ * `scroll_positions.target_element_id` -> `ui_elements.id`), so dropping a parent
+ * before its still-populated child would otherwise abort mid-reset with
+ * `FOREIGN KEY constraint failed`, leaving a half-dropped database. Running the
+ * drops inside a single transaction with `defer_foreign_keys` defers enforcement
+ * to commit — by which point every referencing table is also gone — while leaving
+ * the connection's `foreign_keys` pragma untouched (it auto-resets at commit).
+ */
+async function dropAllTables(db: Kysely<unknown>, tableNames: string[]): Promise<void> {
+  await db.transaction().execute(async trx => {
+    await sql`PRAGMA defer_foreign_keys = ON`.execute(trx);
+    for (const name of tableNames) {
+      await trx.schema.dropTable(name).ifExists().execute();
+    }
+  });
+}
+
 async function resetDatabaseState(
   db: Kysely<unknown>,
-  options: RunMigrationsOptions
+  options: RunMigrationsOptions,
+  env: NodeJS.ProcessEnv
 ): Promise<void> {
   const tables = await db
     .selectFrom("sqlite_master" as any)
@@ -197,12 +216,12 @@ async function resetDatabaseState(
   // Exclude BOTH migration-bookkeeping tables from the populated check: the
   // history table always has rows post-rebuild, and the lock table is seeded
   // with one row — counting either would false-positive a genuinely empty user
-  // DB and break the frictionless empty-DB auto-heal.
+  // DB and break the frictionless empty-DB auto-heal. They are still dropped
+  // below so the replay gets a clean slate.
   const userTables = tableNames.filter(
     name => name !== DEFAULT_MIGRATION_TABLE && name !== MIGRATION_LOCK_TABLE
   );
 
-  const env = options.env ?? process.env;
   const populated = await isAnyTableNonEmpty(db, userTables);
 
   if (populated && !isDestructiveResetExplicitlyOptedIn(env)) {
@@ -225,9 +244,7 @@ async function resetDatabaseState(
     await options.backup();
   }
 
-  for (const name of tableNames) {
-    await db.schema.dropTable(name).ifExists().execute();
-  }
+  await dropAllTables(db, tableNames);
 }
 
 async function runMigrationsOnce(migrator: Migrator) {
@@ -250,7 +267,8 @@ async function recoverCorruptedMigrations(
   db: Kysely<unknown>,
   migrator: Migrator,
   error: Error,
-  options: RunMigrationsOptions
+  options: RunMigrationsOptions,
+  env: NodeJS.ProcessEnv
 ) {
   logger.warn(`Corrupted migrations detected: ${error.message}`);
   logger.warn(
@@ -258,7 +276,7 @@ async function recoverCorruptedMigrations(
       "Set AUTOMOBILE_MIGRATION_RECOVERY=0 to disable."
   );
 
-  const rebuildResult = await rebuildMigrationTable(db, migrator, options.timer ?? defaultTimer);
+  const rebuildResult = await rebuildMigrationTable(db, migrator);
   if (rebuildResult.pruned.length > 0) {
     logger.warn(
       `Pruned missing migrations from history (destructive): ${rebuildResult.pruned.join(", ")}`
@@ -273,7 +291,7 @@ async function recoverCorruptedMigrations(
   }
 
   logger.warn("Migration recovery failed after rebuild. Resetting database state (destructive).");
-  await resetDatabaseState(db, options);
+  await resetDatabaseState(db, options, env);
   result = await runMigrationsOnce(migrator);
   return result;
 }
@@ -301,7 +319,7 @@ export async function runMigrations(
 
   if (error) {
     if (isCorruptedMigrationError(error) && isMigrationRecoveryEnabled(env)) {
-      const recoveryResult = await recoverCorruptedMigrations(db, migrator, error, options);
+      const recoveryResult = await recoverCorruptedMigrations(db, migrator, error, options, env);
       if (recoveryResult.error) {
         logger.error("Failed to run migrations after recovery:", recoveryResult.error);
         throw recoveryResult.error;

@@ -273,4 +273,73 @@ describe("runMigrations recovery", () => {
     await insertSentinel(db);
     expect(await isAnyTableNonEmpty(db, ["widgets"])).toBe(true);
   });
+
+  // Regression: with PRAGMA foreign_keys = ON (as production runs) the drop loop
+  // must not abort mid-reset when a parent table is dropped before its still-
+  // populated child that holds a non-cascade FK reference. Uses a dedicated
+  // connection with FK enforcement enabled (the shared in-memory db does not set
+  // it), reproducing the real-schema `scroll_positions -> ui_elements` shape.
+  test("destructive reset completes with foreign_keys ON and referencing rows", async () => {
+    const fkDb = new Kysely<unknown>({
+      dialect: new BunSqliteDialect({ database: new BunDatabase(":memory:") }),
+    });
+    await sql`PRAGMA foreign_keys = ON`.execute(fkDb);
+
+    const parent: Migration = {
+      async up(d: Kysely<any>) {
+        await d.schema.createTable("parents").addColumn("id", "integer", c => c.primaryKey()).execute();
+      },
+    };
+    const child: Migration = {
+      async up(d: Kysely<any>) {
+        await d.schema
+          .createTable("children")
+          .addColumn("id", "integer", c => c.primaryKey())
+          .addColumn("parent_id", "integer", c => c.references("parents.id"))
+          .execute();
+      },
+    };
+    const base = { "2026_01_02_000_parents": parent, "2026_01_05_000_children": child };
+    await runMigrations(fkDb, { provider: providerFor(base), env: {} });
+    await sql`insert into parents (id) values (1)`.execute(fkDb);
+    await sql`insert into children (id, parent_id) values (1, 1)`.execute(fkDb);
+
+    let backupCalls = 0;
+    const backup = async (): Promise<void> => {
+      backupCalls++;
+    };
+    const withBackport = {
+      ...base,
+      "2026_01_03_000_backport": {
+        async up(d: Kysely<any>) {
+          await d.schema.createTable("sprockets").addColumn("id", "integer", c => c.primaryKey()).execute();
+        },
+      } as Migration,
+    };
+
+    // Opted in -> reset proceeds; it must NOT throw a FOREIGN KEY constraint error.
+    await runMigrations(fkDb, {
+      provider: providerFor(withBackport),
+      env: { AUTOMOBILE_MIGRATION_RECOVERY: "1" },
+      backup,
+    });
+
+    expect(backupCalls).toBe(1);
+    // Replay recreated everything.
+    const names = await migrationNames(fkDb);
+    expect(names).toEqual(
+      ["2026_01_02_000_parents", "2026_01_03_000_backport", "2026_01_05_000_children"].sort()
+    );
+    // FK enforcement is still active afterwards (the reset only deferred it inside
+    // its own transaction): a violating insert must be rejected.
+    let fkStillEnforced = false;
+    try {
+      await sql`insert into children (id, parent_id) values (2, 999)`.execute(fkDb);
+    } catch {
+      fkStillEnforced = true;
+    }
+    expect(fkStillEnforced).toBe(true);
+
+    await fkDb.destroy();
+  });
 });

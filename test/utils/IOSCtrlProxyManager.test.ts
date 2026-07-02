@@ -893,6 +893,55 @@ describe("IOSCtrlProxyManager", function() {
       expect(psArgsCalls).toBeGreaterThanOrEqual(2); // wait-decision + pre-kill re-verify
     });
 
+    test("start() stops a hung host-control runner via host control, not a local kill (#2834)", async function() {
+      const { runner, stops } = createHostControlRunner();
+      // Model the race that reaches the wait-branch under host control: the top-level
+      // liveness check sees the runner as not-running, but by the wait-branch check it
+      // reports running — and then it never becomes healthy.
+      let statusCalls = 0;
+      const racingRunner = {
+        ...runner,
+        status: async (params: { deviceId?: string; pid?: number; port?: number }) => {
+          statusCalls++;
+          return {
+            success: true,
+            data: { running: statusCalls > 1, pid: params.pid, port: params.port },
+          };
+        },
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, // simulator UUID → isSimulator() true, but running via host control
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+        undefined,
+        undefined,
+        racingRunner as unknown as Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+
+      // Host-control health checks go through fetch; never healthy.
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => {
+        throw new Error("health unreachable");
+      }) as unknown as typeof fetch;
+      try {
+        await withHealthBudget("1", async () => {
+          fakeTimer.enableAutoAdvance();
+          await expect(manager.start()).rejects.toThrow(/failed to start within timeout/);
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      // The hung runner's PID lives on the macOS HOST — a local kill would miss it (or
+      // hit an unrelated same-PID container process). It must be stopped via host control.
+      expect(stops).toContainEqual({ deviceId: testDevice.deviceId, pid: 12345 });
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 12345")).toBe(false);
+      expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBeNull();
+      expect((manager as unknown as { isStopping: boolean }).isStopping).toBe(false);
+    });
+
     test("start() reuses an own runner that becomes healthy during the wait (#2834)", async function() {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice, fakeTimer, undefined, fakeExecutor

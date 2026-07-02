@@ -733,7 +733,21 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             `[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID ${hungPid}) never became ` +
             `healthy within ${timeoutSeconds}s; terminating it so the next start spawns a fresh runner`
           );
-          await IOSCtrlProxyManager.terminateProcess(this.processExecutor, this.timer, hungPid);
+          if (this.useHostControl()) {
+            // The runner PID belongs to the macOS HOST, not this (Docker) container —
+            // a local kill would miss it (or signal an unrelated same-PID container
+            // process). Stop it through host control, matching stop() (#2834 review).
+            try {
+              await this.hostControl.stop({ deviceId: this.device.deviceId, pid: hungPid });
+            } catch (error) {
+              logger.warn(
+                `[IOSCtrlProxy] Host control stop of hung runner ${hungPid} failed: ` +
+                `${error instanceof Error ? error.message : String(error)}`
+              );
+            }
+          } else {
+            await IOSCtrlProxyManager.terminateProcess(this.processExecutor, this.timer, hungPid);
+          }
         } else {
           logger.warn(
             `[IOSCtrlProxy] Tracked runner PID ${hungPid} is no longer our CtrlProxy runner ` +

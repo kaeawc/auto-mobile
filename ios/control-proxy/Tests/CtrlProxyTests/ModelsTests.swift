@@ -57,11 +57,14 @@ final class ModelsTests: XCTestCase {
 
         let request = try JSONDecoder().decode(WebSocketRequest.self, from: XCTUnwrap(json.data(using: .utf8)))
 
-        XCTAssertEqual(request.type, "request_tap_coordinates")
-        XCTAssertEqual(request.requestId, "req-123")
-        XCTAssertEqual(request.x, 100)
-        XCTAssertEqual(request.y, 200)
-        XCTAssertEqual(request.duration, 50)
+        XCTAssertEqual(request.typeString, "request_tap_coordinates")
+        guard case let .tapCoordinates(payload) = request else {
+            return XCTFail("Expected .tapCoordinates, got \(request)")
+        }
+        XCTAssertEqual(payload.requestId, "req-123")
+        XCTAssertEqual(payload.x, 100)
+        XCTAssertEqual(payload.y, 200)
+        XCTAssertEqual(payload.duration, 50)
     }
 
     func testWebSocketRequestSwipeDecoding() throws {
@@ -78,12 +81,15 @@ final class ModelsTests: XCTestCase {
 
         let request = try JSONDecoder().decode(WebSocketRequest.self, from: XCTUnwrap(json.data(using: .utf8)))
 
-        XCTAssertEqual(request.type, "request_swipe")
-        XCTAssertEqual(request.x1, 100)
-        XCTAssertEqual(request.y1, 200)
-        XCTAssertEqual(request.x2, 300)
-        XCTAssertEqual(request.y2, 400)
-        XCTAssertEqual(request.duration, 300)
+        XCTAssertEqual(request.typeString, "request_swipe")
+        guard case let .swipe(payload) = request else {
+            return XCTFail("Expected .swipe, got \(request)")
+        }
+        XCTAssertEqual(payload.x1, 100)
+        XCTAssertEqual(payload.y1, 200)
+        XCTAssertEqual(payload.x2, 300)
+        XCTAssertEqual(payload.y2, 400)
+        XCTAssertEqual(payload.duration, 300)
     }
 
     func testWebSocketRequestMultiFingerSwipeDecodesFractionalOffset() throws {
@@ -102,9 +108,12 @@ final class ModelsTests: XCTestCase {
 
         let request = try JSONDecoder().decode(WebSocketRequest.self, from: XCTUnwrap(json.data(using: .utf8)))
 
-        XCTAssertEqual(request.type, "request_multi_finger_swipe")
-        XCTAssertEqual(request.offset ?? -1, 30.5, accuracy: 0.0001)
-        XCTAssertEqual(request.fingerCount, 3)
+        XCTAssertEqual(request.typeString, "request_multi_finger_swipe")
+        guard case let .multiFingerSwipe(payload) = request else {
+            return XCTFail("Expected .multiFingerSwipe, got \(request)")
+        }
+        XCTAssertEqual(payload.offset ?? -1, 30.5, accuracy: 0.0001)
+        XCTAssertEqual(payload.fingerCount, 3)
     }
 
     func testWebSocketRequestDragDecoding() throws {
@@ -123,10 +132,13 @@ final class ModelsTests: XCTestCase {
 
         let request = try JSONDecoder().decode(WebSocketRequest.self, from: XCTUnwrap(json.data(using: .utf8)))
 
-        XCTAssertEqual(request.type, "request_drag")
-        XCTAssertEqual(request.pressDurationMs, 600)
-        XCTAssertEqual(request.dragDurationMs, 300)
-        XCTAssertEqual(request.holdDurationMs, 100)
+        XCTAssertEqual(request.typeString, "request_drag")
+        guard case let .drag(payload) = request else {
+            return XCTFail("Expected .drag, got \(request)")
+        }
+        XCTAssertEqual(payload.pressDurationMs, 600)
+        XCTAssertEqual(payload.dragDurationMs, 300)
+        XCTAssertEqual(payload.holdDurationMs, 100)
     }
 
     // MARK: - WebSocketResponse Tests

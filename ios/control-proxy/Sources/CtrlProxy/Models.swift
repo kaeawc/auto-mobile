@@ -1,173 +1,474 @@
 import Foundation
 
-// MARK: - Request Models (matching Android AccessibilityService)
+// MARK: - Request Models (typed per-command model — see issue #2846)
 
-/// WebSocket request from automation client
-/// Matches Android's WebSocketRequest format
-public struct WebSocketRequest: Codable {
-    public let type: String
-    public let requestId: String?
+// The iOS control-proxy decodes each inbound WebSocket command into a typed
+// `WebSocketRequest` case carrying a per-command payload that declares only the
+// fields that command uses. This replaces the former flat ~43-optional bag +
+// `switch request.type` dispatch (the iOS analog of the Android migration in
+// #2752 / #2771). The wire format is unchanged: the same `type` discriminator
+// strings (see `RequestType`) and the same JSON field names are decoded.
+//
+// Field policy: a payload field is a decode-required (non-optional) property
+// only when the former handler threw `CommandError.missingParameter` on its
+// absence (a generic error). Fields with handler-side defaults, and fields
+// whose absence produced a *command-specific* typed error response
+// (storage/database/highlight), stay optional and are validated in the handler.
+//
+// Payloads use `var` with `= nil` on optionals so they get both a synthesized
+// `Decodable` (which decodes `var`-with-default) and a memberwise initializer
+// with defaults for test construction.
 
-    // Tap parameters
-    public let x: Int?
-    public let y: Int?
-    public let duration: Int?
+// MARK: No-argument command envelope
 
-    // Swipe parameters
-    public let x1: Int?
-    public let y1: Int?
-    public let x2: Int?
-    public let y2: Int?
-    public let offset: Double?
-    public let fingerCount: Int?
+/// Payload for commands that carry no parameters beyond the request id.
+public struct RequestEnvelope: Decodable {
+    public var requestId: String?
+}
 
-    // Drag parameters
-    public let pressDurationMs: Int?
-    public let dragDurationMs: Int?
-    public let holdDurationMs: Int?
-    public let holdTime: Int?
+// MARK: View hierarchy
 
-    // Pinch parameters
-    public let centerX: Int?
-    public let centerY: Int?
-    public let distanceStart: Int?
-    public let distanceEnd: Int?
-    public let rotationDegrees: Float?
+public struct RequestHierarchy: Decodable {
+    public var requestId: String?
+    public var disableAllFiltering: Bool?
+    public var sinceTimestamp: Int64?
+}
 
-    // Text input parameters
-    public let text: String?
-    public let resourceId: String?
-    public let label: String?
+// MARK: Gestures
 
-    // Action parameters
-    public let action: String?
-    public let bundleId: String?
+public struct RequestTapCoordinates: Decodable {
+    public var requestId: String?
+    public var x: Int
+    public var y: Int
+    public var duration: Int?
+}
 
-    // Filtering control
-    public let sinceTimestamp: Int64?
-    public let disableAllFiltering: Bool?
+public struct RequestSwipe: Decodable {
+    public var requestId: String?
+    public var x1: Int
+    public var y1: Int
+    public var x2: Int
+    public var y2: Int
+    public var duration: Int?
+}
 
-    // Highlight parameters
-    public let id: String?
-    public let shape: HighlightShape?
+public struct RequestMultiFingerSwipe: Decodable {
+    public var requestId: String?
+    public var x1: Int
+    public var y1: Int
+    public var x2: Int
+    public var y2: Int
+    public var fingerCount: Int?
+    public var duration: Int?
+    public var offset: Double?
+}
 
-    // Storage parameters
-    public let fileName: String?
-    public let key: String?
-    public let value: String?
-    public let valueType: String?
+public struct RequestDrag: Decodable {
+    public var requestId: String?
+    public var x1: Int
+    public var y1: Int
+    public var x2: Int
+    public var y2: Int
+    public var pressDurationMs: Int?
+    public var dragDurationMs: Int?
+    public var holdDurationMs: Int?
+    public var holdTime: Int?
+}
 
-    // Database parameters
-    public let appId: String?
-    public let databasePath: String?
-    public let query: String?
-    public let table: String?
-    public let limit: Int?
+public struct RequestPinch: Decodable {
+    public var requestId: String?
+    public var centerX: Int
+    public var centerY: Int
+    public var distanceStart: Int
+    public var distanceEnd: Int
+    public var rotationDegrees: Float?
+    public var duration: Int?
+}
 
-    /// App launch parameters
-    public let coldBoot: Bool?
+// MARK: Text input
 
-    /// Rotation parameters
-    public let orientation: String?
+public struct RequestSetText: Decodable {
+    public var requestId: String?
+    public var text: String
+    public var resourceId: String?
+}
 
-    // Permission/settings
-    public let permission: String?
-    public let requestPermission: Bool?
-    public let enabled: Bool?
+public struct RequestClearText: Decodable {
+    public var requestId: String?
+    public var resourceId: String?
+}
 
-    /// Network mocking
-    public let rules: [NetworkMockRuleDTO]?
+public struct RequestImeAction: Decodable {
+    public var requestId: String?
+    public var action: String
+}
 
-    public init(
-        type: String,
-        requestId: String? = nil,
-        x: Int? = nil,
-        y: Int? = nil,
-        duration: Int? = nil,
-        x1: Int? = nil,
-        y1: Int? = nil,
-        x2: Int? = nil,
-        y2: Int? = nil,
-        offset: Double? = nil,
-        fingerCount: Int? = nil,
-        pressDurationMs: Int? = nil,
-        dragDurationMs: Int? = nil,
-        holdDurationMs: Int? = nil,
-        holdTime: Int? = nil,
-        centerX: Int? = nil,
-        centerY: Int? = nil,
-        distanceStart: Int? = nil,
-        distanceEnd: Int? = nil,
-        rotationDegrees: Float? = nil,
-        text: String? = nil,
-        resourceId: String? = nil,
-        label: String? = nil,
-        action: String? = nil,
-        bundleId: String? = nil,
-        sinceTimestamp: Int64? = nil,
-        disableAllFiltering: Bool? = nil,
-        id: String? = nil,
-        shape: HighlightShape? = nil,
-        fileName: String? = nil,
-        key: String? = nil,
-        value: String? = nil,
-        valueType: String? = nil,
-        appId: String? = nil,
-        databasePath: String? = nil,
-        query: String? = nil,
-        table: String? = nil,
-        limit: Int? = nil,
-        coldBoot: Bool? = nil,
-        orientation: String? = nil,
-        permission: String? = nil,
-        requestPermission: Bool? = nil,
-        enabled: Bool? = nil,
-        networkMockRules: [NetworkMockRuleDTO]? = nil
-    ) {
-        self.type = type
-        self.requestId = requestId
-        self.x = x
-        self.y = y
-        self.duration = duration
-        self.x1 = x1
-        self.y1 = y1
-        self.x2 = x2
-        self.y2 = y2
-        self.offset = offset
-        self.fingerCount = fingerCount
-        self.pressDurationMs = pressDurationMs
-        self.dragDurationMs = dragDurationMs
-        self.holdDurationMs = holdDurationMs
-        self.holdTime = holdTime
-        self.centerX = centerX
-        self.centerY = centerY
-        self.distanceStart = distanceStart
-        self.distanceEnd = distanceEnd
-        self.rotationDegrees = rotationDegrees
-        self.text = text
-        self.resourceId = resourceId
-        self.label = label
-        self.action = action
-        self.bundleId = bundleId
-        self.sinceTimestamp = sinceTimestamp
-        self.disableAllFiltering = disableAllFiltering
-        self.id = id
-        self.shape = shape
-        self.fileName = fileName
-        self.key = key
-        self.value = value
-        self.valueType = valueType
-        self.appId = appId
-        self.databasePath = databasePath
-        self.query = query
-        self.table = table
-        self.limit = limit
-        self.coldBoot = coldBoot
-        self.orientation = orientation
-        self.permission = permission
-        self.requestPermission = requestPermission
-        self.enabled = enabled
-        rules = networkMockRules
+public struct RequestKeyboard: Decodable {
+    public var requestId: String?
+    public var action: String
+}
+
+public struct RequestPressButton: Decodable {
+    public var requestId: String?
+    public var action: String
+}
+
+// MARK: Actions
+
+public struct RequestAction: Decodable {
+    public var requestId: String?
+    public var action: String
+    public var resourceId: String?
+    public var label: String?
+}
+
+public struct RequestLaunchApp: Decodable {
+    public var requestId: String?
+    public var bundleId: String
+    public var coldBoot: Bool?
+}
+
+// MARK: Device control
+
+public struct RequestRotate: Decodable {
+    public var requestId: String?
+    public var orientation: String
+}
+
+public struct RequestClipboard: Decodable {
+    public var requestId: String?
+    public var action: String
+    public var text: String?
+}
+
+// MARK: Accessibility features
+
+public struct RequestAddHighlight: Decodable {
+    public var requestId: String?
+    public var id: String?
+    public var shape: HighlightShape?
+}
+
+// MARK: Storage inspection
+
+public struct RequestGetPreferences: Decodable {
+    public var requestId: String?
+    public var fileName: String?
+}
+
+public struct RequestGetPreference: Decodable {
+    public var requestId: String?
+    public var key: String?
+    public var fileName: String?
+}
+
+public struct RequestSetPreference: Decodable {
+    public var requestId: String?
+    public var key: String
+    public var value: String?
+    public var valueType: String
+    public var fileName: String?
+}
+
+public struct RequestRemovePreference: Decodable {
+    public var requestId: String?
+    public var key: String
+    public var fileName: String?
+}
+
+public struct RequestClearPreferences: Decodable {
+    public var requestId: String?
+    public var fileName: String?
+}
+
+// MARK: Network mocking
+
+public struct RequestSetNetworkMockRules: Decodable {
+    public var requestId: String?
+    public var rules: [NetworkMockRuleDTO]
+}
+
+// MARK: Database inspection
+
+public struct RequestExecuteSql: Decodable {
+    public var requestId: String?
+    public var appId: String?
+    public var databasePath: String?
+    public var query: String?
+}
+
+public struct RequestListDatabases: Decodable {
+    public var requestId: String?
+    public var appId: String?
+}
+
+public struct RequestListTables: Decodable {
+    public var requestId: String?
+    public var appId: String?
+    public var databasePath: String?
+}
+
+public struct RequestGetTableData: Decodable {
+    public var requestId: String?
+    public var appId: String?
+    public var databasePath: String?
+    public var table: String?
+    public var limit: Int?
+    public var offset: Double?
+}
+
+public struct RequestGetTableStructure: Decodable {
+    public var requestId: String?
+    public var appId: String?
+    public var databasePath: String?
+    public var table: String?
+}
+
+// MARK: - Typed request envelope
+
+/// Typed WebSocket request from the automation client. Each case carries only
+/// the fields its command uses. Decoded from the flat JSON `{ "type": ... }`
+/// envelope by reading the `type` discriminator and decoding the matching
+/// payload from the same container.
+public enum WebSocketRequest: Decodable {
+    case requestHierarchy(RequestHierarchy)
+    case requestHierarchyIfStale(RequestHierarchy)
+    case requestScreenshot(RequestEnvelope)
+
+    case tapCoordinates(RequestTapCoordinates)
+    case swipe(RequestSwipe)
+    case twoFingerSwipe(RequestMultiFingerSwipe)
+    case multiFingerSwipe(RequestMultiFingerSwipe)
+    case drag(RequestDrag)
+    case pinch(RequestPinch)
+
+    case setText(RequestSetText)
+    case clearText(RequestClearText)
+    case imeAction(RequestImeAction)
+    case selectAll(RequestEnvelope)
+    case keyboard(RequestKeyboard)
+    case pressButton(RequestPressButton)
+    case pressHome(RequestEnvelope)
+    case pressBack(RequestEnvelope)
+    case shake(RequestEnvelope)
+    case recentApps(RequestEnvelope)
+
+    case action(RequestAction)
+    case launchApp(RequestLaunchApp)
+    case rotate(RequestRotate)
+    case clipboard(RequestClipboard)
+
+    case getCurrentFocus(RequestEnvelope)
+    case getTraversalOrder(RequestEnvelope)
+    case addHighlight(RequestAddHighlight)
+    case getVoiceOverState(RequestEnvelope)
+
+    case listPreferenceFiles(RequestEnvelope)
+    case getPreferences(RequestGetPreferences)
+    case getPreference(RequestGetPreference)
+    case setPreference(RequestSetPreference)
+    case removePreference(RequestRemovePreference)
+    case clearPreferences(RequestClearPreferences)
+
+    case setNetworkMockRules(RequestSetNetworkMockRules)
+
+    case executeSql(RequestExecuteSql)
+    case listDatabases(RequestListDatabases)
+    case listTables(RequestListTables)
+    case getTableData(RequestGetTableData)
+    case getTableStructure(RequestGetTableStructure)
+
+    private enum DiscriminatorKey: String, CodingKey {
+        case type
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DiscriminatorKey.self)
+        let typeString = try container.decode(String.self, forKey: .type)
+        guard let requestType = RequestType(rawValue: typeString) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "Unknown command type: \(typeString)"
+            )
+        }
+
+        switch requestType {
+        case .requestHierarchy:
+            self = try .requestHierarchy(RequestHierarchy(from: decoder))
+        case .requestHierarchyIfStale:
+            self = try .requestHierarchyIfStale(RequestHierarchy(from: decoder))
+        case .requestScreenshot:
+            self = try .requestScreenshot(RequestEnvelope(from: decoder))
+        case .requestTapCoordinates:
+            self = try .tapCoordinates(RequestTapCoordinates(from: decoder))
+        case .requestSwipe:
+            self = try .swipe(RequestSwipe(from: decoder))
+        case .requestTwoFingerSwipe:
+            self = try .twoFingerSwipe(RequestMultiFingerSwipe(from: decoder))
+        case .requestMultiFingerSwipe:
+            self = try .multiFingerSwipe(RequestMultiFingerSwipe(from: decoder))
+        case .requestDrag:
+            self = try .drag(RequestDrag(from: decoder))
+        case .requestPinch:
+            self = try .pinch(RequestPinch(from: decoder))
+        case .requestSetText:
+            self = try .setText(RequestSetText(from: decoder))
+        case .requestClearText:
+            self = try .clearText(RequestClearText(from: decoder))
+        case .requestImeAction:
+            self = try .imeAction(RequestImeAction(from: decoder))
+        case .requestSelectAll:
+            self = try .selectAll(RequestEnvelope(from: decoder))
+        case .requestKeyboard:
+            self = try .keyboard(RequestKeyboard(from: decoder))
+        case .requestPressButton:
+            self = try .pressButton(RequestPressButton(from: decoder))
+        case .requestPressHome:
+            self = try .pressHome(RequestEnvelope(from: decoder))
+        case .requestPressBack:
+            self = try .pressBack(RequestEnvelope(from: decoder))
+        case .requestShake:
+            self = try .shake(RequestEnvelope(from: decoder))
+        case .requestRecentApps:
+            self = try .recentApps(RequestEnvelope(from: decoder))
+        case .requestAction:
+            self = try .action(RequestAction(from: decoder))
+        case .requestLaunchApp:
+            self = try .launchApp(RequestLaunchApp(from: decoder))
+        case .requestRotate:
+            self = try .rotate(RequestRotate(from: decoder))
+        case .requestClipboard:
+            self = try .clipboard(RequestClipboard(from: decoder))
+        case .getCurrentFocus:
+            self = try .getCurrentFocus(RequestEnvelope(from: decoder))
+        case .getTraversalOrder:
+            self = try .getTraversalOrder(RequestEnvelope(from: decoder))
+        case .addHighlight:
+            self = try .addHighlight(RequestAddHighlight(from: decoder))
+        case .getVoiceOverState:
+            self = try .getVoiceOverState(RequestEnvelope(from: decoder))
+        case .listPreferenceFiles:
+            self = try .listPreferenceFiles(RequestEnvelope(from: decoder))
+        case .getPreferences:
+            self = try .getPreferences(RequestGetPreferences(from: decoder))
+        case .getPreference:
+            self = try .getPreference(RequestGetPreference(from: decoder))
+        case .setPreference:
+            self = try .setPreference(RequestSetPreference(from: decoder))
+        case .removePreference:
+            self = try .removePreference(RequestRemovePreference(from: decoder))
+        case .clearPreferences:
+            self = try .clearPreferences(RequestClearPreferences(from: decoder))
+        case .setNetworkMockRules:
+            self = try .setNetworkMockRules(RequestSetNetworkMockRules(from: decoder))
+        case .executeSql:
+            self = try .executeSql(RequestExecuteSql(from: decoder))
+        case .listDatabases:
+            self = try .listDatabases(RequestListDatabases(from: decoder))
+        case .listTables:
+            self = try .listTables(RequestListTables(from: decoder))
+        case .getTableData:
+            self = try .getTableData(RequestGetTableData(from: decoder))
+        case .getTableStructure:
+            self = try .getTableStructure(RequestGetTableStructure(from: decoder))
+        }
+    }
+
+    /// The wire discriminator for this command.
+    public var requestType: RequestType {
+        switch self {
+        case .requestHierarchy: return .requestHierarchy
+        case .requestHierarchyIfStale: return .requestHierarchyIfStale
+        case .requestScreenshot: return .requestScreenshot
+        case .tapCoordinates: return .requestTapCoordinates
+        case .swipe: return .requestSwipe
+        case .twoFingerSwipe: return .requestTwoFingerSwipe
+        case .multiFingerSwipe: return .requestMultiFingerSwipe
+        case .drag: return .requestDrag
+        case .pinch: return .requestPinch
+        case .setText: return .requestSetText
+        case .clearText: return .requestClearText
+        case .imeAction: return .requestImeAction
+        case .selectAll: return .requestSelectAll
+        case .keyboard: return .requestKeyboard
+        case .pressButton: return .requestPressButton
+        case .pressHome: return .requestPressHome
+        case .pressBack: return .requestPressBack
+        case .shake: return .requestShake
+        case .recentApps: return .requestRecentApps
+        case .action: return .requestAction
+        case .launchApp: return .requestLaunchApp
+        case .rotate: return .requestRotate
+        case .clipboard: return .requestClipboard
+        case .getCurrentFocus: return .getCurrentFocus
+        case .getTraversalOrder: return .getTraversalOrder
+        case .addHighlight: return .addHighlight
+        case .getVoiceOverState: return .getVoiceOverState
+        case .listPreferenceFiles: return .listPreferenceFiles
+        case .getPreferences: return .getPreferences
+        case .getPreference: return .getPreference
+        case .setPreference: return .setPreference
+        case .removePreference: return .removePreference
+        case .clearPreferences: return .clearPreferences
+        case .setNetworkMockRules: return .setNetworkMockRules
+        case .executeSql: return .executeSql
+        case .listDatabases: return .listDatabases
+        case .listTables: return .listTables
+        case .getTableData: return .getTableData
+        case .getTableStructure: return .getTableStructure
+        }
+    }
+
+    /// The wire discriminator string for this command.
+    public var typeString: String {
+        requestType.rawValue
+    }
+
+    /// The client-supplied correlation id, if any.
+    public var requestId: String? {
+        switch self {
+        case let .requestHierarchy(payload), let .requestHierarchyIfStale(payload):
+            return payload.requestId
+        case let .requestScreenshot(payload),
+             let .selectAll(payload),
+             let .pressHome(payload),
+             let .pressBack(payload),
+             let .shake(payload),
+             let .recentApps(payload),
+             let .getCurrentFocus(payload),
+             let .getTraversalOrder(payload),
+             let .getVoiceOverState(payload),
+             let .listPreferenceFiles(payload):
+            return payload.requestId
+        case let .tapCoordinates(payload): return payload.requestId
+        case let .swipe(payload): return payload.requestId
+        case let .twoFingerSwipe(payload), let .multiFingerSwipe(payload):
+            return payload.requestId
+        case let .drag(payload): return payload.requestId
+        case let .pinch(payload): return payload.requestId
+        case let .setText(payload): return payload.requestId
+        case let .clearText(payload): return payload.requestId
+        case let .imeAction(payload): return payload.requestId
+        case let .keyboard(payload): return payload.requestId
+        case let .pressButton(payload): return payload.requestId
+        case let .action(payload): return payload.requestId
+        case let .launchApp(payload): return payload.requestId
+        case let .rotate(payload): return payload.requestId
+        case let .clipboard(payload): return payload.requestId
+        case let .addHighlight(payload): return payload.requestId
+        case let .getPreferences(payload): return payload.requestId
+        case let .getPreference(payload): return payload.requestId
+        case let .setPreference(payload): return payload.requestId
+        case let .removePreference(payload): return payload.requestId
+        case let .clearPreferences(payload): return payload.requestId
+        case let .setNetworkMockRules(payload): return payload.requestId
+        case let .executeSql(payload): return payload.requestId
+        case let .listDatabases(payload): return payload.requestId
+        case let .listTables(payload): return payload.requestId
+        case let .getTableData(payload): return payload.requestId
+        case let .getTableStructure(payload): return payload.requestId
+        }
     }
 }
 

@@ -123,11 +123,10 @@ final class CommandHandlerTests: XCTestCase {
             ),
         ]
 
-        let response = commandHandler.handle(WebSocketRequest(
-            type: RequestType.setNetworkMockRules.rawValue,
+        let response = commandHandler.handle(WebSocketRequest.setNetworkMockRules(RequestSetNetworkMockRules(
             requestId: "mock-sync-1",
-            networkMockRules: rules
-        ))
+            rules: rules
+        )))
 
         guard let typed = response as? SetNetworkMockRulesResponse else {
             XCTFail("Expected SetNetworkMockRulesResponse, got \(Swift.type(of: response))")
@@ -140,20 +139,12 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(fetcher.lastMockRules?.first?.mockId, "mock-1")
     }
 
-    func testSetNetworkMockRulesReturnsMissingParameterErrorWhenRulesAbsent() {
-        let response = commandHandler.handle(WebSocketRequest(
-            type: RequestType.setNetworkMockRules.rawValue,
-            requestId: "mock-sync-missing"
-        ))
-
-        guard let typed = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse, got \(Swift.type(of: response))")
-            return
-        }
-        XCTAssertEqual(typed.type, ResponseType.setNetworkMockRulesResult.rawValue)
-        XCTAssertEqual(typed.requestId, "mock-sync-missing")
-        XCTAssertEqual(typed.success, false)
-        XCTAssertEqual(typed.error, "Missing required parameter: rules")
+    /// `rules` is now a decode-required field: a `set_network_mock_rules` command
+    /// without it is rejected at the wire boundary rather than dispatched.
+    func testSetNetworkMockRulesWithoutRulesFailsToDecode() {
+        XCTAssertThrowsError(
+            try decodeWebSocketRequest(#"{"type":"set_network_mock_rules","requestId":"mock-sync-missing"}"#)
+        )
     }
 
     // MARK: - Hierarchy Request Tests
@@ -172,10 +163,7 @@ final class CommandHandlerTests: XCTestCase {
         fakeElementLocator.setHierarchy(testHierarchy)
 
         // Create request
-        let request = WebSocketRequest(
-            type: "request_hierarchy",
-            requestId: "test-123"
-        )
+        let request = WebSocketRequest.requestHierarchy(RequestHierarchy(requestId: "test-123"))
 
         // Simulate time passing during extraction
         fakeTimeProvider.setTime(1000)
@@ -208,10 +196,7 @@ final class CommandHandlerTests: XCTestCase {
         )
         fakeElementLocator.setHierarchy(testHierarchy)
 
-        let request = WebSocketRequest(
-            type: "request_hierarchy",
-            requestId: "test-456"
-        )
+        let request = WebSocketRequest.requestHierarchy(RequestHierarchy(requestId: "test-456"))
 
         guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
 
@@ -236,10 +221,7 @@ final class CommandHandlerTests: XCTestCase {
         )
         fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.test.app"))
 
-        let request = WebSocketRequest(
-            type: "request_hierarchy",
-            requestId: "test-sdk-match"
-        )
+        let request = WebSocketRequest.requestHierarchy(RequestHierarchy(requestId: "test-sdk-match"))
 
         guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
 
@@ -262,10 +244,7 @@ final class CommandHandlerTests: XCTestCase {
         )
         fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
 
-        let request = WebSocketRequest(
-            type: "request_hierarchy",
-            requestId: "test-sdk-mismatch"
-        )
+        let request = WebSocketRequest.requestHierarchy(RequestHierarchy(requestId: "test-sdk-mismatch"))
 
         guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
 
@@ -336,10 +315,7 @@ final class CommandHandlerTests: XCTestCase {
         )
         fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.test.app"))
 
-        let request = WebSocketRequest(
-            type: "request_hierarchy",
-            requestId: "test-sdk-fresh"
-        )
+        let request = WebSocketRequest.requestHierarchy(RequestHierarchy(requestId: "test-sdk-fresh"))
 
         guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
 
@@ -360,10 +336,7 @@ final class CommandHandlerTests: XCTestCase {
         )
         fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
 
-        let request = WebSocketRequest(
-            type: "request_hierarchy",
-            requestId: "test-sdk-no-fresh"
-        )
+        let request = WebSocketRequest.requestHierarchy(RequestHierarchy(requestId: "test-sdk-no-fresh"))
 
         guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
 
@@ -388,10 +361,7 @@ final class CommandHandlerTests: XCTestCase {
         )
         fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
 
-        let request = WebSocketRequest(
-            type: "request_hierarchy",
-            requestId: "test-sdk-replace-cache"
-        )
+        let request = WebSocketRequest.requestHierarchy(RequestHierarchy(requestId: "test-sdk-replace-cache"))
 
         guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
 
@@ -407,10 +377,7 @@ final class CommandHandlerTests: XCTestCase {
         // Configure fake to throw error
         fakeElementLocator.setShouldThrow(CommandError.executionFailed("Test error"))
 
-        let request = WebSocketRequest(
-            type: "request_hierarchy",
-            requestId: "test-error"
-        )
+        let request = WebSocketRequest.requestHierarchy(RequestHierarchy(requestId: "test-error"))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -422,12 +389,11 @@ final class CommandHandlerTests: XCTestCase {
     // MARK: - Tap Tests
 
     func testTapCoordinatesSuccess() {
-        let request = WebSocketRequest(
-            type: "request_tap_coordinates",
+        let request = WebSocketRequest.tapCoordinates(RequestTapCoordinates(
             requestId: "tap-123",
             x: 100,
             y: 200
-        )
+        ))
 
         guard let tapResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -441,32 +407,26 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(tapHistory.first?.y, 200)
     }
 
-    func testTapCoordinatesMissingParameters() {
-        let request = WebSocketRequest(
-            type: "request_tap_coordinates",
-            requestId: "tap-error"
-            // Missing x, y
+    /// `x`/`y` are now decode-required: a tap without coordinates is rejected at
+    /// the wire boundary rather than dispatched.
+    func testTapCoordinatesMissingParametersFailToDecode() {
+        XCTAssertThrowsError(
+            try decodeWebSocketRequest(#"{"type":"request_tap_coordinates","requestId":"tap-error"}"#)
         )
-
-        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
-
-        XCTAssertFalse(errorResponse.success ?? true)
-        XCTAssertNotNil(errorResponse.error)
-        XCTAssertTrue(errorResponse.error?.contains("x and y") ?? false)
     }
 
     // MARK: - Swipe Tests
 
     func testSwipeSuccess() {
-        let request = WebSocketRequest(
-            type: "request_swipe",
+        let request = WebSocketRequest.swipe(RequestSwipe(
             requestId: "swipe-123",
-            duration: 300,
             x1: 100,
             y1: 200,
             x2: 100,
-            y2: 500
-        )
+            y2: 500,
+
+            duration: 300
+        ))
 
         guard let swipeResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -480,17 +440,17 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testMultiFingerSwipeSuccess() {
-        let request = WebSocketRequest(
-            type: "request_multi_finger_swipe",
+        let request = WebSocketRequest.multiFingerSwipe(RequestMultiFingerSwipe(
             requestId: "test-multi-finger-swipe",
-            duration: 450,
             x1: 100,
             y1: 600,
             x2: 100,
             y2: 200,
-            offset: 30,
-            fingerCount: 3
-        )
+            fingerCount: 3,
+
+            duration: 450,
+            offset: 30
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -510,17 +470,17 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testMultiFingerSwipePreservesFractionalSpacing() {
-        let request = WebSocketRequest(
-            type: "request_multi_finger_swipe",
+        let request = WebSocketRequest.multiFingerSwipe(RequestMultiFingerSwipe(
             requestId: "test-multi-finger-fractional-spacing",
-            duration: 450,
             x1: 100,
             y1: 600,
             x2: 100,
             y2: 200,
-            offset: 30.5,
-            fingerCount: 3
-        )
+            fingerCount: 3,
+
+            duration: 450,
+            offset: 30.5
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -533,15 +493,15 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testTwoFingerSwipeUsesMultiFingerHandler() {
-        let request = WebSocketRequest(
-            type: "request_two_finger_swipe",
+        let request = WebSocketRequest.twoFingerSwipe(RequestMultiFingerSwipe(
             requestId: "test-two-finger-swipe",
-            duration: 300,
             x1: 10,
             y1: 20,
             x2: 30,
-            y2: 40
-        )
+            y2: 40,
+
+            duration: 300
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -561,15 +521,14 @@ final class CommandHandlerTests: XCTestCase {
                 "XCTest private multi-touch event synthesis classes are unavailable"
             )
         )
-        let request = WebSocketRequest(
-            type: "request_multi_finger_swipe",
+        let request = WebSocketRequest.multiFingerSwipe(RequestMultiFingerSwipe(
             requestId: "test-multi-finger-failure",
             x1: 100,
             y1: 600,
             x2: 100,
             y2: 200,
             fingerCount: 3
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -580,16 +539,16 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testPinchSuccessForwardsRequestPayload() {
-        let request = WebSocketRequest(
-            type: "request_pinch",
+        let request = WebSocketRequest.pinch(RequestPinch(
             requestId: "test-pinch",
-            duration: 700,
             centerX: 100,
             centerY: 200,
             distanceStart: 40,
             distanceEnd: 120,
-            rotationDegrees: 15
-        )
+            rotationDegrees: 15,
+
+            duration: 700
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -612,14 +571,13 @@ final class CommandHandlerTests: XCTestCase {
             for: "pinch",
             error: GesturePerformer.GestureError.gestureFailed("pinch synthesis failed")
         )
-        let request = WebSocketRequest(
-            type: "request_pinch",
+        let request = WebSocketRequest.pinch(RequestPinch(
             requestId: "test-pinch-failure",
             centerX: 100,
             centerY: 200,
             distanceStart: 40,
             distanceEnd: 120
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -631,11 +589,10 @@ final class CommandHandlerTests: XCTestCase {
     // MARK: - Text Input Tests
 
     func testSetTextSuccess() {
-        let request = WebSocketRequest(
-            type: "request_set_text",
+        let request = WebSocketRequest.setText(RequestSetText(
             requestId: "text-123",
             text: "Hello World"
-        )
+        ))
 
         guard let textResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -648,12 +605,11 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testSetTextWithResourceId() {
-        let request = WebSocketRequest(
-            type: "request_set_text",
+        let request = WebSocketRequest.setText(RequestSetText(
             requestId: "text-456",
             text: "Field Text",
             resourceId: "input_field"
-        )
+        ))
 
         guard let textResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -666,15 +622,11 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(setTextHistory.first?.resourceId, "input_field")
     }
 
-    func testSetTextMissingText() {
-        let request = WebSocketRequest(
-            type: "request_set_text",
-            requestId: "text-err-1"
+    /// `text` is now decode-required for `request_set_text`.
+    func testSetTextMissingTextFailsToDecode() {
+        XCTAssertThrowsError(
+            try decodeWebSocketRequest(#"{"type":"request_set_text","requestId":"text-err-1"}"#)
         )
-
-        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
-        XCTAssertEqual(errorResponse.success, false)
-        XCTAssertTrue(errorResponse.error?.contains("text") == true)
     }
 
     func testSetTextTypeTextFailure() {
@@ -683,11 +635,10 @@ final class CommandHandlerTests: XCTestCase {
             error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "No keyboard focus"])
         )
 
-        let request = WebSocketRequest(
-            type: "request_set_text",
+        let request = WebSocketRequest.setText(RequestSetText(
             requestId: "text-fail-1",
             text: "Hello"
-        )
+        ))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
@@ -699,23 +650,21 @@ final class CommandHandlerTests: XCTestCase {
             error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Element not found"])
         )
 
-        let request = WebSocketRequest(
-            type: "request_set_text",
+        let request = WebSocketRequest.setText(RequestSetText(
             requestId: "text-fail-2",
             text: "Hello",
             resourceId: "missing_field"
-        )
+        ))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
     }
 
     func testImeActionSuccess() {
-        let request = WebSocketRequest(
-            type: "request_ime_action",
+        let request = WebSocketRequest.imeAction(RequestImeAction(
             requestId: "ime-1",
             action: "done"
-        )
+        ))
 
         guard let imeResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(imeResponse.success, true)
@@ -723,15 +672,11 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(fakeGesturePerformer.getImeActionHistory(), ["done"])
     }
 
-    func testImeActionMissingAction() {
-        let request = WebSocketRequest(
-            type: "request_ime_action",
-            requestId: "ime-err-1"
+    /// `action` is now decode-required for `request_ime_action`.
+    func testImeActionMissingActionFailsToDecode() {
+        XCTAssertThrowsError(
+            try decodeWebSocketRequest(#"{"type":"request_ime_action","requestId":"ime-err-1"}"#)
         )
-
-        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
-        XCTAssertEqual(errorResponse.success, false)
-        XCTAssertTrue(errorResponse.error?.contains("action") == true)
     }
 
     func testImeActionFailure() {
@@ -740,21 +685,17 @@ final class CommandHandlerTests: XCTestCase {
             error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unsupported"])
         )
 
-        let request = WebSocketRequest(
-            type: "request_ime_action",
+        let request = WebSocketRequest.imeAction(RequestImeAction(
             requestId: "ime-fail-1",
             action: "previous"
-        )
+        ))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
     }
 
     func testSelectAllSuccess() {
-        let request = WebSocketRequest(
-            type: "request_select_all",
-            requestId: "sel-1"
-        )
+        let request = WebSocketRequest.selectAll(RequestEnvelope(requestId: "sel-1"))
 
         guard let selResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(selResponse.success, true)
@@ -768,10 +709,7 @@ final class CommandHandlerTests: XCTestCase {
             error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "No focus"])
         )
 
-        let request = WebSocketRequest(
-            type: "request_select_all",
-            requestId: "sel-fail-1"
-        )
+        let request = WebSocketRequest.selectAll(RequestEnvelope(requestId: "sel-fail-1"))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
@@ -779,11 +717,10 @@ final class CommandHandlerTests: XCTestCase {
 
     func testKeyboardDetectSuccess() {
         fakeGesturePerformer.setKeyboardOpen(true)
-        let request = WebSocketRequest(
-            type: "request_keyboard",
+        let request = WebSocketRequest.keyboard(RequestKeyboard(
             requestId: "keyboard-detect",
             action: "detect"
-        )
+        ))
 
         guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
 
@@ -794,11 +731,10 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testKeyboardOpenSuccess() {
-        let request = WebSocketRequest(
-            type: "request_keyboard",
+        let request = WebSocketRequest.keyboard(RequestKeyboard(
             requestId: "keyboard-open",
             action: "open"
-        )
+        ))
 
         guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
 
@@ -809,11 +745,10 @@ final class CommandHandlerTests: XCTestCase {
 
     func testKeyboardOpenFailureWhenKeyboardRemainsClosed() {
         fakeGesturePerformer.setNextKeyboardResult(false)
-        let request = WebSocketRequest(
-            type: "request_keyboard",
+        let request = WebSocketRequest.keyboard(RequestKeyboard(
             requestId: "keyboard-open-failed",
             action: "open"
-        )
+        ))
 
         guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
 
@@ -825,11 +760,10 @@ final class CommandHandlerTests: XCTestCase {
 
     func testKeyboardCloseSuccess() {
         fakeGesturePerformer.setKeyboardOpen(true)
-        let request = WebSocketRequest(
-            type: "request_keyboard",
+        let request = WebSocketRequest.keyboard(RequestKeyboard(
             requestId: "keyboard-close",
             action: "close"
-        )
+        ))
 
         guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
 
@@ -840,11 +774,10 @@ final class CommandHandlerTests: XCTestCase {
 
     func testKeyboardCloseFailureWhenKeyboardRemainsOpen() {
         fakeGesturePerformer.setNextKeyboardResult(true)
-        let request = WebSocketRequest(
-            type: "request_keyboard",
+        let request = WebSocketRequest.keyboard(RequestKeyboard(
             requestId: "keyboard-close-failed",
             action: "close"
-        )
+        ))
 
         guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
 
@@ -854,23 +787,15 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["close"])
     }
 
-    func testKeyboardMissingAction() {
-        let request = WebSocketRequest(
-            type: "request_keyboard",
-            requestId: "keyboard-missing"
+    /// `action` is now decode-required for `request_keyboard`.
+    func testKeyboardMissingActionFailsToDecode() {
+        XCTAssertThrowsError(
+            try decodeWebSocketRequest(#"{"type":"request_keyboard","requestId":"keyboard-missing"}"#)
         )
-
-        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
-        XCTAssertEqual(errorResponse.success, false)
-        XCTAssertEqual(errorResponse.type, "keyboard_result")
-        XCTAssertTrue(errorResponse.error?.contains("action") == true)
     }
 
     func testClearTextWithoutResourceId() {
-        let request = WebSocketRequest(
-            type: "request_clear_text",
-            requestId: "clear-1"
-        )
+        let request = WebSocketRequest.clearText(RequestClearText(requestId: "clear-1"))
 
         guard let clearResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(clearResponse.success, true)
@@ -882,11 +807,10 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testClearTextWithResourceId() {
-        let request = WebSocketRequest(
-            type: "request_clear_text",
+        let request = WebSocketRequest.clearText(RequestClearText(
             requestId: "clear-2",
             resourceId: "text_input"
-        )
+        ))
 
         guard let clearResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(clearResponse.success, true)
@@ -902,10 +826,7 @@ final class CommandHandlerTests: XCTestCase {
             error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "No focus"])
         )
 
-        let request = WebSocketRequest(
-            type: "request_clear_text",
-            requestId: "clear-fail-1"
-        )
+        let request = WebSocketRequest.clearText(RequestClearText(requestId: "clear-fail-1"))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
@@ -914,11 +835,10 @@ final class CommandHandlerTests: XCTestCase {
     func testClipboardGetSuccess() {
         fakeGesturePerformer.setClipboardContents("Copied text")
 
-        let request = WebSocketRequest(
-            type: "request_clipboard",
+        let request = WebSocketRequest.clipboard(RequestClipboard(
             requestId: "clip-1",
             action: "get"
-        )
+        ))
 
         guard let clipResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(clipResponse.success, true)
@@ -927,12 +847,12 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testClipboardCopySuccess() {
-        let request = WebSocketRequest(
-            type: "request_clipboard",
+        let request = WebSocketRequest.clipboard(RequestClipboard(
             requestId: "clip-2",
-            text: "To copy",
-            action: "copy"
-        )
+            action: "copy",
+
+            text: "To copy"
+        ))
 
         guard let clipResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(clipResponse.success, true)
@@ -943,15 +863,11 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(history[0].text, "To copy")
     }
 
-    func testClipboardMissingAction() {
-        let request = WebSocketRequest(
-            type: "request_clipboard",
-            requestId: "clip-err-1"
+    /// `action` is now decode-required for `request_clipboard`.
+    func testClipboardMissingActionFailsToDecode() {
+        XCTAssertThrowsError(
+            try decodeWebSocketRequest(#"{"type":"request_clipboard","requestId":"clip-err-1"}"#)
         )
-
-        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
-        XCTAssertEqual(errorResponse.success, false)
-        XCTAssertTrue(errorResponse.error?.contains("action") == true)
     }
 
     func testClipboardFailure() {
@@ -960,11 +876,10 @@ final class CommandHandlerTests: XCTestCase {
             error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Clipboard error"])
         )
 
-        let request = WebSocketRequest(
-            type: "request_clipboard",
+        let request = WebSocketRequest.clipboard(RequestClipboard(
             requestId: "clip-fail-1",
             action: "get"
-        )
+        ))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
@@ -976,11 +891,10 @@ final class CommandHandlerTests: XCTestCase {
             error: GesturePerformer.GestureError.clipboardReadUnavailable
         )
 
-        let request = WebSocketRequest(
-            type: "request_clipboard",
+        let request = WebSocketRequest.clipboard(RequestClipboard(
             requestId: "clip-restricted-1",
             action: "get"
-        )
+        ))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
@@ -994,10 +908,7 @@ final class CommandHandlerTests: XCTestCase {
     // MARK: - Device Control Tests
 
     func testPressHomeSuccess() {
-        let request = WebSocketRequest(
-            type: "request_press_home",
-            requestId: "home-123"
-        )
+        let request = WebSocketRequest.pressHome(RequestEnvelope(requestId: "home-123"))
 
         guard let homeResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1017,10 +928,7 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testPressBackSuccess() {
-        let request = WebSocketRequest(
-            type: "request_press_back",
-            requestId: "back-123"
-        )
+        let request = WebSocketRequest.pressBack(RequestEnvelope(requestId: "back-123"))
 
         guard let backResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1039,11 +947,10 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testPressButtonBackSuccess() {
-        let request = WebSocketRequest(
-            type: "request_press_button",
+        let request = WebSocketRequest.pressButton(RequestPressButton(
             requestId: "button-back",
             action: "back"
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1055,11 +962,10 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testPressButtonHomeSwitchesToSpringBoard() {
-        let request = WebSocketRequest(
-            type: "request_press_button",
+        let request = WebSocketRequest.pressButton(RequestPressButton(
             requestId: "button-home",
             action: "home"
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1071,11 +977,10 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testPressButtonHardwareButtonDoesNotSwitchToSpringBoard() {
-        let request = WebSocketRequest(
-            type: "request_press_button",
+        let request = WebSocketRequest.pressButton(RequestPressButton(
             requestId: "button-volume-up",
             action: "volume_up"
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1087,11 +992,10 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testPressButtonPowerDoesNotSwitchToSpringBoard() {
-        let request = WebSocketRequest(
-            type: "request_press_button",
+        let request = WebSocketRequest.pressButton(RequestPressButton(
             requestId: "button-power",
             action: "power"
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1105,11 +1009,10 @@ final class CommandHandlerTests: XCTestCase {
     func testLaunchAppSuccess() {
         // Default: app not running, no coldBoot → full launch
         fakeElementLocator.getAppStateResult = .notRunning
-        let request = WebSocketRequest(
-            type: "request_launch_app",
+        let request = WebSocketRequest.launchApp(RequestLaunchApp(
             requestId: "launch-123",
             bundleId: "com.apple.Preferences"
-        )
+        ))
 
         guard let launchResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1133,11 +1036,10 @@ final class CommandHandlerTests: XCTestCase {
 
     func testLaunchAppUsesActivateWhenRunningBackground() {
         fakeElementLocator.getAppStateResult = .runningBackground
-        let request = WebSocketRequest(
-            type: "request_launch_app",
+        let request = WebSocketRequest.launchApp(RequestLaunchApp(
             requestId: "launch-activate",
             bundleId: "com.example.app"
-        )
+        ))
 
         guard let launchResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1159,11 +1061,10 @@ final class CommandHandlerTests: XCTestCase {
 
     func testLaunchAppUsesActivateWhenRunningForeground() {
         fakeElementLocator.getAppStateResult = .runningForeground
-        let request = WebSocketRequest(
-            type: "request_launch_app",
+        let request = WebSocketRequest.launchApp(RequestLaunchApp(
             requestId: "launch-fg",
             bundleId: "com.example.app"
-        )
+        ))
 
         _ = commandHandler.handle(request)
 
@@ -1183,12 +1084,11 @@ final class CommandHandlerTests: XCTestCase {
 
     func testLaunchAppColdBootTerminatesThenLaunches() {
         fakeElementLocator.getAppStateResult = .runningForeground
-        let request = WebSocketRequest(
-            type: "request_launch_app",
+        let request = WebSocketRequest.launchApp(RequestLaunchApp(
             requestId: "launch-cold",
             bundleId: "com.example.app",
             coldBoot: true
-        )
+        ))
 
         _ = commandHandler.handle(request)
 
@@ -1217,12 +1117,11 @@ final class CommandHandlerTests: XCTestCase {
 
     func testLaunchAppColdBootNotRunningSkipsTerminate() {
         fakeElementLocator.getAppStateResult = .notRunning
-        let request = WebSocketRequest(
-            type: "request_launch_app",
+        let request = WebSocketRequest.launchApp(RequestLaunchApp(
             requestId: "launch-cold-nr",
             bundleId: "com.example.app",
             coldBoot: true
-        )
+        ))
 
         _ = commandHandler.handle(request)
 
@@ -1235,11 +1134,10 @@ final class CommandHandlerTests: XCTestCase {
 
     func testLaunchAppSwitchesForegroundApp() {
         fakeElementLocator.getAppStateResult = .notRunning
-        let request = WebSocketRequest(
-            type: "request_launch_app",
+        let request = WebSocketRequest.launchApp(RequestLaunchApp(
             requestId: "launch-switch",
             bundleId: "com.example.app"
-        )
+        ))
 
         _ = commandHandler.handle(request)
 
@@ -1248,11 +1146,10 @@ final class CommandHandlerTests: XCTestCase {
 
     func testLaunchAppUpdatesGesturePerformer() {
         fakeElementLocator.getAppStateResult = .notRunning
-        let request = WebSocketRequest(
-            type: "request_launch_app",
+        let request = WebSocketRequest.launchApp(RequestLaunchApp(
             requestId: "launch-gesture",
             bundleId: "com.example.app"
-        )
+        ))
 
         _ = commandHandler.handle(request)
 
@@ -1261,11 +1158,10 @@ final class CommandHandlerTests: XCTestCase {
 
     func testLaunchAppAwaitsForegroundState() {
         fakeElementLocator.getAppStateResult = .notRunning
-        let request = WebSocketRequest(
-            type: "request_launch_app",
+        let request = WebSocketRequest.launchApp(RequestLaunchApp(
             requestId: "launch-await",
             bundleId: "com.example.app"
-        )
+        ))
 
         _ = commandHandler.handle(request)
 
@@ -1275,10 +1171,7 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testPressHomeSwitchesToSpringboard() {
-        let request = WebSocketRequest(
-            type: "request_press_home",
-            requestId: "home-switch"
-        )
+        let request = WebSocketRequest.pressHome(RequestEnvelope(requestId: "home-switch"))
 
         _ = commandHandler.handle(request)
 
@@ -1286,10 +1179,7 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testPressHomeUpdatesGesturePerformer() {
-        let request = WebSocketRequest(
-            type: "request_press_home",
-            requestId: "home-gesture"
-        )
+        let request = WebSocketRequest.pressHome(RequestEnvelope(requestId: "home-gesture"))
 
         _ = commandHandler.handle(request)
 
@@ -1299,10 +1189,7 @@ final class CommandHandlerTests: XCTestCase {
     // MARK: - Recent Apps Tests
 
     func testRecentAppsSuccess() {
-        let request = WebSocketRequest(
-            type: "request_recent_apps",
-            requestId: "recents-123"
-        )
+        let request = WebSocketRequest.recentApps(RequestEnvelope(requestId: "recents-123"))
 
         guard let recentsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1313,10 +1200,7 @@ final class CommandHandlerTests: XCTestCase {
 
     func testRecentAppsReturnsFailureWhenSwitcherIsNotVerified() {
         fakeGesturePerformer.setOpenRecentAppsResult(false)
-        let request = WebSocketRequest(
-            type: "request_recent_apps",
-            requestId: "recents-not-visible"
-        )
+        let request = WebSocketRequest.recentApps(RequestEnvelope(requestId: "recents-not-visible"))
 
         guard let recentsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1329,10 +1213,7 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testRecentAppsSwitchesToSpringboard() {
-        let request = WebSocketRequest(
-            type: "request_recent_apps",
-            requestId: "recents-switch"
-        )
+        let request = WebSocketRequest.recentApps(RequestEnvelope(requestId: "recents-switch"))
 
         _ = commandHandler.handle(request)
 
@@ -1340,10 +1221,7 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testRecentAppsUpdatesGesturePerformer() {
-        let request = WebSocketRequest(
-            type: "request_recent_apps",
-            requestId: "recents-gesture"
-        )
+        let request = WebSocketRequest.recentApps(RequestEnvelope(requestId: "recents-gesture"))
 
         _ = commandHandler.handle(request)
 
@@ -1353,10 +1231,7 @@ final class CommandHandlerTests: XCTestCase {
     // MARK: - Shake Tests
 
     func testShakeSuccess() {
-        let request = WebSocketRequest(
-            type: "request_shake",
-            requestId: "shake-123"
-        )
+        let request = WebSocketRequest.shake(RequestEnvelope(requestId: "shake-123"))
 
         guard let shakeResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1368,11 +1243,10 @@ final class CommandHandlerTests: XCTestCase {
     // MARK: - Rotate Tests
 
     func testRotateToLandscapeSuccess() {
-        let request = WebSocketRequest(
-            type: "request_rotate",
+        let request = WebSocketRequest.rotate(RequestRotate(
             requestId: "rotate-123",
             orientation: "landscape"
-        )
+        ))
 
         guard let rotateResponse = handleRequest(request, as: RotateResponse.self) else { return }
 
@@ -1385,11 +1259,10 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testRotateToPortraitWhenAlreadyPortrait() {
-        let request = WebSocketRequest(
-            type: "request_rotate",
+        let request = WebSocketRequest.rotate(RequestRotate(
             requestId: "rotate-noop",
             orientation: "portrait"
-        )
+        ))
 
         guard let rotateResponse = handleRequest(request, as: RotateResponse.self) else { return }
 
@@ -1400,18 +1273,11 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertFalse(rotateResponse.rotationPerformed)
     }
 
-    func testRotateMissingOrientation() {
-        let request = WebSocketRequest(
-            type: "request_rotate",
-            requestId: "rotate-missing"
+    /// `orientation` is now decode-required for `request_rotate`.
+    func testRotateMissingOrientationFailsToDecode() {
+        XCTAssertThrowsError(
+            try decodeWebSocketRequest(#"{"type":"request_rotate","requestId":"rotate-missing"}"#)
         )
-
-        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
-
-        XCTAssertEqual(errorResponse.success, false)
-        XCTAssertEqual(errorResponse.type, "rotate_result")
-        XCTAssertNotNil(errorResponse.error)
-        XCTAssertTrue(errorResponse.error?.contains("orientation") == true)
     }
 
     // MARK: - ObjCExceptionError Propagation Tests
@@ -1422,12 +1288,11 @@ final class CommandHandlerTests: XCTestCase {
             error: ObjCExceptionError(name: "NSRangeException", reason: "index 5 beyond bounds [0..3]")
         )
 
-        let request = WebSocketRequest(
-            type: "request_tap_coordinates",
+        let request = WebSocketRequest.tapCoordinates(RequestTapCoordinates(
             requestId: "tap-objc-err",
             x: 100,
             y: 200
-        )
+        ))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1443,15 +1308,15 @@ final class CommandHandlerTests: XCTestCase {
             error: ObjCExceptionError(name: "NSInternalInconsistencyException", reason: "Invalid snapshot")
         )
 
-        let request = WebSocketRequest(
-            type: "request_swipe",
+        let request = WebSocketRequest.swipe(RequestSwipe(
             requestId: "swipe-objc-err",
-            duration: 300,
             x1: 100,
             y1: 200,
             x2: 100,
-            y2: 500
-        )
+            y2: 500,
+
+            duration: 300
+        ))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1465,10 +1330,7 @@ final class CommandHandlerTests: XCTestCase {
             ObjCExceptionError(name: "NSGenericException", reason: "Stale element reference")
         )
 
-        let request = WebSocketRequest(
-            type: "request_hierarchy",
-            requestId: "hier-objc-err"
-        )
+        let request = WebSocketRequest.requestHierarchy(RequestHierarchy(requestId: "hier-objc-err"))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1484,11 +1346,10 @@ final class CommandHandlerTests: XCTestCase {
             error: ObjCExceptionError(name: "NSInvalidArgumentException", reason: "App not installed")
         )
 
-        let request = WebSocketRequest(
-            type: "request_launch_app",
+        let request = WebSocketRequest.launchApp(RequestLaunchApp(
             requestId: "launch-objc-err",
             bundleId: "com.missing.app"
-        )
+        ))
 
         guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1499,25 +1360,25 @@ final class CommandHandlerTests: XCTestCase {
 
     // MARK: - Unknown Command Tests
 
-    func testUnknownCommand() {
-        let request = WebSocketRequest(
-            type: "unknown_command",
-            requestId: "unknown-123"
-        )
-
-        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
-
-        XCTAssertFalse(errorResponse.success ?? true)
-        XCTAssertTrue(errorResponse.error?.contains("Unknown command") ?? false)
+    /// An unrecognized command `type` is now rejected at the decode boundary
+    /// rather than dispatched: the enum has no case for it, so decoding throws
+    /// and `WebSocketServer` returns a requestId-correlated error response.
+    func testUnknownCommandFailsToDecode() {
+        XCTAssertThrowsError(
+            try decodeWebSocketRequest(#"{"type":"unknown_command","requestId":"unknown-123"}"#)
+        ) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                XCTFail("Expected dataCorrupted, got \(error)")
+                return
+            }
+            XCTAssertTrue(context.debugDescription.contains("Unknown command type"))
+        }
     }
 
     // MARK: - VoiceOver State Tests
 
     func testGetVoiceOverStateReturnsResponse() {
-        let request = WebSocketRequest(
-            type: "get_voiceover_state",
-            requestId: "voiceover-123"
-        )
+        let request = WebSocketRequest.getVoiceOverState(RequestEnvelope(requestId: "voiceover-123"))
 
         guard let voResponse = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
 
@@ -1530,9 +1391,7 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testGetVoiceOverStateWithNilRequestId() {
-        let request = WebSocketRequest(
-            type: "get_voiceover_state"
-        )
+        let request = WebSocketRequest.getVoiceOverState(RequestEnvelope())
 
         guard let voResponse = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
 
@@ -1542,10 +1401,7 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testGetVoiceOverStateIsEncodable() throws {
-        let request = WebSocketRequest(
-            type: "get_voiceover_state",
-            requestId: "encode-test"
-        )
+        let request = WebSocketRequest.getVoiceOverState(RequestEnvelope(requestId: "encode-test"))
 
         guard let voResponse = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
 
@@ -1578,12 +1434,11 @@ final class CommandHandlerTests: XCTestCase {
             type: "box",
             bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
         )
-        let request = WebSocketRequest(
-            type: "add_highlight",
+        let request = WebSocketRequest.addHighlight(RequestAddHighlight(
             requestId: "highlight-request",
             id: "highlight-1",
             shape: shape
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1607,12 +1462,11 @@ final class CommandHandlerTests: XCTestCase {
             type: "box",
             bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
         )
-        let request = WebSocketRequest(
-            type: "add_highlight",
+        let request = WebSocketRequest.addHighlight(RequestAddHighlight(
             requestId: "highlight-request",
             id: "highlight-1",
             shape: shape
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1641,12 +1495,11 @@ final class CommandHandlerTests: XCTestCase {
             type: "box",
             bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
         )
-        let request = WebSocketRequest(
-            type: "add_highlight",
+        let request = WebSocketRequest.addHighlight(RequestAddHighlight(
             requestId: "highlight-request",
             id: "highlight-1",
             shape: shape
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1675,12 +1528,11 @@ final class CommandHandlerTests: XCTestCase {
             type: "box",
             bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
         )
-        let request = WebSocketRequest(
-            type: "add_highlight",
+        let request = WebSocketRequest.addHighlight(RequestAddHighlight(
             requestId: "highlight-request",
             id: "highlight-1",
             shape: shape
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1712,12 +1564,11 @@ final class CommandHandlerTests: XCTestCase {
             type: "box",
             bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
         )
-        let request = WebSocketRequest(
-            type: "add_highlight",
+        let request = WebSocketRequest.addHighlight(RequestAddHighlight(
             requestId: "highlight-request",
             id: "highlight-1",
             shape: shape
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1737,11 +1588,10 @@ final class CommandHandlerTests: XCTestCase {
             gesturePerformer: fakeGesturePerformer,
             perfProvider: perfProvider
         )
-        let request = WebSocketRequest(
-            type: "add_highlight",
+        let request = WebSocketRequest.addHighlight(RequestAddHighlight(
             requestId: "highlight-request",
             id: "highlight-1"
-        )
+        ))
 
         guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
 
@@ -1819,7 +1669,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             StorageSuiteInfo(name: "group.com.example", displayName: "group.com.example", entryCount: 3),
         ])
 
-        let request = WebSocketRequest(type: "list_preference_files", requestId: "list-1")
+        let request = WebSocketRequest.listPreferenceFiles(RequestEnvelope(requestId: "list-1"))
         guard let filesResponse = handleRequest(request, as: StorageFilesResponse.self) else { return }
 
         XCTAssertEqual(filesResponse.requestId, "list-1")
@@ -1841,7 +1691,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             StorageEntry(key: "count", value: "42", type: "INT"),
         ])
 
-        let request = WebSocketRequest(type: "get_preferences", requestId: "get-all-1")
+        let request = WebSocketRequest.getPreferences(RequestGetPreferences(requestId: "get-all-1"))
         guard let entriesResponse = handleRequest(request, as: StorageEntriesResponse.self) else { return }
 
         XCTAssertTrue(entriesResponse.success)
@@ -1856,11 +1706,10 @@ final class StorageCommandHandlerTests: XCTestCase {
             StorageEntry(key: "setting", value: "on", type: "STRING"),
         ], forSuite: "com.example.settings")
 
-        let request = WebSocketRequest(
-            type: "get_preferences",
+        let request = WebSocketRequest.getPreferences(RequestGetPreferences(
             requestId: "get-all-2",
             fileName: "com.example.settings"
-        )
+        ))
         guard let entriesResponse = handleRequest(request, as: StorageEntriesResponse.self) else { return }
 
         XCTAssertTrue(entriesResponse.success)
@@ -1869,11 +1718,10 @@ final class StorageCommandHandlerTests: XCTestCase {
     }
 
     func testGetPreferencesStandardMapsToNil() {
-        let request = WebSocketRequest(
-            type: "get_preferences",
+        let request = WebSocketRequest.getPreferences(RequestGetPreferences(
             requestId: "get-std",
             fileName: "Standard"
-        )
+        ))
         _ = commandHandler.handle(request)
         XCTAssertEqual(fakeStorage.getEntriesHistory, [nil])
     }
@@ -1885,11 +1733,10 @@ final class StorageCommandHandlerTests: XCTestCase {
             StorageEntry(key: "name", value: "Alice", type: "STRING"),
         ])
 
-        let request = WebSocketRequest(
-            type: "get_preference",
+        let request = WebSocketRequest.getPreference(RequestGetPreference(
             requestId: "get-1",
             key: "name"
-        )
+        ))
         guard let entryResponse = handleRequest(request, as: StorageEntryResponse.self) else { return }
 
         XCTAssertTrue(entryResponse.success)
@@ -1900,11 +1747,10 @@ final class StorageCommandHandlerTests: XCTestCase {
     }
 
     func testGetPreferenceNotFound() {
-        let request = WebSocketRequest(
-            type: "get_preference",
+        let request = WebSocketRequest.getPreference(RequestGetPreference(
             requestId: "get-2",
             key: "nonexistent"
-        )
+        ))
         guard let entryResponse = handleRequest(request, as: StorageEntryResponse.self) else { return }
 
         XCTAssertTrue(entryResponse.success)
@@ -1913,10 +1759,7 @@ final class StorageCommandHandlerTests: XCTestCase {
     }
 
     func testGetPreferenceMissingKey() {
-        let request = WebSocketRequest(
-            type: "get_preference",
-            requestId: "get-3"
-        )
+        let request = WebSocketRequest.getPreference(RequestGetPreference(requestId: "get-3"))
         guard let entryResponse = handleRequest(request, as: StorageEntryResponse.self) else { return }
 
         XCTAssertFalse(entryResponse.success)
@@ -1926,13 +1769,12 @@ final class StorageCommandHandlerTests: XCTestCase {
     // MARK: - Set Preference
 
     func testSetPreferenceSuccess() {
-        let request = WebSocketRequest(
-            type: "set_preference",
+        let request = WebSocketRequest.setPreference(RequestSetPreference(
             requestId: "set-1",
             key: "theme",
             value: "dark",
             valueType: "STRING"
-        )
+        ))
         guard let wsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertTrue(wsResponse.success ?? false)
@@ -1943,27 +1785,22 @@ final class StorageCommandHandlerTests: XCTestCase {
         XCTAssertEqual(fakeStorage.setEntryHistory[0].type, "STRING")
     }
 
-    func testSetPreferenceMissingKey() {
-        let request = WebSocketRequest(
-            type: "set_preference",
-            requestId: "set-2",
-            value: "dark",
-            valueType: "STRING"
+    /// `key` is now decode-required for `set_preference`.
+    func testSetPreferenceMissingKeyFailsToDecode() {
+        XCTAssertThrowsError(
+            try decodeWebSocketRequest(
+                #"{"type":"set_preference","requestId":"set-2","value":"dark","valueType":"STRING"}"#
+            )
         )
-        guard let wsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
-
-        XCTAssertFalse(wsResponse.success ?? true)
-        XCTAssertTrue(wsResponse.error?.contains("key") ?? false)
     }
 
     // MARK: - Remove Preference
 
     func testRemovePreferenceSuccess() {
-        let request = WebSocketRequest(
-            type: "remove_preference",
+        let request = WebSocketRequest.removePreference(RequestRemovePreference(
             requestId: "rm-1",
             key: "theme"
-        )
+        ))
         guard let wsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertTrue(wsResponse.success ?? false)
@@ -1975,11 +1812,10 @@ final class StorageCommandHandlerTests: XCTestCase {
     // MARK: - Clear Preferences
 
     func testClearPreferencesSuccess() {
-        let request = WebSocketRequest(
-            type: "clear_preferences",
+        let request = WebSocketRequest.clearPreferences(RequestClearPreferences(
             requestId: "clear-1",
             fileName: "com.example.settings"
-        )
+        ))
         guard let wsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertTrue(wsResponse.success ?? false)
@@ -1998,7 +1834,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             storageInspector: nil
         )
 
-        let request = WebSocketRequest(type: "list_preference_files", requestId: "nil-1")
+        let request = WebSocketRequest.listPreferenceFiles(RequestEnvelope(requestId: "nil-1"))
         guard let filesResponse = handleRequest(handlerNoStorage, request, as: StorageFilesResponse.self)
         else { return }
 
@@ -2011,13 +1847,12 @@ final class StorageCommandHandlerTests: XCTestCase {
     func testSetPreferenceErrorPropagation() {
         fakeStorage.setShouldThrow(StorageError.invalidValue("bad", "INT"))
 
-        let request = WebSocketRequest(
-            type: "set_preference",
+        let request = WebSocketRequest.setPreference(RequestSetPreference(
             requestId: "err-1",
             key: "count",
             value: "bad",
             valueType: "INT"
-        )
+        ))
         guard let wsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertFalse(wsResponse.success ?? true)
@@ -2084,13 +1919,12 @@ final class DatabaseCommandHandlerTests: XCTestCase {
             rowsAffected: 0
         )
 
-        let request = WebSocketRequest(
-            type: "execute_sql",
+        let request = WebSocketRequest.executeSql(RequestExecuteSql(
             requestId: "sql-1",
             appId: "com.example.app",
             databasePath: "/app/Documents/app.db",
             query: "SELECT id, payload FROM notes"
-        )
+        ))
 
         guard let response = handleRequest(request, as: ExecuteSqlResponse.self) else { return }
 
@@ -2111,13 +1945,12 @@ final class DatabaseCommandHandlerTests: XCTestCase {
                 "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
             )
 
-        let request = WebSocketRequest(
-            type: "execute_sql",
+        let request = WebSocketRequest.executeSql(RequestExecuteSql(
             requestId: "sql-disabled",
             appId: "com.example.app",
             databasePath: "/app/Documents/app.db",
             query: "SELECT 1"
-        )
+        ))
 
         guard let response = handleRequest(request, as: ExecuteSqlResponse.self) else { return }
 
@@ -2128,13 +1961,12 @@ final class DatabaseCommandHandlerTests: XCTestCase {
     func testExecuteSqlRejectsSdkServerBundleMismatchBeforeDatabaseCall() {
         fakeSdkHierarchy.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.other.app"))
 
-        let request = WebSocketRequest(
-            type: "execute_sql",
+        let request = WebSocketRequest.executeSql(RequestExecuteSql(
             requestId: "sql-mismatch",
             appId: "com.example.app",
             databasePath: "/app/Documents/app.db",
             query: "SELECT 1"
-        )
+        ))
 
         guard let response = handleRequest(request, as: ExecuteSqlResponse.self) else { return }
 

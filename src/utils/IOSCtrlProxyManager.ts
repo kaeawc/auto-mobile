@@ -606,49 +606,50 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // Check for externally-managed xcodebuild processes (e.g. hot-reload script)
       // before spawning our own to avoid conflicting xcodebuild instances.
       if (this.isSimulator()) {
-        // Adopt an already-running runner BEFORE deciding to wait on or respawn the
-        // tracked one: an externally-managed runner, or ours that bound CtrlProxy's
-        // default port instead of our reallocated port (#2731). Doing this first is
-        // essential — otherwise, if our runner is healthy on the default port while we
-        // allocated a different one, the wait-branch below would poll the wrong port and
-        // eventually terminate a HEALTHY runner as "hung" instead of adopting it
-        // (#2834 review).
-        perf.startOperation("externalProcessCheck");
-        const externalProcess = await this.findExternalCtrlProxyProcess();
-        const defaultPortIsHealthyForDevice = externalProcess === null &&
-          !this.useHostControl() &&
-          this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
-          await this.checkHealthEndpointOnPortForDevice(
-            IOSCtrlProxyManager.DEFAULT_PORT,
-            this.device.deviceId
-          );
-        perf.endOperation("externalProcessCheck");
-        if (externalProcess || defaultPortIsHealthyForDevice) {
-          const externalPort = externalProcess?.port ?? IOSCtrlProxyManager.DEFAULT_PORT;
-          logger.info(
-            `[IOSCtrlProxy] External CtrlProxy process detected on port ${externalPort}, skipping spawn`
-          );
-          if (externalPort !== this.servicePort) {
-            this.adoptServicePort(externalPort);
-          }
-          // Fall through to health polling below instead of spawning
-        } else if (await this.isOwnRunnerProcessAlive()) {
-          // A runner WE already spawned is still mid-startup: on a loaded CI machine
-          // XCUITest can take well past the health-poll budget to answer, so an earlier
-          // setup() gave up and this call is a retry while the same runner is still
-          // coming up. Its PID is alive but its health endpoint isn't yet. Reclaiming
-          // the port here would SIGTERM that starting runner and restart the clock — a
-          // livelock under repeated setup calls (#2834). Wait for it instead.
+        // Decide about OUR OWN tracked runner first. A runner WE already spawned may
+        // still be mid-startup: on a loaded CI machine XCUITest can take well past the
+        // health-poll budget to answer, so an earlier setup() gave up and this call is a
+        // retry while the same runner is still coming up. Its PID is alive but its health
+        // endpoint isn't yet. Reclaiming the port here would SIGTERM that starting runner
+        // and restart the clock — a livelock under repeated setup calls (#2834). Wait for
+        // it instead. Checking this BEFORE the external-process probe is important: that
+        // probe discovers our own child xcodebuild (whose PID differs from the tracked
+        // shell PID under shell:true) and would otherwise mis-classify it as "external"
+        // (#2834 review). A runner that actually came up healthy on the default port
+        // instead of our reallocated port (#2731) is handled by the health-wait recovery
+        // below, which re-checks the default port and adopts it rather than terminating.
+        if (await this.isOwnRunnerProcessAlive()) {
           logger.info(
             `[IOSCtrlProxy] Own CtrlProxy runner (PID ${this.xcTestProcessId}) is still starting; ` +
             `waiting for its health endpoint instead of respawning`
           );
           waitedForStartingRunner = true;
         } else {
-          await this.ensureServicePortReadyForLaunch();
-          perf.startOperation("spawnRunner");
-          await this.startOnSimulator();
-          perf.endOperation("spawnRunner");
+          perf.startOperation("externalProcessCheck");
+          const externalProcess = await this.findExternalCtrlProxyProcess();
+          const defaultPortIsHealthyForDevice = externalProcess === null &&
+            !this.useHostControl() &&
+            this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
+            await this.checkHealthEndpointOnPortForDevice(
+              IOSCtrlProxyManager.DEFAULT_PORT,
+              this.device.deviceId
+            );
+          perf.endOperation("externalProcessCheck");
+          if (externalProcess || defaultPortIsHealthyForDevice) {
+            const externalPort = externalProcess?.port ?? IOSCtrlProxyManager.DEFAULT_PORT;
+            logger.info(
+              `[IOSCtrlProxy] External CtrlProxy process detected on port ${externalPort}, skipping spawn`
+            );
+            if (externalPort !== this.servicePort) {
+              this.adoptServicePort(externalPort);
+            }
+            // Fall through to health polling below instead of spawning
+          } else {
+            await this.ensureServicePortReadyForLaunch();
+            perf.startOperation("spawnRunner");
+            await this.startOnSimulator();
+            perf.endOperation("spawnRunner");
+          }
         }
       } else {
         perf.startOperation("spawnRunner");

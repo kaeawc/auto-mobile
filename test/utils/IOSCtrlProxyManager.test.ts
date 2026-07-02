@@ -850,6 +850,9 @@ describe("IOSCtrlProxyManager", function() {
       // (rather than leave it alive to be re-adopted by findExternalCtrlProxyProcess on
       // the next start), and clear our tracking so the next start spawns fresh.
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 12345")).toBe(true);
+      // The kill targets the process GROUP (tracked PID is the shell wrapper; a
+      // single-PID TERM would orphan the xcodebuild child — #2834 review round 5).
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -12345")).toBe(true);
       expect(runnerProcs[0].alive).toBe(false);
       expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBeNull();
       // The auto-restart suppression latch is not left set across the throw (MINOR-2).
@@ -940,6 +943,56 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 12345")).toBe(false);
       expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBeNull();
       expect((manager as unknown as { isStopping: boolean }).isStopping).toBe(false);
+    });
+
+    test("host-control status reporting a DIFFERENT pid is not ours; untrack without stopping (#2834)", async function() {
+      const { runner, stops } = createHostControlRunner();
+      // The host-control daemon resolves status by deviceId BEFORE pid, so a NEWER
+      // runner for the same device answers running=true with ITS pid. The tracked
+      // (stale) pid must not alias as ours — stopping would kill the newer runner.
+      let statusCalls = 0;
+      const aliasingRunner = {
+        ...runner,
+        status: async () => {
+          statusCalls++;
+          // First call (top-level liveness) not running; afterwards a NEWER runner
+          // (pid 99999) answers for the device — never the tracked pid 12345.
+          return {
+            success: true,
+            data: { running: statusCalls > 1, pid: 99999, port: 8765 },
+          };
+        },
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+        undefined,
+        undefined,
+        aliasingRunner as unknown as Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => {
+        throw new Error("health unreachable");
+      }) as unknown as typeof fetch;
+      try {
+        await withHealthBudget("1", async () => {
+          fakeTimer.enableAutoAdvance();
+          // PID-strict ownership rejects the aliased status, so the wait-branch never
+          // fires; the flow proceeds to the host-control start path instead.
+          await expect(manager.start()).rejects.toThrow();
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      // The newer runner (99999) must never be stopped on the stale pid's behalf.
+      expect(stops).not.toContainEqual({ deviceId: testDevice.deviceId, pid: 12345 });
+      expect(stops.length).toBe(0);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 12345")).toBe(false);
     });
 
     test("start() reuses an own runner that becomes healthy during the wait (#2834)", async function() {

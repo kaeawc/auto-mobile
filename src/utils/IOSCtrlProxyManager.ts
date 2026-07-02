@@ -720,9 +720,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       //
       // Re-verify ownership right before the kill: the multi-minute health poll above is
       // a window in which our runner could exit and its PID be recycled to a foreign
-      // process. isOwnRunnerProcessAlive re-runs getProcessInfo + isOwnedCtrlProxyRunner
-      // Process on the tracked PID, so a recycled/foreign PID is no longer identified as
-      // ours and we skip the kill, only un-tracking (#2834 review — MINOR-1).
+      // process. Locally, isOwnRunnerProcessAlive re-runs getProcessInfo +
+      // isOwnedCtrlProxyRunnerProcess on the tracked PID, so a recycled/foreign PID is
+      // no longer identified as ours and we skip the kill, only un-tracking. Under host
+      // control the re-verify is PID-strict via `status.data.pid === tracked` — the
+      // host-control daemon resolves status/stop by deviceId BEFORE pid, so without the
+      // PID compare a NEWER runner for this device would alias as "ours" and the stop
+      // below could kill it (#2834 review). Residual accepted risk: the status→stop
+      // race (runner replaced between the two calls) — the daemon is the sole per-device
+      // orchestrator, so within one daemon that window is effectively empty; daemon-side
+      // pid-match enforcement is tracked as a follow-up.
       const hungPid = this.xcTestProcessId;
       const stillOurs = await this.isOwnRunnerProcessAlive();
       // Suppress the exit-handler auto-restart across the kill + child-exit event only.
@@ -746,7 +753,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
               );
             }
           } else {
-            await IOSCtrlProxyManager.terminateProcess(this.processExecutor, this.timer, hungPid);
+            // Tree kill, not single-PID: the tracked PID is the shell wrapper, and
+            // signaling only it would orphan the xcodebuild child, which keeps the
+            // hung in-sim runner alive to be re-adopted or contend the port on the
+            // next start (#2834 review).
+            await IOSCtrlProxyManager.terminateProcessTree(this.processExecutor, this.timer, hungPid);
           }
         } else {
           logger.warn(
@@ -757,10 +768,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.stopProcessMonitoring();
         this.xcTestProcessId = null;
         this.xcTestProcess = null;
+        // Host-control mode has no local child-exit event to clear these as a side
+        // effect (handleProcessExit), so clear explicitly for both modes — otherwise
+        // cachedRunning/cachedAvailability can serve a stale positive to the next
+        // setup() for up to STATUS_CACHE_TTL (#2834 review).
+        this.clearCaches();
       } finally {
         // Do NOT leave isStopping latched across the throw below (#2834 review — MINOR-2):
         // a caller that does not retry start() would otherwise wedge the manager in
         // "stopping", disabling handleProcessExit()/scheduleAutoRestart() self-heal.
+        // A late child-exit after this reset is ignored by the untracked-exit guard on
+        // the spawn handlers (xcTestProcess was nulled above).
         this.isStopping = false;
       }
     }
@@ -1178,9 +1196,20 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // this process by reading its env via `ps eww` (see findExternalXcodebuildCtrlProxyProcess
     // / isDaemonManagedSimulatorXcodebuildProcess).
     // Routed through the injected processExecutor so tests can observe/control the process.
-    const child = this.processExecutor.spawn(command, [], { shell: true, env: { ...process.env, ...runnerEnv }, stdio: ["ignore", "pipe", "pipe"] });
+    // detached:true makes the shell a process-group leader so terminateProcessTree can
+    // signal the whole group (`kill -- -pid`): under shell:true the tracked PID is the
+    // /bin/sh wrapper, and TERM to the shell alone does NOT propagate to the xcodebuild
+    // child (#2834 review) — group signaling reaches both. stdio pipes and the exit
+    // handler are unaffected by detachment.
+    const child = this.processExecutor.spawn(command, [], { shell: true, detached: true, env: { ...process.env, ...runnerEnv }, stdio: ["ignore", "pipe", "pipe"] });
 
     child.on("error", error => {
+      // Ignore events from a process we no longer track (e.g. hung-recovery already
+      // tore it down and cleared tracking) so a late error can't double-run cleanup
+      // or schedule an auto-restart of a deliberately-removed runner (#2834 review).
+      if (this.xcTestProcess !== child) {
+        return;
+      }
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);
       this.handleProcessExit();
     });
@@ -1188,6 +1217,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     child.on("exit", (code, signal) => {
       if (code !== 0 || signal) {
         logger.warn(`[IOSCtrlProxy] xcodebuild test exited: code=${code}, signal=${signal}`);
+      }
+      // Same untracked-exit guard as the error handler: after hung-recovery (or stop())
+      // has already cleaned up and untracked this child, its late exit event must not
+      // re-enter handleProcessExit and race an auto-restart against the caller.
+      if (this.xcTestProcess !== child) {
+        return;
       }
       this.handleProcessExit();
     });
@@ -1408,7 +1443,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           deviceId: this.device.deviceId,
           pid: this.xcTestProcessId
         });
-        return status.success && (status.data?.running ?? false);
+        // PID-strict: the host-control daemon resolves status by deviceId BEFORE pid,
+        // so running=true alone is not proof the TRACKED pid is alive — a newer runner
+        // for the same device aliases it, and treating it as "ours" would make us wait
+        // on (and eventually stop) that newer runner (#2834 review).
+        return status.success &&
+          (status.data?.running ?? false) &&
+          status.data?.pid === this.xcTestProcessId;
       } catch {
         return false;
       }
@@ -1466,7 +1507,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           deviceId: this.device.deviceId,
           pid: this.xcTestProcessId
         });
-        return status.success && (status.data?.running ?? false);
+        // PID-strict for the same reason as isOwnRunnerProcessAlive: deviceId-first
+        // resolution in the host-control daemon means running=true may describe a
+        // NEWER runner, not the tracked one. On mismatch we return false and the
+        // host-control start path re-adopts the device's current runner via
+        // status({deviceId}) — the correct adoption point (#2834 review).
+        return status.success &&
+          (status.data?.running ?? false) &&
+          status.data?.pid === this.xcTestProcessId;
       } catch {
         return false;
       }
@@ -1827,6 +1875,36 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private static isDirectCtrlProxyRunnerCommand(command: string): boolean {
     return command.includes("CtrlProxyUITests-Runner");
+  }
+
+  /**
+   * Terminate a runner process TREE rooted at `pid` (TERM → wait → KILL), signaling the
+   * process group first and falling back to the single PID. Under `spawn(..., {shell:
+   * true, detached: true})` the tracked PID is a /bin/sh group leader whose xcodebuild
+   * child does NOT die when only the shell is signaled (#2834 review) — the group signal
+   * (`kill -- -pid`) reaches both. The single-PID fallback covers processes that predate
+   * detachment (not group leaders) or whose group is already gone. Scoped to this tree —
+   * deliberately NOT a machine-wide pkill sweep, which would hit other devices' runners.
+   */
+  private static async terminateProcessTree(
+    processExecutor: ProcessExecutor,
+    timer: Timer,
+    pid: number
+  ): Promise<void> {
+    try {
+      await processExecutor.exec(`kill -TERM -- -${pid} 2>/dev/null || kill -TERM ${pid} 2>/dev/null`);
+    } catch {
+      // Process/group may have already exited.
+    }
+
+    if (!await IOSCtrlProxyManager.waitForProcessExit(processExecutor, timer, pid)) {
+      try {
+        await processExecutor.exec(`kill -KILL -- -${pid} 2>/dev/null || kill -KILL ${pid} 2>/dev/null`);
+      } catch {
+        // Process/group may have exited between liveness check and kill.
+      }
+      await IOSCtrlProxyManager.waitForProcessExit(processExecutor, timer, pid);
+    }
   }
 
   private static async terminateProcess(

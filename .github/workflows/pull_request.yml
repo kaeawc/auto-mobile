@@ -1237,6 +1237,9 @@ jobs:
       # so the test's first `observe` doesn't pay that cost inside its short
       # waitFor window and time out (#2730 follow-up).
       - name: "Warm up iOS CtrlProxy"
+        # Worst case ≈ 3 × (observe floor 150s + delay); bound the step so a
+        # pathological hang points here instead of at the 45-min job cap.
+        timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
       - name: "Run Reminders integration tests (Xcode 26.2)"
@@ -1274,6 +1277,7 @@ jobs:
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       - name: "Warm up iOS CtrlProxy (Xcode 26.3)"
+        timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
       - name: "Run Reminders integration tests (Xcode 26.3)"

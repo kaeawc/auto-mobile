@@ -151,4 +151,116 @@ describe("FocusNavigationExecutor", () => {
     expect(result).toBe(true);
     expect(driver.getSwipeCount()).toBe(4);
   });
+
+  test("returns true without swiping when target is already focused (zero-swipe path)", async () => {
+    const timer = new FakeTimer();
+    const driver = new FakeFocusNavigationDriver();
+    const elements = [
+      makeElement("a", 0),
+      makeElement("b", 1),
+      makeElement("c", 2)
+    ];
+    // Focus is already on the target element "c" (index 2).
+    driver.setElements(elements, 2);
+
+    const targetSelector: FocusElementSelector = { resourceId: "c" };
+    const path: FocusNavigationPath = {
+      currentFocusIndex: 2,
+      targetFocusIndex: 2,
+      swipeCount: 0,
+      direction: "forward",
+      intermediateCheckpoints: []
+    };
+
+    const driverFactory: FocusNavigationDriverFactory = {
+      createDriver: () => driver
+    };
+    const executor = new FocusNavigationExecutor({ timer, driverFactory });
+
+    const result = await executor.navigateToElement("device-1", targetSelector, path, {
+      verificationInterval: 1,
+      swipeDelay: 0
+    });
+
+    expect(result).toBe(true);
+    expect(driver.getSwipeCount()).toBe(0);
+  });
+
+  test("recalculates and navigates when zero-swipe path but target is not yet focused", async () => {
+    const timer = new FakeTimer();
+    const driver = new FakeFocusNavigationDriver();
+    const elements = [
+      makeElement("a", 0),
+      makeElement("b", 1),
+      makeElement("c", 2)
+    ];
+    // Focus is on "a" (index 0) but the caller supplied a stale zero-swipe path.
+    driver.setElements(elements, 0);
+
+    const targetSelector: FocusElementSelector = { resourceId: "c" };
+    const path: FocusNavigationPath = {
+      currentFocusIndex: 0,
+      targetFocusIndex: 2,
+      swipeCount: 0,
+      direction: "forward",
+      intermediateCheckpoints: []
+    };
+
+    const driverFactory: FocusNavigationDriverFactory = {
+      createDriver: () => driver
+    };
+    const executor = new FocusNavigationExecutor({ timer, driverFactory });
+
+    const resultPromise = executor.navigateToElement("device-1", targetSelector, path, {
+      verificationInterval: 1,
+      swipeDelay: 0
+    });
+
+    for (let i = 0; i < 10; i++) {
+      timer.advanceTime(100);
+      await new Promise(r => setImmediate(r));
+    }
+
+    const result = await resultPromise;
+
+    expect(result).toBe(true);
+    expect(driver.getSwipeCount()).toBe(2);
+  });
+
+  test("throws an actionable error (not a ReferenceError) when zero-swipe path but target is not found", async () => {
+    const timer = new FakeTimer();
+    const driver = new FakeFocusNavigationDriver();
+    const elements = [
+      makeElement("a", 0),
+      makeElement("b", 1)
+    ];
+    driver.setElements(elements, 0);
+
+    const targetSelector: FocusElementSelector = { resourceId: "does-not-exist" };
+    const path: FocusNavigationPath = {
+      currentFocusIndex: 0,
+      targetFocusIndex: 0,
+      swipeCount: 0,
+      direction: "forward",
+      intermediateCheckpoints: []
+    };
+
+    const driverFactory: FocusNavigationDriverFactory = {
+      createDriver: () => driver
+    };
+    const executor = new FocusNavigationExecutor({ timer, driverFactory });
+
+    let thrownError: Error | null = null;
+    await executor.navigateToElement("device-1", targetSelector, path, {
+      verificationInterval: 1,
+      swipeDelay: 0
+    }).catch(e => {
+      thrownError = e as Error;
+    });
+
+    expect(thrownError).not.toBeNull();
+    expect(thrownError).not.toBeInstanceOf(ReferenceError);
+    expect(thrownError!.message).toContain("Target not found");
+    expect(driver.getSwipeCount()).toBe(0);
+  });
 });

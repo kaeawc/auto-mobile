@@ -159,7 +159,7 @@ export class FocusNavigationExecutor {
 
     if (remainingSwipes === 0) {
       const initialVerification = await this.verifyNavigationState(
-        accessibilityService,
+        driver,
         targetSelector
       );
       if (initialVerification.reachedTarget) {

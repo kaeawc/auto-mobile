@@ -24,7 +24,14 @@ describe("backupDatabaseFile", () => {
 
   afterEach(async () => {
     await db.destroy();
-    rmSync(dir, { recursive: true, force: true });
+    // Windows releases the sqlite file handle lazily after destroy(), so removing
+    // the temp dir can transiently hit EBUSY — retry, and treat cleanup as
+    // best-effort (a leftover temp dir must not fail the test).
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // best-effort: OS will reclaim the temp dir
+    }
   });
 
   test("captures uncheckpointed WAL rows into a timestamped backup file", async () => {

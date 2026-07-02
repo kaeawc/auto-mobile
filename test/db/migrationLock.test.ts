@@ -88,6 +88,49 @@ describe("FileMigrationLock", () => {
     await lock.release();
   });
 
+  test("reclaims a lock left by our own recycled PID without waiting", async () => {
+    // A supervisor restarts a crashed process and the OS recycles its PID, so a
+    // leaked lock bears our own now-live PID. Since the migration run is a
+    // per-process singleton, this must be reclaimed, not waited out for 60s.
+    const timer = new FakeTimer();
+    writeFileSync(lockPath, "4242");
+    const lock = new FileMigrationLock(lockPath, {
+      timer,
+      pid: 4242,
+      isProcessRunning: () => true, // our own PID is (of course) alive
+    });
+
+    await lock.acquire();
+
+    expect(timer.getSleepCallCount()).toBe(0);
+    expect(readFileSync(lockPath, "utf-8").trim()).toBe("4242");
+    await lock.release();
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  test("release does not delete a lock owned by a different opener", async () => {
+    const timer = new FakeTimer();
+    // A different live opener owns the lock.
+    writeFileSync(lockPath, "9999");
+    const lock = new FileMigrationLock(lockPath, {
+      timer,
+      pid: 4242,
+      isProcessRunning: () => true,
+    });
+
+    // We never acquired it; release must be a no-op that leaves the file intact.
+    await lock.release();
+
+    expect(existsSync(lockPath)).toBe(true);
+    expect(readFileSync(lockPath, "utf-8").trim()).toBe("9999");
+  });
+
+  test("release is inert when the lock was never acquired", async () => {
+    const lock = new FileMigrationLock(lockPath, { timer: new FakeTimer(), pid: 4242 });
+    await lock.release();
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
   test("reclaims a stale lock left by a dead holder without waiting", async () => {
     const timer = new FakeTimer();
     // Stale lock from a dead process.
@@ -129,7 +172,10 @@ describe("FileMigrationLock", () => {
     await pending;
 
     expect(rejection).toBeInstanceOf(ActionableError);
-    expect((rejection as Error).message).toContain("AUTOMOBILE_DB_PATH");
+    const message = (rejection as Error).message;
+    expect(message).toContain("AUTOMOBILE_DB_PATH");
+    expect(message).toContain(lockPath);
+    expect(message).toContain("migration lock");
     // Lock owned by the live holder must remain untouched.
     expect(readFileSync(lockPath, "utf-8").trim()).toBe("9999");
   });

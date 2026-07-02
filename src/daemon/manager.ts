@@ -1,7 +1,7 @@
 import { spawn as nodeSpawn, execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { open, readFile, unlink } from "node:fs/promises";
-import { existsSync, openSync, closeSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, openSync, closeSync } from "node:fs";
+import { join } from "node:path";
 import { logger } from "../utils/logger";
 import { releaseVersion } from "../utils/mcpVersion";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
@@ -39,6 +39,7 @@ import {
   cleanupDaemonFiles,
   isProcessRunning as isDaemonProcessRunning,
 } from "./daemonFiles";
+import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   resolveDaemonLaunchWorkingDirectory,
@@ -261,59 +262,24 @@ export class DaemonManager implements DaemonManagerLike {
    * Acquire an exclusive file lock for daemon start/stop coordination.
    * Uses O_CREAT | O_EXCL for atomic creation. Returns true if lock acquired.
    * Cleans up stale locks from dead processes.
+   *
+   * Non-blocking (single attempt): the caller decides what to do on false. Shares
+   * the canonical `O_EXCL` + stale-reclaim primitive with the DB migration lock
+   * (`src/utils/fileLock.ts`). `reclaimOwnPid` stays false so a same-PID probe
+   * from another manager instance still reads as actively held.
    */
   acquireLock(): boolean {
-    if (this.writeLockFile()) {
-      return true;
-    }
-    // Lock file exists — check if owning process is alive
-    try {
-      const content = readFileSync(this.lockFilePath, "utf-8").trim();
-      if (content.length === 0) {
-        // Empty file — another process just created it and hasn't written PID yet.
-        // Treat as actively held to avoid race condition.
-        return false;
-      }
-      const ownerPid = parseInt(content, 10);
-      if (isNaN(ownerPid)) {
-        // Unreadable PID — treat as actively held (writer may still be writing)
-        return false;
-      }
-      if (this.isProcessRunning(ownerPid)) {
-        return false;
-      }
-      // Owner is dead — stale lock, remove and retry once
-      unlinkSync(this.lockFilePath);
-      return this.writeLockFile();
-    } catch {
-      return false;
-    }
+    return tryAcquireExclusiveLock(this.lockFilePath, {
+      isProcessRunning: pid => this.isProcessRunning(pid),
+    });
   }
 
   /**
-   * Atomically create the lock file with our PID. Returns true on success.
-   */
-  private writeLockFile(): boolean {
-    try {
-      mkdirSync(dirname(this.lockFilePath), { recursive: true });
-      const fd = openSync(this.lockFilePath, "wx", 0o600);
-      writeFileSync(fd, String(process.pid));
-      closeSync(fd);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Release the file lock.
+   * Release the file lock. Compare-and-delete: only removes the file if it still
+   * holds our PID, so it can't delete a lock another opener reclaimed.
    */
   releaseLock(): void {
-    try {
-      unlinkSync(this.lockFilePath);
-    } catch {
-      // Best-effort cleanup
-    }
+    releaseExclusiveLock(this.lockFilePath);
   }
 
   createClient(): DaemonClientLike {

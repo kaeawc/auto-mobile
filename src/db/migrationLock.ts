@@ -1,10 +1,8 @@
-import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "fs";
-import { dirname } from "path";
-import { isProcessRunning as defaultIsProcessRunning } from "../daemon/daemonFiles";
 import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
 
 /**
  * Cross-process lock guarding {@link runMigrations}.
@@ -28,11 +26,15 @@ export interface MigrationLock {
  * No-op lock for the single-opener default and in-memory test databases, where
  * no second process can share the connection. Keeps the migrator's DB-path-
  * agnostic callers unchanged.
+ *
+ * NOTE: this default provides NO cross-process protection — it is correct only
+ * for `:memory:` DBs and the single-daemon path (already serialized by the
+ * in-process mutex). Production DB openers must pass a {@link FileMigrationLock}
+ * via {@link createFileMigrationLock}; `database.ts#startMigrations` does so.
  */
 export class NoOpMigrationLock implements MigrationLock {
   async acquire(): Promise<void> {
-    // Nothing to serialize: a `:memory:` DB is private to one connection and the
-    // single-daemon default already serializes via the in-process mutex.
+    // Nothing to serialize.
   }
 
   async release(): Promise<void> {
@@ -59,20 +61,20 @@ export interface FileMigrationLockOptions {
 const DEFAULT_POLL_INTERVAL_MS = 100;
 // 60s is comfortably above a cold full-migration run on a slow/loaded disk, well
 // clear of the 5s `busy_timeout` that made `BEGIN EXCLUSIVE` unsuitable here.
-const DEFAULT_TIMEOUT_MS = 60_000;
+export const DEFAULT_MIGRATION_LOCK_TIMEOUT_MS = 60_000;
 
 /**
  * File-based cross-process migration lock keyed to the resolved DB path
- * (`${dbPath}.migrate.lock`). Reuses the daemon's atomic `O_CREAT | O_EXCL`
- * (`wx`) create + dead-PID stale reclaim primitive (see
- * `src/daemon/manager.ts` `acquireLock`), but wraps it in a bounded busy-wait so
- * a mid-migration holder is waited out rather than failed fast.
+ * (`${dbPath}.migrate.lock`). Wraps the canonical `O_CREAT | O_EXCL` acquire +
+ * dead-PID stale reclaim primitive (`src/utils/fileLock.ts`, shared with the
+ * daemon lock) in a bounded busy-wait so a mid-migration holder is waited out
+ * rather than failed fast.
  */
 export class FileMigrationLock implements MigrationLock {
   private readonly timer: Timer;
   private readonly pollIntervalMs: number;
   private readonly timeoutMs: number;
-  private readonly isProcessRunning: (pid: number) => boolean;
+  private readonly isProcessRunning: ((pid: number) => boolean) | undefined;
   private readonly pid: number;
 
   constructor(
@@ -80,9 +82,11 @@ export class FileMigrationLock implements MigrationLock {
     options: FileMigrationLockOptions = {}
   ) {
     this.timer = options.timer ?? defaultTimer;
-    this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    this.isProcessRunning = options.isProcessRunning ?? defaultIsProcessRunning;
+    // Clamp to >= 1ms: a 0ms poll would hammer the filesystem as fast as the
+    // macrotask queue allows until the deadline.
+    this.pollIntervalMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_MIGRATION_LOCK_TIMEOUT_MS;
+    this.isProcessRunning = options.isProcessRunning;
     this.pid = options.pid ?? process.pid;
   }
 
@@ -92,7 +96,7 @@ export class FileMigrationLock implements MigrationLock {
     // Fast path: a fresh lock (single opener) acquires on the first attempt with
     // no sleep, so the default single-process path adds no latency.
     for (;;) {
-      if (this.tryAcquireOnce()) {
+      if (this.tryAcquire()) {
         return;
       }
 
@@ -110,84 +114,40 @@ export class FileMigrationLock implements MigrationLock {
   }
 
   async release(): Promise<void> {
-    try {
-      unlinkSync(this.lockFilePath);
-    } catch {
-      // Best-effort: the file may already be gone (never acquired, or removed by
-      // a stale-reclaim in another opener). Nothing actionable to surface.
-    }
+    releaseExclusiveLock(this.lockFilePath, this.pid);
   }
 
-  /**
-   * One non-blocking acquire attempt. Returns true if the lock is now ours.
-   * Mirrors `DaemonManager.acquireLock`: atomic create, else inspect the owner
-   * and reclaim only if it is a dead PID.
-   */
-  private tryAcquireOnce(): boolean {
-    if (this.writeLockFile()) {
-      return true;
-    }
-
-    let content: string;
-    try {
-      content = readFileSync(this.lockFilePath, "utf-8").trim();
-    } catch {
-      // File vanished between the failed `wx` create and this read — treat as
-      // still-contended and retry on the next poll.
-      return false;
-    }
-
-    if (content.length === 0) {
-      // Another opener created the file but has not written its PID yet; treat as
-      // actively held to avoid stealing a lock mid-write.
-      return false;
-    }
-
-    const ownerPid = Number.parseInt(content, 10);
-    if (Number.isNaN(ownerPid)) {
-      // Unreadable PID — a writer may still be filling it in; wait.
-      return false;
-    }
-
-    if (this.isProcessRunning(ownerPid)) {
-      return false;
-    }
-
-    // Owner is dead — reclaim the stale lock, then re-create atomically. The
-    // `wx` open below ensures two openers racing on the same dead PID cannot both
-    // win: the loser's `wx` throws and it falls back to waiting.
-    try {
-      unlinkSync(this.lockFilePath);
-    } catch {
-      // Someone else reclaimed it first; retry on the next poll.
-      return false;
-    }
-    return this.writeLockFile();
-  }
-
-  /**
-   * Atomically create the lock file with our PID via `O_CREAT | O_EXCL` (`wx`).
-   * Returns true on success, false if the file already exists.
-   */
-  private writeLockFile(): boolean {
-    try {
-      mkdirSync(dirname(this.lockFilePath), { recursive: true });
-      const fd = openSync(this.lockFilePath, "wx", 0o600);
-      writeFileSync(fd, String(this.pid));
-      closeSync(fd);
-      return true;
-    } catch {
-      return false;
-    }
+  private tryAcquire(): boolean {
+    return tryAcquireExclusiveLock(this.lockFilePath, {
+      pid: this.pid,
+      isProcessRunning: this.isProcessRunning,
+      // The migration run is a per-process singleton (`migrationsPromise` in
+      // database.ts), so a lock file bearing our own PID can only be a stale leak
+      // from a crashed prior incarnation whose PID the OS recycled — reclaim it
+      // rather than hang for the full timeout.
+      reclaimOwnPid: true,
+    });
   }
 }
 
 /**
  * Default migration lock for a resolved DB file path. Keyed per-file (not
- * per-uid) because the trigger — two openers on one DB file — is per-file.
+ * per-uid) because the trigger — two openers on one DB file — is per-file. The
+ * busy-wait ceiling can be overridden via `AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS`
+ * (with the legacy `AUTO_MOBILE_` alias), mirroring the daemon timeout knobs in
+ * `src/daemon/constants.ts`.
  */
 export function createFileMigrationLock(dbPath: string): MigrationLock {
-  const lock = new FileMigrationLock(`${dbPath}.migrate.lock`);
-  logger.debug(`Migration lock keyed to ${dbPath}.migrate.lock`);
-  return lock;
+  const lockFilePath = `${dbPath}.migrate.lock`;
+  const override =
+    process.env.AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS ??
+    process.env.AUTO_MOBILE_MIGRATION_LOCK_TIMEOUT_MS;
+  const parsed = override ? Number.parseInt(override, 10) : NaN;
+  const timeoutMs = Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+
+  logger.debug(`Migration lock keyed to ${lockFilePath}`);
+  return new FileMigrationLock(
+    lockFilePath,
+    timeoutMs !== undefined ? { timeoutMs } : {}
+  );
 }

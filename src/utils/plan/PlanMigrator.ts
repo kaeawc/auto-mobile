@@ -184,7 +184,10 @@ const migrateStepFields = (
   const paramsFromStep = isRecord(step.params) ? { ...step.params } : {};
   const inlineParams: Record<string, any> = {};
   for (const [key, value] of Object.entries(step)) {
-    if (["tool", "command", "label", "params"].includes(key)) {
+    // Keep step-level keys (not tool params) at the step level. `optional` must survive migration —
+    // importPlanFromYaml runs migratePlan() before PlanNormalizer, so moving it into params here
+    // would strip the flag before the executor sees it, making a best-effort step mandatory (#2853).
+    if (["tool", "command", "label", "params", "optional"].includes(key)) {
       continue;
     }
     inlineParams[key] = value;

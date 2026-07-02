@@ -67,8 +67,14 @@ final class RemindersAddPlanTests: RemindersIntegrationBase {
     // explicit AUTOMOBILE_TEST_RETRY_COUNT always wins; a genuine break still fails on every attempt.
     // The retry is tracked for removal once the guards are proven sufficient — see issue #2855.
     override var retryCount: Int {
-        let base = super.retryCount
-        return base > 0 ? base : 1
+        // Honor an explicit override — including 0 to disable retries — and default to 1 only when
+        // no override is set. (super.retryCount can't distinguish an explicit 0 from the unset
+        // default, so read the env directly.)
+        let environment = AutoMobileEnvironment()
+        if let explicit = environment.intValue(["AUTOMOBILE_TEST_RETRY_COUNT", "RETRY_COUNT"]) {
+            return explicit
+        }
+        return 1
     }
 
     func testAddReminderPlan() throws {

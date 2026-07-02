@@ -250,5 +250,28 @@ describe("YamlPlanSerializer", () => {
 
       expect(() => serializer.importPlanFromYaml(yamlContent)).toThrow();
     });
+
+    test("preserves step-level optional flag through migration + normalization (#2853)", () => {
+      // Regression: importPlanFromYaml runs migratePlan() before PlanNormalizer. `optional` must
+      // stay at the step level and NOT be swept into tool params, or a best-effort step becomes
+      // mandatory and the executor never skips it.
+      const yamlContent = yaml.dump({
+        name: "Optional Plan",
+        steps: [
+          { tool: "tapOn", text: "Not Now", optional: true },
+          { tool: "observe", params: { waitFor: { text: "x" } }, optional: true },
+          { tool: "terminateApp", appId: "com.example.app" },
+        ],
+      });
+
+      const plan = serializer.importPlanFromYaml(yamlContent);
+
+      expect(plan.steps[0].optional).toBe(true);
+      expect(plan.steps[1].optional).toBe(true);
+      expect(plan.steps[2].optional).toBeUndefined();
+      // The flag must not leak into tool params (strict tool schemas would reject it).
+      expect(plan.steps[0].params.optional).toBeUndefined();
+      expect(plan.steps[1].params.optional).toBeUndefined();
+    });
   });
 });

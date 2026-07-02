@@ -85,6 +85,22 @@ final class RemindersPlanContentTests: XCTestCase {
         XCTAssertEqual(RemindersAddPlanTests().retryCount, 1)
     }
 
+    /// An explicit retry override wins — including 0 to disable retries for CI/local repro runs.
+    func testExplicitZeroRetryOverrideIsHonored() {
+        let key = "AUTOMOBILE_TEST_RETRY_COUNT"
+        let original = ProcessInfo.processInfo.environment[key]
+        setenv(key, "0", 1)
+        defer {
+            if let original = original {
+                setenv(key, original, 1)
+            } else {
+                unsetenv(key)
+            }
+        }
+
+        XCTAssertEqual(RemindersAddPlanTests().retryCount, 0)
+    }
+
     /// The intermittent "Enable iCloud Syncing?" alert must be dismissed best-effort before the
     /// create step, and the create tap must itself be guarded by a wait. The dismissal has to be
     /// `optional` so runs where the alert never appears don't fail.

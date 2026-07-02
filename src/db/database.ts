@@ -3,17 +3,14 @@ import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 import type { Database as DatabaseSchema } from "./types";
-import { runMigrations, resolveMigrationFolder } from "./migrator";
+import { runMigrations } from "./migrator";
 import { logger } from "../utils/logger";
 import { BunSqliteDialect } from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import {
-  assertMigrationDependenciesResolvable,
   createIncompleteExtractionError,
   extractMissingPackageName,
-  isIncompleteExtractionError,
-  isMissingPackageError,
-  type DependencyResolver,
+  isMissingMigrationDependencyError,
 } from "./migrationDependencyIntegrity";
 
 type BunDatabaseConstructor = typeof import("bun:sqlite").Database;
@@ -112,28 +109,19 @@ export const DATABASE_STARTUP_MIGRATION_FAILURE =
   "Database startup migrations failed; refusing to run queries until the daemon restarts.";
 
 function createStartupMigrationError(cause: unknown): Error {
-  // A half-linked bunx extraction (a migration runtime dependency such as
+  // A half-linked bunx extraction (a known migration runtime dependency such as
   // `kysely` missing from this run's node_modules) surfaces as a "Cannot find
-  // package" resolve error. Map it to the distinct, recoverable
-  // incomplete-extraction error instead of the generic fatal crash so the
-  // caller knows to remove the extraction and re-run (issue #2833).
-  if (isIncompleteExtractionError(cause)) {
-    return cause as Error;
-  }
-  if (isMissingPackageError(cause)) {
+  // package" resolve error while the migrator dynamically imports a migration
+  // file. Map that to the distinct, recoverable incomplete-extraction error
+  // instead of the generic fatal crash so the caller knows to remove the
+  // extraction and re-run (issue #2833). Scoped to known dependencies so a
+  // genuine code-level bad import in a migration is not mislabeled.
+  if (isMissingMigrationDependencyError(cause)) {
     return createIncompleteExtractionError(extractMissingPackageName(cause), cause);
   }
   const causeMessage = cause instanceof Error ? cause.message : String(cause);
   return new Error(`${DATABASE_STARTUP_MIGRATION_FAILURE} Cause: ${causeMessage}`, { cause });
 }
-
-/**
- * Resolve a module specifier the way the runtime loads a migration file — from
- * the migrations folder on disk. Used to preflight extraction integrity before
- * running migrations (issue #2833).
- */
-const resolveMigrationDependency: DependencyResolver = (specifier, fromDir) =>
-  require.resolve(specifier, { paths: [fromDir] });
 
 async function waitForMigrationsBeforeQuery(): Promise<void> {
   if (migrationsRun) {
@@ -169,18 +157,6 @@ function openConfiguredSqliteDatabase(dbPath: string): BunDatabase {
 }
 
 async function startMigrations(dbPath: string): Promise<void> {
-  // Preflight extraction integrity: if a migration runtime dependency cannot be
-  // resolved from the migrations folder, fail fast with the recoverable
-  // incomplete-extraction error rather than letting the dynamic import blow up
-  // deep inside the migrator with a generic message (issue #2833). Only run when
-  // the folder exists — a missing migrations folder is a distinct failure that
-  // the migrator surfaces on its own; resolving a dependency from a nonexistent
-  // base would spuriously report an incomplete extraction.
-  const migrationFolder = resolveMigrationFolder();
-  if (fs.existsSync(migrationFolder)) {
-    assertMigrationDependenciesResolvable(migrationFolder, resolveMigrationDependency);
-  }
-
   const migrationDb = createSqliteKysely<unknown>(dbPath);
 
   try {

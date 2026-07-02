@@ -3,24 +3,21 @@ import path from "path";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { defaultTimer } from "../../src/utils/SystemTimer";
-import {
-  INCOMPLETE_EXTRACTION_CODE,
-  isIncompleteExtractionError,
-} from "../../src/db/migrationDependencyIntegrity";
+import { isIncompleteExtractionError } from "../../src/db/migrationDependencyIntegrity";
 
 /**
- * Issue #2833: when a migration cannot resolve a runtime dependency (the
- * signature of a half-linked `bunx` extraction), the startup migration failure
- * surfaced to the daemon must be the distinct, recoverable incomplete-extraction
- * error — not the generic "refusing to run queries" crash.
+ * Issue #2833: the incomplete-extraction mapping is scoped to KNOWN migration
+ * runtime dependencies. This drives the REAL migrator path with a migration that
+ * imports a package which is not a declared dependency — a genuine code-level bad
+ * import — and asserts it surfaces the GENERIC startup-migration error rather
+ * than being mislabeled as a recoverable "re-extract" incomplete extraction.
  *
- * This drives the REAL migrator path: a temp migrations folder whose only
- * migration imports a package that does not exist, so bun throws a genuine
- * "Cannot find package" resolve error while loading the migration file. That
- * mirrors the missing-`kysely` failure and proves the mapping holds even when
- * the cheap preflight is bypassed.
+ * (The positive case — a missing KNOWN dependency such as `kysely` — cannot be
+ * reproduced in-repo because bun resolves `kysely` from its global install
+ * cache; that mapping is covered by the unit tests for
+ * isMissingMigrationDependencyError + createIncompleteExtractionError.)
  */
-describe("startup migration failure maps a missing dependency to a recoverable error", () => {
+describe("startup migration failure does not mislabel a genuine bad import", () => {
   const originalDbPath = process.env.AUTOMOBILE_DB_PATH;
   const originalMigrationsDir = process.env.AUTOMOBILE_MIGRATIONS_DIR;
   let tempDir: string | undefined;
@@ -46,14 +43,15 @@ describe("startup migration failure maps a missing dependency to a recoverable e
     return import(`../../src/db/database.ts?incomplete-extraction-test=${Date.now()}-${Math.random()}`);
   }
 
-  test("ensureMigrations rejects with the recoverable incomplete-extraction error", async () => {
-    tempDir = await mkdtemp(path.join(tmpdir(), "am-incomplete-extraction-"));
+  test("an unknown missing package surfaces the generic error, not incomplete-extraction", async () => {
+    tempDir = await mkdtemp(path.join(tmpdir(), "am-bad-import-"));
     const migrationsDir = path.join(tempDir, "migrations");
     await mkdir(migrationsDir, { recursive: true });
 
-    // A migration whose runtime value import cannot be resolved.
+    // A migration whose runtime value import cannot be resolved and is NOT a
+    // declared migration dependency (i.e. a typo / genuine code bug).
     await writeFile(
-      path.join(migrationsDir, "2099_01_01_000_am2833_missing_dep.ts"),
+      path.join(migrationsDir, "2099_01_01_000_am2833_bad_import.ts"),
       "import 'nonexistent-package-am2833';\n" +
         "export async function up(): Promise<void> {}\n" +
         "export async function down(): Promise<void> {}\n"
@@ -79,15 +77,13 @@ describe("startup migration failure maps a missing dependency to a recoverable e
       }
 
       expect(thrown).toBeInstanceOf(Error);
-      expect(isIncompleteExtractionError(thrown)).toBe(true);
-      expect((thrown as { code?: string }).code).toBe(INCOMPLETE_EXTRACTION_CODE);
-      expect((thrown as Error).message).toMatch(/incomplete/i);
-      expect((thrown as Error).message).toMatch(/re-?run/i);
-      // Not the generic startup-migration message.
-      expect((thrown as Error).message).not.toMatch(/refusing to run queries/i);
+      // Generic startup-migration failure, NOT the recoverable extraction remedy.
+      expect((thrown as Error).message).toMatch(/refusing to run queries/i);
+      expect(isIncompleteExtractionError(thrown)).toBe(false);
+      expect((thrown as Error).message).not.toMatch(/incomplete package extraction/i);
 
-      // The cached error stays sticky and recoverable-typed on re-check.
-      expect(isIncompleteExtractionError(db.getMigrationsError())).toBe(true);
+      // Still sticky and generic on re-check.
+      expect(isIncompleteExtractionError(db.getMigrationsError())).toBe(false);
 
       await defaultTimer.sleep(10);
       expect(unhandled).toEqual([]);

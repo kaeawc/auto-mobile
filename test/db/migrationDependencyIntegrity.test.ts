@@ -1,19 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import {
   INCOMPLETE_EXTRACTION_CODE,
+  INCOMPLETE_EXTRACTION_EXIT_CODE,
   MIGRATION_RUNTIME_DEPENDENCIES,
-  assertMigrationDependenciesResolvable,
   createIncompleteExtractionError,
   extractMissingPackageName,
-  findMissingMigrationDependency,
   isIncompleteExtractionError,
+  isMissingMigrationDependencyError,
   isMissingPackageError,
 } from "../../src/db/migrationDependencyIntegrity";
 
 /**
  * Covers issue #2833: a half-linked `bunx` extraction whose `node_modules` is
  * missing a migration runtime dependency (e.g. `kysely`) must surface as a
- * distinct, recoverable failure — not a generic fatal migration crash.
+ * distinct, recoverable failure — not a generic fatal migration crash — while a
+ * genuine bad import (a typo, an unpublished dep) must NOT be mislabeled.
  */
 describe("isMissingPackageError", () => {
   test("recognizes bun's ResolveMessage 'Cannot find package' shape", () => {
@@ -64,6 +65,31 @@ describe("extractMissingPackageName", () => {
   });
 });
 
+describe("isMissingMigrationDependencyError", () => {
+  test("is true only when a KNOWN migration runtime dependency is missing", () => {
+    expect(
+      isMissingMigrationDependencyError(new Error("Cannot find package 'kysely' from '/tmp/x/m.ts'"))
+    ).toBe(true);
+    expect(MIGRATION_RUNTIME_DEPENDENCIES).toContain("kysely");
+  });
+
+  test("is false for a genuine bad import — a typo'd or unpublished package", () => {
+    // A code-level bug in a migration must fall through to the generic error, not
+    // be mislabeled as an incomplete extraction whose fix is "re-extract".
+    expect(
+      isMissingMigrationDependencyError(new Error("Cannot find package 'kysley' from '/tmp/x/m.ts'"))
+    ).toBe(false);
+    expect(
+      isMissingMigrationDependencyError(new Error("Cannot find package 'some-unpublished-dep'"))
+    ).toBe(false);
+  });
+
+  test("is false for non-missing-package failures", () => {
+    expect(isMissingMigrationDependencyError(new Error("database is locked"))).toBe(false);
+    expect(isMissingMigrationDependencyError(undefined)).toBe(false);
+  });
+});
+
 describe("createIncompleteExtractionError", () => {
   test("builds a recoverable error with distinct code, remediation, and preserved cause", () => {
     const cause = new Error("Cannot find package 'kysely' from '/tmp/x/m.ts'");
@@ -76,6 +102,8 @@ describe("createIncompleteExtractionError", () => {
     expect(error.message).toMatch(/incomplete/i);
     expect(error.message).toMatch(/extraction/i);
     expect(error.message).toMatch(/re-?run/i);
+    // Hedges for the non-bunx install path rather than asserting the cause.
+    expect(error.message).toMatch(/bunx/i);
     expect((error as { cause?: unknown }).cause).toBe(cause);
     expect(isIncompleteExtractionError(error)).toBe(true);
   });
@@ -84,6 +112,8 @@ describe("createIncompleteExtractionError", () => {
     const error = createIncompleteExtractionError(null);
     expect(error.message).toMatch(/dependenc/i);
     expect(isIncompleteExtractionError(error)).toBe(true);
+    // No cause supplied → no cause attached.
+    expect((error as { cause?: unknown }).cause).toBeUndefined();
   });
 });
 
@@ -94,66 +124,8 @@ describe("isIncompleteExtractionError", () => {
   });
 });
 
-describe("findMissingMigrationDependency", () => {
-  test("returns the dependency name when the resolver cannot resolve it", () => {
-    const resolve = (specifier: string): string => {
-      if (specifier === "kysely") {
-        throw Object.assign(new Error("Cannot find package 'kysely'"), { code: "MODULE_NOT_FOUND" });
-      }
-      return `/resolved/${specifier}`;
-    };
-    expect(findMissingMigrationDependency("/migrations", resolve)).toBe("kysely");
-  });
-
-  test("returns null when every migration runtime dependency resolves", () => {
-    const resolve = (specifier: string): string => `/resolved/${specifier}`;
-    expect(findMissingMigrationDependency("/migrations", resolve)).toBeNull();
-  });
-
-  test("covers exactly the declared migration runtime dependencies", () => {
-    const attempted: string[] = [];
-    const resolve = (specifier: string): string => {
-      attempted.push(specifier);
-      return `/resolved/${specifier}`;
-    };
-    findMissingMigrationDependency("/migrations", resolve);
-    expect(attempted).toEqual([...MIGRATION_RUNTIME_DEPENDENCIES]);
-    expect(MIGRATION_RUNTIME_DEPENDENCIES).toContain("kysely");
-  });
-
-  test("resolves each dependency from the given migrations folder", () => {
-    const seenPaths: Array<string | undefined> = [];
-    const resolve = (specifier: string, fromDir?: string): string => {
-      seenPaths.push(fromDir);
-      return `/resolved/${specifier}`;
-    };
-    findMissingMigrationDependency("/some/migrations/dir", resolve);
-    expect(seenPaths.every(p => p === "/some/migrations/dir")).toBe(true);
-  });
-});
-
-describe("assertMigrationDependenciesResolvable", () => {
-  test("throws a recoverable incomplete-extraction error naming the missing dependency", () => {
-    const resolve = (specifier: string): string => {
-      if (specifier === "kysely") {
-        throw new Error("Cannot find package 'kysely'");
-      }
-      return `/resolved/${specifier}`;
-    };
-
-    let thrown: unknown;
-    try {
-      assertMigrationDependenciesResolvable("/migrations", resolve);
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(isIncompleteExtractionError(thrown)).toBe(true);
-    expect((thrown as Error).message).toContain("kysely");
-  });
-
-  test("does nothing when all dependencies resolve", () => {
-    const resolve = (specifier: string): string => `/resolved/${specifier}`;
-    expect(() => assertMigrationDependenciesResolvable("/migrations", resolve)).not.toThrow();
+describe("INCOMPLETE_EXTRACTION_EXIT_CODE", () => {
+  test("is EX_TEMPFAIL (75) — a retryable-failure exit code distinct from 1", () => {
+    expect(INCOMPLETE_EXTRACTION_EXIT_CODE).toBe(75);
   });
 });

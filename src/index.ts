@@ -731,9 +731,14 @@ async function main() {
   }
 }
 
-main().catch(err => {
+main().catch(async err => {
   console.error("Fatal error in main():", err);
   fatalLogger?.error("Fatal error in main():", err);
   fatalLogger?.close();
-  process.exit(1);
+  // An incomplete-extraction startup failure exits with a distinct, recoverable
+  // code (EX_TEMPFAIL) so a wrapper can re-extract and retry (issue #2833);
+  // every other fatal keeps exit 1. Resolved lazily to match this file's
+  // deferred-import startup pattern.
+  const { resolveDaemonStartupExitCode } = await import("./daemon/daemonStartupGuard");
+  process.exit(resolveDaemonStartupExitCode(err));
 });

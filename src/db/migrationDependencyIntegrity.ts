@@ -1,38 +1,45 @@
 /**
- * Extraction-integrity checks for the startup database migrations (issue #2833).
+ * Recognises and reframes the startup-migration failure that occurs when a
+ * package extraction is incomplete (issue #2833).
  *
  * The migration modules ship as raw `.ts` files and are loaded from disk at
  * runtime by kysely's `FileMigrationProvider` via dynamic `import()`. Several of
  * them do a *runtime* value import (`import { sql } from "kysely"`), so the
  * runtime resolves `kysely` relative to the migrations folder on disk. When a
- * `bunx` extraction's `node_modules` is half-linked (the shared bun cache has the
- * package but it was never linked into this run's tree), that import throws
+ * `bunx` extraction's `node_modules` is half-linked (the shared bun cache has
+ * the package but it was never linked into this run's tree), that import throws
  * `Cannot find package 'kysely'` and the daemon's startup migration hard-fails
  * with a generic, non-actionable crash.
  *
- * This module turns that class of failure into a distinct, clearly *recoverable*
- * error: it names the missing package and the fix (remove the incomplete
- * extraction directory and re-run — a fresh extraction from the healthy shared
- * cache produces a complete tree). It also provides a cheap preflight so the
- * failure is caught before migrations run rather than deep inside the migrator.
+ * This module maps that specific failure — a *known* migration runtime
+ * dependency failing to resolve — to a distinct, clearly *recoverable* error
+ * that names the package and the fix (remove the incomplete extraction directory
+ * and re-run; a fresh extraction from the healthy shared cache produces a
+ * complete tree). Scoping to the known dependency list (rather than any missing
+ * specifier) keeps a genuine code-level bad import — a typo'd or unpublished
+ * package in a migration — from being mislabeled as an extraction problem.
  */
 
 /** Distinct marker for a recoverable incomplete-extraction failure. */
 export const INCOMPLETE_EXTRACTION_CODE = "AUTOMOBILE_INCOMPLETE_EXTRACTION";
 
 /**
- * Packages the migration modules import at runtime (not just as types). These
- * must resolve from the migrations folder for `migrateToLatest()` to load the
- * migration files. Keep in sync with the value imports in `src/db/migrations/`.
+ * Process exit code the daemon uses when it dies from an incomplete extraction.
+ * 75 is `EX_TEMPFAIL` from sysexits.h — "temporary failure; the user is invited
+ * to retry" — which lets a wrapper distinguish this recoverable case from a
+ * generic fatal (exit 1) and re-extract before retrying.
  */
-export const MIGRATION_RUNTIME_DEPENDENCIES: readonly string[] = ["kysely"];
+export const INCOMPLETE_EXTRACTION_EXIT_CODE = 75;
 
 /**
- * Resolves a module specifier the way the runtime would when loading a migration
- * file, throwing if it cannot be resolved. `fromDir` is the directory to resolve
- * from (the migrations folder) so the check mirrors the dynamic `import()` base.
+ * Packages the migration modules import at runtime (not just as types). These
+ * must resolve from the migrations folder for `migrateToLatest()` to load the
+ * migration files. Keep in sync with the value imports in `src/db/migrations/`;
+ * a runtime import added there but omitted here degrades gracefully — its
+ * missing-package failure falls through to the generic startup error rather than
+ * this extraction-specific remediation.
  */
-export type DependencyResolver = (specifier: string, fromDir: string) => string;
+export const MIGRATION_RUNTIME_DEPENDENCIES: readonly string[] = ["kysely"];
 
 function getErrorCode(error: unknown): string | undefined {
   const code = (error as { code?: unknown } | null | undefined)?.code;
@@ -78,9 +85,23 @@ export function extractMissingPackageName(error: unknown): string | null {
 }
 
 /**
+ * True when `error` is a missing-package failure for a *known* migration runtime
+ * dependency — i.e. the incomplete-extraction signature. A missing package that
+ * is not a declared migration dependency (a typo, an unpublished dep) is
+ * deliberately excluded so it is not mislabeled as an extraction problem.
+ */
+export function isMissingMigrationDependencyError(error: unknown): boolean {
+  if (!isMissingPackageError(error)) {
+    return false;
+  }
+  const name = extractMissingPackageName(error);
+  return name !== null && MIGRATION_RUNTIME_DEPENDENCIES.includes(name);
+}
+
+/**
  * Build the recoverable incomplete-extraction error surfaced at startup. Carries
- * a distinct `code` so callers can branch, preserves the underlying `cause`, and
- * spells out the remediation.
+ * a distinct `code` so callers can branch (and the daemon can pick a distinct
+ * exit code), preserves the underlying `cause`, and spells out the remediation.
  */
 export function createIncompleteExtractionError(
   missingPackage: string | null,
@@ -91,11 +112,12 @@ export function createIncompleteExtractionError(
     : "a required migration dependency could not be resolved";
   const message =
     `Database startup migrations cannot load their dependencies: ${subject}. ` +
-    "This is an incomplete package extraction (e.g. a half-linked `bunx` " +
-    "node_modules where the shared cache has the package but it was not linked " +
-    "into this run's tree), not a missing or unpublished dependency. Remove the " +
-    "incomplete extraction directory and re-run — a fresh extraction from the " +
-    "healthy shared cache produces a complete tree and the daemon starts normally.";
+    "This is most commonly an incomplete package extraction — a half-linked " +
+    "`bunx` node_modules where the shared cache has the package but it was not " +
+    "linked into this run's tree. If you are running via `bunx`, remove the " +
+    "incomplete extraction directory and re-run: a fresh extraction from the " +
+    "healthy shared cache produces a complete tree and the daemon starts " +
+    "normally. Otherwise, reinstall so the package is present in node_modules.";
   const error = new Error(message, cause === undefined ? undefined : { cause });
   (error as { code?: string }).code = INCOMPLETE_EXTRACTION_CODE;
   return error;
@@ -104,40 +126,4 @@ export function createIncompleteExtractionError(
 /** True when `error` is the recoverable incomplete-extraction error above. */
 export function isIncompleteExtractionError(error: unknown): boolean {
   return getErrorCode(error) === INCOMPLETE_EXTRACTION_CODE;
-}
-
-/**
- * Return the first migration runtime dependency that does not resolve from
- * `migrationsFolder`, or null if every one resolves. A resolver that throws for
- * a non-resolution reason still counts the dependency as unresolvable — the
- * runtime import would fail the same way.
- */
-export function findMissingMigrationDependency(
-  migrationsFolder: string,
-  resolve: DependencyResolver
-): string | null {
-  for (const dependency of MIGRATION_RUNTIME_DEPENDENCIES) {
-    try {
-      resolve(dependency, migrationsFolder);
-    } catch {
-      return dependency;
-    }
-  }
-  return null;
-}
-
-/**
- * Preflight the extraction before running migrations: if a migration runtime
- * dependency cannot be resolved from `migrationsFolder`, throw the recoverable
- * incomplete-extraction error instead of letting the dynamic `import()` fail
- * deep inside the migrator with a generic message.
- */
-export function assertMigrationDependenciesResolvable(
-  migrationsFolder: string,
-  resolve: DependencyResolver
-): void {
-  const missing = findMissingMigrationDependency(migrationsFolder, resolve);
-  if (missing) {
-    throw createIncompleteExtractionError(missing);
-  }
 }

@@ -1361,17 +1361,20 @@ final class CommandHandlerTests: XCTestCase {
     // MARK: - Unknown Command Tests
 
     /// An unrecognized command `type` is now rejected at the decode boundary
-    /// rather than dispatched: the enum has no case for it, so decoding throws
-    /// and `WebSocketServer` returns a requestId-correlated error response.
-    func testUnknownCommandFailsToDecode() {
+    /// rather than dispatched: the enum has no case for it, so decoding throws.
+    /// The thrown error must carry the exact "Unknown command type: <type>" text
+    /// so `WebSocketServer` surfaces it on the wire and the TS client's
+    /// `rewriteUnknownCommandError` can flag a stale runner (a generic
+    /// `DecodingError` would lose that diagnostic).
+    func testUnknownCommandFailsToDecodeWithDiagnosticText() {
         XCTAssertThrowsError(
             try decodeWebSocketRequest(#"{"type":"unknown_command","requestId":"unknown-123"}"#)
         ) { error in
-            guard case let DecodingError.dataCorrupted(context) = error else {
-                XCTFail("Expected dataCorrupted, got \(error)")
-                return
-            }
-            XCTAssertTrue(context.debugDescription.contains("Unknown command type"))
+            XCTAssertEqual(
+                (error as? CommandError)?.errorDescription,
+                "Unknown command type: unknown_command"
+            )
+            XCTAssertEqual(error.localizedDescription, "Unknown command type: unknown_command")
         }
     }
 

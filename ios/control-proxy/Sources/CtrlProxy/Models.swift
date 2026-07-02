@@ -286,11 +286,12 @@ public enum WebSocketRequest: Decodable {
         let container = try decoder.container(keyedBy: DiscriminatorKey.self)
         let typeString = try container.decode(String.self, forKey: .type)
         guard let requestType = RequestType(rawValue: typeString) else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .type,
-                in: container,
-                debugDescription: "Unknown command type: \(typeString)"
-            )
+            // Throw CommandError (a LocalizedError) rather than DecodingError so the
+            // error surfaced on the wire is "Unknown command type: <type>". The TS
+            // client's `rewriteUnknownCommandError` matches that exact text to warn
+            // that the deployed runner is older than the daemon; a generic
+            // DecodingError.localizedDescription would silently lose that diagnostic.
+            throw CommandError.unknownCommand(typeString)
         }
 
         switch requestType {

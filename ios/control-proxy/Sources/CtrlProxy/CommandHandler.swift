@@ -373,12 +373,13 @@ public class CommandHandler: CommandHandling {
 
     private func handleMultiFingerSwipe(
         _ request: RequestMultiFingerSwipe,
-        startTime: Date,
-        defaultFingers: Int = 2
+        startTime: Date
     )
         throws -> WebSocketResponse
     {
-        let fingerCount = request.fingerCount ?? defaultFingers
+        // Both request_two_finger_swipe and request_multi_finger_swipe route here;
+        // fingerCount defaults to 2 when the client omits it (two-finger never sends it).
+        let fingerCount = request.fingerCount ?? 2
         let duration = request.duration ?? 300
         let fingerSpacing = request.offset ?? 25
 
@@ -1473,7 +1474,9 @@ public enum CommandError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case let .unknownCommand(cmd):
-            return "Unknown command: \(cmd)"
+            // Wire text must stay "Unknown command type: <type>" — the TS client's
+            // rewriteUnknownCommandError matches it to warn the runner is stale.
+            return "Unknown command type: \(cmd)"
         case let .missingParameter(param):
             return "Missing required parameter: \(param)"
         case let .invalidParameter(param, value):

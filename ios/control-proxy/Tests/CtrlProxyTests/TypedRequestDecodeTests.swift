@@ -583,29 +583,42 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
 
     // MARK: - Decode rejection (required fields enforced at the wire boundary)
 
+    /// Each command is rejected specifically because its named required field is
+    /// absent — asserting `keyNotFound(<field>)`, not merely "some error", so the
+    /// test proves the required-field contract rather than passing for any reason.
     func testMissingRequiredFieldsAreRejectedAtDecode() {
-        let malformed: [String] = [
-            #"{"type":"request_tap_coordinates","requestId":"x"}"#, // missing x/y
-            #"{"type":"request_swipe","requestId":"x","x1":1,"y1":2}"#, // missing x2/y2
-            #"{"type":"request_pinch","requestId":"x","centerX":1}"#, // missing distances
-            #"{"type":"request_set_text","requestId":"x"}"#, // missing text
-            #"{"type":"request_ime_action","requestId":"x"}"#, // missing action
-            #"{"type":"request_keyboard","requestId":"x"}"#, // missing action
-            #"{"type":"request_press_button","requestId":"x"}"#, // missing action
-            #"{"type":"request_action","requestId":"x"}"#, // missing action
-            #"{"type":"request_launch_app","requestId":"x"}"#, // missing bundleId
-            #"{"type":"request_rotate","requestId":"x"}"#, // missing orientation
-            #"{"type":"request_clipboard","requestId":"x"}"#, // missing action
-            #"{"type":"set_preference","requestId":"x","value":"v"}"#, // missing key/valueType
-            #"{"type":"remove_preference","requestId":"x"}"#, // missing key
-            #"{"type":"set_network_mock_rules","requestId":"x"}"#, // missing rules
+        let cases: [(json: String, missingKey: String)] = [
+            (#"{"type":"request_tap_coordinates","requestId":"x","y":2}"#, "x"),
+            (#"{"type":"request_swipe","requestId":"x","x1":1,"y1":2,"y2":4}"#, "x2"),
+            (#"{"type":"request_pinch","requestId":"x","centerX":1,"centerY":2,"distanceEnd":4}"#, "distanceStart"),
+            (#"{"type":"request_set_text","requestId":"x"}"#, "text"),
+            (#"{"type":"request_ime_action","requestId":"x"}"#, "action"),
+            (#"{"type":"request_keyboard","requestId":"x"}"#, "action"),
+            (#"{"type":"request_press_button","requestId":"x"}"#, "action"),
+            (#"{"type":"request_action","requestId":"x"}"#, "action"),
+            (#"{"type":"request_launch_app","requestId":"x"}"#, "bundleId"),
+            (#"{"type":"request_rotate","requestId":"x"}"#, "orientation"),
+            (#"{"type":"request_clipboard","requestId":"x"}"#, "action"),
+            (#"{"type":"set_preference","requestId":"x","value":"v","valueType":"STRING"}"#, "key"),
+            (#"{"type":"remove_preference","requestId":"x"}"#, "key"),
+            (#"{"type":"set_network_mock_rules","requestId":"x"}"#, "rules"),
         ]
-        for json in malformed {
-            XCTAssertThrowsError(try decodeWebSocketRequest(json), "expected \(json) to be rejected")
+        for (json, missingKey) in cases {
+            XCTAssertThrowsError(try decodeWebSocketRequest(json), "expected \(json) to be rejected") { error in
+                guard case let DecodingError.keyNotFound(key, _) = error else {
+                    return XCTFail("Expected keyNotFound(\(missingKey)) for \(json), got \(error)")
+                }
+                XCTAssertEqual(key.stringValue, missingKey, "wrong missing key for \(json)")
+            }
         }
     }
 
     func testMissingTypeIsRejected() {
-        XCTAssertThrowsError(try decodeWebSocketRequest(#"{"requestId":"x"}"#))
+        XCTAssertThrowsError(try decodeWebSocketRequest(#"{"requestId":"x"}"#)) { error in
+            guard case let DecodingError.keyNotFound(key, _) = error else {
+                return XCTFail("Expected keyNotFound(type), got \(error)")
+            }
+            XCTAssertEqual(key.stringValue, "type")
+        }
     }
 }

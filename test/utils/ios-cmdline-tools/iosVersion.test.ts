@@ -58,10 +58,31 @@ describe("iosMajorVersionFromSimctlListDevices", () => {
     expect(iosMajorVersionFromSimctlListDevices("", udid)).toBeNull();
   });
 
+  test("returns null for valid JSON scalars (never throws)", () => {
+    // `JSON.parse` accepts these; the function must still honor its null contract.
+    expect(iosMajorVersionFromSimctlListDevices("null", udid)).toBeNull();
+    expect(iosMajorVersionFromSimctlListDevices("42", udid)).toBeNull();
+    expect(iosMajorVersionFromSimctlListDevices("\"hi\"", udid)).toBeNull();
+    expect(iosMajorVersionFromSimctlListDevices("[]", udid)).toBeNull();
+    expect(iosMajorVersionFromSimctlListDevices("{\"devices\":null}", udid)).toBeNull();
+  });
+
   test("returns null when the runtime id has no iOS version token", () => {
     const weird = JSON.stringify({
       devices: { "com.apple.CoreSimulator.SimRuntime.watchOS-11-0": [{ udid }] },
     });
     expect(iosMajorVersionFromSimctlListDevices(weird, udid)).toBeNull();
+  });
+
+  test("keeps scanning past a non-iOS runtime that also lists the udid", () => {
+    // A tokenless runtime iterated first must not short-circuit the resolution of
+    // a later iOS runtime that lists the same udid.
+    const multi = JSON.stringify({
+      devices: {
+        "com.apple.CoreSimulator.SimRuntime.watchOS-11-0": [{ udid }],
+        "com.apple.CoreSimulator.SimRuntime.iOS-18-6": [{ udid }],
+      },
+    });
+    expect(iosMajorVersionFromSimctlListDevices(multi, udid)).toBe(18);
   });
 });

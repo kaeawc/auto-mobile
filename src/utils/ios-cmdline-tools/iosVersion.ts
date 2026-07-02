@@ -23,7 +23,7 @@ export function parseIosMajorVersion(version: string | undefined | null): number
  * iOS version token, or the JSON is malformed.
  */
 export function iosMajorVersionFromSimctlListDevices(json: string, udid: string): number | null {
-  let parsed: { devices?: Record<string, Array<{ udid?: string }>> };
+  let parsed: unknown;
   try {
     parsed = JSON.parse(json);
   } catch (error) {
@@ -33,11 +33,22 @@ export function iosMajorVersionFromSimctlListDevices(json: string, udid: string)
     return null;
   }
 
-  const devices = parsed.devices ?? {};
+  // `JSON.parse` accepts scalars ("null", "42", '"x"') that are not usable device
+  // maps; guard the shape before indexing so a valid-but-wrong payload yields the
+  // documented "unknown" (null) rather than a TypeError.
+  if (typeof parsed !== "object" || parsed === null) {
+    return null;
+  }
+  const devices = (parsed as { devices?: Record<string, Array<{ udid?: string }>> }).devices ?? {};
   for (const [runtimeId, deviceList] of Object.entries(devices)) {
     if (Array.isArray(deviceList) && deviceList.some(device => device?.udid === udid)) {
       const match = runtimeId.match(/iOS[-_](\d+)/i);
-      return match ? parseInt(match[1], 10) : null;
+      // Keep scanning: a udid should appear under exactly one runtime, but if an
+      // earlier-iterated runtime id carries no iOS version token, later runtimes
+      // may still resolve it rather than short-circuiting to null.
+      if (match) {
+        return parseInt(match[1], 10);
+      }
     }
   }
   return null;

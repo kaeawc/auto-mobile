@@ -92,20 +92,23 @@ const IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR = 17;
 
 /**
  * iOS 18 moved Do Not Disturb / Focus to the `com.apple.donotdisturbd` daemon
- * (Core Data store + a Focus-assertion model). The legacy
- * `com.apple.donotdisturb.enabled` Darwin notification is no longer authoritative:
- * its state is not persisted past the setting process (notify(3): a key's state
- * only exists while a registration is held) and `donotdisturbd` does not consume
- * it, so a posted toggle can never verify. Apple ships no public API to set
- * Focus/DND, so on iOS 18+ simulators the write path honestly reports unsupported
- * rather than posting a notification that has no effect.
+ * (private Core Data store + a Focus-assertion model). That daemon now owns the
+ * legacy `com.apple.donotdisturb.enabled` Darwin notification and immediately
+ * resets it to its authoritative value: empirically, a value posted via
+ * `notifyutil -s` is read back as `0` from a fresh process even sub-second later,
+ * while an unmanaged notify key (e.g. BiometricKit's) set the same way persists.
+ * So the legacy key neither reflects nor controls the real Focus state — a write
+ * cannot verify and a read is a confident falsehood (always `0`). Apple ships no
+ * public API to read or set Focus/DND, so on iOS 18+ simulators both the read and
+ * write paths honestly report unsupported instead of trusting the dead key.
  */
 const IOS18_SIM_DND_UNSUPPORTED_ERROR =
-  "Do Not Disturb cannot be reliably set on an iOS 18+ simulator: iOS 18 moved Do Not Disturb to "
-  + "the donotdisturbd Focus daemon, and the legacy com.apple.donotdisturb.enabled notification is "
-  + "non-authoritative — its state is not persisted and donotdisturbd does not consume it, so the "
-  + "toggle cannot be verified. iOS exposes no public API to set Focus / Do Not Disturb. Use an "
-  + "iOS 17 or earlier simulator for binary DND automation, or set it manually / via a Shortcuts automation.";
+  "Do Not Disturb cannot be reliably read or set on an iOS 18+ simulator: iOS 18 moved Do Not "
+  + "Disturb to the donotdisturbd Focus daemon, which owns the state in a private store and resets "
+  + "the legacy com.apple.donotdisturb.enabled notification — so that notification neither reflects "
+  + "nor controls the real Focus state. iOS exposes no public API to read or set Focus / Do Not "
+  + "Disturb. Use an iOS 17 or earlier simulator for binary DND automation, or set it manually / via "
+  + "a Shortcuts automation.";
 
 function parseAndroidZenMode(raw: string): DoNotDisturbState {
   const value = raw.trim();
@@ -348,8 +351,22 @@ export class DeviceState {
       };
     }
 
+    const simctl = this.simctl ?? new SimCtlClient(this.device);
+
+    // iOS 18+ simulators: the legacy key is owned/reset by donotdisturbd, so
+    // `notifyutil -g` always reads `0` regardless of the real Focus state. Report
+    // unsupported rather than a confident falsehood — symmetric with the write
+    // path. iOS <18 (and unknown) keep the legacy best-effort read below.
+    const iosMajor = await this.resolveSimulatorIosMajorVersion(simctl);
+    if (iosMajor !== null && iosMajor > IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR) {
+      return {
+        supported: false,
+        capability: "unsupported",
+        error: IOS18_SIM_DND_UNSUPPORTED_ERROR,
+      };
+    }
+
     try {
-      const simctl = this.simctl ?? new SimCtlClient(this.device);
       const result = await simctl.executeCommand(
         iosNotifyutilGetCommand(this.device.deviceId, IOS_DND_NOTIFICATION)
       );
@@ -369,7 +386,9 @@ export class DeviceState {
    * Resolve the simulator's major iOS version. Prefers the version already on the
    * `BootedDevice` (populated by the daemon device pool); falls back to a live
    * `simctl list devices <udid> --json` probe. Returns `null` when the version
-   * cannot be determined, so callers treat it as "unknown".
+   * cannot be determined, so callers treat it as "unknown". Non-iOS runtimes
+   * (visionOS/tvOS/watchOS simulators) also resolve to `null` and fall through to
+   * the harmless legacy path — they are not real DND targets.
    */
   private async resolveSimulatorIosMajorVersion(simctl: IosSimulatorClient): Promise<number | null> {
     const fromDevice = parseIosMajorVersion(this.device.iosVersion ?? this.device.osVersion);
@@ -406,11 +425,11 @@ export class DeviceState {
     const simctl = this.simctl ?? new SimCtlClient(this.device);
 
     // iOS 18+ simulators: the legacy binary-DND notification is dead (DND moved to
-    // donotdisturbd, which does not consume it, and the notify state does not
-    // persist past the setting process — so a posted toggle can never verify).
-    // Report unsupported and issue no misleading notifyutil write, mirroring the
-    // physical-device early return. iOS <18 (and unknown) keep the legacy
-    // best-effort path below.
+    // donotdisturbd, which owns the key and immediately resets it to its
+    // authoritative value — so a posted toggle is overwritten and can never
+    // verify). Report unsupported and issue no misleading notifyutil write,
+    // mirroring the physical-device early return. iOS <18 (and unknown) keep the
+    // legacy best-effort path below.
     const iosMajor = await this.resolveSimulatorIosMajorVersion(simctl);
     if (iosMajor !== null && iosMajor > IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR) {
       return {

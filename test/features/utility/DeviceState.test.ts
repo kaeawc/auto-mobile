@@ -46,6 +46,43 @@ describe("DeviceState", () => {
     });
   });
 
+  test("reads iOS <18 simulator Do Not Disturb from the legacy notifyutil key", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.donotdisturb.enabled",
+      "com.apple.donotdisturb.enabled 1\n"
+    );
+
+    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const result = await deviceState.getState();
+
+    expect(result.success).toBe(true);
+    expect(result.doNotDisturb).toMatchObject({
+      supported: true,
+      capability: "binary",
+      enabled: true,
+      bestEffort: true,
+    });
+  });
+
+  test("reports iOS 18+ simulator Do Not Disturb read as unsupported (dead legacy key)", async () => {
+    const simctl = new FakeSimCtlClient();
+
+    const deviceState = new DeviceState(ios18Simulator, { simctl });
+    const result = await deviceState.getState();
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+    });
+    expect(result.doNotDisturb?.error).toContain("donotdisturbd");
+    expect(result.error).toContain("donotdisturbd");
+    // No misleading `notifyutil -g` read is issued once we know the key is dead.
+    const commands = simctl.getMethodCalls("executeCommand").map(c => c.command as string);
+    expect(commands.some(c => c.includes("notifyutil"))).toBe(false);
+  });
+
   test("sets Android Do Not Disturb with cmd notification and verifies readback", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
@@ -304,6 +341,44 @@ describe("DeviceState", () => {
       verified: false,
     });
     const commands = simctl.getMethodCalls("executeCommand").map(c => c.command as string);
+    expect(commands.some(c => c.includes("notifyutil"))).toBe(false);
+  });
+
+  test("treats iOS 26 simulators as unsupported (> last legacy-supported major)", async () => {
+    const ios26Simulator: BootedDevice = {
+      name: "iPhone 17 Pro",
+      platform: "ios",
+      deviceId: "34C35F33-224C-4E74-B8C0-668FF03E49F5",
+      iosVersion: "26.2",
+    };
+    const simctl = new FakeSimCtlClient();
+
+    const deviceState = new DeviceState(ios26Simulator, { simctl });
+    const result = await deviceState.setState({ doNotDisturb: { enabled: true } });
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb?.capability).toBe("unsupported");
+    const commands = simctl.getMethodCalls("executeCommand").map(c => c.command as string);
+    expect(commands.some(c => c.includes("notifyutil"))).toBe(false);
+  });
+
+  test("resolves the iOS major version from `osVersion` when `iosVersion` is absent", async () => {
+    const osVersionOnlySimulator: BootedDevice = {
+      name: "iPhone 16 Pro",
+      platform: "ios",
+      deviceId: "7B3A3792-DB53-4654-BA94-27A1D305C3B7",
+      osVersion: "18.0",
+    };
+    const simctl = new FakeSimCtlClient();
+
+    const deviceState = new DeviceState(osVersionOnlySimulator, { simctl });
+    const result = await deviceState.setState({ doNotDisturb: { enabled: true } });
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb?.capability).toBe("unsupported");
+    // Resolved from the device field → no live `simctl list devices` probe needed.
+    const commands = simctl.getMethodCalls("executeCommand").map(c => c.command as string);
+    expect(commands.some(c => c.includes("list devices"))).toBe(false);
     expect(commands.some(c => c.includes("notifyutil"))).toBe(false);
   });
 

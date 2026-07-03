@@ -107,6 +107,16 @@ let migrationsPromise: Promise<void> | null = null;
 // `ensureMigrations`) can re-check and rethrow it. The failure is sticky: we
 // never null `migrationsPromise` to auto-retry (see issues #2784/#2786/#2796).
 let migrationsError: Error | null = null;
+// Monotonic generation token fencing off stale migration completions. Nulling
+// `migrationsPromise` in `closeDatabase()` does NOT cancel the still-running
+// detached `startMigrations().then(...)` chain — it runs on its own
+// `migrationDb` and settles independently. If a `getDatabase()` reopen starts a
+// NEW generation of migration state before the old chain settles, the stale
+// handler would overwrite the new generation's `migrationsRun`/`migrationsError`.
+// `ensureMigrationsStarted()` captures this counter when it creates the promise;
+// its handlers only write the globals if their captured generation still matches.
+// `closeDatabase()` bumps it, so any handler from a superseded run no-ops (#2898).
+let migrationsGeneration = 0;
 
 export const DATABASE_STARTUP_MIGRATION_FAILURE =
   "Database startup migrations failed; refusing to run queries until the daemon restarts.";
@@ -192,7 +202,9 @@ async function startMigrations(dbPath: string): Promise<void> {
       lock: createFileMigrationLock(dbPath),
       backup: () => backupDatabaseFile(migrationDb, dbPath),
     });
-    migrationsRun = true;
+    // `migrationsRun` is NOT set here: it is a fenced global written only by the
+    // generation-guarded success handler in `ensureMigrationsStarted()`, so a
+    // superseded run (closeDatabase()+reopen) can't flip it on the new generation.
   } catch (error) {
     logger.error("Failed to run migrations on database initialization:", error);
     throw error;
@@ -203,13 +215,24 @@ async function startMigrations(dbPath: string): Promise<void> {
 
 function ensureMigrationsStarted(dbPath: string): void {
   if (!migrationsRun && !migrationsPromise) {
+    // Capture the generation so a completion that lands after a
+    // closeDatabase()+reopen (which bumps the counter) is dropped instead of
+    // stomping the newer generation's `migrationsRun`/`migrationsError` (#2898).
+    const generation = migrationsGeneration;
     // Resolve (never reject) so a failed migration does not float an unhandled
     // rejection; cache the error for synchronous re-checking by awaiters.
     migrationsPromise = startMigrations(dbPath).then(
       () => {
+        if (generation !== migrationsGeneration) {
+          return; // Superseded run; its DB is already destroyed. Drop silently.
+        }
+        migrationsRun = true;
         migrationsError = null;
       },
       error => {
+        if (generation !== migrationsGeneration) {
+          return; // Superseded run; do not resurrect a stale failure.
+        }
         migrationsError = createStartupMigrationError(error);
       }
     );
@@ -303,6 +326,13 @@ export async function closeDatabase(): Promise<void> {
   migrationsPromise = null;
   migrationsError = null;
   resolvedDbPath = null;
+
+  // Bump the generation so any still-in-flight `startMigrations().then(...)` from
+  // the just-closed generation no-ops when it settles instead of overwriting the
+  // globals a subsequent reopen establishes. Nulling `migrationsPromise` above
+  // drops our reference but cannot cancel the detached chain (it runs on its own
+  // `migrationDb`); the fence is what makes the stale completion inert (#2898).
+  migrationsGeneration += 1;
 
   // Cold-start the write barrier too (issue #2896, follow-up to #2796). Its
   // draining flag latches for the process lifetime, so shutdown's

@@ -82,8 +82,12 @@ describe("updated_at columns default to a real timestamp (#2913)", () => {
     });
 
     test(`${table}: updated_at carries the same evaluated default as its created_at sibling`, async () => {
+      // Inline the table name as a literal (`sql.lit`) rather than a bound
+      // parameter: a parameterized `pragma_table_info(?)` read was observed to
+      // intermittently return a null `dflt_value` under parallel-file load
+      // (a bun:sqlite quirk), which would flake this assertion in CI.
       const columns = await sql<{ name: string; dflt_value: string | null }>`
-        SELECT name, dflt_value FROM pragma_table_info(${table as string})
+        SELECT name, dflt_value FROM pragma_table_info(${sql.lit(table as string)})
       `.execute(db);
       const updatedAt = columns.rows.find(c => c.name === "updated_at");
       const createdAt = columns.rows.find(c => c.name === "created_at");

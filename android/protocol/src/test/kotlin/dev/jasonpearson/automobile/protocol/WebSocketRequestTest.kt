@@ -38,9 +38,22 @@ class WebSocketRequestTest {
 
     assertIs<RequestTapCoordinates>(request)
     assertEquals("tap-1", request.requestId)
-    assertEquals(100, request.x)
-    assertEquals(200, request.y)
+    assertEquals(100.0, request.x)
+    assertEquals(200.0, request.y)
     assertEquals(10L, request.duration) // default
+  }
+
+  @Test
+  fun `deserialize request_tap_coordinates with fractional coordinates`() {
+    // Coordinate fields are Double (#2927): a fractional JSON number must decode
+    // without a kotlinx decode error and preserve the fraction.
+    val message =
+      """{"type":"request_tap_coordinates","requestId":"tap-frac","x":100.5,"y":200.25}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestTapCoordinates>(request)
+    assertEquals(100.5, request.x)
+    assertEquals(200.25, request.y)
   }
 
   @Test
@@ -51,11 +64,38 @@ class WebSocketRequestTest {
 
     assertIs<RequestSwipe>(request)
     assertEquals("swipe-1", request.requestId)
-    assertEquals(0, request.x1)
-    assertEquals(100, request.y1)
-    assertEquals(0, request.x2)
-    assertEquals(500, request.y2)
+    assertEquals(0.0, request.x1)
+    assertEquals(100.0, request.y1)
+    assertEquals(0.0, request.x2)
+    assertEquals(500.0, request.y2)
     assertEquals(400L, request.duration)
+  }
+
+  @Test
+  fun `deserialize request_swipe with fractional coordinates`() {
+    val message =
+      """{"type":"request_swipe","requestId":"swipe-frac","x1":0.5,"y1":100.25,"x2":10.75,"y2":500.125,"duration":400}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestSwipe>(request)
+    assertEquals(0.5, request.x1)
+    assertEquals(100.25, request.y1)
+    assertEquals(10.75, request.x2)
+    assertEquals(500.125, request.y2)
+  }
+
+  @Test
+  fun `deserialize request_two_finger_swipe with fractional coordinates`() {
+    val message =
+      """{"type":"request_two_finger_swipe","requestId":"tfs-frac","x1":0.5,"y1":0.25,"x2":10.75,"y2":20.125,"duration":300,"offset":50}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestTwoFingerSwipe>(request)
+    assertEquals(0.5, request.x1)
+    assertEquals(0.25, request.y1)
+    assertEquals(10.75, request.x2)
+    assertEquals(20.125, request.y2)
+    assertEquals(50, request.offset) // offset stays Int (pixel offset, not a coordinate)
   }
 
   @Test
@@ -66,13 +106,26 @@ class WebSocketRequestTest {
 
     assertIs<RequestDrag>(request)
     assertEquals("drag-1", request.requestId)
-    assertEquals(50, request.x1)
-    assertEquals(50, request.y1)
-    assertEquals(150, request.x2)
-    assertEquals(150, request.y2)
+    assertEquals(50.0, request.x1)
+    assertEquals(50.0, request.y1)
+    assertEquals(150.0, request.x2)
+    assertEquals(150.0, request.y2)
     // Legacy fields are used as fallback
     assertEquals(800L, request.resolvedPressDurationMs)
     assertEquals(500L, request.resolvedDragDurationMs)
+  }
+
+  @Test
+  fun `deserialize request_drag with fractional coordinates`() {
+    val message =
+      """{"type":"request_drag","requestId":"drag-frac","x1":50.5,"y1":50.25,"x2":150.75,"y2":150.125}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestDrag>(request)
+    assertEquals(50.5, request.x1)
+    assertEquals(50.25, request.y1)
+    assertEquals(150.75, request.x2)
+    assertEquals(150.125, request.y2)
   }
 
   @Test
@@ -83,12 +136,28 @@ class WebSocketRequestTest {
 
     assertIs<RequestPinch>(request)
     assertEquals("pinch-1", request.requestId)
-    assertEquals(540, request.centerX)
-    assertEquals(960, request.centerY)
-    assertEquals(100, request.distanceStart)
-    assertEquals(300, request.distanceEnd)
+    assertEquals(540.0, request.centerX)
+    assertEquals(960.0, request.centerY)
+    assertEquals(100.0, request.distanceStart)
+    assertEquals(300.0, request.distanceEnd)
     assertEquals(45.0f, request.rotationDegrees)
     assertEquals(500L, request.duration)
+  }
+
+  @Test
+  fun `deserialize request_pinch with fractional coordinates`() {
+    // The iOS-symmetric case (#2927): sub-pixel center + computed fractional distance
+    // must decode without a kotlinx decode error and keep the fraction.
+    val message =
+      """{"type":"request_pinch","requestId":"pinch-frac","centerX":100.5,"centerY":200.25,"distanceStart":80.5,"distanceEnd":120.75,"rotationDegrees":45.0,"duration":500}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestPinch>(request)
+    assertEquals(100.5, request.centerX)
+    assertEquals(200.25, request.centerY)
+    assertEquals(80.5, request.distanceStart)
+    assertEquals(120.75, request.distanceEnd)
+    assertEquals(45.0f, request.rotationDegrees)
   }
 
   @Test

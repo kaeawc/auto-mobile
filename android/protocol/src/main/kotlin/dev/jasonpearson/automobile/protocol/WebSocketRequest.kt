@@ -45,12 +45,18 @@ data class RequestScreenshot(override val requestId: String? = null) : WebSocket
 // Gesture Requests
 // =============================================================================
 
+// Gesture coordinate fields are `Double` (not `Int`) so fractional/sub-pixel JSON numbers
+// deserialize cleanly instead of throwing an opaque kotlinx decode error, symmetric to the iOS
+// runner (#2909 / PR #2919). `Double` decodes both integer and fractional JSON, so the existing
+// TS rounded path (roundCoordinates:true + Math.round, see CtrlProxyGestures.ts) is unaffected —
+// integer payloads decode to identical `.0` values. Durations, `offset`, and `rotationDegrees` are
+// not coordinates and keep their original types. See #2927.
 @Serializable
 @SerialName("request_tap_coordinates")
 data class RequestTapCoordinates(
   override val requestId: String? = null,
-  val x: Int,
-  val y: Int,
+  val x: Double,
+  val y: Double,
   val duration: Long = 10L,
 ) : WebSocketRequest()
 
@@ -58,10 +64,10 @@ data class RequestTapCoordinates(
 @SerialName("request_swipe")
 data class RequestSwipe(
   override val requestId: String? = null,
-  val x1: Int,
-  val y1: Int,
-  val x2: Int,
-  val y2: Int,
+  val x1: Double,
+  val y1: Double,
+  val x2: Double,
+  val y2: Double,
   val duration: Long = 300L,
 ) : WebSocketRequest()
 
@@ -69,10 +75,10 @@ data class RequestSwipe(
 @SerialName("request_two_finger_swipe")
 data class RequestTwoFingerSwipe(
   override val requestId: String? = null,
-  val x1: Int,
-  val y1: Int,
-  val x2: Int,
-  val y2: Int,
+  val x1: Double,
+  val y1: Double,
+  val x2: Double,
+  val y2: Double,
   val duration: Long = 300L,
   val offset: Int = 100,
 ) : WebSocketRequest()
@@ -81,10 +87,10 @@ data class RequestTwoFingerSwipe(
 @SerialName("request_drag")
 data class RequestDrag(
   override val requestId: String? = null,
-  val x1: Int,
-  val y1: Int,
-  val x2: Int,
-  val y2: Int,
+  val x1: Double,
+  val y1: Double,
+  val x2: Double,
+  val y2: Double,
   val pressDurationMs: Long = 600L,
   val dragDurationMs: Long = 300L,
   val holdDurationMs: Long = 100L,
@@ -105,10 +111,10 @@ data class RequestDrag(
 @SerialName("request_pinch")
 data class RequestPinch(
   override val requestId: String? = null,
-  val centerX: Int,
-  val centerY: Int,
-  val distanceStart: Int,
-  val distanceEnd: Int,
+  val centerX: Double,
+  val centerY: Double,
+  val distanceStart: Double,
+  val distanceEnd: Double,
   val rotationDegrees: Float = 0f,
   val duration: Long = 300L,
 ) : WebSocketRequest()

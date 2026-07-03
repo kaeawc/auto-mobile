@@ -5,6 +5,7 @@ import { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsReposit
 import type { RecordFailureInput } from "../../src/db/failureAnalyticsRepository";
 import { createTestDatabase } from "./testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { DbWriteBarrier } from "../../src/db/dbWriteBarrier";
 
 describe("FailureAnalyticsRepository", () => {
   let db: Kysely<Database>;
@@ -362,6 +363,51 @@ describe("FailureAnalyticsRepository", () => {
       const ackedOnly = await repo.getNotificationsSince({ acknowledged: true });
       expect(ackedOnly.notifications).toHaveLength(1);
       expect(ackedOnly.notifications[0].acknowledged).toBe(true);
+    });
+  });
+
+  describe("shutdown draining (issue #2792)", () => {
+    class RecordingBarrier implements DbWriteBarrier {
+      draining = false;
+      trackCalls = 0;
+      ranCount = 0;
+      isDraining(): boolean { return this.draining; }
+      inFlightCount(): number { return 0; }
+      beginDrain(): void { this.draining = true; }
+      async drain(): Promise<boolean> { return true; }
+      async track<T>(work: () => Promise<T>): Promise<T | undefined> {
+        this.trackCalls += 1;
+        if (this.draining) { return undefined; }
+        this.ranCount += 1;
+        return work();
+      }
+    }
+
+    test("routes background retention cleanup through the barrier", async () => {
+      const barrier = new RecordingBarrier();
+      const barrierRepo = new FailureAnalyticsRepository(timer, db, barrier);
+
+      await barrierRepo.recordFailure(makeFailureInput());
+
+      // The fire-and-forget cleanupRetention() is tracked (exactly once).
+      expect(barrier.trackCalls).toBe(1);
+      expect(barrier.ranCount).toBe(1);
+    });
+
+    test("skips background retention cleanup while draining, still records the failure", async () => {
+      const barrier = new RecordingBarrier();
+      barrier.beginDrain();
+      const barrierRepo = new FailureAnalyticsRepository(timer, db, barrier);
+
+      const occurrenceId = await barrierRepo.recordFailure(makeFailureInput());
+
+      // The foreground failure write still lands...
+      expect(typeof occurrenceId).toBe("string");
+      const groups = await db.selectFrom("failure_groups").selectAll().execute();
+      expect(groups).toHaveLength(1);
+      // ...but the background cleanup was short-circuited by the drain.
+      expect(barrier.trackCalls).toBe(1);
+      expect(barrier.ranCount).toBe(0);
     });
   });
 });

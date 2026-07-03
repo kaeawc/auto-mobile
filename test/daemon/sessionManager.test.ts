@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { DbWriteBarrier } from "../../src/db/dbWriteBarrier";
 
 const HEARTBEAT_ENV_KEYS = [
   "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
@@ -314,6 +315,66 @@ describe("SessionManager", () => {
       expect(released).toHaveLength(1);
       expect(released[0].sessionId).toBe("session-timer");
       expect(released[0].deviceId).toBe("emulator-5556");
+    });
+  });
+
+  describe("shutdown draining (issue #2792)", () => {
+    class RecordingBarrier implements DbWriteBarrier {
+      draining = false;
+      ran: string[] = [];
+      isDraining(): boolean { return this.draining; }
+      inFlightCount(): number { return 0; }
+      beginDrain(): void { this.draining = true; }
+      async drain(): Promise<boolean> { return true; }
+      async track<T>(work: () => Promise<T>): Promise<T | undefined> {
+        if (this.draining) { return undefined; }
+        this.ran.push("ran");
+        return work();
+      }
+    }
+
+    // Minimal repo double capturing the fire-and-forget session writes.
+    function makeRepo(): { repo: any; activity: string[]; released: string[] } {
+      const activity: string[] = [];
+      const released: string[] = [];
+      const repo = {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(sessionId: string): Promise<void> { activity.push(sessionId); },
+        async markReleased(sessionId: string): Promise<void> { released.push(sessionId); },
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      };
+      return { repo, activity, released };
+    }
+
+    test("routes fire-and-forget session activity writes through the barrier", async () => {
+      const { repo, activity } = makeRepo();
+      const barrier = new RecordingBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, barrier);
+      try {
+        await mgr.createSession("s1", "emulator-5554", "android");
+        mgr.recordHeartbeat("s1");
+        await Promise.resolve(); // let the void-tracked write run
+        expect(activity).toContain("s1");
+        expect(barrier.ran.length).toBeGreaterThan(0);
+      } finally {
+        mgr.stopCleanupTimer();
+      }
+    });
+
+    test("skips fire-and-forget session writes while draining", async () => {
+      const { repo, activity } = makeRepo();
+      const barrier = new RecordingBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, barrier);
+      try {
+        await mgr.createSession("s1", "emulator-5554", "android");
+        barrier.beginDrain();
+        mgr.recordHeartbeat("s1");
+        await Promise.resolve();
+        // The heartbeat's activity write was short-circuited by the drain.
+        expect(activity).toHaveLength(0);
+      } finally {
+        mgr.stopCleanupTimer();
+      }
     });
   });
 });

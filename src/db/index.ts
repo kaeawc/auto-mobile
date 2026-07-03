@@ -8,6 +8,12 @@ export {
   DATABASE_STARTUP_MIGRATION_FAILURE,
 } from "./database";
 export { runMigrations } from "./migrator";
+export {
+  type DbWriteBarrier,
+  InMemoryDbWriteBarrier,
+  getDbWriteBarrier,
+  resetDbWriteBarrier,
+} from "./dbWriteBarrier";
 export type {
   Database,
   DeviceConfigTable,

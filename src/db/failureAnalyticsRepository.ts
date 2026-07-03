@@ -12,6 +12,7 @@ import type {
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
 import type {
   FailureType,
   FailureSeverity,
@@ -110,10 +111,12 @@ const STREAM_LIMIT_MAX = 500;
 export class FailureAnalyticsRepository {
   private timer: Timer;
   private db: Kysely<Database> | null;
+  private barrier: DbWriteBarrier;
 
-  constructor(timer: Timer = defaultTimer, db?: Kysely<Database>) {
+  constructor(timer: Timer = defaultTimer, db?: Kysely<Database>, barrier: DbWriteBarrier = getDbWriteBarrier()) {
     this.timer = timer;
     this.db = db ?? null;
+    this.barrier = barrier;
   }
 
   private getDb(): Kysely<Database> {
@@ -255,8 +258,9 @@ export class FailureAnalyticsRepository {
       };
       await db.insertInto("failure_notifications").values(notification).execute();
 
-      // Run retention cleanup in background
-      this.cleanupRetention().catch(() => {});
+      // Run retention cleanup in background, tracked by the shutdown barrier so
+      // this fire-and-forget writer is drained (or skipped) before closeDatabase().
+      this.barrier.track(() => this.cleanupRetention()).catch(() => {});
 
       return occurrenceId;
     } catch (error) {

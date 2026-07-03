@@ -43,6 +43,11 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
     const { client } = fixture.getContext();
     const res: any = await client.callTool({ name: TOOL, arguments: {} });
     expect(res.structuredContent).toBeDefined();
+    // This test asserts the RAW wire envelope, so it must read `structuredContent`
+    // directly rather than via getStructuredField() — that helper is the #2907
+    // production dead-read guard, but here inspecting the pre-strip wire shape is
+    // the whole point of the test.
+    // eslint-disable-next-line no-restricted-syntax -- intentional raw-wire assertion
     expect(res.structuredContent.marker).toBe("probe");
   });
 

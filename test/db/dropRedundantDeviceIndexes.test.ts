@@ -173,6 +173,23 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
     }
   });
 
+  test("storage previous-value lookup (device_id + extra equality predicates) still uses the composite", async () => {
+    // storageEventRepository.ts:33-42 is the only device query with equality
+    // predicates beyond timestamp: WHERE device_id=? AND file_name=? AND key=?
+    // ORDER BY timestamp DESC LIMIT 1. The composite's device_id left-prefix
+    // must still serve it (the extra columns are not indexed either way).
+    await dropUp(db);
+
+    const plan = queryPlan(
+      bunDb,
+      `SELECT value FROM storage_events
+       WHERE device_id = 'dev-1' AND file_name = 'prefs.xml' AND key = 'theme'
+       ORDER BY timestamp DESC LIMIT 1`
+    ).join("\n");
+    expect(plan).toMatch(/SEARCH .*USING INDEX idx_storage_events_device_timestamp/);
+    expect(plan).not.toContain("USE TEMP B-TREE FOR ORDER BY");
+  });
+
   test("retention cutoff (ORDER BY timestamp DESC, no device filter) still uses the timestamp index", async () => {
     await dropUp(db);
 

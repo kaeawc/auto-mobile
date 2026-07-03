@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "./testDbHelper";
-import { up as repairUp } from "../../src/db/migrations/2026_07_03_000_repair_datetime_now_defaults";
+import {
+  up as repairUp,
+  down as repairDown,
+} from "../../src/db/migrations/2026_07_03_000_repair_datetime_now_defaults";
 
 /**
  * Coverage for the data-repair half of issue #2895. Historical databases that
@@ -100,5 +103,50 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
       .executeTakeFirstOrThrow();
 
     expect(secondPass.created_at).toBe(firstPass.created_at);
+  });
+
+  test("rewrites literal CURRENT_TIMESTAMP rows too", async () => {
+    // recomposition_metrics.created_at was declared with the string-literal
+    // "CURRENT_TIMESTAMP" default — the same failure mode, a different literal.
+    await db
+      .insertInto("recomposition_metrics")
+      .values({
+        device_id: "d",
+        session_id: "s",
+        package_name: "p",
+        composable_id: "c",
+        total_count: 1,
+        skip_count: 0,
+        timestamp: "2026-07-03T00:00:00.000Z",
+        created_at: "CURRENT_TIMESTAMP",
+      })
+      .execute();
+
+    await repairUp(db as unknown as Kysely<unknown>);
+
+    const row = await db
+      .selectFrom("recomposition_metrics")
+      .selectAll()
+      .where("device_id", "=", "d")
+      .executeTakeFirstOrThrow();
+
+    expect(row.created_at).not.toBe("CURRENT_TIMESTAMP");
+    expect(Number.isNaN(Date.parse(row.created_at))).toBe(false);
+  });
+
+  test("down() is a safe no-op (irreversible data repair)", async () => {
+    await expect(repairDown()).resolves.toBeUndefined();
+  });
+
+  test("runs as part of the real migration chain (migration is registered)", async () => {
+    // createTestDatabase() ran the full chain via runMigrations; assert the
+    // repair migration actually executed (present in kysely_migration history),
+    // so the fix ships in the real upgrade path — not just when called directly.
+    const executed = await db
+      .selectFrom("kysely_migration" as never)
+      .select("name" as never)
+      .execute();
+    const names = executed.map((r: { name: string }) => r.name);
+    expect(names).toContain("2026_07_03_000_repair_datetime_now_defaults");
   });
 });

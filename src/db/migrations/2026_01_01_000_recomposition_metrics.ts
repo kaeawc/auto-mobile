@@ -1,4 +1,4 @@
-import { Kysely } from "kysely";
+import { Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<any>): Promise<void> {
   await db.schema
@@ -21,7 +21,7 @@ export async function up(db: Kysely<any>): Promise<void> {
     .addColumn("stable_annotated", "integer")
     .addColumn("remembered_count", "integer")
     .addColumn("timestamp", "text", col => col.notNull())
-    .addColumn("created_at", "text", col => col.notNull().defaultTo("CURRENT_TIMESTAMP"))
+    .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(CURRENT_TIMESTAMP)`))
     .execute();
 
   await db.schema

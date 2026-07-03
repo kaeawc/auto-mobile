@@ -188,4 +188,69 @@ describe("CtrlProxyVoiceOver", function() {
       }
     });
   });
+
+  describe("requestVoiceOverActivate", function() {
+    // Regression guard for #2857: VoiceOver activation must ride the existing
+    // `request_action` command (a real `RequestType`), not the phantom
+    // `request_voiceover_action` the runner rejected as "Unknown command type".
+    test("sends request_action (not request_voiceover_action) and passes label + action", async function() {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+
+      try {
+        const resultPromise = client.requestVoiceOverActivate("Submit", "activate");
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMsg.type).toBe("request_action");
+        expect(sentMsg.type).not.toBe("request_voiceover_action");
+        expect(sentMsg.label).toBe("Submit");
+        expect(sentMsg.action).toBe("activate");
+        expect(typeof sentMsg.requestId).toBe("string");
+
+        // The runner replies with action_result, which resolves the request.
+        socket!.simulateMessage(JSON.stringify({
+          type: "action_result",
+          requestId: sentMsg.requestId,
+          success: true,
+          action: "activate",
+          totalTimeMs: 3,
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("maps long_press through the same request_action command", async function() {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+
+      try {
+        const resultPromise = client.requestVoiceOverActivate("Row", "long_press");
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMsg.type).toBe("request_action");
+        expect(sentMsg.action).toBe("long_press");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "action_result",
+          requestId: sentMsg.requestId,
+          success: true,
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await client.close();
+      }
+    });
+  });
 });

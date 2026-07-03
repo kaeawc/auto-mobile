@@ -905,6 +905,45 @@ final class CommandHandlerTests: XCTestCase {
         )
     }
 
+    // MARK: - Node Action Tests
+
+    /// VoiceOver activation (issue #2857) rides `request_action` with action "activate"
+    /// and an accessibility label. The command must decode and reach `performAction`
+    /// with the label preserved, replying `action_result`.
+    func testActionActivateByLabelReachesPerformAction() {
+        let request = WebSocketRequest.action(RequestAction(
+            requestId: "act-activate-1",
+            action: "activate",
+            resourceId: nil,
+            label: "Submit"
+        ))
+
+        guard let actionResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+        XCTAssertEqual(actionResponse.success, true)
+        XCTAssertEqual(actionResponse.type, "action_result")
+
+        let history = fakeGesturePerformer.getActionHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history[0].action, "activate")
+        XCTAssertEqual(history[0].label, "Submit")
+        XCTAssertNil(history[0].resourceId)
+    }
+
+    /// `request_action` decoded straight from the wire the TS client now emits for
+    /// VoiceOver long-press activation.
+    func testActionLongPressDecodesFromWire() throws {
+        let request = try decodeWebSocketRequest(
+            #"{"type":"request_action","requestId":"act-lp-1","action":"long_press","label":"Row"}"#
+        )
+
+        guard let actionResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+        XCTAssertEqual(actionResponse.success, true)
+
+        let history = fakeGesturePerformer.getActionHistory()
+        XCTAssertEqual(history[0].action, "long_press")
+        XCTAssertEqual(history[0].label, "Row")
+    }
+
     // MARK: - Device Control Tests
 
     func testPressHomeSuccess() {

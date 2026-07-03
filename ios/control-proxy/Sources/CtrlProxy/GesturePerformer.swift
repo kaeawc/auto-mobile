@@ -779,7 +779,9 @@ public class GesturePerformer: GesturePerforming {
 
             try runOnMainThread {
                 switch action.lowercased() {
-                case "click", "tap":
+                case "click", "tap", "activate":
+                    // "activate" is the VoiceOver activation gesture (issue #2857); for an
+                    // element located by label it resolves to a tap, matching "click"/"tap".
                     found.tap()
                 case "long_click", "long_press":
                     found.press(forDuration: 1.0)

@@ -78,13 +78,20 @@ export class CtrlProxyVoiceOver {
   }
 
   /**
-   * Request VoiceOver accessibility action on an element by label.
+   * Activate an element by its accessibility label via the runner's node-action path.
+   *
+   * Rides the existing `request_action` command (element lookup by label, then
+   * `activate`→tap / `long_press`→press in the Swift `performAction`) rather than a
+   * dedicated `request_voiceover_action` command, which never existed in the Swift
+   * `RequestType` and so failed to decode on-device — always falling back to a
+   * coordinate tap (issue #2857). The runner replies `action_result`, which decodes
+   * into the same shape as `CtrlProxyVoiceOverActionResult`.
    *
    * @param label - The accessibility label of the target element
    * @param action - The action to perform: "activate" or "long_press"
    * @param timeoutMs - Request timeout in milliseconds (default: 5000)
    * @param perf - Optional performance tracker
-   * @returns VoiceOver action result
+   * @returns Action result
    */
   async requestVoiceOverActivate(
     label: string,
@@ -94,14 +101,14 @@ export class CtrlProxyVoiceOver {
   ): Promise<CtrlProxyVoiceOverActionResult> {
     return sendCommand<CtrlProxyVoiceOverActionResult>(this.context, {
       idPrefix: "voiceover_action",
-      responseType: "voiceover_action",
-      messageType: "request_voiceover_action",
+      responseType: "action",
+      messageType: "request_action",
       params: { label, action },
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
-      timeoutError: () => ({ success: false, error: "Timeout waiting for voiceover_action_result" }),
+      timeoutError: () => ({ success: false, error: "Timeout waiting for action_result" }),
     });
   }
 }

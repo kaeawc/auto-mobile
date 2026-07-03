@@ -128,15 +128,6 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       };
       break;
 
-    case "voiceover_action_result":
-      result = {
-        success: message.success ?? true,
-        action: (message as { action?: string }).action,
-        totalTimeMs: message.totalTimeMs ?? 0,
-        error: message.error,
-      };
-      break;
-
     case "highlight_response":
       result = {
         success: message.success ?? false,

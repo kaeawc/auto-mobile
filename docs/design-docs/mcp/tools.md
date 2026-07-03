@@ -14,6 +14,8 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 - 🔍 `pinchOn` for zoom in/out gestures.
 - 📳 `shake` for accelerometer simulation.
 
+All Interactions tools — including `pinchOn`, which routes coordinate-based pinch/zoom through the runner's synthesized two-finger events — run on **Android** (physical devices and emulators) and **iOS** via the XCUITest CtrlProxy runner. iOS support is currently <kbd>📱 Simulator Only</kbd> (see the [iOS overview](../plat/ios/index.md)). `shake` is the one exception with no physical-iOS path even once physical support lands, because XCTest exposes no shake API for real devices — it returns an actionable error there.
+
 #### App Management
 
 - 📱 Installed apps are exposed via the `automobile:apps` resource with query filters.

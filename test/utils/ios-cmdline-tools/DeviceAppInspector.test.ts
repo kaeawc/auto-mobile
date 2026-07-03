@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { DeviceAppInspector, findProcessIdentifier, findProcessIdByBundle, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppInspector, findProcessIdentifier, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppInspector";
 import { hashAppBundle } from "../../../src/utils/ios-cmdline-tools/AppBundleHasher";
 import { FakeHostControlDeviceAppInspector } from "../../fakes/FakeHostControlDeviceAppInspector";
 
@@ -576,7 +576,7 @@ describe("DeviceAppInspector", () => {
   });
 });
 
-describe("DeviceAppInspector launch/terminate (devicectl)", () => {
+describe("DeviceAppInspector launch (devicectl)", () => {
   const makeExecResult = (stdout = "") => ({
     stdout,
     stderr: "",
@@ -701,96 +701,9 @@ describe("DeviceAppInspector launch/terminate (devicectl)", () => {
     expect(commands.every(c => !c.includes("devicectl"))).toBe(true);
   });
 
-  test("terminateApp kills a known PID via devicectl process terminate --kill", async () => {
-    const commands: string[] = [];
-    const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
-
-    const inspector = createInspector({ exec });
-    await inspector.terminateApp("device-udid", bundleId, 4321);
-
-    const terminateCommand = commands.find(c => c.includes("device process terminate"))!;
-    expect(terminateCommand).toContain("xcrun devicectl device process terminate");
-    expect(terminateCommand).toContain("--device device-udid");
-    expect(terminateCommand).toContain("--pid 4321");
-    expect(terminateCommand).toContain("--kill");
-    // No process lookup needed when the PID is already known.
-    expect(commands.every(c => !c.includes("device info processes"))).toBe(true);
-  });
-
-  test("terminateApp resolves the PID via device info processes then terminates", async () => {
-    const commands: string[] = [];
-    const exec = async (command: string) => {
-      commands.push(command);
-      if (command.includes("device info processes")) {
-        const jsonPath = parseDevicectlJsonOutputPath(command);
-        if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({
-            result: {
-              runningProcesses: [
-                { processIdentifier: 11, executable: "file:///usr/libexec/other" },
-                { processIdentifier: 4321, executable: "file:///CtrlProxyApp.app/CtrlProxyApp", bundleIdentifier: bundleId }
-              ]
-            }
-          }), "utf-8");
-        }
-      }
-      return makeExecResult();
-    };
-
-    const inspector = createInspector({ exec });
-    await inspector.terminateApp("device-udid", bundleId);
-
-    const terminateCommand = commands.find(c => c.includes("device process terminate"))!;
-    expect(terminateCommand).toContain("--pid 4321");
-  });
-
-  test("terminateApp is a no-op when the app is not running", async () => {
-    const commands: string[] = [];
-    const exec = async (command: string) => {
-      commands.push(command);
-      if (command.includes("device info processes")) {
-        const jsonPath = parseDevicectlJsonOutputPath(command);
-        if (jsonPath) {
-          await fs.writeFile(jsonPath, JSON.stringify({
-            result: { runningProcesses: [{ processIdentifier: 11, executable: "file:///usr/libexec/other" }] }
-          }), "utf-8");
-        }
-      }
-      return makeExecResult();
-    };
-
-    const inspector = createInspector({ exec });
-    await inspector.terminateApp("device-udid", bundleId);
-
-    expect(commands.every(c => !c.includes("device process terminate"))).toBe(true);
-  });
-
-  test("terminateApp is a no-op on non-darwin", async () => {
-    const commands: string[] = [];
-    const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
-
-    const inspector = createInspector({ platform: "linux", exec });
-    await inspector.terminateApp("device-udid", bundleId, 4321);
-
-    expect(commands).toEqual([]);
-  });
-
   test("findProcessIdentifier reads result.process.processIdentifier and falls back to a deep search", () => {
     expect(findProcessIdentifier({ result: { process: { processIdentifier: 7 } } })).toBe(7);
     expect(findProcessIdentifier({ a: { b: [{ processIdentifier: 9 }] } })).toBe(9);
     expect(findProcessIdentifier({ result: {} })).toBeUndefined();
-  });
-
-  test("findProcessIdByBundle matches the process referencing the bundle id", () => {
-    const data = {
-      result: {
-        runningProcesses: [
-          { processIdentifier: 1, executable: "file:///a" },
-          { processIdentifier: 2, bundleIdentifier: bundleId }
-        ]
-      }
-    };
-    expect(findProcessIdByBundle(data, bundleId)).toBe(2);
-    expect(findProcessIdByBundle(data, "com.other.app")).toBeUndefined();
   });
 });

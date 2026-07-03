@@ -194,48 +194,6 @@ export const findProcessIdentifier = (data: unknown): number | undefined => {
   return walk(data);
 };
 
-/**
- * Find the PID of a running process that references `bundleId` in a devicectl
- * `device info processes --json-output` payload. Best-effort: devicectl's
- * process listing exposes an executable path and (on some versions) a bundle
- * identifier, but not always a bundle id, so a miss returns `undefined` and the
- * caller treats termination as a no-op — cold-boot semantics still hold because
- * `process launch --terminate-existing` is the authoritative relaunch mechanism.
- */
-export const findProcessIdByBundle = (data: unknown, bundleId: string): number | undefined => {
-  const walk = (node: unknown): number | undefined => {
-    if (!node || typeof node !== "object") {
-      return undefined;
-    }
-    if (Array.isArray(node)) {
-      for (const item of node) {
-        const found = walk(item);
-        if (found !== undefined) {
-          return found;
-        }
-      }
-      return undefined;
-    }
-    const record = node as Record<string, unknown>;
-    if (typeof record.processIdentifier === "number") {
-      const referencesBundle = Object.values(record).some(
-        value => typeof value === "string" && value.includes(bundleId)
-      );
-      if (referencesBundle) {
-        return record.processIdentifier;
-      }
-    }
-    for (const value of Object.values(record)) {
-      const found = walk(value);
-      if (found !== undefined) {
-        return found;
-      }
-    }
-    return undefined;
-  };
-  return walk(data);
-};
-
 const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: string): boolean =>
   bundleId.endsWith(".XCTestServiceApp") &&
   (errorMessage.includes("No such file or directory") ||
@@ -467,8 +425,14 @@ export class DeviceAppInspector {
    * Mirrors {@link SimCtlClient.launchApp}'s `{ success; pid?; error? }` contract
    * so `LaunchApp.executeiOS` can substitute this for the simctl path without
    * changing downstream handling. `terminateExisting` maps to
-   * `--terminate-existing` (cold-boot relaunch); devicectl has no
-   * foreground-if-running verb, so warm launches also relaunch.
+   * `--terminate-existing`, which is the authoritative cold-boot relaunch: it
+   * terminates any already-running instance and starts a fresh process (which
+   * foregrounds). devicectl has no foreground-if-running verb, so warm launches
+   * also relaunch this way. This subsumes a separate "terminate then launch" —
+   * there is intentionally no standalone devicectl terminate here, because
+   * devicectl's `info processes` listing exposes no stable bundle-id field to
+   * resolve a PID by bundle (only `install`/`info apps` do), so a reliable
+   * terminate-by-bundle needs the follow-up device app-listing work.
    *
    * Gated to macOS + local devicectl. Host control (Docker) exposes no launch
    * bridge, so we return an explicit, actionable error rather than a confusing
@@ -514,83 +478,6 @@ export class DeviceAppInspector {
       return { success: true, pid };
     } catch (error) {
       return { success: false, error: getErrorMessage(error) };
-    } finally {
-      await this.deps.rm(tempDir);
-    }
-  }
-
-  /**
-   * Terminate a running app on a physical iOS device. Prefer a PID cached from a
-   * prior launch; otherwise resolve it from `device info processes`. A not-running
-   * app (no resolvable PID) is a no-op, matching simctl's "found nothing to
-   * terminate" behaviour. Uses `--kill` (SIGKILL) for a hard, cold-boot terminate.
-   *
-   * Gated to macOS + local devicectl; best-effort under host control (no launch
-   * lifecycle to manage there) and non-darwin.
-   */
-  public async terminateApp(deviceUdid: string, bundleId: string, knownPid?: number): Promise<void> {
-    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
-    if (useHostControl) {
-      this.deps.logger.warn(
-        `[DeviceAppInspector] Terminating ${bundleId} on a physical device is not supported under host control`
-      );
-      return;
-    }
-
-    if (this.deps.platform() !== "darwin") {
-      return;
-    }
-
-    const pid = knownPid ?? await this.findRunningPid(deviceUdid, bundleId);
-    if (pid === undefined) {
-      return;
-    }
-
-    const command = [
-      "xcrun",
-      "devicectl",
-      "device",
-      "process",
-      "terminate",
-      "--device", deviceUdid,
-      "--pid", String(pid),
-      "--kill",
-      "--quiet"
-    ].join(" ");
-    await this.deps.exec(command);
-  }
-
-  /**
-   * Resolve the PID of a running app on a physical device via
-   * `devicectl device info processes`, matching a process that references
-   * `bundleId`. Returns `undefined` on any failure or miss (see
-   * {@link findProcessIdByBundle} for the best-effort matching contract).
-   */
-  private async findRunningPid(deviceUdid: string, bundleId: string): Promise<number | undefined> {
-    if (this.deps.platform() !== "darwin") {
-      return undefined;
-    }
-
-    const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-procs-"));
-    const jsonPath = join(tempDir, "processes.json");
-    try {
-      const command = [
-        "xcrun",
-        "devicectl",
-        "device",
-        "info",
-        "processes",
-        "--device", deviceUdid,
-        "--json-output", quoteShell(jsonPath),
-        "--quiet"
-      ].join(" ");
-      await this.deps.exec(command);
-
-      const raw = await this.deps.readFile(jsonPath);
-      return findProcessIdByBundle(JSON.parse(raw), bundleId);
-    } catch (error) {
-      this.deps.logger.warn(`[DeviceAppInspector] Failed to resolve running PID for ${bundleId}: ${getErrorMessage(error)}`);
-      return undefined;
     } finally {
       await this.deps.rm(tempDir);
     }

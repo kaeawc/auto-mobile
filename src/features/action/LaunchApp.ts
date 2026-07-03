@@ -31,9 +31,11 @@ export interface InstalledAppsProvider {
 }
 
 /**
- * Launch/terminate an app on a physical iOS device via devicectl. Narrow
- * injection point so tests never shell out; parallels `DeviceAppUninstaller`
- * in UninstallApp. Implemented by `DeviceAppInspector`.
+ * Launch an app on a physical iOS device via devicectl. Narrow injection point
+ * so tests never shell out; parallels `DeviceAppUninstaller` in UninstallApp.
+ * Implemented by `DeviceAppInspector`. `terminateExisting` provides cold-boot
+ * relaunch (terminate + fresh process); there is no standalone device terminate
+ * here because devicectl cannot reliably resolve a PID by bundle id (deferred).
  */
 export interface DeviceAppLauncher {
   launchApp(
@@ -41,7 +43,6 @@ export interface DeviceAppLauncher {
     bundleId: string,
     options?: { terminateExisting?: boolean }
   ): Promise<{ success: boolean; pid?: number; error?: string }>;
-  terminateApp(deviceUdid: string, bundleId: string, knownPid?: number): Promise<void>;
 }
 
 interface LaunchAppDependencies {
@@ -299,17 +300,20 @@ export class LaunchApp extends BaseVisualChange {
           // XCUIApplication.launch() is slow for heavy apps (10s+ timeout) while
           // simctl launch completes in ~500ms. CtrlProxy's value is in the
           // activate() fast path, not cold boot.
-          await perf.track("terminateApp", async () => {
-            try {
-              if (simulator) {
+          if (simulator) {
+            // simctl launch does not terminate an already-running instance, so
+            // terminate first for cold-boot semantics. Physical devices skip this:
+            // the devicectl launch below passes `--terminate-existing`, which is
+            // the authoritative cold-boot relaunch (an explicit pre-terminate
+            // would add a redundant round-trip).
+            await perf.track("terminateApp", async () => {
+              try {
                 await this.simctl.terminateApp(bundleId);
-              } else {
-                await this.deviceAppLauncher.terminateApp(this.device.deviceId, bundleId);
+              } catch {
+                // App might not be running
               }
-            } catch {
-              // App might not be running
-            }
-          });
+            });
+          }
 
           // Wipe the app's data container (fastest iOS "clear data": no reinstall,
           // keeps permission grants). System bundles (com.apple.*) are skipped —

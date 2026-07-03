@@ -605,14 +605,16 @@ describe("LaunchApp", () => {
       }
     });
 
-    test("cold boot terminates via devicectl before launching", async () => {
+    test("cold boot on a device issues no separate terminate — --terminate-existing carries cold-boot semantics", async () => {
       fakeTimer.enableAutoAdvance();
-      const { iosLaunchApp, deviceAppLauncher, cleanup } = createDeviceHarness({ deviceId: physicalUdid });
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({ deviceId: physicalUdid });
       try {
         await iosLaunchApp.execute(userBundleId, false, true);
-        expect(deviceAppLauncher.terminateCalls).toHaveLength(1);
-        expect(deviceAppLauncher.terminateCalls[0]).toMatchObject({ deviceUdid: physicalUdid, bundleId: userBundleId });
+        // Exactly one devicectl round-trip: the launch (with --terminate-existing).
+        // No separate pre-terminate call, and simctl is never touched on a device.
         expect(deviceAppLauncher.launchCalls).toHaveLength(1);
+        expect(deviceAppLauncher.launchCalls[0].terminateExisting).toBe(true);
+        expect(simctlCalls).toEqual([]);
       } finally {
         cleanup();
       }
@@ -624,8 +626,6 @@ describe("LaunchApp", () => {
       try {
         const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ false, /* coldBoot */ false);
         expect(result.success).toBe(true);
-        // Warm path does not pre-terminate; it relaunches with terminateExisting.
-        expect(deviceAppLauncher.terminateCalls).toHaveLength(0);
         expect(deviceAppLauncher.launchCalls).toHaveLength(1);
         expect(deviceAppLauncher.launchCalls[0].terminateExisting).toBe(true);
         expect(simctlCalls).toEqual([]);
@@ -658,7 +658,6 @@ describe("LaunchApp", () => {
         // Simulator path untouched: simctl used, devicectl launcher never called.
         expect(simctlCalls.some(c => c === `launch:${userBundleId}`)).toBe(true);
         expect(deviceAppLauncher.launchCalls).toHaveLength(0);
-        expect(deviceAppLauncher.terminateCalls).toHaveLength(0);
       } finally {
         cleanup();
       }

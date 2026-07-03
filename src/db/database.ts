@@ -321,6 +321,44 @@ export function getMigrationsError(): Error | null {
 }
 
 /**
+ * Reset every piece of module-global state that outlives a single DB connection
+ * so a same-process reopen behaves like a cold start. This is THE one place the
+ * "reopen == cold start" contract is expressed (issue #2900): a future reset
+ * hangs off here, not off a fresh call site, so there is exactly one function to
+ * grep and extend. Called by `closeDatabase()` unconditionally (partial-init
+ * cleanup); inert in the daemon, whose only caller is shutdown-then-exit.
+ *
+ * Two resets with two different lifecycle semantics live here as deliberate
+ * siblings:
+ *
+ * - `lifecycle.reset()` clears the migration/path state machine as a set (issue
+ *   #2796). Leaving any field set would let `ensureMigrationsStarted()` no-op and
+ *   `waitForMigrationsBeforeQuery()` short-circuit (skipping migration gating on
+ *   the new connection), rethrow a stale startup error against an
+ *   otherwise-healthy reopened DB, or redirect the reopen to the stale
+ *   `resolvedDbPath` instead of re-reading AUTOMOBILE_DB_PATH / AUTOMOBILE_DB_DIR.
+ *   In the daemon this is inert and the "path always matches" invariant from
+ *   resolveDbPath() holds; the reset is what gives tests full isolation.
+ *
+ * - `resetDbWriteBarrier()` cold-starts the write barrier (issue #2896). Its
+ *   draining flag latches for the process lifetime, so shutdown's
+ *   `getDbWriteBarrier().drain(...)` before close (issue #2792 ordering) would
+ *   otherwise leave the shared barrier permanently draining, and any future
+ *   in-process reopen (config reload / DB path switch / restart-without-exit)
+ *   would silently skip every tracked best-effort write against the reopened DB.
+ *   This is an identity swap in a separate, already-encapsulated module
+ *   (`dbWriteBarrier.ts`), not part of the migration/path state machine — hence a
+ *   sibling call here rather than a field on `MigrationLifecycleState`. It only
+ *   covers consumers that resolve `getDbWriteBarrier()` at use-time;
+ *   construction-captured consumers keep their pinned barrier and remain the
+ *   documented reopen exception (#2912).
+ */
+function resetDatabaseLifecycleForReopen(): void {
+  lifecycle.reset();
+  resetDbWriteBarrier();
+}
+
+/**
  * Close the database connection.
  * Call this during graceful shutdown.
  */
@@ -330,39 +368,10 @@ export async function closeDatabase(): Promise<void> {
     dbInstance = null;
   }
 
-  // Reset the module-global state that outlives the connection so a same-process
-  // reopen behaves like a cold start (issue #2796). This is done unconditionally
-  // — outside the `if (dbInstance)` guard — so a partially-initialized state
-  // (migrations started but `dbInstance` already nulled) is still cleaned up.
-  //
-  // The migration/path lifecycle is now one object reset as a set (issue #2900):
-  // leaving any field set would let `ensureMigrationsStarted()` no-op and
-  // `waitForMigrationsBeforeQuery()` short-circuit (skipping migration gating on
-  // the new connection), rethrow a stale startup error against an
-  // otherwise-healthy reopened DB, or redirect the reopen to the stale
-  // `resolvedDbPath` instead of re-reading AUTOMOBILE_DB_PATH / AUTOMOBILE_DB_DIR.
-  // In the daemon the only caller is shutdown-then-exit (daemon.ts), so this is
-  // inert there and the "path always matches" invariant from resolveDbPath()
-  // holds; the reset is what gives tests full isolation.
-  lifecycle.reset();
-
-  // Cold-start the write barrier too (issue #2896, follow-up to #2796). Its
-  // draining flag latches for the process lifetime, so shutdown's
-  // `getDbWriteBarrier().drain(...)` before this close (issue #2792 ordering)
-  // would otherwise leave the shared barrier permanently draining. Any future
-  // in-process reopen (config reload / DB path switch / restart-without-exit)
-  // would then silently skip every tracked best-effort write against the
-  // reopened DB. Resetting here extends the "reopen behaves like a cold start"
-  // contract to the write barrier for consumers that resolve
-  // `getDbWriteBarrier()` at use-time; construction-captured consumers keep
-  // their pinned barrier and remain the documented reopen exception (#2912).
-  // Inert in the daemon, where the only caller is
-  // shutdown-then-`process.exit`. This is a deliberate sibling of
-  // `lifecycle.reset()` rather than a field on it: the barrier is a separate,
-  // already-encapsulated module global (`dbWriteBarrier.ts`), not part of the
-  // migration/path state machine. `closeDatabase()` is the single place that
-  // expresses "reopen == cold start"; keep both resets here together (#2900).
-  resetDbWriteBarrier();
+  // Reset unconditionally — outside the `if (dbInstance)` guard — so a
+  // partially-initialized state (migrations started but `dbInstance` already
+  // nulled) is still cleaned up.
+  resetDatabaseLifecycleForReopen();
 }
 
 /**

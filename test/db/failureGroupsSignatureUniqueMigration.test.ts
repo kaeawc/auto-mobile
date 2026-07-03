@@ -43,6 +43,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     firstOccurrence: number;
     totalCount: number;
     uniqueSessions: number;
+    lastOccurrence?: number;
     type?: string;
   }): Promise<void> {
     await db
@@ -55,7 +56,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
         message: "m",
         severity: "critical",
         first_occurrence: overrides.firstOccurrence,
-        last_occurrence: overrides.firstOccurrence,
+        last_occurrence: overrides.lastOccurrence ?? overrides.firstOccurrence,
         total_count: overrides.totalCount,
         unique_sessions: overrides.uniqueSessions,
         stack_trace_json: null,
@@ -103,9 +104,25 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
   }
 
   test("collapses duplicate-signature groups into the earliest keeper and repoints occurrences (FK-safe)", async () => {
-    // Keeper A (earlier first_occurrence) and loser B share a signature.
-    await seedGroup({ id: "A", signature: "sig-x", firstOccurrence: 100, totalCount: 3, uniqueSessions: 2 });
-    await seedGroup({ id: "B", signature: "sig-x", firstOccurrence: 200, totalCount: 2, uniqueSessions: 2 });
+    // Keeper A (earlier first_occurrence) and loser B share a signature. B has a
+    // MORE RECENT last_occurrence, which the keeper must inherit so the dashboard
+    // (ordered by last_occurrence) does not sort the collapsed group as stale.
+    await seedGroup({
+      id: "A",
+      signature: "sig-x",
+      firstOccurrence: 100,
+      lastOccurrence: 150,
+      totalCount: 3,
+      uniqueSessions: 2,
+    });
+    await seedGroup({
+      id: "B",
+      signature: "sig-x",
+      firstOccurrence: 200,
+      lastOccurrence: 900,
+      totalCount: 2,
+      uniqueSessions: 2,
+    });
     // A has sessions s1, s2; B has sessions s2, s3.
     await seedOccurrence("occ-a1", "A", "s1");
     await seedOccurrence("occ-a2", "A", "s2");
@@ -121,6 +138,8 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     expect(groups[0].id).toBe("A");
     // total_count is the SUM of the duplicate groups' historical counts.
     expect(groups[0].total_count).toBe(5);
+    // last_occurrence is the MAX across duplicates (B's 900), not the keeper's own.
+    expect(groups[0].last_occurrence).toBe(900);
     // unique_sessions is DERIVED from the surviving occurrences: {s1, s2, s3}.
     expect(groups[0].unique_sessions).toBe(3);
 

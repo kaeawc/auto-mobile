@@ -91,6 +91,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
           FROM failure_groups g2
           WHERE g2.signature = failure_groups.signature
         ),
+        last_occurrence = (
+          SELECT MAX(g2.last_occurrence)
+          FROM failure_groups g2
+          WHERE g2.signature = failure_groups.signature
+        ),
         unique_sessions = (
           SELECT COUNT(DISTINCT o.session_id)
           FROM failure_occurrences o

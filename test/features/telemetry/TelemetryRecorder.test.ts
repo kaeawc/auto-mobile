@@ -514,7 +514,7 @@ describe("TelemetryRecorder", () => {
   describe("shutdown draining (issue #2792)", () => {
     it("skips the DB write once the barrier is draining, still pushes to socket (A5)", async () => {
       const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
-      const drainingRecorder = new TelemetryRecorder(repo, () => pushTarget, barrier);
+      const drainingRecorder = new TelemetryRecorder(repo, () => pushTarget, () => barrier);
       drainingRecorder.setContext("device-1", "session-1");
       barrier.beginDrain();
 
@@ -537,7 +537,7 @@ describe("TelemetryRecorder", () => {
     it("does not throw to callers when draining even if the repo would fail", async () => {
       repo.shouldThrow = true;
       const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
-      const drainingRecorder = new TelemetryRecorder(repo, () => pushTarget, barrier);
+      const drainingRecorder = new TelemetryRecorder(repo, () => pushTarget, () => barrier);
       barrier.beginDrain();
 
       // Would throw "db error" if the write were attempted; draining skips it.
@@ -558,7 +558,7 @@ describe("TelemetryRecorder", () => {
           await new Promise<void>(r => { resolveWrite = r; });
         },
       };
-      const slowRecorder = new TelemetryRecorder(slowRepo, () => pushTarget, barrier);
+      const slowRecorder = new TelemetryRecorder(slowRepo, () => pushTarget, () => barrier);
 
       const p = slowRecorder.recordLogEvent({
         timestamp: 1, applicationId: null, level: 3, tag: "t", message: "m", filterName: "f",

@@ -385,7 +385,7 @@ describe("FailureAnalyticsRepository", () => {
 
     test("routes background retention cleanup through the barrier", async () => {
       const barrier = new RecordingBarrier();
-      const barrierRepo = new FailureAnalyticsRepository(timer, db, barrier);
+      const barrierRepo = new FailureAnalyticsRepository(timer, db, () => barrier);
 
       await barrierRepo.recordFailure(makeFailureInput());
 
@@ -397,7 +397,7 @@ describe("FailureAnalyticsRepository", () => {
     test("skips background retention cleanup while draining, still records the failure", async () => {
       const barrier = new RecordingBarrier();
       barrier.beginDrain();
-      const barrierRepo = new FailureAnalyticsRepository(timer, db, barrier);
+      const barrierRepo = new FailureAnalyticsRepository(timer, db, () => barrier);
 
       const occurrenceId = await barrierRepo.recordFailure(makeFailureInput());
 

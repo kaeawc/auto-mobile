@@ -349,7 +349,7 @@ describe("SessionManager", () => {
     test("routes fire-and-forget session activity writes through the barrier", async () => {
       const { repo, activity } = makeRepo();
       const barrier = new RecordingBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, barrier);
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         mgr.recordHeartbeat("s1");
@@ -364,7 +364,7 @@ describe("SessionManager", () => {
     test("skips fire-and-forget session writes while draining", async () => {
       const { repo, activity } = makeRepo();
       const barrier = new RecordingBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, barrier);
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         barrier.beginDrain();

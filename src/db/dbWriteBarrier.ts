@@ -33,12 +33,13 @@ export interface DbWriteBarrier {
    * whether a real shutdown drain-then-reopen or a test restart — resolves a
    * fresh, non-draining barrier from {@link getDbWriteBarrier} (issue #2896).
    *
-   * This only covers consumers that resolve `getDbWriteBarrier()` at use-time.
-   * Consumers that capture a barrier once at construction (TelemetryRecorder,
-   * FailureAnalyticsRepository, SessionManager — all injected) keep their
-   * pinned instance across the null-swap, so a future in-process reopen path
-   * MUST reconstruct them (or the barrier lifecycle must move to in-place
-   * reset). Inert today: no in-process reopen path exists — see #2912.
+   * Every shared-barrier consumer resolves `getDbWriteBarrier()` at use-time
+   * (per-write), so the {@link resetDbWriteBarrier} identity swap reaches all of
+   * them — none capture the instance at construction. TelemetryRecorder,
+   * FailureAnalyticsRepository and SessionManager were converted from a captured
+   * field to a per-write resolver in #2912 (decision (a)); AndroidCtrlProxyClient
+   * already resolved fresh per call. A future in-process reopen path therefore
+   * needs no consumer reconstruction and no in-place barrier reset.
    */
   beginDrain(): void;
 
@@ -139,11 +140,16 @@ export function getDbWriteBarrier(): DbWriteBarrier {
  * flag would otherwise latch for the process lifetime after a shutdown drain —
  * and by tests for isolation.
  *
- * Identity swap, not in-place reset: callers holding a captured reference keep
- * the old instance (see {@link beginDrain}). That is intentional for today's
- * only caller — the daemon closes then exits, so leaving captured barriers
- * draining keeps a late best-effort write safely short-circuited instead of
- * hitting the just-destroyed connection.
+ * Identity swap, not in-place reset (issue #2912 decision (a)). Now that every
+ * shared-barrier consumer re-resolves {@link getDbWriteBarrier} per write (see
+ * {@link beginDrain}), the swap reaches all of them: in the drain→close window a
+ * late write still resolves the *previous*, still-draining barrier and
+ * short-circuits (the #2792 safety margin); only after this reset does a new
+ * write resolve the fresh non-draining barrier. Kept as an identity swap rather
+ * than an in-place `#draining` clear because, with all consumers per-write, the
+ * two are behaviorally equivalent — so in-place reset (issue option (b)) would
+ * only grow the {@link DbWriteBarrier} interface with a `reset()` for no benefit
+ * while no in-process reopen path exists. Revisit if one is added.
  */
 export function resetDbWriteBarrier(): void {
   sharedBarrier = null;

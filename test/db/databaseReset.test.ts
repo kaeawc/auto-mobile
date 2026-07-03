@@ -1,0 +1,171 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import path from "path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
+import { defaultTimer } from "../../src/utils/SystemTimer";
+
+/**
+ * Regression tests for issue #2796.
+ *
+ * `closeDatabase()` destroys the Kysely instance but historically left the
+ * module-global migration state machine (`migrationsRun` / `migrationsPromise`
+ * / `migrationsError`) and the cached `resolvedDbPath` set. A same-process
+ * reopen therefore inherited stale state: `ensureMigrationsStarted()` no-ops
+ * because `migrationsRun` is still true, `waitForMigrationsBeforeQuery()`
+ * short-circuits, and the new connection issues queries against a possibly
+ * unmigrated schema — or throws a stale cached startup error against an
+ * otherwise-healthy new DB. The fix resets all four globals unconditionally so
+ * a reopen behaves like a cold start.
+ *
+ * These globals are module-scoped and not exported, so each assertion drives
+ * the reset through observable behavior (re-migration / re-resolution) rather
+ * than reading internals directly.
+ */
+describe("closeDatabase resets migration + path globals (issue #2796)", () => {
+  const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+  const originalDbDir = process.env.AUTOMOBILE_DB_DIR;
+  const originalDbPath = process.env.AUTOMOBILE_DB_PATH;
+  const originalMigrationsDir = process.env.AUTOMOBILE_MIGRATIONS_DIR;
+  const originalLegacyMigrationsDir = process.env.AUTO_MOBILE_MIGRATIONS_DIR;
+
+  function restore(key: string, value: string | undefined): void {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    restore(DAEMON_LAUNCH_CWD_ENV, originalLaunchCwd);
+    restore("AUTOMOBILE_DB_DIR", originalDbDir);
+    restore("AUTOMOBILE_DB_PATH", originalDbPath);
+    restore("AUTOMOBILE_MIGRATIONS_DIR", originalMigrationsDir);
+    restore("AUTO_MOBILE_MIGRATIONS_DIR", originalLegacyMigrationsDir);
+    for (const dir of tempDirs.splice(0)) {
+      await removeTempDirWithRetry(dir);
+    }
+  });
+
+  async function importFreshDatabaseModule() {
+    // Fresh module instance so its lazy globals are not shared with other tests.
+    return import(`../../src/db/database.ts?reset-test=${Date.now()}-${Math.random()}`);
+  }
+
+  async function makeTempDbDir(prefix: string): Promise<string> {
+    const dir = await mkdtemp(path.join(tmpdir(), prefix));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  async function removeTempDirWithRetry(dir: string): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        await rm(dir, { recursive: true, force: true });
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
+          throw error;
+        }
+        await defaultTimer.sleep(50);
+      }
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
+
+  function queryToolCalls(db: any) {
+    return db
+      .selectFrom("tool_calls" as any)
+      .selectAll()
+      .execute();
+  }
+
+  test("reopen after close re-runs migrations against a fresh DB (migrationsRun reset)", async () => {
+    const firstDir = await makeTempDbDir("auto-mobile-reset-first-");
+    process.env.AUTOMOBILE_DB_DIR = firstDir;
+    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+
+    const databaseModule = await importFreshDatabaseModule();
+
+    // Cold start on the first DB: migrations run, migrationsRun becomes true.
+    const firstDb = databaseModule.getDatabase();
+    expect(await queryToolCalls(firstDb)).toEqual([]);
+
+    await databaseModule.closeDatabase();
+
+    // Point at a brand-new, empty DB dir and reopen in the same process.
+    const secondDir = await makeTempDbDir("auto-mobile-reset-second-");
+    process.env.AUTOMOBILE_DB_DIR = secondDir;
+
+    // The reopen must bind the fresh file (resolvedDbPath reset), otherwise the
+    // stale path cache silently redirects back to the first (already-migrated)
+    // DB and masks the migrationsRun bug below.
+    expect(databaseModule.getDatabasePath()).toBe(path.join(secondDir, "auto-mobile.db"));
+
+    // And against that fresh, empty file migrations must re-run (migrationsRun
+    // reset). If they don't, ensureMigrationsStarted() no-ops and the query
+    // hits an unmigrated schema -> "no such table: tool_calls".
+    const secondDb = databaseModule.getDatabase();
+    expect(await queryToolCalls(secondDb)).toEqual([]);
+
+    await databaseModule.closeDatabase();
+  });
+
+  test("reopen after close re-resolves the DB path under a changed env (resolvedDbPath reset)", async () => {
+    const firstDir = await makeTempDbDir("auto-mobile-reset-path-first-");
+    process.env.AUTOMOBILE_DB_DIR = firstDir;
+    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+
+    const databaseModule = await importFreshDatabaseModule();
+
+    // Resolve + open once so resolvedDbPath is cached.
+    databaseModule.getDatabase();
+    expect(databaseModule.getDatabasePath()).toBe(path.join(firstDir, "auto-mobile.db"));
+
+    await databaseModule.closeDatabase();
+
+    // A changed env after close must be re-read (cache cleared).
+    const secondDir = await makeTempDbDir("auto-mobile-reset-path-second-");
+    process.env.AUTOMOBILE_DB_DIR = secondDir;
+
+    expect(databaseModule.getDatabasePath()).toBe(path.join(secondDir, "auto-mobile.db"));
+  });
+
+  test("reopen after a failed boot behaves like a cold start (migrationsError reset)", async () => {
+    const failDir = await makeTempDbDir("auto-mobile-reset-fail-");
+    process.env.AUTOMOBILE_DB_DIR = failDir;
+    // Force a startup-migration failure: a migrations dir that does not exist.
+    process.env.AUTOMOBILE_MIGRATIONS_DIR = path.join(failDir, "missing-migrations");
+    delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
+    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+
+    const databaseModule = await importFreshDatabaseModule();
+
+    const failingDb = databaseModule.getDatabase();
+    await expect(queryToolCalls(failingDb)).rejects.toThrow(
+      "Database startup migrations failed; refusing to run queries until the daemon restarts."
+    );
+    expect(databaseModule.getMigrationsError()).not.toBeNull();
+
+    await databaseModule.closeDatabase();
+
+    // The cached error must not survive the close.
+    expect(databaseModule.getMigrationsError()).toBeNull();
+
+    // Reopen with a valid migrations dir + fresh DB: it must migrate cleanly and
+    // NOT rethrow the stale error from the failed boot.
+    const healthyDir = await makeTempDbDir("auto-mobile-reset-healthy-");
+    process.env.AUTOMOBILE_DB_DIR = healthyDir;
+    delete process.env.AUTOMOBILE_MIGRATIONS_DIR;
+
+    const healthyDb = databaseModule.getDatabase();
+    expect(await queryToolCalls(healthyDb)).toEqual([]);
+    expect(databaseModule.getMigrationsError()).toBeNull();
+
+    await databaseModule.closeDatabase();
+  });
+});

@@ -290,6 +290,24 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         XCTAssertEqual(history.first?.endY ?? .nan, 40.75, accuracy: 0.0001)
     }
 
+    /// Negative fractional coordinates are a legitimate computed input (e.g. an
+    /// off-screen anchor or a delta relative to an origin). Asserts the exact
+    /// values survive at the payload-decode boundary — not merely that decode
+    /// did not throw — so a future accidental re-narrowing to `Int` (which would
+    /// truncate the fraction and reject nothing) is caught.
+    func testGestureCoordinatesDecodeNegativeFractionalAtBoundary() throws {
+        let request = try decodeWebSocketRequest(
+            #"{"type":"request_swipe","requestId":"neg-1","x1":-5.5,"y1":0.25,"x2":30.75,"y2":-40.5}"#
+        )
+        guard case let .swipe(payload) = request else {
+            return XCTFail("Expected .swipe, got \(request)")
+        }
+        XCTAssertEqual(payload.x1, -5.5, accuracy: 0.0001)
+        XCTAssertEqual(payload.y1, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(payload.x2, 30.75, accuracy: 0.0001)
+        XCTAssertEqual(payload.y2, -40.5, accuracy: 0.0001)
+    }
+
     func testPinchDecodeAcceptsFractionalCoordinates() {
         let response = dispatch(
             #"""

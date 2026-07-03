@@ -215,110 +215,21 @@ describe("finalizeToolResponse", () => {
     expect(root["view-id"]).toBeUndefined();
     expect(root.clickable).toBeUndefined();
   });
-});
 
-/**
- * toolResultsNoStructuredContent gate (issue #2899). When enabled,
- * finalizeToolResponse strips `structuredContent` from the envelope, leaving
- * `content[0].text` as the single source of truth. `content[0].text` and
- * `structuredContent` are kept in sync by the sanitize step, so they are
- * redundant duplicates — dropping one halves the payload with no data loss.
- */
-describe("finalizeToolResponse — toolResultsNoStructuredContent gate", () => {
-  let originalStrip: boolean;
-  let originalDropElements: boolean;
-
-  beforeEach(() => {
-    originalStrip = serverConfig.isToolResultsNoStructuredContentEnabled();
-    originalDropElements = serverConfig.isObserveResultDropElementsEnabled();
-    serverConfig.setObserveResultDropElementsEnabled(false);
+  test("EC-B: finalize never strips structuredContent (that is a wire-boundary concern)", () => {
+    // Even with the strip flag on, finalizeToolResponse keeps structuredContent so
+    // internal handler callers (e.g. DefaultUIStateSetup's swipeOn found-detection)
+    // can still read it — the strip is applied later, only at the MCP boundary.
+    const originalStrip = serverConfig.isToolResultsNoStructuredContentEnabled();
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
-  });
-
-  afterEach(() => {
-    serverConfig.setToolResultsNoStructuredContentEnabled(originalStrip);
-    serverConfig.setObserveResultDropElementsEnabled(originalDropElements);
-  });
-
-  test("EC-A: observe response drops structuredContent, keeps sanitized text", () => {
-    const finalized = finalizeToolResponse(
-      createStructuredToolResponse(makeObserveResult()),
-      { name: "observe" }
-    );
-
-    expect("structuredContent" in finalized).toBe(false);
-    expect(finalized.content[0].type).toBe("text");
-    // EC-G: the retained text is the sanitized payload (view-id was dropped).
-    const root = JSON.parse(finalized.content[0].text).viewHierarchy.hierarchy.node;
-    expect(root["view-id"]).toBeUndefined();
-    expect(root["content-desc"]).toBe("keep-me");
-  });
-
-  test("EC-B: with the gate disabled, structuredContent is preserved", () => {
-    serverConfig.setToolResultsNoStructuredContentEnabled(false);
-    const finalized = finalizeToolResponse(
-      createStructuredToolResponse(makeObserveResult()),
-      { name: "observe" }
-    );
-    expect(finalized.structuredContent).toBeDefined();
-  });
-
-  test("EC-C: action tool (outputSchema) drops structuredContent, keeps nested observation text", () => {
-    const finalized = finalizeToolResponse(
-      createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-      { name: "tapOn" }
-    );
-
-    expect("structuredContent" in finalized).toBe(false);
-    const parsed = JSON.parse(finalized.content[0].text);
-    expect(parsed.success).toBe(true);
-    // Nested observation still sanitized in the retained text.
-    expect(parsed.observation.viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
-  });
-
-  test("EC-D: non-observe payload also drops structuredContent, keeps text", () => {
-    const payload = { success: true, message: "done" };
-    const finalized = finalizeToolResponse(createStructuredToolResponse(payload), { name: "pressButton" });
-    expect("structuredContent" in finalized).toBe(false);
-    expect(JSON.parse(finalized.content[0].text)).toEqual(payload);
-  });
-
-  test("EC-E: text-only response (no structuredContent) is an unchanged no-op", () => {
-    const obs = makeObserveResult();
-    const textOnly: any = { content: [{ type: "text", text: JSON.stringify(obs) }] };
-    const finalized = finalizeToolResponse(textOnly, { name: "observe" });
-    expect("structuredContent" in finalized).toBe(false);
-    // Still sanitized.
-    expect(JSON.parse(finalized.content[0].text).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
-  });
-
-  test("EC-E: image response (no structuredContent) passes through unchanged", () => {
-    const imageResponse: any = { content: [{ type: "image", data: "base64==", mimeType: "image/png" }] };
-    const finalized = finalizeToolResponse(imageResponse, { name: "observe" });
-    expect(finalized).toBe(imageResponse);
-    expect("structuredContent" in finalized).toBe(false);
-  });
-
-  test("EC-F: caller's in-memory ObserveResult is not mutated by the strip", () => {
-    const obs = makeObserveResult();
-    finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
-    expect(obs.viewHierarchy!.hierarchy.node as any).toHaveProperty("view-id");
-    expect(obs.elements).toBeDefined();
-  });
-
-  test("EC-I: interoperates with observeResultDropElements when both are enabled", () => {
-    serverConfig.setObserveResultDropElementsEnabled(true);
-    const finalized = finalizeToolResponse(
-      createStructuredToolResponse(makeObserveResult()),
-      { name: "observe" }
-    );
-    expect("structuredContent" in finalized).toBe(false);
-    // elements dropped in the retained text.
-    expect(JSON.parse(finalized.content[0].text).elements).toBeUndefined();
-  });
-
-  test("null / primitive responses are returned as-is with the gate on", () => {
-    expect(finalizeToolResponse(null, { name: "observe" })).toBeNull();
-    expect(finalizeToolResponse("plain", { name: "observe" })).toBe("plain");
+    try {
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(makeObserveResult()),
+        { name: "observe" }
+      );
+      expect(finalized.structuredContent).toBeDefined();
+    } finally {
+      serverConfig.setToolResultsNoStructuredContentEnabled(originalStrip);
+    }
   });
 });

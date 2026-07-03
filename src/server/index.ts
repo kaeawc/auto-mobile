@@ -13,6 +13,7 @@ import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanEx
 
 // Import the tool registry
 import { ToolRegistry } from "./toolRegistry";
+import { stripToolResultStructuredContent } from "./stripToolResultStructuredContent";
 
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
@@ -336,10 +337,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       : undefined;
 
     try {
-      return await runWithAbortSignal(
+      const result = await runWithAbortSignal(
         execution.abortController.signal,
         () => tool.handler(handlerParams, progressCallback, execution.abortController.signal)
       );
+      // Wire-boundary output policy: strip `structuredContent` when the
+      // `--tool-results-no-structured-content` flag is on (issue #2899). Applied
+      // here — not inside a tool handler — so internal handler callers keep
+      // reading `structuredContent`, and so plain-registered tools are covered.
+      return stripToolResultStructuredContent(result);
     } finally {
       executionTracker.endExecution(execution.id);
     }

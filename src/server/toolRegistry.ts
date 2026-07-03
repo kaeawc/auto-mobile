@@ -413,8 +413,13 @@ class ToolRegistryClass {
             getMcpRecorder()?.record(name, args);
           }
 
-          // After swipeOn executes with lookFor, update the tool call with scroll position
-          if (name === "swipeOn" && args.lookFor && response?.success && response?.found) {
+          // After swipeOn executes with lookFor, update the tool call with scroll position.
+          // Handlers pre-serialize into an MCP envelope, so `found` lives under
+          // `structuredContent` — `createStructuredToolResponse` only hoists
+          // `success`/`error` to the envelope top level. The former `response?.found`
+          // read was always undefined, so this block was dead and scroll-position
+          // tracking never fired (issue #2897; same class as the #2758 lastHierarchy fix).
+          if (name === "swipeOn" && args.lookFor && response?.structuredContent?.success && response?.structuredContent?.found) {
             const scrollPosition = UIStateExtractor.createScrollPosition(args);
             if (scrollPosition) {
               const scrollNavManager = sessionUuid

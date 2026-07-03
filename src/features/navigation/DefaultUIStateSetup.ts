@@ -159,7 +159,13 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // Execute swipeOn with lookFor
       const result = await swipeOnTool.handler(swipeOnArgs);
 
-      if (result?.success && result?.found) {
+      // `swipeOn` pre-serializes into an MCP envelope via createStructuredToolResponse,
+      // which hoists only `success`/`error` to the top level — `found` lives under
+      // `structuredContent`. Reading `result?.found` off the envelope was always
+      // undefined, so this success branch was dead and setup always logged the
+      // "could not find" warning even on a successful scroll (issue #2897; same class
+      // as the toolRegistry scroll-position and #2758 lastHierarchy fixes).
+      if (result?.structuredContent?.success && result?.structuredContent?.found) {
         logger.info(`[UI_STATE_SETUP] Successfully scrolled to target element`);
         return `swipeOn(lookFor: ${JSON.stringify(scrollPosition.targetElement)})`;
       } else {

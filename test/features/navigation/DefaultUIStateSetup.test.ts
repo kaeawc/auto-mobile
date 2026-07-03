@@ -1,10 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DefaultUIStateSetup, type ObserveScreenLike } from "../../../src/features/navigation/DefaultUIStateSetup";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { BootedDevice } from "../../../src/models";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { NavigationEdge } from "../../../src/features/navigation/NavigationGraphManager";
+import { ToolRegistry } from "../../../src/server/toolRegistry";
+import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
+import type { ScrollPosition } from "../../../src/utils/interfaces/NavigationGraph";
 
 const device: BootedDevice = {
   deviceId: "test-device",
@@ -67,5 +70,56 @@ describe("DefaultUIStateSetup", () => {
 
     expect(actions).toEqual([]);
     expect(calls).toBe(0);
+  });
+
+  // Regression for issue #2897 (sibling of the toolRegistry scroll-position fix):
+  // `swipeOn`'s handler returns an MCP envelope from createStructuredToolResponse,
+  // which hoists only `success`/`error` to the top level — `found` lives under
+  // `structuredContent`. setupScrollPosition read `result?.found` off the envelope,
+  // so it was always undefined: the success branch was dead and setup returned null
+  // (logging "could not find") even when the scroll succeeded.
+  describe("setupScrollPosition envelope read (#2897)", () => {
+    afterEach(() => {
+      ToolRegistry.clearTools();
+    });
+
+    const scrollPosition: ScrollPosition = {
+      targetElement: { text: "Target", resourceId: "com.example:id/target" },
+      direction: "up",
+    };
+
+    function registerSwipeOn(found: boolean): void {
+      ToolRegistry.register(
+        "swipeOn",
+        "swipeOn",
+        {},
+        async () => createStructuredToolResponse({
+          success: true,
+          found,
+          message: found ? "Swiped up and found element" : "Swiped up",
+          observation: {},
+          scrollIterations: 1,
+        })
+      );
+    }
+
+    test("returns the swipeOn marker action when the element is found (found lives in structuredContent)", async () => {
+      registerSwipeOn(true);
+      const setup = makeSetup();
+
+      const action = await setup.setupScrollPosition(scrollPosition, "android");
+
+      expect(action).not.toBeNull();
+      expect(action).toContain("swipeOn(lookFor:");
+    });
+
+    test("returns null when the element is not found", async () => {
+      registerSwipeOn(false);
+      const setup = makeSetup();
+
+      const action = await setup.setupScrollPosition(scrollPosition, "android");
+
+      expect(action).toBeNull();
+    });
   });
 });

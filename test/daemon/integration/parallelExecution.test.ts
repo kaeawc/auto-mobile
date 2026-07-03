@@ -5,6 +5,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { BootedDevice } from "../../../src/models";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
+import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 
 describe("Parallel Execution Across Multiple Devices", function() {
   let sessionManager: SessionManager;
@@ -183,13 +184,15 @@ describe("Parallel Execution Across Multiple Devices", function() {
       await devicePool.assignDeviceToSession(session2Id);
 
       // Set different cache data for each session
+      const hierarchy1: ViewHierarchyResult = { hierarchy: { node: { "$": {}, "view-id": "session-1" } } };
+      const hierarchy2: ViewHierarchyResult = { hierarchy: { node: { "$": {}, "view-id": "session-2" } } };
       sessionManager.updateSessionCache(session1Id, {
-        lastHierarchy: "hierarchy-session-1",
+        lastHierarchy: hierarchy1,
         lastScreenshot: "screenshot-session-1",
       });
 
       sessionManager.updateSessionCache(session2Id, {
-        lastHierarchy: "hierarchy-session-2",
+        lastHierarchy: hierarchy2,
         lastScreenshot: "screenshot-session-2",
       });
 
@@ -197,9 +200,9 @@ describe("Parallel Execution Across Multiple Devices", function() {
       const cache1 = sessionManager.getSessionCache(session1Id);
       const cache2 = sessionManager.getSessionCache(session2Id);
 
-      expect(cache1?.lastHierarchy).toBe("hierarchy-session-1");
+      expect(cache1?.lastHierarchy).toEqual(hierarchy1);
       expect(cache1?.lastScreenshot).toBe("screenshot-session-1");
-      expect(cache2?.lastHierarchy).toBe("hierarchy-session-2");
+      expect(cache2?.lastHierarchy).toEqual(hierarchy2);
       expect(cache2?.lastScreenshot).toBe("screenshot-session-2");
 
       // Verify caches are different
@@ -222,7 +225,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
 
       // Update cache and verify device assignment persists
       sessionManager.updateSessionCache(sessionId, {
-        lastHierarchy: "test-hierarchy",
+        lastHierarchy: { hierarchy: { node: { $: {} } } },
       });
 
       const device3 = sessionManager.getDeviceForSession(sessionId);

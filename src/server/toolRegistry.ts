@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { ActionableError, BootedDevice, SomePlatform } from "../models";
+import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -444,15 +445,17 @@ class ToolRegistryClass {
             // lives under `structuredContent`, not on `response` directly (the
             // former read of `response.viewHierarchy` was always undefined, so
             // `lastHierarchy` never populated — the #2761 diff baseline needs it).
-            // Runs before finalizeToolResponse, so the cache keeps the full,
-            // untrimmed hierarchy while the wire copy is sanitized.
-            const observeHierarchy = name === "observe" ? getStructuredField(response, "viewHierarchy") : undefined;
+            // Route through the typed setters so the canonical top-level slots
+            // are the source of truth rather than the untyped `customData` bag
+            // (issue #2917). Runs before finalizeToolResponse, so the cache keeps
+            // the full, untrimmed hierarchy while the wire copy is sanitized.
+            const observeHierarchy = name === "observe" ? getStructuredField<ViewHierarchyResult>(response, "viewHierarchy") : undefined;
             if (observeHierarchy) {
-              await updateSessionCache(context, "lastHierarchy", observeHierarchy);
+              sessionManager.setLastHierarchy(sessionUuid, observeHierarchy);
             }
-            const observeScreenshot = name === "observe" ? getStructuredField(response, "screenshot") : undefined;
+            const observeScreenshot = name === "observe" ? getStructuredField<string>(response, "screenshot") : undefined;
             if (observeScreenshot) {
-              await updateSessionCache(context, "lastScreenshot", observeScreenshot);
+              sessionManager.setLastScreenshot(sessionUuid, observeScreenshot);
             }
 
             // Update last action timestamp for interaction tools

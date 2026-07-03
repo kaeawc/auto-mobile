@@ -21,7 +21,7 @@ object DisplayControl {
   private val displayManagerGlobal: Any by lazy {
     val getInstanceMethod = displayManagerGlobalClass.getMethod("getInstance")
     getInstanceMethod.invoke(null)
-        ?: throw IllegalStateException("DisplayManagerGlobal.getInstance() returned null")
+      ?: throw IllegalStateException("DisplayManagerGlobal.getInstance() returned null")
   }
 
   private val createVirtualDisplayMethod: Method by lazy {
@@ -29,17 +29,17 @@ object DisplayControl {
     //             Surface surface, int flags, VirtualDisplay.Callback callback,
     //             Handler handler, String uniqueId, int displayIdToMirror
     displayManagerGlobalClass.getMethod(
-        "createVirtualDisplay",
-        String::class.java, // name
-        Int::class.javaPrimitiveType, // width
-        Int::class.javaPrimitiveType, // height
-        Int::class.javaPrimitiveType, // densityDpi
-        Surface::class.java, // surface
-        Int::class.javaPrimitiveType, // flags
-        Class.forName("android.hardware.display.VirtualDisplay\$Callback"), // callback
-        android.os.Handler::class.java, // handler
-        String::class.java, // uniqueId
-        Int::class.javaPrimitiveType, // displayIdToMirror
+      "createVirtualDisplay",
+      String::class.java, // name
+      Int::class.javaPrimitiveType, // width
+      Int::class.javaPrimitiveType, // height
+      Int::class.javaPrimitiveType, // densityDpi
+      Surface::class.java, // surface
+      Int::class.javaPrimitiveType, // flags
+      Class.forName("android.hardware.display.VirtualDisplay\$Callback"), // callback
+      android.os.Handler::class.java, // handler
+      String::class.java, // uniqueId
+      Int::class.javaPrimitiveType, // displayIdToMirror
     )
   }
 
@@ -49,11 +49,11 @@ object DisplayControl {
     val displayInfo = displayInfoClass.getDeclaredConstructor().newInstance()
 
     val getDisplayInfoMethod =
-        displayManagerGlobalClass.getMethod(
-            "getDisplayInfo",
-            Int::class.javaPrimitiveType,
-            displayInfoClass,
-        )
+      displayManagerGlobalClass.getMethod(
+        "getDisplayInfo",
+        Int::class.javaPrimitiveType,
+        displayInfoClass,
+      )
 
     getDisplayInfoMethod.invoke(displayManagerGlobal, displayId, displayInfo)
 
@@ -63,10 +63,10 @@ object DisplayControl {
     val rotation = displayInfoClass.getField("rotation").getInt(displayInfo)
 
     return DisplayInfo(
-        width = logicalWidth,
-        height = logicalHeight,
-        densityDpi = logicalDensityDpi,
-        rotation = rotation,
+      width = logicalWidth,
+      height = logicalHeight,
+      densityDpi = logicalDensityDpi,
+      rotation = rotation,
     )
   }
 
@@ -82,35 +82,35 @@ object DisplayControl {
    * @return The created VirtualDisplay
    */
   fun createVirtualDisplay(
-      name: String,
-      width: Int,
-      height: Int,
-      densityDpi: Int,
-      surface: Surface,
-      displayIdToMirror: Int = 0,
+    name: String,
+    width: Int,
+    height: Int,
+    densityDpi: Int,
+    surface: Surface,
+    displayIdToMirror: Int = 0,
   ): VirtualDisplay {
     // Flags for mirroring: VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR (1 << 4) = 16
     val flags = 1 shl 4
 
     return createVirtualDisplayMethod.invoke(
-        displayManagerGlobal,
-        name,
-        width,
-        height,
-        densityDpi,
-        surface,
-        flags,
-        null, // callback
-        null, // handler
-        null, // uniqueId
-        displayIdToMirror,
+      displayManagerGlobal,
+      name,
+      width,
+      height,
+      densityDpi,
+      surface,
+      flags,
+      null, // callback
+      null, // handler
+      null, // uniqueId
+      displayIdToMirror,
     ) as VirtualDisplay
   }
 
   data class DisplayInfo(
-      val width: Int,
-      val height: Int,
-      val densityDpi: Int,
-      val rotation: Int,
+    val width: Int,
+    val height: Int,
+    val densityDpi: Int,
+    val rotation: Int,
   )
 }

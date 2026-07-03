@@ -26,7 +26,7 @@ class RemovePropertyQuickFix(private val propertyName: String) : LocalQuickFix {
 
 /** Quick fix to add a missing required field to the YAML */
 class AddRequiredFieldQuickFix(private val fieldName: String, private val defaultValue: String) :
-    LocalQuickFix {
+  LocalQuickFix {
   override fun getFamilyName(): String = "Add missing field '$fieldName'"
 
   override fun applyFix(project: Project, descriptor: ProblemDescriptor) {
@@ -44,7 +44,7 @@ class AddRequiredFieldQuickFix(private val fieldName: String, private val defaul
 
 /** Quick fix to rename a misspelled field */
 class RenameFieldQuickFix(private val oldName: String, private val newName: String) :
-    LocalQuickFix {
+  LocalQuickFix {
   override fun getFamilyName(): String = "Rename '$oldName' to '$newName'"
 
   override fun applyFix(project: Project, descriptor: ProblemDescriptor) {
@@ -60,16 +60,16 @@ class RenameFieldQuickFix(private val oldName: String, private val newName: Stri
 
 /** Quick fix to convert a deprecated field to its new equivalent */
 class ConvertDeprecatedFieldQuickFix(
-    private val deprecatedField: String,
-    private val newField: String,
-    private val moveToMetadata: Boolean = false,
+  private val deprecatedField: String,
+  private val newField: String,
+  private val moveToMetadata: Boolean = false,
 ) : LocalQuickFix {
   override fun getFamilyName(): String =
-      if (moveToMetadata) {
-        "Move '$deprecatedField' to 'metadata.$newField'"
-      } else {
-        "Replace '$deprecatedField' with '$newField'"
-      }
+    if (moveToMetadata) {
+      "Move '$deprecatedField' to 'metadata.$newField'"
+    } else {
+      "Replace '$deprecatedField' with '$newField'"
+    }
 
   override fun applyFix(project: Project, descriptor: ProblemDescriptor) {
     val element = descriptor.psiElement
@@ -106,7 +106,7 @@ class ConvertDeprecatedFieldQuickFix(
 
 /** Quick fix to fix an invalid tool name with a suggestion */
 class FixToolNameQuickFix(private val currentName: String, private val suggestedName: String) :
-    LocalQuickFix {
+  LocalQuickFix {
   override fun getFamilyName(): String = "Change tool to '$suggestedName'"
 
   override fun applyFix(project: Project, descriptor: ProblemDescriptor) {
@@ -126,12 +126,12 @@ object TestPlanQuickFixFactory {
   /** Find similar tool names using Levenshtein distance */
   private fun findSimilarTools(toolName: String, maxDistance: Int = 3): List<String> {
     return ValidTools.TOOLS.map { validTool ->
-          validTool to levenshteinDistance(toolName.lowercase(), validTool.lowercase())
-        }
-        .filter { (_, distance) -> distance <= maxDistance }
-        .sortedBy { (_, distance) -> distance }
-        .take(3)
-        .map { (tool, _) -> tool }
+        validTool to levenshteinDistance(toolName.lowercase(), validTool.lowercase())
+      }
+      .filter { (_, distance) -> distance <= maxDistance }
+      .sortedBy { (_, distance) -> distance }
+      .take(3)
+      .map { (tool, _) -> tool }
   }
 
   /** Calculate Levenshtein distance between two strings */
@@ -141,11 +141,11 @@ object TestPlanQuickFixFactory {
       var lastValue = i
       for (j in 1..s2.length) {
         val newValue =
-            if (s1[i - 1] == s2[j - 1]) {
-              costs[j - 1]
-            } else {
-              minOf(costs[j - 1], lastValue, costs[j]) + 1
-            }
+          if (s1[i - 1] == s2[j - 1]) {
+            costs[j - 1]
+          } else {
+            minOf(costs[j - 1], lastValue, costs[j]) + 1
+          }
         costs[j - 1] = lastValue
         lastValue = newValue
       }

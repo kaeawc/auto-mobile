@@ -32,12 +32,12 @@ import androidx.media3.ui.PlayerView
  */
 @Composable
 fun VideoPlayerSlideItem(
-    videoUrl: String,
-    caption: String? = null,
-    contentDescription: String? = null,
-    modifier: Modifier = Modifier,
-    captionColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-    autoPlay: Boolean = false,
+  videoUrl: String,
+  caption: String? = null,
+  contentDescription: String? = null,
+  modifier: Modifier = Modifier,
+  captionColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+  autoPlay: Boolean = false,
 ) {
   val context = LocalContext.current
 
@@ -51,43 +51,43 @@ fun VideoPlayerSlideItem(
   }
 
   Column(
-      modifier = modifier.fillMaxSize().padding(24.dp),
-      verticalArrangement = Arrangement.spacedBy(16.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
+    modifier = modifier.fillMaxSize().padding(24.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     // Video player
     Card(
-        modifier = Modifier.weight(1f).fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+      modifier = Modifier.weight(1f).fillMaxWidth(),
+      shape = RoundedCornerShape(16.dp),
+      colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+      elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
     ) {
       AndroidView(
-          factory = { context ->
-            PlayerView(context).apply {
-              player = exoPlayer
-              useController = true
-              setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-              controllerAutoShow = true
-              controllerHideOnTouch = false
-              setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-            }
-          },
-          modifier = Modifier.fillMaxSize(),
+        factory = { context ->
+          PlayerView(context).apply {
+            player = exoPlayer
+            useController = true
+            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+            controllerAutoShow = true
+            controllerHideOnTouch = false
+            setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+          }
+        },
+        modifier = Modifier.fillMaxSize(),
       )
     }
 
     // Caption
     caption?.let {
       Text(
-          text = it,
-          style =
-              MaterialTheme.typography.headlineSmall.copy(
-                  textAlign = TextAlign.Center,
-                  color = captionColor,
-                  fontWeight = FontWeight.Medium,
-              ),
-          modifier = Modifier.padding(horizontal = 16.dp),
+        text = it,
+        style =
+          MaterialTheme.typography.headlineSmall.copy(
+            textAlign = TextAlign.Center,
+            color = captionColor,
+            fontWeight = FontWeight.Medium,
+          ),
+        modifier = Modifier.padding(horizontal = 16.dp),
       )
     }
   }
@@ -100,31 +100,31 @@ fun VideoPlayerSlideItem(
 @Composable
 private fun VideoPlayerPreview(caption: String? = null, modifier: Modifier = Modifier) {
   Column(
-      modifier = modifier.fillMaxSize().padding(24.dp),
-      verticalArrangement = Arrangement.spacedBy(16.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
+    modifier = modifier.fillMaxSize().padding(24.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     // Video placeholder
     Card(
-        modifier = Modifier.weight(1f).fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+      modifier = Modifier.weight(1f).fillMaxWidth(),
+      shape = RoundedCornerShape(16.dp),
+      colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+      elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
     ) {
       Column(
-          modifier = Modifier.fillMaxSize(),
-          horizontalAlignment = Alignment.CenterHorizontally,
-          verticalArrangement = Arrangement.Center,
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
       ) {
         Text(
-            text = "🎬",
-            style = MaterialTheme.typography.displayLarge,
-            modifier = Modifier.padding(bottom = 16.dp),
+          text = "🎬",
+          style = MaterialTheme.typography.displayLarge,
+          modifier = Modifier.padding(bottom = 16.dp),
         )
         Text(
-            text = "Video Player",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          text = "Video Player",
+          style = MaterialTheme.typography.headlineMedium,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
       }
     }
@@ -132,14 +132,14 @@ private fun VideoPlayerPreview(caption: String? = null, modifier: Modifier = Mod
     // Caption
     caption?.let {
       Text(
-          text = it,
-          style =
-              MaterialTheme.typography.headlineSmall.copy(
-                  textAlign = TextAlign.Center,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  fontWeight = FontWeight.Medium,
-              ),
-          modifier = Modifier.padding(horizontal = 16.dp),
+        text = it,
+        style =
+          MaterialTheme.typography.headlineSmall.copy(
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Medium,
+          ),
+        modifier = Modifier.padding(horizontal = 16.dp),
       )
     }
   }

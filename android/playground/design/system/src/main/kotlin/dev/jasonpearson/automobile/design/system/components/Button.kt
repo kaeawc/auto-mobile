@@ -18,24 +18,24 @@ import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 
 @Composable
 fun AutoMobileButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+  text: String,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  enabled: Boolean = true,
+  contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
 ) {
   Button(
-      onClick = onClick,
-      modifier = modifier.height(AutoMobileDimensions.buttonHeight),
-      enabled = enabled,
-      colors =
-          ButtonDefaults.buttonColors(
-              containerColor = MaterialTheme.colorScheme.primary,
-              contentColor = MaterialTheme.colorScheme.onPrimary,
-              disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-              disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-          ),
-      contentPadding = contentPadding,
+    onClick = onClick,
+    modifier = modifier.height(AutoMobileDimensions.buttonHeight),
+    enabled = enabled,
+    colors =
+      ButtonDefaults.buttonColors(
+        containerColor = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+      ),
+    contentPadding = contentPadding,
   ) {
     Text(text = text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
   }
@@ -43,22 +43,22 @@ fun AutoMobileButton(
 
 @Composable
 fun AutoMobileSecondaryButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+  text: String,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  enabled: Boolean = true,
+  contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
 ) {
   FilledTonalButton(
-      onClick = onClick,
-      modifier = modifier.height(AutoMobileDimensions.buttonHeight),
-      enabled = enabled,
-      colors =
-          ButtonDefaults.filledTonalButtonColors(
-              containerColor = MaterialTheme.colorScheme.secondary,
-              contentColor = MaterialTheme.colorScheme.onSecondary,
-          ),
-      contentPadding = contentPadding,
+    onClick = onClick,
+    modifier = modifier.height(AutoMobileDimensions.buttonHeight),
+    enabled = enabled,
+    colors =
+      ButtonDefaults.filledTonalButtonColors(
+        containerColor = MaterialTheme.colorScheme.secondary,
+        contentColor = MaterialTheme.colorScheme.onSecondary,
+      ),
+    contentPadding = contentPadding,
   ) {
     Text(text = text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
   }
@@ -66,19 +66,18 @@ fun AutoMobileSecondaryButton(
 
 @Composable
 fun AutoMobileOutlinedButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+  text: String,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  enabled: Boolean = true,
+  contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
 ) {
   OutlinedButton(
-      onClick = onClick,
-      modifier = modifier.height(AutoMobileDimensions.buttonHeight),
-      enabled = enabled,
-      colors =
-          ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
-      contentPadding = contentPadding,
+    onClick = onClick,
+    modifier = modifier.height(AutoMobileDimensions.buttonHeight),
+    enabled = enabled,
+    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+    contentPadding = contentPadding,
   ) {
     Text(text = text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
   }
@@ -86,18 +85,18 @@ fun AutoMobileOutlinedButton(
 
 @Composable
 fun AutoMobileTextButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
+  text: String,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  enabled: Boolean = true,
+  contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
 ) {
   TextButton(
-      onClick = onClick,
-      modifier = modifier,
-      enabled = enabled,
-      colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary),
-      contentPadding = contentPadding,
+    onClick = onClick,
+    modifier = modifier,
+    enabled = enabled,
+    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+    contentPadding = contentPadding,
   ) {
     Text(text = text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
   }

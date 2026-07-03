@@ -11,13 +11,13 @@ class ChatMessageTest {
   @Test
   fun `creates message with all properties`() {
     val message =
-        ChatMessage(
-            id = "test-id",
-            text = "Test message",
-            isFromUser = true,
-            timestamp = 1234567890L,
-            profileImageUrl = "https://example.com/profile.jpg",
-        )
+      ChatMessage(
+        id = "test-id",
+        text = "Test message",
+        isFromUser = true,
+        timestamp = 1234567890L,
+        profileImageUrl = "https://example.com/profile.jpg",
+      )
 
     assertEquals("test-id", message.id)
     assertEquals("Test message", message.text)
@@ -38,8 +38,8 @@ class ChatMessageTest {
     assertEquals("Test message", message.text)
     assertFalse(message.isFromUser)
     assertTrue(
-        "Timestamp should be within expected range",
-        message.timestamp in beforeTime..afterTime,
+      "Timestamp should be within expected range",
+      message.timestamp in beforeTime..afterTime,
     )
     assertNull("Profile image should be null by default", message.profileImageUrl)
   }
@@ -55,12 +55,12 @@ class ChatMessageTest {
   @Test
   fun `creates bot message`() {
     val message =
-        ChatMessage(
-            id = "bot-1",
-            text = "Hello from bot",
-            isFromUser = false,
-            profileImageUrl = "https://bot.com/avatar.png",
-        )
+      ChatMessage(
+        id = "bot-1",
+        text = "Hello from bot",
+        isFromUser = false,
+        profileImageUrl = "https://bot.com/avatar.png",
+      )
 
     assertFalse("Should be from bot", message.isFromUser)
     assertEquals("Hello from bot", message.text)
@@ -70,18 +70,18 @@ class ChatMessageTest {
   @Test
   fun `data class equality works correctly`() {
     val message1 =
-        ChatMessage(id = "same-id", text = "Same message", isFromUser = true, timestamp = 1000L)
+      ChatMessage(id = "same-id", text = "Same message", isFromUser = true, timestamp = 1000L)
 
     val message2 =
-        ChatMessage(id = "same-id", text = "Same message", isFromUser = true, timestamp = 1000L)
+      ChatMessage(id = "same-id", text = "Same message", isFromUser = true, timestamp = 1000L)
 
     val message3 =
-        ChatMessage(
-            id = "different-id",
-            text = "Same message",
-            isFromUser = true,
-            timestamp = 1000L,
-        )
+      ChatMessage(
+        id = "different-id",
+        text = "Same message",
+        isFromUser = true,
+        timestamp = 1000L,
+      )
 
     assertEquals("Messages with same content should be equal", message1, message2)
     assertEquals("Hash codes should be equal", message1.hashCode(), message2.hashCode())
@@ -91,13 +91,13 @@ class ChatMessageTest {
   @Test
   fun `toString contains all properties`() {
     val message =
-        ChatMessage(
-            id = "test-id",
-            text = "Test message",
-            isFromUser = true,
-            timestamp = 1234567890L,
-            profileImageUrl = "https://example.com/profile.jpg",
-        )
+      ChatMessage(
+        id = "test-id",
+        text = "Test message",
+        isFromUser = true,
+        timestamp = 1234567890L,
+        profileImageUrl = "https://example.com/profile.jpg",
+      )
 
     val toString = message.toString()
 
@@ -106,8 +106,8 @@ class ChatMessageTest {
     assertTrue("toString should contain isFromUser", toString.contains("true"))
     assertTrue("toString should contain timestamp", toString.contains("1234567890"))
     assertTrue(
-        "toString should contain profileImageUrl",
-        toString.contains("https://example.com/profile.jpg"),
+      "toString should contain profileImageUrl",
+      toString.contains("https://example.com/profile.jpg"),
     )
   }
 }

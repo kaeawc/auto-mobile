@@ -3,9 +3,7 @@ package dev.jasonpearson.automobile.sdk.context
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
-/**
- * Thread-safe mutable context holding ambient state attached to SDK events.
- */
+/** Thread-safe mutable context holding ambient state attached to SDK events. */
 internal class SdkContext {
   private val lock = ReentrantLock()
 

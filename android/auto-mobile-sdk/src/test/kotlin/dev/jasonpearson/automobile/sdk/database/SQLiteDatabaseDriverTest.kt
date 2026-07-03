@@ -56,8 +56,8 @@ class SQLiteDatabaseDriverTest {
           start.await(2, TimeUnit.SECONDS)
           if (index % 4 == 0) {
             driver.executeSQL(
-                dbFile.absolutePath,
-                "UPDATE items SET value = value + 1 WHERE id = 1",
+              dbFile.absolutePath,
+              "UPDATE items SET value = value + 1 WHERE id = 1",
             )
           } else {
             val data = driver.getTableData(dbFile.absolutePath, "items", 10, 0)
@@ -86,26 +86,26 @@ class SQLiteDatabaseDriverTest {
     val driver = SQLiteDatabaseDriver(context)
 
     listOf(
-            "INSERT INTO notes (body) VALUES ('delta') RETURNING id, body",
-            "UPDATE notes SET body = 'beta2' WHERE body = 'beta' RETURNING id, body",
-            "DELETE FROM notes WHERE body = 'gamma' RETURNING id, body",
-            """
-            WITH target AS (
-              SELECT id FROM notes WHERE body = 'alpha'
-            )
-            UPDATE notes SET body = 'alpha2'
-            WHERE id IN (SELECT id FROM target)
-            RETURNING id, body
-            """
-                .trimIndent(),
+        "INSERT INTO notes (body) VALUES ('delta') RETURNING id, body",
+        "UPDATE notes SET body = 'beta2' WHERE body = 'beta' RETURNING id, body",
+        "DELETE FROM notes WHERE body = 'gamma' RETURNING id, body",
+        """
+        WITH target AS (
+          SELECT id FROM notes WHERE body = 'alpha'
         )
-        .forEach { query ->
-          assertEquals(
-              Classification(returnsRows = true, readOnly = false),
-              classifySQL(driver, query),
-              query,
-          )
-        }
+        UPDATE notes SET body = 'alpha2'
+        WHERE id IN (SELECT id FROM target)
+        RETURNING id, body
+        """
+          .trimIndent(),
+      )
+      .forEach { query ->
+        assertEquals(
+          Classification(returnsRows = true, readOnly = false),
+          classifySQL(driver, query),
+          query,
+        )
+      }
   }
 
   @Test
@@ -114,15 +114,15 @@ class SQLiteDatabaseDriverTest {
     val driver = SQLiteDatabaseDriver(context)
 
     assertEquals(
-        Classification(returnsRows = false, readOnly = false),
-        classifySQL(driver, "UPDATE notes SET body = 'not RETURNING syntax' WHERE body = 'alpha'"),
+      Classification(returnsRows = false, readOnly = false),
+      classifySQL(driver, "UPDATE notes SET body = 'not RETURNING syntax' WHERE body = 'alpha'"),
     )
 
     val result =
-        driver.executeSQL(
-            dbFile.absolutePath,
-            "UPDATE notes SET body = 'not RETURNING syntax' WHERE body = 'alpha'",
-        )
+      driver.executeSQL(
+        dbFile.absolutePath,
+        "UPDATE notes SET body = 'not RETURNING syntax' WHERE body = 'alpha'",
+      )
 
     assertEquals(SQLExecutionResult.Mutation(rowsAffected = 1), result)
     driver.closeAll()
@@ -133,16 +133,16 @@ class SQLiteDatabaseDriverTest {
     val driver = SQLiteDatabaseDriver(context)
 
     listOf(
-            "CREATE TABLE backup AS SELECT * FROM notes",
-            "CREATE VIEW notes_view AS SELECT * FROM notes",
+        "CREATE TABLE backup AS SELECT * FROM notes",
+        "CREATE VIEW notes_view AS SELECT * FROM notes",
+      )
+      .forEach { query ->
+        assertEquals(
+          Classification(returnsRows = false, readOnly = false),
+          classifySQL(driver, query),
+          query,
         )
-        .forEach { query ->
-          assertEquals(
-              Classification(returnsRows = false, readOnly = false),
-              classifySQL(driver, query),
-              query,
-          )
-        }
+      }
   }
 
   private fun createDatabase(name: String): File {
@@ -175,16 +175,13 @@ class SQLiteDatabaseDriverTest {
 
   private fun classifySQL(driver: SQLiteDatabaseDriver, query: String): Classification {
     val classify =
-        SQLiteDatabaseDriver::class
-            .java
-            .getDeclaredMethod("classifySQL", String::class.java)
-            .apply {
-              isAccessible = true
-            }
+      SQLiteDatabaseDriver::class.java.getDeclaredMethod("classifySQL", String::class.java).apply {
+        isAccessible = true
+      }
     val result = classify.invoke(driver, query) as Pair<*, *>
     return Classification(
-        returnsRows = result.first as Boolean,
-        readOnly = result.second as Boolean,
+      returnsRows = result.first as Boolean,
+      readOnly = result.second as Boolean,
     )
   }
 

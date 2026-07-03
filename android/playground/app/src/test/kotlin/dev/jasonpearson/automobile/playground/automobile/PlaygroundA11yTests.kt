@@ -9,8 +9,8 @@ import org.junit.Test
  * - docs/using/a11y/contrast.md (WCAG contrast ratio compliance)
  * - docs/using/a11y/tap-targets.md (minimum tap target size requirements)
  *
- * Requires a connected device and the AutoMobile daemon running.
- * Run with: ./gradlew :playground:app:connectedDebugAndroidTest
+ * Requires a connected device and the AutoMobile daemon running. Run with: ./gradlew
+ * :playground:app:connectedDebugAndroidTest
  */
 class PlaygroundA11yTests {
 

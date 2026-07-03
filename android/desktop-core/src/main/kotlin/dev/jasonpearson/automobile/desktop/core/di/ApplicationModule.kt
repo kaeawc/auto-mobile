@@ -11,18 +11,18 @@ import dev.zacsweers.metro.Provides
 @ContributesTo(AppScope::class)
 interface ApplicationModule {
 
-    companion object {
+  companion object {
 
-        @Provides
-        @SingleIn(AppScope::class)
-        fun provideAutoMobileClient(): AutoMobileClient {
-            return McpClientFactory.createPreferred(null)
-        }
-
-        @Provides
-        @SingleIn(AppScope::class)
-        fun provideSettingsProvider(): SettingsProvider {
-            return FakeSettingsProvider()
-        }
+    @Provides
+    @SingleIn(AppScope::class)
+    fun provideAutoMobileClient(): AutoMobileClient {
+      return McpClientFactory.createPreferred(null)
     }
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun provideSettingsProvider(): SettingsProvider {
+      return FakeSettingsProvider()
+    }
+  }
 }

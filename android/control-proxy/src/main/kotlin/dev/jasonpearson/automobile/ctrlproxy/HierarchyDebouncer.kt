@@ -16,17 +16,17 @@ import kotlinx.coroutines.launch
 sealed class HierarchyResult {
   /** New hierarchy extracted with different structural content. */
   data class Changed(val hierarchy: ViewHierarchy, val hash: Int, val extractionTimeMs: Long) :
-      HierarchyResult()
+    HierarchyResult()
 
   /**
    * Hierarchy extracted but structure unchanged (animation only). Bounds may have changed but
    * text/content is the same.
    */
   data class Unchanged(
-      val hierarchy: ViewHierarchy,
-      val hash: Int,
-      val extractionTimeMs: Long,
-      val skippedEventCount: Int,
+    val hierarchy: ViewHierarchy,
+    val hash: Int,
+    val extractionTimeMs: Long,
+    val skippedEventCount: Int,
   ) : HierarchyResult()
 
   /** Failed to extract hierarchy. */
@@ -55,12 +55,12 @@ sealed class HierarchyResult {
  * @param extractHierarchy Function to extract the current hierarchy
  */
 class HierarchyDebouncer(
-    private val scope: CoroutineScope,
-    private val timeProvider: TimeProvider = SystemTimeProvider(),
-    private val perfProvider: PerfProvider = PerfProvider.instance,
-    private val quickDebounceMs: Long = 5L,
-    private val animationSkipWindowMs: Long = 100L,
-    private val extractHierarchy: (disableAllFiltering: Boolean) -> ViewHierarchy?,
+  private val scope: CoroutineScope,
+  private val timeProvider: TimeProvider = SystemTimeProvider(),
+  private val perfProvider: PerfProvider = PerfProvider.instance,
+  private val quickDebounceMs: Long = 5L,
+  private val animationSkipWindowMs: Long = 100L,
+  private val extractHierarchy: (disableAllFiltering: Boolean) -> ViewHierarchy?,
 ) {
   companion object {
     private const val TAG = "HierarchyDebouncer"
@@ -85,7 +85,7 @@ class HierarchyDebouncer(
 
   // Flow for emitting hierarchy results
   private val _hierarchyFlow =
-      MutableSharedFlow<HierarchyResult>(replay = 1, extraBufferCapacity = 10)
+    MutableSharedFlow<HierarchyResult>(replay = 1, extraBufferCapacity = 10)
   val hierarchyFlow: SharedFlow<HierarchyResult> = _hierarchyFlow
 
   // Last emitted hierarchy (for quick access)
@@ -121,11 +121,10 @@ class HierarchyDebouncer(
 
     // Cancel previous debounce and start new one
     debounceJob?.cancel()
-    debounceJob =
-        scope.launch {
-          delay(quickDebounceMs)
-          extractAndCompare()
-        }
+    debounceJob = scope.launch {
+      delay(quickDebounceMs)
+      extractAndCompare()
+    }
   }
 
   /**
@@ -149,8 +148,8 @@ class HierarchyDebouncer(
    * @return The extracted hierarchy, or null if extraction failed.
    */
   fun extractNowBlocking(
-      skipFlowEmit: Boolean = false,
-      disableAllFiltering: Boolean = false,
+    skipFlowEmit: Boolean = false,
+    disableAllFiltering: Boolean = false,
   ): ViewHierarchy? {
     debounceJob?.cancel()
     inAnimationMode = false
@@ -177,10 +176,10 @@ class HierarchyDebouncer(
    * @return The extracted hierarchy, or null if extraction failed.
    */
   fun extractAfterQuiescence(
-      quiescenceMs: Long = 50L,
-      maxWaitMs: Long = 500L,
-      pollIntervalMs: Long = 10L,
-      initialEventWaitMs: Long = 200L, // Max time to wait for first event
+    quiescenceMs: Long = 50L,
+    maxWaitMs: Long = 500L,
+    pollIntervalMs: Long = 10L,
+    initialEventWaitMs: Long = 200L, // Max time to wait for first event
   ): ViewHierarchy? {
     val startTime = timeProvider.currentTimeMillis()
     val initialTimestamp = lastEventTimestamp // Capture timestamp BEFORE the action
@@ -188,8 +187,8 @@ class HierarchyDebouncer(
     // Suppress flow emissions to prevent racing broadcasts from debounced extractions
     suppressFlowEmissions = true
     Log.d(
-        TAG,
-        "extractAfterQuiescence: suppressing flow emissions, waiting for first event then quiescence (${quiescenceMs}ms quiet)",
+      TAG,
+      "extractAfterQuiescence: suppressing flow emissions, waiting for first event then quiescence (${quiescenceMs}ms quiet)",
     )
 
     try {
@@ -233,8 +232,8 @@ class HierarchyDebouncer(
           // Check if we've exceeded max wait time
           if (elapsed >= maxWaitMs) {
             Log.d(
-                TAG,
-                "extractAfterQuiescence: max wait time exceeded (${elapsed}ms), proceeding with extraction",
+              TAG,
+              "extractAfterQuiescence: max wait time exceeded (${elapsed}ms), proceeding with extraction",
             )
             break
           }
@@ -242,8 +241,8 @@ class HierarchyDebouncer(
           // Check if we've achieved quiescence
           if (timeSinceLastEvent >= quiescenceMs) {
             Log.d(
-                TAG,
-                "extractAfterQuiescence: quiescence achieved after ${elapsed}ms (no events for ${timeSinceLastEvent}ms)",
+              TAG,
+              "extractAfterQuiescence: quiescence achieved after ${elapsed}ms (no events for ${timeSinceLastEvent}ms)",
             )
             break
           }
@@ -285,8 +284,8 @@ class HierarchyDebouncer(
    *   broadcast directly to avoid race conditions.
    */
   private suspend fun extractAndCompare(
-      skipFlowEmit: Boolean = false,
-      disableAllFiltering: Boolean = false,
+    skipFlowEmit: Boolean = false,
+    disableAllFiltering: Boolean = false,
   ) {
     val startTime = timeProvider.currentTimeMillis()
 
@@ -320,17 +319,17 @@ class HierarchyDebouncer(
         animationModeEndTime = timeProvider.currentTimeMillis() + animationSkipWindowMs
 
         resultToEmit =
-            HierarchyResult.Unchanged(
-                hierarchy = hierarchy,
-                hash = structuralHash,
-                extractionTimeMs = extractionTime,
-                skippedEventCount = skippedEventCount,
-            )
+          HierarchyResult.Unchanged(
+            hierarchy = hierarchy,
+            hash = structuralHash,
+            extractionTimeMs = extractionTime,
+            skippedEventCount = skippedEventCount,
+          )
         hierarchyToCache = hierarchy
 
         Log.d(
-            TAG,
-            "Structure unchanged (hash=$structuralHash), entering animation mode for ${animationSkipWindowMs}ms",
+          TAG,
+          "Structure unchanged (hash=$structuralHash), entering animation mode for ${animationSkipWindowMs}ms",
         )
 
         // Reset skipped count
@@ -342,11 +341,11 @@ class HierarchyDebouncer(
         lastStructuralHash = structuralHash
 
         resultToEmit =
-            HierarchyResult.Changed(
-                hierarchy = hierarchy,
-                hash = structuralHash,
-                extractionTimeMs = extractionTime,
-            )
+          HierarchyResult.Changed(
+            hierarchy = hierarchy,
+            hash = structuralHash,
+            extractionTimeMs = extractionTime,
+          )
         hierarchyToCache = hierarchy
 
         Log.d(TAG, "Structure changed (oldHash=$oldHash, newHash=$structuralHash)")
@@ -390,14 +389,14 @@ class HierarchyDebouncer(
       // No events since the given timestamp - the UI is "stale" from MCP's perspective
       // Trigger immediate extraction to push current state
       Log.d(
-          TAG,
-          "extractIfStale: no events since $sinceTimestamp (lastEvent=$lastEventTimestamp), triggering extraction",
+        TAG,
+        "extractIfStale: no events since $sinceTimestamp (lastEvent=$lastEventTimestamp), triggering extraction",
       )
       extractNow()
     } else {
       Log.d(
-          TAG,
-          "extractIfStale: events occurred since $sinceTimestamp (lastEvent=$lastEventTimestamp), skipping extraction",
+        TAG,
+        "extractIfStale: events occurred since $sinceTimestamp (lastEvent=$lastEventTimestamp), skipping extraction",
       )
     }
   }
@@ -405,11 +404,11 @@ class HierarchyDebouncer(
   /** Get current state for debugging. */
   fun getState(): DebounceState {
     return DebounceState(
-        lastHash = lastStructuralHash,
-        inAnimationMode = inAnimationMode,
-        animationModeEndTime = animationModeEndTime,
-        skippedEventCount = skippedEventCount,
-        hasActiveJob = debounceJob?.isActive == true,
+      lastHash = lastStructuralHash,
+      inAnimationMode = inAnimationMode,
+      animationModeEndTime = animationModeEndTime,
+      skippedEventCount = skippedEventCount,
+      hasActiveJob = debounceJob?.isActive == true,
     )
   }
 
@@ -426,10 +425,10 @@ class HierarchyDebouncer(
 
   /** Debugging state info. */
   data class DebounceState(
-      val lastHash: Int,
-      val inAnimationMode: Boolean,
-      val animationModeEndTime: Long,
-      val skippedEventCount: Int,
-      val hasActiveJob: Boolean,
+    val lastHash: Int,
+    val inAnimationMode: Boolean,
+    val animationModeEndTime: Long,
+    val skippedEventCount: Int,
+    val hasActiveJob: Boolean,
   )
 }

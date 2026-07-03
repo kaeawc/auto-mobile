@@ -10,7 +10,7 @@ data class LoginResult<T>(val success: T? = null, val error: Int? = null)
 
 class AuthRepository(context: Context) {
   private val sharedPreferences: SharedPreferences =
-      context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
   var user: LoggedInUserRecord? = null
     private set
@@ -36,10 +36,10 @@ class AuthRepository(context: Context) {
       // Simulate login validation - in real app this would call API
       if (username.isNotEmpty() && password.isNotEmpty()) {
         val loggedInUser =
-            LoggedInUserRecord(
-                userId = username,
-                displayName = username.replaceFirstChar { it.uppercase() },
-            )
+          LoggedInUserRecord(
+            userId = username,
+            displayName = username.replaceFirstChar { it.uppercase() },
+          )
         setLoggedInUser(loggedInUser)
         LoginResult(success = loggedInUser)
       } else {

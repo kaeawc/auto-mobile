@@ -72,9 +72,11 @@ import java.util.concurrent.CopyOnWriteArrayList
 object AutoMobileSDK {
   private const val TAG = "AutoMobileSDK"
 
-  /** Internal SDK logger. Replace with [NoOpSdkLogger][dev.jasonpearson.automobile.sdk.logging.NoOpSdkLogger] to silence. */
-  @Volatile
-  internal var logger: SdkLogger = DefaultSdkLogger()
+  /**
+   * Internal SDK logger. Replace with
+   * [NoOpSdkLogger][dev.jasonpearson.automobile.sdk.logging.NoOpSdkLogger] to silence.
+   */
+  @Volatile internal var logger: SdkLogger = DefaultSdkLogger()
 
   private val listeners = CopyOnWriteArrayList<NavigationListener>()
   @Volatile private var _isEnabled = true
@@ -123,9 +125,7 @@ object AutoMobileSDK {
     val appContext = this.context!!
 
     // Create disk persistence for events
-    val eventPersistence = FileEventPersistence(
-      File(appContext.cacheDir, "automobile_events"),
-    )
+    val eventPersistence = FileEventPersistence(File(appContext.cacheDir, "automobile_events"))
     persistence = eventPersistence
 
     // Create drop counter for tracking event drops across the pipeline
@@ -134,16 +134,17 @@ object AutoMobileSDK {
     SdkEventBroadcaster.dropCounter = counter
 
     // Create shared event buffer with broadcast flush callback and disk persistence
-    val buffer = SdkEventBuffer(
-      maxBufferSize = configuration.bufferSize,
-      flushIntervalMs = configuration.flushIntervalMs,
-      onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
-      persistence = eventPersistence,
-      dropCounter = counter,
-      processors = configuration.eventProcessors,
-      maxPendingEvents = configuration.maxPendingEvents,
-      backPressureStrategy = configuration.backPressureStrategy,
-    )
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = configuration.bufferSize,
+        flushIntervalMs = configuration.flushIntervalMs,
+        onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
+        persistence = eventPersistence,
+        dropCounter = counter,
+        processors = configuration.eventProcessors,
+        maxPendingEvents = configuration.maxPendingEvents,
+        backPressureStrategy = configuration.backPressureStrategy,
+      )
     buffer.isEnabled = _isEnabled
     buffer.start()
     eventBuffer = buffer
@@ -151,7 +152,8 @@ object AutoMobileSDK {
     // Initialize SDK context with app version from PackageManager
     val ctx = SdkContext()
     try {
-      ctx.appVersion = appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
+      ctx.appVersion =
+        appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
     } catch (_: Exception) {
       // PackageManager lookup may fail in test environments
     }
@@ -165,7 +167,11 @@ object AutoMobileSDK {
 
     // Thread-safe subsystems — can initialize from any thread
     NetworkMockRuleStore.initialize(appContext)
-    AutoMobileNetwork.initialize(appContext.packageName, buffer, NetworkMockRuleStore.getInstance().ruleMatcher)
+    AutoMobileNetwork.initialize(
+      appContext.packageName,
+      buffer,
+      NetworkMockRuleStore.getInstance().ruleMatcher,
+    )
     AutoMobileLog.initialize()
     AutoMobileBroadcastInterceptor.initialize(appContext, buffer)
     DatabaseInspector.initialize(appContext)
@@ -190,14 +196,16 @@ object AutoMobileSDK {
       AutoMobileOsEvents.initialize(appContext, buffer)
 
       // Register session tracker with process lifecycle
-      val observer = object : DefaultLifecycleObserver {
-        override fun onStart(owner: LifecycleOwner) {
-          tracker.onForeground()
+      val observer =
+        object : DefaultLifecycleObserver {
+          override fun onStart(owner: LifecycleOwner) {
+            tracker.onForeground()
+          }
+
+          override fun onStop(owner: LifecycleOwner) {
+            tracker.onBackground()
+          }
         }
-        override fun onStop(owner: LifecycleOwner) {
-          tracker.onBackground()
-        }
-      }
       sessionLifecycleObserver = observer
       ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
       RecompositionTracker.initialize(appContext)
@@ -275,9 +283,7 @@ object AutoMobileSDK {
     )
   }
 
-  /**
-   * Convert SDK NavigationSource to protocol NavigationSourceType.
-   */
+  /** Convert SDK NavigationSource to protocol NavigationSourceType. */
   private fun NavigationSource.toProtocolType(): NavigationSourceType {
     return when (this) {
       NavigationSource.NAVIGATION_COMPONENT -> NavigationSourceType.NAVIGATION_COMPONENT
@@ -301,17 +307,19 @@ object AutoMobileSDK {
   }
 
   /** Whether navigation tracking is currently enabled. */
-  val isTrackingEnabled: Boolean get() = _isEnabled
+  val isTrackingEnabled: Boolean
+    get() = _isEnabled
 
   /** The current number of registered listeners. */
-  val listenerCount: Int get() = listeners.size
+  val listenerCount: Int
+    get() = listeners.size
 
   /** Returns the current session ID, or null if no active session. */
   fun currentSessionId(): String? = sessionTracker?.currentSessionId()
 
   /**
-   * Add a breadcrumb to the trail. Breadcrumbs are attached to crash reports
-   * so that recent app activity is visible when diagnosing crashes.
+   * Add a breadcrumb to the trail. Breadcrumbs are attached to crash reports so that recent app
+   * activity is visible when diagnosing crashes.
    *
    * @param message A short description of the breadcrumb
    * @param category The category (defaults to CUSTOM)
@@ -328,7 +336,7 @@ object AutoMobileSDK {
         category = category,
         message = message,
         metadata = metadata,
-      ),
+      )
     )
   }
 
@@ -337,26 +345,34 @@ object AutoMobileSDK {
    *
    * Useful for diagnostics — the map is empty when no events have been dropped.
    */
-  val dropReport: Map<DropReason, Long> get() = dropCounter?.snapshot() ?: emptyMap()
+  val dropReport: Map<DropReason, Long>
+    get() = dropCounter?.snapshot() ?: emptyMap()
 
   /** Returns the shared event buffer, or null if not initialized. */
   internal fun getEventBuffer(): SdkEventBuffer? = eventBuffer
 
   /** Sets the user identifier on the SDK context. */
-  fun setUserId(userId: String?) { sdkContext?.userId = userId }
+  fun setUserId(userId: String?) {
+    sdkContext?.userId = userId
+  }
 
   /** Sets a tag on the SDK context. */
-  fun setTag(key: String, value: String) { sdkContext?.setTag(key, value) }
+  fun setTag(key: String, value: String) {
+    sdkContext?.setTag(key, value)
+  }
 
   /** Removes a tag from the SDK context. */
-  fun removeTag(key: String) { sdkContext?.removeTag(key) }
+  fun removeTag(key: String) {
+    sdkContext?.removeTag(key)
+  }
 
   /** An immutable snapshot of the current SDK context, or null if not initialized. */
-  val contextSnapshot: SdkContextSnapshot? get() = sdkContext?.snapshot()
+  val contextSnapshot: SdkContextSnapshot?
+    get() = sdkContext?.snapshot()
 
   /**
-   * Replay pending event batches from disk (events that survived process death).
-   * Each batch is broadcast and removed on success; failures remain on disk.
+   * Replay pending event batches from disk (events that survived process death). Each batch is
+   * broadcast and removed on success; failures remain on disk.
    */
   private fun replayPendingBatches(context: Context, persistence: EventPersistence) {
     for ((batchId, events) in persistence.loadPending()) {

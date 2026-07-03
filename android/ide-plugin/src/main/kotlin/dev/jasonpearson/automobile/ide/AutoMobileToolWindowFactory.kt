@@ -14,11 +14,11 @@ class AutoMobileToolWindowFactory : ToolWindowFactory, DumbAware {
   override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
     val panel = JewelComposePanel {
       AutoMobileContent(
-          settingsProvider = AutoMobileSettings.getInstance(),
-          notificationHandler = IntellijNotificationHandler,
-          onOpenSource = { fileName, lineNumber, className ->
-            SourceFileFinder.findAndOpen(project, fileName, lineNumber, className)
-          },
+        settingsProvider = AutoMobileSettings.getInstance(),
+        notificationHandler = IntellijNotificationHandler,
+        onOpenSource = { fileName, lineNumber, className ->
+          SourceFileFinder.findAndOpen(project, fileName, lineNumber, className)
+        },
       )
     }
     val content = toolWindow.contentManager.factory.createContent(panel, "", false)
@@ -31,15 +31,15 @@ private object IntellijNotificationHandler : NotificationHandler {
   override fun show(title: String, content: String, isWarning: Boolean) {
     try {
       val type =
-          if (isWarning) {
-            com.intellij.notification.NotificationType.WARNING
-          } else {
-            com.intellij.notification.NotificationType.INFORMATION
-          }
+        if (isWarning) {
+          com.intellij.notification.NotificationType.WARNING
+        } else {
+          com.intellij.notification.NotificationType.INFORMATION
+        }
       com.intellij.notification.NotificationGroupManager.getInstance()
-          .getNotificationGroup("AutoMobile")
-          .createNotification(title, content, type)
-          .notify(null)
+        .getNotificationGroup("AutoMobile")
+        .createNotification(title, content, type)
+        .notify(null)
     } catch (_: Exception) {}
   }
 }

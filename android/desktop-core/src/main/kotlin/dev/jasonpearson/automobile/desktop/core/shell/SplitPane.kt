@@ -45,96 +45,81 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
  */
 @Composable
 fun HorizontalSplitPane(
-    first: @Composable () -> Unit,
-    second: @Composable () -> Unit,
-    modifier: Modifier = Modifier,
-    firstPaneFraction: Float = 0.25f,
-    minFirstDp: Dp = 100.dp,
-    minSecondDp: Dp = 100.dp,
-    onFractionChanged: ((Float) -> Unit)? = null,
-    dividerWidth: Dp = 1.dp,
-    dragHandleWidth: Dp = 8.dp,
+  first: @Composable () -> Unit,
+  second: @Composable () -> Unit,
+  modifier: Modifier = Modifier,
+  firstPaneFraction: Float = 0.25f,
+  minFirstDp: Dp = 100.dp,
+  minSecondDp: Dp = 100.dp,
+  onFractionChanged: ((Float) -> Unit)? = null,
+  dividerWidth: Dp = 1.dp,
+  dragHandleWidth: Dp = 8.dp,
 ) {
-    val currentDensity by rememberUpdatedState(LocalDensity.current)
-    val currentOnFractionChanged by rememberUpdatedState(onFractionChanged)
-    var fraction by remember { mutableStateOf(firstPaneFraction) }
-    var totalWidthPx by remember { mutableStateOf(0) }
-    var isDragging by remember { mutableStateOf(false) }
-    val interactionSource = remember { MutableInteractionSource() }
-    val isHovered by interactionSource.collectIsHoveredAsState()
+  val currentDensity by rememberUpdatedState(LocalDensity.current)
+  val currentOnFractionChanged by rememberUpdatedState(onFractionChanged)
+  var fraction by remember { mutableStateOf(firstPaneFraction) }
+  var totalWidthPx by remember { mutableStateOf(0) }
+  var isDragging by remember { mutableStateOf(false) }
+  val interactionSource = remember { MutableInteractionSource() }
+  val isHovered by interactionSource.collectIsHoveredAsState()
 
-    LaunchedEffect(firstPaneFraction) {
-        fraction = firstPaneFraction
-    }
+  LaunchedEffect(firstPaneFraction) {
+    fraction = firstPaneFraction
+  }
 
-    val colors = SharedTheme.globalColors
-    val dividerColor = if (isHovered || isDragging) {
-        colors.text.normal.copy(alpha = 0.3f)
+  val colors = SharedTheme.globalColors
+  val dividerColor =
+    if (isHovered || isDragging) {
+      colors.text.normal.copy(alpha = 0.3f)
     } else {
-        colors.text.normal.copy(alpha = 0.15f)
+      colors.text.normal.copy(alpha = 0.15f)
     }
 
-    Row(
-        modifier = modifier
-            .fillMaxSize()
-            .onSizeChanged { totalWidthPx = it.width },
-    ) {
-        Box(
-            modifier = Modifier
-                .weight(fraction.coerceIn(0.01f, 0.99f))
-                .fillMaxHeight(),
-        ) {
-            first()
-        }
+  Row(modifier = modifier.fillMaxSize().onSizeChanged { totalWidthPx = it.width }) {
+    Box(modifier = Modifier.weight(fraction.coerceIn(0.01f, 0.99f)).fillMaxHeight()) {
+      first()
+    }
 
-        Box(
-            modifier = Modifier
-                .width(dragHandleWidth)
-                .fillMaxHeight()
-                .hoverable(interactionSource)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
-                    detectDragGestures(
-                        onDragStart = { isDragging = true },
-                        onDragEnd = { isDragging = false },
-                        onDragCancel = { isDragging = false },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            if (totalWidthPx > 0) {
-                                val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
-                                val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
-                                val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
-                                val usable = (totalWidthPx - handlePx)
-                                    .coerceAtLeast(minFirstPx + minSecondPx)
-                                if (usable <= 0f) return@detectDragGestures
-                                val newFirstPx = (fraction * usable + dragAmount.x)
-                                    .coerceIn(minFirstPx, (usable - minSecondPx).coerceAtLeast(minFirstPx))
-                                val newFraction = (newFirstPx / usable)
-                                    .coerceIn(0.01f, 0.99f)
-                                fraction = newFraction
-                                currentOnFractionChanged?.invoke(newFraction)
-                            }
-                        },
+    Box(
+      modifier =
+        Modifier.width(dragHandleWidth)
+          .fillMaxHeight()
+          .hoverable(interactionSource)
+          .pointerHoverIcon(PointerIcon.Hand)
+          .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
+            detectDragGestures(
+              onDragStart = { isDragging = true },
+              onDragEnd = { isDragging = false },
+              onDragCancel = { isDragging = false },
+              onDrag = { change, dragAmount ->
+                change.consume()
+                if (totalWidthPx > 0) {
+                  val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
+                  val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
+                  val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
+                  val usable = (totalWidthPx - handlePx).coerceAtLeast(minFirstPx + minSecondPx)
+                  if (usable <= 0f) return@detectDragGestures
+                  val newFirstPx =
+                    (fraction * usable + dragAmount.x).coerceIn(
+                      minFirstPx,
+                      (usable - minSecondPx).coerceAtLeast(minFirstPx),
                     )
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(dividerWidth)
-                    .fillMaxHeight()
-                    .background(dividerColor),
+                  val newFraction = (newFirstPx / usable).coerceIn(0.01f, 0.99f)
+                  fraction = newFraction
+                  currentOnFractionChanged?.invoke(newFraction)
+                }
+              },
             )
-        }
-
-        Box(
-            modifier = Modifier
-                .weight((1f - fraction).coerceIn(0.01f, 0.99f))
-                .fillMaxHeight(),
-        ) {
-            second()
-        }
+          },
+      contentAlignment = Alignment.Center,
+    ) {
+      Box(modifier = Modifier.width(dividerWidth).fillMaxHeight().background(dividerColor))
     }
+
+    Box(modifier = Modifier.weight((1f - fraction).coerceIn(0.01f, 0.99f)).fillMaxHeight()) {
+      second()
+    }
+  }
 }
 
 /**
@@ -151,94 +136,79 @@ fun HorizontalSplitPane(
  */
 @Composable
 fun VerticalSplitPane(
-    first: @Composable () -> Unit,
-    second: @Composable () -> Unit,
-    modifier: Modifier = Modifier,
-    firstPaneFraction: Float = 0.25f,
-    minFirstDp: Dp = 100.dp,
-    minSecondDp: Dp = 100.dp,
-    onFractionChanged: ((Float) -> Unit)? = null,
-    dividerWidth: Dp = 1.dp,
-    dragHandleWidth: Dp = 8.dp,
+  first: @Composable () -> Unit,
+  second: @Composable () -> Unit,
+  modifier: Modifier = Modifier,
+  firstPaneFraction: Float = 0.25f,
+  minFirstDp: Dp = 100.dp,
+  minSecondDp: Dp = 100.dp,
+  onFractionChanged: ((Float) -> Unit)? = null,
+  dividerWidth: Dp = 1.dp,
+  dragHandleWidth: Dp = 8.dp,
 ) {
-    val currentDensity by rememberUpdatedState(LocalDensity.current)
-    val currentOnFractionChanged by rememberUpdatedState(onFractionChanged)
-    var fraction by remember { mutableStateOf(firstPaneFraction) }
-    var totalHeightPx by remember { mutableStateOf(0) }
-    var isDragging by remember { mutableStateOf(false) }
-    val interactionSource = remember { MutableInteractionSource() }
-    val isHovered by interactionSource.collectIsHoveredAsState()
+  val currentDensity by rememberUpdatedState(LocalDensity.current)
+  val currentOnFractionChanged by rememberUpdatedState(onFractionChanged)
+  var fraction by remember { mutableStateOf(firstPaneFraction) }
+  var totalHeightPx by remember { mutableStateOf(0) }
+  var isDragging by remember { mutableStateOf(false) }
+  val interactionSource = remember { MutableInteractionSource() }
+  val isHovered by interactionSource.collectIsHoveredAsState()
 
-    LaunchedEffect(firstPaneFraction) {
-        fraction = firstPaneFraction
-    }
+  LaunchedEffect(firstPaneFraction) {
+    fraction = firstPaneFraction
+  }
 
-    val colors = SharedTheme.globalColors
-    val dividerColor = if (isHovered || isDragging) {
-        colors.text.normal.copy(alpha = 0.3f)
+  val colors = SharedTheme.globalColors
+  val dividerColor =
+    if (isHovered || isDragging) {
+      colors.text.normal.copy(alpha = 0.3f)
     } else {
-        colors.text.normal.copy(alpha = 0.15f)
+      colors.text.normal.copy(alpha = 0.15f)
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .onSizeChanged { totalHeightPx = it.height },
-    ) {
-        Box(
-            modifier = Modifier
-                .weight(fraction.coerceIn(0.01f, 0.99f))
-                .fillMaxWidth(),
-        ) {
-            first()
-        }
+  Column(modifier = modifier.fillMaxSize().onSizeChanged { totalHeightPx = it.height }) {
+    Box(modifier = Modifier.weight(fraction.coerceIn(0.01f, 0.99f)).fillMaxWidth()) {
+      first()
+    }
 
-        Box(
-            modifier = Modifier
-                .height(dragHandleWidth)
-                .fillMaxWidth()
-                .hoverable(interactionSource)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
-                    detectDragGestures(
-                        onDragStart = { isDragging = true },
-                        onDragEnd = { isDragging = false },
-                        onDragCancel = { isDragging = false },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            if (totalHeightPx > 0) {
-                                val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
-                                val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
-                                val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
-                                val usable = (totalHeightPx - handlePx)
-                                    .coerceAtLeast(minFirstPx + minSecondPx)
-                                if (usable <= 0f) return@detectDragGestures
-                                val newFirstPx = (fraction * usable + dragAmount.y)
-                                    .coerceIn(minFirstPx, (usable - minSecondPx).coerceAtLeast(minFirstPx))
-                                val newFraction = (newFirstPx / usable)
-                                    .coerceIn(0.01f, 0.99f)
-                                fraction = newFraction
-                                currentOnFractionChanged?.invoke(newFraction)
-                            }
-                        },
+    Box(
+      modifier =
+        Modifier.height(dragHandleWidth)
+          .fillMaxWidth()
+          .hoverable(interactionSource)
+          .pointerHoverIcon(PointerIcon.Hand)
+          .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
+            detectDragGestures(
+              onDragStart = { isDragging = true },
+              onDragEnd = { isDragging = false },
+              onDragCancel = { isDragging = false },
+              onDrag = { change, dragAmount ->
+                change.consume()
+                if (totalHeightPx > 0) {
+                  val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
+                  val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
+                  val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
+                  val usable = (totalHeightPx - handlePx).coerceAtLeast(minFirstPx + minSecondPx)
+                  if (usable <= 0f) return@detectDragGestures
+                  val newFirstPx =
+                    (fraction * usable + dragAmount.y).coerceIn(
+                      minFirstPx,
+                      (usable - minSecondPx).coerceAtLeast(minFirstPx),
                     )
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(
-                modifier = Modifier
-                    .height(dividerWidth)
-                    .fillMaxWidth()
-                    .background(dividerColor),
+                  val newFraction = (newFirstPx / usable).coerceIn(0.01f, 0.99f)
+                  fraction = newFraction
+                  currentOnFractionChanged?.invoke(newFraction)
+                }
+              },
             )
-        }
-
-        Box(
-            modifier = Modifier
-                .weight((1f - fraction).coerceIn(0.01f, 0.99f))
-                .fillMaxWidth(),
-        ) {
-            second()
-        }
+          },
+      contentAlignment = Alignment.Center,
+    ) {
+      Box(modifier = Modifier.height(dividerWidth).fillMaxWidth().background(dividerColor))
     }
+
+    Box(modifier = Modifier.weight((1f - fraction).coerceIn(0.01f, 0.99f)).fillMaxWidth()) {
+      second()
+    }
+  }
 }

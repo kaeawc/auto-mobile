@@ -3,10 +3,15 @@ package dev.jasonpearson.automobile.desktop.core.logging
 /** Platform-agnostic logger interface to decouple from IntelliJ's Logger. */
 interface Logger {
   fun info(message: String)
+
   fun warn(message: String)
+
   fun warn(message: String, throwable: Throwable)
+
   fun error(message: String)
+
   fun error(message: String, throwable: Throwable)
+
   fun debug(message: String)
 }
 

@@ -52,10 +52,10 @@ import kotlin.math.min
 fun StatisticItem(label: String, value: String) {
   Column(horizontalAlignment = Alignment.CenterHorizontally) {
     Text(
-        text = value,
-        fontSize = 24.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
+      text = value,
+      fontSize = 24.sp,
+      fontWeight = FontWeight.Bold,
+      color = MaterialTheme.colorScheme.primary,
     )
     Text(text = label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
   }
@@ -93,79 +93,75 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
     }
 
     Scaffold(
-        topBar = {
-          ProfileTopAppBar(
-              name = name,
-              email = email,
-              scrollProgress = scrollProgress,
-              onEmailClick = {
-                tempEmail = email
-                isEditingEmail = true
-              },
-          )
-        }
+      topBar = {
+        ProfileTopAppBar(
+          name = name,
+          email = email,
+          scrollProgress = scrollProgress,
+          onEmailClick = {
+            tempEmail = email
+            isEditingEmail = true
+          },
+        )
+      }
     ) { paddingValues ->
       Column(
-          modifier =
-              Modifier.fillMaxSize()
-                  .padding(paddingValues)
-                  .padding(16.dp)
-                  .verticalScroll(scrollState),
-          verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier =
+          Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).verticalScroll(scrollState),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         HorizontalDivider()
 
         // Experiments Section
         ExperimentsSection(
-            experiments = experiments,
-            onExperimentsUpdated = { updatedExperiments ->
-              updatedExperiments.forEach { updatedExp ->
-                val originalExp = experiments.find { it.name == updatedExp.name }
-                if (
-                    originalExp != null &&
-                        originalExp.currentTreatment != updatedExp.currentTreatment
-                ) {
-                  viewModel.updateExperimentTreatment(updatedExp, updatedExp.currentTreatment)
-                }
+          experiments = experiments,
+          onExperimentsUpdated = { updatedExperiments ->
+            updatedExperiments.forEach { updatedExp ->
+              val originalExp = experiments.find { it.name == updatedExp.name }
+              if (
+                originalExp != null && originalExp.currentTreatment != updatedExp.currentTreatment
+              ) {
+                viewModel.updateExperimentTreatment(updatedExp, updatedExp.currentTreatment)
               }
-            },
+            }
+          },
         )
 
         HorizontalDivider()
 
         // Statistics Section
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-            shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.fillMaxWidth(),
+          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+          shape = RoundedCornerShape(12.dp),
         ) {
           Column(
-              modifier = Modifier.padding(20.dp),
-              verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
             ) {
               Icon(
-                  imageVector = Icons.Filled.Analytics,
-                  contentDescription = "Analytics",
-                  modifier = Modifier.padding(end = 8.dp),
-                  tint = MaterialTheme.colorScheme.primary,
+                imageVector = Icons.Filled.Analytics,
+                contentDescription = "Analytics",
+                modifier = Modifier.padding(end = 8.dp),
+                tint = MaterialTheme.colorScheme.primary,
               )
               Text(
-                  text = "Statistics",
-                  fontSize = 18.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = MaterialTheme.colorScheme.onSurface,
+                text = "Statistics",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
               )
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
               StatisticItem("Taps", userStats.taps.toString())
               StatisticItem("Swipes", userStats.swipes.toString())
@@ -175,55 +171,55 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
             ) {
               Text(text = "Enable Tracking", modifier = Modifier.weight(1f))
               Switch(
-                  checked = trackingEnabled,
-                  onCheckedChange = { viewModel.updateTrackingEnabled(it) },
+                checked = trackingEnabled,
+                onCheckedChange = { viewModel.updateTrackingEnabled(it) },
               )
             }
 
             Text(
-                text = "For demo purposes only. No data is transmitted anywhere.",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
+              text = "For demo purposes only. No data is transmitted anywhere.",
+              fontSize = 12.sp,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.padding(top = 4.dp),
             )
           }
         }
 
         // Logout Section
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors =
-                CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+          modifier = Modifier.fillMaxWidth(),
+          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+          shape = RoundedCornerShape(12.dp),
+          colors =
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
         ) {
           Column(
-              modifier = Modifier.padding(20.dp),
-              horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
           ) {
             Text(
-                text = "Account Actions",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.padding(bottom = 12.dp),
+              text = "Account Actions",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              color = MaterialTheme.colorScheme.onErrorContainer,
+              modifier = Modifier.padding(bottom = 12.dp),
             )
 
             Button(
-                onClick = onLogout,
-                modifier = Modifier.fillMaxWidth(),
-                colors =
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+              onClick = onLogout,
+              modifier = Modifier.fillMaxWidth(),
+              colors =
+                ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
             ) {
               Icon(
-                  imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                  contentDescription = "Logout",
-                  modifier = Modifier.padding(end = 8.dp),
+                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                contentDescription = "Logout",
+                modifier = Modifier.padding(end = 8.dp),
               )
               Text("Logout")
             }
@@ -235,35 +231,35 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
     // Email editing bottom sheet
     if (isEditingEmail) {
       EmailEditBottomSheet(
-          email = tempEmail,
-          onEmailChange = { tempEmail = it },
-          onDismiss = { isEditingEmail = false },
-          onSave = {
-            viewModel.saveEmail(tempEmail)
-            isEditingEmail = false
-          },
+        email = tempEmail,
+        onEmailChange = { tempEmail = it },
+        onDismiss = { isEditingEmail = false },
+        onSave = {
+          viewModel.saveEmail(tempEmail)
+          isEditingEmail = false
+        },
       )
     }
   }
 }
 
 @Preview(
-    name = "Discover Screen - Keyboard Open",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_NO,
+  name = "Discover Screen - Keyboard Open",
+  showBackground = true,
+  uiMode = Configuration.UI_MODE_NIGHT_NO,
 )
 @Preview(
-    name = "Discover Screen - Keyboard Open - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
+  name = "Discover Screen - Keyboard Open - Dark",
+  showBackground = true,
+  uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun SettingsScreenMainPreview() {
   val isDarkMode =
-      when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
-        Configuration.UI_MODE_NIGHT_YES -> true
-        else -> false
-      }
+    when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
+      Configuration.UI_MODE_NIGHT_YES -> true
+      else -> false
+    }
 
   AutoMobileTheme(darkTheme = isDarkMode) {
     SettingsScreen(onLogout = { /* Preview logout action */ })

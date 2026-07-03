@@ -52,99 +52,99 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
     var errorStatusMessage by remember { mutableStateOf("No errors triggered") }
 
     Scaffold(
-        topBar = {
-          TopAppBar(
-              title = { Text(text = "Bug Reproduction Demo") },
-              navigationIcon = {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.semantics { testTag = "bug_repro_back" },
-                ) {
-                  Icon(
-                      imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                      contentDescription = "Back",
-                  )
-                }
-              },
-          )
-        }
+      topBar = {
+        TopAppBar(
+          title = { Text(text = "Bug Reproduction Demo") },
+          navigationIcon = {
+            IconButton(
+              onClick = onNavigateBack,
+              modifier = Modifier.semantics { testTag = "bug_repro_back" },
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+              )
+            }
+          },
+        )
+      }
     ) { paddingValues ->
       Column(
-          modifier =
-              Modifier.fillMaxSize()
-                  .padding(paddingValues)
-                  .padding(16.dp)
-                  .verticalScroll(rememberScrollState())
-                  .semantics { testTag = "bug_repro_content" },
-          verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier =
+          Modifier.fillMaxSize()
+            .padding(paddingValues)
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+            .semantics { testTag = "bug_repro_content" },
+        verticalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         // === UI Bug Section ===
         Text(
-            text = "UI Bug Demo",
-            style = MaterialTheme.typography.titleMedium,
+          text = "UI Bug Demo",
+          style = MaterialTheme.typography.titleMedium,
         )
         Text(
-            text = "Enable the bug, then tap Add Item to reproduce.",
-            style = MaterialTheme.typography.bodyMedium,
+          text = "Enable the bug, then tap Add Item to reproduce.",
+          style = MaterialTheme.typography.bodyMedium,
         )
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           Text(text = "Enable Bug", modifier = Modifier.weight(1f))
           Switch(
-              checked = bugEnabled,
-              onCheckedChange = { bugEnabled = it },
-              modifier = Modifier.semantics { testTag = "bug_repro_toggle" },
+            checked = bugEnabled,
+            onCheckedChange = { bugEnabled = it },
+            modifier = Modifier.semantics { testTag = "bug_repro_toggle" },
           )
         }
 
         Card(
-            modifier = Modifier.fillMaxWidth().semantics { testTag = "bug_repro_status_card" },
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+          modifier = Modifier.fillMaxWidth().semantics { testTag = "bug_repro_status_card" },
+          elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
           Column(
-              modifier = Modifier.fillMaxWidth().padding(16.dp),
-              verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
           ) {
             Text(
-                text = "Expected count: $expectedCount",
-                modifier = Modifier.semantics { testTag = "bug_repro_expected" },
+              text = "Expected count: $expectedCount",
+              modifier = Modifier.semantics { testTag = "bug_repro_expected" },
             )
             Text(
-                text = "Displayed count: $displayedCount",
-                modifier = Modifier.semantics { testTag = "bug_repro_displayed" },
+              text = "Displayed count: $displayedCount",
+              modifier = Modifier.semantics { testTag = "bug_repro_displayed" },
             )
             Text(
-                text = "Status: $statusMessage",
-                modifier = Modifier.semantics { testTag = "bug_repro_status" },
+              text = "Status: $statusMessage",
+              modifier = Modifier.semantics { testTag = "bug_repro_status" },
             )
           }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
           Button(
-              onClick = {
-                expectedCount += 1
-                if (!bugEnabled) {
-                  displayedCount += 1
-                  statusMessage = "Updated"
-                } else {
-                  statusMessage = "Bug triggered: UI did not update"
-                }
-              },
-              modifier = Modifier.semantics { testTag = "bug_repro_add" },
+            onClick = {
+              expectedCount += 1
+              if (!bugEnabled) {
+                displayedCount += 1
+                statusMessage = "Updated"
+              } else {
+                statusMessage = "Bug triggered: UI did not update"
+              }
+            },
+            modifier = Modifier.semantics { testTag = "bug_repro_add" },
           ) {
             Text("Add Item")
           }
           Button(
-              onClick = {
-                expectedCount = 0
-                displayedCount = 0
-                statusMessage = "Reset"
-              },
-              modifier = Modifier.semantics { testTag = "bug_repro_reset" },
+            onClick = {
+              expectedCount = 0
+              displayedCount = 0
+              statusMessage = "Reset"
+            },
+            modifier = Modifier.semantics { testTag = "bug_repro_reset" },
           ) {
             Text("Reset")
           }
@@ -154,96 +154,93 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
 
         // === Error Simulation Section ===
         Text(
-            text = "Error Simulation",
-            style = MaterialTheme.typography.titleMedium,
+          text = "Error Simulation",
+          style = MaterialTheme.typography.titleMedium,
         )
         Text(
-            text = "Trigger crashes, ANRs, and non-fatal errors to test SDK capture.",
-            style = MaterialTheme.typography.bodyMedium,
+          text = "Trigger crashes, ANRs, and non-fatal errors to test SDK capture.",
+          style = MaterialTheme.typography.bodyMedium,
         )
 
         Card(
-            modifier = Modifier.fillMaxWidth().semantics { testTag = "error_status_card" },
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+          modifier = Modifier.fillMaxWidth().semantics { testTag = "error_status_card" },
+          elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
           Column(
-              modifier = Modifier.fillMaxWidth().padding(16.dp),
-              verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
           ) {
             Text(
-                text = "Non-fatal errors recorded: $nonFatalCount",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.semantics { testTag = "error_nonfatal_count" },
+              text = "Non-fatal errors recorded: $nonFatalCount",
+              style = MaterialTheme.typography.bodyMedium,
+              modifier = Modifier.semantics { testTag = "error_nonfatal_count" },
             )
             Text(
-                text = errorStatusMessage,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.semantics { testTag = "error_status_message" },
+              text = errorStatusMessage,
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.semantics { testTag = "error_status_message" },
             )
           }
         }
 
         // Non-fatal error button
         OutlinedButton(
-            onClick = {
-              try {
-                throw IllegalStateException(
-                    "Intentional non-fatal error from Bug Reproduction screen"
-                )
-              } catch (e: IllegalStateException) {
-                AutoMobileFailures.recordHandledException(
-                    e,
-                    "User triggered non-fatal error from BugReproScreen",
-                    "BugReproScreen",
-                )
-                nonFatalCount++
-                errorStatusMessage = "Non-fatal error recorded: IllegalStateException"
-              }
-            },
-            modifier = Modifier.fillMaxWidth().semantics { testTag = "trigger_nonfatal_error" },
+          onClick = {
+            try {
+              throw IllegalStateException(
+                "Intentional non-fatal error from Bug Reproduction screen"
+              )
+            } catch (e: IllegalStateException) {
+              AutoMobileFailures.recordHandledException(
+                e,
+                "User triggered non-fatal error from BugReproScreen",
+                "BugReproScreen",
+              )
+              nonFatalCount++
+              errorStatusMessage = "Non-fatal error recorded: IllegalStateException"
+            }
+          },
+          modifier = Modifier.fillMaxWidth().semantics { testTag = "trigger_nonfatal_error" },
         ) {
           Text("Trigger Non-Fatal Error")
         }
 
         // ANR button (blocks main thread)
         Button(
-            onClick = {
-              errorStatusMessage = "Triggering ANR (blocking main thread for 6 seconds)..."
-              // Block the main thread for 6 seconds to trigger ANR
-              // ANR threshold is typically 5 seconds for input events
-              Thread.sleep(6000)
-              errorStatusMessage = "ANR triggered (if system detected it)"
-            },
-            colors =
-                ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.tertiary,
-                ),
-            modifier = Modifier.fillMaxWidth().semantics { testTag = "trigger_anr" },
+          onClick = {
+            errorStatusMessage = "Triggering ANR (blocking main thread for 6 seconds)..."
+            // Block the main thread for 6 seconds to trigger ANR
+            // ANR threshold is typically 5 seconds for input events
+            Thread.sleep(6000)
+            errorStatusMessage = "ANR triggered (if system detected it)"
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+          modifier = Modifier.fillMaxWidth().semantics { testTag = "trigger_anr" },
         ) {
           Text("Trigger ANR (6s Block)")
         }
 
         // Crash button
         Button(
-            onClick = {
-              errorStatusMessage = "Crashing app..."
-              // Throw an uncaught exception to crash the app
-              throw RuntimeException("Intentional crash from Bug Reproduction screen")
-            },
-            colors =
-                ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFB71C1C), // Dark red for danger
-                ),
-            modifier = Modifier.fillMaxWidth().semantics { testTag = "trigger_crash" },
+          onClick = {
+            errorStatusMessage = "Crashing app..."
+            // Throw an uncaught exception to crash the app
+            throw RuntimeException("Intentional crash from Bug Reproduction screen")
+          },
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = Color(0xFFB71C1C) // Dark red for danger
+            ),
+          modifier = Modifier.fillMaxWidth().semantics { testTag = "trigger_crash" },
         ) {
           Text("Trigger Crash", color = Color.White)
         }
 
         Text(
-            text = "⚠️ Crash button will terminate the app. ANR button will freeze the UI.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
+          text = "⚠️ Crash button will terminate the app. ANR button will freeze the UI.",
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.error,
         )
       }
     }

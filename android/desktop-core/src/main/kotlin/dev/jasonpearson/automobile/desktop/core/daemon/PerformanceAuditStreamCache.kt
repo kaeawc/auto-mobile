@@ -23,16 +23,16 @@ class FakePerformanceAuditClock(initialMs: Long) : PerformanceAuditClock {
 }
 
 data class PerformanceAuditStreamFilter(
-    val deviceId: String? = null,
-    val sessionId: String? = null,
-    val packageName: String? = null,
-    val timeWindowMs: Long? = null,
+  val deviceId: String? = null,
+  val sessionId: String? = null,
+  val packageName: String? = null,
+  val timeWindowMs: Long? = null,
 )
 
 class PerformanceAuditStreamCache(
-    private val clock: PerformanceAuditClock,
-    private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
-    private val ttlMs: Long = DEFAULT_TTL_MS,
+  private val clock: PerformanceAuditClock,
+  private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
+  private val ttlMs: Long = DEFAULT_TTL_MS,
 ) {
   companion object {
     const val DEFAULT_MAX_ENTRIES = 10_000
@@ -40,8 +40,8 @@ class PerformanceAuditStreamCache(
   }
 
   private data class CachedEntry(
-      val entry: PerformanceAuditHistoryEntry,
-      val timestampMs: Long,
+    val entry: PerformanceAuditHistoryEntry,
+    val timestampMs: Long,
   )
 
   private val entries = LinkedHashMap<Long, CachedEntry>(16, 0.75f, true)
@@ -61,18 +61,19 @@ class PerformanceAuditStreamCache(
   }
 
   @Synchronized
-  fun snapshot(filter: PerformanceAuditStreamFilter = PerformanceAuditStreamFilter()):
-      List<PerformanceAuditHistoryEntry> {
+  fun snapshot(
+    filter: PerformanceAuditStreamFilter = PerformanceAuditStreamFilter()
+  ): List<PerformanceAuditHistoryEntry> {
     pruneExpiredLocked()
     val windowMs = filter.timeWindowMs ?: ttlMs
     val cutoff = clock.nowMs() - windowMs
     return entries.values
-        .asSequence()
-        .filter { it.timestampMs >= cutoff }
-        .filter { entryMatchesFilter(it.entry, filter) }
-        .sortedWith(compareBy<CachedEntry> { it.timestampMs }.thenBy { it.entry.id })
-        .map { it.entry }
-        .toList()
+      .asSequence()
+      .filter { it.timestampMs >= cutoff }
+      .filter { entryMatchesFilter(it.entry, filter) }
+      .sortedWith(compareBy<CachedEntry> { it.timestampMs }.thenBy { it.entry.id })
+      .map { it.entry }
+      .toList()
   }
 
   @Synchronized
@@ -81,8 +82,8 @@ class PerformanceAuditStreamCache(
   }
 
   private fun entryMatchesFilter(
-      entry: PerformanceAuditHistoryEntry,
-      filter: PerformanceAuditStreamFilter,
+    entry: PerformanceAuditHistoryEntry,
+    filter: PerformanceAuditStreamFilter,
   ): Boolean {
     if (!filter.deviceId.isNullOrBlank() && entry.deviceId != filter.deviceId) {
       return false

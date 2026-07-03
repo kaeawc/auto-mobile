@@ -13,10 +13,10 @@ class AutoMobileTestDemo {
   @Test
   fun testAutoMobilePlanDSLConstruction() {
     val plan =
-        AutoMobilePlan("test-plans/launch-clock.yaml") {
-          "experiment" to "GROUP_A"
-          "environment" to "QA"
-        }
+      AutoMobilePlan("test-plans/launch-clock.yaml") {
+        "experiment" to "GROUP_A"
+        "environment" to "QA"
+      }
     assertNotNull(plan)
   }
 
@@ -32,28 +32,28 @@ class AutoMobileTestDemo {
   @Test
   fun effectiveExecutePlanTimeoutNeverDropsBelowFloor() {
     assertEquals(
-        MIN_EXECUTE_PLAN_TIMEOUT_MS,
-        AutoMobilePlanExecutionOptions().effectiveExecutePlanTimeoutMs(),
+      MIN_EXECUTE_PLAN_TIMEOUT_MS,
+      AutoMobilePlanExecutionOptions().effectiveExecutePlanTimeoutMs(),
     )
     assertEquals(
-        MIN_EXECUTE_PLAN_TIMEOUT_MS,
-        AutoMobilePlanExecutionOptions(timeoutMs = 30_000L).effectiveExecutePlanTimeoutMs(),
+      MIN_EXECUTE_PLAN_TIMEOUT_MS,
+      AutoMobilePlanExecutionOptions(timeoutMs = 30_000L).effectiveExecutePlanTimeoutMs(),
     )
     assertEquals(
-        900_000L,
-        AutoMobilePlanExecutionOptions(timeoutMs = 900_000L).effectiveExecutePlanTimeoutMs(),
+      900_000L,
+      AutoMobilePlanExecutionOptions(timeoutMs = 900_000L).effectiveExecutePlanTimeoutMs(),
     )
   }
 
   @Test
   fun testAutoMobilePlanExecutionOptionsCustom() {
     val options =
-        AutoMobilePlanExecutionOptions(
-            timeoutMs = 60000L,
-            device = "emulator-5554",
-            aiAssistance = false,
-            maxRetries = 2,
-        )
+      AutoMobilePlanExecutionOptions(
+        timeoutMs = 60000L,
+        device = "emulator-5554",
+        aiAssistance = false,
+        maxRetries = 2,
+      )
     assertEquals(60000L, options.timeoutMs)
     assertEquals("emulator-5554", options.device)
     assertFalse(options.aiAssistance)

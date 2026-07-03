@@ -11,9 +11,9 @@ data class ValidationResult(val valid: Boolean, val errors: List<ValidationError
 
 /** Structured validation error with severity and location information */
 data class ValidationError(
-    val field: String,
-    val message: String,
-    val severity: ValidationSeverity = ValidationSeverity.ERROR,
-    val line: Int? = null,
-    val column: Int? = null,
+  val field: String,
+  val message: String,
+  val severity: ValidationSeverity = ValidationSeverity.ERROR,
+  val line: Int? = null,
+  val column: Int? = null,
 )

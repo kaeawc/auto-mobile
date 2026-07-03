@@ -9,22 +9,22 @@ import kotlin.math.min
 import kotlin.math.sin
 
 data class NodeLayout(
-    val node: NavigationGraphSummaryNode,
-    val center: Offset,
-    val radius: Float,
-    val ring: Int,
+  val node: NavigationGraphSummaryNode,
+  val center: Offset,
+  val radius: Float,
+  val ring: Int,
 )
 
 data class GraphLayout(
-    val nodeLayouts: Map<String, NodeLayout>,
-    val size: IntSize,
+  val nodeLayouts: Map<String, NodeLayout>,
+  val size: IntSize,
 )
 
 fun computeGraphLayout(
-    summary: NavigationGraphSummary,
-    size: IntSize,
-    baseRadiusPx: Float,
-    paddingPx: Float,
+  summary: NavigationGraphSummary,
+  size: IntSize,
+  baseRadiusPx: Float,
+  paddingPx: Float,
 ): GraphLayout {
   if (summary.nodes.isEmpty() || size.width <= 0 || size.height <= 0) {
     return GraphLayout(emptyMap(), size)
@@ -32,8 +32,7 @@ fun computeGraphLayout(
 
   val adjacency = buildAdjacency(summary)
   val root =
-      summary.currentScreen?.takeIf { adjacency.containsKey(it) }
-          ?: summary.nodes.first().screenName
+    summary.currentScreen?.takeIf { adjacency.containsKey(it) } ?: summary.nodes.first().screenName
   val distances = computeDistances(adjacency, root)
 
   val maxDistance = distances.values.maxOrNull() ?: 0
@@ -57,12 +56,12 @@ fun computeGraphLayout(
     if (ring == 0) {
       val node = sorted.first()
       layouts[node.screenName] =
-          NodeLayout(
-              node = node,
-              center = center,
-              radius = nodeRadius(node.visitCount, minVisit, maxVisit, baseRadiusPx, extraRadius),
-              ring = ring,
-          )
+        NodeLayout(
+          node = node,
+          center = center,
+          radius = nodeRadius(node.visitCount, minVisit, maxVisit, baseRadiusPx, extraRadius),
+          ring = ring,
+        )
       continue
     }
 
@@ -75,12 +74,12 @@ fun computeGraphLayout(
       val x = center.x + ringRadius * cos(angle).toFloat()
       val y = center.y + ringRadius * sin(angle).toFloat()
       layouts[node.screenName] =
-          NodeLayout(
-              node = node,
-              center = Offset(x, y),
-              radius = nodeRadius(node.visitCount, minVisit, maxVisit, baseRadiusPx, extraRadius),
-              ring = ring,
-          )
+        NodeLayout(
+          node = node,
+          center = Offset(x, y),
+          radius = nodeRadius(node.visitCount, minVisit, maxVisit, baseRadiusPx, extraRadius),
+          ring = ring,
+        )
     }
   }
 
@@ -97,8 +96,8 @@ private fun buildAdjacency(summary: NavigationGraphSummary): Map<String, Mutable
 }
 
 private fun computeDistances(
-    adjacency: Map<String, MutableSet<String>>,
-    root: String,
+  adjacency: Map<String, MutableSet<String>>,
+  root: String,
 ): MutableMap<String, Int> {
   val distances = mutableMapOf<String, Int>()
   val queue = ArrayDeque<String>()
@@ -127,11 +126,11 @@ private fun visitCountRange(nodes: List<NavigationGraphSummaryNode>): Pair<Int, 
 }
 
 private fun nodeRadius(
-    visitCount: Int,
-    minVisit: Int,
-    maxVisit: Int,
-    baseRadius: Float,
-    extraRadius: Float,
+  visitCount: Int,
+  minVisit: Int,
+  maxVisit: Int,
+  baseRadius: Float,
+  extraRadius: Float,
 ): Float {
   if (maxVisit <= minVisit) {
     return baseRadius

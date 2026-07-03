@@ -37,33 +37,33 @@ class PerformanceAuditStreamCacheTest {
     val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 60_000L)
 
     cache.merge(
-        listOf(
-            entry(id = 1, timestampMs = 9_000L, deviceId = "device-a", sessionId = "s1"),
-            entry(id = 2, timestampMs = 9_100L, deviceId = "device-b", sessionId = "s2"),
-        )
+      listOf(
+        entry(id = 1, timestampMs = 9_000L, deviceId = "device-a", sessionId = "s1"),
+        entry(id = 2, timestampMs = 9_100L, deviceId = "device-b", sessionId = "s2"),
+      )
     )
 
     val snapshot =
-        cache.snapshot(PerformanceAuditStreamFilter(deviceId = "device-b", sessionId = "s2"))
+      cache.snapshot(PerformanceAuditStreamFilter(deviceId = "device-b", sessionId = "s2"))
     assertEquals(listOf(2L), snapshot.map { it.id })
   }
 
   private fun entry(
-      id: Long,
-      timestampMs: Long,
-      deviceId: String = "device",
-      sessionId: String = "session",
-      packageName: String = "package",
+    id: Long,
+    timestampMs: Long,
+    deviceId: String = "device",
+    sessionId: String = "session",
+    packageName: String = "package",
   ): PerformanceAuditHistoryEntry {
     return PerformanceAuditHistoryEntry(
-        id = id,
-        deviceId = deviceId,
-        sessionId = sessionId,
-        packageName = packageName,
-        timestamp = Instant.ofEpochMilli(timestampMs).toString(),
-        passed = true,
-        metrics = PerformanceAuditMetrics(),
-        diagnostics = null,
+      id = id,
+      deviceId = deviceId,
+      sessionId = sessionId,
+      packageName = packageName,
+      timestamp = Instant.ofEpochMilli(timestampMs).toString(),
+      passed = true,
+      metrics = PerformanceAuditMetrics(),
+      diagnostics = null,
     )
   }
 }

@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.desktop.core.platform
 
-/** Platform-agnostic notification handler. IDE plugin provides IntelliJ impl; desktop app uses no-op. */
+/**
+ * Platform-agnostic notification handler. IDE plugin provides IntelliJ impl; desktop app uses
+ * no-op.
+ */
 interface NotificationHandler {
   fun show(title: String, content: String, isWarning: Boolean = false)
 }

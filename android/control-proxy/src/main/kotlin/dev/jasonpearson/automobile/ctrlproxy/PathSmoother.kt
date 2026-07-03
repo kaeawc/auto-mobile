@@ -9,9 +9,9 @@ import kotlin.math.hypot
 class PathSmoother {
 
   fun smoothPath(
-      points: List<PointF>,
-      algorithm: SmoothingAlgorithm,
-      tension: Float = DEFAULT_TENSION,
+    points: List<PointF>,
+    algorithm: SmoothingAlgorithm,
+    tension: Float = DEFAULT_TENSION,
   ): Path {
     val filteredPoints = filterClosePoints(points)
     if (filteredPoints.size < 2) {

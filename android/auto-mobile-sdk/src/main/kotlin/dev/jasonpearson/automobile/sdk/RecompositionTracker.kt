@@ -44,27 +44,27 @@ internal object RecompositionTracker {
   }
 
   fun recordRecomposition(
-      id: String,
-      composableName: String? = null,
-      resourceId: String? = null,
-      testTag: String? = null,
-      parentChain: List<String>? = null,
-      stableAnnotated: Boolean? = null,
-      rememberedCount: Int? = null,
-      likelyCause: String? = null,
+    id: String,
+    composableName: String? = null,
+    resourceId: String? = null,
+    testTag: String? = null,
+    parentChain: List<String>? = null,
+    stableAnnotated: Boolean? = null,
+    rememberedCount: Int? = null,
+    likelyCause: String? = null,
   ) {
     if (!enabled.get()) {
       return
     }
     val entry = entries.computeIfAbsent(id) { Entry(id) }
     entry.record(
-        composableName,
-        resourceId,
-        testTag,
-        parentChain,
-        stableAnnotated,
-        rememberedCount,
-        likelyCause,
+      composableName,
+      resourceId,
+      testTag,
+      parentChain,
+      stableAnnotated,
+      rememberedCount,
+      likelyCause,
     )
   }
 
@@ -93,14 +93,14 @@ internal object RecompositionTracker {
 
   private fun scheduleBroadcast() {
     handler.postDelayed(
-        object : Runnable {
-          override fun run() {
-            if (!enabled.get()) return
-            broadcastSnapshot()
-            handler.postDelayed(this, BROADCAST_INTERVAL_MS)
-          }
-        },
-        BROADCAST_INTERVAL_MS,
+      object : Runnable {
+        override fun run() {
+          if (!enabled.get()) return
+          broadcastSnapshot()
+          handler.postDelayed(this, BROADCAST_INTERVAL_MS)
+        }
+      },
+      BROADCAST_INTERVAL_MS,
     )
   }
 
@@ -108,10 +108,10 @@ internal object RecompositionTracker {
     val ctx = context ?: return
     val payload = buildSnapshotJson(ctx.packageName)
     val intent =
-        Intent(AutoMobileSDK.ACTION_RECOMPOSITION_SNAPSHOT).apply {
-          putExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_SNAPSHOT, payload)
-          setPackage(SdkConstants.CTRL_PROXY_PACKAGE)
-        }
+      Intent(AutoMobileSDK.ACTION_RECOMPOSITION_SNAPSHOT).apply {
+        putExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_SNAPSHOT, payload)
+        setPackage(SdkConstants.CTRL_PROXY_PACKAGE)
+      }
     ctx.sendBroadcast(intent)
   }
 
@@ -122,10 +122,10 @@ internal object RecompositionTracker {
     }
 
     val snapshot =
-        JSONObject()
-            .put("timestamp", System.currentTimeMillis())
-            .put("applicationId", applicationId)
-            .put("entries", entriesArray)
+      JSONObject()
+        .put("timestamp", System.currentTimeMillis())
+        .put("applicationId", applicationId)
+        .put("entries", entriesArray)
 
     return snapshot.toString()
   }
@@ -135,26 +135,31 @@ internal object RecompositionTracker {
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       context.registerReceiver(
-          controlReceiver,
-          filter,
-          SdkConstants.PERMISSION_NETWORK_CONTROL,
-          null,
-          Context.RECEIVER_EXPORTED)
+        controlReceiver,
+        filter,
+        SdkConstants.PERMISSION_NETWORK_CONTROL,
+        null,
+        Context.RECEIVER_EXPORTED,
+      )
     } else {
       @SuppressLint("UnspecifiedRegisterReceiverFlag")
       context.registerReceiver(
-          controlReceiver, filter, SdkConstants.PERMISSION_NETWORK_CONTROL, null)
+        controlReceiver,
+        filter,
+        SdkConstants.PERMISSION_NETWORK_CONTROL,
+        null,
+      )
     }
   }
 
   private val controlReceiver =
-      object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-          if (intent?.action != AutoMobileSDK.ACTION_RECOMPOSITION_CONTROL) return
-          val enabledFlag = intent.getBooleanExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_ENABLED, false)
-          setEnabled(enabledFlag)
-        }
+    object : BroadcastReceiver() {
+      override fun onReceive(context: Context?, intent: Intent?) {
+        if (intent?.action != AutoMobileSDK.ACTION_RECOMPOSITION_CONTROL) return
+        val enabledFlag = intent.getBooleanExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_ENABLED, false)
+        setEnabled(enabledFlag)
       }
+    }
 
   private class Entry(val id: String) {
     private val rollingAverage = RollingAverage(WINDOW_MS)
@@ -172,13 +177,13 @@ internal object RecompositionTracker {
 
     @Synchronized
     fun record(
-        composableName: String?,
-        resourceId: String?,
-        testTag: String?,
-        parentChain: List<String>?,
-        stableAnnotated: Boolean?,
-        rememberedCount: Int?,
-        likelyCause: String?,
+      composableName: String?,
+      resourceId: String?,
+      testTag: String?,
+      parentChain: List<String>?,
+      stableAnnotated: Boolean?,
+      rememberedCount: Int?,
+      likelyCause: String?,
     ) {
       totalCount += 1
       rollingAverage.record()
@@ -200,11 +205,11 @@ internal object RecompositionTracker {
 
     fun toJson(): JSONObject {
       val json =
-          JSONObject()
-              .put("id", id)
-              .put("total", totalCount)
-              .put("skipCount", skipCount)
-              .put("rolling1sAverage", rollingAverage.getAverage())
+        JSONObject()
+          .put("id", id)
+          .put("total", totalCount)
+          .put("skipCount", skipCount)
+          .put("rolling1sAverage", rollingAverage.getAverage())
 
       composableName?.let { json.put("composableName", it) }
       resourceId?.let { json.put("resourceId", it) }

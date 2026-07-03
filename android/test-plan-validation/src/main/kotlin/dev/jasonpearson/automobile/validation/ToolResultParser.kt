@@ -20,48 +20,48 @@ object ToolResultParser {
 
   fun parseToolResult(stepIndex: Int, toolName: String, element: JsonElement): ToolResult {
     val objectElement =
-        element as? JsonObject ?: throw SerializationException("Tool result is not a JSON object")
+      element as? JsonObject ?: throw SerializationException("Tool result is not a JSON object")
 
     val success = inferSuccess(objectElement)
     val error = objectElement["error"]?.jsonPrimitive?.content
 
     val response =
-        when (toolName) {
-          "tapOn" -> json.decodeFromJsonElement<TapOnResponse>(objectElement)
-          "observe" -> json.decodeFromJsonElement<ObserveResponse>(objectElement)
-          "executePlan" -> json.decodeFromJsonElement<ExecutePlanResponse>(objectElement)
-          else -> GenericToolResponse(success = success, payload = objectElement)
-        }
+      when (toolName) {
+        "tapOn" -> json.decodeFromJsonElement<TapOnResponse>(objectElement)
+        "observe" -> json.decodeFromJsonElement<ObserveResponse>(objectElement)
+        "executePlan" -> json.decodeFromJsonElement<ExecutePlanResponse>(objectElement)
+        else -> GenericToolResponse(success = success, payload = objectElement)
+      }
 
     return ToolResult(
-        stepIndex = stepIndex,
-        toolName = toolName,
-        success = success,
-        response = response,
-        error = error,
+      stepIndex = stepIndex,
+      toolName = toolName,
+      success = success,
+      response = response,
+      error = error,
     )
   }
 
   fun parseToolResultFromMcpResponse(
-      stepIndex: Int,
-      toolName: String,
-      mcpResult: JsonElement,
+    stepIndex: Int,
+    toolName: String,
+    mcpResult: JsonElement,
   ): ToolResult {
     val response = json.decodeFromJsonElement<McpToolResponse>(mcpResult)
     val textPayload =
-        response.content.firstOrNull { it.type == "text" }?.text
-            ?: throw SerializationException("MCP response did not contain text content")
+      response.content.firstOrNull { it.type == "text" }?.text
+        ?: throw SerializationException("MCP response did not contain text content")
     return parseToolResult(stepIndex, toolName, textPayload)
   }
 
   fun parseTapOnResponse(jsonString: String): TapOnResponse =
-      json.decodeFromString(TapOnResponse.serializer(), jsonString)
+    json.decodeFromString(TapOnResponse.serializer(), jsonString)
 
   fun parseObserveResponse(jsonString: String): ObserveResponse =
-      json.decodeFromString(ObserveResponse.serializer(), jsonString)
+    json.decodeFromString(ObserveResponse.serializer(), jsonString)
 
   fun parseExecutePlanResponse(jsonString: String): ExecutePlanResponse =
-      json.decodeFromString(ExecutePlanResponse.serializer(), jsonString)
+    json.decodeFromString(ExecutePlanResponse.serializer(), jsonString)
 
   private fun inferSuccess(result: JsonObject): Boolean {
     val successValue = result["success"]?.jsonPrimitive?.content?.toBooleanStrictOrNull()

@@ -33,10 +33,15 @@ class McpHttpClientIntegrationTest {
   /** Build an MCP tool response wrapping the given JSON text. */
   private fun mcpToolResponse(textJson: String): JsonElement = buildJsonObject {
     put(
-        "content",
-        buildJsonArray {
-          add(buildJsonObject { put("type", "text"); put("text", textJson) })
-        },
+      "content",
+      buildJsonArray {
+        add(
+          buildJsonObject {
+            put("type", "text")
+            put("text", textJson)
+          }
+        )
+      },
     )
   }
 
@@ -46,8 +51,8 @@ class McpHttpClientIntegrationTest {
 
     assertTrue(daemon.calls.contains("initialize"), "Should have called initialize")
     assertTrue(
-        daemon.calls.contains("notifications/initialized"),
-        "Should have sent initialized notification",
+      daemon.calls.contains("notifications/initialized"),
+      "Should have sent initialized notification",
     )
   }
 
@@ -86,7 +91,7 @@ class McpHttpClientIntegrationTest {
   @Test
   fun `listResources returns configured resources`() {
     daemon.addResource(
-        McpResource(uri = "automobile://devices", name = "devices", description = "List devices"),
+      McpResource(uri = "automobile://devices", name = "devices", description = "List devices")
     )
 
     val resources = client.listResources()
@@ -100,14 +105,14 @@ class McpHttpClientIntegrationTest {
   fun `readResource returns configured content`() {
     val uri = "automobile://devices"
     daemon.setResourceResponse(
-        uri,
-        listOf(
-            McpResourceContent(
-                uri = uri,
-                mimeType = "application/json",
-                text = """{"devices":[]}""",
-            ),
-        ),
+      uri,
+      listOf(
+        McpResourceContent(
+          uri = uri,
+          mimeType = "application/json",
+          text = """{"devices":[]}""",
+        )
+      ),
     )
 
     val contents = client.readResource(uri)
@@ -144,12 +149,12 @@ class McpHttpClientIntegrationTest {
   @Test
   fun `callTool passes arguments through`() {
     daemon.setToolResponse(
-        "startDevice",
-        mcpToolResponse("""{"success":true,"message":"started"}"""),
+      "startDevice",
+      mcpToolResponse("""{"success":true,"message":"started"}"""),
     )
 
     val result =
-        client.startDevice(name = "Pixel_6", platform = "android", deviceId = "emulator-5554")
+      client.startDevice(name = "Pixel_6", platform = "android", deviceId = "emulator-5554")
 
     assertTrue(result.success)
     assertEquals("started", result.message)

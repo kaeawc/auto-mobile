@@ -42,34 +42,33 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-/**
- * Interface for the unified socket client.
- */
+/** Interface for the unified socket client. */
 interface UnifiedSocketClient {
-    val connectionState: StateFlow<ConnectionState>
+  val connectionState: StateFlow<ConnectionState>
 
-    suspend fun connect()
-    suspend fun disconnect()
+  suspend fun connect()
 
-    suspend fun <T> request(
-        domain: String,
-        method: String,
-        params: JsonElement? = null,
-        timeout: Duration = 30.seconds,
-    ): T
+  suspend fun disconnect()
 
-    fun subscribe(
-        domain: String,
-        event: String? = null,
-        params: JsonElement? = null,
-    ): Flow<UnifiedMessage>
+  suspend fun <T> request(
+    domain: String,
+    method: String,
+    params: JsonElement? = null,
+    timeout: Duration = 30.seconds,
+  ): T
 
-    suspend fun unsubscribe(subscriptionId: String)
+  fun subscribe(
+    domain: String,
+    event: String? = null,
+    params: JsonElement? = null,
+  ): Flow<UnifiedMessage>
+
+  suspend fun unsubscribe(subscriptionId: String)
 }
 
 /**
- * Client for the unified Unix domain socket server.
- * Provides multiplexed access to all domains through a single connection.
+ * Client for the unified Unix domain socket server. Provides multiplexed access to all domains
+ * through a single connection.
  *
  * Features:
  * - Request/response correlation with message IDs
@@ -78,427 +77,440 @@ interface UnifiedSocketClient {
  * - Mutex-protected socket writes
  * - Auto-resubscribe on reconnect
  *
- * Socket path: ~/.auto-mobile/api.sock
- * or /tmp/auto-mobile-api.sock (in external mode)
+ * Socket path: ~/.auto-mobile/api.sock or /tmp/auto-mobile-api.sock (in external mode)
  */
 class UnifiedSocketClientImpl : UnifiedSocketClient {
-    companion object {
-        private fun getSocketPath(): String {
-            val isExternalMode = System.getenv("AUTOMOBILE_EMULATOR_EXTERNAL") == "true"
-            return if (isExternalMode) {
-                "/tmp/auto-mobile-api.sock"
-            } else {
-                "${System.getProperty("user.home")}/.auto-mobile/api.sock"
-            }
-        }
+  companion object {
+    private fun getSocketPath(): String {
+      val isExternalMode = System.getenv("AUTOMOBILE_EMULATOR_EXTERNAL") == "true"
+      return if (isExternalMode) {
+        "/tmp/auto-mobile-api.sock"
+      } else {
+        "${System.getProperty("user.home")}/.auto-mobile/api.sock"
+      }
     }
+  }
 
-    private val log = LoggerFactory.getLogger(UnifiedSocketClientImpl::class.java)
-    private val json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  private val log = LoggerFactory.getLogger(UnifiedSocketClientImpl::class.java)
+  private val json = Json {
+    ignoreUnknownKeys = true
+    encodeDefaults = true
+  }
+  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private var channel: SocketChannel? = null
-    private var reader: BufferedReader? = null
-    private var writer: BufferedWriter? = null
-    private val writeMutex = Mutex()
-    private var connectionJob: Job? = null
-    private var readJob: Job? = null
+  private var channel: SocketChannel? = null
+  private var reader: BufferedReader? = null
+  private var writer: BufferedWriter? = null
+  private val writeMutex = Mutex()
+  private var connectionJob: Job? = null
+  private var readJob: Job? = null
 
-    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
-    override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+  private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
+  override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-    private val isConnected: Boolean get() = _connectionState.value.isConnected
-    private val shouldReconnect: Boolean get() = _connectionState.value.shouldReconnect
+  private val isConnected: Boolean
+    get() = _connectionState.value.isConnected
 
-    // Retry configuration
-    private val initialRetryDelayMs = 1000L
-    private val maxRetryDelayMs = 30000L
+  private val shouldReconnect: Boolean
+    get() = _connectionState.value.shouldReconnect
 
-    // Pending request correlation
-    private val pendingRequests = ConcurrentHashMap<String, CompletableDeferred<UnifiedMessage>>()
+  // Retry configuration
+  private val initialRetryDelayMs = 1000L
+  private val maxRetryDelayMs = 30000L
 
-    // Active subscriptions for resubscription on reconnect
-    private data class ActiveSubscription(
-        val domain: String,
-        val event: String?,
-        val params: JsonElement?,
-        val flow: MutableSharedFlow<UnifiedMessage>,
+  // Pending request correlation
+  private val pendingRequests = ConcurrentHashMap<String, CompletableDeferred<UnifiedMessage>>()
+
+  // Active subscriptions for resubscription on reconnect
+  private data class ActiveSubscription(
+    val domain: String,
+    val event: String?,
+    val params: JsonElement?,
+    val flow: MutableSharedFlow<UnifiedMessage>,
+  )
+
+  private val subscriptions = ConcurrentHashMap<String, ActiveSubscription>()
+
+  // Flow for all push messages
+  private val _pushMessages =
+    MutableSharedFlow<UnifiedMessage>(
+      extraBufferCapacity = 100,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
-    private val subscriptions = ConcurrentHashMap<String, ActiveSubscription>()
 
-    // Flow for all push messages
-    private val _pushMessages = MutableSharedFlow<UnifiedMessage>(
-        extraBufferCapacity = 100,
+  override suspend fun connect() {
+    if (isConnected) {
+      log.info("Already connected to unified socket")
+      return
+    }
+
+    connectionJob?.cancel()
+    _connectionState.update { ConnectionState.Connecting }
+
+    connectionJob = scope.launch {
+      connectWithRetry()
+    }
+  }
+
+  private suspend fun connectWithRetry() {
+    val socketPath = getSocketPath()
+    var attempt = 0
+
+    while (shouldReconnect) {
+      log.info("Connecting to unified socket at $socketPath (attempt ${attempt + 1})")
+
+      try {
+        val path = Path.of(socketPath)
+        if (!Files.exists(path)) {
+          throw SocketNotFoundError("Socket not found at $socketPath")
+        }
+
+        val address = UnixDomainSocketAddress.of(socketPath)
+        channel = SocketChannel.open(address)
+        reader =
+          BufferedReader(
+            InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
+          )
+        writer =
+          BufferedWriter(
+            OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
+          )
+
+        _connectionState.update { ConnectionState.Connected() }
+        attempt = 0
+        log.info("Connected to unified socket")
+
+        // Resubscribe to active subscriptions (snapshot to avoid ConcurrentModificationException)
+        resubscribeAll()
+
+        // Start reading messages
+        readJob = scope.launch { readMessages() }
+        readJob?.join()
+
+        // If we get here, connection was lost
+        if (shouldReconnect) {
+          log.info("Connection lost, will attempt to reconnect")
+          attempt++
+          val delayMs = calculateBackoff(attempt)
+          _connectionState.update { ConnectionState.Reconnecting(attempt, delayMs) }
+          failAllPendingRequests("Connection lost")
+        }
+      } catch (e: Exception) {
+        cleanupConnection()
+
+        if (!shouldReconnect) {
+          log.info("Reconnection disabled, stopping connection attempts")
+          _connectionState.update { ConnectionState.Disconnected() }
+          return
+        }
+
+        attempt++
+        val delayMs = calculateBackoff(attempt)
+
+        log.warn(
+          "Failed to connect to unified socket (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms"
+        )
+        _connectionState.update { ConnectionState.Reconnecting(attempt, delayMs) }
+
+        delay(delayMs)
+      }
+    }
+
+    _connectionState.update { ConnectionState.Disconnected() }
+  }
+
+  private fun calculateBackoff(attempt: Int): Long {
+    val exponentialDelay = initialRetryDelayMs * (1L shl min(attempt - 1, 10))
+    val cappedDelay = min(exponentialDelay, maxRetryDelayMs)
+    val jitter = (cappedDelay * 0.1 * Math.random()).toLong()
+    return cappedDelay + jitter
+  }
+
+  private class SocketNotFoundError(message: String) : Exception(message)
+
+  override suspend fun disconnect() {
+    _connectionState.update { ConnectionState.Disconnected() }
+
+    connectionJob?.cancel()
+    connectionJob = null
+    readJob?.cancel()
+    readJob = null
+
+    cleanupConnection()
+    subscriptions.clear()
+    failAllPendingRequests("Disconnected")
+  }
+
+  private fun cleanupConnection() {
+    try {
+      channel?.close()
+    } catch (e: Exception) {
+      log.warn("Error closing channel: ${e.message}")
+    }
+    channel = null
+    reader = null
+    writer = null
+  }
+
+  private fun failAllPendingRequests(reason: String) {
+    val exception = NotConnectedException()
+    for (deferred in pendingRequests.values) {
+      deferred.completeExceptionally(exception)
+    }
+    pendingRequests.clear()
+  }
+
+  private suspend fun resubscribeAll() {
+    // Snapshot entries before mutation to avoid ConcurrentModificationException
+    val snapshot = subscriptions.entries.toList()
+    for ((subscriptionId, subscription) in snapshot) {
+      try {
+        val newSubId = sendSubscribe(subscription.domain, subscription.event, subscription.params)
+        // Update the subscription map with the new ID
+        subscriptions.remove(subscriptionId)
+        subscriptions[newSubId] = subscription
+        log.info("Resubscribed $subscriptionId as $newSubId")
+      } catch (e: Exception) {
+        log.warn("Failed to resubscribe $subscriptionId: ${e.message}")
+      }
+    }
+  }
+
+  private suspend fun readMessages() {
+    val currentReader = reader ?: return
+
+    try {
+      while (isConnected) {
+        val line = currentReader.readLine() ?: break
+        if (line.isBlank()) continue
+
+        try {
+          handleMessage(line)
+        } catch (e: Exception) {
+          log.warn("Failed to parse message: ${e.message}", e)
+        }
+      }
+    } catch (e: Exception) {
+      log.warn("Error reading from socket: ${e.message}", e)
+    }
+
+    cleanupConnection()
+  }
+
+  private suspend fun handleMessage(line: String) {
+    val message = json.decodeFromString<UnifiedMessage>(line)
+
+    when (message.type) {
+      MessageTypes.RESPONSE -> handleResponse(message)
+      MessageTypes.ERROR -> handleError(message)
+      MessageTypes.PUSH -> handlePush(message)
+      MessageTypes.PING -> sendPong()
+      else -> log.warn("Unknown message type: ${message.type}")
+    }
+  }
+
+  private fun handleResponse(message: UnifiedMessage) {
+    val id = message.id ?: return
+    val deferred = pendingRequests.remove(id)
+    deferred?.complete(message)
+  }
+
+  private fun handleError(message: UnifiedMessage) {
+    val id = message.id
+    if (id != null) {
+      val deferred = pendingRequests.remove(id)
+      val error = message.error
+      deferred?.completeExceptionally(
+        RequestErrorException(
+          error?.code ?: "UNKNOWN",
+          error?.message ?: "Unknown error",
+        )
+      )
+    }
+  }
+
+  private suspend fun handlePush(message: UnifiedMessage) {
+    _pushMessages.emit(message)
+
+    // Route to subscription-specific flows (snapshot to avoid ConcurrentModificationException)
+    val snapshot = subscriptions.entries.toList()
+    for ((subId, subscription) in snapshot) {
+      if (subscription.domain == message.domain) {
+        if (subscription.event == null || subscription.event == message.event) {
+          subscription.flow.tryEmit(message)
+        }
+      }
+    }
+  }
+
+  private suspend fun sendPong() {
+    val pongMessage =
+      UnifiedMessage(
+        type = MessageTypes.PONG,
+        timestamp = System.currentTimeMillis(),
+      )
+    sendMessage(pongMessage)
+  }
+
+  private suspend fun sendMessage(message: UnifiedMessage): Boolean {
+    val currentWriter = writer ?: return false
+
+    return writeMutex.withLock {
+      try {
+        val jsonString = json.encodeToString(message)
+        currentWriter.write(jsonString)
+        currentWriter.newLine()
+        currentWriter.flush()
+        true
+      } catch (e: Exception) {
+        log.warn("Failed to send message: ${e.message}")
+        false
+      }
+    }
+  }
+
+  @Suppress("UNCHECKED_CAST")
+  override suspend fun <T> request(
+    domain: String,
+    method: String,
+    params: JsonElement?,
+    timeout: Duration,
+  ): T {
+    if (!isConnected) {
+      throw NotConnectedException()
+    }
+
+    val id = UUID.randomUUID().toString()
+    val deferred = CompletableDeferred<UnifiedMessage>()
+    pendingRequests[id] = deferred
+
+    val requestMessage =
+      UnifiedMessage(
+        id = id,
+        type = MessageTypes.REQUEST,
+        domain = domain,
+        method = method,
+        params = params,
+        timestamp = System.currentTimeMillis(),
+      )
+
+    if (!sendMessage(requestMessage)) {
+      pendingRequests.remove(id)
+      throw NotConnectedException()
+    }
+
+    val response =
+      withTimeoutOrNull(timeout.inWholeMilliseconds) {
+        deferred.await()
+      }
+
+    if (response == null) {
+      pendingRequests.remove(id)
+      throw RequestTimeoutException("Request timed out after $timeout")
+    }
+
+    if (response.error != null) {
+      throw RequestErrorException(response.error.code, response.error.message)
+    }
+
+    return response.result as T
+  }
+
+  override fun subscribe(
+    domain: String,
+    event: String?,
+    params: JsonElement?,
+  ): Flow<UnifiedMessage> {
+    val flow =
+      MutableSharedFlow<UnifiedMessage>(
+        replay = 1,
+        extraBufferCapacity = 50,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-    )
+      )
 
-    override suspend fun connect() {
-        if (isConnected) {
-            log.info("Already connected to unified socket")
-            return
-        }
-
-        connectionJob?.cancel()
-        _connectionState.update { ConnectionState.Connecting }
-
-        connectionJob = scope.launch {
-            connectWithRetry()
-        }
+    scope.launch {
+      try {
+        val subscriptionId = sendSubscribe(domain, event, params)
+        subscriptions[subscriptionId] = ActiveSubscription(domain, event, params, flow)
+        log.info("Subscribed to $domain${event?.let { "/$it" } ?: ""} with ID $subscriptionId")
+      } catch (e: Exception) {
+        log.warn("Failed to subscribe: ${e.message}")
+      }
     }
 
-    private suspend fun connectWithRetry() {
-        val socketPath = getSocketPath()
-        var attempt = 0
+    return flow.asSharedFlow()
+  }
 
-        while (shouldReconnect) {
-            log.info("Connecting to unified socket at $socketPath (attempt ${attempt + 1})")
+  private suspend fun sendSubscribe(
+    domain: String,
+    event: String?,
+    params: JsonElement?,
+  ): String {
+    val id = UUID.randomUUID().toString()
+    val deferred = CompletableDeferred<UnifiedMessage>()
+    pendingRequests[id] = deferred
 
-            try {
-                val path = Path.of(socketPath)
-                if (!Files.exists(path)) {
-                    throw SocketNotFoundError("Socket not found at $socketPath")
-                }
+    val subscribeMessage =
+      UnifiedMessage(
+        id = id,
+        type = MessageTypes.SUBSCRIBE,
+        domain = domain,
+        event = event,
+        params = params,
+        timestamp = System.currentTimeMillis(),
+      )
 
-                val address = UnixDomainSocketAddress.of(socketPath)
-                channel = SocketChannel.open(address)
-                reader = BufferedReader(
-                    InputStreamReader(Channels.newInputStream(channel!!), StandardCharsets.UTF_8)
-                )
-                writer = BufferedWriter(
-                    OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
-                )
-
-                _connectionState.update { ConnectionState.Connected() }
-                attempt = 0
-                log.info("Connected to unified socket")
-
-                // Resubscribe to active subscriptions (snapshot to avoid ConcurrentModificationException)
-                resubscribeAll()
-
-                // Start reading messages
-                readJob = scope.launch { readMessages() }
-                readJob?.join()
-
-                // If we get here, connection was lost
-                if (shouldReconnect) {
-                    log.info("Connection lost, will attempt to reconnect")
-                    attempt++
-                    val delayMs = calculateBackoff(attempt)
-                    _connectionState.update { ConnectionState.Reconnecting(attempt, delayMs) }
-                    failAllPendingRequests("Connection lost")
-                }
-
-            } catch (e: Exception) {
-                cleanupConnection()
-
-                if (!shouldReconnect) {
-                    log.info("Reconnection disabled, stopping connection attempts")
-                    _connectionState.update { ConnectionState.Disconnected() }
-                    return
-                }
-
-                attempt++
-                val delayMs = calculateBackoff(attempt)
-
-                log.warn("Failed to connect to unified socket (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms")
-                _connectionState.update { ConnectionState.Reconnecting(attempt, delayMs) }
-
-                delay(delayMs)
-            }
-        }
-
-        _connectionState.update { ConnectionState.Disconnected() }
+    if (!sendMessage(subscribeMessage)) {
+      pendingRequests.remove(id)
+      throw NotConnectedException()
     }
 
-    private fun calculateBackoff(attempt: Int): Long {
-        val exponentialDelay = initialRetryDelayMs * (1L shl min(attempt - 1, 10))
-        val cappedDelay = min(exponentialDelay, maxRetryDelayMs)
-        val jitter = (cappedDelay * 0.1 * Math.random()).toLong()
-        return cappedDelay + jitter
+    val response =
+      withTimeoutOrNull(30_000) {
+        deferred.await()
+      }
+
+    if (response == null) {
+      pendingRequests.remove(id)
+      throw RequestTimeoutException("Subscribe timed out")
     }
 
-    private class SocketNotFoundError(message: String) : Exception(message)
-
-    override suspend fun disconnect() {
-        _connectionState.update { ConnectionState.Disconnected() }
-
-        connectionJob?.cancel()
-        connectionJob = null
-        readJob?.cancel()
-        readJob = null
-
-        cleanupConnection()
-        subscriptions.clear()
-        failAllPendingRequests("Disconnected")
+    if (response.error != null) {
+      throw RequestErrorException(response.error.code, response.error.message)
     }
 
-    private fun cleanupConnection() {
-        try {
-            channel?.close()
-        } catch (e: Exception) {
-            log.warn("Error closing channel: ${e.message}")
-        }
-        channel = null
-        reader = null
-        writer = null
+    val result = response.result
+    return if (result is JsonObject) {
+      val subIdElement = result["subscriptionId"]
+      if (subIdElement is JsonPrimitive && subIdElement.isString) {
+        subIdElement.content
+      } else {
+        throw RequestErrorException("INVALID_RESPONSE", "Missing subscriptionId in response")
+      }
+    } else {
+      throw RequestErrorException("INVALID_RESPONSE", "Invalid subscription response")
+    }
+  }
+
+  override suspend fun unsubscribe(subscriptionId: String) {
+    val subscription = subscriptions.remove(subscriptionId)
+
+    if (!isConnected) {
+      return
     }
 
-    private fun failAllPendingRequests(reason: String) {
-        val exception = NotConnectedException()
-        for (deferred in pendingRequests.values) {
-            deferred.completeExceptionally(exception)
-        }
-        pendingRequests.clear()
-    }
+    val id = UUID.randomUUID().toString()
+    val params = JsonObject(mapOf("subscriptionId" to JsonPrimitive(subscriptionId)))
 
-    private suspend fun resubscribeAll() {
-        // Snapshot entries before mutation to avoid ConcurrentModificationException
-        val snapshot = subscriptions.entries.toList()
-        for ((subscriptionId, subscription) in snapshot) {
-            try {
-                val newSubId = sendSubscribe(subscription.domain, subscription.event, subscription.params)
-                // Update the subscription map with the new ID
-                subscriptions.remove(subscriptionId)
-                subscriptions[newSubId] = subscription
-                log.info("Resubscribed $subscriptionId as $newSubId")
-            } catch (e: Exception) {
-                log.warn("Failed to resubscribe $subscriptionId: ${e.message}")
-            }
-        }
-    }
+    val unsubscribeMessage =
+      UnifiedMessage(
+        id = id,
+        type = MessageTypes.UNSUBSCRIBE,
+        domain = subscription?.domain,
+        params = params,
+        timestamp = System.currentTimeMillis(),
+      )
 
-    private suspend fun readMessages() {
-        val currentReader = reader ?: return
-
-        try {
-            while (isConnected) {
-                val line = currentReader.readLine() ?: break
-                if (line.isBlank()) continue
-
-                try {
-                    handleMessage(line)
-                } catch (e: Exception) {
-                    log.warn("Failed to parse message: ${e.message}", e)
-                }
-            }
-        } catch (e: Exception) {
-            log.warn("Error reading from socket: ${e.message}", e)
-        }
-
-        cleanupConnection()
-    }
-
-    private suspend fun handleMessage(line: String) {
-        val message = json.decodeFromString<UnifiedMessage>(line)
-
-        when (message.type) {
-            MessageTypes.RESPONSE -> handleResponse(message)
-            MessageTypes.ERROR -> handleError(message)
-            MessageTypes.PUSH -> handlePush(message)
-            MessageTypes.PING -> sendPong()
-            else -> log.warn("Unknown message type: ${message.type}")
-        }
-    }
-
-    private fun handleResponse(message: UnifiedMessage) {
-        val id = message.id ?: return
-        val deferred = pendingRequests.remove(id)
-        deferred?.complete(message)
-    }
-
-    private fun handleError(message: UnifiedMessage) {
-        val id = message.id
-        if (id != null) {
-            val deferred = pendingRequests.remove(id)
-            val error = message.error
-            deferred?.completeExceptionally(
-                RequestErrorException(
-                    error?.code ?: "UNKNOWN",
-                    error?.message ?: "Unknown error"
-                )
-            )
-        }
-    }
-
-    private suspend fun handlePush(message: UnifiedMessage) {
-        _pushMessages.emit(message)
-
-        // Route to subscription-specific flows (snapshot to avoid ConcurrentModificationException)
-        val snapshot = subscriptions.entries.toList()
-        for ((subId, subscription) in snapshot) {
-            if (subscription.domain == message.domain) {
-                if (subscription.event == null || subscription.event == message.event) {
-                    subscription.flow.tryEmit(message)
-                }
-            }
-        }
-    }
-
-    private suspend fun sendPong() {
-        val pongMessage = UnifiedMessage(
-            type = MessageTypes.PONG,
-            timestamp = System.currentTimeMillis(),
-        )
-        sendMessage(pongMessage)
-    }
-
-    private suspend fun sendMessage(message: UnifiedMessage): Boolean {
-        val currentWriter = writer ?: return false
-
-        return writeMutex.withLock {
-            try {
-                val jsonString = json.encodeToString(message)
-                currentWriter.write(jsonString)
-                currentWriter.newLine()
-                currentWriter.flush()
-                true
-            } catch (e: Exception) {
-                log.warn("Failed to send message: ${e.message}")
-                false
-            }
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    override suspend fun <T> request(
-        domain: String,
-        method: String,
-        params: JsonElement?,
-        timeout: Duration,
-    ): T {
-        if (!isConnected) {
-            throw NotConnectedException()
-        }
-
-        val id = UUID.randomUUID().toString()
-        val deferred = CompletableDeferred<UnifiedMessage>()
-        pendingRequests[id] = deferred
-
-        val requestMessage = UnifiedMessage(
-            id = id,
-            type = MessageTypes.REQUEST,
-            domain = domain,
-            method = method,
-            params = params,
-            timestamp = System.currentTimeMillis(),
-        )
-
-        if (!sendMessage(requestMessage)) {
-            pendingRequests.remove(id)
-            throw NotConnectedException()
-        }
-
-        val response = withTimeoutOrNull(timeout.inWholeMilliseconds) {
-            deferred.await()
-        }
-
-        if (response == null) {
-            pendingRequests.remove(id)
-            throw RequestTimeoutException("Request timed out after $timeout")
-        }
-
-        if (response.error != null) {
-            throw RequestErrorException(response.error.code, response.error.message)
-        }
-
-        return response.result as T
-    }
-
-    override fun subscribe(
-        domain: String,
-        event: String?,
-        params: JsonElement?,
-    ): Flow<UnifiedMessage> {
-        val flow = MutableSharedFlow<UnifiedMessage>(
-            replay = 1,
-            extraBufferCapacity = 50,
-            onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-        )
-
-        scope.launch {
-            try {
-                val subscriptionId = sendSubscribe(domain, event, params)
-                subscriptions[subscriptionId] = ActiveSubscription(domain, event, params, flow)
-                log.info("Subscribed to $domain${event?.let { "/$it" } ?: ""} with ID $subscriptionId")
-            } catch (e: Exception) {
-                log.warn("Failed to subscribe: ${e.message}")
-            }
-        }
-
-        return flow.asSharedFlow()
-    }
-
-    private suspend fun sendSubscribe(
-        domain: String,
-        event: String?,
-        params: JsonElement?,
-    ): String {
-        val id = UUID.randomUUID().toString()
-        val deferred = CompletableDeferred<UnifiedMessage>()
-        pendingRequests[id] = deferred
-
-        val subscribeMessage = UnifiedMessage(
-            id = id,
-            type = MessageTypes.SUBSCRIBE,
-            domain = domain,
-            event = event,
-            params = params,
-            timestamp = System.currentTimeMillis(),
-        )
-
-        if (!sendMessage(subscribeMessage)) {
-            pendingRequests.remove(id)
-            throw NotConnectedException()
-        }
-
-        val response = withTimeoutOrNull(30_000) {
-            deferred.await()
-        }
-
-        if (response == null) {
-            pendingRequests.remove(id)
-            throw RequestTimeoutException("Subscribe timed out")
-        }
-
-        if (response.error != null) {
-            throw RequestErrorException(response.error.code, response.error.message)
-        }
-
-        val result = response.result
-        return if (result is JsonObject) {
-            val subIdElement = result["subscriptionId"]
-            if (subIdElement is JsonPrimitive && subIdElement.isString) {
-                subIdElement.content
-            } else {
-                throw RequestErrorException("INVALID_RESPONSE", "Missing subscriptionId in response")
-            }
-        } else {
-            throw RequestErrorException("INVALID_RESPONSE", "Invalid subscription response")
-        }
-    }
-
-    override suspend fun unsubscribe(subscriptionId: String) {
-        val subscription = subscriptions.remove(subscriptionId)
-
-        if (!isConnected) {
-            return
-        }
-
-        val id = UUID.randomUUID().toString()
-        val params = JsonObject(mapOf("subscriptionId" to JsonPrimitive(subscriptionId)))
-
-        val unsubscribeMessage = UnifiedMessage(
-            id = id,
-            type = MessageTypes.UNSUBSCRIBE,
-            domain = subscription?.domain,
-            params = params,
-            timestamp = System.currentTimeMillis(),
-        )
-
-        sendMessage(unsubscribeMessage)
-    }
-
+    sendMessage(unsubscribeMessage)
+  }
 }

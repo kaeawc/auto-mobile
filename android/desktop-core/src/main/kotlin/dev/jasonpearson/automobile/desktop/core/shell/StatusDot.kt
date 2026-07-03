@@ -13,15 +13,14 @@ import androidx.compose.ui.unit.dp
 private val connectedColor = Color(0xFF4CAF50)
 private val disconnectedColor = Color(0xFFE53935)
 
-/**
- * Small colored circle indicating connected (green) or disconnected (red) state.
- */
+/** Small colored circle indicating connected (green) or disconnected (red) state. */
 @Composable
 fun StatusDot(connected: Boolean, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .size(8.dp)
-            .clip(CircleShape)
-            .background(if (connected) connectedColor else disconnectedColor),
-    )
+  Box(
+    modifier =
+      modifier
+        .size(8.dp)
+        .clip(CircleShape)
+        .background(if (connected) connectedColor else disconnectedColor)
+  )
 }

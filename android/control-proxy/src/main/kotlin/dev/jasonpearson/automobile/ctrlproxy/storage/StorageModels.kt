@@ -5,17 +5,17 @@ import kotlinx.serialization.Serializable
 /** Represents an active subscription to SharedPreferences file changes. */
 @Serializable
 data class StorageSubscription(
-    val packageName: String,
-    val fileName: String,
-    val subscriptionId: String = "$packageName:$fileName",
+  val packageName: String,
+  val fileName: String,
+  val subscriptionId: String = "$packageName:$fileName",
 ) {
   companion object {
     /**
-     * Inverts the [subscriptionId] format back into its `(packageName, fileName)` parts. This is the
-     * single canonical parse for the `"$packageName:$fileName"` format built above — both the
+     * Inverts the [subscriptionId] format back into its `(packageName, fileName)` parts. This is
+     * the single canonical parse for the `"$packageName:$fileName"` format built above — both the
      * inbound `unsubscribe_storage` dispatch (which receives only a subscriptionId from the TS
-     * client) and [StorageSubscriptionManager.destroy] resolve ids through here, so the format lives
-     * in one place.
+     * client) and [StorageSubscriptionManager.destroy] resolve ids through here, so the format
+     * lives in one place.
      *
      * Package names never contain `:`, so the FIRST `:` delimits packageName from fileName (a file
      * name could theoretically contain `:`). Returns null when [subscriptionId] has no `:` or an
@@ -32,34 +32,34 @@ data class StorageSubscription(
 /** Information about a SharedPreferences file. */
 @Serializable
 data class PreferenceFileInfo(
-    val name: String,
-    val path: String,
-    val entryCount: Int,
+  val name: String,
+  val path: String,
+  val entryCount: Int,
 )
 
 /** A key-value entry from SharedPreferences. */
 @Serializable
 data class PreferenceEntry(
-    val key: String,
-    /** JSON-encoded value (null if the value itself is null). */
-    val value: String?,
-    /** Type name matching SDK KeyValueType enum. */
-    val type: String,
+  val key: String,
+  /** JSON-encoded value (null if the value itself is null). */
+  val value: String?,
+  /** Type name matching SDK KeyValueType enum. */
+  val type: String,
 )
 
 /** A change event for a preference value. */
 @Serializable
 data class PreferenceChangeEvent(
-    val packageName: String,
-    val fileName: String,
-    /** The key that changed, or null if the file was cleared. */
-    val key: String?,
-    /** JSON-encoded new value (null if key was removed). */
-    val value: String?,
-    /** Type name matching SDK KeyValueType enum. */
-    val type: String,
-    /** Timestamp when the change occurred (milliseconds since epoch). */
-    val timestamp: Long,
-    /** Monotonically increasing sequence number for ordering changes. */
-    val sequenceNumber: Long,
+  val packageName: String,
+  val fileName: String,
+  /** The key that changed, or null if the file was cleared. */
+  val key: String?,
+  /** JSON-encoded new value (null if key was removed). */
+  val value: String?,
+  /** Type name matching SDK KeyValueType enum. */
+  val type: String,
+  /** Timestamp when the change occurred (milliseconds since epoch). */
+  val timestamp: Long,
+  /** Monotonically increasing sequence number for ordering changes. */
+  val sequenceNumber: Long,
 )

@@ -15,9 +15,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class SettingsViewModel(
-    private val experimentRepository: ExperimentRepository,
-    private val userRepository: UserRepository,
-    private val analyticsRepository: AnalyticsRepository,
+  private val experimentRepository: ExperimentRepository,
+  private val userRepository: UserRepository,
+  private val analyticsRepository: AnalyticsRepository,
 ) : ViewModel() {
 
   private val _experiments = MutableStateFlow<List<Experiment<*>>>(emptyList())
@@ -124,11 +124,11 @@ class SettingsViewModelFactory(private val context: Context) : ViewModelProvider
     if (modelClass.isAssignableFrom(SettingsViewModel::class.java)) {
       @Suppress("UNCHECKED_CAST")
       return SettingsViewModel(
-          ExperimentRepository(context),
-          UserRepository(context),
-          AnalyticsRepository(context),
+        ExperimentRepository(context),
+        UserRepository(context),
+        AnalyticsRepository(context),
       )
-          as T
+        as T
     }
     throw IllegalArgumentException("Unknown ViewModel class")
   }

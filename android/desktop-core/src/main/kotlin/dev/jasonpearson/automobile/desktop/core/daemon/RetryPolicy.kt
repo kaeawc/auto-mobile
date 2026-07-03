@@ -6,11 +6,11 @@ import kotlin.math.pow
 import kotlin.random.Random
 
 data class RetryPolicy(
-    val maxRetries: Int = 3,
-    val initialDelayMs: Long = 1000,
-    val maxDelayMs: Long = 30000,
-    val backoffMultiplier: Double = 2.0,
-    val jitterFraction: Double = 0.1,
+  val maxRetries: Int = 3,
+  val initialDelayMs: Long = 1000,
+  val maxDelayMs: Long = 30000,
+  val backoffMultiplier: Double = 2.0,
+  val jitterFraction: Double = 0.1,
 )
 
 /**
@@ -18,9 +18,9 @@ data class RetryPolicy(
  * synchronous McpHttpClient methods.
  */
 fun <T> retryWithBackoffBlocking(
-    policy: RetryPolicy = RetryPolicy(),
-    isRetryable: (Exception) -> Boolean = { true },
-    block: () -> T,
+  policy: RetryPolicy = RetryPolicy(),
+  isRetryable: (Exception) -> Boolean = { true },
+  block: () -> T,
 ): T {
   var lastException: Exception? = null
   val attempts = maxOf(1, policy.maxRetries)

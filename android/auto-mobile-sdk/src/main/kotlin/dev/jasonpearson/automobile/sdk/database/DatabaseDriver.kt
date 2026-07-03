@@ -1,8 +1,8 @@
 package dev.jasonpearson.automobile.sdk.database
 
 /**
- * Interface for database operations. Implementations provide access to app databases for
- * inspection and querying.
+ * Interface for database operations. Implementations provide access to app databases for inspection
+ * and querying.
  */
 interface DatabaseDriver {
   /** Returns a list of all accessible databases. */
@@ -23,40 +23,40 @@ interface DatabaseDriver {
 
 /** Describes a database file. */
 data class DatabaseDescriptor(
-    /** Display name of the database (typically the filename). */
-    val name: String,
-    /** Absolute path to the database file. */
-    val path: String
+  /** Display name of the database (typically the filename). */
+  val name: String,
+  /** Absolute path to the database file. */
+  val path: String,
 )
 
 /** Result of querying table data. */
 data class TableDataResult(
-    /** Column names in order. */
-    val columns: List<String>,
-    /** Row data as list of column values. */
-    val rows: List<List<Any?>>,
-    /** Total number of rows in the table. */
-    val total: Int
+  /** Column names in order. */
+  val columns: List<String>,
+  /** Row data as list of column values. */
+  val rows: List<List<Any?>>,
+  /** Total number of rows in the table. */
+  val total: Int,
 )
 
 /** Result of querying table structure. */
 data class TableStructureResult(
-    /** Column definitions. */
-    val columns: List<ColumnInfo>
+  /** Column definitions. */
+  val columns: List<ColumnInfo>
 )
 
 /** Column metadata from PRAGMA table_info. */
 data class ColumnInfo(
-    /** Column name. */
-    val name: String,
-    /** Column type (e.g., TEXT, INTEGER, REAL, BLOB). */
-    val type: String,
-    /** Whether the column allows NULL values. */
-    val nullable: Boolean,
-    /** Whether the column is a primary key. */
-    val primaryKey: Boolean,
-    /** Default value if any. */
-    val defaultValue: String?
+  /** Column name. */
+  val name: String,
+  /** Column type (e.g., TEXT, INTEGER, REAL, BLOB). */
+  val type: String,
+  /** Whether the column allows NULL values. */
+  val nullable: Boolean,
+  /** Whether the column is a primary key. */
+  val primaryKey: Boolean,
+  /** Default value if any. */
+  val defaultValue: String?,
 )
 
 /** Result of executing a SQL statement. */

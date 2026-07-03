@@ -8,49 +8,52 @@ import okhttp3.WebSocketListener
 /**
  * Grouped parameters for recording a network request/response manually.
  *
- * Use this with [AutoMobileNetwork.recordRequest] instead of constructing
- * [SdkNetworkRequestEvent] directly.
+ * Use this with [AutoMobileNetwork.recordRequest] instead of constructing [SdkNetworkRequestEvent]
+ * directly.
  *
  * @property url The full request URL (e.g. "https://api.example.com/users?page=1").
  * @property method HTTP method (e.g. "GET", "POST").
  * @property requestHeaders Optional request headers. Only recorded when header capture is enabled.
  * @property requestBodySize Size of the request body in bytes, or -1 if unknown.
  * @property statusCode HTTP status code of the response (e.g. 200, 404), or 0 on failure.
- * @property responseHeaders Optional response headers. Only recorded when header capture is enabled.
+ * @property responseHeaders Optional response headers. Only recorded when header capture is
+ *   enabled.
  * @property responseBodySize Size of the response body in bytes, or -1 if unknown.
  * @property durationMs Round-trip duration in milliseconds.
  * @property error Error description if the request failed, null on success.
  * @property host The request host (e.g. "api.example.com"). Extracted from [url] if omitted.
  * @property path The request path (e.g. "/users"). Extracted from [url] if omitted.
- * @property requestBody Request body text. Only useful when body capture is enabled and content is text-based.
- * @property responseBody Response body text. Only useful when body capture is enabled and content is text-based.
+ * @property requestBody Request body text. Only useful when body capture is enabled and content is
+ *   text-based.
+ * @property responseBody Response body text. Only useful when body capture is enabled and content
+ *   is text-based.
  * @property contentType Content type of the response (e.g. "application/json").
  */
 data class NetworkRequestRecord(
-    val url: String,
-    val method: String,
-    val requestHeaders: Map<String, String>? = null,
-    val requestBodySize: Long = -1,
-    val statusCode: Int = 0,
-    val responseHeaders: Map<String, String>? = null,
-    val responseBodySize: Long = -1,
-    val durationMs: Long = 0,
-    val error: String? = null,
-    val host: String? = null,
-    val path: String? = null,
-    val requestBody: String? = null,
-    val responseBody: String? = null,
-    val contentType: String? = null,
+  val url: String,
+  val method: String,
+  val requestHeaders: Map<String, String>? = null,
+  val requestBodySize: Long = -1,
+  val statusCode: Int = 0,
+  val responseHeaders: Map<String, String>? = null,
+  val responseBodySize: Long = -1,
+  val durationMs: Long = 0,
+  val error: String? = null,
+  val host: String? = null,
+  val path: String? = null,
+  val requestBody: String? = null,
+  val responseBody: String? = null,
+  val contentType: String? = null,
 )
 
 /**
  * Public API for network interception.
  *
- * Provides an OkHttp [Interceptor] for HTTP request/response tracking and a
- * wrapper for [WebSocketListener] to track WebSocket frames.
+ * Provides an OkHttp [Interceptor] for HTTP request/response tracking and a wrapper for
+ * [WebSocketListener] to track WebSocket frames.
  *
- * For custom transport layers (gRPC, GraphQL, etc.) that do not use OkHttp,
- * use [recordRequest] to record request metadata manually.
+ * For custom transport layers (gRPC, GraphQL, etc.) that do not use OkHttp, use [recordRequest] to
+ * record request metadata manually.
  *
  * OkHttp is a `compileOnly` dependency -- consumers must include OkHttp themselves.
  */
@@ -68,9 +71,9 @@ object AutoMobileNetwork {
    * @param ruleStore Optional rule matcher for mock enforcement and error simulation
    */
   internal fun initialize(
-      applicationId: String?,
-      buffer: SdkEventBuffer,
-      ruleStore: NetworkMockRuleStore.RuleMatcher? = null,
+    applicationId: String?,
+    buffer: SdkEventBuffer,
+    ruleStore: NetworkMockRuleStore.RuleMatcher? = null,
   ) {
     this.applicationId = applicationId
     this.buffer = buffer
@@ -80,62 +83,74 @@ object AutoMobileNetwork {
   /**
    * Create an OkHttp Application-level Interceptor for HTTP request tracking.
    *
-   * When a [ruleStore] has been provided via [initialize], the interceptor also
-   * enforces mock rules and error simulation by short-circuiting matching requests.
+   * When a [ruleStore] has been provided via [initialize], the interceptor also enforces mock rules
+   * and error simulation by short-circuiting matching requests.
    *
    * @param captureHeaders Whether to capture request/response headers (default false for privacy)
-   * @param captureBodies Whether to capture request/response bodies (default false, truncated to 32KB)
+   * @param captureBodies Whether to capture request/response bodies (default false, truncated to
+   *   32KB)
    * @return An [Interceptor] that records network events, or null if not initialized
    */
   fun interceptor(
-      captureHeaders: Boolean = false,
-      captureBodies: Boolean = false,
+    captureHeaders: Boolean = false,
+    captureBodies: Boolean = false,
   ): Interceptor? {
     val buf = buffer ?: return null
     return AutoMobileNetworkInterceptor(
-        buf, applicationId, captureHeaders, captureBodies, ruleStore = ruleStore)
+      buf,
+      applicationId,
+      captureHeaders,
+      captureBodies,
+      ruleStore = ruleStore,
+    )
   }
 
   /**
    * Record a network request/response manually using a [NetworkRequestRecord].
    *
-   * Use this for custom transport layers (gRPC, GraphQL, etc.) where the OkHttp
-   * [interceptor] approach is not applicable.
+   * Use this for custom transport layers (gRPC, GraphQL, etc.) where the OkHttp [interceptor]
+   * approach is not applicable.
    *
    * @param record A [NetworkRequestRecord] describing the request and response.
    * @param captureHeaders Whether to include request/response headers (default false for privacy).
    * @param captureBodies Whether to include request/response bodies (default false).
    */
   fun recordRequest(
-      record: NetworkRequestRecord,
-      captureHeaders: Boolean = false,
-      captureBodies: Boolean = false,
+    record: NetworkRequestRecord,
+    captureHeaders: Boolean = false,
+    captureBodies: Boolean = false,
   ) {
     val buf = buffer ?: return
-    val parsedUrl = if (record.host == null || record.path == null) {
-      try { java.net.URL(record.url) } catch (_: Exception) { null }
-    } else null
+    val parsedUrl =
+      if (record.host == null || record.path == null) {
+        try {
+          java.net.URL(record.url)
+        } catch (_: Exception) {
+          null
+        }
+      } else null
     val host = record.host ?: parsedUrl?.host
     val path = record.path ?: parsedUrl?.path
     buf.add(
-        SdkNetworkRequestEvent(
-            timestamp = System.currentTimeMillis(),
-            applicationId = applicationId,
-            url = record.url,
-            method = record.method,
-            statusCode = record.statusCode,
-            durationMs = record.durationMs,
-            requestBodySize = record.requestBodySize,
-            responseBodySize = record.responseBodySize,
-            host = host,
-            path = path,
-            error = record.error,
-            requestHeaders = if (captureHeaders) record.requestHeaders else null,
-            responseHeaders = if (captureHeaders) record.responseHeaders else null,
-            requestBody = if (captureBodies) record.requestBody else null,
-            responseBody = if (captureBodies) record.responseBody else null,
-            contentType = record.contentType,
-        ))
+      SdkNetworkRequestEvent(
+        timestamp = System.currentTimeMillis(),
+        applicationId = applicationId,
+        url = record.url,
+        method = record.method,
+        statusCode = record.statusCode,
+        durationMs = record.durationMs,
+        requestBodySize = record.requestBodySize,
+        responseBodySize = record.responseBodySize,
+        host = host,
+        path = path,
+        error = record.error,
+        requestHeaders = if (captureHeaders) record.requestHeaders else null,
+        responseHeaders = if (captureHeaders) record.responseHeaders else null,
+        requestBody = if (captureBodies) record.requestBody else null,
+        responseBody = if (captureBodies) record.responseBody else null,
+        contentType = record.contentType,
+      )
+    )
   }
 
   /**

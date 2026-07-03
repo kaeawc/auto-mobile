@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class TraversalOrderResult(
-    val elements: List<UIElementInfo>,
-    val focusedIndex: Int? = null,
-    val totalCount: Int = elements.size,
+  val elements: List<UIElementInfo>,
+  val focusedIndex: Int? = null,
+  val totalCount: Int = elements.size,
 )

@@ -81,11 +81,11 @@ private val ACCESSIBILITY_FAILURE_MODES = listOf("report", "threshold", "strict"
 private val ACCESSIBILITY_SEVERITIES = listOf("error", "warning", "info")
 
 private data class FeatureFlagsUiState(
-    val statusText: String = "Loading feature flags...",
-    val errorText: String? = null,
-    val flags: List<FeatureFlagState> = emptyList(),
-    val updatingKeys: Set<String> = emptySet(),
-    val isLoading: Boolean = true,
+  val statusText: String = "Loading feature flags...",
+  val errorText: String? = null,
+  val flags: List<FeatureFlagState> = emptyList(),
+  val updatingKeys: Set<String> = emptySet(),
+  val isLoading: Boolean = true,
 )
 
 private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
@@ -96,9 +96,9 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
   fun loadFlags() {
     _state.update {
       it.copy(
-          statusText = "Loading feature flags...",
-          errorText = null,
-          isLoading = true,
+        statusText = "Loading feature flags...",
+        errorText = null,
+        isLoading = true,
       )
     }
     scope.launch {
@@ -106,19 +106,19 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
         val flags = client.listFeatureFlags()
         _state.update {
           it.copy(
-              flags = flags,
-              statusText = "Loaded ${flags.size} flags",
-              errorText = null,
-              isLoading = false,
+            flags = flags,
+            statusText = "Loaded ${flags.size} flags",
+            errorText = null,
+            isLoading = false,
           )
         }
       } catch (error: Exception) {
         _state.update {
           it.copy(
-              flags = emptyList(),
-              statusText = "Unable to load feature flags",
-              errorText = error.message ?: "Unknown error",
-              isLoading = false,
+            flags = emptyList(),
+            statusText = "Unable to load feature flags",
+            errorText = error.message ?: "Unknown error",
+            isLoading = false,
           )
         }
       }
@@ -129,13 +129,13 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
     val previousFlags = _state.value.flags
     _state.update {
       it.copy(
-          flags =
-              it.flags.map { entry ->
-                if (entry.key == flag.key) entry.copy(enabled = enabled) else entry
-              },
-          statusText = "Updating ${flag.label}...",
-          errorText = null,
-          updatingKeys = it.updatingKeys + flag.key,
+        flags =
+          it.flags.map { entry ->
+            if (entry.key == flag.key) entry.copy(enabled = enabled) else entry
+          },
+        statusText = "Updating ${flag.label}...",
+        errorText = null,
+        updatingKeys = it.updatingKeys + flag.key,
       )
     }
     scope.launch {
@@ -143,18 +143,18 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
         val updated = client.setFeatureFlag(flag.key, enabled)
         _state.update {
           it.copy(
-              flags = it.flags.map { entry -> if (entry.key == flag.key) updated else entry },
-              statusText = "Updated ${flag.label}",
-              updatingKeys = it.updatingKeys - flag.key,
+            flags = it.flags.map { entry -> if (entry.key == flag.key) updated else entry },
+            statusText = "Updated ${flag.label}",
+            updatingKeys = it.updatingKeys - flag.key,
           )
         }
       } catch (error: Exception) {
         _state.update {
           it.copy(
-              flags = previousFlags,
-              statusText = "Update failed",
-              errorText = error.message ?: "Unknown error",
-              updatingKeys = it.updatingKeys - flag.key,
+            flags = previousFlags,
+            statusText = "Update failed",
+            errorText = error.message ?: "Unknown error",
+            updatingKeys = it.updatingKeys - flag.key,
           )
         }
       }
@@ -165,13 +165,13 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
     val previousFlags = _state.value.flags
     _state.update {
       it.copy(
-          flags =
-              it.flags.map { entry ->
-                if (entry.key == flag.key) entry.copy(config = config) else entry
-              },
-          statusText = "Updating ${flag.label}...",
-          errorText = null,
-          updatingKeys = it.updatingKeys + flag.key,
+        flags =
+          it.flags.map { entry ->
+            if (entry.key == flag.key) entry.copy(config = config) else entry
+          },
+        statusText = "Updating ${flag.label}...",
+        errorText = null,
+        updatingKeys = it.updatingKeys + flag.key,
       )
     }
     scope.launch {
@@ -179,18 +179,18 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
         val updated = client.setFeatureFlag(flag.key, flag.enabled, config)
         _state.update {
           it.copy(
-              flags = it.flags.map { entry -> if (entry.key == flag.key) updated else entry },
-              statusText = "Updated ${flag.label}",
-              updatingKeys = it.updatingKeys - flag.key,
+            flags = it.flags.map { entry -> if (entry.key == flag.key) updated else entry },
+            statusText = "Updated ${flag.label}",
+            updatingKeys = it.updatingKeys - flag.key,
           )
         }
       } catch (error: Exception) {
         _state.update {
           it.copy(
-              flags = previousFlags,
-              statusText = "Update failed",
-              errorText = error.message ?: "Unknown error",
-              updatingKeys = it.updatingKeys - flag.key,
+            flags = previousFlags,
+            statusText = "Update failed",
+            errorText = error.message ?: "Unknown error",
+            updatingKeys = it.updatingKeys - flag.key,
           )
         }
       }
@@ -209,17 +209,17 @@ private fun FeatureFlagsSettingsContent(viewModel: FeatureFlagsViewModel) {
   val colors = JewelTheme.globalColors
 
   Column(
-      modifier = Modifier.fillMaxSize().padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
+    modifier = Modifier.fillMaxSize().padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       Text("Feature flags")
       OutlinedButton(
-          onClick = { viewModel.loadFlags() },
-          enabled = !uiState.isLoading,
+        onClick = { viewModel.loadFlags() },
+        enabled = !uiState.isLoading,
       ) {
         Text("Refresh")
       }
@@ -232,20 +232,20 @@ private fun FeatureFlagsSettingsContent(viewModel: FeatureFlagsViewModel) {
 
     if (uiState.flags.isEmpty() && !uiState.isLoading) {
       Text(
-          "No feature flags available.",
-          color = colors.text.normal.copy(alpha = 0.7f),
+        "No feature flags available.",
+        color = colors.text.normal.copy(alpha = 0.7f),
       )
     } else {
       LazyColumn(
-          modifier = Modifier.fillMaxSize(),
-          verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
       ) {
         items(uiState.flags, key = { it.key }) { flag ->
           FeatureFlagRow(
-              flag = flag,
-              isUpdating = uiState.updatingKeys.contains(flag.key),
-              onToggle = { enabled -> viewModel.toggleFlag(flag, enabled) },
-              onUpdateConfig = { config -> viewModel.updateFlagConfig(flag, config) },
+            flag = flag,
+            isUpdating = uiState.updatingKeys.contains(flag.key),
+            onToggle = { enabled -> viewModel.toggleFlag(flag, enabled) },
+            onUpdateConfig = { config -> viewModel.updateFlagConfig(flag, config) },
           )
         }
       }
@@ -255,42 +255,42 @@ private fun FeatureFlagsSettingsContent(viewModel: FeatureFlagsViewModel) {
 
 @Composable
 private fun FeatureFlagRow(
-    flag: FeatureFlagState,
-    isUpdating: Boolean,
-    onToggle: (Boolean) -> Unit,
-    onUpdateConfig: (JsonObject) -> Unit,
+  flag: FeatureFlagState,
+  isUpdating: Boolean,
+  onToggle: (Boolean) -> Unit,
+  onUpdateConfig: (JsonObject) -> Unit,
 ) {
   val colors = JewelTheme.globalColors
 
   Column(
-      modifier = Modifier.fillMaxWidth(),
-      verticalArrangement = Arrangement.spacedBy(6.dp),
+    modifier = Modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
     CheckboxRow(
-        text = flag.label,
-        checked = flag.enabled,
-        onCheckedChange = { enabled ->
-          if (!isUpdating) {
-            onToggle(enabled)
-          }
-        },
-        enabled = !isUpdating,
+      text = flag.label,
+      checked = flag.enabled,
+      onCheckedChange = { enabled ->
+        if (!isUpdating) {
+          onToggle(enabled)
+        }
+      },
+      enabled = !isUpdating,
     )
 
     val desc = flag.description
     if (!desc.isNullOrBlank()) {
       Text(
-          desc,
-          color = colors.text.normal.copy(alpha = 0.7f),
-          fontSize = 12.sp,
+        desc,
+        color = colors.text.normal.copy(alpha = 0.7f),
+        fontSize = 12.sp,
       )
     }
 
     if (flag.key == "accessibility-audit") {
       AccessibilityConfigPanel(
-          flag = flag,
-          isUpdating = isUpdating,
-          onConfigChange = onUpdateConfig,
+        flag = flag,
+        isUpdating = isUpdating,
+        onConfigChange = onUpdateConfig,
       )
     }
   }
@@ -298,9 +298,9 @@ private fun FeatureFlagRow(
 
 @Composable
 private fun AccessibilityConfigPanel(
-    flag: FeatureFlagState,
-    isUpdating: Boolean,
-    onConfigChange: (JsonObject) -> Unit,
+  flag: FeatureFlagState,
+  isUpdating: Boolean,
+  onConfigChange: (JsonObject) -> Unit,
 ) {
   val colors = JewelTheme.globalColors
 
@@ -333,72 +333,72 @@ private fun AccessibilityConfigPanel(
   }
 
   Column(
-      modifier = Modifier.fillMaxWidth().padding(start = 28.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+    modifier = Modifier.fillMaxWidth().padding(start = 28.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Text(
-        "Accessibility audit settings",
-        color = colors.text.normal.copy(alpha = 0.7f),
-        fontSize = 12.sp,
+      "Accessibility audit settings",
+      color = colors.text.normal.copy(alpha = 0.7f),
+      fontSize = 12.sp,
     )
 
     Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
       Text("Level", fontSize = 12.sp)
       ListComboBox(
-          ACCESSIBILITY_LEVELS,
-          ACCESSIBILITY_LEVELS.indexOf(level).coerceAtLeast(0),
-          { index ->
-            if (!isUpdating) {
-              level = ACCESSIBILITY_LEVELS.getOrNull(index) ?: level
-              submit()
-            }
-          },
-          enabled = !isUpdating,
-          modifier = Modifier.width(90.dp),
-      )
-
-      Text("Failure", fontSize = 12.sp)
-      ListComboBox(
-          ACCESSIBILITY_FAILURE_MODES,
-          ACCESSIBILITY_FAILURE_MODES.indexOf(failureMode).coerceAtLeast(0),
-          { index ->
-            if (!isUpdating) {
-              failureMode = ACCESSIBILITY_FAILURE_MODES.getOrNull(index) ?: failureMode
-              submit()
-            }
-          },
-          enabled = !isUpdating,
-          modifier = Modifier.width(120.dp),
-      )
-
-      Text("Min severity", fontSize = 12.sp)
-      ListComboBox(
-          ACCESSIBILITY_SEVERITIES,
-          ACCESSIBILITY_SEVERITIES.indexOf(minSeverity).coerceAtLeast(0),
-          { index ->
-            if (!isUpdating) {
-              minSeverity = ACCESSIBILITY_SEVERITIES.getOrNull(index) ?: minSeverity
-              submit()
-            }
-          },
-          enabled = !isUpdating,
-          modifier = Modifier.width(110.dp),
-      )
-    }
-
-    CheckboxRow(
-        text = "Use baseline",
-        checked = useBaseline,
-        onCheckedChange = { enabled ->
+        ACCESSIBILITY_LEVELS,
+        ACCESSIBILITY_LEVELS.indexOf(level).coerceAtLeast(0),
+        { index ->
           if (!isUpdating) {
-            useBaseline = enabled
+            level = ACCESSIBILITY_LEVELS.getOrNull(index) ?: level
             submit()
           }
         },
         enabled = !isUpdating,
+        modifier = Modifier.width(90.dp),
+      )
+
+      Text("Failure", fontSize = 12.sp)
+      ListComboBox(
+        ACCESSIBILITY_FAILURE_MODES,
+        ACCESSIBILITY_FAILURE_MODES.indexOf(failureMode).coerceAtLeast(0),
+        { index ->
+          if (!isUpdating) {
+            failureMode = ACCESSIBILITY_FAILURE_MODES.getOrNull(index) ?: failureMode
+            submit()
+          }
+        },
+        enabled = !isUpdating,
+        modifier = Modifier.width(120.dp),
+      )
+
+      Text("Min severity", fontSize = 12.sp)
+      ListComboBox(
+        ACCESSIBILITY_SEVERITIES,
+        ACCESSIBILITY_SEVERITIES.indexOf(minSeverity).coerceAtLeast(0),
+        { index ->
+          if (!isUpdating) {
+            minSeverity = ACCESSIBILITY_SEVERITIES.getOrNull(index) ?: minSeverity
+            submit()
+          }
+        },
+        enabled = !isUpdating,
+        modifier = Modifier.width(110.dp),
+      )
+    }
+
+    CheckboxRow(
+      text = "Use baseline",
+      checked = useBaseline,
+      onCheckedChange = { enabled ->
+        if (!isUpdating) {
+          useBaseline = enabled
+          submit()
+        }
+      },
+      enabled = !isUpdating,
     )
   }
 }

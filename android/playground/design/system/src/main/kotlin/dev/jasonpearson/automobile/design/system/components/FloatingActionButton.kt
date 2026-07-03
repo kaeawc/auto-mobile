@@ -20,17 +20,17 @@ import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 
 @Composable
 fun AutoMobileFloatingActionButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    icon: ImageVector,
-    contentDescription: String? = null,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  icon: ImageVector,
+  contentDescription: String? = null,
 ) {
   FloatingActionButton(
-      onClick = onClick,
-      modifier = modifier,
-      containerColor = MaterialTheme.colorScheme.secondary,
-      contentColor = MaterialTheme.colorScheme.onSecondary,
-      elevation = FloatingActionButtonDefaults.elevation(),
+    onClick = onClick,
+    modifier = modifier,
+    containerColor = MaterialTheme.colorScheme.secondary,
+    contentColor = MaterialTheme.colorScheme.onSecondary,
+    elevation = FloatingActionButtonDefaults.elevation(),
   ) {
     Icon(imageVector = icon, contentDescription = contentDescription)
   }
@@ -38,17 +38,17 @@ fun AutoMobileFloatingActionButton(
 
 @Composable
 fun AutoMobileSmallFloatingActionButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    icon: ImageVector,
-    contentDescription: String? = null,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  icon: ImageVector,
+  contentDescription: String? = null,
 ) {
   SmallFloatingActionButton(
-      onClick = onClick,
-      modifier = modifier,
-      containerColor = MaterialTheme.colorScheme.secondary,
-      contentColor = MaterialTheme.colorScheme.onSecondary,
-      elevation = FloatingActionButtonDefaults.elevation(),
+    onClick = onClick,
+    modifier = modifier,
+    containerColor = MaterialTheme.colorScheme.secondary,
+    contentColor = MaterialTheme.colorScheme.onSecondary,
+    elevation = FloatingActionButtonDefaults.elevation(),
   ) {
     Icon(imageVector = icon, contentDescription = contentDescription)
   }
@@ -56,18 +56,18 @@ fun AutoMobileSmallFloatingActionButton(
 
 @Composable
 fun AutoMobileExtendedFloatingActionButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    icon: ImageVector? = null,
-    contentDescription: String? = null,
+  text: String,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  icon: ImageVector? = null,
+  contentDescription: String? = null,
 ) {
   ExtendedFloatingActionButton(
-      onClick = onClick,
-      modifier = modifier,
-      containerColor = MaterialTheme.colorScheme.secondary,
-      contentColor = MaterialTheme.colorScheme.onSecondary,
-      elevation = FloatingActionButtonDefaults.elevation(),
+    onClick = onClick,
+    modifier = modifier,
+    containerColor = MaterialTheme.colorScheme.secondary,
+    contentColor = MaterialTheme.colorScheme.onSecondary,
+    elevation = FloatingActionButtonDefaults.elevation(),
   ) {
     if (icon != null) {
       Icon(imageVector = icon, contentDescription = contentDescription)
@@ -82,22 +82,22 @@ private fun AutoMobileFloatingActionButtonPreview() {
   AutoMobileTheme {
     Column(verticalArrangement = Arrangement.spacedBy(AutoMobileDimensions.spacing4)) {
       AutoMobileFloatingActionButton(
-          onClick = {},
-          icon = Icons.Default.Add,
-          contentDescription = "Add",
+        onClick = {},
+        icon = Icons.Default.Add,
+        contentDescription = "Add",
       )
 
       AutoMobileSmallFloatingActionButton(
-          onClick = {},
-          icon = Icons.Default.Add,
-          contentDescription = "Add",
+        onClick = {},
+        icon = Icons.Default.Add,
+        contentDescription = "Add",
       )
 
       AutoMobileExtendedFloatingActionButton(
-          text = "Add Item",
-          onClick = {},
-          icon = Icons.Default.Add,
-          contentDescription = "Add",
+        text = "Add Item",
+        onClick = {},
+        icon = Icons.Default.Add,
+        contentDescription = "Add",
       )
     }
   }

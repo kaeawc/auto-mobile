@@ -18,44 +18,44 @@ import kotlinx.serialization.json.Json
 
 @Serializable
 data class McpHealthUptime(
-    val ms: Long? = null,
-    val human: String? = null,
+  val ms: Long? = null,
+  val human: String? = null,
 )
 
 @Serializable
 data class McpHealthResponse(
-    val status: String? = null,
-    val server: String? = null,
-    val version: String? = null,
-    val instanceId: String? = null,
-    val port: Int? = null,
-    val branch: String? = null,
-    val uptime: McpHealthUptime? = null,
-    val activeSessions: Int? = null,
-    val transport: String? = null,
+  val status: String? = null,
+  val server: String? = null,
+  val version: String? = null,
+  val instanceId: String? = null,
+  val port: Int? = null,
+  val branch: String? = null,
+  val uptime: McpHealthUptime? = null,
+  val activeSessions: Int? = null,
+  val transport: String? = null,
 )
 
 data class GitWorktree(
-    val path: String,
-    val branch: String? = null,
+  val path: String,
+  val branch: String? = null,
 )
 
 data class McpHttpServer(
-    val endpoint: String,
-    val health: McpHealthResponse,
+  val endpoint: String,
+  val health: McpHealthResponse,
 )
 
 data class McpServerOption(
-    val id: String,
-    val label: String,
-    val server: McpHttpServer?,
-    val worktree: GitWorktree?,
+  val id: String,
+  val label: String,
+  val server: McpHttpServer?,
+  val worktree: GitWorktree?,
 )
 
 data class McpDiscoverySnapshot(
-    val options: List<McpServerOption>,
-    val servers: List<McpHttpServer>,
-    val worktrees: List<GitWorktree>,
+  val options: List<McpServerOption>,
+  val servers: List<McpHttpServer>,
+  val worktrees: List<GitWorktree>,
 ) {
   companion object {
     fun empty(): McpDiscoverySnapshot = McpDiscoverySnapshot(emptyList(), emptyList(), emptyList())
@@ -75,53 +75,53 @@ interface HealthProbe {
 }
 
 class McpHttpDiscovery(
-    private val worktreeLister: WorktreeLister = GitWorktreeLister(),
-    private val portScanner: PortScanner = DefaultPortScanner(),
-    private val healthProbe: HealthProbe = HttpHealthProbe(),
+  private val worktreeLister: WorktreeLister = GitWorktreeLister(),
+  private val portScanner: PortScanner = DefaultPortScanner(),
+  private val healthProbe: HealthProbe = HttpHealthProbe(),
 ) {
   suspend fun discover(projectBasePath: String?): McpDiscoverySnapshot = coroutineScope {
     val worktrees = worktreeLister.listWorktrees(projectBasePath)
     val ports = portScanner.scanListeningPorts()
     val servers =
-        ports.map { port -> async(Dispatchers.IO) { probePort(port) } }.awaitAll().filterNotNull()
+      ports.map { port -> async(Dispatchers.IO) { probePort(port) } }.awaitAll().filterNotNull()
 
     val options = buildOptions(worktrees, servers)
     McpDiscoverySnapshot(options, servers, worktrees)
   }
 
   private fun buildOptions(
-      worktrees: List<GitWorktree>,
-      servers: List<McpHttpServer>,
+    worktrees: List<GitWorktree>,
+    servers: List<McpHttpServer>,
   ): List<McpServerOption> {
     val remainingServers = servers.toMutableList()
     val options = mutableListOf<McpServerOption>()
 
     for (worktree in worktrees) {
       val server =
-          worktree.branch?.let { branch ->
-            remainingServers.firstOrNull { it.health.branch == branch }
-          }
+        worktree.branch?.let { branch ->
+          remainingServers.firstOrNull { it.health.branch == branch }
+        }
       if (server != null) {
         remainingServers.remove(server)
       }
       options.add(
-          McpServerOption(
-              id = "worktree:${worktree.path}",
-              label = buildWorktreeLabel(worktree, server),
-              server = server,
-              worktree = worktree,
-          )
+        McpServerOption(
+          id = "worktree:${worktree.path}",
+          label = buildWorktreeLabel(worktree, server),
+          server = server,
+          worktree = worktree,
+        )
       )
     }
 
     for (server in remainingServers) {
       options.add(
-          McpServerOption(
-              id = "server:${server.health.port ?: server.endpoint}",
-              label = buildServerLabel(server),
-              server = server,
-              worktree = null,
-          )
+        McpServerOption(
+          id = "server:${server.health.port ?: server.endpoint}",
+          label = buildServerLabel(server),
+          server = server,
+          worktree = null,
+        )
       )
     }
 
@@ -169,56 +169,56 @@ class McpHttpDiscovery(
 
 class GitWorktreeLister : WorktreeLister {
   override suspend fun listWorktrees(projectBasePath: String?): List<GitWorktree> =
-      withContext(Dispatchers.IO) {
-        if (projectBasePath.isNullOrBlank()) {
-          return@withContext emptyList()
-        }
+    withContext(Dispatchers.IO) {
+      if (projectBasePath.isNullOrBlank()) {
+        return@withContext emptyList()
+      }
 
-        val output =
-            runProcess(listOf("git", "worktree", "list", "--porcelain"), projectBasePath)
-                ?: return@withContext emptyList()
+      val output =
+        runProcess(listOf("git", "worktree", "list", "--porcelain"), projectBasePath)
+          ?: return@withContext emptyList()
 
-        val worktrees = mutableListOf<GitWorktree>()
-        var currentPath: String? = null
-        var currentBranch: String? = null
+      val worktrees = mutableListOf<GitWorktree>()
+      var currentPath: String? = null
+      var currentBranch: String? = null
 
-        for (line in output.lineSequence()) {
-          when {
-            line.startsWith("worktree ") -> {
-              if (currentPath != null) {
-                worktrees.add(GitWorktree(currentPath!!, currentBranch))
-              }
-              currentPath = line.removePrefix("worktree ").trim()
+      for (line in output.lineSequence()) {
+        when {
+          line.startsWith("worktree ") -> {
+            if (currentPath != null) {
+              worktrees.add(GitWorktree(currentPath!!, currentBranch))
+            }
+            currentPath = line.removePrefix("worktree ").trim()
+            currentBranch = null
+          }
+          line.startsWith("branch ") -> {
+            val branchRef = line.removePrefix("branch ").trim()
+            currentBranch = branchRef.removePrefix("refs/heads/")
+          }
+          line.isBlank() -> {
+            if (currentPath != null) {
+              worktrees.add(GitWorktree(currentPath!!, currentBranch))
+              currentPath = null
               currentBranch = null
-            }
-            line.startsWith("branch ") -> {
-              val branchRef = line.removePrefix("branch ").trim()
-              currentBranch = branchRef.removePrefix("refs/heads/")
-            }
-            line.isBlank() -> {
-              if (currentPath != null) {
-                worktrees.add(GitWorktree(currentPath!!, currentBranch))
-                currentPath = null
-                currentBranch = null
-              }
             }
           }
         }
-
-        if (currentPath != null) {
-          worktrees.add(GitWorktree(currentPath!!, currentBranch))
-        }
-
-        worktrees
       }
+
+      if (currentPath != null) {
+        worktrees.add(GitWorktree(currentPath!!, currentBranch))
+      }
+
+      worktrees
+    }
 
   private fun runProcess(command: List<String>, workingDir: String): String? {
     return try {
       val process =
-          ProcessBuilder(command)
-              .directory(java.io.File(workingDir))
-              .redirectErrorStream(true)
-              .start()
+        ProcessBuilder(command)
+          .directory(java.io.File(workingDir))
+          .redirectErrorStream(true)
+          .start()
       val completed = process.waitFor(3, TimeUnit.SECONDS)
       if (!completed) {
         process.destroy()
@@ -267,14 +267,15 @@ object SystemPlatformInfo : PlatformInfo {
 }
 
 class DefaultPortScanner(
-    private val commandRunner: PortCommandRunner = SystemPortCommandRunner(),
-    private val platformInfo: PlatformInfo = SystemPlatformInfo,
+  private val commandRunner: PortCommandRunner = SystemPortCommandRunner(),
+  private val platformInfo: PlatformInfo = SystemPlatformInfo,
 ) : PortScanner {
   override suspend fun scanListeningPorts(): Set<Int> = coroutineScope {
     val osName = platformInfo.osName
     val commands = buildCommandList(osName)
 
-    val outputs = commands
+    val outputs =
+      commands
         .map { cmd -> async(Dispatchers.IO) { commandRunner.runCommand(cmd) } }
         .awaitAll()
         .filterNotNull()
@@ -286,9 +287,7 @@ class DefaultPortScanner(
     return if (osName.contains("win")) {
       listOf(listOf("netstat", "-ano", "-p", "tcp"))
     } else {
-      val commands = mutableListOf(
-          listOf("lsof", "-iTCP", "-sTCP:LISTEN", "-n", "-P"),
-      )
+      val commands = mutableListOf(listOf("lsof", "-iTCP", "-sTCP:LISTEN", "-n", "-P"))
       // ss is not available on macOS — skip it to avoid a 2s timeout
       if (!osName.contains("mac") && !osName.contains("darwin")) {
         commands.add(listOf("ss", "-ltn"))
@@ -316,16 +315,16 @@ class DefaultPortScanner(
 }
 
 class HttpHealthProbe(
-    private val json: Json = Json { ignoreUnknownKeys = true },
-    private val httpClient: HttpClient =
-        HttpClient.newBuilder().connectTimeout(Duration.ofMillis(800)).build(),
+  private val json: Json = Json { ignoreUnknownKeys = true },
+  private val httpClient: HttpClient =
+    HttpClient.newBuilder().connectTimeout(Duration.ofMillis(800)).build(),
 ) : HealthProbe {
   override suspend fun probeHealth(port: Int): McpHealthResponse? {
     val urls =
-        listOf(
-            "http://localhost:$port/health",
-            "http://localhost:$port/auto-mobile/health",
-        )
+      listOf(
+        "http://localhost:$port/health",
+        "http://localhost:$port/auto-mobile/health",
+      )
     for (url in urls) {
       val health = requestHealth(url) ?: continue
       return health
@@ -334,21 +333,21 @@ class HttpHealthProbe(
   }
 
   private suspend fun requestHealth(url: String): McpHealthResponse? =
-      withContext(Dispatchers.IO) {
-        try {
-          val request =
-              HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMillis(800)).GET().build()
-          val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-          if (response.statusCode() != 200) {
-            return@withContext null
-          }
-          val body = response.body().trim()
-          if (body.isEmpty()) {
-            return@withContext null
-          }
-          json.decodeFromString(McpHealthResponse.serializer(), body)
-        } catch (_: Exception) {
-          null
+    withContext(Dispatchers.IO) {
+      try {
+        val request =
+          HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMillis(800)).GET().build()
+        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() != 200) {
+          return@withContext null
         }
+        val body = response.body().trim()
+        if (body.isEmpty()) {
+          return@withContext null
+        }
+        json.decodeFromString(McpHealthResponse.serializer(), body)
+      } catch (_: Exception) {
+        null
       }
+    }
 }

@@ -98,21 +98,21 @@ internal object DaemonSocketClientManager {
     // ensureVersionMatches/ensureBuildMatches.
     val pidFilePath = DaemonSocketPaths.pidFilePath()
     val versionSkew =
-        daemonAvailable &&
-            DaemonSocketPaths.requiresVersionSkewRestart(
-                DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
-                DaemonSocketPaths.resolveClientVersion(),
-            )
+      daemonAvailable &&
+        DaemonSocketPaths.requiresVersionSkewRestart(
+          DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
+          DaemonSocketPaths.resolveClientVersion(),
+        )
     // Two checkouts at the same release version (e.g. a stale `0.0.40+gold` daemon vs this
     // local `0.0.40`) are indistinguishable by release alone; the entry-script hash catches them.
     val buildSkew =
-        daemonAvailable &&
-            DaemonSocketPaths.requiresBuildSkewRestart(
-                DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
-                DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
-                DaemonSocketPaths.resolveClientBuildId(),
-                DaemonSocketPaths.resolveLocalDaemonEntryScript(),
-            )
+      daemonAvailable &&
+        DaemonSocketPaths.requiresBuildSkewRestart(
+          DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
+          DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
+          DaemonSocketPaths.resolveClientBuildId(),
+          DaemonSocketPaths.resolveLocalDaemonEntryScript(),
+        )
     val skew = versionSkew || buildSkew
 
     if (!forceRestart && daemonAvailable && !skew) {
@@ -120,11 +120,11 @@ internal object DaemonSocketClientManager {
     }
 
     val startCommand =
-        if (forceRestart || skew) {
-          DaemonSocketPaths.buildDaemonRestartCommand()
-        } else {
-          DaemonSocketPaths.buildDaemonStartCommand()
-        }
+      if (forceRestart || skew) {
+        DaemonSocketPaths.buildDaemonRestartCommand()
+      } else {
+        DaemonSocketPaths.buildDaemonStartCommand()
+      }
     val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
     if (skew && debugMode) {
       println("Restarting AutoMobile daemon due to version/build skew with runner")
@@ -135,19 +135,19 @@ internal object DaemonSocketClientManager {
 
     val environmentOverrides = resolveDaemonEnvironmentOverrides()
     AutoMobileSharedUtils.executeCommand(
-        startCommand,
-        DaemonSocketPaths.daemonStartTimeoutMs(),
-        environmentOverrides,
+      startCommand,
+      DaemonSocketPaths.daemonStartTimeoutMs(),
+      environmentOverrides,
     )
 
     val started =
-        DaemonSocketClient.waitForAvailability(
-            socketPath,
-            DaemonSocketPaths.daemonStartTimeoutMs(),
-        )
+      DaemonSocketClient.waitForAvailability(
+        socketPath,
+        DaemonSocketPaths.daemonStartTimeoutMs(),
+      )
     if (!started) {
       throw DaemonUnavailableException(
-          "Daemon failed to start within ${DaemonSocketPaths.daemonStartTimeoutMs()}ms"
+        "Daemon failed to start within ${DaemonSocketPaths.daemonStartTimeoutMs()}ms"
       )
     }
 
@@ -158,22 +158,22 @@ internal object DaemonSocketClientManager {
     // Confirm the running daemon's version AND build identity match this runner before marking it
     // ensured; a daemon that records no version/build id is accepted (a skew cannot be proven).
     val stillVersionSkewed =
-        DaemonSocketPaths.requiresVersionSkewRestart(
-            DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
-            DaemonSocketPaths.resolveClientVersion(),
-        )
+      DaemonSocketPaths.requiresVersionSkewRestart(
+        DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
+        DaemonSocketPaths.resolveClientVersion(),
+      )
     val stillBuildSkewed =
-        DaemonSocketPaths.requiresBuildSkewRestart(
-            DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
-            DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
-            DaemonSocketPaths.resolveClientBuildId(),
-            DaemonSocketPaths.resolveLocalDaemonEntryScript(),
-        )
+      DaemonSocketPaths.requiresBuildSkewRestart(
+        DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
+        DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
+        DaemonSocketPaths.resolveClientBuildId(),
+        DaemonSocketPaths.resolveLocalDaemonEntryScript(),
+      )
     if (stillVersionSkewed || stillBuildSkewed) {
       throw DaemonUnavailableException(
-          "AutoMobile daemon still differs from this runner after (re)start; the shared socket is " +
-              "served by a different build. Ensure the same @kaeawc/auto-mobile version starts the " +
-              "daemon and runs the tests (e.g. set automobile.daemon.package.version)."
+        "AutoMobile daemon still differs from this runner after (re)start; the shared socket is " +
+          "served by a different build. Ensure the same @kaeawc/auto-mobile version starts the " +
+          "daemon and runs the tests (e.g. set automobile.daemon.package.version)."
       )
     }
 
@@ -211,8 +211,8 @@ internal object DaemonSocketClientManager {
             val refreshResponse = socketClient.callDaemonMethod("daemon/refreshDevices", 5000)
             if (debugMode && refreshResponse.success) {
               val addedDevices =
-                  refreshResponse.result?.jsonObject?.get("addedDevices")?.jsonPrimitive?.intOrNull
-                      ?: 0
+                refreshResponse.result?.jsonObject?.get("addedDevices")?.jsonPrimitive?.intOrNull
+                  ?: 0
               println("Device pool refresh complete: added $addedDevices devices")
             }
           } catch (e: Exception) {
@@ -224,30 +224,30 @@ internal object DaemonSocketClientManager {
         }
 
         val response =
-            socketClient.callTool(
-                "listDevices",
-                JsonObject(mapOf("platform" to JsonPrimitive("android"))),
-                5000,
-            )
+          socketClient.callTool(
+            "listDevices",
+            JsonObject(mapOf("platform" to JsonPrimitive("android"))),
+            5000,
+          )
         socketClient.close()
 
         if (response.success) {
           val payloadText =
-              response.result
-                  ?.jsonObject
-                  ?.get("content")
-                  ?.jsonArray
-                  ?.firstOrNull()
-                  ?.jsonObject
-                  ?.get("text")
-                  ?.jsonPrimitive
-                  ?.content
+            response.result
+              ?.jsonObject
+              ?.get("content")
+              ?.jsonArray
+              ?.firstOrNull()
+              ?.jsonObject
+              ?.get("text")
+              ?.jsonPrimitive
+              ?.content
           val parsedResult = payloadText?.let { json.parseToJsonElement(it).jsonObject }
           val poolStatus = parsedResult?.get("poolStatus")?.jsonObject
           val totalDevices =
-              poolStatus?.get("total")?.jsonPrimitive?.intOrNull
-                  ?: parsedResult?.get("totalCount")?.jsonPrimitive?.intOrNull
-                  ?: 0
+            poolStatus?.get("total")?.jsonPrimitive?.intOrNull
+              ?: parsedResult?.get("totalCount")?.jsonPrimitive?.intOrNull
+              ?: 0
 
           if (totalDevices > 0) {
             if (debugMode) {
@@ -276,22 +276,21 @@ internal object DaemonSocketClientManager {
 
     // Device pool is still empty after timeout - throw error
     throw DaemonUnavailableException(
-        "Daemon device pool is empty after ${timeoutMs}ms. " +
-            "Start an emulator or connect a physical device before running tests."
+      "Daemon device pool is empty after ${timeoutMs}ms. " +
+        "Start an emulator or connect a physical device before running tests."
     )
   }
 
   private fun resolveDaemonEnvironmentOverrides(): Map<String, String> {
     val resolvedOverrides = mutableMapOf<String, String>()
-    val ctrlProxyApkProperty =
-        SystemPropertyCache.get("automobile.ctrl.proxy.apk.path", "").trim()
+    val ctrlProxyApkProperty = SystemPropertyCache.get("automobile.ctrl.proxy.apk.path", "").trim()
     val ctrlProxyApkEnv = System.getenv("AUTOMOBILE_CTRL_PROXY_APK_PATH")?.trim().orEmpty()
     val ctrlProxyApkPath =
-        when {
-          ctrlProxyApkProperty.isNotEmpty() -> ctrlProxyApkProperty
-          ctrlProxyApkEnv.isNotEmpty() -> ctrlProxyApkEnv
-          else -> findLocalCtrlProxyApkPath().orEmpty()
-        }
+      when {
+        ctrlProxyApkProperty.isNotEmpty() -> ctrlProxyApkProperty
+        ctrlProxyApkEnv.isNotEmpty() -> ctrlProxyApkEnv
+        else -> findLocalCtrlProxyApkPath().orEmpty()
+      }
     if (ctrlProxyApkPath.isNotEmpty()) {
       resolvedOverrides["AUTOMOBILE_CTRL_PROXY_APK_PATH"] = ctrlProxyApkPath
     }
@@ -300,15 +299,11 @@ internal object DaemonSocketClientManager {
 
   private fun findLocalCtrlProxyApkPath(): String? {
     val candidates =
-        listOf(
-            File("control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"),
-            File(
-                "../control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
-            ),
-            File(
-                "../../control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
-            ),
-        )
+      listOf(
+        File("control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"),
+        File("../control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"),
+        File("../../control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"),
+      )
     return candidates.firstOrNull { it.exists() }?.absolutePath
   }
 }
@@ -329,7 +324,7 @@ internal object DaemonSocketPaths {
     val sysProp = SystemPropertyCache.get("automobile.daemon.startup.timeout.ms", "")
     val envVar = System.getenv("AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS")?.trim().orEmpty()
     val configured =
-        sysProp.ifEmpty { envVar }.ifEmpty { DEFAULT_DAEMON_STARTUP_TIMEOUT_MS.toString() }
+      sysProp.ifEmpty { envVar }.ifEmpty { DEFAULT_DAEMON_STARTUP_TIMEOUT_MS.toString() }
     return configured.toLongOrNull() ?: DEFAULT_DAEMON_STARTUP_TIMEOUT_MS
   }
 
@@ -342,24 +337,30 @@ internal object DaemonSocketPaths {
   }
 
   private fun buildDaemonCommand(subCommand: String): List<String> {
-    val command = resolveLocalCommand(subCommand)
+    val command =
+      resolveLocalCommand(subCommand)
         ?: resolvePackageCommand(subCommand)
         ?: listOf("auto-mobile", "--daemon", subCommand)
 
     return command
-        .withDismissKeyboardAfterInput()
-        .withNoUiPerfMode()
-        .withNoNavigationScreenshots()
-        .withNoWaitForPollingOverhead()
-        .withNoIncludeNotImportantViews()
-        .withNoReportViewIds()
-        .withNoRetrieveInteractiveWindows()
+      .withDismissKeyboardAfterInput()
+      .withNoUiPerfMode()
+      .withNoNavigationScreenshots()
+      .withNoWaitForPollingOverhead()
+      .withNoIncludeNotImportantViews()
+      .withNoReportViewIds()
+      .withNoRetrieveInteractiveWindows()
   }
 
   private fun resolveLocalCommand(subCommand: String): List<String>? {
     val projectRoot = resolveLocalDaemonProjectRoot() ?: return null
     val runtime = resolveRuntimePath()
-    return listOf(runtime, File(projectRoot, "dist/src/index.js").absolutePath, "--daemon", subCommand)
+    return listOf(
+      runtime,
+      File(projectRoot, "dist/src/index.js").absolutePath,
+      "--daemon",
+      subCommand,
+    )
   }
 
   /**
@@ -380,12 +381,12 @@ internal object DaemonSocketPaths {
       val packageJson = File(projectRoot, "package.json")
       if (!packageJson.exists()) return null
       Json { ignoreUnknownKeys = true }
-          .parseToJsonElement(packageJson.readText())
-          .jsonObject["version"]
-          ?.jsonPrimitive
-          ?.contentOrNull
-          ?.trim()
-          ?.takeIf { it.isNotEmpty() }
+        .parseToJsonElement(packageJson.readText())
+        .jsonObject["version"]
+        ?.jsonPrimitive
+        ?.contentOrNull
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
     } catch (e: Exception) {
       null
     }
@@ -397,9 +398,9 @@ internal object DaemonSocketPaths {
   }
 
   internal fun buildPackageDaemonCommand(
-      runner: String,
-      subCommand: String,
-      packageVersion: String? = resolveDaemonPackageVersion(),
+    runner: String,
+    subCommand: String,
+    packageVersion: String? = resolveDaemonPackageVersion(),
   ): List<String>? {
     val packageSpecifier = resolveDaemonPackageSpecifier(packageVersion) ?: return null
     return if (File(runner).nameWithoutExtension == "npx") {
@@ -435,19 +436,19 @@ internal object DaemonSocketPaths {
    *
    * Must describe the daemon this runner will actually *start*, else the daemon rejects every
    * request. When a local project override is active, [buildDaemonCommand] starts
-   * `<local>/dist/src/index.js` — whose version is the local checkout's, not this runner jar's —
-   * so declare the local `package.json` version (falling back to omitting, i.e. a legacy ungated
+   * `<local>/dist/src/index.js` — whose version is the local checkout's, not this runner jar's — so
+   * declare the local `package.json` version (falling back to omitting, i.e. a legacy ungated
    * client, when it can't be read) rather than the jar `Implementation-Version` the published
    * package path would use. This was the #2749 review's local-override rejection.
    */
   internal fun resolveClientVersion(): String? {
     val localProjectRoot = resolveLocalDaemonProjectRoot()
     val resolved =
-        if (localProjectRoot != null) {
-          resolveLocalPackageVersion(localProjectRoot)
-        } else {
-          resolveDaemonPackageVersion()
-        }
+      if (localProjectRoot != null) {
+        resolveLocalPackageVersion(localProjectRoot)
+      } else {
+        resolveDaemonPackageVersion()
+      }
     val trimmed = resolved?.trim().orEmpty()
     // Aliases like `latest`/`unknown` are not real versions — resolveDaemonPackageSpecifier()
     // already treats them as unpinnable and starts bare `auto-mobile`. Declaring one as
@@ -460,10 +461,10 @@ internal object DaemonSocketPaths {
   }
 
   /**
-   * Resolve whether to force a daemon restart before reuse. Explicit configuration wins
-   * (JVM property `automobile.daemon.force.restart` or env `AUTOMOBILE_DAEMON_FORCE_RESTART`);
-   * otherwise CI runs default to true so a stale daemon left by a previous job is replaced
-   * rather than silently reused (#2744 interim). See [shouldForceRestart] for the decision.
+   * Resolve whether to force a daemon restart before reuse. Explicit configuration wins (JVM
+   * property `automobile.daemon.force.restart` or env `AUTOMOBILE_DAEMON_FORCE_RESTART`); otherwise
+   * CI runs default to true so a stale daemon left by a previous job is replaced rather than
+   * silently reused (#2744 interim). See [shouldForceRestart] for the decision.
    */
   fun resolveForceRestart(): Boolean {
     val property = SystemPropertyCache.get("automobile.daemon.force.restart", "").ifBlank { null }
@@ -473,25 +474,35 @@ internal object DaemonSocketPaths {
   }
 
   /**
-   * Pure force-restart decision. Explicit property/env values (parsed as booleans) win in
-   * order; when neither is set, a truthy `CI` marker defaults to true. Unset/blank/unparseable
-   * values fall through, defaulting to false outside CI.
+   * Pure force-restart decision. Explicit property/env values (parsed as booleans) win in order;
+   * when neither is set, a truthy `CI` marker defaults to true. Unset/blank/unparseable values fall
+   * through, defaulting to false outside CI.
    */
   internal fun shouldForceRestart(
-      propertyValue: String?,
-      envValue: String?,
-      ciValue: String?,
+    propertyValue: String?,
+    envValue: String?,
+    ciValue: String?,
   ): Boolean {
-    parseBooleanFlag(propertyValue)?.let { return it }
-    parseBooleanFlag(envValue)?.let { return it }
+    parseBooleanFlag(propertyValue)?.let {
+      return it
+    }
+    parseBooleanFlag(envValue)?.let {
+      return it
+    }
     return parseBooleanFlag(ciValue) ?: false
   }
 
   private fun parseBooleanFlag(value: String?): Boolean? {
     val normalized = value?.trim()?.lowercase() ?: return null
     return when (normalized) {
-      "1", "true", "yes", "y" -> true
-      "0", "false", "no", "n" -> false
+      "1",
+      "true",
+      "yes",
+      "y" -> true
+      "0",
+      "false",
+      "no",
+      "n" -> false
       else -> null
     }
   }
@@ -503,35 +514,35 @@ internal object DaemonSocketPaths {
   }
 
   /**
-   * The release portion of a version string — everything before the semver `+g<sha>` dev
-   * stamp. Mirrors the daemon's `releaseVersion`, so a git-stamped source-checkout daemon
-   * and a plain-versioned runner compare equal at the same release.
+   * The release portion of a version string — everything before the semver `+g<sha>` dev stamp.
+   * Mirrors the daemon's `releaseVersion`, so a git-stamped source-checkout daemon and a
+   * plain-versioned runner compare equal at the same release.
    */
   internal fun releaseVersion(version: String): String = version.substringBefore('+')
 
   /** Read the daemon's recorded version from its PID file, or null if absent/unreadable. */
   internal fun readDaemonVersionFromPidFile(path: String): String? =
-      readPidFileString(path, "version")
+    readPidFileString(path, "version")
 
   /** Read the daemon's recorded build-identity hash from its PID file, or null. */
   internal fun readDaemonBuildIdFromPidFile(path: String): String? =
-      readPidFileString(path, "buildId")
+    readPidFileString(path, "buildId")
 
   /** Read the daemon's recorded entry-script path from its PID file, or null. */
   internal fun readDaemonEntryScriptFromPidFile(path: String): String? =
-      readPidFileString(path, "entryScript")
+    readPidFileString(path, "entryScript")
 
   private fun readPidFileString(path: String, field: String): String? {
     return try {
       val file = File(path)
       if (!file.exists()) return null
       Json { ignoreUnknownKeys = true }
-          .parseToJsonElement(file.readText())
-          .jsonObject[field]
-          ?.jsonPrimitive
-          ?.contentOrNull
-          ?.trim()
-          ?.takeIf { it.isNotEmpty() }
+        .parseToJsonElement(file.readText())
+        .jsonObject[field]
+        ?.jsonPrimitive
+        ?.contentOrNull
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
     } catch (e: Exception) {
       null
     }
@@ -542,7 +553,7 @@ internal object DaemonSocketPaths {
    * local override is active. This is the file whose content hash forms the build identity.
    */
   internal fun resolveLocalDaemonEntryScript(): String? =
-      resolveLocalDaemonProjectRoot()?.let { File(it, "dist/src/index.js").absolutePath }
+    resolveLocalDaemonProjectRoot()?.let { File(it, "dist/src/index.js").absolutePath }
 
   /**
    * Build identity (short content hash of the started daemon's entry script) this runner declares
@@ -552,7 +563,7 @@ internal object DaemonSocketPaths {
    * daemon's own build id compares equal.
    */
   internal fun resolveClientBuildId(): String? =
-      resolveLocalDaemonEntryScript()?.let { computeBuildId(File(it)) }
+    resolveLocalDaemonEntryScript()?.let { computeBuildId(File(it)) }
 
   private fun computeBuildId(entryScript: File): String? {
     return try {
@@ -573,10 +584,10 @@ internal object DaemonSocketPaths {
    * still triggers a restart), else treat as a match to avoid thrashing an unidentifiable daemon.
    */
   internal fun requiresBuildSkewRestart(
-      daemonBuildId: String?,
-      daemonEntryScript: String?,
-      clientBuildId: String?,
-      clientEntryScript: String?,
+    daemonBuildId: String?,
+    daemonEntryScript: String?,
+    clientBuildId: String?,
+    clientEntryScript: String?,
   ): Boolean {
     val daemonHash = daemonBuildId?.trim().orEmpty()
     val clientHash = clientBuildId?.trim().orEmpty()
@@ -594,12 +605,11 @@ internal object DaemonSocketPaths {
   }
 
   /**
-   * Whether an already-running daemon must be restarted before reuse because its recorded
-   * version does not match this runner's (#2744). Compares release portions (stripping the
-   * dev stamp), mirroring the MCP proxy's `ensureVersionMatches`. A blank/unknown version on
-   * either side yields false: without both versions the skew cannot be proven, and forcing a
-   * restart would thrash a daemon we cannot identify (matches the daemon gate's lenient
-   * "unknown => allow" stance).
+   * Whether an already-running daemon must be restarted before reuse because its recorded version
+   * does not match this runner's (#2744). Compares release portions (stripping the dev stamp),
+   * mirroring the MCP proxy's `ensureVersionMatches`. A blank/unknown version on either side yields
+   * false: without both versions the skew cannot be proven, and forcing a restart would thrash a
+   * daemon we cannot identify (matches the daemon gate's lenient "unknown => allow" stance).
    */
   internal fun requiresVersionSkewRestart(daemonVersion: String?, clientVersion: String?): Boolean {
     val daemonBase = releaseVersion(daemonVersion?.trim().orEmpty())
@@ -620,7 +630,8 @@ internal object DaemonSocketPaths {
     if (SystemPropertyCache.getBoolean("automobile.daemon.dismiss.keyboard.after.input", false)) {
       return true
     }
-    val env = System.getenv("AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT")?.trim()?.lowercase().orEmpty()
+    val env =
+      System.getenv("AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT")?.trim()?.lowercase().orEmpty()
     return env == "1" || env == "true" || env == "yes"
   }
 
@@ -656,7 +667,8 @@ internal object DaemonSocketPaths {
     if (SystemPropertyCache.getBoolean("automobile.daemon.no.navigation.screenshots", false)) {
       return true
     }
-    val env = System.getenv("AUTOMOBILE_DAEMON_NO_NAVIGATION_SCREENSHOTS")?.trim()?.lowercase().orEmpty()
+    val env =
+      System.getenv("AUTOMOBILE_DAEMON_NO_NAVIGATION_SCREENSHOTS")?.trim()?.lowercase().orEmpty()
     return env == "1" || env == "true" || env == "yes"
   }
 
@@ -669,19 +681,23 @@ internal object DaemonSocketPaths {
    * When true, the spawned daemon passes `--no-include-not-important-views` to disable
    * `FLAG_INCLUDE_NOT_IMPORTANT_VIEWS` on the CtrlProxy accessibility service.
    *
-   * Configured via JVM system property `automobile.daemon.no.include.not.important.views`
-   * or environment variable `AUTOMOBILE_DAEMON_NO_INCLUDE_NOT_IMPORTANT_VIEWS`.
+   * Configured via JVM system property `automobile.daemon.no.include.not.important.views` or
+   * environment variable `AUTOMOBILE_DAEMON_NO_INCLUDE_NOT_IMPORTANT_VIEWS`.
    */
   private fun noIncludeNotImportantViewsRequested(): Boolean {
-    if (SystemPropertyCache.getBoolean(
+    if (
+      SystemPropertyCache.getBoolean(
         "automobile.daemon.no.include.not.important.views",
-        false
+        false,
       )
     ) {
       return true
     }
-    val env = System.getenv("AUTOMOBILE_DAEMON_NO_INCLUDE_NOT_IMPORTANT_VIEWS")
-        ?.trim()?.lowercase().orEmpty()
+    val env =
+      System.getenv("AUTOMOBILE_DAEMON_NO_INCLUDE_NOT_IMPORTANT_VIEWS")
+        ?.trim()
+        ?.lowercase()
+        .orEmpty()
     return env == "1" || env == "true" || env == "yes"
   }
 
@@ -691,22 +707,22 @@ internal object DaemonSocketPaths {
   }
 
   /**
-   * When true, the spawned daemon passes `--no-report-view-ids` to disable
-   * `FLAG_REPORT_VIEW_IDS` on the CtrlProxy accessibility service.
+   * When true, the spawned daemon passes `--no-report-view-ids` to disable `FLAG_REPORT_VIEW_IDS`
+   * on the CtrlProxy accessibility service.
    *
-   * Configured via JVM system property `automobile.daemon.no.report.view.ids`
-   * or environment variable `AUTOMOBILE_DAEMON_NO_REPORT_VIEW_IDS`.
+   * Configured via JVM system property `automobile.daemon.no.report.view.ids` or environment
+   * variable `AUTOMOBILE_DAEMON_NO_REPORT_VIEW_IDS`.
    */
   private fun noReportViewIdsRequested(): Boolean {
-    if (SystemPropertyCache.getBoolean(
+    if (
+      SystemPropertyCache.getBoolean(
         "automobile.daemon.no.report.view.ids",
-        false
+        false,
       )
     ) {
       return true
     }
-    val env = System.getenv("AUTOMOBILE_DAEMON_NO_REPORT_VIEW_IDS")
-        ?.trim()?.lowercase().orEmpty()
+    val env = System.getenv("AUTOMOBILE_DAEMON_NO_REPORT_VIEW_IDS")?.trim()?.lowercase().orEmpty()
     return env == "1" || env == "true" || env == "yes"
   }
 
@@ -719,19 +735,23 @@ internal object DaemonSocketPaths {
    * When true, the spawned daemon passes `--no-retrieve-interactive-windows` to disable
    * `FLAG_RETRIEVE_INTERACTIVE_WINDOWS` on the CtrlProxy accessibility service.
    *
-   * Configured via JVM system property `automobile.daemon.no.retrieve.interactive.windows`
-   * or environment variable `AUTOMOBILE_DAEMON_NO_RETRIEVE_INTERACTIVE_WINDOWS`.
+   * Configured via JVM system property `automobile.daemon.no.retrieve.interactive.windows` or
+   * environment variable `AUTOMOBILE_DAEMON_NO_RETRIEVE_INTERACTIVE_WINDOWS`.
    */
   private fun noRetrieveInteractiveWindowsRequested(): Boolean {
-    if (SystemPropertyCache.getBoolean(
+    if (
+      SystemPropertyCache.getBoolean(
         "automobile.daemon.no.retrieve.interactive.windows",
-        false
+        false,
       )
     ) {
       return true
     }
-    val env = System.getenv("AUTOMOBILE_DAEMON_NO_RETRIEVE_INTERACTIVE_WINDOWS")
-        ?.trim()?.lowercase().orEmpty()
+    val env =
+      System.getenv("AUTOMOBILE_DAEMON_NO_RETRIEVE_INTERACTIVE_WINDOWS")
+        ?.trim()
+        ?.lowercase()
+        .orEmpty()
     return env == "1" || env == "true" || env == "yes"
   }
 
@@ -741,23 +761,24 @@ internal object DaemonSocketPaths {
   }
 
   /**
-   * When true, the spawned daemon passes `--no-waitfor-polling-overhead` to skip screenshots
-   * and back stack collection during observe waitFor polling loops. Reduces ADB contention
-   * that can cause ctrl-proxy WebSocket instability on resource-constrained CI emulators.
+   * When true, the spawned daemon passes `--no-waitfor-polling-overhead` to skip screenshots and
+   * back stack collection during observe waitFor polling loops. Reduces ADB contention that can
+   * cause ctrl-proxy WebSocket instability on resource-constrained CI emulators.
    *
-   * Configured via JVM system property `automobile.daemon.no.waitfor.polling.overhead`
-   * or environment variable `AUTOMOBILE_DAEMON_NO_WAITFOR_POLLING_OVERHEAD`.
+   * Configured via JVM system property `automobile.daemon.no.waitfor.polling.overhead` or
+   * environment variable `AUTOMOBILE_DAEMON_NO_WAITFOR_POLLING_OVERHEAD`.
    */
   private fun noWaitForPollingOverheadRequested(): Boolean {
-    if (SystemPropertyCache.getBoolean(
+    if (
+      SystemPropertyCache.getBoolean(
         "automobile.daemon.no.waitfor.polling.overhead",
-        false
+        false,
       )
     ) {
       return true
     }
-    val env = System.getenv("AUTOMOBILE_DAEMON_NO_WAITFOR_POLLING_OVERHEAD")
-        ?.trim()?.lowercase().orEmpty()
+    val env =
+      System.getenv("AUTOMOBILE_DAEMON_NO_WAITFOR_POLLING_OVERHEAD")?.trim()?.lowercase().orEmpty()
     return env == "1" || env == "true" || env == "yes"
   }
 
@@ -779,14 +800,15 @@ internal object DaemonSocketPaths {
     // Gradle test workers often have a stripped PATH, so resolve full paths.
     // Prefer bun since the project runs on bun.
     val home = System.getProperty("user.home") ?: System.getenv("HOME") ?: ""
-    val candidates = listOfNotNull(
+    val candidates =
+      listOfNotNull(
         if (home.isNotEmpty()) "$home/.bun/bin/bun" else null,
         "/usr/local/bin/bun",
         "/opt/homebrew/bin/bun",
         "/usr/local/bin/node",
         "/opt/homebrew/bin/node",
         if (home.isNotEmpty()) "$home/.nvm/current/bin/node" else null,
-    )
+      )
 
     for (path in candidates) {
       if (File(path).exists()) return path
@@ -805,9 +827,7 @@ internal object DaemonSocketPaths {
 
   private fun resolveCommandPath(cmd: String): String? {
     try {
-      val process = ProcessBuilder("which", cmd)
-          .redirectErrorStream(true)
-          .start()
+      val process = ProcessBuilder("which", cmd).redirectErrorStream(true).start()
       val exited = process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
       if (exited && process.exitValue() == 0) {
         val path = process.inputStream.bufferedReader().readText().trim()
@@ -842,10 +862,10 @@ internal object DaemonSocketPaths {
 }
 
 internal class DaemonSocketClient(
-    private val socketPath: String,
-    private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
-    private val clientBuildId: String? = DaemonSocketPaths.resolveClientBuildId(),
-    private val clientEntryScript: String? = DaemonSocketPaths.resolveLocalDaemonEntryScript(),
+  private val socketPath: String,
+  private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
+  private val clientBuildId: String? = DaemonSocketPaths.resolveClientBuildId(),
+  private val clientEntryScript: String? = DaemonSocketPaths.resolveLocalDaemonEntryScript(),
 ) : Closeable, DaemonToolClient {
   private val json = Json { ignoreUnknownKeys = true }
   private val pending = ConcurrentHashMap<String, CompletableFuture<DaemonResponse>>()
@@ -868,7 +888,7 @@ internal class DaemonSocketClient(
     writer = BufferedWriter(OutputStreamWriter(outputStream, StandardCharsets.UTF_8))
 
     readThread =
-        thread(start = true, isDaemon = true, name = "auto-mobile-daemon-reader") { readLoop() }
+      thread(start = true, isDaemon = true, name = "auto-mobile-daemon-reader") { readLoop() }
   }
 
   fun isConnected(): Boolean {
@@ -882,16 +902,16 @@ internal class DaemonSocketClient(
 
     val requestId = UUID.randomUUID().toString()
     val request =
-        DaemonRequest(
-            id = requestId,
-            type = "mcp_request",
-            method = "tools/call",
-            params = buildJsonParams(toolName, arguments),
-            timeoutMs = timeoutMs,
-            clientVersion = clientVersion,
-            clientBuildId = clientBuildId,
-            clientEntryScript = clientEntryScript,
-        )
+      DaemonRequest(
+        id = requestId,
+        type = "mcp_request",
+        method = "tools/call",
+        params = buildJsonParams(toolName, arguments),
+        timeoutMs = timeoutMs,
+        clientVersion = clientVersion,
+        clientBuildId = clientBuildId,
+        clientEntryScript = clientEntryScript,
+      )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
     pending[requestId] = responseFuture
@@ -913,16 +933,16 @@ internal class DaemonSocketClient(
 
     val requestId = UUID.randomUUID().toString()
     val request =
-        DaemonRequest(
-            id = requestId,
-            type = "mcp_request",
-            method = "resources/read",
-            params = JsonObject(mapOf("uri" to JsonPrimitive(uri))),
-            timeoutMs = timeoutMs,
-            clientVersion = clientVersion,
-            clientBuildId = clientBuildId,
-            clientEntryScript = clientEntryScript,
-        )
+      DaemonRequest(
+        id = requestId,
+        type = "mcp_request",
+        method = "resources/read",
+        params = JsonObject(mapOf("uri" to JsonPrimitive(uri))),
+        timeoutMs = timeoutMs,
+        clientVersion = clientVersion,
+        clientBuildId = clientBuildId,
+        clientEntryScript = clientEntryScript,
+      )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
     pending[requestId] = responseFuture
@@ -938,9 +958,9 @@ internal class DaemonSocketClient(
   }
 
   fun callDaemonMethod(
-      method: String,
-      timeoutMs: Long,
-      params: JsonObject = JsonObject(emptyMap()),
+    method: String,
+    timeoutMs: Long,
+    params: JsonObject = JsonObject(emptyMap()),
   ): DaemonResponse {
     if (!isConnected()) {
       throw DaemonUnavailableException("Daemon socket connection is not available")
@@ -948,15 +968,15 @@ internal class DaemonSocketClient(
 
     val requestId = UUID.randomUUID().toString()
     val request =
-        DaemonRequest(
-            id = requestId,
-            type = "daemon_request",
-            method = method,
-            params = params,
-            clientVersion = clientVersion,
-            clientBuildId = clientBuildId,
-            clientEntryScript = clientEntryScript,
-        )
+      DaemonRequest(
+        id = requestId,
+        type = "daemon_request",
+        method = method,
+        params = params,
+        clientVersion = clientVersion,
+        clientBuildId = clientBuildId,
+        clientEntryScript = clientEntryScript,
+      )
 
     val responseFuture = CompletableFuture<DaemonResponse>()
     pending[requestId] = responseFuture
@@ -1034,13 +1054,13 @@ internal class DaemonSocketClient(
   private fun buildJsonParams(toolName: String, arguments: JsonObject): JsonObject {
     // Include sessionUuid in tool arguments to enable per-thread plan execution locking
     val argumentsWithSession =
-        JsonObject(
-            arguments.toMutableMap().apply {
-              if (!containsKey("sessionUuid")) {
-                put("sessionUuid", JsonPrimitive(sessionUuid))
-              }
-            }
-        )
+      JsonObject(
+        arguments.toMutableMap().apply {
+          if (!containsKey("sessionUuid")) {
+            put("sessionUuid", JsonPrimitive(sessionUuid))
+          }
+        }
+      )
     return JsonObject(mapOf("name" to JsonPrimitive(toolName), "arguments" to argumentsWithSession))
   }
 
@@ -1076,27 +1096,27 @@ internal class DaemonSocketClient(
 
 @Serializable
 internal data class DaemonRequest(
-    val id: String,
-    val type: String,
-    val method: String,
-    val params: JsonObject,
-    val timeoutMs: Long? = null,
-    // Declared for the daemon's server-side version handshake gate (#2744). Null on
-    // legacy runners; the daemon allows those through.
-    val clientVersion: String? = null,
-    // Build identity (entry-script content hash + path) for the local-override case, so the gate
-    // can distinguish two checkouts at the same release version. Null for the package path.
-    val clientBuildId: String? = null,
-    val clientEntryScript: String? = null,
+  val id: String,
+  val type: String,
+  val method: String,
+  val params: JsonObject,
+  val timeoutMs: Long? = null,
+  // Declared for the daemon's server-side version handshake gate (#2744). Null on
+  // legacy runners; the daemon allows those through.
+  val clientVersion: String? = null,
+  // Build identity (entry-script content hash + path) for the local-override case, so the gate
+  // can distinguish two checkouts at the same release version. Null for the package path.
+  val clientBuildId: String? = null,
+  val clientEntryScript: String? = null,
 )
 
 @Serializable
 internal data class DaemonResponse(
-    val id: String,
-    val type: String,
-    val success: Boolean,
-    val result: JsonElement? = null,
-    val error: String? = null,
+  val id: String,
+  val type: String,
+  val success: Boolean,
+  val result: JsonElement? = null,
+  val error: String? = null,
 )
 
 /** Interface for daemon tool calls to enable testing with fakes. */

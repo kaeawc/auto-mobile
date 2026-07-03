@@ -34,18 +34,18 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     val dbDir = File(context.applicationInfo.dataDir, "databases")
     if (dbDir.exists() && dbDir.isDirectory) {
       dbDir
-          .listFiles { file ->
-            file.isFile &&
-                !file.name.endsWith("-journal") &&
-                !file.name.endsWith("-wal") &&
-                !file.name.endsWith("-shm")
+        .listFiles { file ->
+          file.isFile &&
+            !file.name.endsWith("-journal") &&
+            !file.name.endsWith("-wal") &&
+            !file.name.endsWith("-shm")
+        }
+        ?.forEach { file ->
+          // Only add if not already in list
+          if (databases.none { it.path == file.absolutePath }) {
+            databases.add(DatabaseDescriptor(name = file.name, path = file.absolutePath))
           }
-          ?.forEach { file ->
-            // Only add if not already in list
-            if (databases.none { it.path == file.absolutePath }) {
-              databases.add(DatabaseDescriptor(name = file.name, path = file.absolutePath))
-            }
-          }
+        }
     }
 
     return databases.sortedBy { it.name }
@@ -57,7 +57,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       val tables = mutableListOf<String>()
 
       db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name", null).use {
-          cursor ->
+        cursor ->
         while (cursor.moveToNext()) {
           val name = cursor.getString(0)
           // Exclude internal SQLite tables
@@ -72,10 +72,10 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   }
 
   override fun getTableData(
-      databasePath: String,
-      table: String,
-      limit: Int,
-      offset: Int,
+    databasePath: String,
+    table: String,
+    limit: Int,
+    offset: Int,
   ): TableDataResult {
     synchronized(databaseLock) {
       val db = openDatabase(databasePath, readOnly = true)
@@ -87,33 +87,33 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
 
       // Get total count
       val total =
-          db.rawQuery("SELECT COUNT(*) FROM \"${table.replace("\"", "\"\"")}\"", null).use { cursor
-            ->
-            cursor.moveToFirst()
-            cursor.getInt(0)
-          }
+        db.rawQuery("SELECT COUNT(*) FROM \"${table.replace("\"", "\"\"")}\"", null).use { cursor ->
+          cursor.moveToFirst()
+          cursor.getInt(0)
+        }
 
       // Get paginated data
       val columns = mutableListOf<String>()
       val rows = mutableListOf<List<Any?>>()
 
-      db.rawQuery(
-              "SELECT * FROM \"${table.replace("\"", "\"\"")}\" LIMIT ? OFFSET ?",
-              arrayOf(limit.toString(), offset.toString()),
-          )
-          .use { cursor ->
-            // Get column names
-            columns.addAll(cursor.columnNames)
+      db
+        .rawQuery(
+          "SELECT * FROM \"${table.replace("\"", "\"\"")}\" LIMIT ? OFFSET ?",
+          arrayOf(limit.toString(), offset.toString()),
+        )
+        .use { cursor ->
+          // Get column names
+          columns.addAll(cursor.columnNames)
 
-            // Get row data
-            while (cursor.moveToNext()) {
-              val row = mutableListOf<Any?>()
-              for (i in 0 until cursor.columnCount) {
-                row.add(getColumnValue(cursor, i))
-              }
-              rows.add(row)
+          // Get row data
+          while (cursor.moveToNext()) {
+            val row = mutableListOf<Any?>()
+            for (i in 0 until cursor.columnCount) {
+              row.add(getColumnValue(cursor, i))
             }
+            rows.add(row)
           }
+        }
 
       return TableDataResult(columns = columns, rows = rows, total = total)
     }
@@ -140,13 +140,13 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
           val isPrimaryKey = cursor.getInt(5) > 0
 
           columns.add(
-              ColumnInfo(
-                  name = name,
-                  type = type,
-                  nullable = !notNull,
-                  primaryKey = isPrimaryKey,
-                  defaultValue = defaultValue,
-              )
+            ColumnInfo(
+              name = name,
+              type = type,
+              nullable = !notNull,
+              primaryKey = isPrimaryKey,
+              defaultValue = defaultValue,
+            )
           )
         }
       }
@@ -179,7 +179,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
 
     if (keyword == "INSERT" || keyword == "UPDATE" || keyword == "DELETE") {
       val hasReturning =
-          findTopLevelKeyword(query, statementIndex + keyword.length, listOf("RETURNING")) != null
+        findTopLevelKeyword(query, statementIndex + keyword.length, listOf("RETURNING")) != null
       return Pair(hasReturning, false)
     }
 
@@ -187,7 +187,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   }
 
   private fun startsWithKeyword(text: String, keyword: String): Boolean =
-      matchesKeywordAt(text, 0, keyword)
+    matchesKeywordAt(text, 0, keyword)
 
   private fun matchesKeywordAt(text: String, index: Int, keyword: String): Boolean {
     if (index > 0 && isWordChar(text[index - 1])) return false
@@ -202,23 +202,23 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     val keywords = listOf("SELECT", "PRAGMA", "EXPLAIN", "INSERT", "UPDATE", "DELETE")
     if (!startsWithKeyword(query, "WITH")) {
       return keywords
-          .firstOrNull { keyword -> startsWithKeyword(query, keyword) }
-          ?.let { keyword ->
-            Pair(keyword, 0)
-          }
+        .firstOrNull { keyword -> startsWithKeyword(query, keyword) }
+        ?.let { keyword ->
+          Pair(keyword, 0)
+        }
     }
 
     return findTopLevelKeyword(
-        query,
-        "WITH".length,
-        keywords,
+      query,
+      "WITH".length,
+      keywords,
     )
   }
 
   private fun findTopLevelKeyword(
-      query: String,
-      startIndex: Int,
-      keywords: List<String>,
+    query: String,
+    startIndex: Int,
+    keywords: List<String>,
   ): Pair<String, Int>? {
     var depth = 0
     var i = startIndex
@@ -286,9 +286,9 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   }
 
   private fun executeQuery(
-      databasePath: String,
-      query: String,
-      readOnly: Boolean,
+    databasePath: String,
+    query: String,
+    readOnly: Boolean,
   ): SQLExecutionResult.Query {
     val db = openDatabase(databasePath, readOnly = readOnly)
     val columns = mutableListOf<String>()
@@ -398,19 +398,20 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     val normalizedDataDir = File(dataDir).canonicalPath
 
     if (
-        normalizedPath != normalizedDataDir &&
-            !normalizedPath.startsWith(normalizedDataDir + File.separator)
+      normalizedPath != normalizedDataDir &&
+        !normalizedPath.startsWith(normalizedDataDir + File.separator)
     ) {
       throw DatabaseError.InvalidPath(path)
     }
   }
 
   private fun tableExists(db: SQLiteDatabase, table: String): Boolean {
-    return db.rawQuery(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            arrayOf(table),
-        )
-        .use { cursor -> cursor.count > 0 }
+    return db
+      .rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        arrayOf(table),
+      )
+      .use { cursor -> cursor.count > 0 }
   }
 
   private fun getColumnValue(cursor: Cursor, columnIndex: Int): Any? {

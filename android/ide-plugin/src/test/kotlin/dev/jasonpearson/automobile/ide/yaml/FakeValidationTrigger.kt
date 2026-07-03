@@ -8,7 +8,7 @@ import com.intellij.openapi.editor.Document
  * validation behavior.
  */
 class FakeValidationTrigger(private val parentDisposable: Disposable? = null) :
-    ValidationTrigger, Disposable {
+  ValidationTrigger, Disposable {
   private val _shouldValidateCalls = mutableListOf<Document>()
   private val _triggerValidationCalls = mutableListOf<Document>()
 

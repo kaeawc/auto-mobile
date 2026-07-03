@@ -43,9 +43,9 @@ data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom
     if (top > bottom || left > right) return true
 
     return right < -margin || // Completely left of screen
-        left > screenWidth + margin || // Completely right of screen
-        bottom < -margin || // Completely above screen
-        top > screenHeight + margin // Completely below screen
+      left > screenWidth + margin || // Completely right of screen
+      bottom < -margin || // Completely above screen
+      top > screenHeight + margin // Completely below screen
   }
 
   override fun toString(): String = """{"left":$left,"top":$top,"right":$right,"bottom":$bottom}"""

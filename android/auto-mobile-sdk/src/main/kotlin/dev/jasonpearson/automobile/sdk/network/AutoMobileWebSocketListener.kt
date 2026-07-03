@@ -4,17 +4,17 @@ import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import java.util.UUID
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
-import java.util.UUID
 
 /**
  * Decorator wrapping an existing [WebSocketListener] to capture WebSocket frame metadata.
  *
- * Records frame direction, type, and size as [SdkWebSocketFrameEvent] without inspecting
- * the actual payload content.
+ * Records frame direction, type, and size as [SdkWebSocketFrameEvent] without inspecting the actual
+ * payload content.
  *
  * @param delegate The original WebSocketListener to delegate all callbacks to
  * @param url The WebSocket URL for identification
@@ -57,7 +57,11 @@ internal class AutoMobileWebSocketListener(
     delegate.onFailure(webSocket, t, response)
   }
 
-  private fun recordFrame(direction: WebSocketFrameDirection, type: WebSocketFrameType, size: Long) {
+  private fun recordFrame(
+    direction: WebSocketFrameDirection,
+    type: WebSocketFrameType,
+    size: Long,
+  ) {
     buffer.add(
       SdkWebSocketFrameEvent(
         timestamp = System.currentTimeMillis(),

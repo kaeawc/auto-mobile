@@ -14,21 +14,21 @@ class HighlightAnimatorTest {
   @Test
   fun `startFadeOut configures duration and interpolator`() {
     val animator =
-        HighlightAnimator(
-            onAlphaUpdate = { _, _ -> },
-            onDrawProgressUpdate = { _, _ -> },
-            onAnimationComplete = {},
-            onAnimationActiveChanged = {},
-        )
+      HighlightAnimator(
+        onAlphaUpdate = { _, _ -> },
+        onDrawProgressUpdate = { _, _ -> },
+        onAnimationComplete = {},
+        onAnimationActiveChanged = {},
+      )
 
     animator.startFadeOut("highlight")
 
     val valueAnimator = animator.getAnimatorForTest("highlight")
     assertNotNull(valueAnimator)
     val expectedDuration =
-        HighlightAnimator.DEFAULT_FADE_IN_DURATION_MS +
-            HighlightAnimator.DEFAULT_DISPLAY_DURATION_MS +
-            HighlightAnimator.DEFAULT_FADE_OUT_DURATION_MS
+      HighlightAnimator.DEFAULT_FADE_IN_DURATION_MS +
+        HighlightAnimator.DEFAULT_DISPLAY_DURATION_MS +
+        HighlightAnimator.DEFAULT_FADE_OUT_DURATION_MS
     assertEquals(expectedDuration, valueAnimator!!.duration)
     assertTrue(valueAnimator.interpolator is AccelerateDecelerateInterpolator)
   }
@@ -39,21 +39,21 @@ class HighlightAnimatorTest {
     val completions = mutableListOf<String>()
     val activity = mutableListOf<Boolean>()
     val animator =
-        HighlightAnimator(
-            onAlphaUpdate = { _, alpha -> updates.add(alpha) },
-            onDrawProgressUpdate = { _, _ -> },
-            onAnimationComplete = { id -> completions.add(id) },
-            onAnimationActiveChanged = { active -> activity.add(active) },
-        )
+      HighlightAnimator(
+        onAlphaUpdate = { _, alpha -> updates.add(alpha) },
+        onDrawProgressUpdate = { _, _ -> },
+        onAnimationComplete = { id -> completions.add(id) },
+        onAnimationActiveChanged = { active -> activity.add(active) },
+      )
 
     animator.startFadeOut("highlight")
 
     val valueAnimator = animator.getAnimatorForTest("highlight")
     assertNotNull(valueAnimator)
     val totalDuration =
-        HighlightAnimator.DEFAULT_FADE_IN_DURATION_MS +
-            HighlightAnimator.DEFAULT_DISPLAY_DURATION_MS +
-            HighlightAnimator.DEFAULT_FADE_OUT_DURATION_MS
+      HighlightAnimator.DEFAULT_FADE_IN_DURATION_MS +
+        HighlightAnimator.DEFAULT_DISPLAY_DURATION_MS +
+        HighlightAnimator.DEFAULT_FADE_OUT_DURATION_MS
     valueAnimator!!.setCurrentPlayTime(totalDuration / 2)
     valueAnimator.setCurrentPlayTime(totalDuration)
     valueAnimator.end()
@@ -70,12 +70,12 @@ class HighlightAnimatorTest {
     val completions = mutableListOf<String>()
     val activity = mutableListOf<Boolean>()
     val animator =
-        HighlightAnimator(
-            onAlphaUpdate = { _, _ -> },
-            onDrawProgressUpdate = { _, _ -> },
-            onAnimationComplete = { id -> completions.add(id) },
-            onAnimationActiveChanged = { active -> activity.add(active) },
-        )
+      HighlightAnimator(
+        onAlphaUpdate = { _, _ -> },
+        onDrawProgressUpdate = { _, _ -> },
+        onAnimationComplete = { id -> completions.add(id) },
+        onAnimationActiveChanged = { active -> activity.add(active) },
+      )
 
     animator.startFadeOut("highlight")
     animator.cancel("highlight")

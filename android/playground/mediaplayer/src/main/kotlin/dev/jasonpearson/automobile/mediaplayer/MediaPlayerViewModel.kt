@@ -50,104 +50,103 @@ class MediaPlayerViewModel : ViewModel() {
 
           // Create a more robust ExoPlayer with better codec support
           val renderersFactory =
-              DefaultRenderersFactory(context)
-                  .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            DefaultRenderersFactory(context)
+              .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
 
           val exoPlayer =
-              ExoPlayer.Builder(context).setRenderersFactory(renderersFactory).build().also { player
-                ->
-                val mediaItem = videoResource.toMediaItem(context)
-                Log.d("MediaPlayerVM", "Created MediaItem: $mediaItem")
-                if (mediaItem != null) {
-                  player.setMediaItem(mediaItem)
-                  player.prepare()
-                  // Auto-play on first load, respect saved state on subsequent loads
-                  player.playWhenReady = isFirstLoad
-                  player.seekTo(savedPosition)
+            ExoPlayer.Builder(context).setRenderersFactory(renderersFactory).build().also { player
+              ->
+              val mediaItem = videoResource.toMediaItem(context)
+              Log.d("MediaPlayerVM", "Created MediaItem: $mediaItem")
+              if (mediaItem != null) {
+                player.setMediaItem(mediaItem)
+                player.prepare()
+                // Auto-play on first load, respect saved state on subsequent loads
+                player.playWhenReady = isFirstLoad
+                player.seekTo(savedPosition)
 
-                  // Hide controls initially on first load
-                  if (isFirstLoad) {
-                    _shouldShowControls.value = false
-                    // Auto-show controls after a delay if video is playing
-                    //                  viewModelScope.launch {
-                    //                    delay(3000) // Hide controls for 3 seconds
-                    //                    if (_isPlaying.value) {
-                    //                      _shouldShowControls.value = true
-                    //                    }
-                    //                  }
-                  } else {
-                    //                  _shouldShowControls.value = true
-                  }
+                // Hide controls initially on first load
+                if (isFirstLoad) {
+                  _shouldShowControls.value = false
+                  // Auto-show controls after a delay if video is playing
+                  //                  viewModelScope.launch {
+                  //                    delay(3000) // Hide controls for 3 seconds
+                  //                    if (_isPlaying.value) {
+                  //                      _shouldShowControls.value = true
+                  //                    }
+                  //                  }
+                } else {
+                  //                  _shouldShowControls.value = true
+                }
 
-                  Log.d("MediaPlayerVM", "Player prepared and ready, autoplay: $isFirstLoad")
+                Log.d("MediaPlayerVM", "Player prepared and ready, autoplay: $isFirstLoad")
 
-                  // Add player event listeners
-                  player.addListener(
-                      object : Player.Listener {
-                        override fun onPlayerError(error: PlaybackException) {
-                          Log.e("MediaPlayerVM", "Player error: ${error.message}", error)
-                          handlePlaybackError(error)
+                // Add player event listeners
+                player.addListener(
+                  object : Player.Listener {
+                    override fun onPlayerError(error: PlaybackException) {
+                      Log.e("MediaPlayerVM", "Player error: ${error.message}", error)
+                      handlePlaybackError(error)
+                    }
+
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                      Log.d("MediaPlayerVM", "Playing state changed: $isPlaying")
+                      _isPlaying.value = isPlaying
+                      if (isPlaying) {
+                        startPositionUpdates()
+                        // Mark as no longer first load once playback starts
+                        isFirstLoad = false
+                      }
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                      val stateString =
+                        when (playbackState) {
+                          Player.STATE_IDLE -> "IDLE"
+                          Player.STATE_BUFFERING -> "BUFFERING"
+                          Player.STATE_READY -> "READY"
+                          Player.STATE_ENDED -> "ENDED"
+                          else -> "UNKNOWN"
                         }
-
-                        override fun onIsPlayingChanged(isPlaying: Boolean) {
-                          Log.d("MediaPlayerVM", "Playing state changed: $isPlaying")
-                          _isPlaying.value = isPlaying
-                          if (isPlaying) {
-                            startPositionUpdates()
-                            // Mark as no longer first load once playback starts
-                            isFirstLoad = false
-                          }
-                        }
-
-                        override fun onPlaybackStateChanged(playbackState: Int) {
-                          val stateString =
-                              when (playbackState) {
-                                Player.STATE_IDLE -> "IDLE"
-                                Player.STATE_BUFFERING -> "BUFFERING"
-                                Player.STATE_READY -> "READY"
-                                Player.STATE_ENDED -> "ENDED"
-                                else -> "UNKNOWN"
-                              }
-                          Log.d("MediaPlayerVM", "Playback state changed: $stateString")
-                          when (playbackState) {
-                            Player.STATE_READY -> {
-                              _duration.value = player.duration
-                              Log.d("MediaPlayerVM", "Duration: ${player.duration}")
-                            }
-                          }
-                        }
-
-                        override fun onPositionDiscontinuity(
-                            oldPosition: Player.PositionInfo,
-                            newPosition: Player.PositionInfo,
-                            reason: Int,
-                        ) {
-                          // Hide controls when user seeks to the beginning
-                          if (
-                              reason == Player.DISCONTINUITY_REASON_SEEK &&
-                                  newPosition.positionMs <= 100
-                          ) { // Within 100ms of start
-                            Log.d("MediaPlayerVM", "Rewound to start, hiding controls")
-                            _shouldShowControls.value = false
-                            // Auto-show controls after delay if playing
-                            //                      if (player.isPlaying) {
-                            //                        viewModelScope.launch {
-                            //                          delay(500)
-                            //                          if (_isPlaying.value) {
-                            //                            _shouldShowControls.value = true
-                            //                          }
-                            //                        }
-                            //                      }
-                          }
+                      Log.d("MediaPlayerVM", "Playback state changed: $stateString")
+                      when (playbackState) {
+                        Player.STATE_READY -> {
+                          _duration.value = player.duration
+                          Log.d("MediaPlayerVM", "Duration: ${player.duration}")
                         }
                       }
-                  )
-                } else {
-                  Log.e("MediaPlayerVM", "MediaItem is null")
-                  _playbackError.value = "No valid media source provided"
-                  return@launch
-                }
+                    }
+
+                    override fun onPositionDiscontinuity(
+                      oldPosition: Player.PositionInfo,
+                      newPosition: Player.PositionInfo,
+                      reason: Int,
+                    ) {
+                      // Hide controls when user seeks to the beginning
+                      if (
+                        reason == Player.DISCONTINUITY_REASON_SEEK && newPosition.positionMs <= 100
+                      ) { // Within 100ms of start
+                        Log.d("MediaPlayerVM", "Rewound to start, hiding controls")
+                        _shouldShowControls.value = false
+                        // Auto-show controls after delay if playing
+                        //                      if (player.isPlaying) {
+                        //                        viewModelScope.launch {
+                        //                          delay(500)
+                        //                          if (_isPlaying.value) {
+                        //                            _shouldShowControls.value = true
+                        //                          }
+                        //                        }
+                        //                      }
+                      }
+                    }
+                  }
+                )
+              } else {
+                Log.e("MediaPlayerVM", "MediaItem is null")
+                _playbackError.value = "No valid media source provided"
+                return@launch
               }
+            }
 
           _playerState.value = exoPlayer
           clearError()
@@ -249,48 +248,48 @@ class MediaPlayerViewModel : ViewModel() {
     Log.e("MediaPlayerVM", "Detailed error: ${error.errorCodeName}, cause: ${error.cause?.message}")
 
     val errorMessage =
-        when (error.errorCode) {
-          PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> {
-            "Network connection failed. Please check your internet connection."
-          }
+      when (error.errorCode) {
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> {
+          "Network connection failed. Please check your internet connection."
+        }
 
-          PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> {
-            "Media file not found. The content may have been moved or deleted."
-          }
+        PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> {
+          "Media file not found. The content may have been moved or deleted."
+        }
 
-          PlaybackException.ERROR_CODE_DECODER_INIT_FAILED -> {
-            if (
-                error.cause?.message?.contains("vp9", ignoreCase = true) == true ||
-                    error.cause?.message?.contains("webm", ignoreCase = true) == true
-            ) {
-              "This video codec (WebM/VP9) is not supported on this device. Please try a different video format."
-            } else {
-              "Unable to play this media format. Decoder initialization failed."
-            }
-          }
-
-          PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> {
-            "Unable to load media. Server returned an error."
-          }
-
-          PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED -> {
-            "Media file is corrupted or in an unsupported format."
-          }
-
-          else -> {
-            // Check if it's a codec-related error in the cause chain
-            val causeMessage = error.cause?.message ?: ""
-            if (
-                causeMessage.contains("codec", ignoreCase = true) ||
-                    causeMessage.contains("decoder", ignoreCase = true) ||
-                    causeMessage.contains("vp9", ignoreCase = true)
-            ) {
-              "Video codec not supported on this device. The video format may not be compatible."
-            } else {
-              "Playback error occurred: ${error.message ?: "Unknown error"}"
-            }
+        PlaybackException.ERROR_CODE_DECODER_INIT_FAILED -> {
+          if (
+            error.cause?.message?.contains("vp9", ignoreCase = true) == true ||
+              error.cause?.message?.contains("webm", ignoreCase = true) == true
+          ) {
+            "This video codec (WebM/VP9) is not supported on this device. Please try a different video format."
+          } else {
+            "Unable to play this media format. Decoder initialization failed."
           }
         }
+
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> {
+          "Unable to load media. Server returned an error."
+        }
+
+        PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED -> {
+          "Media file is corrupted or in an unsupported format."
+        }
+
+        else -> {
+          // Check if it's a codec-related error in the cause chain
+          val causeMessage = error.cause?.message ?: ""
+          if (
+            causeMessage.contains("codec", ignoreCase = true) ||
+              causeMessage.contains("decoder", ignoreCase = true) ||
+              causeMessage.contains("vp9", ignoreCase = true)
+          ) {
+            "Video codec not supported on this device. The video format may not be compatible."
+          } else {
+            "Playback error occurred: ${error.message ?: "Unknown error"}"
+          }
+        }
+      }
 
     _playbackError.value = errorMessage
   }

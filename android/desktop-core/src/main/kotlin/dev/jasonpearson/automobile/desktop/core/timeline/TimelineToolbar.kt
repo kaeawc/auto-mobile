@@ -26,52 +26,57 @@ import java.util.Locale
 
 @Composable
 fun TimelineToolbar(
-    state: TimelineState,
-    spanCount: Int,
-    onFitAll: () -> Unit = {},
-    modifier: Modifier = Modifier,
+  state: TimelineState,
+  spanCount: Int,
+  onFitAll: () -> Unit = {},
+  modifier: Modifier = Modifier,
 ) {
-    val colors = SharedTheme.globalColors
-    val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(24.dp)
-            .background(colors.panelBackground)
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("Timeline", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
-        Spacer(Modifier.width(8.dp))
-        Text("$spanCount events", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.4f))
-        Spacer(Modifier.weight(1f))
-        Text(
-            "${timeFormat.format(Date(state.visibleStartMs))} — ${timeFormat.format(Date(state.visibleEndMs))}",
-            fontSize = 10.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
-        )
-        Spacer(Modifier.width(8.dp))
-        ToolbarButton("-") { state.zoomOut() }
-        Spacer(Modifier.width(2.dp))
-        ToolbarButton("+") { state.zoomIn() }
-        Spacer(Modifier.width(2.dp))
-        ToolbarButton("Fit", onClick = onFitAll)
-    }
+  val colors = SharedTheme.globalColors
+  val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+  Row(
+    modifier =
+      modifier
+        .fillMaxWidth()
+        .height(24.dp)
+        .background(colors.panelBackground)
+        .padding(horizontal = 8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text("Timeline", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
+    Spacer(Modifier.width(8.dp))
+    Text("$spanCount events", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.4f))
+    Spacer(Modifier.weight(1f))
+    Text(
+      "${timeFormat.format(Date(state.visibleStartMs))} — ${timeFormat.format(Date(state.visibleEndMs))}",
+      fontSize = 10.sp,
+      color = colors.text.normal.copy(alpha = 0.5f),
+    )
+    Spacer(Modifier.width(8.dp))
+    ToolbarButton("-") { state.zoomOut() }
+    Spacer(Modifier.width(2.dp))
+    ToolbarButton("+") { state.zoomIn() }
+    Spacer(Modifier.width(2.dp))
+    ToolbarButton("Fit", onClick = onFitAll)
+  }
 }
 
 @Composable
 private fun ToolbarButton(label: String, onClick: () -> Unit) {
-    val colors = SharedTheme.globalColors
-    val interactionSource = remember { MutableInteractionSource() }
-    Text(
-        text = label,
-        fontSize = 10.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
-        modifier = Modifier
-            .hoverable(interactionSource)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
-            .pointerHoverIcon(PointerIcon.Hand)
-            .background(colors.text.normal.copy(alpha = 0.05f))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    )
+  val colors = SharedTheme.globalColors
+  val interactionSource = remember { MutableInteractionSource() }
+  Text(
+    text = label,
+    fontSize = 10.sp,
+    color = colors.text.normal.copy(alpha = 0.6f),
+    modifier =
+      Modifier.hoverable(interactionSource)
+        .clickable(
+          interactionSource = interactionSource,
+          indication = null,
+          onClick = onClick,
+        )
+        .pointerHoverIcon(PointerIcon.Hand)
+        .background(colors.text.normal.copy(alpha = 0.05f))
+        .padding(horizontal = 6.dp, vertical = 2.dp),
+  )
 }

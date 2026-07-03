@@ -8,13 +8,13 @@ import dev.jasonpearson.automobile.slides.model.SlideContent
  * sections into one comprehensive presentation.
  */
 fun getAllSlides(): List<SlideContent> =
-    getIntroductionSlides() +
-        getMobileUseSlides() +
-        getWhatAutoMobileDoesSlides() +
-        listOf(
-            SlideContent.Emoji(
-                emoji = PresentationEmoji.PLAYGROUND,
-                caption = "Demo: AutoMobile Playground",
-            ),
-        ) +
-        getVisionSlides()
+  getIntroductionSlides() +
+    getMobileUseSlides() +
+    getWhatAutoMobileDoesSlides() +
+    listOf(
+      SlideContent.Emoji(
+        emoji = PresentationEmoji.PLAYGROUND,
+        caption = "Demo: AutoMobile Playground",
+      )
+    ) +
+    getVisionSlides()

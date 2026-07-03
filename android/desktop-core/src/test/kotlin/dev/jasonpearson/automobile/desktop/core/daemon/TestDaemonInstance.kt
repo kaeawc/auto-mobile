@@ -19,9 +19,7 @@ import kotlinx.serialization.json.put
  *
  * Uses JDK's built-in [HttpServer] with OS-assigned port (port 0) for parallel-safe tests.
  */
-class TestDaemonInstance(
-    private val port: Int = 0,
-) {
+class TestDaemonInstance(private val port: Int = 0) {
   private var server: HttpServer? = null
   private val json = Json { ignoreUnknownKeys = true }
 
@@ -72,13 +70,13 @@ class TestDaemonInstance(
         exchange.responseBody.use { it.write(responseBytes) }
       } catch (e: Exception) {
         val errorResponse =
-            json.encodeToString(
-                JsonRpcResponse.serializer(),
-                JsonRpcResponse(
-                    jsonrpc = "2.0",
-                    error = JsonRpcError(code = -32603, message = e.message ?: "Internal error"),
-                ),
-            )
+          json.encodeToString(
+            JsonRpcResponse.serializer(),
+            JsonRpcResponse(
+              jsonrpc = "2.0",
+              error = JsonRpcError(code = -32603, message = e.message ?: "Internal error"),
+            ),
+          )
         val errorBytes = errorResponse.toByteArray()
         exchange.responseHeaders.add("Content-Type", "application/json")
         exchange.sendResponseHeaders(200, errorBytes.size.toLong())
@@ -98,14 +96,14 @@ class TestDaemonInstance(
   private fun handleRequest(request: JsonRpcRequest): JsonRpcResponse {
     val method = request.method
     calls.add(
-        when {
-          method == "tools/call" -> {
-            val toolName =
-                request.params?.jsonObject?.get("name")?.jsonPrimitive?.content ?: "unknown"
-            "tools/call:$toolName"
-          }
-          else -> method
+      when {
+        method == "tools/call" -> {
+          val toolName =
+            request.params?.jsonObject?.get("name")?.jsonPrimitive?.content ?: "unknown"
+          "tools/call:$toolName"
         }
+        else -> method
+      }
     )
 
     return when (method) {
@@ -116,52 +114,51 @@ class TestDaemonInstance(
       "resources/list" -> handleResourcesList(request)
       "resources/read" -> handleResourcesRead(request)
       else ->
-          JsonRpcResponse(
-              jsonrpc = "2.0",
-              id = request.id,
-              error = JsonRpcError(code = -32601, message = "Method not found: $method"),
-          )
+        JsonRpcResponse(
+          jsonrpc = "2.0",
+          id = request.id,
+          error = JsonRpcError(code = -32601, message = "Method not found: $method"),
+        )
     }
   }
 
   private fun handleInitialize(request: JsonRpcRequest): JsonRpcResponse {
     return JsonRpcResponse(
-        jsonrpc = "2.0",
-        id = request.id,
-        result =
+      jsonrpc = "2.0",
+      id = request.id,
+      result =
+        buildJsonObject {
+          put("protocolVersion", LATEST_MCP_PROTOCOL_VERSION)
+          put("capabilities", JsonObject(emptyMap()))
+          put(
+            "serverInfo",
             buildJsonObject {
-              put("protocolVersion", LATEST_MCP_PROTOCOL_VERSION)
-              put("capabilities", JsonObject(emptyMap()))
-              put(
-                  "serverInfo",
-                  buildJsonObject {
-                    put("name", "test-daemon")
-                    put("version", "0.0.1")
-                  },
-              )
+              put("name", "test-daemon")
+              put("version", "0.0.1")
             },
+          )
+        },
     )
   }
 
   private fun handleToolsList(request: JsonRpcRequest): JsonRpcResponse {
-    val toolsJson =
-        advertisedTools.map { tool ->
-          buildJsonObject {
-            put("name", tool.name)
-            if (tool.description != null) put("description", tool.description)
-            if (tool.inputSchema != null) put("inputSchema", tool.inputSchema)
-          }
-        }
+    val toolsJson = advertisedTools.map { tool ->
+      buildJsonObject {
+        put("name", tool.name)
+        if (tool.description != null) put("description", tool.description)
+        if (tool.inputSchema != null) put("inputSchema", tool.inputSchema)
+      }
+    }
     return JsonRpcResponse(
-        jsonrpc = "2.0",
-        id = request.id,
-        result =
-            buildJsonObject {
-              put(
-                  "tools",
-                  JsonArray(toolsJson),
-              )
-            },
+      jsonrpc = "2.0",
+      id = request.id,
+      result =
+        buildJsonObject {
+          put(
+            "tools",
+            JsonArray(toolsJson),
+          )
+        },
     )
   }
 
@@ -169,32 +166,31 @@ class TestDaemonInstance(
     val params = request.params?.jsonObject ?: JsonObject(emptyMap())
     val toolName = params["name"]?.jsonPrimitive?.content ?: "unknown"
     val response =
-        toolResponses[toolName]
-            ?: return JsonRpcResponse(
-                jsonrpc = "2.0",
-                id = request.id,
-                error = JsonRpcError(code = -32602, message = "No response configured for: $toolName"),
-            )
+      toolResponses[toolName]
+        ?: return JsonRpcResponse(
+          jsonrpc = "2.0",
+          id = request.id,
+          error = JsonRpcError(code = -32602, message = "No response configured for: $toolName"),
+        )
     return JsonRpcResponse(jsonrpc = "2.0", id = request.id, result = response)
   }
 
   private fun handleResourcesList(request: JsonRpcRequest): JsonRpcResponse {
-    val resourcesJson =
-        advertisedResources.map { resource ->
-          buildJsonObject {
-            put("uri", resource.uri)
-            put("name", resource.name)
-            if (resource.description != null) put("description", resource.description)
-            if (resource.mimeType != null) put("mimeType", resource.mimeType)
-          }
-        }
+    val resourcesJson = advertisedResources.map { resource ->
+      buildJsonObject {
+        put("uri", resource.uri)
+        put("name", resource.name)
+        if (resource.description != null) put("description", resource.description)
+        if (resource.mimeType != null) put("mimeType", resource.mimeType)
+      }
+    }
     return JsonRpcResponse(
-        jsonrpc = "2.0",
-        id = request.id,
-        result =
-            buildJsonObject {
-              put("resources", JsonArray(resourcesJson))
-            },
+      jsonrpc = "2.0",
+      id = request.id,
+      result =
+        buildJsonObject {
+          put("resources", JsonArray(resourcesJson))
+        },
     )
   }
 
@@ -202,27 +198,26 @@ class TestDaemonInstance(
     val params = request.params?.jsonObject ?: JsonObject(emptyMap())
     val uri = params["uri"]?.jsonPrimitive?.content ?: ""
     val contents =
-        resourceResponses[uri]
-            ?: return JsonRpcResponse(
-                jsonrpc = "2.0",
-                id = request.id,
-                error = JsonRpcError(code = -32602, message = "No resource configured for: $uri"),
-            )
-    val contentsJson =
-        contents.map { content ->
-          buildJsonObject {
-            put("uri", content.uri)
-            if (content.mimeType != null) put("mimeType", content.mimeType)
-            if (content.text != null) put("text", content.text)
-          }
-        }
+      resourceResponses[uri]
+        ?: return JsonRpcResponse(
+          jsonrpc = "2.0",
+          id = request.id,
+          error = JsonRpcError(code = -32602, message = "No resource configured for: $uri"),
+        )
+    val contentsJson = contents.map { content ->
+      buildJsonObject {
+        put("uri", content.uri)
+        if (content.mimeType != null) put("mimeType", content.mimeType)
+        if (content.text != null) put("text", content.text)
+      }
+    }
     return JsonRpcResponse(
-        jsonrpc = "2.0",
-        id = request.id,
-        result =
-            buildJsonObject {
-              put("contents", JsonArray(contentsJson))
-            },
+      jsonrpc = "2.0",
+      id = request.id,
+      result =
+        buildJsonObject {
+          put("contents", JsonArray(contentsJson))
+        },
     )
   }
 }

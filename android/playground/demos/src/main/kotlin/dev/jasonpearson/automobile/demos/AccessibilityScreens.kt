@@ -45,60 +45,60 @@ private val LowContrastSurface = Color(0xFFF5F5F5)
 fun ContrastDemoScreen(onNavigateBack: () -> Unit) {
   TrackRecomposition(id = "screen.demo.a11y.contrast", composableName = "ContrastDemoScreen") {
     Scaffold(
-        topBar = {
-          TopAppBar(
-              title = { Text(text = "Contrast Demo") },
-              navigationIcon = {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.semantics { testTag = "contrast_back" },
-                ) {
-                  Icon(
-                      imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                      contentDescription = "Back",
-                  )
-                }
-              },
-          )
-        }
+      topBar = {
+        TopAppBar(
+          title = { Text(text = "Contrast Demo") },
+          navigationIcon = {
+            IconButton(
+              onClick = onNavigateBack,
+              modifier = Modifier.semantics { testTag = "contrast_back" },
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+              )
+            }
+          },
+        )
+      }
     ) { paddingValues ->
       Column(
-          modifier =
-              Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).semantics {
-                testTag = "contrast_content"
-              },
-          verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier =
+          Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).semantics {
+            testTag = "contrast_content"
+          },
+        verticalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         Text(
-            text = "Intentional contrast failures for auditing.",
-            style = MaterialTheme.typography.bodyLarge,
+          text = "Intentional contrast failures for auditing.",
+          style = MaterialTheme.typography.bodyLarge,
         )
         Card(
-            modifier = Modifier.fillMaxWidth().semantics { testTag = "contrast_low_card" },
-            colors = CardDefaults.cardColors(containerColor = LowContrastSurface),
+          modifier = Modifier.fillMaxWidth().semantics { testTag = "contrast_low_card" },
+          colors = CardDefaults.cardColors(containerColor = LowContrastSurface),
         ) {
           Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
-                text = "Low contrast body text",
-                color = LowContrastText,
-                modifier = Modifier.semantics { testTag = "contrast_low_text" },
+              text = "Low contrast body text",
+              color = LowContrastText,
+              modifier = Modifier.semantics { testTag = "contrast_low_text" },
             )
             Text(
-                text = "Secondary text with insufficient contrast",
-                color = LowContrastText,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.semantics { testTag = "contrast_low_text_secondary" },
+              text = "Secondary text with insufficient contrast",
+              color = LowContrastText,
+              style = MaterialTheme.typography.bodySmall,
+              modifier = Modifier.semantics { testTag = "contrast_low_text_secondary" },
             )
           }
         }
         Button(
-            onClick = {},
-            modifier = Modifier.semantics { testTag = "contrast_low_button" },
-            colors =
-                ButtonDefaults.buttonColors(
-                    containerColor = LowContrastSurface,
-                    contentColor = LowContrastText,
-                ),
+          onClick = {},
+          modifier = Modifier.semantics { testTag = "contrast_low_button" },
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = LowContrastSurface,
+              contentColor = LowContrastText,
+            ),
         ) {
           Text("Low Contrast Action")
         }
@@ -112,73 +112,69 @@ fun ContrastDemoScreen(onNavigateBack: () -> Unit) {
 fun TapTargetsDemoScreen(onNavigateBack: () -> Unit) {
   TrackRecomposition(id = "screen.demo.a11y.tap", composableName = "TapTargetsDemoScreen") {
     Scaffold(
-        topBar = {
-          TopAppBar(
-              title = { Text(text = "Tap Targets Demo") },
-              navigationIcon = {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.semantics { testTag = "tap_targets_back" },
-                ) {
-                  Icon(
-                      imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                      contentDescription = "Back",
-                  )
-                }
-              },
-          )
-        }
+      topBar = {
+        TopAppBar(
+          title = { Text(text = "Tap Targets Demo") },
+          navigationIcon = {
+            IconButton(
+              onClick = onNavigateBack,
+              modifier = Modifier.semantics { testTag = "tap_targets_back" },
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+              )
+            }
+          },
+        )
+      }
     ) { paddingValues ->
       Column(
-          modifier =
-              Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).semantics {
-                testTag = "tap_targets_content"
-              },
-          verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier =
+          Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).semantics {
+            testTag = "tap_targets_content"
+          },
+        verticalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         Text(
-            text = "These targets are intentionally small or tightly spaced.",
-            style = MaterialTheme.typography.bodyLarge,
+          text = "These targets are intentionally small or tightly spaced.",
+          style = MaterialTheme.typography.bodyLarge,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
           SmallTapTarget(
-              icon = Icons.Filled.Edit,
-              label = "Edit",
-              tag = "tap_target_small_edit",
+            icon = Icons.Filled.Edit,
+            label = "Edit",
+            tag = "tap_target_small_edit",
           )
           SmallTapTarget(
-              icon = Icons.Filled.Close,
-              label = "Close",
-              tag = "tap_target_small_close",
+            icon = Icons.Filled.Close,
+            label = "Close",
+            tag = "tap_target_small_close",
           )
           SmallTapTarget(
-              icon = Icons.Filled.Favorite,
-              label = "Favorite",
-              tag = "tap_target_small_favorite",
+            icon = Icons.Filled.Favorite,
+            label = "Favorite",
+            tag = "tap_target_small_favorite",
           )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text(
-              text = "Tiny Link",
-              color = MaterialTheme.colorScheme.primary,
-              modifier =
-                  Modifier.padding(2.dp)
-                      .clickable {}
-                      .semantics { testTag = "tap_target_tiny_link" },
+            text = "Tiny Link",
+            color = MaterialTheme.colorScheme.primary,
+            modifier =
+              Modifier.padding(2.dp).clickable {}.semantics { testTag = "tap_target_tiny_link" },
           )
           Spacer(modifier = Modifier.width(6.dp))
           Text(
-              text = "Another Link",
-              color = MaterialTheme.colorScheme.primary,
-              modifier =
-                  Modifier.padding(2.dp)
-                      .clickable {}
-                      .semantics { testTag = "tap_target_tiny_link_2" },
+            text = "Another Link",
+            color = MaterialTheme.colorScheme.primary,
+            modifier =
+              Modifier.padding(2.dp).clickable {}.semantics { testTag = "tap_target_tiny_link_2" },
           )
         }
         Card(
-            modifier = Modifier.fillMaxWidth().semantics { testTag = "tap_targets_note" },
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+          modifier = Modifier.fillMaxWidth().semantics { testTag = "tap_targets_note" },
+          elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
           Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(text = "Spacing below 8dp and sizes under 44dp.")
@@ -191,23 +187,23 @@ fun TapTargetsDemoScreen(onNavigateBack: () -> Unit) {
 
 @Composable
 private fun SmallTapTarget(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    tag: String,
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  label: String,
+  tag: String,
 ) {
   Column(horizontalAlignment = Alignment.CenterHorizontally) {
     Box(
-        modifier =
-            Modifier.size(32.dp)
-                .clickable {}
-                .semantics { this.testTag = tag }
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-        contentAlignment = Alignment.Center,
+      modifier =
+        Modifier.size(32.dp)
+          .clickable {}
+          .semantics { this.testTag = tag }
+          .background(MaterialTheme.colorScheme.surfaceVariant),
+      contentAlignment = Alignment.Center,
     ) {
       Icon(
-          imageVector = icon,
-          contentDescription = label,
-          modifier = Modifier.size(16.dp),
+        imageVector = icon,
+        contentDescription = label,
+        modifier = Modifier.size(16.dp),
       )
     }
     Text(text = label, style = MaterialTheme.typography.bodySmall)

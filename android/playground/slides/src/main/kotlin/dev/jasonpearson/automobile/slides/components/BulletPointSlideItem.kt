@@ -27,37 +27,37 @@ import dev.jasonpearson.automobile.slides.model.BulletPoint
  */
 @Composable
 fun BulletPointSlideItem(
-    title: String?,
-    points: List<BulletPoint>,
-    modifier: Modifier = Modifier,
-    titleColor: Color = MaterialTheme.colorScheme.onBackground,
-    bulletColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-    subBulletColor: Color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+  title: String?,
+  points: List<BulletPoint>,
+  modifier: Modifier = Modifier,
+  titleColor: Color = MaterialTheme.colorScheme.onBackground,
+  bulletColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+  subBulletColor: Color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
 ) {
   Column(
-      modifier = modifier.fillMaxSize().padding(32.dp).verticalScroll(rememberScrollState()),
-      horizontalAlignment = Alignment.Start,
-      verticalArrangement = Arrangement.spacedBy(24.dp),
+    modifier = modifier.fillMaxSize().padding(32.dp).verticalScroll(rememberScrollState()),
+    horizontalAlignment = Alignment.Start,
+    verticalArrangement = Arrangement.spacedBy(24.dp),
   ) {
     // Title
     if (title != null) {
       Text(
-          text = title,
-          style =
-              MaterialTheme.typography.displaySmall.copy(
-                  fontWeight = FontWeight.Bold,
-                  textAlign = TextAlign.Center,
-                  color = titleColor,
-              ),
-          modifier = Modifier.padding(bottom = 16.dp),
+        text = title,
+        style =
+          MaterialTheme.typography.displaySmall.copy(
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            color = titleColor,
+          ),
+        modifier = Modifier.padding(bottom = 16.dp),
       )
     }
 
     // Bullet points
     Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+      modifier = Modifier.fillMaxWidth(),
+      horizontalAlignment = Alignment.Start,
+      verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
       points.forEach { bulletPoint ->
         BulletPointItem(bulletPoint = bulletPoint, bulletColor = bulletColor)
@@ -69,20 +69,20 @@ fun BulletPointSlideItem(
 /** Individual bullet point item. */
 @Composable
 private fun BulletPointItem(
-    bulletPoint: BulletPoint,
-    bulletColor: Color,
-    modifier: Modifier = Modifier,
+  bulletPoint: BulletPoint,
+  bulletColor: Color,
+  modifier: Modifier = Modifier,
 ) {
   Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
     Text(
-        text = "•",
-        style = MaterialTheme.typography.displaySmall,
-        color = bulletColor,
-        modifier = Modifier.padding(top = 4.dp),
+      text = "•",
+      style = MaterialTheme.typography.displaySmall,
+      color = bulletColor,
+      modifier = Modifier.padding(top = 4.dp),
     )
     Text(
-        text = bulletPoint.text,
-        style = MaterialTheme.typography.displaySmall.copy(color = bulletColor, lineHeight = 48.sp),
+      text = bulletPoint.text,
+      style = MaterialTheme.typography.displaySmall.copy(color = bulletColor, lineHeight = 48.sp),
     )
   }
 }
@@ -92,31 +92,30 @@ private fun BulletPointItem(
 fun BulletPointSlideItemPreview() {
   MaterialTheme {
     BulletPointSlideItem(
-        title = "AutoMobile Features",
-        points =
-            listOf(
-                BulletPoint(
-                    text = "Source Intelligence",
-                    subPoints =
-                        listOf(
-                            "Analyzes Android app source code",
-                            "Generates intelligent test selectors",
-                        ),
-                ),
-                BulletPoint(
-                    text = "Cross-Platform Testing",
-                    subPoints =
-                        listOf("Supports Android and iOS", "Unified API for both platforms"),
-                ),
-                BulletPoint(
-                    text = "JUnit Integration",
-                    subPoints =
-                        listOf(
-                            "Drop-in replacement for Espresso",
-                            "Compatible with existing test infrastructure",
-                        ),
-                ),
-            ),
+      title = "AutoMobile Features",
+      points =
+        listOf(
+          BulletPoint(
+            text = "Source Intelligence",
+            subPoints =
+              listOf(
+                "Analyzes Android app source code",
+                "Generates intelligent test selectors",
+              ),
+          ),
+          BulletPoint(
+            text = "Cross-Platform Testing",
+            subPoints = listOf("Supports Android and iOS", "Unified API for both platforms"),
+          ),
+          BulletPoint(
+            text = "JUnit Integration",
+            subPoints =
+              listOf(
+                "Drop-in replacement for Espresso",
+                "Compatible with existing test infrastructure",
+              ),
+          ),
+        ),
     )
   }
 }
@@ -126,31 +125,30 @@ fun BulletPointSlideItemPreview() {
 fun BulletPointSlideItemLandscapePreview() {
   MaterialTheme {
     BulletPointSlideItem(
-        title = "AutoMobile Features",
-        points =
-            listOf(
-                BulletPoint(
-                    text = "Source Intelligence",
-                    subPoints =
-                        listOf(
-                            "Analyzes Android app source code",
-                            "Generates intelligent test selectors",
-                        ),
-                ),
-                BulletPoint(
-                    text = "Cross-Platform Testing",
-                    subPoints =
-                        listOf("Supports Android and iOS", "Unified API for both platforms"),
-                ),
-                BulletPoint(
-                    text = "JUnit Integration",
-                    subPoints =
-                        listOf(
-                            "Drop-in replacement for Espresso",
-                            "Compatible with existing test infrastructure",
-                        ),
-                ),
-            ),
+      title = "AutoMobile Features",
+      points =
+        listOf(
+          BulletPoint(
+            text = "Source Intelligence",
+            subPoints =
+              listOf(
+                "Analyzes Android app source code",
+                "Generates intelligent test selectors",
+              ),
+          ),
+          BulletPoint(
+            text = "Cross-Platform Testing",
+            subPoints = listOf("Supports Android and iOS", "Unified API for both platforms"),
+          ),
+          BulletPoint(
+            text = "JUnit Integration",
+            subPoints =
+              listOf(
+                "Drop-in replacement for Espresso",
+                "Compatible with existing test infrastructure",
+              ),
+          ),
+        ),
     )
   }
 }

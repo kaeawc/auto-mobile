@@ -1,7 +1,7 @@
 @file:OptIn(
-    ExperimentalFoundationApi::class,
-    androidx.compose.ui.ExperimentalComposeUiApi::class,
-    androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
+  ExperimentalFoundationApi::class,
+  androidx.compose.ui.ExperimentalComposeUiApi::class,
+  androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
 )
 
 package dev.jasonpearson.automobile.desktop.core
@@ -146,12 +146,12 @@ import kotlinx.serialization.json.put
 private val LOG = LoggerFactory.getLogger("AutoMobileContent")
 
 internal fun activeDeviceConnectionLostEvent(
-    event: DeviceStreamEvent,
-    activeDeviceId: String?,
+  event: DeviceStreamEvent,
+  activeDeviceId: String?,
 ): DeviceStreamEvent.DeviceConnectionLost? {
   return when (event) {
     is DeviceStreamEvent.DeviceConnectionLost ->
-        event.takeIf { isActiveDeviceStreamFrame(it.deviceId, activeDeviceId) }
+      event.takeIf { isActiveDeviceStreamFrame(it.deviceId, activeDeviceId) }
   }
 }
 
@@ -166,8 +166,8 @@ internal interface AutoMobileDeviceStreamEventSink {
 }
 
 internal class AutoMobileDeviceStreamEventHandler(
-    private val activeDeviceId: () -> String?,
-    private val sink: AutoMobileDeviceStreamEventSink,
+  private val activeDeviceId: () -> String?,
+  private val sink: AutoMobileDeviceStreamEventSink,
 ) {
   fun handle(event: DeviceStreamEvent): DeviceStreamEvent.DeviceConnectionLost? {
     val lostEvent = activeDeviceConnectionLostEvent(event, activeDeviceId()) ?: return null
@@ -192,13 +192,13 @@ enum class Dashboard(val title: String, val icon: String) {
 
 // Common launcher package names
 private val ANDROID_LAUNCHERS =
-    listOf(
-        "com.google.android.apps.nexuslauncher", // Pixel Launcher
-        "com.android.launcher3", // AOSP Launcher
-        "com.sec.android.app.launcher", // Samsung One UI
-        "com.huawei.android.launcher", // Huawei
-        "com.miui.home", // Xiaomi MIUI
-    )
+  listOf(
+    "com.google.android.apps.nexuslauncher", // Pixel Launcher
+    "com.android.launcher3", // AOSP Launcher
+    "com.sec.android.app.launcher", // Samsung One UI
+    "com.huawei.android.launcher", // Huawei
+    "com.miui.home", // Xiaomi MIUI
+  )
 private const val IOS_SPRINGBOARD = "com.apple.springboard"
 private const val TIMELINE_EVENT_CACHE_LIMIT = 10_000
 
@@ -207,13 +207,13 @@ private const val TIMELINE_EVENT_CACHE_LIMIT = 10_000
  * launcher/springboard > first app in list
  */
 private data class DeviceFilterState(
-    val minApi: Int = 28,
-    val maxApi: Int = 35,
-    val googleApisOnly: Boolean = false,
-    val minIos: Int = 16,
-    val maxIos: Int = 26,
-    val showIphone: Boolean = true,
-    val showIpad: Boolean = true,
+  val minApi: Int = 28,
+  val maxApi: Int = 35,
+  val googleApisOnly: Boolean = false,
+  val minIos: Int = 16,
+  val maxIos: Int = 26,
+  val showIphone: Boolean = true,
+  val showIpad: Boolean = true,
 )
 
 private fun loadDeviceFilter(file: java.io.File): DeviceFilterState {
@@ -222,18 +222,18 @@ private fun loadDeviceFilter(file: java.io.File): DeviceFilterState {
       val element = kotlinx.serialization.json.Json.parseToJsonElement(file.readText())
       val obj = element as? kotlinx.serialization.json.JsonObject ?: return DeviceFilterState()
       fun intField(key: String, default: Int) =
-          (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: default
+        (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: default
       fun boolField(key: String, default: Boolean) =
-          (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull()
-              ?: default
+        (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull()
+          ?: default
       return DeviceFilterState(
-          minApi = intField("minApi", 28),
-          maxApi = intField("maxApi", 35),
-          googleApisOnly = boolField("googleApisOnly", false),
-          minIos = intField("minIos", 16),
-          maxIos = intField("maxIos", 26),
-          showIphone = boolField("showIphone", true),
-          showIpad = boolField("showIpad", true),
+        minApi = intField("minApi", 28),
+        maxApi = intField("maxApi", 35),
+        googleApisOnly = boolField("googleApisOnly", false),
+        minIos = intField("minIos", 16),
+        maxIos = intField("maxIos", 26),
+        showIphone = boolField("showIphone", true),
+        showIpad = boolField("showIpad", true),
       )
     }
   } catch (_: Exception) {}
@@ -241,19 +241,19 @@ private fun loadDeviceFilter(file: java.io.File): DeviceFilterState {
 }
 
 private fun saveDeviceFilter(
-    file: java.io.File,
-    minApi: Int,
-    maxApi: Int,
-    googleApisOnly: Boolean,
-    minIos: Int,
-    maxIos: Int,
-    showIphone: Boolean,
-    showIpad: Boolean,
+  file: java.io.File,
+  minApi: Int,
+  maxApi: Int,
+  googleApisOnly: Boolean,
+  minIos: Int,
+  maxIos: Int,
+  showIphone: Boolean,
+  showIpad: Boolean,
 ) {
   try {
     file.parentFile?.mkdirs()
     file.writeText(
-        "{\"minApi\":$minApi,\"maxApi\":$maxApi,\"googleApisOnly\":$googleApisOnly,\"minIos\":$minIos,\"maxIos\":$maxIos,\"showIphone\":$showIphone,\"showIpad\":$showIpad}"
+      "{\"minApi\":$minApi,\"maxApi\":$maxApi,\"googleApisOnly\":$googleApisOnly,\"minIos\":$minIos,\"maxIos\":$maxIos,\"showIphone\":$showIphone,\"showIpad\":$showIpad}"
     )
   } catch (_: Exception) {}
 }
@@ -262,45 +262,45 @@ private fun saveDeviceFilter(
 private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
   val colors = SharedTheme.globalColors
   Text(
-      text = label,
-      fontSize = 10.sp,
-      color = if (selected) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
-      modifier =
-          Modifier.background(
-                  if (selected) colors.text.info.copy(alpha = 0.12f)
-                  else colors.text.normal.copy(alpha = 0.06f),
-                  RoundedCornerShape(12.dp),
-              )
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 10.dp, vertical = 4.dp),
+    text = label,
+    fontSize = 10.sp,
+    color = if (selected) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
+    modifier =
+      Modifier.background(
+          if (selected) colors.text.info.copy(alpha = 0.12f)
+          else colors.text.normal.copy(alpha = 0.06f),
+          RoundedCornerShape(12.dp),
+        )
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 10.dp, vertical = 4.dp),
   )
 }
 
 private fun selectDefaultApp(apps: List<InstalledApp>, deviceType: DeviceType?): String? {
   // First priority: foreground app
   apps
-      .find { it.isForeground }
-      ?.let {
-        return it.packageName
-      }
+    .find { it.isForeground }
+    ?.let {
+      return it.packageName
+    }
 
   // Second priority: launcher (Android) or springboard (iOS)
   val isIOS = deviceType == DeviceType.iOSSimulator || deviceType == DeviceType.iOSPhysical
   if (isIOS) {
     apps
-        .find { it.packageName == IOS_SPRINGBOARD }
-        ?.let {
-          return it.packageName
-        }
+      .find { it.packageName == IOS_SPRINGBOARD }
+      ?.let {
+        return it.packageName
+      }
   } else {
     // Android - try common launcher packages
     for (launcher in ANDROID_LAUNCHERS) {
       apps
-          .find { it.packageName == launcher }
-          ?.let {
-            return it.packageName
-          }
+        .find { it.packageName == launcher }
+        ?.let {
+          return it.packageName
+        }
     }
   }
 
@@ -310,10 +310,10 @@ private fun selectDefaultApp(apps: List<InstalledApp>, deviceType: DeviceType?):
 
 @Composable
 fun AutoMobileContent(
-    settingsProvider: SettingsProvider = FakeSettingsProvider(),
-    notificationHandler: NotificationHandler = NoOpNotificationHandler,
-    onOpenSource: ((String, Int, String) -> Unit)? = null,
-    menuBarActions: MenuBarActions? = null,
+  settingsProvider: SettingsProvider = FakeSettingsProvider(),
+  notificationHandler: NotificationHandler = NoOpNotificationHandler,
+  onOpenSource: ((String, Int, String) -> Unit)? = null,
+  menuBarActions: MenuBarActions? = null,
 ) {
   // When a MenuBarActions bridge is supplied (from Main.kt's MenuBar), delegate
   // pane-visibility and overlay state to it so the native menu items and the
@@ -365,9 +365,9 @@ fun AutoMobileContent(
   // Horizontal tabs at bottom (Navigation, Test Runs, Storage, Diagnostics)
   val horizontalTabs = remember {
     listOf(
-        HorizontalTab("test_runs", "Test Runs", AppIcons.TestRuns),
-        HorizontalTab("storage", "Storage", AppIcons.Storage),
-        HorizontalTab("diagnostics", "Diagnostics", AppIcons.Diagnostics),
+      HorizontalTab("test_runs", "Test Runs", AppIcons.TestRuns),
+      HorizontalTab("storage", "Storage", AppIcons.Storage),
+      HorizontalTab("diagnostics", "Diagnostics", AppIcons.Diagnostics),
     )
   }
   var selectedHorizontalTabId by remember { mutableStateOf<String?>(null) }
@@ -420,7 +420,7 @@ fun AutoMobileContent(
   // Log state changes for debugging
   LaunchedEffect(activeDeviceId, isDevicePanelExpanded) {
     LOG.info(
-        "State changed: activeDeviceId=$activeDeviceId, isDevicePanelExpanded=$isDevicePanelExpanded"
+      "State changed: activeDeviceId=$activeDeviceId, isDevicePanelExpanded=$isDevicePanelExpanded"
     )
   }
 
@@ -439,30 +439,30 @@ fun AutoMobileContent(
   // Mock devices list (only used in Fake mode)
   val mockBootedDevices = remember {
     listOf(
-        BootedDevice(
-            "pixel8",
-            "Pixel 8 API 35",
-            DeviceType.AndroidEmulator,
-            "Running",
-            "com.example.myapp",
-            System.currentTimeMillis() - 300000,
-        ),
-        BootedDevice(
-            "pixel7",
-            "Pixel 7 API 34",
-            DeviceType.AndroidEmulator,
-            "Running",
-            "com.android.launcher3",
-            System.currentTimeMillis() - 600000,
-        ),
-        BootedDevice(
-            "iphone15",
-            "iPhone 15 Pro",
-            DeviceType.iOSSimulator,
-            "Booted",
-            "com.apple.springboard",
-            System.currentTimeMillis() - 180000,
-        ),
+      BootedDevice(
+        "pixel8",
+        "Pixel 8 API 35",
+        DeviceType.AndroidEmulator,
+        "Running",
+        "com.example.myapp",
+        System.currentTimeMillis() - 300000,
+      ),
+      BootedDevice(
+        "pixel7",
+        "Pixel 7 API 34",
+        DeviceType.AndroidEmulator,
+        "Running",
+        "com.android.launcher3",
+        System.currentTimeMillis() - 600000,
+      ),
+      BootedDevice(
+        "iphone15",
+        "iPhone 15 Pro",
+        DeviceType.iOSSimulator,
+        "Booted",
+        "com.apple.springboard",
+        System.currentTimeMillis() - 180000,
+      ),
     )
   }
 
@@ -482,7 +482,7 @@ fun AutoMobileContent(
   // Log when connectedMcpProcess changes
   LaunchedEffect(connectedMcpProcess) {
     LOG.info(
-        "connectedMcpProcess changed to: ${connectedMcpProcess?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}"
+      "connectedMcpProcess changed to: ${connectedMcpProcess?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}"
     )
   }
 
@@ -494,11 +494,11 @@ fun AutoMobileContent(
         val processes = detector.detectProcesses()
         LOG.info("Auto-detect MCP: found ${processes.size} process(es)")
         val preferred =
-            processes.firstOrNull { it.connectionType == McpConnectionType.UnixSocket }
-                ?: processes.firstOrNull { it.connectionType == McpConnectionType.StreamableHttp }
+          processes.firstOrNull { it.connectionType == McpConnectionType.UnixSocket }
+            ?: processes.firstOrNull { it.connectionType == McpConnectionType.StreamableHttp }
         if (preferred != null) {
           LOG.info(
-              "Auto-connecting to MCP process: ${preferred.name} (PID ${preferred.pid}, ${preferred.connectionType})"
+            "Auto-connecting to MCP process: ${preferred.name} (PID ${preferred.pid}, ${preferred.connectionType})"
           )
           connectedMcpProcess = preferred
         }
@@ -508,28 +508,28 @@ fun AutoMobileContent(
 
   // Client provider function for dashboards to access MCP data
   val clientProvider: (() -> AutoMobileClient)? =
-      remember(connectedMcpProcess) {
-        LOG.info(
-            "clientProvider being computed, connectedMcpProcess=${connectedMcpProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}"
-        )
-        connectedMcpProcess?.let { process ->
-          {
-            when (process.connectionType) {
-              McpConnectionType.UnixSocket -> {
-                val socketPath = process.socketPath ?: DaemonSocketPaths.socketPath()
-                McpDaemonClient(socketPath)
-              }
-              McpConnectionType.StreamableHttp -> {
-                val port = process.port ?: 3000
-                McpHttpClient("http://localhost:$port/auto-mobile/streamable")
-              }
-              McpConnectionType.Stdio -> {
-                throw UnsupportedOperationException("Cannot connect to STDIO process externally")
-              }
+    remember(connectedMcpProcess) {
+      LOG.info(
+        "clientProvider being computed, connectedMcpProcess=${connectedMcpProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}"
+      )
+      connectedMcpProcess?.let { process ->
+        {
+          when (process.connectionType) {
+            McpConnectionType.UnixSocket -> {
+              val socketPath = process.socketPath ?: DaemonSocketPaths.socketPath()
+              McpDaemonClient(socketPath)
+            }
+            McpConnectionType.StreamableHttp -> {
+              val port = process.port ?: 3000
+              McpHttpClient("http://localhost:$port/auto-mobile/streamable")
+            }
+            McpConnectionType.Stdio -> {
+              throw UnsupportedOperationException("Cannot connect to STDIO process externally")
             }
           }
         }
       }
+    }
 
   // Register the screenshot callback on the shared MenuBarActions bridge so the
   // native menu bar "Take Screenshot" item can trigger it.
@@ -563,17 +563,17 @@ fun AutoMobileContent(
               val allDevices = parsed?.devices ?: emptyList()
               val allBootedDevices = allDevices.map { dev ->
                 val deviceType =
-                    when {
-                      dev.platform == "ios" && dev.isVirtual -> DeviceType.iOSSimulator
-                      dev.platform == "ios" -> DeviceType.iOSPhysical
-                      dev.isVirtual -> DeviceType.AndroidEmulator
-                      else -> DeviceType.AndroidPhysical
-                    }
+                  when {
+                    dev.platform == "ios" && dev.isVirtual -> DeviceType.iOSSimulator
+                    dev.platform == "ios" -> DeviceType.iOSPhysical
+                    dev.isVirtual -> DeviceType.AndroidEmulator
+                    else -> DeviceType.AndroidPhysical
+                  }
                 BootedDevice(
-                    id = dev.deviceId,
-                    name = dev.name,
-                    type = deviceType,
-                    status = dev.status,
+                  id = dev.deviceId,
+                  name = dev.name,
+                  type = deviceType,
+                  status = dev.status,
                 )
               }
               realDevices = allBootedDevices
@@ -582,7 +582,7 @@ fun AutoMobileContent(
                 realDevice = firstDevice
                 activeDeviceId = firstDevice.id
                 LOG.info(
-                    "Set realDevice from MCP: ${firstDevice.name} (${firstDevice.id}), total devices: ${allBootedDevices.size}"
+                  "Set realDevice from MCP: ${firstDevice.name} (${firstDevice.id}), total devices: ${allBootedDevices.size}"
                 )
               }
             }
@@ -622,11 +622,11 @@ fun AutoMobileContent(
     val maxDelayMs = 60000L
     while (true) {
       val delayMs =
-          if (consecutiveFailures <= 1) baseDelayMs
-          else
-              (baseDelayMs * (1L shl (consecutiveFailures - 1).coerceAtMost(4))).coerceAtMost(
-                  maxDelayMs
-              )
+        if (consecutiveFailures <= 1) baseDelayMs
+        else
+          (baseDelayMs * (1L shl (consecutiveFailures - 1).coerceAtMost(4))).coerceAtMost(
+            maxDelayMs
+          )
       kotlinx.coroutines.delay(delayMs)
       kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
@@ -638,23 +638,23 @@ fun AutoMobileContent(
                 val parsed = DeviceResourceParser.parseBootedDevices(result.content)
                 val allDevices = parsed?.devices ?: emptyList()
                 val newDevices =
-                    allDevices
-                        .filter { it.name != "Unknown" && it.status == "booted" }
-                        .map { dev ->
-                          val deviceType =
-                              when {
-                                dev.platform == "ios" && dev.isVirtual -> DeviceType.iOSSimulator
-                                dev.platform == "ios" -> DeviceType.iOSPhysical
-                                dev.isVirtual -> DeviceType.AndroidEmulator
-                                else -> DeviceType.AndroidPhysical
-                              }
-                          BootedDevice(
-                              id = dev.deviceId,
-                              name = dev.name,
-                              type = deviceType,
-                              status = dev.status,
-                          )
+                  allDevices
+                    .filter { it.name != "Unknown" && it.status == "booted" }
+                    .map { dev ->
+                      val deviceType =
+                        when {
+                          dev.platform == "ios" && dev.isVirtual -> DeviceType.iOSSimulator
+                          dev.platform == "ios" -> DeviceType.iOSPhysical
+                          dev.isVirtual -> DeviceType.AndroidEmulator
+                          else -> DeviceType.AndroidPhysical
                         }
+                      BootedDevice(
+                        id = dev.deviceId,
+                        name = dev.name,
+                        type = deviceType,
+                        status = dev.status,
+                      )
+                    }
                 realDevices = newDevices
                 // Clear active device if it's no longer in the list
                 if (activeDeviceId != null && newDevices.none { it.id == activeDeviceId }) {
@@ -698,15 +698,15 @@ fun AutoMobileContent(
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
       update.data?.let { hierarchyJson ->
         val result =
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-              val parsed = parseHierarchyFromJson(hierarchyJson) ?: return@withContext null
-              val changedIds =
-                  layoutInspectorState.computeChangedElements(
-                      layoutInspectorState.currentElementMap,
-                      parsed.elementMap,
-                  )
-              parsed to changedIds
-            }
+          kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val parsed = parseHierarchyFromJson(hierarchyJson) ?: return@withContext null
+            val changedIds =
+              layoutInspectorState.computeChangedElements(
+                layoutInspectorState.currentElementMap,
+                parsed.elementMap,
+              )
+            parsed to changedIds
+          }
         result?.let {
           layoutInspectorState.updateConnectionStatus(ConnectionStatus.Connected)
           layoutInspectorState.applyHierarchyUpdate(it.first, it.second)
@@ -720,15 +720,15 @@ fun AutoMobileContent(
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
       update.screenshotBase64?.let { base64 ->
         val screenshotData =
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-              java.util.Base64.getDecoder().decode(base64)
-            }
+          kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            java.util.Base64.getDecoder().decode(base64)
+          }
         layoutInspectorState.updateConnectionStatus(ConnectionStatus.Connected)
         layoutInspectorState.updateScreenshot(
-            data = screenshotData,
-            width = update.screenWidth,
-            height = update.screenHeight,
-            timestamp = update.timestamp,
+          data = screenshotData,
+          width = update.screenWidth,
+          height = update.screenHeight,
+          timestamp = update.timestamp,
         )
       }
     }
@@ -745,11 +745,11 @@ fun AutoMobileContent(
   // Streaming failures data source for real-time failure notifications
   // Only created in Real mode when the Failures panel is expanded
   val streamingFailuresDataSource =
-      remember(dataSourceMode, isFailuresPanelCollapsed) {
-        if (dataSourceMode == DataSourceMode.Real && !isFailuresPanelCollapsed)
-            StreamingFailuresDataSource()
-        else null
-      }
+    remember(dataSourceMode, isFailuresPanelCollapsed) {
+      if (dataSourceMode == DataSourceMode.Real && !isFailuresPanelCollapsed)
+        StreamingFailuresDataSource()
+      else null
+    }
 
   // Fetch initial failure counts (deferred until a device is connected)
   LaunchedEffect(dataSourceMode, failuresDateRange, clientProvider, activeDeviceId) {
@@ -758,20 +758,20 @@ fun AutoMobileContent(
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       try {
         val dataSource =
-            when (dataSourceMode) {
-              DataSourceMode.Fake -> FakeFailuresDataSource()
-              DataSourceMode.Real -> clientProvider?.let { McpFailuresDataSource(it) }
-            }
+          when (dataSourceMode) {
+            DataSourceMode.Fake -> FakeFailuresDataSource()
+            DataSourceMode.Real -> clientProvider?.let { McpFailuresDataSource(it) }
+          }
         if (dataSource != null) {
           // Use appropriate aggregation for the selected date range
           val aggregation =
-              when (failuresDateRange) {
-                DateRange.OneHour -> TimeAggregation.Minute
-                DateRange.TwentyFourHours -> TimeAggregation.Hour
-                DateRange.ThreeDays -> TimeAggregation.Hour
-                DateRange.SevenDays -> TimeAggregation.Day
-                DateRange.ThirtyDays -> TimeAggregation.Day
-              }
+            when (failuresDateRange) {
+              DateRange.OneHour -> TimeAggregation.Minute
+              DateRange.TwentyFourHours -> TimeAggregation.Hour
+              DateRange.ThreeDays -> TimeAggregation.Hour
+              DateRange.SevenDays -> TimeAggregation.Day
+              DateRange.ThirtyDays -> TimeAggregation.Day
+            }
           when (val result = dataSource.getTimelineData(failuresDateRange, aggregation)) {
             is Result.Success -> {
               val data = result.data
@@ -805,7 +805,7 @@ fun AutoMobileContent(
     if (deviceId != null) {
       obsClient = ObservationStreamClient()
       LOG.info(
-          "Connecting observation stream for device: $deviceId (client: ${obsClient.hashCode()})"
+        "Connecting observation stream for device: $deviceId (client: ${obsClient.hashCode()})"
       )
       obsClient.connect(deviceId)
       observationStreamClient = obsClient
@@ -927,19 +927,19 @@ fun AutoMobileContent(
     val client = observationStreamClient ?: return@LaunchedEffect
     val clearLivePerformanceMetrics = { clearPerformanceMetrics() }
     val eventHandler =
-        AutoMobileDeviceStreamEventHandler(
-            activeDeviceId = { activeDeviceId },
-            sink =
-                object : AutoMobileDeviceStreamEventSink {
-                  override fun disconnectLayout() {
-                    layoutInspectorState.disconnect()
-                  }
+      AutoMobileDeviceStreamEventHandler(
+        activeDeviceId = { activeDeviceId },
+        sink =
+          object : AutoMobileDeviceStreamEventSink {
+            override fun disconnectLayout() {
+              layoutInspectorState.disconnect()
+            }
 
-                  override fun clearPerformanceMetrics() {
-                    clearLivePerformanceMetrics()
-                  }
-                },
-        )
+            override fun clearPerformanceMetrics() {
+              clearLivePerformanceMetrics()
+            }
+          },
+      )
     client.deviceEvents.collect { event ->
       val lostEvent = eventHandler.handle(event) ?: return@collect
       LOG.warn("Device connection lost for ${lostEvent.deviceId}: ${lostEvent.error}")
@@ -979,11 +979,11 @@ fun AutoMobileContent(
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
           try {
             val appListDataSource =
-                graph.dataSourceFactory.createAppListDataSource(
-                    dataSourceMode,
-                    clientProvider,
-                    activeDeviceId,
-                )
+              graph.dataSourceFactory.createAppListDataSource(
+                dataSourceMode,
+                clientProvider,
+                activeDeviceId,
+              )
             when (val result = appListDataSource.getInstalledApps()) {
               is Result.Success -> {
                 if (isFirstLoad) {
@@ -1021,7 +1021,7 @@ fun AutoMobileContent(
       // Load fake apps for development (no polling needed)
       kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val fakeAppListDataSource =
-            graph.dataSourceFactory.createAppListDataSource(dataSourceMode, null, null)
+          graph.dataSourceFactory.createAppListDataSource(dataSourceMode, null, null)
         when (val result = fakeAppListDataSource.getInstalledApps()) {
           is Result.Success -> {
             installedApps = result.data
@@ -1037,33 +1037,33 @@ fun AutoMobileContent(
 
   // Devices list switches based on mode
   val bootedDevices =
-      if (dataSourceMode == DataSourceMode.Fake) {
-        mockBootedDevices
-      } else {
-        // In Real mode, show all connected MCP devices
-        realDevices
-      }
+    if (dataSourceMode == DataSourceMode.Fake) {
+      mockBootedDevices
+    } else {
+      // In Real mode, show all connected MCP devices
+      realDevices
+    }
 
   // Compute platform based on device type for iOS/Android-specific data flow
   val isIOSDevice =
-      realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical
+    realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical
   val platformString = if (isIOSDevice) "ios" else "android"
   val storagePlatform = if (isIOSDevice) StoragePlatform.iOS else StoragePlatform.Android
 
   val availableEmulators = remember {
     listOf(
-        AvailableEmulator("pixel6", "Pixel 6 API 33", DeviceType.AndroidEmulator, "33"),
-        AvailableEmulator("pixel5", "Pixel 5 API 31", DeviceType.AndroidEmulator, "31"),
-        AvailableEmulator("iphone14", "iPhone 14", DeviceType.iOSSimulator),
-        AvailableEmulator("ipad", "iPad Pro (12.9-inch)", DeviceType.iOSSimulator),
+      AvailableEmulator("pixel6", "Pixel 6 API 33", DeviceType.AndroidEmulator, "33"),
+      AvailableEmulator("pixel5", "Pixel 5 API 31", DeviceType.AndroidEmulator, "31"),
+      AvailableEmulator("iphone14", "iPhone 14", DeviceType.iOSSimulator),
+      AvailableEmulator("ipad", "iPad Pro (12.9-inch)", DeviceType.iOSSimulator),
     )
   }
   val systemImages = remember {
     listOf(
-        SystemImage("android-35", "Android 15 (VanillaIceCream)", "Android", "35"),
-        SystemImage("android-34", "Android 14 (UpsideDownCake)", "Android", "34"),
-        SystemImage("ios-17", "iOS 17.2", "iOS", "17.2"),
-        SystemImage("ios-16", "iOS 16.4", "iOS", "16.4"),
+      SystemImage("android-35", "Android 15 (VanillaIceCream)", "Android", "35"),
+      SystemImage("android-34", "Android 14 (UpsideDownCake)", "Android", "34"),
+      SystemImage("ios-17", "iOS 17.2", "iOS", "17.2"),
+      SystemImage("ios-16", "iOS 16.4", "iOS", "16.4"),
     )
   }
 
@@ -1081,120 +1081,119 @@ fun AutoMobileContent(
   LaunchedEffect(showLeftPane, showRightPane, showBottomPane, showNavigationView) {
     commandRegistry.clear()
     commandRegistry.registerAll(
-        buildDefaultCommands(
-            onToggleLeftPane = { showLeftPane = !showLeftPane },
-            onToggleRightPane = { showRightPane = !showRightPane },
-            onToggleBottomPane = { showBottomPane = !showBottomPane },
-            onClearTelemetry = { telemetryEventCache.clear() },
-            onExportEvents = {
-              val jsonArray = buildJsonArray {
-                telemetryEventCache.take(1000).forEach { event ->
-                  add(
-                      buildJsonObject {
-                        put("type", event::class.simpleName ?: "unknown")
-                        put("timestamp", event.timestamp)
-                      }
-                  )
+      buildDefaultCommands(
+        onToggleLeftPane = { showLeftPane = !showLeftPane },
+        onToggleRightPane = { showRightPane = !showRightPane },
+        onToggleBottomPane = { showBottomPane = !showBottomPane },
+        onClearTelemetry = { telemetryEventCache.clear() },
+        onExportEvents = {
+          val jsonArray = buildJsonArray {
+            telemetryEventCache.take(1000).forEach { event ->
+              add(
+                buildJsonObject {
+                  put("type", event::class.simpleName ?: "unknown")
+                  put("timestamp", event.timestamp)
                 }
+              )
+            }
+          }
+          SwingFileSaver.save("telemetry_events.json", jsonArray.toString()) {}
+        },
+        onSwitchToDarkMode = { isDarkMode = true },
+        onSwitchToLightMode = { isDarkMode = false },
+        onOpenSettings = { showSettings = true },
+        onTakeScreenshot = {
+          val provider = clientProvider
+          if (provider != null) {
+            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+              val client = provider()
+              try {
+                client.callTool("screenshot", buildJsonObject {})
+              } catch (_: Exception) {} finally {
+                client.close()
               }
-              SwingFileSaver.save("telemetry_events.json", jsonArray.toString()) {}
-            },
-            onSwitchToDarkMode = { isDarkMode = true },
-            onSwitchToLightMode = { isDarkMode = false },
-            onOpenSettings = { showSettings = true },
-            onTakeScreenshot = {
-              val provider = clientProvider
-              if (provider != null) {
-                kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                  val client = provider()
-                  try {
-                    client.callTool("screenshot", buildJsonObject {})
-                  } catch (_: Exception) {} finally {
-                    client.close()
-                  }
-                }
-              }
-            },
-            onToggleLiveLayout = { showNavigationView = !showNavigationView },
-        ),
+            }
+          }
+        },
+        onToggleLiveLayout = { showNavigationView = !showNavigationView },
+      )
     )
   }
 
   // Search provider wired to telemetry events, navigation screens, and installed apps
   val searchProvider: SearchResultProvider =
-      remember(
-          telemetryEventCache.size,
-          telemetryEventCache.lastOrNull()?.timestamp,
-          installedApps.size,
-      ) {
-        object : SearchResultProvider {
-          override fun search(query: String): List<SearchResult> {
-            if (query.isBlank()) return emptyList()
-            val results = mutableListOf<SearchResult>()
-            // Telemetry events (most recent 200, capped for performance)
-            telemetryEventCache
-                .takeLast(200)
-                .filter { it.matchesSearch(query) }
-                .take(20)
-                .forEachIndexed { i, event ->
-                  val (label, preview) =
-                      when (event) {
-                        is TelemetryDisplayEvent.Network ->
-                            "${event.method} ${event.url}" to "${event.statusCode}"
-                        is TelemetryDisplayEvent.Log ->
-                            "[${event.tag}] ${event.message.take(40)}" to event.tag
-                        is TelemetryDisplayEvent.Navigation ->
-                            event.destination to (event.source ?: "")
-                        is TelemetryDisplayEvent.Failure -> event.title to event.type
-                        else -> (event::class.simpleName ?: "Event") to ""
-                      }
-                  results.add(
-                      SearchResult(
-                          id = "tel_${i}_${event.timestamp}",
-                          category = SearchCategory.TelemetryEvent,
-                          label = label,
-                          preview = preview,
-                          onSelect = {},
-                      )
-                  )
+    remember(
+      telemetryEventCache.size,
+      telemetryEventCache.lastOrNull()?.timestamp,
+      installedApps.size,
+    ) {
+      object : SearchResultProvider {
+        override fun search(query: String): List<SearchResult> {
+          if (query.isBlank()) return emptyList()
+          val results = mutableListOf<SearchResult>()
+          // Telemetry events (most recent 200, capped for performance)
+          telemetryEventCache
+            .takeLast(200)
+            .filter { it.matchesSearch(query) }
+            .take(20)
+            .forEachIndexed { i, event ->
+              val (label, preview) =
+                when (event) {
+                  is TelemetryDisplayEvent.Network ->
+                    "${event.method} ${event.url}" to "${event.statusCode}"
+                  is TelemetryDisplayEvent.Log ->
+                    "[${event.tag}] ${event.message.take(40)}" to event.tag
+                  is TelemetryDisplayEvent.Navigation -> event.destination to (event.source ?: "")
+                  is TelemetryDisplayEvent.Failure -> event.title to event.type
+                  else -> (event::class.simpleName ?: "Event") to ""
                 }
-            // Navigation screens from mock data
-            NavigationMockData.screens
-                .filter {
-                  it.name.contains(query, ignoreCase = true) ||
-                      it.packageName.contains(query, ignoreCase = true)
-                }
-                .take(10)
-                .forEach { screen ->
-                  results.add(
-                      SearchResult(
-                          id = "nav_${screen.id}",
-                          category = SearchCategory.NavigationScreen,
-                          label = screen.name,
-                          preview = "${screen.type} · ${screen.packageName}",
-                          onSelect = {},
-                      )
-                  )
-                }
-            // Installed apps as hierarchy elements
-            installedApps
-                .filter { it.packageName.contains(query, ignoreCase = true) }
-                .take(10)
-                .forEach { app ->
-                  results.add(
-                      SearchResult(
-                          id = "app_${app.packageName}",
-                          category = SearchCategory.HierarchyElement,
-                          label = app.packageName.substringAfterLast('.'),
-                          preview = app.packageName,
-                          onSelect = { selectedAppId = app.packageName },
-                      )
-                  )
-                }
-            return results
-          }
+              results.add(
+                SearchResult(
+                  id = "tel_${i}_${event.timestamp}",
+                  category = SearchCategory.TelemetryEvent,
+                  label = label,
+                  preview = preview,
+                  onSelect = {},
+                )
+              )
+            }
+          // Navigation screens from mock data
+          NavigationMockData.screens
+            .filter {
+              it.name.contains(query, ignoreCase = true) ||
+                it.packageName.contains(query, ignoreCase = true)
+            }
+            .take(10)
+            .forEach { screen ->
+              results.add(
+                SearchResult(
+                  id = "nav_${screen.id}",
+                  category = SearchCategory.NavigationScreen,
+                  label = screen.name,
+                  preview = "${screen.type} · ${screen.packageName}",
+                  onSelect = {},
+                )
+              )
+            }
+          // Installed apps as hierarchy elements
+          installedApps
+            .filter { it.packageName.contains(query, ignoreCase = true) }
+            .take(10)
+            .forEach { app ->
+              results.add(
+                SearchResult(
+                  id = "app_${app.packageName}",
+                  category = SearchCategory.HierarchyElement,
+                  label = app.packageName.substringAfterLast('.'),
+                  preview = app.packageName,
+                  onSelect = { selectedAppId = app.packageName },
+                )
+              )
+            }
+          return results
         }
       }
+    }
 
   // Setup state - true when AutoMobile service/daemon not detected or accessibility service not
   // running
@@ -1220,13 +1219,13 @@ fun AutoMobileContent(
 
   // Compute the current highlighted screens for replay (show path up to current index)
   val replayHighlightedScreens =
-      remember(testFlowScreens, currentReplayIndex, isReplaying) {
-        if (isReplaying && testFlowScreens.isNotEmpty()) {
-          testFlowScreens.take(currentReplayIndex + 1)
-        } else {
-          testFlowScreens
-        }
+    remember(testFlowScreens, currentReplayIndex, isReplaying) {
+      if (isReplaying && testFlowScreens.isNotEmpty()) {
+        testFlowScreens.take(currentReplayIndex + 1)
+      } else {
+        testFlowScreens
       }
+    }
 
   val colors = SharedTheme.globalColors
 
@@ -1242,821 +1241,816 @@ fun AutoMobileContent(
   // Settings panel (full-screen overlay)
   if (showSettings) {
     SettingsPanel(
-        settings = settingsProvider,
-        onClose = { showSettings = false },
-        clientProvider = clientProvider,
-        modifier = Modifier.fillMaxSize(),
+      settings = settingsProvider,
+      onClose = { showSettings = false },
+      clientProvider = clientProvider,
+      modifier = Modifier.fillMaxSize(),
     )
     return
   }
 
   Box(
-      modifier =
-          Modifier.fillMaxSize().onPreviewKeyEvent { event ->
-            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-            val isModifier = event.isMetaPressed || event.isCtrlPressed
-            if (isModifier && event.isShiftPressed) {
-              when (event.key) {
-                Key.P -> {
-                  showCommandPalette = true
-                  true
-                }
-                Key.F -> {
-                  showGlobalSearch = true
-                  true
-                }
-                else -> false
-              }
-            } else {
-              false
+    modifier =
+      Modifier.fillMaxSize().onPreviewKeyEvent { event ->
+        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+        val isModifier = event.isMetaPressed || event.isCtrlPressed
+        if (isModifier && event.isShiftPressed) {
+          when (event.key) {
+            Key.P -> {
+              showCommandPalette = true
+              true
             }
-          },
+            Key.F -> {
+              showGlobalSearch = true
+              true
+            }
+            else -> false
+          }
+        } else {
+          false
+        }
+      }
   ) {
     ThreePaneShell(
-        showLeftPane = showLeftPane,
-        onToggleLeftPane = { showLeftPane = !showLeftPane },
-        showRightPane = showRightPane,
-        onToggleRightPane = { showRightPane = !showRightPane },
-        showBottomPane = showBottomPane,
-        onToggleBottomPane = { showBottomPane = !showBottomPane },
-        deviceName = realDevice?.name,
-        foregroundApp =
-            realDevice?.foregroundApp ?: installedApps.find { it.isForeground }?.packageName,
-        crashCount = crashCount,
-        anrCount = anrCount,
-        nonFatalCount = nonFatalCount,
-        toolFailureCount = toolFailureCount,
-        currentFps = currentFps,
-        currentMemoryMb = currentMemoryMb,
-        isDaemonConnected = connectedMcpProcess != null,
-        onNavigateUp = { if (selectedEventIndex > 0) selectedEventIndex-- },
-        onNavigateDown = { selectedEventIndex++ },
-        onSelectEvent = {
-          // Opens the inspector for the currently focused event
-          if (selectedEventIndex >= 0) showRightPane = true
-        },
-        onDeselectEvent = {
-          if (showRightPane) {
-            showRightPane = false
-          } else {
-            selectedEventIndex = -1
+      showLeftPane = showLeftPane,
+      onToggleLeftPane = { showLeftPane = !showLeftPane },
+      showRightPane = showRightPane,
+      onToggleRightPane = { showRightPane = !showRightPane },
+      showBottomPane = showBottomPane,
+      onToggleBottomPane = { showBottomPane = !showBottomPane },
+      deviceName = realDevice?.name,
+      foregroundApp =
+        realDevice?.foregroundApp ?: installedApps.find { it.isForeground }?.packageName,
+      crashCount = crashCount,
+      anrCount = anrCount,
+      nonFatalCount = nonFatalCount,
+      toolFailureCount = toolFailureCount,
+      currentFps = currentFps,
+      currentMemoryMb = currentMemoryMb,
+      isDaemonConnected = connectedMcpProcess != null,
+      onNavigateUp = { if (selectedEventIndex > 0) selectedEventIndex-- },
+      onNavigateDown = { selectedEventIndex++ },
+      onSelectEvent = {
+        // Opens the inspector for the currently focused event
+        if (selectedEventIndex >= 0) showRightPane = true
+      },
+      onDeselectEvent = {
+        if (showRightPane) {
+          showRightPane = false
+        } else {
+          selectedEventIndex = -1
+        }
+      },
+      onJumpToTop = { selectedEventIndex = 0 },
+      onJumpToBottom = { /* No-op until event list size is known */ },
+      onQuickJump = { /* Timestamp jump placeholder */ },
+      menuBarActions = menuBarActions,
+      vimModeEnabled = vimModeEnabled,
+      centerContent = { mod ->
+        if (isLiveLayoutMode) {
+          // Live layout mode: center shows device screenshot with element overlays
+          Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
+            DeviceScreenView(
+              screenshotData = layoutInspectorState.screenshotData,
+              screenWidth = layoutInspectorState.screenWidth,
+              screenHeight = layoutInspectorState.screenHeight,
+              rotation = layoutInspectorState.rotation,
+              hierarchy = layoutInspectorState.hierarchy,
+              selectedElementId = layoutInspectorState.selectedElementId,
+              hoveredElementId = layoutInspectorState.hoveredElementId,
+              onElementSelected = { layoutInspectorState.selectElement(it) },
+              onElementHovered = { layoutInspectorState.hoverElement(it) },
+              showTapTargetIssues = layoutInspectorState.showTapTargetIssues,
+              onToggleTapTargetIssues = { layoutInspectorState.toggleTapTargetIssues() },
+              connectionStatus = layoutInspectorState.connectionStatus,
+              socketExists = true,
+              elementMap = layoutInspectorState.currentElementMap.takeIf { it.isNotEmpty() },
+              modifier = Modifier.fillMaxSize(),
+            )
           }
-        },
-        onJumpToTop = { selectedEventIndex = 0 },
-        onJumpToBottom = { /* No-op until event list size is known */ },
-        onQuickJump = { /* Timestamp jump placeholder */ },
-        menuBarActions = menuBarActions,
-        vimModeEnabled = vimModeEnabled,
-        centerContent = { mod ->
-          if (isLiveLayoutMode) {
-            // Live layout mode: center shows device screenshot with element overlays
-            Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
-              DeviceScreenView(
-                  screenshotData = layoutInspectorState.screenshotData,
-                  screenWidth = layoutInspectorState.screenWidth,
-                  screenHeight = layoutInspectorState.screenHeight,
-                  rotation = layoutInspectorState.rotation,
-                  hierarchy = layoutInspectorState.hierarchy,
-                  selectedElementId = layoutInspectorState.selectedElementId,
-                  hoveredElementId = layoutInspectorState.hoveredElementId,
-                  onElementSelected = { layoutInspectorState.selectElement(it) },
-                  onElementHovered = { layoutInspectorState.hoverElement(it) },
-                  showTapTargetIssues = layoutInspectorState.showTapTargetIssues,
-                  onToggleTapTargetIssues = { layoutInspectorState.toggleTapTargetIssues() },
-                  connectionStatus = layoutInspectorState.connectionStatus,
-                  socketExists = true,
-                  elementMap = layoutInspectorState.currentElementMap.takeIf { it.isNotEmpty() },
-                  modifier = Modifier.fillMaxSize(),
-              )
-            }
-          } else {
-            Column(mod) {
-              // Telemetry is the primary center content
-              TelemetryDashboard(
-                  telemetryPushClient = telemetryPushClient,
-                  dataSourceMode = dataSourceMode,
-                  activeDeviceId = activeDeviceId,
-                  selectedEvent = selectedTelemetryEvent,
-                  onEventSelected = { event ->
-                    selectedTelemetryEvent = event
-                    if (event != null && !showRightPane) showRightPane = true
-                  },
-                  timelineState = timelineState,
-                  onFilterChanged = { categoryKey ->
-                    filteredTimelineCategories =
-                        if (categoryKey != null) {
-                          TimelineCategory.entries.filter { it.name != categoryKey }.toSet()
-                        } else {
-                          emptySet()
-                        }
-                  },
-                  modifier = Modifier.weight(1f),
-              )
-              // Bottom tabs for secondary views
-              HorizontalTabBar(
-                  tabs = horizontalTabs,
-                  selectedTabId = selectedHorizontalTabId,
-                  onTabSelected = { selectedHorizontalTabId = it },
-              )
-              if (selectedHorizontalTabId != null) {
-                Box(Modifier.fillMaxWidth().weight(0.5f)) {
-                  when (selectedHorizontalTabId) {
-                    "test_runs" ->
-                        TestDashboard(
-                            onNavigateToGraph = { screens ->
-                              testFlowScreens = screens
-                              isReplaying = true
-                              currentReplayIndex = 0
-                              showNavigationView = true
-                            },
-                            dataSourceMode = dataSourceMode,
-                            clientProvider = clientProvider,
-                            observationStreamClient = observationStreamClient,
-                        )
-                    "storage" ->
-                        StorageDashboard(
-                            dataSourceMode = dataSourceMode,
-                            clientProvider = clientProvider,
-                            deviceId = activeDeviceId,
-                            packageName = selectedAppId,
-                            platform = storagePlatform,
-                        )
-                    "diagnostics" ->
-                        DiagnosticsDashboard(
-                            connectedMcpProcess = connectedMcpProcess,
-                            dataSourceMode = dataSourceMode,
-                        )
+        } else {
+          Column(mod) {
+            // Telemetry is the primary center content
+            TelemetryDashboard(
+              telemetryPushClient = telemetryPushClient,
+              dataSourceMode = dataSourceMode,
+              activeDeviceId = activeDeviceId,
+              selectedEvent = selectedTelemetryEvent,
+              onEventSelected = { event ->
+                selectedTelemetryEvent = event
+                if (event != null && !showRightPane) showRightPane = true
+              },
+              timelineState = timelineState,
+              onFilterChanged = { categoryKey ->
+                filteredTimelineCategories =
+                  if (categoryKey != null) {
+                    TimelineCategory.entries.filter { it.name != categoryKey }.toSet()
+                  } else {
+                    emptySet()
                   }
+              },
+              modifier = Modifier.weight(1f),
+            )
+            // Bottom tabs for secondary views
+            HorizontalTabBar(
+              tabs = horizontalTabs,
+              selectedTabId = selectedHorizontalTabId,
+              onTabSelected = { selectedHorizontalTabId = it },
+            )
+            if (selectedHorizontalTabId != null) {
+              Box(Modifier.fillMaxWidth().weight(0.5f)) {
+                when (selectedHorizontalTabId) {
+                  "test_runs" ->
+                    TestDashboard(
+                      onNavigateToGraph = { screens ->
+                        testFlowScreens = screens
+                        isReplaying = true
+                        currentReplayIndex = 0
+                        showNavigationView = true
+                      },
+                      dataSourceMode = dataSourceMode,
+                      clientProvider = clientProvider,
+                      observationStreamClient = observationStreamClient,
+                    )
+                  "storage" ->
+                    StorageDashboard(
+                      dataSourceMode = dataSourceMode,
+                      clientProvider = clientProvider,
+                      deviceId = activeDeviceId,
+                      packageName = selectedAppId,
+                      platform = storagePlatform,
+                    )
+                  "diagnostics" ->
+                    DiagnosticsDashboard(
+                      connectedMcpProcess = connectedMcpProcess,
+                      dataSourceMode = dataSourceMode,
+                    )
                 }
               }
             }
           }
-        },
-        leftPaneContent = {
-          // Stub: replaced by real LeftSidebarPanel when Unit 2 merges
-          Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp)) {
-            // Data source mode toggle
-            Text("Data Source", color = colors.text.normal, fontSize = 14.sp)
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              val realSelected = dataSourceMode == DataSourceMode.Real
-              Text(
-                  text = "Real",
-                  color =
-                      if (realSelected) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
+        }
+      },
+      leftPaneContent = {
+        // Stub: replaced by real LeftSidebarPanel when Unit 2 merges
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp)) {
+          // Data source mode toggle
+          Text("Data Source", color = colors.text.normal, fontSize = 14.sp)
+          Spacer(Modifier.height(4.dp))
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            val realSelected = dataSourceMode == DataSourceMode.Real
+            Text(
+              text = "Real",
+              color = if (realSelected) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
+              fontSize = 12.sp,
+              modifier =
+                Modifier.clickable {
+                    dataSourceMode = DataSourceMode.Real
+                    activeDeviceId = null
+                    isDevicePanelExpanded = true
+                  }
+                  .padding(end = 8.dp),
+            )
+            Text(
+              text = "Fake",
+              color =
+                if (!realSelected) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
+              fontSize = 12.sp,
+              modifier =
+                Modifier.clickable {
+                    dataSourceMode = DataSourceMode.Fake
+                    if (mockBootedDevices.isNotEmpty()) {
+                      activeDeviceId = mockBootedDevices.first().id
+                      isDevicePanelExpanded = false
+                    }
+                  }
+                  .padding(end = 8.dp),
+            )
+          }
+          Spacer(Modifier.height(12.dp))
+
+          // MCP connection status & controls
+          Text("MCP Connection", color = colors.text.normal, fontSize = 14.sp)
+          Spacer(Modifier.height(8.dp))
+          connectedMcpProcess?.let { process ->
+            Text("Connected: ${process.name}", color = colors.text.info, fontSize = 12.sp)
+            Text(
+              "PID: ${process.pid}",
+              color = colors.text.normal.copy(alpha = 0.7f),
+              fontSize = 11.sp,
+            )
+          }
+            ?: run {
+              Text("Not connected", color = colors.text.warning, fontSize = 12.sp)
+              if (dataSourceMode == DataSourceMode.Real) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                  text = "[Retry Detection]",
+                  color = colors.text.info,
                   fontSize = 12.sp,
-                  modifier =
-                      Modifier.clickable {
-                            dataSourceMode = DataSourceMode.Real
-                            activeDeviceId = null
-                            isDevicePanelExpanded = true
-                          }
-                          .padding(end = 8.dp),
+                  modifier = Modifier.clickable { mcpConnectRetryCounter++ },
+                )
+              }
+            }
+          Spacer(Modifier.height(16.dp))
+          Text("Booted Devices", color = colors.text.normal, fontSize = 14.sp)
+          Spacer(Modifier.height(8.dp))
+          val devices =
+            if (dataSourceMode == DataSourceMode.Fake) mockBootedDevices else realDevices
+          if (devices.isEmpty()) {
+            Text(
+              "No booted devices",
+              fontSize = 11.sp,
+              color = colors.text.normal.copy(alpha = 0.5f),
+            )
+          }
+          devices.forEach { device ->
+            val isActive = device.id == activeDeviceId
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            ) {
+              Text(
+                text =
+                  "${if (device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical) "\uD83C\uDF4E" else "\uD83E\uDD16"} ${device.name}",
+                color = if (isActive) colors.text.info else colors.text.normal,
+                fontSize = 12.sp,
+                modifier =
+                  Modifier.weight(1f).clickable {
+                    activeDeviceId = device.id
+                    realDevice = device
+                    isDevicePanelExpanded = false
+                  },
               )
+              // Kill button
               Text(
-                  text = "Fake",
-                  color =
-                      if (!realSelected) colors.text.info
-                      else colors.text.normal.copy(alpha = 0.5f),
-                  fontSize = 12.sp,
-                  modifier =
-                      Modifier.clickable {
-                            dataSourceMode = DataSourceMode.Fake
-                            if (mockBootedDevices.isNotEmpty()) {
-                              activeDeviceId = mockBootedDevices.first().id
-                              isDevicePanelExpanded = false
-                            }
-                          }
-                          .padding(end = 8.dp),
+                "\u23F9",
+                fontSize = 10.sp,
+                color = colors.text.error.copy(alpha = 0.6f),
+                modifier =
+                  Modifier.clickable {
+                      val platform =
+                        if (
+                          device.type == DeviceType.iOSSimulator ||
+                            device.type == DeviceType.iOSPhysical
+                        )
+                          "ios"
+                        else "android"
+                      kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                        try {
+                          val client = clientProvider?.invoke()
+                          LOG.info(
+                            "Killing device ${device.name} (${device.id}) via ${client?.transportName}"
+                          )
+                          client?.killDevice(device.name, device.id, platform)
+                        } catch (e: Exception) {
+                          LOG.info("Failed to kill device: ${e.message}")
+                        }
+                      }
+                    }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(4.dp),
               )
             }
+          }
+
+          // Device images (available to boot) — grouped by platform with filters
+          if (deviceImages.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
 
-            // MCP connection status & controls
-            Text("MCP Connection", color = colors.text.normal, fontSize = 14.sp)
-            Spacer(Modifier.height(8.dp))
-            connectedMcpProcess?.let { process ->
-              Text("Connected: ${process.name}", color = colors.text.info, fontSize = 12.sp)
-              Text(
-                  "PID: ${process.pid}",
-                  color = colors.text.normal.copy(alpha = 0.7f),
-                  fontSize = 11.sp,
+            // Persisted filter state — read/write to ~/.automobile/device-filter.json
+            val filterFile = remember {
+              java.io.File(System.getProperty("user.home"), ".automobile/device-filter.json")
+            }
+            val savedFilter = remember { loadDeviceFilter(filterFile) }
+            var minApiFilter by remember { mutableStateOf(savedFilter.minApi.toFloat()) }
+            var maxApiFilter by remember { mutableStateOf(savedFilter.maxApi.toFloat()) }
+            var googleApisOnly by remember { mutableStateOf(savedFilter.googleApisOnly) }
+            var minIosFilter by remember { mutableStateOf(savedFilter.minIos.toFloat()) }
+            var maxIosFilter by remember { mutableStateOf(savedFilter.maxIos.toFloat()) }
+            var showIphone by remember { mutableStateOf(savedFilter.showIphone) }
+            var showIpad by remember { mutableStateOf(savedFilter.showIpad) }
+            var imagesExpanded by remember { mutableStateOf(false) }
+
+            fun saveFilters() {
+              saveDeviceFilter(
+                filterFile,
+                minApiFilter.toInt(),
+                maxApiFilter.toInt(),
+                googleApisOnly,
+                minIosFilter.toInt(),
+                maxIosFilter.toInt(),
+                showIphone,
+                showIpad,
               )
             }
-                ?: run {
-                  Text("Not connected", color = colors.text.warning, fontSize = 12.sp)
-                  if (dataSourceMode == DataSourceMode.Real) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "[Retry Detection]",
-                        color = colors.text.info,
-                        fontSize = 12.sp,
-                        modifier = Modifier.clickable { mcpConnectRetryCounter++ },
-                    )
-                  }
-                }
-            Spacer(Modifier.height(16.dp))
-            Text("Booted Devices", color = colors.text.normal, fontSize = 14.sp)
-            Spacer(Modifier.height(8.dp))
-            val devices =
-                if (dataSourceMode == DataSourceMode.Fake) mockBootedDevices else realDevices
-            if (devices.isEmpty()) {
+
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier =
+                Modifier.fillMaxWidth()
+                  .clickable { imagesExpanded = !imagesExpanded }
+                  .pointerHoverIcon(PointerIcon.Hand),
+            ) {
               Text(
-                  "No booted devices",
-                  fontSize = 11.sp,
-                  color = colors.text.normal.copy(alpha = 0.5f),
+                if (imagesExpanded) "\u25BE" else "\u25B8",
+                fontSize = 10.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
+              )
+              Spacer(Modifier.width(4.dp))
+              Text("Available Devices", color = colors.text.normal, fontSize = 14.sp)
+              Spacer(Modifier.weight(1f))
+              Text(
+                "${deviceImages.size}",
+                fontSize = 10.sp,
+                color = colors.text.normal.copy(alpha = 0.4f),
               )
             }
-            devices.forEach { device ->
-              val isActive = device.id == activeDeviceId
-              Row(
+
+            if (imagesExpanded) {
+              Spacer(Modifier.height(4.dp))
+              val bootedIds = devices.map { it.id }.toSet()
+              val androidImages = deviceImages.filter {
+                it.platform == "android" && (it.deviceId == null || it.deviceId !in bootedIds)
+              }
+              val iosImages = deviceImages.filter {
+                it.platform == "ios" && (it.deviceId == null || it.deviceId !in bootedIds)
+              }
+              var showAndroid by remember { mutableStateOf(true) }
+              var showIos by remember { mutableStateOf(true) }
+
+              // ── Android group ──
+              if (androidImages.isNotEmpty()) {
+                Row(
                   verticalAlignment = Alignment.CenterVertically,
-                  modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-              ) {
-                Text(
-                    text =
-                        "${if (device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical) "\uD83C\uDF4E" else "\uD83E\uDD16"} ${device.name}",
-                    color = if (isActive) colors.text.info else colors.text.normal,
-                    fontSize = 12.sp,
-                    modifier =
-                        Modifier.weight(1f).clickable {
-                          activeDeviceId = device.id
-                          realDevice = device
-                          isDevicePanelExpanded = false
-                        },
-                )
-                // Kill button
-                Text(
-                    "\u23F9",
+                  modifier =
+                    Modifier.fillMaxWidth()
+                      .clickable { showAndroid = !showAndroid }
+                      .pointerHoverIcon(PointerIcon.Hand)
+                      .padding(vertical = 2.dp),
+                ) {
+                  Text(
+                    if (showAndroid) "\u25BE" else "\u25B8",
                     fontSize = 10.sp,
-                    color = colors.text.error.copy(alpha = 0.6f),
-                    modifier =
-                        Modifier.clickable {
-                              val platform =
-                                  if (
-                                      device.type == DeviceType.iOSSimulator ||
-                                          device.type == DeviceType.iOSPhysical
-                                  )
-                                      "ios"
-                                  else "android"
+                    color = colors.text.normal.copy(alpha = 0.5f),
+                  )
+                  Spacer(Modifier.width(4.dp))
+                  Text(
+                    "\uD83E\uDD16 Android",
+                    fontSize = 11.sp,
+                    color = colors.text.normal.copy(alpha = 0.7f),
+                  )
+                  Spacer(Modifier.weight(1f))
+                  Text(
+                    "${androidImages.size}",
+                    fontSize = 9.sp,
+                    color = colors.text.normal.copy(alpha = 0.4f),
+                  )
+                }
+                if (showAndroid) {
+                  // API range sliders
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
+                  ) {
+                    Text(
+                      "API ${minApiFilter.toInt()}-${maxApiFilter.toInt()}",
+                      fontSize = 9.sp,
+                      color = colors.text.normal.copy(alpha = 0.5f),
+                      modifier = Modifier.width(55.dp),
+                    )
+                    Column(Modifier.weight(1f)) {
+                      androidx.compose.material3.Slider(
+                        value = minApiFilter,
+                        onValueChange = { minApiFilter = it.coerceAtMost(maxApiFilter) },
+                        onValueChangeFinished = { saveFilters() },
+                        valueRange = 21f..35f,
+                        steps = 13,
+                        modifier = Modifier.fillMaxWidth().height(16.dp),
+                      )
+                      androidx.compose.material3.Slider(
+                        value = maxApiFilter,
+                        onValueChange = { maxApiFilter = it.coerceAtLeast(minApiFilter) },
+                        onValueChangeFinished = { saveFilters() },
+                        valueRange = 21f..35f,
+                        steps = 13,
+                        modifier = Modifier.fillMaxWidth().height(16.dp),
+                      )
+                    }
+                  }
+                  // Google APIs chip
+                  Row(modifier = Modifier.padding(start = 12.dp)) {
+                    FilterChip("Google APIs", googleApisOnly) {
+                      googleApisOnly = !googleApisOnly
+                      saveFilters()
+                    }
+                  }
+                  Spacer(Modifier.height(2.dp))
+                  // Filtered list
+                  val filteredAndroid =
+                    androidImages
+                      .filter { image ->
+                        val apiLevel =
+                          extractApiLevel(image.target)
+                            ?: Regex("""(?i)api[_-]?(\d+)""")
+                              .find(image.name)
+                              ?.groupValues
+                              ?.get(1)
+                              ?.toIntOrNull()
+                        val hasGoogleApis =
+                          image.target?.contains("google", ignoreCase = true) == true ||
+                            image.name.contains("-ga-", ignoreCase = true) ||
+                            image.name.contains("Google", ignoreCase = true)
+                        if (googleApisOnly && !hasGoogleApis) return@filter false
+                        if (apiLevel != null) apiLevel in minApiFilter.toInt()..maxApiFilter.toInt()
+                        else true
+                      }
+                      .sortedBy { it.name }
+                  filteredAndroid.forEach { image ->
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      modifier =
+                        Modifier.fillMaxWidth().padding(start = 12.dp, top = 1.dp, bottom = 1.dp),
+                    ) {
+                      Text(
+                        image.name,
+                        color = colors.text.normal.copy(alpha = 0.6f),
+                        fontSize = 10.sp,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                      )
+                      Text(
+                        "\u25B6",
+                        fontSize = 9.sp,
+                        color = Color(0xFF4CAF50).copy(alpha = 0.7f),
+                        modifier =
+                          Modifier.clickable {
                               kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
                                 try {
-                                  val client = clientProvider?.invoke()
-                                  LOG.info(
-                                      "Killing device ${device.name} (${device.id}) via ${client?.transportName}"
-                                  )
-                                  client?.killDevice(device.name, device.id, platform)
-                                } catch (e: Exception) {
-                                  LOG.info("Failed to kill device: ${e.message}")
-                                }
+                                  clientProvider
+                                    ?.invoke()
+                                    ?.startDevice(
+                                      image.name,
+                                      image.platform,
+                                      image.deviceId,
+                                    )
+                                } catch (_: Exception) {}
                               }
                             }
                             .pointerHoverIcon(PointerIcon.Hand)
                             .padding(4.dp),
-                )
-              }
-            }
-
-            // Device images (available to boot) — grouped by platform with filters
-            if (deviceImages.isNotEmpty()) {
-              Spacer(Modifier.height(12.dp))
-
-              // Persisted filter state — read/write to ~/.automobile/device-filter.json
-              val filterFile = remember {
-                java.io.File(System.getProperty("user.home"), ".automobile/device-filter.json")
-              }
-              val savedFilter = remember { loadDeviceFilter(filterFile) }
-              var minApiFilter by remember { mutableStateOf(savedFilter.minApi.toFloat()) }
-              var maxApiFilter by remember { mutableStateOf(savedFilter.maxApi.toFloat()) }
-              var googleApisOnly by remember { mutableStateOf(savedFilter.googleApisOnly) }
-              var minIosFilter by remember { mutableStateOf(savedFilter.minIos.toFloat()) }
-              var maxIosFilter by remember { mutableStateOf(savedFilter.maxIos.toFloat()) }
-              var showIphone by remember { mutableStateOf(savedFilter.showIphone) }
-              var showIpad by remember { mutableStateOf(savedFilter.showIpad) }
-              var imagesExpanded by remember { mutableStateOf(false) }
-
-              fun saveFilters() {
-                saveDeviceFilter(
-                    filterFile,
-                    minApiFilter.toInt(),
-                    maxApiFilter.toInt(),
-                    googleApisOnly,
-                    minIosFilter.toInt(),
-                    maxIosFilter.toInt(),
-                    showIphone,
-                    showIpad,
-                )
+                      )
+                    }
+                  }
+                  if (filteredAndroid.isEmpty())
+                    Text(
+                      "No matching images",
+                      fontSize = 10.sp,
+                      color = colors.text.normal.copy(alpha = 0.4f),
+                      modifier = Modifier.padding(start = 12.dp),
+                    )
+                }
               }
 
-              Row(
+              // ── iOS group ──
+              if (iosImages.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Row(
                   verticalAlignment = Alignment.CenterVertically,
                   modifier =
-                      Modifier.fillMaxWidth()
-                          .clickable { imagesExpanded = !imagesExpanded }
-                          .pointerHoverIcon(PointerIcon.Hand),
-              ) {
-                Text(
-                    if (imagesExpanded) "\u25BE" else "\u25B8",
+                    Modifier.fillMaxWidth()
+                      .clickable { showIos = !showIos }
+                      .pointerHoverIcon(PointerIcon.Hand)
+                      .padding(vertical = 2.dp),
+                ) {
+                  Text(
+                    if (showIos) "\u25BE" else "\u25B8",
                     fontSize = 10.sp,
                     color = colors.text.normal.copy(alpha = 0.5f),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("Available Devices", color = colors.text.normal, fontSize = 14.sp)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "${deviceImages.size}",
-                    fontSize = 10.sp,
+                  )
+                  Spacer(Modifier.width(4.dp))
+                  Text(
+                    "\uD83C\uDF4E iOS",
+                    fontSize = 11.sp,
+                    color = colors.text.normal.copy(alpha = 0.7f),
+                  )
+                  Spacer(Modifier.weight(1f))
+                  Text(
+                    "${iosImages.size}",
+                    fontSize = 9.sp,
                     color = colors.text.normal.copy(alpha = 0.4f),
-                )
-              }
-
-              if (imagesExpanded) {
-                Spacer(Modifier.height(4.dp))
-                val bootedIds = devices.map { it.id }.toSet()
-                val androidImages = deviceImages.filter {
-                  it.platform == "android" && (it.deviceId == null || it.deviceId !in bootedIds)
+                  )
                 }
-                val iosImages = deviceImages.filter {
-                  it.platform == "ios" && (it.deviceId == null || it.deviceId !in bootedIds)
-                }
-                var showAndroid by remember { mutableStateOf(true) }
-                var showIos by remember { mutableStateOf(true) }
-
-                // ── Android group ──
-                if (androidImages.isNotEmpty()) {
-                  Row(
-                      verticalAlignment = Alignment.CenterVertically,
-                      modifier =
-                          Modifier.fillMaxWidth()
-                              .clickable { showAndroid = !showAndroid }
-                              .pointerHoverIcon(PointerIcon.Hand)
-                              .padding(vertical = 2.dp),
-                  ) {
-                    Text(
-                        if (showAndroid) "\u25BE" else "\u25B8",
-                        fontSize = 10.sp,
-                        color = colors.text.normal.copy(alpha = 0.5f),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "\uD83E\uDD16 Android",
-                        fontSize = 11.sp,
-                        color = colors.text.normal.copy(alpha = 0.7f),
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        "${androidImages.size}",
-                        fontSize = 9.sp,
-                        color = colors.text.normal.copy(alpha = 0.4f),
-                    )
+                if (showIos) {
+                  // Collect all available versions sorted, for slider steps
+                  val allVersions =
+                    remember(iosImages) {
+                      iosImages
+                        .mapNotNull { it.iosVersion }
+                        .distinct()
+                        .sortedWith(
+                          compareBy(
+                            { it.substringBefore('.').toIntOrNull() ?: 0 },
+                            { it.substringAfter('.', "0").toIntOrNull() ?: 0 },
+                          )
+                        )
+                    }
+                  // Version slider — only shown when 2+ distinct versions exist
+                  var minIdx by remember { mutableStateOf(0f) }
+                  var maxIdxState by remember {
+                    mutableStateOf((allVersions.size - 1).coerceAtLeast(0).toFloat())
                   }
-                  if (showAndroid) {
-                    // API range sliders
+                  if (allVersions.size >= 2) {
+                    val maxIdx = (allVersions.size - 1).toFloat()
+                    // Clamp state in case allVersions changed
+                    val clampedMaxIdx = maxIdxState.coerceIn(0f, maxIdx)
+                    val clampedMinIdx = minIdx.coerceIn(0f, clampedMaxIdx)
+                    val minVer =
+                      allVersions.getOrElse(clampedMinIdx.toInt()) { allVersions.first() }
+                    val maxVer =
+                      allVersions.getOrElse(
+                        clampedMaxIdx.toInt().coerceAtMost(allVersions.size - 1)
+                      ) {
+                        allVersions.last()
+                      }
+
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                      modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
                     ) {
                       Text(
-                          "API ${minApiFilter.toInt()}-${maxApiFilter.toInt()}",
-                          fontSize = 9.sp,
-                          color = colors.text.normal.copy(alpha = 0.5f),
-                          modifier = Modifier.width(55.dp),
+                        "$minVer\u2013$maxVer",
+                        fontSize = 9.sp,
+                        color = colors.text.normal.copy(alpha = 0.5f),
+                        modifier = Modifier.width(65.dp),
                       )
                       Column(Modifier.weight(1f)) {
                         androidx.compose.material3.Slider(
-                            value = minApiFilter,
-                            onValueChange = { minApiFilter = it.coerceAtMost(maxApiFilter) },
-                            onValueChangeFinished = { saveFilters() },
-                            valueRange = 21f..35f,
-                            steps = 13,
-                            modifier = Modifier.fillMaxWidth().height(16.dp),
+                          value = clampedMinIdx,
+                          onValueChange = { minIdx = it.coerceAtMost(maxIdxState) },
+                          onValueChangeFinished = { saveFilters() },
+                          valueRange = 0f..maxIdx,
+                          steps = (allVersions.size - 2).coerceAtLeast(0),
+                          modifier = Modifier.fillMaxWidth().height(16.dp),
                         )
                         androidx.compose.material3.Slider(
-                            value = maxApiFilter,
-                            onValueChange = { maxApiFilter = it.coerceAtLeast(minApiFilter) },
-                            onValueChangeFinished = { saveFilters() },
-                            valueRange = 21f..35f,
-                            steps = 13,
-                            modifier = Modifier.fillMaxWidth().height(16.dp),
+                          value = clampedMaxIdx,
+                          onValueChange = { maxIdxState = it.coerceAtLeast(minIdx) },
+                          onValueChangeFinished = { saveFilters() },
+                          valueRange = 0f..maxIdx,
+                          steps = (allVersions.size - 2).coerceAtLeast(0),
+                          modifier = Modifier.fillMaxWidth().height(16.dp),
                         )
                       }
                     }
-                    // Google APIs chip
-                    Row(modifier = Modifier.padding(start = 12.dp)) {
-                      FilterChip("Google APIs", googleApisOnly) {
-                        googleApisOnly = !googleApisOnly
-                        saveFilters()
-                      }
-                    }
-                    Spacer(Modifier.height(2.dp))
-                    // Filtered list
-                    val filteredAndroid =
-                        androidImages
-                            .filter { image ->
-                              val apiLevel =
-                                  extractApiLevel(image.target)
-                                      ?: Regex("""(?i)api[_-]?(\d+)""")
-                                          .find(image.name)
-                                          ?.groupValues
-                                          ?.get(1)
-                                          ?.toIntOrNull()
-                              val hasGoogleApis =
-                                  image.target?.contains("google", ignoreCase = true) == true ||
-                                      image.name.contains("-ga-", ignoreCase = true) ||
-                                      image.name.contains("Google", ignoreCase = true)
-                              if (googleApisOnly && !hasGoogleApis) return@filter false
-                              if (apiLevel != null)
-                                  apiLevel in minApiFilter.toInt()..maxApiFilter.toInt()
-                              else true
-                            }
-                            .sortedBy { it.name }
-                    filteredAndroid.forEach { image ->
-                      Row(
-                          verticalAlignment = Alignment.CenterVertically,
-                          modifier =
-                              Modifier.fillMaxWidth()
-                                  .padding(start = 12.dp, top = 1.dp, bottom = 1.dp),
-                      ) {
-                        Text(
-                            image.name,
-                            color = colors.text.normal.copy(alpha = 0.6f),
-                            fontSize = 10.sp,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            "\u25B6",
-                            fontSize = 9.sp,
-                            color = Color(0xFF4CAF50).copy(alpha = 0.7f),
-                            modifier =
-                                Modifier.clickable {
-                                      kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                                        try {
-                                          clientProvider
-                                              ?.invoke()
-                                              ?.startDevice(
-                                                  image.name,
-                                                  image.platform,
-                                                  image.deviceId,
-                                              )
-                                        } catch (_: Exception) {}
-                                      }
-                                    }
-                                    .pointerHoverIcon(PointerIcon.Hand)
-                                    .padding(4.dp),
-                        )
-                      }
-                    }
-                    if (filteredAndroid.isEmpty())
-                        Text(
-                            "No matching images",
-                            fontSize = 10.sp,
-                            color = colors.text.normal.copy(alpha = 0.4f),
-                            modifier = Modifier.padding(start = 12.dp),
-                        )
                   }
-                }
 
-                // ── iOS group ──
-                if (iosImages.isNotEmpty()) {
-                  Spacer(Modifier.height(4.dp))
+                  // iPhone / iPad chips
                   Row(
-                      verticalAlignment = Alignment.CenterVertically,
-                      modifier =
-                          Modifier.fillMaxWidth()
-                              .clickable { showIos = !showIos }
-                              .pointerHoverIcon(PointerIcon.Hand)
-                              .padding(vertical = 2.dp),
+                    modifier = Modifier.padding(start = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                   ) {
-                    Text(
-                        if (showIos) "\u25BE" else "\u25B8",
-                        fontSize = 10.sp,
-                        color = colors.text.normal.copy(alpha = 0.5f),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "\uD83C\uDF4E iOS",
-                        fontSize = 11.sp,
-                        color = colors.text.normal.copy(alpha = 0.7f),
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        "${iosImages.size}",
-                        fontSize = 9.sp,
-                        color = colors.text.normal.copy(alpha = 0.4f),
-                    )
-                  }
-                  if (showIos) {
-                    // Collect all available versions sorted, for slider steps
-                    val allVersions =
-                        remember(iosImages) {
-                          iosImages
-                              .mapNotNull { it.iosVersion }
-                              .distinct()
-                              .sortedWith(
-                                  compareBy(
-                                      { it.substringBefore('.').toIntOrNull() ?: 0 },
-                                      { it.substringAfter('.', "0").toIntOrNull() ?: 0 },
-                                  )
-                              )
-                        }
-                    // Version slider — only shown when 2+ distinct versions exist
-                    var minIdx by remember { mutableStateOf(0f) }
-                    var maxIdxState by remember {
-                      mutableStateOf((allVersions.size - 1).coerceAtLeast(0).toFloat())
+                    FilterChip("iPhone", showIphone) {
+                      showIphone = !showIphone
+                      saveFilters()
                     }
-                    if (allVersions.size >= 2) {
-                      val maxIdx = (allVersions.size - 1).toFloat()
-                      // Clamp state in case allVersions changed
-                      val clampedMaxIdx = maxIdxState.coerceIn(0f, maxIdx)
-                      val clampedMinIdx = minIdx.coerceIn(0f, clampedMaxIdx)
-                      val minVer =
-                          allVersions.getOrElse(clampedMinIdx.toInt()) { allVersions.first() }
-                      val maxVer =
-                          allVersions.getOrElse(
-                              clampedMaxIdx.toInt().coerceAtMost(allVersions.size - 1)
-                          ) {
-                            allVersions.last()
-                          }
+                    FilterChip("iPad", showIpad) {
+                      showIpad = !showIpad
+                      saveFilters()
+                    }
+                  }
+                  Spacer(Modifier.height(2.dp))
 
+                  // Determine selected version range
+                  val selectedVersions =
+                    if (allVersions.size >= 2) {
+                      allVersions
+                        .subList(
+                          minIdx.toInt().coerceIn(0, allVersions.size - 1),
+                          (maxIdxState.toInt() + 1).coerceAtMost(allVersions.size),
+                        )
+                        .toSet()
+                    } else {
+                      allVersions.toSet()
+                    }
+
+                  // Filter by version range + device type
+                  val filteredIos =
+                    iosImages
+                      .filter { image ->
+                        val ver = image.iosVersion
+                        val inRange = ver == null || ver in selectedVersions
+                        val isIphone = image.name.contains("iPhone", ignoreCase = true)
+                        val isIpad = image.name.contains("iPad", ignoreCase = true)
+                        val typeOk =
+                          when {
+                            isIphone -> showIphone
+                            isIpad -> showIpad
+                            else -> true // Apple Watch, Apple TV, etc.
+                          }
+                        inRange && typeOk
+                      }
+                      .sortedBy { it.name }
+
+                  // Group by version, sorted descending
+                  val iosByVersion =
+                    filteredIos
+                      .groupBy { it.iosVersion ?: "Unknown" }
+                      .toSortedMap(compareByDescending { it })
+                  iosByVersion.forEach { (version, images) ->
+                    Text(
+                      "iOS $version",
+                      fontSize = 9.sp,
+                      color = colors.text.normal.copy(alpha = 0.5f),
+                      modifier = Modifier.padding(start = 12.dp, top = 4.dp),
+                    )
+                    images.forEach { image ->
                       Row(
-                          verticalAlignment = Alignment.CenterVertically,
-                          modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier =
+                          Modifier.fillMaxWidth().padding(start = 16.dp, top = 1.dp, bottom = 1.dp),
                       ) {
                         Text(
-                            "$minVer\u2013$maxVer",
-                            fontSize = 9.sp,
-                            color = colors.text.normal.copy(alpha = 0.5f),
-                            modifier = Modifier.width(65.dp),
+                          image.name,
+                          color = colors.text.normal.copy(alpha = 0.6f),
+                          fontSize = 10.sp,
+                          modifier = Modifier.weight(1f),
+                          maxLines = 1,
+                          overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         )
-                        Column(Modifier.weight(1f)) {
-                          androidx.compose.material3.Slider(
-                              value = clampedMinIdx,
-                              onValueChange = { minIdx = it.coerceAtMost(maxIdxState) },
-                              onValueChangeFinished = { saveFilters() },
-                              valueRange = 0f..maxIdx,
-                              steps = (allVersions.size - 2).coerceAtLeast(0),
-                              modifier = Modifier.fillMaxWidth().height(16.dp),
-                          )
-                          androidx.compose.material3.Slider(
-                              value = clampedMaxIdx,
-                              onValueChange = { maxIdxState = it.coerceAtLeast(minIdx) },
-                              onValueChangeFinished = { saveFilters() },
-                              valueRange = 0f..maxIdx,
-                              steps = (allVersions.size - 2).coerceAtLeast(0),
-                              modifier = Modifier.fillMaxWidth().height(16.dp),
-                          )
-                        }
-                      }
-                    }
-
-                    // iPhone / iPad chips
-                    Row(
-                        modifier = Modifier.padding(start = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                      FilterChip("iPhone", showIphone) {
-                        showIphone = !showIphone
-                        saveFilters()
-                      }
-                      FilterChip("iPad", showIpad) {
-                        showIpad = !showIpad
-                        saveFilters()
-                      }
-                    }
-                    Spacer(Modifier.height(2.dp))
-
-                    // Determine selected version range
-                    val selectedVersions =
-                        if (allVersions.size >= 2) {
-                          allVersions
-                              .subList(
-                                  minIdx.toInt().coerceIn(0, allVersions.size - 1),
-                                  (maxIdxState.toInt() + 1).coerceAtMost(allVersions.size),
-                              )
-                              .toSet()
-                        } else {
-                          allVersions.toSet()
-                        }
-
-                    // Filter by version range + device type
-                    val filteredIos =
-                        iosImages
-                            .filter { image ->
-                              val ver = image.iosVersion
-                              val inRange = ver == null || ver in selectedVersions
-                              val isIphone = image.name.contains("iPhone", ignoreCase = true)
-                              val isIpad = image.name.contains("iPad", ignoreCase = true)
-                              val typeOk =
-                                  when {
-                                    isIphone -> showIphone
-                                    isIpad -> showIpad
-                                    else -> true // Apple Watch, Apple TV, etc.
-                                  }
-                              inRange && typeOk
-                            }
-                            .sortedBy { it.name }
-
-                    // Group by version, sorted descending
-                    val iosByVersion =
-                        filteredIos
-                            .groupBy { it.iosVersion ?: "Unknown" }
-                            .toSortedMap(compareByDescending { it })
-                    iosByVersion.forEach { (version, images) ->
-                      Text(
-                          "iOS $version",
-                          fontSize = 9.sp,
-                          color = colors.text.normal.copy(alpha = 0.5f),
-                          modifier = Modifier.padding(start = 12.dp, top = 4.dp),
-                      )
-                      images.forEach { image ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier =
-                                Modifier.fillMaxWidth()
-                                    .padding(start = 16.dp, top = 1.dp, bottom = 1.dp),
-                        ) {
-                          Text(
-                              image.name,
-                              color = colors.text.normal.copy(alpha = 0.6f),
-                              fontSize = 10.sp,
-                              modifier = Modifier.weight(1f),
-                              maxLines = 1,
-                              overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                          )
-                          Text(
-                              "\u25B6",
-                              fontSize = 9.sp,
-                              color = Color(0xFF4CAF50).copy(alpha = 0.7f),
-                              modifier =
-                                  Modifier.clickable {
-                                        kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                                          try {
-                                            clientProvider
-                                                ?.invoke()
-                                                ?.startDevice(
-                                                    image.name,
-                                                    image.platform,
-                                                    image.deviceId,
-                                                )
-                                          } catch (_: Exception) {}
-                                        }
-                                      }
-                                      .pointerHoverIcon(PointerIcon.Hand)
-                                      .padding(4.dp),
-                          )
-                        }
-                      }
-                    }
-                    if (filteredIos.isEmpty())
                         Text(
-                            "No matching simulators",
-                            fontSize = 10.sp,
-                            color = colors.text.normal.copy(alpha = 0.4f),
-                            modifier = Modifier.padding(start = 12.dp),
+                          "\u25B6",
+                          fontSize = 9.sp,
+                          color = Color(0xFF4CAF50).copy(alpha = 0.7f),
+                          modifier =
+                            Modifier.clickable {
+                                kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                                  try {
+                                    clientProvider
+                                      ?.invoke()
+                                      ?.startDevice(
+                                        image.name,
+                                        image.platform,
+                                        image.deviceId,
+                                      )
+                                  } catch (_: Exception) {}
+                                }
+                              }
+                              .pointerHoverIcon(PointerIcon.Hand)
+                              .padding(4.dp),
                         )
+                      }
+                    }
                   }
-                }
-              }
-            }
-
-            // App filter dropdown
-            if (installedApps.isNotEmpty()) {
-              Spacer(Modifier.height(12.dp))
-              Text(
-                  "App Filter",
-                  color = colors.text.normal,
-                  fontSize = 12.sp,
-                  fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-              )
-              Spacer(Modifier.height(4.dp))
-              var appDropdownExpanded by remember { mutableStateOf(false) }
-              Box {
-                Text(
-                    text = selectedAppId?.substringAfterLast('.') ?: "All apps",
-                    color =
-                        if (selectedAppId != null) colors.text.info
-                        else colors.text.normal.copy(alpha = 0.6f),
-                    fontSize = 11.sp,
-                    modifier =
-                        Modifier.fillMaxWidth()
-                            .background(
-                                colors.text.normal.copy(alpha = 0.05f),
-                                RoundedCornerShape(4.dp),
-                            )
-                            .clickable { appDropdownExpanded = true }
-                            .pointerHoverIcon(PointerIcon.Hand)
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                )
-                androidx.compose.material3.DropdownMenu(
-                    expanded = appDropdownExpanded,
-                    onDismissRequest = { appDropdownExpanded = false },
-                ) {
-                  androidx.compose.material3.DropdownMenuItem(
-                      text = { Text("All apps", fontSize = 11.sp) },
-                      onClick = {
-                        selectedAppId = null
-                        appDropdownExpanded = false
-                      },
-                  )
-                  installedApps.forEach { app ->
-                    androidx.compose.material3.DropdownMenuItem(
-                        text = {
-                          Text(
-                              app.packageName.substringAfterLast('.'),
-                              fontSize = 11.sp,
-                              color =
-                                  if (app.packageName == selectedAppId) colors.text.info
-                                  else colors.text.normal,
-                          )
-                        },
-                        onClick = {
-                          selectedAppId = app.packageName
-                          appDropdownExpanded = false
-                        },
+                  if (filteredIos.isEmpty())
+                    Text(
+                      "No matching simulators",
+                      fontSize = 10.sp,
+                      color = colors.text.normal.copy(alpha = 0.4f),
+                      modifier = Modifier.padding(start = 12.dp),
                     )
-                  }
                 }
               }
             }
-            Spacer(Modifier.height(16.dp))
+          }
+
+          // App filter dropdown
+          if (installedApps.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
             Text(
-                text = "\u2699 Settings",
-                color = colors.text.normal,
-                fontSize = 12.sp,
-                modifier = Modifier.clickable { showSettings = true }.padding(vertical = 4.dp),
+              "App Filter",
+              color = colors.text.normal,
+              fontSize = 12.sp,
+              fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
             )
-          }
-        },
-        rightPaneContent = {
-          RightInspectorPanel(
-              selectedEvent = selectedTelemetryEvent,
-              onClose = {
-                if (isLiveLayoutMode) isLiveLayoutMode = false else selectedTelemetryEvent = null
-              },
-              isLiveMode = isLiveLayoutMode,
-              onToggleLiveMode = { live ->
-                isLiveLayoutMode = live
-                if (live && !showRightPane) showRightPane = true
-              },
-              layoutInspectorState = layoutInspectorState,
-              hasDevice = observationStreamClient != null,
-              onOpenSource = onOpenSource,
-              screenshotLoader =
-                  remember(clientProvider, dataSourceMode) {
-                    if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
-                        NavigationScreenshotLoader(clientProvider)
-                    else null
-                  },
-          )
-        },
-        bottomPaneContent = {
-          val spans =
-              remember(
-                  telemetryEventCache.size,
-                  telemetryEventCache.lastOrNull()?.timestamp,
-                  filteredTimelineCategories,
-              ) {
-                buildTimelineSpans(telemetryEventCache.toList(), filteredTimelineCategories)
-              }
-          val lanes = remember(spans) { activeLanes(spans) }
-          if (spans.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Spacer(Modifier.height(4.dp))
+            var appDropdownExpanded by remember { mutableStateOf(false) }
+            Box {
               Text(
-                  "Event Timeline",
-                  color = colors.text.normal.copy(alpha = 0.5f),
-                  fontSize = 12.sp,
+                text = selectedAppId?.substringAfterLast('.') ?: "All apps",
+                color =
+                  if (selectedAppId != null) colors.text.info
+                  else colors.text.normal.copy(alpha = 0.6f),
+                fontSize = 11.sp,
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .background(
+                      colors.text.normal.copy(alpha = 0.05f),
+                      RoundedCornerShape(4.dp),
+                    )
+                    .clickable { appDropdownExpanded = true }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
               )
+              androidx.compose.material3.DropdownMenu(
+                expanded = appDropdownExpanded,
+                onDismissRequest = { appDropdownExpanded = false },
+              ) {
+                androidx.compose.material3.DropdownMenuItem(
+                  text = { Text("All apps", fontSize = 11.sp) },
+                  onClick = {
+                    selectedAppId = null
+                    appDropdownExpanded = false
+                  },
+                )
+                installedApps.forEach { app ->
+                  androidx.compose.material3.DropdownMenuItem(
+                    text = {
+                      Text(
+                        app.packageName.substringAfterLast('.'),
+                        fontSize = 11.sp,
+                        color =
+                          if (app.packageName == selectedAppId) colors.text.info
+                          else colors.text.normal,
+                      )
+                    },
+                    onClick = {
+                      selectedAppId = app.packageName
+                      appDropdownExpanded = false
+                    },
+                  )
+                }
+              }
             }
-          } else {
-            TimelineCanvas(
-                spans = spans,
-                activeLanes = lanes,
-                state = timelineState,
-                onEventClicked = { event ->
-                  selectedTelemetryEvent = event
-                  if (!showRightPane) showRightPane = true
-                },
-                modifier = Modifier.fillMaxSize(),
+          }
+          Spacer(Modifier.height(16.dp))
+          Text(
+            text = "\u2699 Settings",
+            color = colors.text.normal,
+            fontSize = 12.sp,
+            modifier = Modifier.clickable { showSettings = true }.padding(vertical = 4.dp),
+          )
+        }
+      },
+      rightPaneContent = {
+        RightInspectorPanel(
+          selectedEvent = selectedTelemetryEvent,
+          onClose = {
+            if (isLiveLayoutMode) isLiveLayoutMode = false else selectedTelemetryEvent = null
+          },
+          isLiveMode = isLiveLayoutMode,
+          onToggleLiveMode = { live ->
+            isLiveLayoutMode = live
+            if (live && !showRightPane) showRightPane = true
+          },
+          layoutInspectorState = layoutInspectorState,
+          hasDevice = observationStreamClient != null,
+          onOpenSource = onOpenSource,
+          screenshotLoader =
+            remember(clientProvider, dataSourceMode) {
+              if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
+                NavigationScreenshotLoader(clientProvider)
+              else null
+            },
+        )
+      },
+      bottomPaneContent = {
+        val spans =
+          remember(
+            telemetryEventCache.size,
+            telemetryEventCache.lastOrNull()?.timestamp,
+            filteredTimelineCategories,
+          ) {
+            buildTimelineSpans(telemetryEventCache.toList(), filteredTimelineCategories)
+          }
+        val lanes = remember(spans) { activeLanes(spans) }
+        if (spans.isEmpty()) {
+          Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+              "Event Timeline",
+              color = colors.text.normal.copy(alpha = 0.5f),
+              fontSize = 12.sp,
             )
           }
-        },
+        } else {
+          TimelineCanvas(
+            spans = spans,
+            activeLanes = lanes,
+            state = timelineState,
+            onEventClicked = { event ->
+              selectedTelemetryEvent = event
+              if (!showRightPane) showRightPane = true
+            },
+            modifier = Modifier.fillMaxSize(),
+          )
+        }
+      },
     )
 
     // Command palette overlay
     if (showCommandPalette) {
       CommandPalette(
-          registry = commandRegistry,
-          onDismiss = { showCommandPalette = false },
+        registry = commandRegistry,
+        onDismiss = { showCommandPalette = false },
       )
     }
 
     // Global search overlay
     if (showGlobalSearch) {
       GlobalSearchOverlay(
-          searchProvider = searchProvider,
-          onDismiss = { showGlobalSearch = false },
+        searchProvider = searchProvider,
+        onDismiss = { showGlobalSearch = false },
       )
     }
   } // Box
@@ -2064,9 +2058,9 @@ fun AutoMobileContent(
 
 @Composable
 private fun MainContentViewToggle(
-    showNavigation: Boolean,
-    onToggle: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
+  showNavigation: Boolean,
+  onToggle: (Boolean) -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   val bgColor = colors.panelBackground.copy(alpha = 0.85f)
@@ -2074,29 +2068,29 @@ private fun MainContentViewToggle(
   val borderColor = colors.text.normal.copy(alpha = 0.15f)
 
   Row(
-      modifier =
-          modifier
-              .clip(RoundedCornerShape(6.dp))
-              .background(bgColor)
-              .border(1.dp, borderColor, RoundedCornerShape(6.dp))
-              .padding(2.dp),
-      horizontalArrangement = Arrangement.spacedBy(0.dp),
+    modifier =
+      modifier
+        .clip(RoundedCornerShape(6.dp))
+        .background(bgColor)
+        .border(1.dp, borderColor, RoundedCornerShape(6.dp))
+        .padding(2.dp),
+    horizontalArrangement = Arrangement.spacedBy(0.dp),
   ) {
     val options = listOf(false to "\uD83D\uDCD0 Layout", true to "\uD83E\uDDED Navigation")
     options.forEach { (isNav, label) ->
       val isSelected = showNavigation == isNav
       Box(
-          modifier =
-              Modifier.clip(RoundedCornerShape(4.dp))
-                  .then(if (isSelected) Modifier.background(selectedBg) else Modifier)
-                  .clickable { onToggle(isNav) }
-                  .padding(horizontal = 8.dp, vertical = 4.dp),
-          contentAlignment = Alignment.Center,
+        modifier =
+          Modifier.clip(RoundedCornerShape(4.dp))
+            .then(if (isSelected) Modifier.background(selectedBg) else Modifier)
+            .clickable { onToggle(isNav) }
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center,
       ) {
         Text(
-            text = label,
-            fontSize = 11.sp,
-            color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+          text = label,
+          fontSize = 11.sp,
+          color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
         )
       }
     }
@@ -2105,65 +2099,63 @@ private fun MainContentViewToggle(
 
 @Composable
 private fun GlobalShellHeader(
-    devices: List<BootedDevice>,
-    activeDeviceId: String?,
-    onDeviceSelected: (String) -> Unit,
-    isDevicePanelExpanded: Boolean = false,
-    availableEmulators: List<AvailableEmulator> = emptyList(),
-    systemImages: List<SystemImage> = emptyList(),
-    onBootEmulator: (String) -> Unit = {},
-    onCreateEmulator: (String) -> Unit = {},
-    onCollapsePanel: () -> Unit = {},
-    needsSetup: Boolean = false,
-    onSetupClick: () -> Unit = {},
-    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
-    onDataSourceModeChanged: (DataSourceMode) -> Unit = {},
-    onMcpDeviceSelected: (deviceId: String, deviceName: String?) -> Unit = { _, _ -> },
-    onProcessConnected: (McpProcess?) -> Unit = {},
-    suppressAutoSelect: Boolean = false,
-    // App selector props (kept for backwards compatibility, but FG toggle is preferred)
-    installedApps: List<InstalledApp> = emptyList(),
-    selectedAppId: String? = null,
-    isAppListLoading: Boolean = false,
-    appDropdownExpanded: Boolean = false,
-    onAppDropdownExpandedChange: (Boolean) -> Unit = {},
-    onAppSelected: (String?) -> Unit = {},
-    onSettingsClicked: () -> Unit = {},
+  devices: List<BootedDevice>,
+  activeDeviceId: String?,
+  onDeviceSelected: (String) -> Unit,
+  isDevicePanelExpanded: Boolean = false,
+  availableEmulators: List<AvailableEmulator> = emptyList(),
+  systemImages: List<SystemImage> = emptyList(),
+  onBootEmulator: (String) -> Unit = {},
+  onCreateEmulator: (String) -> Unit = {},
+  onCollapsePanel: () -> Unit = {},
+  needsSetup: Boolean = false,
+  onSetupClick: () -> Unit = {},
+  dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+  onDataSourceModeChanged: (DataSourceMode) -> Unit = {},
+  onMcpDeviceSelected: (deviceId: String, deviceName: String?) -> Unit = { _, _ -> },
+  onProcessConnected: (McpProcess?) -> Unit = {},
+  suppressAutoSelect: Boolean = false,
+  // App selector props (kept for backwards compatibility, but FG toggle is preferred)
+  installedApps: List<InstalledApp> = emptyList(),
+  selectedAppId: String? = null,
+  isAppListLoading: Boolean = false,
+  appDropdownExpanded: Boolean = false,
+  onAppDropdownExpandedChange: (Boolean) -> Unit = {},
+  onAppSelected: (String?) -> Unit = {},
+  onSettingsClicked: () -> Unit = {},
 ) {
   val colors = SharedTheme.globalColors
 
-  Column(
-      modifier = Modifier.fillMaxWidth().background(SharedTheme.globalColors.panelBackground),
-  ) {
+  Column(modifier = Modifier.fillMaxWidth().background(SharedTheme.globalColors.panelBackground)) {
     FlowRow(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
       // Left side: Device selection
       if (dataSourceMode == DataSourceMode.Fake) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           Text(
-              "Devices:",
-              fontSize = 11.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = colors.text.normal.copy(alpha = 0.5f),
+            "Devices:",
+            fontSize = 11.sp,
+            maxLines = 1,
+            softWrap = false,
+            color = colors.text.normal.copy(alpha = 0.5f),
           )
 
           // Device icons
           Row(
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
             devices.forEach { device ->
               DeviceIcon(
-                  device = device,
-                  isActive = device.id == activeDeviceId,
-                  onClick = { onDeviceSelected(device.id) },
+                device = device,
+                isActive = device.id == activeDeviceId,
+                onClick = { onDeviceSelected(device.id) },
               )
             }
           }
@@ -2171,91 +2163,91 @@ private fun GlobalShellHeader(
       } else {
         // Real mode: show MCP server indicator or empty space
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           // Show "Devices:" when a device is selected, "MCP Servers" otherwise
           if (activeDeviceId != null) {
             Text(
-                "Devices:",
-                fontSize = 11.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = Color(0xFF2196F3),
-                modifier =
-                    Modifier.clickable {
-                          // Clicking "Devices:" expands the device panel
-                          // We need to deselect the device and expand the panel
-                          onDeviceSelected("")
-                        }
-                        .pointerHoverIcon(PointerIcon.Hand),
+              "Devices:",
+              fontSize = 11.sp,
+              maxLines = 1,
+              softWrap = false,
+              color = Color(0xFF2196F3),
+              modifier =
+                Modifier.clickable {
+                    // Clicking "Devices:" expands the device panel
+                    // We need to deselect the device and expand the panel
+                    onDeviceSelected("")
+                  }
+                  .pointerHoverIcon(PointerIcon.Hand),
             )
 
             // Show device buttons next to "Devices:" using emojis with tooltips
             devices.forEach { device ->
               val isActive = device.id == activeDeviceId
               val deviceEmoji =
-                  when (device.type) {
-                    DeviceType.AndroidEmulator,
-                    DeviceType.AndroidPhysical -> "\uD83E\uDD16" // 🤖
-                    DeviceType.iOSSimulator,
-                    DeviceType.iOSPhysical -> "\uD83C\uDF4E" // 🍎
-                  }
+                when (device.type) {
+                  DeviceType.AndroidEmulator,
+                  DeviceType.AndroidPhysical -> "\uD83E\uDD16" // 🤖
+                  DeviceType.iOSSimulator,
+                  DeviceType.iOSPhysical -> "\uD83C\uDF4E" // 🍎
+                }
               Tooltip(
-                  tooltip = {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                      Text(device.name, fontSize = 12.sp)
+                tooltip = {
+                  Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(device.name, fontSize = 12.sp)
+                    Text(
+                      "Status: ${device.status}",
+                      fontSize = 10.sp,
+                      color = colors.text.normal.copy(alpha = 0.6f),
+                    )
+                    device.foregroundApp?.let { app ->
                       Text(
-                          "Status: ${device.status}",
-                          fontSize = 10.sp,
-                          color = colors.text.normal.copy(alpha = 0.6f),
+                        "App: $app",
+                        fontSize = 10.sp,
+                        color = colors.text.normal.copy(alpha = 0.6f),
                       )
-                      device.foregroundApp?.let { app ->
-                        Text(
-                            "App: $app",
-                            fontSize = 10.sp,
-                            color = colors.text.normal.copy(alpha = 0.6f),
-                        )
-                      }
                     }
-                  },
+                  }
+                }
               ) {
                 Box(
-                    modifier =
-                        Modifier.background(
-                                if (isActive) Color(0xFF2196F3).copy(alpha = 0.15f)
-                                else colors.text.normal.copy(alpha = 0.08f),
-                                RoundedCornerShape(4.dp),
-                            )
-                            .clickable {
-                              if (device.id == activeDeviceId) {
-                                // Tapping active device expands panel to show more devices
-                                onDeviceSelected("")
-                              } else {
-                                onDeviceSelected(device.id)
-                              }
-                            }
-                            .pointerHoverIcon(PointerIcon.Hand)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                  modifier =
+                    Modifier.background(
+                        if (isActive) Color(0xFF2196F3).copy(alpha = 0.15f)
+                        else colors.text.normal.copy(alpha = 0.08f),
+                        RoundedCornerShape(4.dp),
+                      )
+                      .clickable {
+                        if (device.id == activeDeviceId) {
+                          // Tapping active device expands panel to show more devices
+                          onDeviceSelected("")
+                        } else {
+                          onDeviceSelected(device.id)
+                        }
+                      }
+                      .pointerHoverIcon(PointerIcon.Hand)
+                      .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                   Text(
-                      deviceEmoji,
-                      fontSize = 14.sp,
+                    deviceEmoji,
+                    fontSize = 14.sp,
                   )
                 }
               }
             }
           } else {
             Text(
-                "🔌",
-                fontSize = 14.sp,
+              "🔌",
+              fontSize = 14.sp,
             )
             Text(
-                "MCP Servers",
-                fontSize = 11.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = colors.text.normal.copy(alpha = 0.7f),
+              "MCP Servers",
+              fontSize = 11.sp,
+              maxLines = 1,
+              softWrap = false,
+              color = colors.text.normal.copy(alpha = 0.7f),
             )
           }
         }
@@ -2263,47 +2255,47 @@ private fun GlobalShellHeader(
 
       // Right side: Setup button (conditional), Real Data toggle, Live toggle
       Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         // Setup AutoMobile button (shown when service not detected)
         if (needsSetup) {
           Box(
-              modifier =
-                  Modifier.background(
-                          Color(0xFF2196F3).copy(alpha = 0.15f),
-                          RoundedCornerShape(4.dp),
-                      )
-                      .clickable(onClick = onSetupClick)
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier =
+              Modifier.background(
+                  Color(0xFF2196F3).copy(alpha = 0.15f),
+                  RoundedCornerShape(4.dp),
+                )
+                .clickable(onClick = onSetupClick)
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 8.dp, vertical = 4.dp)
           ) {
             Text(
-                "Setup",
-                fontSize = 10.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = Color(0xFF64B5F6),
+              "Setup",
+              fontSize = 10.sp,
+              maxLines = 1,
+              softWrap = false,
+              color = Color(0xFF64B5F6),
             )
           }
         }
 
         // Real Data switch
         RealDataSwitch(
-            isRealData = dataSourceMode == DataSourceMode.Real,
-            onToggle = { isReal ->
-              onDataSourceModeChanged(if (isReal) DataSourceMode.Real else DataSourceMode.Fake)
-            },
+          isRealData = dataSourceMode == DataSourceMode.Real,
+          onToggle = { isReal ->
+            onDataSourceModeChanged(if (isReal) DataSourceMode.Real else DataSourceMode.Fake)
+          },
         )
 
         // Settings gear
         Text(
-            "⚙",
-            fontSize = 16.sp,
-            modifier =
-                Modifier.clickable { onSettingsClicked() }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+          "⚙",
+          fontSize = 16.sp,
+          modifier =
+            Modifier.clickable { onSettingsClicked() }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(horizontal = 8.dp, vertical = 4.dp),
         )
       }
     }
@@ -2312,17 +2304,17 @@ private fun GlobalShellHeader(
     if (isDevicePanelExpanded) {
       if (dataSourceMode == DataSourceMode.Real) {
         McpProcessesPanel(
-            useRealData = true,
-            onDeviceSelected = onMcpDeviceSelected,
-            onProcessConnected = onProcessConnected,
-            suppressAutoSelect = suppressAutoSelect,
+          useRealData = true,
+          onDeviceSelected = onMcpDeviceSelected,
+          onProcessConnected = onProcessConnected,
+          suppressAutoSelect = suppressAutoSelect,
         )
       } else {
         McpProcessesPanel(
-            useRealData = false,
-            onDeviceSelected = onMcpDeviceSelected,
-            onProcessConnected = onProcessConnected,
-            suppressAutoSelect = suppressAutoSelect,
+          useRealData = false,
+          onDeviceSelected = onMcpDeviceSelected,
+          onProcessConnected = onProcessConnected,
+          suppressAutoSelect = suppressAutoSelect,
         )
       }
     }
@@ -2331,48 +2323,47 @@ private fun GlobalShellHeader(
 
 @Composable
 private fun DeviceIcon(
-    device: BootedDevice,
-    isActive: Boolean,
-    onClick: () -> Unit,
+  device: BootedDevice,
+  isActive: Boolean,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val bgColor =
-      if (isActive) colors.text.normal.copy(alpha = 0.15f)
-      else colors.text.normal.copy(alpha = 0.05f)
+    if (isActive) colors.text.normal.copy(alpha = 0.15f) else colors.text.normal.copy(alpha = 0.05f)
   val borderColor = if (isActive) colors.text.normal.copy(alpha = 0.4f) else Color.Transparent
   val iconColor = if (isActive) colors.text.normal else colors.text.normal.copy(alpha = 0.4f)
 
   Tooltip(
-      tooltip = {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-          Text(device.name, fontSize = 12.sp)
+    tooltip = {
+      Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(device.name, fontSize = 12.sp)
+        Text(
+          "Status: ${device.status}",
+          fontSize = 11.sp,
+          color = colors.text.normal.copy(alpha = 0.7f),
+        )
+        device.foregroundApp?.let { app ->
           Text(
-              "Status: ${device.status}",
-              fontSize = 11.sp,
-              color = colors.text.normal.copy(alpha = 0.7f),
+            "App: $app",
+            fontSize = 11.sp,
+            color = colors.text.normal.copy(alpha = 0.7f),
           )
-          device.foregroundApp?.let { app ->
-            Text(
-                "App: $app",
-                fontSize = 11.sp,
-                color = colors.text.normal.copy(alpha = 0.7f),
-            )
-          }
         }
-      },
+      }
+    }
   ) {
     Box(
-        modifier =
-            Modifier.size(28.dp)
-                .background(bgColor, shape = RoundedCornerShape(6.dp))
-                .then(
-                    if (borderColor != Color.Transparent)
-                        Modifier.border(1.5.dp, borderColor, RoundedCornerShape(6.dp))
-                    else Modifier
-                )
-                .clickable(onClick = onClick)
-                .pointerHoverIcon(PointerIcon.Hand),
-        contentAlignment = Alignment.Center,
+      modifier =
+        Modifier.size(28.dp)
+          .background(bgColor, shape = RoundedCornerShape(6.dp))
+          .then(
+            if (borderColor != Color.Transparent)
+              Modifier.border(1.5.dp, borderColor, RoundedCornerShape(6.dp))
+            else Modifier
+          )
+          .clickable(onClick = onClick)
+          .pointerHoverIcon(PointerIcon.Hand),
+      contentAlignment = Alignment.Center,
     ) {
       // Simple device icon representation
       when (device.type) {
@@ -2391,26 +2382,26 @@ private fun AndroidDeviceIcon(color: Color) {
   Box(modifier = Modifier.size(16.dp)) {
     // Body (rounded rectangle)
     Box(
-        modifier =
-            Modifier.align(Alignment.BottomCenter)
-                .size(width = 12.dp, height = 10.dp)
-                .background(
-                    color,
-                    RoundedCornerShape(
-                        topStart = 2.dp,
-                        topEnd = 2.dp,
-                        bottomStart = 3.dp,
-                        bottomEnd = 3.dp,
-                    ),
-                )
+      modifier =
+        Modifier.align(Alignment.BottomCenter)
+          .size(width = 12.dp, height = 10.dp)
+          .background(
+            color,
+            RoundedCornerShape(
+              topStart = 2.dp,
+              topEnd = 2.dp,
+              bottomStart = 3.dp,
+              bottomEnd = 3.dp,
+            ),
+          )
     )
     // Head (smaller rounded rect on top)
     Box(
-        modifier =
-            Modifier.align(Alignment.TopCenter)
-                .offset(y = 1.dp)
-                .size(width = 10.dp, height = 5.dp)
-                .background(color, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+      modifier =
+        Modifier.align(Alignment.TopCenter)
+          .offset(y = 1.dp)
+          .size(width = 10.dp, height = 5.dp)
+          .background(color, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
     )
   }
 }
@@ -2419,47 +2410,47 @@ private fun AndroidDeviceIcon(color: Color) {
 private fun AppleDeviceIcon(color: Color) {
   // Simple iPhone shape (rounded rectangle with notch hint)
   Box(
-      modifier =
-          Modifier.size(width = 10.dp, height = 16.dp).background(color, RoundedCornerShape(2.dp))
+    modifier =
+      Modifier.size(width = 10.dp, height = 16.dp).background(color, RoundedCornerShape(2.dp))
   )
 }
 
 @Composable
 private fun RealDataSwitch(
-    isRealData: Boolean,
-    onToggle: (Boolean) -> Unit,
+  isRealData: Boolean,
+  onToggle: (Boolean) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val trackColor = if (isRealData) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.3f)
   val thumbColor = Color.White
 
   Row(
-      horizontalArrangement = Arrangement.spacedBy(6.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
-        "Real Data",
-        fontSize = 11.sp,
-        maxLines = 1,
-        softWrap = false,
-        color = if (isRealData) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
+      "Real Data",
+      fontSize = 11.sp,
+      maxLines = 1,
+      softWrap = false,
+      color = if (isRealData) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
     )
     Box(
-        modifier =
-            Modifier.width(32.dp)
-                .height(18.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .background(trackColor)
-                .clickable { onToggle(!isRealData) }
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(2.dp),
+      modifier =
+        Modifier.width(32.dp)
+          .height(18.dp)
+          .clip(RoundedCornerShape(9.dp))
+          .background(trackColor)
+          .clickable { onToggle(!isRealData) }
+          .pointerHoverIcon(PointerIcon.Hand)
+          .padding(2.dp)
     ) {
       Box(
-          modifier =
-              Modifier.size(14.dp)
-                  .offset(x = if (isRealData) 14.dp else 0.dp)
-                  .clip(CircleShape)
-                  .background(thumbColor),
+        modifier =
+          Modifier.size(14.dp)
+            .offset(x = if (isRealData) 14.dp else 0.dp)
+            .clip(CircleShape)
+            .background(thumbColor)
       )
     }
   }
@@ -2467,15 +2458,15 @@ private fun RealDataSwitch(
 
 @Composable
 private fun DraggableTabs(
-    tabs: List<Dashboard>,
-    selectedIndex: Int,
-    onTabSelected: (Int) -> Unit,
-    onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
-    draggedIndex: Int?,
-    onDragStart: (Int) -> Unit,
-    onDragEnd: () -> Unit,
-    dropTargetIndex: Int?,
-    onDropTargetChanged: (Int?) -> Unit,
+  tabs: List<Dashboard>,
+  selectedIndex: Int,
+  onTabSelected: (Int) -> Unit,
+  onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
+  draggedIndex: Int?,
+  onDragStart: (Int) -> Unit,
+  onDragEnd: () -> Unit,
+  dropTargetIndex: Int?,
+  onDropTargetChanged: (Int?) -> Unit,
 ) {
   LOG.debug("DraggableTabs rendered with ${tabs.size} tabs, selectedIndex=$selectedIndex")
   val colors = SharedTheme.globalColors
@@ -2483,15 +2474,15 @@ private fun DraggableTabs(
   var dragOffset by remember { mutableStateOf(0f) }
 
   BoxWithConstraints(
-      modifier = Modifier.fillMaxWidth().background(SharedTheme.globalColors.panelBackground)
+    modifier = Modifier.fillMaxWidth().background(SharedTheme.globalColors.panelBackground)
   ) {
     // Three modes: icons only (< 300dp), icon + text (300-600dp), text only (> 600dp)
     val useIconsOnly = maxWidth < 300.dp
     val useIconsWithText = maxWidth >= 300.dp && maxWidth < 600.dp
 
     Row(
-        modifier = Modifier.padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.Start,
+      modifier = Modifier.padding(horizontal = 4.dp),
+      horizontalArrangement = Arrangement.Start,
     ) {
       tabs.forEachIndexed { index, dashboard ->
         val isSelected = index == selectedIndex
@@ -2499,85 +2490,85 @@ private fun DraggableTabs(
         val isDropTarget = index == dropTargetIndex && draggedIndex != null && draggedIndex != index
 
         Box(
-            modifier =
-                Modifier.padding(vertical = 4.dp, horizontal = 2.dp)
-                    .then(if (isDragged) Modifier.offset(x = dragOffset.dp) else Modifier)
-                    .background(
-                        when {
-                          isDropTarget -> colors.text.normal.copy(alpha = 0.15f)
-                          isSelected -> colors.text.normal.copy(alpha = 0.1f)
-                          else -> Color.Transparent
-                        },
-                        RoundedCornerShape(6.dp),
-                    )
-                    .then(
-                        if (isDropTarget)
-                            Modifier.border(
-                                1.5.dp,
-                                Color(0xFF2196F3).copy(alpha = 0.5f),
-                                RoundedCornerShape(6.dp),
-                            )
-                        else Modifier
-                    )
-                    .clickable {
-                      LOG.debug("Tab clicked via clickable: $index (${tabs[index]})")
-                      onTabSelected(index)
+          modifier =
+            Modifier.padding(vertical = 4.dp, horizontal = 2.dp)
+              .then(if (isDragged) Modifier.offset(x = dragOffset.dp) else Modifier)
+              .background(
+                when {
+                  isDropTarget -> colors.text.normal.copy(alpha = 0.15f)
+                  isSelected -> colors.text.normal.copy(alpha = 0.1f)
+                  else -> Color.Transparent
+                },
+                RoundedCornerShape(6.dp),
+              )
+              .then(
+                if (isDropTarget)
+                  Modifier.border(
+                    1.5.dp,
+                    Color(0xFF2196F3).copy(alpha = 0.5f),
+                    RoundedCornerShape(6.dp),
+                  )
+                else Modifier
+              )
+              .clickable {
+                LOG.debug("Tab clicked via clickable: $index (${tabs[index]})")
+                onTabSelected(index)
+              }
+              .pointerInput("drag-$index") {
+                detectDragGesturesAfterLongPress(
+                  onDragStart = { onDragStart(index) },
+                  onDragEnd = {
+                    if (
+                      draggedIndex != null &&
+                        dropTargetIndex != null &&
+                        draggedIndex != dropTargetIndex
+                    ) {
+                      onReorder(draggedIndex, dropTargetIndex)
                     }
-                    .pointerInput("drag-$index") {
-                      detectDragGesturesAfterLongPress(
-                          onDragStart = { onDragStart(index) },
-                          onDragEnd = {
-                            if (
-                                draggedIndex != null &&
-                                    dropTargetIndex != null &&
-                                    draggedIndex != dropTargetIndex
-                            ) {
-                              onReorder(draggedIndex, dropTargetIndex)
-                            }
-                            dragOffset = 0f
-                            onDragEnd()
-                          },
-                          onDragCancel = {
-                            dragOffset = 0f
-                            onDragEnd()
-                          },
-                          onDrag = { change, dragAmount ->
-                            change.consume()
-                            dragOffset += dragAmount.x / 2 // Scale down for smoother feel
+                    dragOffset = 0f
+                    onDragEnd()
+                  },
+                  onDragCancel = {
+                    dragOffset = 0f
+                    onDragEnd()
+                  },
+                  onDrag = { change, dragAmount ->
+                    change.consume()
+                    dragOffset += dragAmount.x / 2 // Scale down for smoother feel
 
-                            // Calculate which tab we're over based on position
-                            val positions = tabPositions.toList().sortedBy { it.second }
-                            val draggedPos = (tabPositions[index] ?: 0f) + dragOffset
-                            var newTarget: Int? = null
-                            for (i in positions.indices) {
-                              val (tabIdx, pos) = positions[i]
-                              val nextPos = positions.getOrNull(i + 1)?.second ?: (pos + 80f)
-                              if (draggedPos >= pos && draggedPos < nextPos) {
-                                newTarget = tabIdx
-                                break
-                              }
-                            }
-                            if (newTarget != null && newTarget != draggedIndex) {
-                              onDropTargetChanged(newTarget)
-                            } else if (newTarget == draggedIndex) {
-                              onDropTargetChanged(null)
-                            }
-                          },
-                      )
+                    // Calculate which tab we're over based on position
+                    val positions = tabPositions.toList().sortedBy { it.second }
+                    val draggedPos = (tabPositions[index] ?: 0f) + dragOffset
+                    var newTarget: Int? = null
+                    for (i in positions.indices) {
+                      val (tabIdx, pos) = positions[i]
+                      val nextPos = positions.getOrNull(i + 1)?.second ?: (pos + 80f)
+                      if (draggedPos >= pos && draggedPos < nextPos) {
+                        newTarget = tabIdx
+                        break
+                      }
                     }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = if (useIconsOnly) 8.dp else 10.dp, vertical = 6.dp)
-                    .onGloballyPositioned { coordinates ->
-                      tabPositions = tabPositions + (index to coordinates.positionInParent().x)
-                    },
-            contentAlignment = Alignment.Center,
+                    if (newTarget != null && newTarget != draggedIndex) {
+                      onDropTargetChanged(newTarget)
+                    } else if (newTarget == draggedIndex) {
+                      onDropTargetChanged(null)
+                    }
+                  },
+                )
+              }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(horizontal = if (useIconsOnly) 8.dp else 10.dp, vertical = 6.dp)
+              .onGloballyPositioned { coordinates ->
+                tabPositions = tabPositions + (index to coordinates.positionInParent().x)
+              },
+          contentAlignment = Alignment.Center,
         ) {
           val textColor =
-              when {
-                isDragged -> colors.text.normal.copy(alpha = 0.8f)
-                isSelected -> colors.text.normal
-                else -> colors.text.normal.copy(alpha = 0.6f)
-              }
+            when {
+              isDragged -> colors.text.normal.copy(alpha = 0.8f)
+              isSelected -> colors.text.normal
+              else -> colors.text.normal.copy(alpha = 0.6f)
+            }
 
           when {
             useIconsOnly -> {
@@ -2587,26 +2578,26 @@ private fun DraggableTabs(
             }
             useIconsWithText -> {
               Row(
-                  horizontalArrangement = Arrangement.spacedBy(4.dp),
-                  verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
               ) {
                 Text(dashboard.icon, fontSize = 12.sp)
                 Text(
-                    dashboard.title,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    softWrap = false,
-                    color = textColor,
+                  dashboard.title,
+                  fontSize = 11.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  color = textColor,
                 )
               }
             }
             else -> {
               Text(
-                  dashboard.title,
-                  fontSize = 12.sp,
-                  maxLines = 1,
-                  softWrap = false,
-                  color = textColor,
+                dashboard.title,
+                fontSize = 12.sp,
+                maxLines = 1,
+                softWrap = false,
+                color = textColor,
               )
             }
           }
@@ -2618,25 +2609,25 @@ private fun DraggableTabs(
 
 @Composable
 private fun DeviceManagementPanel(
-    bootedDevices: List<BootedDevice>,
-    availableEmulators: List<AvailableEmulator>,
-    systemImages: List<SystemImage>,
-    onDeviceSelected: (String) -> Unit,
-    onBootEmulator: (String) -> Unit,
-    onCreateEmulator: (String) -> Unit,
+  bootedDevices: List<BootedDevice>,
+  availableEmulators: List<AvailableEmulator>,
+  systemImages: List<SystemImage>,
+  onDeviceSelected: (String) -> Unit,
+  onBootEmulator: (String) -> Unit,
+  onCreateEmulator: (String) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   // Split devices by platform
   val androidDevices =
-      bootedDevices
-          .filter { it.type == DeviceType.AndroidEmulator || it.type == DeviceType.AndroidPhysical }
-          .sortedByDescending { it.connectedAt }
+    bootedDevices
+      .filter { it.type == DeviceType.AndroidEmulator || it.type == DeviceType.AndroidPhysical }
+      .sortedByDescending { it.connectedAt }
 
   val iosDevices =
-      bootedDevices
-          .filter { it.type == DeviceType.iOSSimulator || it.type == DeviceType.iOSPhysical }
-          .sortedByDescending { it.connectedAt }
+    bootedDevices
+      .filter { it.type == DeviceType.iOSSimulator || it.type == DeviceType.iOSPhysical }
+      .sortedByDescending { it.connectedAt }
 
   val androidEmulators = availableEmulators.filter { it.type == DeviceType.AndroidEmulator }
   val iosSimulators = availableEmulators.filter { it.type == DeviceType.iOSSimulator }
@@ -2645,21 +2636,21 @@ private fun DeviceManagementPanel(
   val iosImages = systemImages.filter { it.platform == "iOS" }
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth().background(colors.text.normal.copy(alpha = 0.02f)).padding(8.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
+    modifier =
+      Modifier.fillMaxWidth().background(colors.text.normal.copy(alpha = 0.02f)).padding(8.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     // Active Devices section
     if (androidDevices.isNotEmpty() || iosDevices.isNotEmpty()) {
       DeviceSectionHeader("Active Devices")
       Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         // Android column
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
           Text("Android", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
           if (androidDevices.isEmpty()) {
@@ -2667,10 +2658,10 @@ private fun DeviceManagementPanel(
           } else {
             androidDevices.forEach { device ->
               DeviceListItem(
-                  name = device.name,
-                  status = device.status,
-                  icon = if (device.type == DeviceType.AndroidPhysical) "📱" else "📲",
-                  onClick = { onDeviceSelected(device.id) },
+                name = device.name,
+                status = device.status,
+                icon = if (device.type == DeviceType.AndroidPhysical) "📱" else "📲",
+                onClick = { onDeviceSelected(device.id) },
               )
             }
           }
@@ -2678,8 +2669,8 @@ private fun DeviceManagementPanel(
 
         // iOS column
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
           Text("iOS", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
           if (iosDevices.isEmpty()) {
@@ -2687,10 +2678,10 @@ private fun DeviceManagementPanel(
           } else {
             iosDevices.forEach { device ->
               DeviceListItem(
-                  name = device.name,
-                  status = device.status,
-                  icon = if (device.type == DeviceType.iOSPhysical) "📱" else "📲",
-                  onClick = { onDeviceSelected(device.id) },
+                name = device.name,
+                status = device.status,
+                icon = if (device.type == DeviceType.iOSPhysical) "📱" else "📲",
+                onClick = { onDeviceSelected(device.id) },
               )
             }
           }
@@ -2702,21 +2693,21 @@ private fun DeviceManagementPanel(
     if (androidEmulators.isNotEmpty() || iosSimulators.isNotEmpty()) {
       DeviceSectionHeader("Available to Boot")
       Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         // Android emulators
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
           if (androidEmulators.isNotEmpty()) {
             androidEmulators.forEach { emulator ->
               EmulatorListItem(
-                  name = emulator.name,
-                  apiLevel = emulator.apiLevel,
-                  icon = "🤖",
-                  onClick = { onBootEmulator(emulator.id) },
+                name = emulator.name,
+                apiLevel = emulator.apiLevel,
+                icon = "🤖",
+                onClick = { onBootEmulator(emulator.id) },
               )
             }
           }
@@ -2724,16 +2715,16 @@ private fun DeviceManagementPanel(
 
         // iOS simulators
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
           if (iosSimulators.isNotEmpty()) {
             iosSimulators.forEach { simulator ->
               EmulatorListItem(
-                  name = simulator.name,
-                  apiLevel = null,
-                  icon = "🍎",
-                  onClick = { onBootEmulator(simulator.id) },
+                name = simulator.name,
+                apiLevel = null,
+                icon = "🍎",
+                onClick = { onBootEmulator(simulator.id) },
               )
             }
           }
@@ -2745,21 +2736,21 @@ private fun DeviceManagementPanel(
     if (androidImages.isNotEmpty() || iosImages.isNotEmpty()) {
       DeviceSectionHeader("System Images")
       Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         // Android images
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
           if (androidImages.isNotEmpty()) {
             androidImages.forEach { image ->
               SystemImageListItem(
-                  name = image.name,
-                  apiLevel = image.apiLevel,
-                  icon = "💿",
-                  onClick = { onCreateEmulator(image.id) },
+                name = image.name,
+                apiLevel = image.apiLevel,
+                icon = "💿",
+                onClick = { onCreateEmulator(image.id) },
               )
             }
           }
@@ -2767,16 +2758,16 @@ private fun DeviceManagementPanel(
 
         // iOS images
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
           if (iosImages.isNotEmpty()) {
             iosImages.forEach { image ->
               SystemImageListItem(
-                  name = image.name,
-                  apiLevel = image.apiLevel,
-                  icon = "💿",
-                  onClick = { onCreateEmulator(image.id) },
+                name = image.name,
+                apiLevel = image.apiLevel,
+                icon = "💿",
+                onClick = { onCreateEmulator(image.id) },
               )
             }
           }
@@ -2790,38 +2781,38 @@ private fun DeviceManagementPanel(
 private fun DeviceSectionHeader(title: String) {
   val colors = SharedTheme.globalColors
   Text(
-      title,
-      fontSize = 11.sp,
-      color = colors.text.normal.copy(alpha = 0.6f),
+    title,
+    fontSize = 11.sp,
+    color = colors.text.normal.copy(alpha = 0.6f),
   )
 }
 
 @Composable
 private fun DeviceListItem(
-    name: String,
-    status: String,
-    icon: String,
-    onClick: () -> Unit,
+  name: String,
+  status: String,
+  icon: String,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 8.dp, vertical = 6.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 8.dp, vertical = 6.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(icon, fontSize = 14.sp)
     Column(modifier = Modifier.weight(1f)) {
       Text(name, fontSize = 11.sp, maxLines = 1)
       Text(
-          status,
-          fontSize = 9.sp,
-          color = Color(0xFF4CAF50),
+        status,
+        fontSize = 9.sp,
+        color = Color(0xFF4CAF50),
       )
     }
   }
@@ -2829,31 +2820,31 @@ private fun DeviceListItem(
 
 @Composable
 private fun EmulatorListItem(
-    name: String,
-    apiLevel: String?,
-    icon: String,
-    onClick: () -> Unit,
+  name: String,
+  apiLevel: String?,
+  icon: String,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 8.dp, vertical = 6.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 8.dp, vertical = 6.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(icon, fontSize = 14.sp)
     Column(modifier = Modifier.weight(1f)) {
       Text(name, fontSize = 11.sp, maxLines = 1)
       if (apiLevel != null) {
         Text(
-            "API $apiLevel",
-            fontSize = 9.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
+          "API $apiLevel",
+          fontSize = 9.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
         )
       }
     }
@@ -2863,30 +2854,30 @@ private fun EmulatorListItem(
 
 @Composable
 private fun SystemImageListItem(
-    name: String,
-    apiLevel: String,
-    icon: String,
-    onClick: () -> Unit,
+  name: String,
+  apiLevel: String,
+  icon: String,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 8.dp, vertical = 6.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 8.dp, vertical = 6.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(icon, fontSize = 14.sp)
     Column(modifier = Modifier.weight(1f)) {
       Text(name, fontSize = 11.sp, maxLines = 1)
       Text(
-          "API $apiLevel",
-          fontSize = 9.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
+        "API $apiLevel",
+        fontSize = 9.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
       )
     }
     Text("Create", fontSize = 10.sp, color = Color(0xFF2196F3))
@@ -2895,29 +2886,28 @@ private fun SystemImageListItem(
 
 // Test result state
 data class TestResult(
-    val pid: Int,
-    val success: Boolean,
-    val latencyMs: Long? = null,
-    val error: String? = null,
-    val timestamp: Long = System.currentTimeMillis(),
+  val pid: Int,
+  val success: Boolean,
+  val latencyMs: Long? = null,
+  val error: String? = null,
+  val timestamp: Long = System.currentTimeMillis(),
 )
 
 @Composable
 private fun McpProcessesPanel(
-    useRealData: Boolean = false,
-    onDeviceSelected: (deviceId: String, deviceName: String?) -> Unit = { _, _ -> },
-    onProcessConnected: (McpProcess?) -> Unit = {}, // Called when MCP process connection changes
-    suppressAutoSelect: Boolean =
-        false, // When true, don't auto-select device (user wants to browse)
+  useRealData: Boolean = false,
+  onDeviceSelected: (deviceId: String, deviceName: String?) -> Unit = { _, _ -> },
+  onProcessConnected: (McpProcess?) -> Unit = {}, // Called when MCP process connection changes
+  suppressAutoSelect: Boolean = false, // When true, don't auto-select device (user wants to browse)
 ) {
   val graph = LocalAutoMobileGraph.current
   val colors = SharedTheme.globalColors
 
   // Use appropriate detector based on mode
   val detector =
-      remember(useRealData) {
-        if (useRealData) RealMcpProcessDetector() else FakeMcpProcessDetector()
-      }
+    remember(useRealData) {
+      if (useRealData) RealMcpProcessDetector() else FakeMcpProcessDetector()
+    }
 
   // Detect processes (with refresh capability)
   var refreshCounter by remember { mutableIntStateOf(0) }
@@ -2929,11 +2919,11 @@ private fun McpProcessesPanel(
     processes = detector.detectProcesses()
     isLoading = false
     LOG.debug(
-        "[McpProcessesPanel] Detected ${processes.size} MCP processes (useRealData=$useRealData)"
+      "[McpProcessesPanel] Detected ${processes.size} MCP processes (useRealData=$useRealData)"
     )
     processes.forEach { p ->
       LOG.debug(
-          "[McpProcessesPanel]   - ${p.name} (PID ${p.pid}, ${p.connectionType}, socket=${p.socketPath}, port=${p.port})"
+        "[McpProcessesPanel]   - ${p.name} (PID ${p.pid}, ${p.connectionType}, socket=${p.socketPath}, port=${p.port})"
       )
     }
   }
@@ -2944,7 +2934,7 @@ private fun McpProcessesPanel(
   // Notify parent when connected process changes
   LaunchedEffect(connectedProcess) {
     LOG.debug(
-        "[McpProcessesPanel] LaunchedEffect(connectedProcess) triggered, connectedProcess=${connectedProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}"
+      "[McpProcessesPanel] LaunchedEffect(connectedProcess) triggered, connectedProcess=${connectedProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}"
     )
     onProcessConnected(connectedProcess)
   }
@@ -2955,7 +2945,7 @@ private fun McpProcessesPanel(
     if (socketProcesses.size == 1 && connectedProcess == null) {
       val autoConnectProcess = socketProcesses.first()
       LOG.debug(
-          "[McpProcessesPanel] Auto-connecting to ${autoConnectProcess.name} (PID ${autoConnectProcess.pid})"
+        "[McpProcessesPanel] Auto-connecting to ${autoConnectProcess.name} (PID ${autoConnectProcess.pid})"
       )
       connectedProcess = autoConnectProcess
       // Call directly - don't rely on LaunchedEffect(connectedProcess) which may not
@@ -3017,26 +3007,27 @@ private fun McpProcessesPanel(
       devicesError = null
       try {
         LOG.debug(
-            "[AutoMobile IDE] Creating MCP client for process: ${process.name}, type: ${process.connectionType}, socket: ${process.socketPath}, port: ${process.port}"
+          "[AutoMobile IDE] Creating MCP client for process: ${process.name}, type: ${process.connectionType}, socket: ${process.socketPath}, port: ${process.port}"
         )
 
         val client =
-            if (useRealData) {
-              dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory.create(process)
-            } else {
-              dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory.createFake()
-            }
+          if (useRealData) {
+            dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory.create(process)
+          } else {
+            dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory.createFake()
+          }
 
         LOG.debug("[AutoMobile IDE] Fetching booted devices from automobile:devices/booted")
         // Fetch booted devices
         when (val result = client.readResource("automobile:devices/booted")) {
           is dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult.Success -> {
             LOG.debug(
-                "[AutoMobile IDE] Successfully fetched booted devices: ${result.content.take(200)}..."
+              "[AutoMobile IDE] Successfully fetched booted devices: ${result.content.take(200)}..."
             )
             val parsed =
-                dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser
-                    .parseBootedDevices(result.content)
+              dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser.parseBootedDevices(
+                result.content
+              )
             bootedDevices = parsed?.devices ?: emptyList()
             LOG.debug("[AutoMobile IDE] Parsed ${bootedDevices.size} booted devices")
           }
@@ -3051,12 +3042,12 @@ private fun McpProcessesPanel(
         when (val result = client.readResource("automobile:devices/images")) {
           is dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult.Success -> {
             LOG.debug(
-                "[AutoMobile IDE] Successfully fetched device images: ${result.content.take(200)}..."
+              "[AutoMobile IDE] Successfully fetched device images: ${result.content.take(200)}..."
             )
             val parsed =
-                dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser.parseDeviceImages(
-                    result.content
-                )
+              dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser.parseDeviceImages(
+                result.content
+              )
             deviceImages = parsed?.images ?: emptyList()
             LOG.debug("[AutoMobile IDE] Parsed ${deviceImages.size} device images")
           }
@@ -3081,7 +3072,7 @@ private fun McpProcessesPanel(
         LOG.debug("[AutoMobile IDE] Exception fetching devices: ${e.javaClass.name}: ${e.message}")
         LOG.debug("[AutoMobile IDE] Stack trace:\n$stackTrace")
         devicesError =
-            "${e.javaClass.simpleName}: ${e.message}\n\nStack trace:\n${stackTrace.lines().take(5).joinToString("\n")}"
+          "${e.javaClass.simpleName}: ${e.message}\n\nStack trace:\n${stackTrace.lines().take(5).joinToString("\n")}"
       }
       devicesLoading = false
     } else {
@@ -3098,7 +3089,7 @@ private fun McpProcessesPanel(
     if (!suppressAutoSelect && bootedDevices.size == 1 && selectingDevice == null) {
       val autoSelectDevice = bootedDevices.first()
       LOG.debug(
-          "[McpProcessesPanel] Auto-selecting device: ${autoSelectDevice.name} (${autoSelectDevice.deviceId})"
+        "[McpProcessesPanel] Auto-selecting device: ${autoSelectDevice.name} (${autoSelectDevice.deviceId})"
       )
       selectingDevice = autoSelectDevice
       onDeviceSelected(autoSelectDevice.deviceId, autoSelectDevice.name)
@@ -3106,11 +3097,11 @@ private fun McpProcessesPanel(
       kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
           graph.autoMobileClient.setActiveDevice(
-              autoSelectDevice.deviceId,
-              autoSelectDevice.platform,
+            autoSelectDevice.deviceId,
+            autoSelectDevice.platform,
           )
           LOG.debug(
-              "[McpProcessesPanel] Auto-selected device on MCP server: ${autoSelectDevice.name}"
+            "[McpProcessesPanel] Auto-selected device on MCP server: ${autoSelectDevice.name}"
           )
         } catch (e: Exception) {
           LOG.warn("[McpProcessesPanel] Failed to set active device on MCP: ${e.message}")
@@ -3126,7 +3117,7 @@ private fun McpProcessesPanel(
     connectedProcess = if (wasConnected) null else process
     LOG.debug("[McpProcessesPanel] Connect button clicked for ${process.name} (PID ${process.pid})")
     LOG.debug(
-        "[McpProcessesPanel] ${if (wasConnected) "Disconnecting from" else "Connecting to"} process"
+      "[McpProcessesPanel] ${if (wasConnected) "Disconnecting from" else "Connecting to"} process"
     )
     LOG.debug("[McpProcessesPanel] connectedProcess is now: ${connectedProcess?.name ?: "null"}")
   }
@@ -3175,121 +3166,119 @@ private fun McpProcessesPanel(
 
   // Boot device action (non-blocking coroutine)
   val onBootDeviceAction: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit =
-      { image ->
-        val deviceKey = image.deviceId ?: image.name
-        bootingDeviceIds = bootingDeviceIds + deviceKey
-        bootErrors = bootErrors - deviceKey
-        scope.launch(Dispatchers.IO) {
-          try {
-            LOG.debug("[AutoMobile IDE] Booting device: ${image.name}")
-            val result =
-                graph.autoMobileClient.startDevice(
-                    name = image.name,
-                    platform = image.platform,
-                    deviceId = image.deviceId,
-                )
-            if (result.success) {
-              LOG.debug("[AutoMobile IDE] Device booted successfully: ${image.name}")
-              kotlinx.coroutines.delay(3000)
-              refreshCounter++
-            } else {
-              LOG.debug("[AutoMobile IDE] Failed to boot device: ${result.message}")
-              bootErrors = bootErrors + (deviceKey to (result.message ?: "Failed to boot"))
-            }
-          } catch (e: Exception) {
-            LOG.debug("[AutoMobile IDE] Exception booting device: ${e.message}")
-            bootErrors = bootErrors + (deviceKey to (e.message ?: "Error booting device"))
+    { image ->
+      val deviceKey = image.deviceId ?: image.name
+      bootingDeviceIds = bootingDeviceIds + deviceKey
+      bootErrors = bootErrors - deviceKey
+      scope.launch(Dispatchers.IO) {
+        try {
+          LOG.debug("[AutoMobile IDE] Booting device: ${image.name}")
+          val result =
+            graph.autoMobileClient.startDevice(
+              name = image.name,
+              platform = image.platform,
+              deviceId = image.deviceId,
+            )
+          if (result.success) {
+            LOG.debug("[AutoMobile IDE] Device booted successfully: ${image.name}")
+            kotlinx.coroutines.delay(3000)
+            refreshCounter++
+          } else {
+            LOG.debug("[AutoMobile IDE] Failed to boot device: ${result.message}")
+            bootErrors = bootErrors + (deviceKey to (result.message ?: "Failed to boot"))
           }
-          bootingDeviceIds = bootingDeviceIds - deviceKey
+        } catch (e: Exception) {
+          LOG.debug("[AutoMobile IDE] Exception booting device: ${e.message}")
+          bootErrors = bootErrors + (deviceKey to (e.message ?: "Error booting device"))
         }
+        bootingDeviceIds = bootingDeviceIds - deviceKey
       }
+    }
 
   // Select device action (non-blocking coroutine)
   val onSelectDeviceAction:
-      (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit =
-      { device ->
-        LOG.debug(
-            "[AutoMobile IDE] Select clicked for device: ${device.name}, deviceId: ${device.deviceId}, platform: ${device.platform}"
-        )
-        selectingDevice = device
-        selectError = null
-        onDeviceSelected(device.deviceId, device.name)
-        scope.launch(Dispatchers.IO) {
-          try {
-            val result = graph.autoMobileClient.setActiveDevice(device.deviceId, device.platform)
-            if (result.success) {
-              LOG.debug("[AutoMobile IDE] Device selected successfully: ${device.name}")
-              selectError = null
-            } else {
-              LOG.debug("[AutoMobile IDE] Failed to select device: ${result.message}")
-              selectError = result.message
-            }
-          } catch (e: Exception) {
-            LOG.debug("[AutoMobile IDE] Exception selecting device: ${e.message}")
-            selectError = e.message ?: "Error selecting device"
+    (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit =
+    { device ->
+      LOG.debug(
+        "[AutoMobile IDE] Select clicked for device: ${device.name}, deviceId: ${device.deviceId}, platform: ${device.platform}"
+      )
+      selectingDevice = device
+      selectError = null
+      onDeviceSelected(device.deviceId, device.name)
+      scope.launch(Dispatchers.IO) {
+        try {
+          val result = graph.autoMobileClient.setActiveDevice(device.deviceId, device.platform)
+          if (result.success) {
+            LOG.debug("[AutoMobile IDE] Device selected successfully: ${device.name}")
+            selectError = null
+          } else {
+            LOG.debug("[AutoMobile IDE] Failed to select device: ${result.message}")
+            selectError = result.message
           }
-          selectingDevice = null
+        } catch (e: Exception) {
+          LOG.debug("[AutoMobile IDE] Exception selecting device: ${e.message}")
+          selectError = e.message ?: "Error selecting device"
         }
+        selectingDevice = null
       }
+    }
 
   // Kill device action (non-blocking coroutine)
   val onKillDeviceAction: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit =
-      { device ->
-        killingDeviceIds = killingDeviceIds + device.deviceId
-        killErrors = killErrors - device.deviceId
-        scope.launch(Dispatchers.IO) {
-          try {
-            LOG.warn(
-                "[AutoMobile IDE] Killing device: ${device.name} (${device.deviceId}, ${device.platform})"
+    { device ->
+      killingDeviceIds = killingDeviceIds + device.deviceId
+      killErrors = killErrors - device.deviceId
+      scope.launch(Dispatchers.IO) {
+        try {
+          LOG.warn(
+            "[AutoMobile IDE] Killing device: ${device.name} (${device.deviceId}, ${device.platform})"
+          )
+          val result =
+            graph.autoMobileClient.killDevice(
+              name = device.name,
+              deviceId = device.deviceId,
+              platform = device.platform,
             )
-            val result =
-                graph.autoMobileClient.killDevice(
-                    name = device.name,
-                    deviceId = device.deviceId,
-                    platform = device.platform,
-                )
-            if (result.success) {
-              LOG.warn("[AutoMobile IDE] Device killed successfully: ${device.name}")
-              kotlinx.coroutines.delay(2000)
-              refreshCounter++
-            } else {
-              LOG.warn("[AutoMobile IDE] Failed to kill device: ${result.message}")
-              killErrors = killErrors + (device.deviceId to (result.message ?: "Failed to kill"))
-            }
-          } catch (e: Exception) {
-            LOG.warn("[AutoMobile IDE] Exception killing device: ${e.javaClass.name}: ${e.message}")
-            killErrors = killErrors + (device.deviceId to (e.message ?: "Error killing device"))
+          if (result.success) {
+            LOG.warn("[AutoMobile IDE] Device killed successfully: ${device.name}")
+            kotlinx.coroutines.delay(2000)
+            refreshCounter++
+          } else {
+            LOG.warn("[AutoMobile IDE] Failed to kill device: ${result.message}")
+            killErrors = killErrors + (device.deviceId to (result.message ?: "Failed to kill"))
           }
-          killingDeviceIds = killingDeviceIds - device.deviceId
+        } catch (e: Exception) {
+          LOG.warn("[AutoMobile IDE] Exception killing device: ${e.javaClass.name}: ${e.message}")
+          killErrors = killErrors + (device.deviceId to (e.message ?: "Error killing device"))
         }
+        killingDeviceIds = killingDeviceIds - device.deviceId
       }
+    }
 
   // Update service action (non-blocking coroutine)
   val onUpdateServiceAction:
-      (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit =
-      { device ->
-        updatingServiceDeviceIds = updatingServiceDeviceIds + device.deviceId
-        scope.launch(Dispatchers.IO) {
-          try {
-            LOG.warn(
-                "[AutoMobile IDE] Updating service for device: ${device.name} (${device.deviceId}, ${device.platform})"
-            )
-            val result = graph.autoMobileClient.updateService(device.deviceId, device.platform)
-            if (result.success) {
-              LOG.warn("[AutoMobile IDE] Service updated successfully for: ${device.name}")
-              kotlinx.coroutines.delay(1000)
-              refreshCounter++
-            } else {
-              LOG.warn("[AutoMobile IDE] Failed to update service: ${result.message}")
-            }
-          } catch (e: Exception) {
-            LOG.warn(
-                "[AutoMobile IDE] Exception updating service: ${e.javaClass.name}: ${e.message}"
-            )
+    (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit =
+    { device ->
+      updatingServiceDeviceIds = updatingServiceDeviceIds + device.deviceId
+      scope.launch(Dispatchers.IO) {
+        try {
+          LOG.warn(
+            "[AutoMobile IDE] Updating service for device: ${device.name} (${device.deviceId}, ${device.platform})"
+          )
+          val result = graph.autoMobileClient.updateService(device.deviceId, device.platform)
+          if (result.success) {
+            LOG.warn("[AutoMobile IDE] Service updated successfully for: ${device.name}")
+            kotlinx.coroutines.delay(1000)
+            refreshCounter++
+          } else {
+            LOG.warn("[AutoMobile IDE] Failed to update service: ${result.message}")
           }
-          updatingServiceDeviceIds = updatingServiceDeviceIds - device.deviceId
+        } catch (e: Exception) {
+          LOG.warn("[AutoMobile IDE] Exception updating service: ${e.javaClass.name}: ${e.message}")
         }
+        updatingServiceDeviceIds = updatingServiceDeviceIds - device.deviceId
       }
+    }
 
   // Handle test execution via LaunchedEffect
   LaunchedEffect(testingPid) {
@@ -3297,19 +3286,19 @@ private fun McpProcessesPanel(
       kotlinx.coroutines.delay(500) // Simulate network latency
       val success = (0..10).random() > 2 // 80% success rate for demo
       val result =
-          if (success) {
-            TestResult(
-                pid = testingPid!!,
-                success = true,
-                latencyMs = (20..150).random().toLong(),
-            )
-          } else {
-            TestResult(
-                pid = testingPid!!,
-                success = false,
-                error = "Connection refused",
-            )
-          }
+        if (success) {
+          TestResult(
+            pid = testingPid!!,
+            success = true,
+            latencyMs = (20..150).random().toLong(),
+          )
+        } else {
+          TestResult(
+            pid = testingPid!!,
+            success = false,
+            error = "Connection refused",
+          )
+        }
       testResults = testResults + (testingPid!! to result)
       testingPid = null
     }
@@ -3323,143 +3312,143 @@ private fun McpProcessesPanel(
   val stdioProcesses = processes.filter { it.connectionType == McpConnectionType.Stdio }
 
   LOG.debug(
-      "[McpProcessesPanel] Process breakdown: streamable=${streamableProcesses.size}, socket=${socketProcesses.size}, stdio=${stdioProcesses.size}"
+    "[McpProcessesPanel] Process breakdown: streamable=${streamableProcesses.size}, socket=${socketProcesses.size}, stdio=${stdioProcesses.size}"
   )
 
   val scrollState = rememberScrollState()
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .verticalScroll(scrollState)
-              .background(colors.text.normal.copy(alpha = 0.02f))
-              .padding(12.dp),
-      verticalArrangement = Arrangement.spacedBy(16.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .verticalScroll(scrollState)
+        .background(colors.text.normal.copy(alpha = 0.02f))
+        .padding(12.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
     // Header with Start Daemon button
     if (useRealData && socketProcesses.isEmpty() && !isDaemonStarting) {
       Box(
-          modifier =
-              Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                  .clickable { onStartDaemon() }
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(horizontal = 8.dp, vertical = 4.dp),
+        modifier =
+          Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+            .clickable { onStartDaemon() }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
       ) {
         Text(
-            "Start Daemon",
-            fontSize = 10.sp,
-            color = Color(0xFF4CAF50),
+          "Start Daemon",
+          fontSize = 10.sp,
+          color = Color(0xFF4CAF50),
         )
       }
     }
     if (isDaemonStarting) {
       Text(
-          "Starting...",
-          fontSize = 10.sp,
-          color = Color(0xFF2196F3),
+        "Starting...",
+        fontSize = 10.sp,
+        color = Color(0xFF2196F3),
       )
     }
 
     // Daemon start error
     if (daemonStartError != null) {
       Row(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .background(Color(0xFFE53935).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
-                  .padding(12.dp),
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalAlignment = Alignment.CenterVertically,
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(Color(0xFFE53935).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         Text("⚠", fontSize = 14.sp, color = Color(0xFFE53935))
         Text(
-            daemonStartError!!,
-            fontSize = 11.sp,
-            color = Color(0xFFE53935),
-            modifier = Modifier.weight(1f),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+          daemonStartError!!,
+          fontSize = 11.sp,
+          color = Color(0xFFE53935),
+          modifier = Modifier.weight(1f),
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
         )
         Text(
-            "✕",
-            fontSize = 14.sp,
-            color = Color(0xFFE53935).copy(alpha = 0.5f),
-            modifier =
-                Modifier.clickable { daemonStartError = null }.pointerHoverIcon(PointerIcon.Hand),
+          "✕",
+          fontSize = 14.sp,
+          color = Color(0xFFE53935).copy(alpha = 0.5f),
+          modifier =
+            Modifier.clickable { daemonStartError = null }.pointerHoverIcon(PointerIcon.Hand),
         )
       }
     }
 
     if (isLoading && processes.isEmpty()) {
       Box(
-          modifier = Modifier.fillMaxWidth().padding(32.dp),
-          contentAlignment = Alignment.Center,
+        modifier = Modifier.fillMaxWidth().padding(32.dp),
+        contentAlignment = Alignment.Center,
       ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
           Text("⟳", fontSize = 24.sp, color = Color(0xFF2196F3))
           Text(
-              "Detecting MCP servers...",
-              fontSize = 12.sp,
-              color = colors.text.normal.copy(alpha = 0.5f),
-              modifier = Modifier.padding(top = 8.dp),
+            "Detecting MCP servers...",
+            fontSize = 12.sp,
+            color = colors.text.normal.copy(alpha = 0.5f),
+            modifier = Modifier.padding(top = 8.dp),
           )
         }
       }
     } else if (processes.isEmpty()) {
       Box(
-          modifier = Modifier.fillMaxWidth().padding(32.dp),
-          contentAlignment = Alignment.Center,
+        modifier = Modifier.fillMaxWidth().padding(32.dp),
+        contentAlignment = Alignment.Center,
       ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
           Text(if (useRealData) "🔍" else "📋", fontSize = 24.sp)
           Text(
-              if (useRealData) "No AutoMobile servers detected" else "Mock MCP Servers",
-              fontSize = 12.sp,
-              color = colors.text.normal.copy(alpha = 0.5f),
-              modifier = Modifier.padding(top = 8.dp),
+            if (useRealData) "No AutoMobile servers detected" else "Mock MCP Servers",
+            fontSize = 12.sp,
+            color = colors.text.normal.copy(alpha = 0.5f),
+            modifier = Modifier.padding(top = 8.dp),
           )
           if (useRealData) {
             Text(
-                "Start a daemon to enable MCP features",
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.4f),
-                modifier = Modifier.padding(top = 4.dp),
+              "Start a daemon to enable MCP features",
+              fontSize = 10.sp,
+              color = colors.text.normal.copy(alpha = 0.4f),
+              modifier = Modifier.padding(top = 4.dp),
             )
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(top = 12.dp),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.padding(top = 12.dp),
             ) {
               Box(
-                  modifier =
-                      Modifier.background(
-                              Color(0xFF4CAF50).copy(alpha = 0.15f),
-                              RoundedCornerShape(4.dp),
-                          )
-                          .clickable(enabled = !isDaemonStarting) { onStartDaemon() }
-                          .pointerHoverIcon(
-                              if (isDaemonStarting) PointerIcon.Default else PointerIcon.Hand
-                          )
-                          .padding(horizontal = 12.dp, vertical = 6.dp),
+                modifier =
+                  Modifier.background(
+                      Color(0xFF4CAF50).copy(alpha = 0.15f),
+                      RoundedCornerShape(4.dp),
+                    )
+                    .clickable(enabled = !isDaemonStarting) { onStartDaemon() }
+                    .pointerHoverIcon(
+                      if (isDaemonStarting) PointerIcon.Default else PointerIcon.Hand
+                    )
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
               ) {
                 Text(
-                    if (isDaemonStarting) "Starting..." else "Start Daemon",
-                    fontSize = 11.sp,
-                    color = Color(0xFF4CAF50),
+                  if (isDaemonStarting) "Starting..." else "Start Daemon",
+                  fontSize = 11.sp,
+                  color = Color(0xFF4CAF50),
                 )
               }
               Text(
-                  "↻ Refresh",
-                  fontSize = 10.sp,
-                  color = Color(0xFF2196F3),
-                  modifier =
-                      Modifier.clickable { refreshCounter++ }.pointerHoverIcon(PointerIcon.Hand),
+                "↻ Refresh",
+                fontSize = 10.sp,
+                color = Color(0xFF2196F3),
+                modifier =
+                  Modifier.clickable { refreshCounter++ }.pointerHoverIcon(PointerIcon.Hand),
               )
             }
           } else {
             Text(
-                "Switch to Real mode to detect actual servers",
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.4f),
-                modifier = Modifier.padding(top = 4.dp),
+              "Switch to Real mode to detect actual servers",
+              fontSize = 10.sp,
+              color = colors.text.normal.copy(alpha = 0.4f),
+              modifier = Modifier.padding(top = 4.dp),
             )
           }
         }
@@ -3468,114 +3457,111 @@ private fun McpProcessesPanel(
       // Streamable HTTP servers
       if (streamableProcesses.isNotEmpty()) {
         ProcessSection(
-            title = "Streamable HTTP",
-            icon = "🌐",
-            processes = streamableProcesses,
-            connectedPid = connectedProcess?.pid,
-            testResults = testResults,
-            testingPid = testingPid,
-            detailsPid = detailsProcess?.pid,
-            onConnect = onConnect,
-            onDetails = onDetails,
-            onTest = onTest,
+          title = "Streamable HTTP",
+          icon = "🌐",
+          processes = streamableProcesses,
+          connectedPid = connectedProcess?.pid,
+          testResults = testResults,
+          testingPid = testingPid,
+          detailsPid = detailsProcess?.pid,
+          onConnect = onConnect,
+          onDetails = onDetails,
+          onTest = onTest,
         )
       }
 
       // Unix Socket servers
       if (socketProcesses.isNotEmpty()) {
         ProcessSection(
-            title = "Unix Socket",
-            icon = "🔌",
-            processes = socketProcesses,
-            connectedPid = connectedProcess?.pid,
-            testResults = testResults,
-            testingPid = testingPid,
-            detailsPid = detailsProcess?.pid,
-            onConnect = onConnect,
-            onDetails = onDetails,
-            onTest = onTest,
+          title = "Unix Socket",
+          icon = "🔌",
+          processes = socketProcesses,
+          connectedPid = connectedProcess?.pid,
+          testResults = testResults,
+          testingPid = testingPid,
+          detailsPid = detailsProcess?.pid,
+          onConnect = onConnect,
+          onDetails = onDetails,
+          onTest = onTest,
         )
       }
 
       // Devices section (when connected)
       LOG.debug(
-          "[McpProcessesPanel] connectedProcess=$connectedProcess, bootedDevices.size=${bootedDevices.size}"
+        "[McpProcessesPanel] connectedProcess=$connectedProcess, bootedDevices.size=${bootedDevices.size}"
       )
       if (connectedProcess != null) {
         LOG.debug("[McpProcessesPanel] Showing DevicesSection")
         DevicesSection(
-            bootedDevices = bootedDevices,
-            deviceImages = deviceImages,
-            isLoading = devicesLoading,
-            error = devicesError,
-            bootingDeviceIds = bootingDeviceIds,
-            killingDeviceIds = killingDeviceIds,
-            bootErrors = bootErrors,
-            killErrors = killErrors,
-            daemonStatus = daemonStatus,
-            updatingServiceDeviceIds = updatingServiceDeviceIds,
-            onSelectDevice = onSelectDeviceAction,
-            onBootDevice = onBootDeviceAction,
-            onKillDevice = onKillDeviceAction,
-            onUpdateService = onUpdateServiceAction,
+          bootedDevices = bootedDevices,
+          deviceImages = deviceImages,
+          isLoading = devicesLoading,
+          error = devicesError,
+          bootingDeviceIds = bootingDeviceIds,
+          killingDeviceIds = killingDeviceIds,
+          bootErrors = bootErrors,
+          killErrors = killErrors,
+          daemonStatus = daemonStatus,
+          updatingServiceDeviceIds = updatingServiceDeviceIds,
+          onSelectDevice = onSelectDeviceAction,
+          onBootDevice = onBootDeviceAction,
+          onKillDevice = onKillDeviceAction,
+          onUpdateService = onUpdateServiceAction,
         )
       }
 
       // Potential ports info
       Box(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-                  .padding(12.dp),
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+            .padding(12.dp)
       ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
           Text(
-              "Connection Info",
-              fontSize = 11.sp,
-              maxLines = 1,
-              softWrap = false,
-              fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-              color = colors.text.normal.copy(alpha = 0.7f),
+            "Connection Info",
+            fontSize = 11.sp,
+            maxLines = 1,
+            softWrap = false,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+            color = colors.text.normal.copy(alpha = 0.7f),
           )
           Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Column {
               Text(
-                  "Active Ports",
-                  fontSize = 9.sp,
-                  maxLines = 1,
-                  softWrap = false,
-                  color = colors.text.normal.copy(alpha = 0.5f),
+                "Active Ports",
+                fontSize = 9.sp,
+                maxLines = 1,
+                softWrap = false,
+                color = colors.text.normal.copy(alpha = 0.5f),
               )
               Text(
-                  streamableProcesses
-                      .mapNotNull { it.port }
-                      .joinToString(", ") { ":$it" }
-                      .ifEmpty { "None" },
-                  fontSize = 11.sp,
-                  color = colors.text.normal,
-                  maxLines = 1,
-                  softWrap = false,
-                  overflow = TextOverflow.Ellipsis,
+                streamableProcesses
+                  .mapNotNull { it.port }
+                  .joinToString(", ") { ":$it" }
+                  .ifEmpty { "None" },
+                fontSize = 11.sp,
+                color = colors.text.normal,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
               )
             }
             Column {
               Text(
-                  "Socket Paths",
-                  fontSize = 9.sp,
-                  maxLines = 1,
-                  softWrap = false,
-                  color = colors.text.normal.copy(alpha = 0.5f),
+                "Socket Paths",
+                fontSize = 9.sp,
+                maxLines = 1,
+                softWrap = false,
+                color = colors.text.normal.copy(alpha = 0.5f),
               )
               Text(
-                  socketProcesses
-                      .mapNotNull { it.socketPath }
-                      .joinToString(", ")
-                      .ifEmpty { "None" },
-                  fontSize = 11.sp,
-                  color = colors.text.normal,
-                  maxLines = 1,
-                  softWrap = false,
-                  overflow = TextOverflow.Ellipsis,
+                socketProcesses.mapNotNull { it.socketPath }.joinToString(", ").ifEmpty { "None" },
+                fontSize = 11.sp,
+                color = colors.text.normal,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
               )
             }
           }
@@ -3587,56 +3573,56 @@ private fun McpProcessesPanel(
 
 @Composable
 private fun ProcessSection(
-    title: String,
-    icon: String,
-    processes: List<McpProcess>,
-    connectedPid: Int?,
-    testResults: Map<Int, TestResult>,
-    testingPid: Int?,
-    detailsPid: Int?,
-    onConnect: (McpProcess) -> Unit,
-    onDetails: (McpProcess) -> Unit,
-    onTest: (McpProcess) -> Unit,
+  title: String,
+  icon: String,
+  processes: List<McpProcess>,
+  connectedPid: Int?,
+  testResults: Map<Int, TestResult>,
+  testingPid: Int?,
+  detailsPid: Int?,
+  onConnect: (McpProcess) -> Unit,
+  onDetails: (McpProcess) -> Unit,
+  onTest: (McpProcess) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(icon, fontSize = 12.sp)
       Text(
-          title,
-          fontSize = 11.sp,
-          maxLines = 1,
-          softWrap = false,
-          fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-          color = colors.text.normal.copy(alpha = 0.7f),
+        title,
+        fontSize = 11.sp,
+        maxLines = 1,
+        softWrap = false,
+        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+        color = colors.text.normal.copy(alpha = 0.7f),
       )
       Box(
-          modifier =
-              Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                  .padding(horizontal = 6.dp, vertical = 2.dp),
+        modifier =
+          Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
       ) {
         Text(
-            "${processes.size}",
-            fontSize = 9.sp,
-            color = Color(0xFF4CAF50),
+          "${processes.size}",
+          fontSize = 9.sp,
+          color = Color(0xFF4CAF50),
         )
       }
     }
 
     processes.forEach { process ->
       McpProcessItem(
-          process = process,
-          isConnected = connectedPid == process.pid,
-          testResult = testResults[process.pid],
-          isTesting = testingPid == process.pid,
-          showDetails = detailsPid == process.pid,
-          onConnect = onConnect,
-          onDetails = onDetails,
-          onTest = onTest,
+        process = process,
+        isConnected = connectedPid == process.pid,
+        testResult = testResults[process.pid],
+        isTesting = testingPid == process.pid,
+        showDetails = detailsPid == process.pid,
+        onConnect = onConnect,
+        onDetails = onDetails,
+        onTest = onTest,
       )
     }
   }
@@ -3644,14 +3630,14 @@ private fun ProcessSection(
 
 @Composable
 private fun McpProcessItem(
-    process: McpProcess,
-    isConnected: Boolean = false,
-    testResult: TestResult? = null,
-    isTesting: Boolean = false,
-    showDetails: Boolean = false,
-    onConnect: (McpProcess) -> Unit = {},
-    onDetails: (McpProcess) -> Unit = {},
-    onTest: (McpProcess) -> Unit = {},
+  process: McpProcess,
+  isConnected: Boolean = false,
+  testResult: TestResult? = null,
+  isTesting: Boolean = false,
+  showDetails: Boolean = false,
+  onConnect: (McpProcess) -> Unit = {},
+  onDetails: (McpProcess) -> Unit = {},
+  onTest: (McpProcess) -> Unit = {},
 ) {
   val colors = SharedTheme.globalColors
   val uptimeText = formatUptime(process.uptimeMs)
@@ -3660,157 +3646,156 @@ private fun McpProcessItem(
     val isCompressed = maxWidth < 300.dp
     Column {
       Row(
-          modifier =
-              Modifier.fillMaxWidth()
-                  .background(
-                      if (isConnected) Color(0xFF4CAF50).copy(alpha = 0.1f)
-                      else colors.text.normal.copy(alpha = 0.05f),
-                      RoundedCornerShape(
-                          topStart = 6.dp,
-                          topEnd = 6.dp,
-                          bottomStart = if (showDetails) 0.dp else 6.dp,
-                          bottomEnd = if (showDetails) 0.dp else 6.dp,
-                      ),
-                  )
-                  .then(
-                      if (isConnected)
-                          Modifier.border(
-                              1.dp,
-                              Color(0xFF4CAF50).copy(alpha = 0.3f),
-                              RoundedCornerShape(
-                                  topStart = 6.dp,
-                                  topEnd = 6.dp,
-                                  bottomStart = if (showDetails) 0.dp else 6.dp,
-                                  bottomEnd = if (showDetails) 0.dp else 6.dp,
-                              ),
-                          )
-                      else Modifier
-                  )
-                  .padding(10.dp),
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
-          verticalAlignment = Alignment.CenterVertically,
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(
+              if (isConnected) Color(0xFF4CAF50).copy(alpha = 0.1f)
+              else colors.text.normal.copy(alpha = 0.05f),
+              RoundedCornerShape(
+                topStart = 6.dp,
+                topEnd = 6.dp,
+                bottomStart = if (showDetails) 0.dp else 6.dp,
+                bottomEnd = if (showDetails) 0.dp else 6.dp,
+              ),
+            )
+            .then(
+              if (isConnected)
+                Modifier.border(
+                  1.dp,
+                  Color(0xFF4CAF50).copy(alpha = 0.3f),
+                  RoundedCornerShape(
+                    topStart = 6.dp,
+                    topEnd = 6.dp,
+                    bottomStart = if (showDetails) 0.dp else 6.dp,
+                    bottomEnd = if (showDetails) 0.dp else 6.dp,
+                  ),
+                )
+              else Modifier
+            )
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         // Status indicator
         Box(
-            modifier =
-                Modifier.size(8.dp)
-                    .background(
-                        if (isConnected) Color(0xFF4CAF50)
-                        else Color(0xFF4CAF50).copy(alpha = 0.5f),
-                        CircleShape,
-                    ),
+          modifier =
+            Modifier.size(8.dp)
+              .background(
+                if (isConnected) Color(0xFF4CAF50) else Color(0xFF4CAF50).copy(alpha = 0.5f),
+                CircleShape,
+              )
         )
 
         // Process info
         Column(modifier = Modifier.weight(1f)) {
           Row(
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
             Text(
-                process.name,
-                fontSize = 12.sp,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+              process.name,
+              fontSize = 12.sp,
+              fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
             )
             Text(
-                "PID ${process.pid}",
-                fontSize = 10.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = colors.text.normal.copy(alpha = 0.5f),
+              "PID ${process.pid}",
+              fontSize = 10.sp,
+              maxLines = 1,
+              softWrap = false,
+              color = colors.text.normal.copy(alpha = 0.5f),
             )
             if (isConnected) {
               Text(
-                  "● Active",
-                  fontSize = 9.sp,
-                  maxLines = 1,
-                  softWrap = false,
-                  color = Color(0xFF4CAF50),
+                "● Active",
+                fontSize = 9.sp,
+                maxLines = 1,
+                softWrap = false,
+                color = Color(0xFF4CAF50),
               )
             }
           }
           Row(
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
             when (process.connectionType) {
               McpConnectionType.StreamableHttp -> {
                 Text(
-                    "http://localhost:${process.port}",
-                    fontSize = 10.sp,
-                    color = Color(0xFF2196F3),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                  "http://localhost:${process.port}",
+                  fontSize = 10.sp,
+                  color = Color(0xFF2196F3),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
                 )
               }
               McpConnectionType.UnixSocket -> {
                 Text(
-                    process.socketPath ?: "Unknown socket",
-                    fontSize = 10.sp,
-                    color = Color(0xFF9C27B0),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                  process.socketPath ?: "Unknown socket",
+                  fontSize = 10.sp,
+                  color = Color(0xFF9C27B0),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
                 )
               }
               McpConnectionType.Stdio -> {
                 Text(
-                    "Standard I/O",
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    softWrap = false,
-                    color = Color(0xFFFF9800),
+                  "Standard I/O",
+                  fontSize = 10.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  color = Color(0xFFFF9800),
                 )
               }
             }
             Text(
-                "•",
-                fontSize = 10.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = colors.text.normal.copy(alpha = 0.3f),
+              "•",
+              fontSize = 10.sp,
+              maxLines = 1,
+              softWrap = false,
+              color = colors.text.normal.copy(alpha = 0.3f),
             )
             Text(
-                "Up $uptimeText",
-                fontSize = 10.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = colors.text.normal.copy(alpha = 0.5f),
+              "Up $uptimeText",
+              fontSize = 10.sp,
+              maxLines = 1,
+              softWrap = false,
+              color = colors.text.normal.copy(alpha = 0.5f),
             )
 
             // Test result indicator
             if (isTesting) {
               Text(
-                  "Testing...",
-                  fontSize = 10.sp,
-                  maxLines = 1,
-                  softWrap = false,
-                  color = Color(0xFF2196F3),
+                "Testing...",
+                fontSize = 10.sp,
+                maxLines = 1,
+                softWrap = false,
+                color = Color(0xFF2196F3),
               )
             } else if (testResult != null) {
               Text(
-                  "•",
-                  fontSize = 10.sp,
-                  maxLines = 1,
-                  softWrap = false,
-                  color = colors.text.normal.copy(alpha = 0.3f),
+                "•",
+                fontSize = 10.sp,
+                maxLines = 1,
+                softWrap = false,
+                color = colors.text.normal.copy(alpha = 0.3f),
               )
               if (testResult.success) {
                 Text(
-                    "✓ ${testResult.latencyMs}ms",
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    softWrap = false,
-                    color = Color(0xFF4CAF50),
+                  "✓ ${testResult.latencyMs}ms",
+                  fontSize = 10.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  color = Color(0xFF4CAF50),
                 )
               } else {
                 Text(
-                    "✗ ${testResult.error}",
-                    fontSize = 10.sp,
-                    color = Color(0xFFE53935),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                  "✗ ${testResult.error}",
+                  fontSize = 10.sp,
+                  color = Color(0xFFE53935),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
                 )
               }
             }
@@ -3821,86 +3806,86 @@ private fun McpProcessItem(
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
           // Test button
           Box(
-              modifier =
-                  Modifier.background(
-                          when {
-                            isTesting -> Color(0xFF2196F3).copy(alpha = 0.15f)
-                            testResult?.success == true -> Color(0xFF4CAF50).copy(alpha = 0.1f)
-                            testResult?.success == false -> Color(0xFFE53935).copy(alpha = 0.1f)
-                            else -> colors.text.normal.copy(alpha = 0.08f)
-                          },
-                          RoundedCornerShape(4.dp),
-                      )
-                      .clickable(enabled = !isTesting) { onTest(process) }
-                      .pointerHoverIcon(if (isTesting) PointerIcon.Default else PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier =
+              Modifier.background(
+                  when {
+                    isTesting -> Color(0xFF2196F3).copy(alpha = 0.15f)
+                    testResult?.success == true -> Color(0xFF4CAF50).copy(alpha = 0.1f)
+                    testResult?.success == false -> Color(0xFFE53935).copy(alpha = 0.1f)
+                    else -> colors.text.normal.copy(alpha = 0.08f)
+                  },
+                  RoundedCornerShape(4.dp),
+                )
+                .clickable(enabled = !isTesting) { onTest(process) }
+                .pointerHoverIcon(if (isTesting) PointerIcon.Default else PointerIcon.Hand)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
           ) {
             Text(
+              when {
+                isTesting -> "..."
+                isCompressed -> "🧪"
+                else -> "Test"
+              },
+              fontSize = 10.sp,
+              maxLines = 1,
+              softWrap = false,
+              color =
                 when {
-                  isTesting -> "..."
-                  isCompressed -> "🧪"
-                  else -> "Test"
+                  isTesting -> Color(0xFF2196F3)
+                  testResult?.success == true -> Color(0xFF4CAF50)
+                  testResult?.success == false -> Color(0xFFE53935)
+                  else -> colors.text.normal.copy(alpha = 0.7f)
                 },
-                fontSize = 10.sp,
-                maxLines = 1,
-                softWrap = false,
-                color =
-                    when {
-                      isTesting -> Color(0xFF2196F3)
-                      testResult?.success == true -> Color(0xFF4CAF50)
-                      testResult?.success == false -> Color(0xFFE53935)
-                      else -> colors.text.normal.copy(alpha = 0.7f)
-                    },
             )
           }
 
           // Details button
           Box(
-              modifier =
-                  Modifier.background(
-                          if (showDetails) Color(0xFF9C27B0).copy(alpha = 0.25f)
-                          else Color(0xFF9C27B0).copy(alpha = 0.15f),
-                          RoundedCornerShape(4.dp),
-                      )
-                      .clickable { onDetails(process) }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier =
+              Modifier.background(
+                  if (showDetails) Color(0xFF9C27B0).copy(alpha = 0.25f)
+                  else Color(0xFF9C27B0).copy(alpha = 0.15f),
+                  RoundedCornerShape(4.dp),
+                )
+                .clickable { onDetails(process) }
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
           ) {
             Text(
-                if (isCompressed) "📋" else if (showDetails) "Hide" else "Details",
-                fontSize = 10.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = Color(0xFF9C27B0),
+              if (isCompressed) "📋" else if (showDetails) "Hide" else "Details",
+              fontSize = 10.sp,
+              maxLines = 1,
+              softWrap = false,
+              color = Color(0xFF9C27B0),
             )
           }
 
           // Connect toggle button
           Box(
-              modifier =
-                  Modifier.background(
-                          if (isConnected) Color(0xFF4CAF50).copy(alpha = 0.3f)
-                          else Color(0xFF4CAF50).copy(alpha = 0.15f),
-                          RoundedCornerShape(4.dp),
-                      )
-                      .clickable {
-                        LOG.debug("[McpProcessItem] Connect button clicked for ${process.name}")
-                        onConnect(process)
-                      }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier =
+              Modifier.background(
+                  if (isConnected) Color(0xFF4CAF50).copy(alpha = 0.3f)
+                  else Color(0xFF4CAF50).copy(alpha = 0.15f),
+                  RoundedCornerShape(4.dp),
+                )
+                .clickable {
+                  LOG.debug("[McpProcessItem] Connect button clicked for ${process.name}")
+                  onConnect(process)
+                }
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
           ) {
             Text(
-                when {
-                  isCompressed && isConnected -> "✓"
-                  isCompressed -> "🔌"
-                  isConnected -> "Connected ✓"
-                  else -> "Connect"
-                },
-                fontSize = 10.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = Color(0xFF4CAF50),
+              when {
+                isCompressed && isConnected -> "✓"
+                isCompressed -> "🔌"
+                isConnected -> "Connected ✓"
+                else -> "Connect"
+              },
+              fontSize = 10.sp,
+              maxLines = 1,
+              softWrap = false,
+              color = Color(0xFF4CAF50),
             )
           }
         }
@@ -3929,12 +3914,12 @@ private fun McpProcessDetails(process: McpProcess) {
       try {
         kotlinx.coroutines.withTimeout(5000) {
           val client =
-              when (process.connectionType) {
-                McpConnectionType.StreamableHttp ->
-                    McpHttpClient("http://localhost:${process.port}/auto-mobile/streamable")
-                McpConnectionType.UnixSocket -> McpDaemonClient(process.socketPath ?: "")
-                McpConnectionType.Stdio -> null // STDIO shouldn't appear
-              }
+            when (process.connectionType) {
+              McpConnectionType.StreamableHttp ->
+                McpHttpClient("http://localhost:${process.port}/auto-mobile/streamable")
+              McpConnectionType.UnixSocket -> McpDaemonClient(process.socketPath ?: "")
+              McpConnectionType.Stdio -> null // STDIO shouldn't appear
+            }
 
           if (client != null) {
             val fetchedResources = client.listResources()
@@ -3959,63 +3944,63 @@ private fun McpProcessDetails(process: McpProcess) {
   }
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(
-                  colors.text.normal.copy(alpha = 0.03f),
-                  RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp),
-              )
-              .padding(12.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(
+          colors.text.normal.copy(alpha = 0.03f),
+          RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp),
+        )
+        .padding(12.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     // Connection details
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
       Text(
-          "Connection",
-          fontSize = 11.sp,
-          maxLines = 1,
-          softWrap = false,
-          fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-          color = colors.text.normal.copy(alpha = 0.7f),
+        "Connection",
+        fontSize = 11.sp,
+        maxLines = 1,
+        softWrap = false,
+        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+        color = colors.text.normal.copy(alpha = 0.7f),
       )
       Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Column {
           Text(
-              "Type",
-              fontSize = 9.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = colors.text.normal.copy(alpha = 0.5f),
+            "Type",
+            fontSize = 9.sp,
+            maxLines = 1,
+            softWrap = false,
+            color = colors.text.normal.copy(alpha = 0.5f),
           )
           Text(process.connectionType.label, fontSize = 11.sp, maxLines = 1, softWrap = false)
         }
         Column {
           Text(
-              "Endpoint",
-              fontSize = 9.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = colors.text.normal.copy(alpha = 0.5f),
+            "Endpoint",
+            fontSize = 9.sp,
+            maxLines = 1,
+            softWrap = false,
+            color = colors.text.normal.copy(alpha = 0.5f),
           )
           Text(
-              when (process.connectionType) {
-                McpConnectionType.StreamableHttp -> "http://localhost:${process.port}"
-                McpConnectionType.UnixSocket -> process.socketPath ?: "Unknown"
-                McpConnectionType.Stdio -> "stdin/stdout"
-              },
-              fontSize = 11.sp,
-              maxLines = 1,
-              softWrap = false,
-              overflow = TextOverflow.Ellipsis,
+            when (process.connectionType) {
+              McpConnectionType.StreamableHttp -> "http://localhost:${process.port}"
+              McpConnectionType.UnixSocket -> process.socketPath ?: "Unknown"
+              McpConnectionType.Stdio -> "stdin/stdout"
+            },
+            fontSize = 11.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
           )
         }
         Column {
           Text(
-              "PID",
-              fontSize = 9.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = colors.text.normal.copy(alpha = 0.5f),
+            "PID",
+            fontSize = 9.sp,
+            maxLines = 1,
+            softWrap = false,
+            color = colors.text.normal.copy(alpha = 0.5f),
           )
           Text("${process.pid}", fontSize = 11.sp, maxLines = 1, softWrap = false)
         }
@@ -4029,27 +4014,27 @@ private fun McpProcessDetails(process: McpProcess) {
       val currentResourcesExpanded = resourcesExpanded
 
       Row(
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
       ) {
         Text(
-            "Resources",
-            fontSize = 11.sp,
-            maxLines = 1,
-            softWrap = false,
-            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-            color = colors.text.normal.copy(alpha = 0.7f),
+          "Resources",
+          fontSize = 11.sp,
+          maxLines = 1,
+          softWrap = false,
+          fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+          color = colors.text.normal.copy(alpha = 0.7f),
         )
         if (currentResources != null && currentResources.size > 5) {
           Text(
-              if (currentResourcesExpanded) "Collapse" else "Expand all",
-              fontSize = 9.sp,
-              color = Color(0xFF2196F3),
-              modifier =
-                  Modifier.clickable { resourcesExpanded = !resourcesExpanded }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 4.dp),
+            if (currentResourcesExpanded) "Collapse" else "Expand all",
+            fontSize = 9.sp,
+            color = Color(0xFF2196F3),
+            modifier =
+              Modifier.clickable { resourcesExpanded = !resourcesExpanded }
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 4.dp),
           )
         }
       }
@@ -4061,29 +4046,29 @@ private fun McpProcessDetails(process: McpProcess) {
         Text("No resources", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
       } else {
         val resourcesToShow =
-            if (currentResourcesExpanded) currentResources else currentResources.take(5)
+          if (currentResourcesExpanded) currentResources else currentResources.take(5)
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
           resourcesToShow.forEach { resource ->
             Box(
-                modifier =
-                    Modifier.background(
-                            Color(0xFF2196F3).copy(alpha = 0.1f),
-                            RoundedCornerShape(4.dp),
-                        )
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
+              modifier =
+                Modifier.background(
+                    Color(0xFF2196F3).copy(alpha = 0.1f),
+                    RoundedCornerShape(4.dp),
+                  )
+                  .padding(horizontal = 6.dp, vertical = 3.dp)
             ) {
               Text(resource.uri, fontSize = 9.sp, color = Color(0xFF2196F3))
             }
           }
           if (!currentResourcesExpanded && currentResources.size > 5) {
             Text(
-                "+${currentResources.size - 5} more",
-                fontSize = 9.sp,
-                color = Color(0xFF2196F3),
-                modifier =
-                    Modifier.clickable { resourcesExpanded = true }
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .padding(horizontal = 4.dp),
+              "+${currentResources.size - 5} more",
+              fontSize = 9.sp,
+              color = Color(0xFF2196F3),
+              modifier =
+                Modifier.clickable { resourcesExpanded = true }
+                  .pointerHoverIcon(PointerIcon.Hand)
+                  .padding(horizontal = 4.dp),
             )
           }
         }
@@ -4097,27 +4082,27 @@ private fun McpProcessDetails(process: McpProcess) {
       val currentToolsExpanded = toolsExpanded
 
       Row(
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
       ) {
         Text(
-            "Tools",
-            fontSize = 11.sp,
-            maxLines = 1,
-            softWrap = false,
-            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-            color = colors.text.normal.copy(alpha = 0.7f),
+          "Tools",
+          fontSize = 11.sp,
+          maxLines = 1,
+          softWrap = false,
+          fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+          color = colors.text.normal.copy(alpha = 0.7f),
         )
         if (currentTools != null && currentTools.size > 8) {
           Text(
-              if (currentToolsExpanded) "Collapse" else "Expand all",
-              fontSize = 9.sp,
-              color = Color(0xFF9C27B0),
-              modifier =
-                  Modifier.clickable { toolsExpanded = !toolsExpanded }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 4.dp),
+            if (currentToolsExpanded) "Collapse" else "Expand all",
+            fontSize = 9.sp,
+            color = Color(0xFF9C27B0),
+            modifier =
+              Modifier.clickable { toolsExpanded = !toolsExpanded }
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 4.dp),
           )
         }
       }
@@ -4134,12 +4119,12 @@ private fun McpProcessDetails(process: McpProcess) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
               row.forEach { tool ->
                 Box(
-                    modifier =
-                        Modifier.background(
-                                Color(0xFF9C27B0).copy(alpha = 0.1f),
-                                RoundedCornerShape(4.dp),
-                            )
-                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                  modifier =
+                    Modifier.background(
+                        Color(0xFF9C27B0).copy(alpha = 0.1f),
+                        RoundedCornerShape(4.dp),
+                      )
+                      .padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
                   Text(tool.name, fontSize = 9.sp, color = Color(0xFF9C27B0))
                 }
@@ -4148,13 +4133,13 @@ private fun McpProcessDetails(process: McpProcess) {
           }
           if (!currentToolsExpanded && currentTools.size > 8) {
             Text(
-                "+${currentTools.size - 8} more",
-                fontSize = 9.sp,
-                color = Color(0xFF9C27B0),
-                modifier =
-                    Modifier.clickable { toolsExpanded = true }
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .padding(horizontal = 4.dp),
+              "+${currentTools.size - 8} more",
+              fontSize = 9.sp,
+              color = Color(0xFF9C27B0),
+              modifier =
+                Modifier.clickable { toolsExpanded = true }
+                  .pointerHoverIcon(PointerIcon.Hand)
+                  .padding(horizontal = 4.dp),
             )
           }
         }
@@ -4174,51 +4159,51 @@ private fun formatUptime(ms: Long): String {
 
 @Composable
 private fun DevicesSection(
-    bootedDevices: List<dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo>,
-    deviceImages: List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>,
-    isLoading: Boolean,
-    error: String?,
-    bootingDeviceIds: Set<String>,
-    killingDeviceIds: Set<String>,
-    bootErrors: Map<String, String>,
-    killErrors: Map<String, String>,
-    daemonStatus: dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse?,
-    updatingServiceDeviceIds: Set<String>,
-    onSelectDevice: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
-    onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
-    onKillDevice: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
-    onUpdateService: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
+  bootedDevices: List<dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo>,
+  deviceImages: List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>,
+  isLoading: Boolean,
+  error: String?,
+  bootingDeviceIds: Set<String>,
+  killingDeviceIds: Set<String>,
+  bootErrors: Map<String, String>,
+  killErrors: Map<String, String>,
+  daemonStatus: dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse?,
+  updatingServiceDeviceIds: Set<String>,
+  onSelectDevice: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
+  onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
+  onKillDevice: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
+  onUpdateService: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-              .padding(12.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+        .padding(12.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     // Header
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(
-          "Devices",
-          fontSize = 12.sp,
-          maxLines = 1,
-          softWrap = false,
-          fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-          color = colors.text.normal,
+        "Devices",
+        fontSize = 12.sp,
+        maxLines = 1,
+        softWrap = false,
+        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+        color = colors.text.normal,
       )
       if (isLoading) {
         Text(
-            "Loading...",
-            fontSize = 10.sp,
-            maxLines = 1,
-            softWrap = false,
-            color = Color(0xFF2196F3),
+          "Loading...",
+          fontSize = 10.sp,
+          maxLines = 1,
+          softWrap = false,
+          color = Color(0xFF2196F3),
         )
       }
     }
@@ -4230,30 +4215,30 @@ private fun DevicesSection(
 
     if (error != null) {
       Text(
-          error,
-          fontSize = 10.sp,
-          color = Color(0xFFE53935),
+        error,
+        fontSize = 10.sp,
+        color = Color(0xFFE53935),
       )
     } else if (!isLoading) {
       // Running devices
       if (bootedDevices.isNotEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
           Text(
-              "Running (${bootedDevices.size})",
-              fontSize = 10.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = colors.text.normal.copy(alpha = 0.6f),
+            "Running (${bootedDevices.size})",
+            fontSize = 10.sp,
+            maxLines = 1,
+            softWrap = false,
+            color = colors.text.normal.copy(alpha = 0.6f),
           )
           bootedDevices.forEach { device ->
             BootedDeviceRow(
-                device = device,
-                isKilling = device.deviceId in killingDeviceIds,
-                killError = killErrors[device.deviceId],
-                isUpdatingService = device.deviceId in updatingServiceDeviceIds,
-                onSelect = { onSelectDevice(device) },
-                onKill = { onKillDevice(device) },
-                onUpdateService = { onUpdateService(device) },
+              device = device,
+              isKilling = device.deviceId in killingDeviceIds,
+              killError = killErrors[device.deviceId],
+              isUpdatingService = device.deviceId in updatingServiceDeviceIds,
+              onSelect = { onSelectDevice(device) },
+              onKill = { onKillDevice(device) },
+              onUpdateService = { onUpdateService(device) },
             )
           }
         }
@@ -4262,20 +4247,20 @@ private fun DevicesSection(
       // Available images grouped by API level
       if (deviceImages.isNotEmpty()) {
         DeviceImagesGrouped(
-            deviceImages = deviceImages,
-            bootingDeviceIds = bootingDeviceIds,
-            bootErrors = bootErrors,
-            onBootDevice = onBootDevice,
+          deviceImages = deviceImages,
+          bootingDeviceIds = bootingDeviceIds,
+          bootErrors = bootErrors,
+          onBootDevice = onBootDevice,
         )
       }
 
       if (bootedDevices.isEmpty() && deviceImages.isEmpty()) {
         Text(
-            "No devices found",
-            fontSize = 10.sp,
-            maxLines = 1,
-            softWrap = false,
-            color = colors.text.normal.copy(alpha = 0.5f),
+          "No devices found",
+          fontSize = 10.sp,
+          maxLines = 1,
+          softWrap = false,
+          color = colors.text.normal.copy(alpha = 0.5f),
         )
       }
     }
@@ -4284,52 +4269,52 @@ private fun DevicesSection(
 
 @Composable
 private fun DaemonStatusInfo(
-    daemonStatus: dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse,
+  daemonStatus: dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse
 ) {
   val colors = SharedTheme.globalColors
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(4.dp))
-              .padding(8.dp),
-      verticalArrangement = Arrangement.spacedBy(4.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(4.dp))
+        .padding(8.dp),
+    verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(
-          "AutoMobile ${daemonStatus.version}",
-          fontSize = 9.sp,
-          fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-          color = colors.text.normal.copy(alpha = 0.7f),
-          maxLines = 1,
+        "AutoMobile ${daemonStatus.version}",
+        fontSize = 9.sp,
+        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+        color = colors.text.normal.copy(alpha = 0.7f),
+        maxLines = 1,
       )
       if (daemonStatus.releaseVersion.isNotEmpty()) {
         Text(
-            "(${daemonStatus.releaseVersion})",
-            fontSize = 9.sp,
-            color = colors.text.normal.copy(alpha = 0.4f),
-            maxLines = 1,
+          "(${daemonStatus.releaseVersion})",
+          fontSize = 9.sp,
+          color = colors.text.normal.copy(alpha = 0.4f),
+          maxLines = 1,
         )
       }
     }
     val ctrlProxySha = daemonStatus.android?.ctrlProxy?.expectedSha256 ?: ""
     if (ctrlProxySha.isNotEmpty()) {
       Text(
-          "CtrlProxy SHA: ${ctrlProxySha.take(8)}...",
-          fontSize = 8.sp,
-          color = colors.text.normal.copy(alpha = 0.4f),
-          maxLines = 1,
+        "CtrlProxy SHA: ${ctrlProxySha.take(8)}...",
+        fontSize = 8.sp,
+        color = colors.text.normal.copy(alpha = 0.4f),
+        maxLines = 1,
       )
     }
     val xcTestSha = daemonStatus.ios?.xcTestService?.expectedSha256 ?: ""
     if (xcTestSha.isNotEmpty()) {
       Text(
-          "XCTest SHA: ${xcTestSha.take(8)}...",
-          fontSize = 8.sp,
-          color = colors.text.normal.copy(alpha = 0.4f),
-          maxLines = 1,
+        "XCTest SHA: ${xcTestSha.take(8)}...",
+        fontSize = 8.sp,
+        color = colors.text.normal.copy(alpha = 0.4f),
+        maxLines = 1,
       )
     }
   }
@@ -4348,56 +4333,56 @@ private fun extractIosVersion(iosVersion: String?): String? {
 }
 
 private data class DeviceGroup(
-    val label: String,
-    val sortKey: Int,
-    val images: List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>,
+  val label: String,
+  val sortKey: Int,
+  val images: List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>,
 )
 
 @Composable
 private fun DeviceImagesGrouped(
-    deviceImages: List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>,
-    bootingDeviceIds: Set<String>,
-    bootErrors: Map<String, String>,
-    onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
+  deviceImages: List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>,
+  bootingDeviceIds: Set<String>,
+  bootErrors: Map<String, String>,
+  onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
 
   // Group images by API level / iOS version
   val groups =
-      deviceImages
-          .groupBy { image ->
-            if (image.platform == "android") {
-              val api = extractApiLevel(image.target)
-              if (api != null) "API $api" else "Android (Unknown)"
-            } else {
-              extractIosVersion(image.iosVersion) ?: "iOS (Unknown)"
-            }
+    deviceImages
+      .groupBy { image ->
+        if (image.platform == "android") {
+          val api = extractApiLevel(image.target)
+          if (api != null) "API $api" else "Android (Unknown)"
+        } else {
+          extractIosVersion(image.iosVersion) ?: "iOS (Unknown)"
+        }
+      }
+      .map { (label, images) ->
+        val sortKey =
+          when {
+            label.startsWith("API ") -> label.removePrefix("API ").toIntOrNull() ?: 0
+            label.startsWith("iOS ") -> label.removePrefix("iOS ").toIntOrNull() ?: 0
+            else -> -1
           }
-          .map { (label, images) ->
-            val sortKey =
-                when {
-                  label.startsWith("API ") -> label.removePrefix("API ").toIntOrNull() ?: 0
-                  label.startsWith("iOS ") -> label.removePrefix("iOS ").toIntOrNull() ?: 0
-                  else -> -1
-                }
-            DeviceGroup(label, sortKey, images)
-          }
-          .sortedByDescending { it.sortKey }
+        DeviceGroup(label, sortKey, images)
+      }
+      .sortedByDescending { it.sortKey }
 
   Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
     Text(
-        "Available to Boot (${deviceImages.size})",
-        fontSize = 10.sp,
-        maxLines = 1,
-        softWrap = false,
-        color = colors.text.normal.copy(alpha = 0.6f),
+      "Available to Boot (${deviceImages.size})",
+      fontSize = 10.sp,
+      maxLines = 1,
+      softWrap = false,
+      color = colors.text.normal.copy(alpha = 0.6f),
     )
     groups.forEach { group ->
       CollapsibleDeviceGroup(
-          group = group,
-          bootingDeviceIds = bootingDeviceIds,
-          bootErrors = bootErrors,
-          onBootDevice = onBootDevice,
+        group = group,
+        bootingDeviceIds = bootingDeviceIds,
+        bootErrors = bootErrors,
+        onBootDevice = onBootDevice,
       )
     }
   }
@@ -4405,10 +4390,10 @@ private fun DeviceImagesGrouped(
 
 @Composable
 private fun CollapsibleDeviceGroup(
-    group: DeviceGroup,
-    bootingDeviceIds: Set<String>,
-    bootErrors: Map<String, String>,
-    onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
+  group: DeviceGroup,
+  bootingDeviceIds: Set<String>,
+  bootErrors: Map<String, String>,
+  onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   var expanded by remember { mutableStateOf(false) }
@@ -4419,40 +4404,40 @@ private fun CollapsibleDeviceGroup(
   Column {
     // Collapsible header
     Row(
-        modifier =
-            Modifier.fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      modifier =
+        Modifier.fillMaxWidth()
+          .clickable { expanded = !expanded }
+          .pointerHoverIcon(PointerIcon.Hand)
+          .padding(vertical = 2.dp),
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(
-          if (expanded) "v" else ">",
-          fontSize = 9.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
+        if (expanded) "v" else ">",
+        fontSize = 9.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
       )
       Text(
-          "${group.label} ($deviceCount $countSuffix)",
-          fontSize = 10.sp,
-          fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-          color = colors.text.normal.copy(alpha = 0.7f),
-          maxLines = 1,
+        "${group.label} ($deviceCount $countSuffix)",
+        fontSize = 10.sp,
+        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+        color = colors.text.normal.copy(alpha = 0.7f),
+        maxLines = 1,
       )
     }
 
     if (expanded) {
       Column(
-          modifier = Modifier.padding(start = 12.dp),
-          verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.padding(start = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         group.images.forEach { image ->
           val deviceKey = image.deviceId ?: image.name
           DeviceImageRow(
-              image = image,
-              isBooting = deviceKey in bootingDeviceIds,
-              error = bootErrors[deviceKey],
-              onBoot = { onBootDevice(image) },
+            image = image,
+            isBooting = deviceKey in bootingDeviceIds,
+            error = bootErrors[deviceKey],
+            onBoot = { onBootDevice(image) },
           )
         }
       }
@@ -4462,123 +4447,121 @@ private fun CollapsibleDeviceGroup(
 
 @Composable
 private fun BootedDeviceRow(
-    device: dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo,
-    isKilling: Boolean = false,
-    killError: String? = null,
-    isUpdatingService: Boolean = false,
-    onSelect: () -> Unit,
-    onKill: () -> Unit,
-    onUpdateService: () -> Unit,
+  device: dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo,
+  isKilling: Boolean = false,
+  killError: String? = null,
+  isUpdatingService: Boolean = false,
+  onSelect: () -> Unit,
+  onKill: () -> Unit,
+  onUpdateService: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val platformIcon = if (device.platform == "android") "🤖" else "🍎"
   val isPhysical = !device.isVirtual
 
   Column(
-      modifier =
-          Modifier.fillMaxWidth()
-              .let { mod ->
-                if (isPhysical) {
-                  mod.border(1.dp, Color(0xFFFFA726).copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-                } else {
-                  mod
-                }
-              }
-              .background(Color(0xFF4CAF50).copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-              .padding(8.dp),
-      verticalArrangement = Arrangement.spacedBy(4.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .let { mod ->
+          if (isPhysical) {
+            mod.border(1.dp, Color(0xFFFFA726).copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+          } else {
+            mod
+          }
+        }
+        .background(Color(0xFF4CAF50).copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+        .padding(8.dp),
+    verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(platformIcon, fontSize = 12.sp)
       Column(modifier = Modifier.weight(1f)) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+          verticalAlignment = Alignment.CenterVertically,
         ) {
           Text(
-              device.name,
-              fontSize = 11.sp,
-              fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-              modifier = Modifier.weight(1f, fill = false),
+            device.name,
+            fontSize = 11.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
           )
           if (isPhysical) {
             Box(
-                modifier =
-                    Modifier.background(
-                            Color(0xFFFFA726).copy(alpha = 0.2f),
-                            RoundedCornerShape(3.dp),
-                        )
-                        .padding(horizontal = 4.dp, vertical = 1.dp),
+              modifier =
+                Modifier.background(
+                    Color(0xFFFFA726).copy(alpha = 0.2f),
+                    RoundedCornerShape(3.dp),
+                  )
+                  .padding(horizontal = 4.dp, vertical = 1.dp)
             ) {
               Text(
-                  "Physical",
-                  fontSize = 8.sp,
-                  maxLines = 1,
-                  softWrap = false,
-                  color = Color(0xFFFFA726),
+                "Physical",
+                fontSize = 8.sp,
+                maxLines = 1,
+                softWrap = false,
+                color = Color(0xFFFFA726),
               )
             }
           }
         }
         Text(
-            device.deviceId,
-            fontSize = 9.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+          device.deviceId,
+          fontSize = 9.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
         )
       }
       // Select button
       Box(
-          modifier =
-              Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                  .clickable(
-                      onClick = {
-                        LOG.debug(
-                            "[AutoMobile IDE] BootedDeviceRow Select clicked for: ${device.name}"
-                        )
-                        onSelect()
-                      }
-                  )
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(horizontal = 6.dp, vertical = 2.dp),
+        modifier =
+          Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+            .clickable(
+              onClick = {
+                LOG.debug("[AutoMobile IDE] BootedDeviceRow Select clicked for: ${device.name}")
+                onSelect()
+              }
+            )
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
       ) {
         Text(
-            "Select",
-            fontSize = 9.sp,
-            maxLines = 1,
-            softWrap = false,
-            color = Color(0xFF4CAF50),
+          "Select",
+          fontSize = 9.sp,
+          maxLines = 1,
+          softWrap = false,
+          color = Color(0xFF4CAF50),
         )
       }
       // Kill button
       Box(
-          modifier =
-              Modifier.background(
-                      if (killError != null) Color(0xFFE53935).copy(alpha = 0.15f)
-                      else Color(0xFFE53935).copy(alpha = 0.1f),
-                      RoundedCornerShape(4.dp),
-                  )
-                  .clickable(enabled = !isKilling, onClick = onKill)
-                  .pointerHoverIcon(if (isKilling) PointerIcon.Default else PointerIcon.Hand)
-                  .padding(horizontal = 6.dp, vertical = 2.dp),
+        modifier =
+          Modifier.background(
+              if (killError != null) Color(0xFFE53935).copy(alpha = 0.15f)
+              else Color(0xFFE53935).copy(alpha = 0.1f),
+              RoundedCornerShape(4.dp),
+            )
+            .clickable(enabled = !isKilling, onClick = onKill)
+            .pointerHoverIcon(if (isKilling) PointerIcon.Default else PointerIcon.Hand)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
       ) {
         Text(
-            when {
-              isKilling -> "..."
-              killError != null -> "Err"
-              else -> "Kill"
-            },
-            fontSize = 9.sp,
-            maxLines = 1,
-            softWrap = false,
-            color = Color(0xFFE53935),
+          when {
+            isKilling -> "..."
+            killError != null -> "Err"
+            else -> "Kill"
+          },
+          fontSize = 9.sp,
+          maxLines = 1,
+          softWrap = false,
+          color = Color(0xFFE53935),
         )
       }
     }
@@ -4586,11 +4569,11 @@ private fun BootedDeviceRow(
     // Kill error
     if (killError != null) {
       Text(
-          killError,
-          fontSize = 8.sp,
-          color = Color(0xFFE53935),
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
+        killError,
+        fontSize = 8.sp,
+        color = Color(0xFFE53935),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
     }
 
@@ -4598,8 +4581,8 @@ private fun BootedDeviceRow(
     val serviceStatus = device.serviceStatus
     if (serviceStatus != null) {
       Row(
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-          verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         val statusOk = serviceStatus.isCompatible && serviceStatus.running
         val statusIcon = if (statusOk) "+" else "x"
@@ -4609,39 +4592,37 @@ private fun BootedDeviceRow(
 
         Text(statusIcon, fontSize = 9.sp, color = statusColor)
         Text(
-            statusLabel,
-            fontSize = 9.sp,
-            color = statusColor,
-            maxLines = 1,
+          statusLabel,
+          fontSize = 9.sp,
+          color = statusColor,
+          maxLines = 1,
         )
         val sha = serviceStatus.installedSha256
         if (sha != null && sha.isNotEmpty()) {
           Text(
-              sha.take(8),
-              fontSize = 8.sp,
-              color = colors.text.normal.copy(alpha = 0.4f),
-              maxLines = 1,
+            sha.take(8),
+            fontSize = 8.sp,
+            color = colors.text.normal.copy(alpha = 0.4f),
+            maxLines = 1,
           )
         }
         if (!serviceStatus.isCompatible) {
           Box(
-              modifier =
-                  Modifier.background(
-                          Color(0xFFFFA726).copy(alpha = 0.2f),
-                          RoundedCornerShape(3.dp),
-                      )
-                      .clickable(enabled = !isUpdatingService, onClick = onUpdateService)
-                      .pointerHoverIcon(
-                          if (isUpdatingService) PointerIcon.Default else PointerIcon.Hand
-                      )
-                      .padding(horizontal = 4.dp, vertical = 1.dp),
+            modifier =
+              Modifier.background(
+                  Color(0xFFFFA726).copy(alpha = 0.2f),
+                  RoundedCornerShape(3.dp),
+                )
+                .clickable(enabled = !isUpdatingService, onClick = onUpdateService)
+                .pointerHoverIcon(if (isUpdatingService) PointerIcon.Default else PointerIcon.Hand)
+                .padding(horizontal = 4.dp, vertical = 1.dp)
           ) {
             Text(
-                if (isUpdatingService) "..." else "Update",
-                fontSize = 8.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = Color(0xFFFFA726),
+              if (isUpdatingService) "..." else "Update",
+              fontSize = 8.sp,
+              maxLines = 1,
+              softWrap = false,
+              color = Color(0xFFFFA726),
             )
           }
         }
@@ -4652,78 +4633,78 @@ private fun BootedDeviceRow(
 
 @Composable
 private fun DeviceImageRow(
-    image: dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo,
-    isBooting: Boolean = false,
-    error: String? = null,
-    onBoot: () -> Unit,
+  image: dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo,
+  isBooting: Boolean = false,
+  error: String? = null,
+  onBoot: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val platformIcon = if (image.platform == "android") "🤖" else "🍎"
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-              .clickable(enabled = !isBooting, onClick = onBoot)
-              .pointerHoverIcon(if (isBooting) PointerIcon.Default else PointerIcon.Hand)
-              .padding(8.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+        .clickable(enabled = !isBooting, onClick = onBoot)
+        .pointerHoverIcon(if (isBooting) PointerIcon.Default else PointerIcon.Hand)
+        .padding(8.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(platformIcon, fontSize = 12.sp)
     Column(modifier = Modifier.weight(1f)) {
       Text(
-          image.name,
-          fontSize = 11.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
+        image.name,
+        fontSize = 11.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
       if (error != null) {
         Text(
-            error,
-            fontSize = 9.sp,
-            color = Color(0xFFE53935),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+          error,
+          fontSize = 9.sp,
+          color = Color(0xFFE53935),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
         )
       } else {
         image.target?.let { target ->
           Text(
-              target,
-              fontSize = 9.sp,
-              color = colors.text.normal.copy(alpha = 0.5f),
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
+            target,
+            fontSize = 9.sp,
+            color = colors.text.normal.copy(alpha = 0.5f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
           )
         }
       }
     }
     Box(
-        modifier =
-            Modifier.background(
-                    when {
-                      error != null -> Color(0xFFE53935).copy(alpha = 0.15f)
-                      isBooting -> Color(0xFF2196F3).copy(alpha = 0.25f)
-                      else -> Color(0xFF2196F3).copy(alpha = 0.15f)
-                    },
-                    RoundedCornerShape(4.dp),
-                )
-                .padding(horizontal = 6.dp, vertical = 2.dp),
+      modifier =
+        Modifier.background(
+            when {
+              error != null -> Color(0xFFE53935).copy(alpha = 0.15f)
+              isBooting -> Color(0xFF2196F3).copy(alpha = 0.25f)
+              else -> Color(0xFF2196F3).copy(alpha = 0.15f)
+            },
+            RoundedCornerShape(4.dp),
+          )
+          .padding(horizontal = 6.dp, vertical = 2.dp)
     ) {
       Text(
+        when {
+          error != null -> "Error"
+          isBooting -> "..."
+          else -> "Boot"
+        },
+        fontSize = 9.sp,
+        maxLines = 1,
+        softWrap = false,
+        color =
           when {
-            error != null -> "Error"
-            isBooting -> "..."
-            else -> "Boot"
+            error != null -> Color(0xFFE53935)
+            else -> Color(0xFF2196F3)
           },
-          fontSize = 9.sp,
-          maxLines = 1,
-          softWrap = false,
-          color =
-              when {
-                error != null -> Color(0xFFE53935)
-                else -> Color(0xFF2196F3)
-              },
       )
     }
   }
@@ -4731,103 +4712,103 @@ private fun DeviceImageRow(
 
 @Composable
 private fun AppSelectorDropdown(
-    installedApps: List<InstalledApp>,
-    selectedAppId: String?,
-    isLoading: Boolean,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    onAppSelected: (String?) -> Unit,
+  installedApps: List<InstalledApp>,
+  selectedAppId: String?,
+  isLoading: Boolean,
+  expanded: Boolean,
+  onExpandedChange: (Boolean) -> Unit,
+  onAppSelected: (String?) -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val selectedApp = installedApps.find { it.packageName == selectedAppId }
   val displayText =
-      when {
-        isLoading -> "Loading..."
-        selectedApp != null -> selectedApp.displayName ?: selectedApp.packageName
-        selectedAppId != null -> selectedAppId // Show package name if app not in list
-        installedApps.isEmpty() -> "No apps"
-        else -> "Select app"
-      }
+    when {
+      isLoading -> "Loading..."
+      selectedApp != null -> selectedApp.displayName ?: selectedApp.packageName
+      selectedAppId != null -> selectedAppId // Show package name if app not in list
+      installedApps.isEmpty() -> "No apps"
+      else -> "Select app"
+    }
 
   Row(
-      horizontalArrangement = Arrangement.spacedBy(6.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Text(
-        "App:",
-        fontSize = 11.sp,
-        maxLines = 1,
-        softWrap = false,
-        color = colors.text.normal.copy(alpha = 0.5f),
+      "App:",
+      fontSize = 11.sp,
+      maxLines = 1,
+      softWrap = false,
+      color = colors.text.normal.copy(alpha = 0.5f),
     )
 
     Box {
       Row(
-          modifier =
-              Modifier.background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-                  .border(1.dp, colors.text.normal.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                  .clickable(enabled = !isLoading) { onExpandedChange(!expanded) }
-                  .pointerHoverIcon(if (isLoading) PointerIcon.Default else PointerIcon.Hand)
-                  .padding(horizontal = 10.dp, vertical = 4.dp),
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-          verticalAlignment = Alignment.CenterVertically,
+        modifier =
+          Modifier.background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+            .border(1.dp, colors.text.normal.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+            .clickable(enabled = !isLoading) { onExpandedChange(!expanded) }
+            .pointerHoverIcon(if (isLoading) PointerIcon.Default else PointerIcon.Hand)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         Text(
-            displayText,
-            fontSize = 11.sp,
-            color = colors.text.normal,
-            maxLines = 1,
+          displayText,
+          fontSize = 11.sp,
+          color = colors.text.normal,
+          maxLines = 1,
         )
 
         // Foreground indicator
         if (selectedApp?.isForeground == true) {
           Box(
-              modifier =
-                  Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(2.dp))
-                      .padding(horizontal = 4.dp, vertical = 1.dp)
+            modifier =
+              Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(2.dp))
+                .padding(horizontal = 4.dp, vertical = 1.dp)
           ) {
             Text(
-                "FG",
-                fontSize = 9.sp,
-                color = Color.White,
+              "FG",
+              fontSize = 9.sp,
+              color = Color.White,
             )
           }
         }
 
         Text(
-            if (expanded) "\u25B2" else "\u25BC",
-            fontSize = 8.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
+          if (expanded) "\u25B2" else "\u25BC",
+          fontSize = 8.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
         )
       }
 
       // Dropdown popup overlay
       if (expanded) {
         Popup(
-            onDismissRequest = { onExpandedChange(false) },
-            offset = IntOffset(0, 32),
-            properties = PopupProperties(focusable = true),
+          onDismissRequest = { onExpandedChange(false) },
+          offset = IntOffset(0, 32),
+          properties = PopupProperties(focusable = true),
         ) {
           Column(
-              modifier =
-                  Modifier.width(300.dp)
-                      .heightIn(max = 200.dp) // Show ~5 items, scroll for more
-                      .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
-                      .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp))
-                      .verticalScroll(rememberScrollState())
+            modifier =
+              Modifier.width(300.dp)
+                .heightIn(max = 200.dp) // Show ~5 items, scroll for more
+                .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
+                .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp))
+                .verticalScroll(rememberScrollState())
           ) {
             // Installed apps - foreground first
             val sortedApps = installedApps.sortedByDescending { it.isForeground }
             sortedApps.forEach { app ->
               AppDropdownItem(
-                  displayName = app.displayName,
-                  packageName = app.packageName,
-                  isForeground = app.isForeground,
-                  isSelected = app.packageName == selectedAppId,
-                  onClick = {
-                    onAppSelected(app.packageName)
-                    onExpandedChange(false)
-                  },
+                displayName = app.displayName,
+                packageName = app.packageName,
+                isForeground = app.isForeground,
+                isSelected = app.packageName == selectedAppId,
+                onClick = {
+                  onAppSelected(app.packageName)
+                  onExpandedChange(false)
+                },
               )
             }
           }
@@ -4839,59 +4820,59 @@ private fun AppSelectorDropdown(
 
 @Composable
 private fun AppDropdownItem(
-    displayName: String?,
-    packageName: String?,
-    isForeground: Boolean,
-    isSelected: Boolean,
-    onClick: () -> Unit,
+  displayName: String?,
+  packageName: String?,
+  isForeground: Boolean,
+  isSelected: Boolean,
+  onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
   val bgColor = if (isSelected) Color(0xFF2166B3) else Color.Transparent
 
   Row(
-      modifier =
-          Modifier.fillMaxWidth()
-              .background(bgColor)
-              .clickable(onClick = onClick)
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 12.dp, vertical = 8.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(bgColor)
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 12.dp, vertical = 8.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
   ) {
     Column(modifier = Modifier.weight(1f)) {
       Text(
-          displayName ?: packageName ?: "Unknown",
-          fontSize = 12.sp,
-          color = colors.text.normal,
+        displayName ?: packageName ?: "Unknown",
+        fontSize = 12.sp,
+        color = colors.text.normal,
       )
       if (packageName != null && displayName != null && displayName != packageName) {
         Text(
-            packageName,
-            fontSize = 10.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
+          packageName,
+          fontSize = 10.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
         )
       }
     }
 
     if (isForeground) {
       Box(
-          modifier =
-              Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(2.dp))
-                  .padding(horizontal = 4.dp, vertical = 1.dp)
+        modifier =
+          Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(2.dp))
+            .padding(horizontal = 4.dp, vertical = 1.dp)
       ) {
         Text(
-            "FG",
-            fontSize = 9.sp,
-            color = Color.White,
+          "FG",
+          fontSize = 9.sp,
+          color = Color.White,
         )
       }
     }
 
     if (isSelected) {
       Text(
-          "\u2713",
-          fontSize = 12.sp,
-          color = Color(0xFF4CAF50),
+        "\u2713",
+        fontSize = 12.sp,
+        color = Color(0xFF4CAF50),
       )
     }
   }

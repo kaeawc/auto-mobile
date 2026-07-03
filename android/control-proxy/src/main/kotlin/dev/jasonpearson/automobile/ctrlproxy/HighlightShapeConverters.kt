@@ -24,35 +24,35 @@ import dev.jasonpearson.automobile.protocol.SmoothingAlgorithm as ProtocolSmooth
  * [ModelBounds.toRectF]. Enum members are mapped by name (the constant names match one-to-one).
  */
 internal fun ProtocolShape.toModel(): ModelShape =
-    ModelShape(
-        type = type,
-        bounds = bounds?.toModel(),
-        points = points?.map { it.toModel() },
-        style = style?.toModel(),
-    )
+  ModelShape(
+    type = type,
+    bounds = bounds?.toModel(),
+    points = points?.map { it.toModel() },
+    style = style?.toModel(),
+  )
 
 private fun ProtocolBounds.toModel(): ModelBounds =
-    ModelBounds(
-        x = x,
-        y = y,
-        width = width,
-        height = height,
-        sourceWidth = sourceWidth,
-        sourceHeight = sourceHeight,
-    )
+  ModelBounds(
+    x = x,
+    y = y,
+    width = width,
+    height = height,
+    sourceWidth = sourceWidth,
+    sourceHeight = sourceHeight,
+  )
 
 private fun ProtocolPoint.toModel(): ModelPoint = ModelPoint(x = x, y = y)
 
 private fun ProtocolStyle.toModel(): ModelStyle =
-    ModelStyle(
-        strokeColor = strokeColor,
-        strokeWidth = strokeWidth,
-        dashPattern = dashPattern,
-        smoothing = smoothing?.toModel(),
-        tension = tension,
-        capStyle = capStyle?.toModel(),
-        joinStyle = joinStyle?.toModel(),
-    )
+  ModelStyle(
+    strokeColor = strokeColor,
+    strokeWidth = strokeWidth,
+    dashPattern = dashPattern,
+    smoothing = smoothing?.toModel(),
+    tension = tension,
+    capStyle = capStyle?.toModel(),
+    joinStyle = joinStyle?.toModel(),
+  )
 
 private fun ProtocolSmoothing.toModel(): ModelSmoothing = ModelSmoothing.valueOf(name)
 

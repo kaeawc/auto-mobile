@@ -54,9 +54,9 @@ class TestPlanExternalAnnotator : ExternalAnnotator<PsiFile, TestPlanValidationR
 
   /** Apply annotations to the editor (runs on UI thread) */
   override fun apply(
-      file: PsiFile,
-      annotationResult: TestPlanValidationResult?,
-      holder: AnnotationHolder,
+    file: PsiFile,
+    annotationResult: TestPlanValidationResult?,
+    holder: AnnotationHolder,
   ) {
     if (annotationResult == null || annotationResult.valid) {
       return
@@ -65,10 +65,10 @@ class TestPlanExternalAnnotator : ExternalAnnotator<PsiFile, TestPlanValidationR
     for (error in annotationResult.errors) {
       val range = findTextRange(file, error)
       val severity =
-          when (error.severity) {
-            ValidationSeverity.ERROR -> HighlightSeverity.ERROR
-            ValidationSeverity.WARNING -> HighlightSeverity.WARNING
-          }
+        when (error.severity) {
+          ValidationSeverity.ERROR -> HighlightSeverity.ERROR
+          ValidationSeverity.WARNING -> HighlightSeverity.WARNING
+        }
 
       holder.newAnnotation(severity, error.message).range(range).create()
     }

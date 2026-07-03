@@ -24,24 +24,24 @@ fun LongPressScreen() {
   val scrollState = rememberScrollState()
 
   Column(
-      modifier =
-          Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp).semantics {
-            testTag = "long_press_screen_content"
-          },
-      verticalArrangement = Arrangement.spacedBy(16.dp),
+    modifier =
+      Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp).semantics {
+        testTag = "long_press_screen_content"
+      },
+    verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
     Text(
-        text = "LONG PRESS SCREEN",
-        fontSize = 24.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.fillMaxWidth().semantics { testTag = "long_press_screen_title" },
+      text = "LONG PRESS SCREEN",
+      fontSize = 24.sp,
+      fontWeight = FontWeight.Bold,
+      modifier = Modifier.fillMaxWidth().semantics { testTag = "long_press_screen_title" },
     )
 
     Text(
-        text = "Dedicated long press scenarios for testing gestures and timing",
-        fontSize = 16.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().semantics { testTag = "long_press_screen_description" },
+      text = "Dedicated long press scenarios for testing gestures and timing",
+      fontSize = 16.sp,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      modifier = Modifier.fillMaxWidth().semantics { testTag = "long_press_screen_description" },
     )
 
     LongPressContent()

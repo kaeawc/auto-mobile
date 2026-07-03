@@ -7,62 +7,63 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
 /**
- * Fake implementation of [TelemetryPushClient] for UI testing and Fake mode.
- * Allows emitting events and controlling connection state programmatically.
+ * Fake implementation of [TelemetryPushClient] for UI testing and Fake mode. Allows emitting events
+ * and controlling connection state programmatically.
  */
 class FakeTelemetryPushClient : TelemetryPushClient {
 
-    private val _telemetryEvents = MutableSharedFlow<TelemetryDisplayEvent>(
-        replay = 0,
-        extraBufferCapacity = 200,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+  private val _telemetryEvents =
+    MutableSharedFlow<TelemetryDisplayEvent>(
+      replay = 0,
+      extraBufferCapacity = 200,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
-    override val telemetryEvents: SharedFlow<TelemetryDisplayEvent> = _telemetryEvents.asSharedFlow()
+  override val telemetryEvents: SharedFlow<TelemetryDisplayEvent> = _telemetryEvents.asSharedFlow()
 
-    private val _connectionState = MutableSharedFlow<ConnectionState>(replay = 1)
-    override val connectionState: SharedFlow<ConnectionState> = _connectionState.asSharedFlow()
+  private val _connectionState = MutableSharedFlow<ConnectionState>(replay = 1)
+  override val connectionState: SharedFlow<ConnectionState> = _connectionState.asSharedFlow()
 
-    private var connected = false
-    private var connectCallCount = 0
-    private var disconnectCallCount = 0
-    private var lastDeviceId: String? = null
+  private var connected = false
+  private var connectCallCount = 0
+  private var disconnectCallCount = 0
+  private var lastDeviceId: String? = null
 
-    override fun connect(deviceId: String?) {
-        connectCallCount++
-        lastDeviceId = deviceId
-        connected = true
-        _connectionState.tryEmit(ConnectionState.Connected())
-    }
+  override fun connect(deviceId: String?) {
+    connectCallCount++
+    lastDeviceId = deviceId
+    connected = true
+    _connectionState.tryEmit(ConnectionState.Connected())
+  }
 
-    override fun disconnect() {
-        disconnectCallCount++
-        connected = false
-        _connectionState.tryEmit(ConnectionState.Disconnected(null))
-    }
+  override fun disconnect() {
+    disconnectCallCount++
+    connected = false
+    _connectionState.tryEmit(ConnectionState.Disconnected(null))
+  }
 
-    override fun isConnected(): Boolean = connected
+  override fun isConnected(): Boolean = connected
 
-    override fun dispose() {
-        disconnect()
-    }
+  override fun dispose() {
+    disconnect()
+  }
 
-    // -- Test helpers --
+  // -- Test helpers --
 
-    /** Emit a telemetry event to all collectors. */
-    fun emitEvent(event: TelemetryDisplayEvent): Boolean = _telemetryEvents.tryEmit(event)
+  /** Emit a telemetry event to all collectors. */
+  fun emitEvent(event: TelemetryDisplayEvent): Boolean = _telemetryEvents.tryEmit(event)
 
-    /** Set the connection state for testing. */
-    fun setConnectionState(state: ConnectionState) {
-        connected = state is ConnectionState.Connected
-        _connectionState.tryEmit(state)
-    }
+  /** Set the connection state for testing. */
+  fun setConnectionState(state: ConnectionState) {
+    connected = state is ConnectionState.Connected
+    _connectionState.tryEmit(state)
+  }
 
-    /** Get the number of times [connect] was called. */
-    fun getConnectCallCount(): Int = connectCallCount
+  /** Get the number of times [connect] was called. */
+  fun getConnectCallCount(): Int = connectCallCount
 
-    /** Get the number of times [disconnect] was called. */
-    fun getDisconnectCallCount(): Int = disconnectCallCount
+  /** Get the number of times [disconnect] was called. */
+  fun getDisconnectCallCount(): Int = disconnectCallCount
 
-    /** Get the deviceId from the last [connect] call. */
-    fun getLastDeviceId(): String? = lastDeviceId
+  /** Get the deviceId from the last [connect] call. */
+  fun getLastDeviceId(): String? = lastDeviceId
 }

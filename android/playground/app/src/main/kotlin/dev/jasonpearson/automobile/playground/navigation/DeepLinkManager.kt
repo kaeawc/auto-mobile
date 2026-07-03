@@ -207,8 +207,8 @@ object DeepLinkManager {
   fun parseDeepLink(uri: Uri): AppDestination? {
     Log.d(TAG, "Parsing deep link URI: $uri")
     Log.d(
-        TAG,
-        "URI scheme: ${uri.scheme}, host: ${uri.host}, path: ${uri.path}, ssp: ${uri.schemeSpecificPart}",
+      TAG,
+      "URI scheme: ${uri.scheme}, host: ${uri.host}, path: ${uri.path}, ssp: ${uri.schemeSpecificPart}",
     )
 
     if (uri.scheme != SCHEME) {
@@ -219,26 +219,26 @@ object DeepLinkManager {
     // Determine if this is a hierarchical URI (automobile://playground/path) or opaque URI
     // (automobile:playground/path)
     val path =
-        if (uri.host != null) {
-          // Hierarchical URI: automobile://playground/path
-          Log.d(TAG, "Parsing hierarchical URI format")
-          if (uri.host != HOST) {
-            Log.d(TAG, "Invalid host. Expected: $HOST, got: ${uri.host}")
-            return null
-          }
-          // Extract path (already starts with "/")
-          uri.path ?: ""
-        } else {
-          // Opaque URI: automobile:playground/path
-          Log.d(TAG, "Parsing opaque URI format")
-          val ssp = uri.schemeSpecificPart
-          if (ssp == null || !ssp.startsWith(HOST)) {
-            Log.d(TAG, "Invalid host. Expected scheme-specific part to start with: $HOST")
-            return null
-          }
-          // Extract path from scheme-specific part (remove "playground" prefix)
-          if (ssp.length > HOST.length) ssp.substring(HOST.length) else ""
+      if (uri.host != null) {
+        // Hierarchical URI: automobile://playground/path
+        Log.d(TAG, "Parsing hierarchical URI format")
+        if (uri.host != HOST) {
+          Log.d(TAG, "Invalid host. Expected: $HOST, got: ${uri.host}")
+          return null
         }
+        // Extract path (already starts with "/")
+        uri.path ?: ""
+      } else {
+        // Opaque URI: automobile:playground/path
+        Log.d(TAG, "Parsing opaque URI format")
+        val ssp = uri.schemeSpecificPart
+        if (ssp == null || !ssp.startsWith(HOST)) {
+          Log.d(TAG, "Invalid host. Expected scheme-specific part to start with: $HOST")
+          return null
+        }
+        // Extract path from scheme-specific part (remove "playground" prefix)
+        if (ssp.length > HOST.length) ssp.substring(HOST.length) else ""
+      }
 
     if (path.isEmpty() && uri.schemeSpecificPart != HOST && uri.host != HOST) {
       Log.d(TAG, "Invalid URI format")
@@ -248,127 +248,127 @@ object DeepLinkManager {
     Log.d(TAG, "Extracted path: '$path'")
 
     val destination =
-        when {
-          path == PATH_ONBOARDING -> {
-            Log.d(TAG, "Parsed as OnboardingDestination")
-            OnboardingDestination
-          }
+      when {
+        path == PATH_ONBOARDING -> {
+          Log.d(TAG, "Parsed as OnboardingDestination")
+          OnboardingDestination
+        }
 
-          path == PATH_LOGIN -> {
-            Log.d(TAG, "Parsed as LoginDestination")
-            LoginDestination
-          }
+        path == PATH_LOGIN -> {
+          Log.d(TAG, "Parsed as LoginDestination")
+          LoginDestination
+        }
 
-          path == PATH_HOME || path.isEmpty() -> {
-            Log.d(TAG, "Parsed as HomeDestination with default tab (path: '$path')")
-            HomeDestination(selectedTab = 0)
-          }
+        path == PATH_HOME || path.isEmpty() -> {
+          Log.d(TAG, "Parsed as HomeDestination with default tab (path: '$path')")
+          HomeDestination(selectedTab = 0)
+        }
 
-          path == PATH_MEDIA -> {
-            Log.d(TAG, "Parsed as HomeDestination with media/discover tab selected")
-            HomeDestination(selectedTab = 0, selectedSubTab = 2) // Media sub-tab is index 2
-          }
+        path == PATH_MEDIA -> {
+          Log.d(TAG, "Parsed as HomeDestination with media/discover tab selected")
+          HomeDestination(selectedTab = 0, selectedSubTab = 2) // Media sub-tab is index 2
+        }
 
-          path == PATH_TAP -> {
-            Log.d(TAG, "Parsed as HomeDestination with tap sub-tab selected")
-            HomeDestination(selectedTab = 0, selectedSubTab = 0) // Tap sub-tab is index 0
-          }
+        path == PATH_TAP -> {
+          Log.d(TAG, "Parsed as HomeDestination with tap sub-tab selected")
+          HomeDestination(selectedTab = 0, selectedSubTab = 0) // Tap sub-tab is index 0
+        }
 
-          path == PATH_LONG_PRESS -> {
-            Log.d(TAG, "Parsed as HomeDestination with tap sub-tab selected (long press alias)")
-            HomeDestination(selectedTab = 0, selectedSubTab = 0) // Tap sub-tab is index 0
-          }
+        path == PATH_LONG_PRESS -> {
+          Log.d(TAG, "Parsed as HomeDestination with tap sub-tab selected (long press alias)")
+          HomeDestination(selectedTab = 0, selectedSubTab = 0) // Tap sub-tab is index 0
+        }
 
-          path == PATH_SWIPE -> {
-            Log.d(TAG, "Parsed as HomeDestination with swipe sub-tab selected")
-            HomeDestination(selectedTab = 0, selectedSubTab = 1) // Swipe sub-tab is index 1
-          }
+        path == PATH_SWIPE -> {
+          Log.d(TAG, "Parsed as HomeDestination with swipe sub-tab selected")
+          HomeDestination(selectedTab = 0, selectedSubTab = 1) // Swipe sub-tab is index 1
+        }
 
-          path == PATH_TEXT -> {
-            Log.d(TAG, "Parsed as HomeDestination with text sub-tab selected")
-            HomeDestination(selectedTab = 0, selectedSubTab = 3) // Text sub-tab is index 3
-          }
+        path == PATH_TEXT -> {
+          Log.d(TAG, "Parsed as HomeDestination with text sub-tab selected")
+          HomeDestination(selectedTab = 0, selectedSubTab = 3) // Text sub-tab is index 3
+        }
 
-          path == PATH_CHAT -> {
-            Log.d(TAG, "Parsed as HomeDestination with chat sub-tab selected")
-            HomeDestination(selectedTab = 0, selectedSubTab = 4) // Chat sub-tab is index 4
-          }
+        path == PATH_CHAT -> {
+          Log.d(TAG, "Parsed as HomeDestination with chat sub-tab selected")
+          HomeDestination(selectedTab = 0, selectedSubTab = 4) // Chat sub-tab is index 4
+        }
 
-          path == PATH_VIDEO -> {
-            Log.d(TAG, "Parsed as HomeDestination with video sub-tab selected (alias for media)")
-            HomeDestination(selectedTab = 0, selectedSubTab = 2) // Video is same as Media sub-tab
-          }
+        path == PATH_VIDEO -> {
+          Log.d(TAG, "Parsed as HomeDestination with video sub-tab selected (alias for media)")
+          HomeDestination(selectedTab = 0, selectedSubTab = 2) // Video is same as Media sub-tab
+        }
 
-          path.startsWith(PATH_SLIDES) -> {
-            val slideIndex = path.substringAfterLast("/").toIntOrNull()?.takeIf { it >= 0 } ?: 0
-            Log.d(TAG, "Parsed as SlidesDestination with slideIndex: $slideIndex")
-            SlidesDestination(slideIndex)
-          }
-          path.startsWith(PATH_VIDEO_PLAYER) -> {
-            val videoId = path.substringAfterLast("/")
-            if (videoId.isNotEmpty()) {
-              Log.d(TAG, "Parsed as VideoPlayerDestination with videoId: '$videoId'")
-              VideoPlayerDestination(videoId)
-            } else {
-              Log.d(TAG, "Empty videoId for video player path")
-              null
-            }
-          }
-          path == PATH_SETTINGS -> {
-            Log.d(TAG, "Parsed as SettingsDestination")
-            SettingsDestination
-          }
-          path == PATH_DEMOS -> {
-            Log.d(TAG, "Parsed as DemoIndexDestination")
-            DemoIndexDestination
-          }
-          path == PATH_DEMO_UX_START -> {
-            Log.d(TAG, "Parsed as DemoUxStartDestination")
-            DemoUxStartDestination
-          }
-          path == PATH_DEMO_UX_DETAILS -> {
-            Log.d(TAG, "Parsed as DemoUxDetailsDestination")
-            DemoUxDetailsDestination
-          }
-          path == PATH_DEMO_UX_SUMMARY -> {
-            Log.d(TAG, "Parsed as DemoUxSummaryDestination")
-            DemoUxSummaryDestination
-          }
-          path == PATH_DEMO_STARTUP -> {
-            Log.d(TAG, "Parsed as DemoStartupDestination")
-            DemoStartupDestination
-          }
-          path == PATH_DEMO_PERF_LIST -> {
-            Log.d(TAG, "Parsed as DemoPerformanceListDestination")
-            DemoPerformanceListDestination
-          }
-          path.startsWith(PATH_DEMO_PERF_DETAIL) -> {
-            val itemId = path.substringAfterLast("/").toIntOrNull()
-            if (itemId != null && itemId > 0) {
-              Log.d(TAG, "Parsed as DemoPerformanceDetailDestination with itemId: $itemId")
-              DemoPerformanceDetailDestination(itemId)
-            } else {
-              Log.d(TAG, "Invalid itemId for demo performance detail path")
-              null
-            }
-          }
-          path == PATH_DEMO_A11Y_CONTRAST -> {
-            Log.d(TAG, "Parsed as DemoContrastDestination")
-            DemoContrastDestination
-          }
-          path == PATH_DEMO_A11Y_TAP_TARGETS -> {
-            Log.d(TAG, "Parsed as DemoTapTargetsDestination")
-            DemoTapTargetsDestination
-          }
-          path == PATH_DEMO_BUG_REPRO -> {
-            Log.d(TAG, "Parsed as DemoBugReproDestination")
-            DemoBugReproDestination
-          }
-          else -> {
-            Log.d(TAG, "No matching destination for path: $path")
+        path.startsWith(PATH_SLIDES) -> {
+          val slideIndex = path.substringAfterLast("/").toIntOrNull()?.takeIf { it >= 0 } ?: 0
+          Log.d(TAG, "Parsed as SlidesDestination with slideIndex: $slideIndex")
+          SlidesDestination(slideIndex)
+        }
+        path.startsWith(PATH_VIDEO_PLAYER) -> {
+          val videoId = path.substringAfterLast("/")
+          if (videoId.isNotEmpty()) {
+            Log.d(TAG, "Parsed as VideoPlayerDestination with videoId: '$videoId'")
+            VideoPlayerDestination(videoId)
+          } else {
+            Log.d(TAG, "Empty videoId for video player path")
             null
           }
         }
+        path == PATH_SETTINGS -> {
+          Log.d(TAG, "Parsed as SettingsDestination")
+          SettingsDestination
+        }
+        path == PATH_DEMOS -> {
+          Log.d(TAG, "Parsed as DemoIndexDestination")
+          DemoIndexDestination
+        }
+        path == PATH_DEMO_UX_START -> {
+          Log.d(TAG, "Parsed as DemoUxStartDestination")
+          DemoUxStartDestination
+        }
+        path == PATH_DEMO_UX_DETAILS -> {
+          Log.d(TAG, "Parsed as DemoUxDetailsDestination")
+          DemoUxDetailsDestination
+        }
+        path == PATH_DEMO_UX_SUMMARY -> {
+          Log.d(TAG, "Parsed as DemoUxSummaryDestination")
+          DemoUxSummaryDestination
+        }
+        path == PATH_DEMO_STARTUP -> {
+          Log.d(TAG, "Parsed as DemoStartupDestination")
+          DemoStartupDestination
+        }
+        path == PATH_DEMO_PERF_LIST -> {
+          Log.d(TAG, "Parsed as DemoPerformanceListDestination")
+          DemoPerformanceListDestination
+        }
+        path.startsWith(PATH_DEMO_PERF_DETAIL) -> {
+          val itemId = path.substringAfterLast("/").toIntOrNull()
+          if (itemId != null && itemId > 0) {
+            Log.d(TAG, "Parsed as DemoPerformanceDetailDestination with itemId: $itemId")
+            DemoPerformanceDetailDestination(itemId)
+          } else {
+            Log.d(TAG, "Invalid itemId for demo performance detail path")
+            null
+          }
+        }
+        path == PATH_DEMO_A11Y_CONTRAST -> {
+          Log.d(TAG, "Parsed as DemoContrastDestination")
+          DemoContrastDestination
+        }
+        path == PATH_DEMO_A11Y_TAP_TARGETS -> {
+          Log.d(TAG, "Parsed as DemoTapTargetsDestination")
+          DemoTapTargetsDestination
+        }
+        path == PATH_DEMO_BUG_REPRO -> {
+          Log.d(TAG, "Parsed as DemoBugReproDestination")
+          DemoBugReproDestination
+        }
+        else -> {
+          Log.d(TAG, "No matching destination for path: $path")
+          null
+        }
+      }
 
     Log.d(TAG, "Final parsed destination: $destination")
     return destination
@@ -387,13 +387,13 @@ object DeepLinkManager {
     // Handle both hierarchical (automobile://playground/path) and opaque
     // (automobile:playground/path) URIs
     val hasValidHost =
-        if (uri.host != null) {
-          // Hierarchical URI: check host
-          uri.host == HOST
-        } else {
-          // Opaque URI: check scheme-specific part
-          uri.schemeSpecificPart?.startsWith(HOST) == true
-        }
+      if (uri.host != null) {
+        // Hierarchical URI: check host
+        uri.host == HOST
+      } else {
+        // Opaque URI: check scheme-specific part
+        uri.schemeSpecificPart?.startsWith(HOST) == true
+      }
 
     if (!hasValidHost) {
       Log.d(TAG, "Deep link validation result: false (invalid host)")
@@ -425,32 +425,32 @@ object DeepLinkManager {
     val path = if (ssp.length > HOST.length) ssp.substring(HOST.length) else ""
 
     val destinationName =
-        when {
-          path == PATH_ONBOARDING -> "Onboarding"
-          path == PATH_LOGIN -> "Login"
-          path == PATH_HOME || path.isEmpty() -> "Home"
-          path == PATH_MEDIA -> "Media"
-          path == PATH_TAP -> "Tap"
-          path == PATH_LONG_PRESS -> "Tap"
-          path == PATH_SWIPE -> "Swipe"
-          path == PATH_TEXT -> "Text"
-          path == PATH_CHAT -> "Chat"
-          path == PATH_VIDEO -> "Video"
-          path.startsWith(PATH_SLIDES) -> "Slides"
-          path.startsWith(PATH_VIDEO_PLAYER) -> "Video Player"
-          path == PATH_SETTINGS -> "Settings"
-          path == PATH_DEMOS -> "Demo Index"
-          path == PATH_DEMO_UX_START -> "Demo UX Start"
-          path == PATH_DEMO_UX_DETAILS -> "Demo UX Details"
-          path == PATH_DEMO_UX_SUMMARY -> "Demo UX Summary"
-          path == PATH_DEMO_STARTUP -> "Demo Startup"
-          path == PATH_DEMO_PERF_LIST -> "Demo Performance List"
-          path.startsWith(PATH_DEMO_PERF_DETAIL) -> "Demo Performance Detail"
-          path == PATH_DEMO_A11Y_CONTRAST -> "Demo Contrast"
-          path == PATH_DEMO_A11Y_TAP_TARGETS -> "Demo Tap Targets"
-          path == PATH_DEMO_BUG_REPRO -> "Demo Bug Repro"
-          else -> null
-        }
+      when {
+        path == PATH_ONBOARDING -> "Onboarding"
+        path == PATH_LOGIN -> "Login"
+        path == PATH_HOME || path.isEmpty() -> "Home"
+        path == PATH_MEDIA -> "Media"
+        path == PATH_TAP -> "Tap"
+        path == PATH_LONG_PRESS -> "Tap"
+        path == PATH_SWIPE -> "Swipe"
+        path == PATH_TEXT -> "Text"
+        path == PATH_CHAT -> "Chat"
+        path == PATH_VIDEO -> "Video"
+        path.startsWith(PATH_SLIDES) -> "Slides"
+        path.startsWith(PATH_VIDEO_PLAYER) -> "Video Player"
+        path == PATH_SETTINGS -> "Settings"
+        path == PATH_DEMOS -> "Demo Index"
+        path == PATH_DEMO_UX_START -> "Demo UX Start"
+        path == PATH_DEMO_UX_DETAILS -> "Demo UX Details"
+        path == PATH_DEMO_UX_SUMMARY -> "Demo UX Summary"
+        path == PATH_DEMO_STARTUP -> "Demo Startup"
+        path == PATH_DEMO_PERF_LIST -> "Demo Performance List"
+        path.startsWith(PATH_DEMO_PERF_DETAIL) -> "Demo Performance Detail"
+        path == PATH_DEMO_A11Y_CONTRAST -> "Demo Contrast"
+        path == PATH_DEMO_A11Y_TAP_TARGETS -> "Demo Tap Targets"
+        path == PATH_DEMO_BUG_REPRO -> "Demo Bug Repro"
+        else -> null
+      }
 
     Log.d(TAG, "Destination name: $destinationName")
     return destinationName
@@ -602,10 +602,10 @@ object DeepLinkManager {
     Log.d(TAG, "Context package name: ${context.packageName}")
 
     val intent =
-        Intent(Intent.ACTION_VIEW, Uri.parse(deepLinkUrl)).apply {
-          setPackage(context.packageName)
-          flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
+      Intent(Intent.ACTION_VIEW, Uri.parse(deepLinkUrl)).apply {
+        setPackage(context.packageName)
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+      }
 
     Log.d(TAG, "Intent created with flags: ${intent.flags}")
     Log.d(TAG, "Starting activity with intent")
@@ -622,32 +622,32 @@ object DeepLinkManager {
   fun getAllDeepLinks(): List<Pair<String, String>> {
     Log.d(TAG, "Getting all available deep links")
     val deepLinks =
-        listOf(
-            "Onboarding" to generateOnboardingUrl(),
-            "Login" to generateLoginUrl(),
-            "Home" to generateHomeUrl(),
-            "Media" to generateMediaUrl(),
-            "Tap" to generateTapUrl(),
-            "Long Press (alias)" to generateLongPressUrl(),
-            "Swipe" to generateSwipeUrl(),
-            "Text" to generateTextUrl(),
-            "Chat" to generateChatUrl(),
-            "Video" to generateVideoUrl(),
-            "Slides (slide 0)" to generateSlidesUrl(0),
-            "Slides (slide 3)" to generateSlidesUrl(3),
-            "Video Player (sample)" to generateVideoPlayerUrl("sample123"),
-            "Settings" to generateSettingsUrl(),
-            "Demos Index" to generateDemosIndexUrl(),
-            "Demo UX Start" to generateDemoUxStartUrl(),
-            "Demo UX Details" to generateDemoUxDetailsUrl(),
-            "Demo UX Summary" to generateDemoUxSummaryUrl(),
-            "Demo Startup" to generateDemoStartupUrl(),
-            "Demo Performance List" to generateDemoPerformanceListUrl(),
-            "Demo Performance Detail (item 4)" to generateDemoPerformanceDetailUrl(4),
-            "Demo Contrast" to generateDemoContrastUrl(),
-            "Demo Tap Targets" to generateDemoTapTargetsUrl(),
-            "Demo Bug Repro" to generateDemoBugReproUrl(),
-        )
+      listOf(
+        "Onboarding" to generateOnboardingUrl(),
+        "Login" to generateLoginUrl(),
+        "Home" to generateHomeUrl(),
+        "Media" to generateMediaUrl(),
+        "Tap" to generateTapUrl(),
+        "Long Press (alias)" to generateLongPressUrl(),
+        "Swipe" to generateSwipeUrl(),
+        "Text" to generateTextUrl(),
+        "Chat" to generateChatUrl(),
+        "Video" to generateVideoUrl(),
+        "Slides (slide 0)" to generateSlidesUrl(0),
+        "Slides (slide 3)" to generateSlidesUrl(3),
+        "Video Player (sample)" to generateVideoPlayerUrl("sample123"),
+        "Settings" to generateSettingsUrl(),
+        "Demos Index" to generateDemosIndexUrl(),
+        "Demo UX Start" to generateDemoUxStartUrl(),
+        "Demo UX Details" to generateDemoUxDetailsUrl(),
+        "Demo UX Summary" to generateDemoUxSummaryUrl(),
+        "Demo Startup" to generateDemoStartupUrl(),
+        "Demo Performance List" to generateDemoPerformanceListUrl(),
+        "Demo Performance Detail (item 4)" to generateDemoPerformanceDetailUrl(4),
+        "Demo Contrast" to generateDemoContrastUrl(),
+        "Demo Tap Targets" to generateDemoTapTargetsUrl(),
+        "Demo Bug Repro" to generateDemoBugReproUrl(),
+      )
     Log.d(TAG, "Generated ${deepLinks.size} deep links")
     return deepLinks
   }

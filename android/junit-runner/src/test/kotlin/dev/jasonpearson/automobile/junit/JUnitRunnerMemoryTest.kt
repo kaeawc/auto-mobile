@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.junit
 
-import java.io.File
 import java.util.Base64
 import org.junit.After
 import org.junit.AfterClass
@@ -64,14 +63,14 @@ class JUnitRunnerMemoryTest {
 
     if (deltaBytes > maxGrowthBytes) {
       val reason =
-          "Heap growth ${formatBytes(deltaBytes)} exceeded limit ${formatBytes(maxGrowthBytes)}"
+        "Heap growth ${formatBytes(deltaBytes)} exceeded limit ${formatBytes(maxGrowthBytes)}"
       MemoryDiagnostics.captureDiagnostics("junit_runner_memory_growth", reason)
       MemoryDiagnostics.dumpHeap("junit_runner_memory_growth", reason)
     }
 
     assertTrue(
-        "Heap growth ${formatBytes(deltaBytes)} exceeded limit ${formatBytes(maxGrowthBytes)}",
-        deltaBytes <= maxGrowthBytes,
+      "Heap growth ${formatBytes(deltaBytes)} exceeded limit ${formatBytes(maxGrowthBytes)}",
+      deltaBytes <= maxGrowthBytes,
     )
   }
 
@@ -91,11 +90,11 @@ class JUnitRunnerMemoryTest {
 
   private fun resolveMaxGrowthBytes(): Long {
     val configured =
-        System.getProperty(
-                "automobile.junit.memory.max.growth.mb",
-                DEFAULT_MAX_GROWTH_MB.toString(),
-            )
-            .toLongOrNull()
+      System.getProperty(
+          "automobile.junit.memory.max.growth.mb",
+          DEFAULT_MAX_GROWTH_MB.toString(),
+        )
+        .toLongOrNull()
     val resolved = configured ?: DEFAULT_MAX_GROWTH_MB
     return resolved * 1024L * 1024L
   }

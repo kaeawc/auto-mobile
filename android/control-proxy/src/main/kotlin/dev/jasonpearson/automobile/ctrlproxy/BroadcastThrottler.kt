@@ -3,8 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 
 class BroadcastThrottler(
-    private val timeProvider: TimeProvider,
-    private val minIntervalMs: Long,
+  private val timeProvider: TimeProvider,
+  private val minIntervalMs: Long,
 ) {
   private var lastBroadcastMs: Long? = null
 

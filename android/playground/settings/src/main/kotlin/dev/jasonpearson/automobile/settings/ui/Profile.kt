@@ -47,66 +47,66 @@ fun ProfileTopAppBar(name: String, email: String, scrollProgress: Float, onEmail
   val emailAlpha by remember { derivedStateOf { max(0f, 1f - scrollProgress) } }
 
   TopAppBar(
-      title = {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-          Column {
-            Text(text = name, fontSize = titleSize, fontWeight = FontWeight.Bold)
-            if (emailAlpha > 0f) {
-              Text(
-                  text = email,
-                  fontSize = 14.sp,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  modifier = Modifier.alpha(emailAlpha).clickable { onEmailClick() },
-              )
-            }
+    title = {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        Column {
+          Text(text = name, fontSize = titleSize, fontWeight = FontWeight.Bold)
+          if (emailAlpha > 0f) {
+            Text(
+              text = email,
+              fontSize = 14.sp,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.alpha(emailAlpha).clickable { onEmailClick() },
+            )
           }
-
-          Icon(
-              imageVector = Icons.Filled.Person,
-              contentDescription = "Profile Photo",
-              modifier = Modifier.size(40.dp).clip(CircleShape),
-              tint = MaterialTheme.colorScheme.primary,
-          )
         }
+
+        Icon(
+          imageVector = Icons.Filled.Person,
+          contentDescription = "Profile Photo",
+          modifier = Modifier.size(40.dp).clip(CircleShape),
+          tint = MaterialTheme.colorScheme.primary,
+        )
       }
+    }
   )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EmailEditBottomSheet(
-    email: String,
-    onEmailChange: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onSave: () -> Unit,
+  email: String,
+  onEmailChange: (String) -> Unit,
+  onDismiss: () -> Unit,
+  onSave: () -> Unit,
 ) {
   ModalBottomSheet(onDismissRequest = onDismiss) {
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
       Text(
-          text = "Edit Email",
-          fontSize = 20.sp,
-          fontWeight = FontWeight.Bold,
-          modifier = Modifier.padding(bottom = 16.dp),
+        text = "Edit Email",
+        fontSize = 20.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(bottom = 16.dp),
       )
 
       OutlinedTextField(
-          value = email,
-          onValueChange = onEmailChange,
-          label = { Text("Email") },
-          modifier = Modifier.fillMaxWidth(),
+        value = email,
+        onValueChange = onEmailChange,
+        label = { Text("Email") },
+        modifier = Modifier.fillMaxWidth(),
       )
 
       Spacer(modifier = Modifier.height(16.dp))
 
       Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
         Button(
-            onClick = onDismiss,
-            colors =
-                ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+          onClick = onDismiss,
+          colors =
+            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
         ) {
           Text("Cancel")
         }
@@ -121,15 +121,61 @@ fun EmailEditBottomSheet(
 
 @Composable
 fun ProfileSection(
-    name: String,
-    email: String,
-    scrollProgress: Float,
-    onEmailUpdated: (String) -> Unit,
+  name: String,
+  email: String,
+  scrollProgress: Float,
+  onEmailUpdated: (String) -> Unit,
 ) {
   var isEditingEmail by remember { mutableStateOf(false) }
   var tempEmail by remember { mutableStateOf(email) }
 
   ProfileTopAppBar(
+    name = name,
+    email = email,
+    scrollProgress = scrollProgress,
+    onEmailClick = {
+      tempEmail = email
+      isEditingEmail = true
+    },
+  )
+
+  if (isEditingEmail) {
+    EmailEditBottomSheet(
+      email = tempEmail,
+      onEmailChange = { tempEmail = it },
+      onDismiss = { isEditingEmail = false },
+      onSave = {
+        onEmailUpdated(tempEmail)
+        isEditingEmail = false
+      },
+    )
+  }
+}
+
+@Composable
+fun ProfileWithBottomSheet(
+  name: String,
+  email: String,
+  scrollProgress: Float,
+  onEmailUpdated: (String) -> Unit,
+): @Composable () -> Unit {
+  var isEditingEmail by remember { mutableStateOf(false) }
+  var tempEmail by remember { mutableStateOf(email) }
+
+  if (isEditingEmail) {
+    EmailEditBottomSheet(
+      email = tempEmail,
+      onEmailChange = { tempEmail = it },
+      onDismiss = { isEditingEmail = false },
+      onSave = {
+        onEmailUpdated(tempEmail)
+        isEditingEmail = false
+      },
+    )
+  }
+
+  return {
+    ProfileTopAppBar(
       name = name,
       email = email,
       scrollProgress = scrollProgress,
@@ -137,52 +183,6 @@ fun ProfileSection(
         tempEmail = email
         isEditingEmail = true
       },
-  )
-
-  if (isEditingEmail) {
-    EmailEditBottomSheet(
-        email = tempEmail,
-        onEmailChange = { tempEmail = it },
-        onDismiss = { isEditingEmail = false },
-        onSave = {
-          onEmailUpdated(tempEmail)
-          isEditingEmail = false
-        },
-    )
-  }
-}
-
-@Composable
-fun ProfileWithBottomSheet(
-    name: String,
-    email: String,
-    scrollProgress: Float,
-    onEmailUpdated: (String) -> Unit,
-): @Composable () -> Unit {
-  var isEditingEmail by remember { mutableStateOf(false) }
-  var tempEmail by remember { mutableStateOf(email) }
-
-  if (isEditingEmail) {
-    EmailEditBottomSheet(
-        email = tempEmail,
-        onEmailChange = { tempEmail = it },
-        onDismiss = { isEditingEmail = false },
-        onSave = {
-          onEmailUpdated(tempEmail)
-          isEditingEmail = false
-        },
-    )
-  }
-
-  return {
-    ProfileTopAppBar(
-        name = name,
-        email = email,
-        scrollProgress = scrollProgress,
-        onEmailClick = {
-          tempEmail = email
-          isEditingEmail = true
-        },
     )
   }
 }
@@ -192,10 +192,10 @@ fun ProfileWithBottomSheet(
 fun ProfileTopAppBarPreview() {
   MaterialTheme {
     ProfileTopAppBar(
-        name = "John Doe",
-        email = "john.doe@example.com",
-        scrollProgress = 0f,
-        onEmailClick = { /* Preview email click */ },
+      name = "John Doe",
+      email = "john.doe@example.com",
+      scrollProgress = 0f,
+      onEmailClick = { /* Preview email click */ },
     )
   }
 }
@@ -205,10 +205,10 @@ fun ProfileTopAppBarPreview() {
 fun EmailEditBottomSheetPreview() {
   MaterialTheme {
     EmailEditBottomSheet(
-        email = "john.doe@example.com",
-        onEmailChange = { /* Preview email change */ },
-        onDismiss = { /* Preview dismiss */ },
-        onSave = { /* Preview save */ },
+      email = "john.doe@example.com",
+      onEmailChange = { /* Preview email change */ },
+      onDismiss = { /* Preview dismiss */ },
+      onSave = { /* Preview save */ },
     )
   }
 }

@@ -57,6 +57,15 @@ for cmd in find xargs git; do
     fi
 done
 
+# Ensure the ktfmt on PATH runs and accepts --google-style before formatting.
+# If an older/broken ktfmt is already on PATH, fail fast with an actionable
+# message rather than staging files it never formatted.
+if ! printf 'fun probe() {}\n' | ktfmt --google-style - >/dev/null 2>&1; then
+    echo -e "${RED}The ktfmt on PATH does not run with --google-style (this repo pins 0.64).${NC}"
+    echo -e "${RED}Update ktfmt ('brew upgrade ktfmt' or re-run scripts/ktfmt/install_ktfmt.sh) and retry.${NC}"
+    exit 1
+fi
+
 # Start the timer
 if [[ -f "$PROJECT_ROOT/scripts/utils/get_timestamp.sh" ]]; then
     start_time=$(bash "$PROJECT_ROOT/scripts/utils/get_timestamp.sh")
@@ -147,11 +156,19 @@ printf '%s\n' "${files_to_process[@]}" > "$temp_file"
 echo -e "${YELLOW}Applying ktfmt formatting...${NC}"
 
 if [[ -s "$temp_file" ]]; then
-    # Apply ktfmt formatting and capture output, filtering out "Done formatting" messages
-    ktfmt_output=$(xargs ktfmt 2>&1 < "$temp_file" | grep -v "Done formatting" | grep -v "^$")
+    # Apply ktfmt formatting with --google-style (2-space block + 2-space
+    # continuation indent). This is a non-default style, so the flag is required.
+    # Capture ktfmt's own exit status via PIPESTATUS[0] — without this, the
+    # assignment only sees the trailing grep's status, masking a ktfmt/xargs
+    # failure and letting the script stage unformatted files as "success".
+    ktfmt_output=$(xargs ktfmt --google-style < "$temp_file" 2>&1 | grep -v "Done formatting" | grep -v "^$"; exit "${PIPESTATUS[0]}")
+    ktfmt_status=$?
 
-    # Check if the output contains actual errors vs just informational messages
-    if echo "$ktfmt_output" | grep -E "(error|Error|ERROR|failed|Failed|FAILED)" >/dev/null 2>&1; then
+    # Treat a non-zero ktfmt/xargs run as a hard error; otherwise still scan the
+    # output for error keywords (belt and suspenders).
+    if [[ $ktfmt_status -ne 0 ]]; then
+        errors="ktfmt exited with status ${ktfmt_status}:\n${ktfmt_output}"
+    elif echo "$ktfmt_output" | grep -E "(error|Error|ERROR|failed|Failed|FAILED)" >/dev/null 2>&1; then
         errors="$ktfmt_output"
     fi
 fi

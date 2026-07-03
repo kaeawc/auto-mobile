@@ -25,10 +25,11 @@ java {
 // release, scripts/ci/verify-release-integrity.sh asserts the SNAPSHOT-stripped
 // base version here matches package.json and the git tag.
 val npmPackageVersion =
-    providers.fileContents(rootProject.layout.projectDirectory.file("../package.json")).asText.map { packageJson ->
-      val parsed = JsonSlurper().parseText(packageJson) as Map<*, *>
-      parsed["version"].toString()
-    }
+  providers.fileContents(rootProject.layout.projectDirectory.file("../package.json")).asText.map {
+    packageJson ->
+    val parsed = JsonSlurper().parseText(packageJson) as Map<*, *>
+    parsed["version"].toString()
+  }
 
 dependencies {
   // Shared validation module
@@ -60,9 +61,7 @@ dependencies {
 tasks.withType<KotlinCompile>().configureEach {
   compilerOptions {
     languageVersion.set(
-        KotlinVersion.valueOf(
-            "KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}"
-        )
+      KotlinVersion.valueOf("KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}")
     )
   }
 }
@@ -70,9 +69,9 @@ tasks.withType<KotlinCompile>().configureEach {
 mavenPublishing {
   // Coordinates: group and version from root, artifact from local gradle.properties
   coordinates(
-      property("GROUP").toString(),
-      property("POM_ARTIFACT_ID").toString(),
-      version.toString(),
+    property("GROUP").toString(),
+    property("POM_ARTIFACT_ID").toString(),
+    version.toString(),
   )
 
   pom {
@@ -114,15 +113,18 @@ tasks.withType<Test> {
   maxParallelForks = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
   dependsOn(":control-proxy:assembleDebug")
   val accessibilityApk =
-      project(":control-proxy")
-          .layout
-          .buildDirectory
-          .file("outputs/apk/debug/control-proxy-debug.apk")
+    project(":control-proxy")
+      .layout
+      .buildDirectory
+      .file("outputs/apk/debug/control-proxy-debug.apk")
   environment("AUTOMOBILE_CTRL_PROXY_APK_PATH", accessibilityApk.get().asFile.absolutePath)
   systemProperty("automobile.ctrl.proxy.apk.path", accessibilityApk.get().asFile.absolutePath)
   systemProperty("automobile.daemon.package.version", npmPackageVersion.get())
   systemProperty("automobile.daemon.force.restart", "true")
-  systemProperty("automobile.daemon.local.project.path", rootProject.rootDir.parentFile.absolutePath)
+  systemProperty(
+    "automobile.daemon.local.project.path",
+    rootProject.rootDir.parentFile.absolutePath,
+  )
 
   testLogging {
     // Show standard output and error for tests
@@ -135,8 +137,8 @@ tasks.withType<Test> {
 tasks.named<Jar>("jar") {
   manifest {
     attributes(
-        "Implementation-Title" to project.property("POM_ARTIFACT_ID").toString(),
-        "Implementation-Version" to npmPackageVersion.get(),
+      "Implementation-Title" to project.property("POM_ARTIFACT_ID").toString(),
+      "Implementation-Version" to npmPackageVersion.get(),
     )
   }
 }

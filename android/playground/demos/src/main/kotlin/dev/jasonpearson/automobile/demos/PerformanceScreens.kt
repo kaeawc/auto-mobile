@@ -29,69 +29,69 @@ import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 
 private data class PerformanceItem(
-    val id: Int,
-    val title: String,
-    val subtitle: String,
-    val price: String,
+  val id: Int,
+  val title: String,
+  val subtitle: String,
+  val price: String,
 )
 
 private val performanceItems =
-    List(80) { index ->
-      PerformanceItem(
-          id = index + 1,
-          title = "Product ${index + 1}",
-          subtitle = "Demo item ${(index + 1) * 3}A",
-          price = "$${(index + 1) * 2}",
-      )
-    }
+  List(80) { index ->
+    PerformanceItem(
+      id = index + 1,
+      title = "Product ${index + 1}",
+      subtitle = "Demo item ${(index + 1) * 3}A",
+      price = "$${(index + 1) * 2}",
+    )
+  }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StartupDemoScreen(onNavigateBack: () -> Unit) {
   TrackRecomposition(id = "screen.demo.startup", composableName = "StartupDemoScreen") {
     Scaffold(
-        topBar = {
-          TopAppBar(
-              title = { Text(text = "Startup Demo") },
-              navigationIcon = {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.semantics { testTag = "startup_back" },
-                ) {
-                  Icon(
-                      imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                      contentDescription = "Back",
-                  )
-                }
-              },
-          )
-        }
+      topBar = {
+        TopAppBar(
+          title = { Text(text = "Startup Demo") },
+          navigationIcon = {
+            IconButton(
+              onClick = onNavigateBack,
+              modifier = Modifier.semantics { testTag = "startup_back" },
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+              )
+            }
+          },
+        )
+      }
     ) { paddingValues ->
       Column(
-          modifier =
-              Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).semantics {
-                testTag = "startup_content"
-              },
-          verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier =
+          Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).semantics {
+            testTag = "startup_content"
+          },
+        verticalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         Text(
-            text = "This screen is used as a stable startup target.",
-            style = MaterialTheme.typography.bodyLarge,
+          text = "This screen is used as a stable startup target.",
+          style = MaterialTheme.typography.bodyLarge,
         )
         Text(
-            text = "When measuring startup, wait for the Ready signal below.",
-            style = MaterialTheme.typography.bodyMedium,
+          text = "When measuring startup, wait for the Ready signal below.",
+          style = MaterialTheme.typography.bodyMedium,
         )
         Card(
-            modifier = Modifier.fillMaxWidth().semantics { testTag = "startup_ready_card" },
-            colors =
-                CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+          modifier = Modifier.fillMaxWidth().semantics { testTag = "startup_ready_card" },
+          colors =
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         ) {
           Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(text = "Ready", style = MaterialTheme.typography.titleMedium)
             Text(
-                text = "UI is stable and interactive.",
-                style = MaterialTheme.typography.bodySmall,
+              text = "UI is stable and interactive.",
+              style = MaterialTheme.typography.bodySmall,
             )
           }
         }
@@ -103,60 +103,60 @@ fun StartupDemoScreen(onNavigateBack: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PerformanceListScreen(
-    onNavigateToDetail: (Int) -> Unit,
-    onNavigateBack: () -> Unit,
+  onNavigateToDetail: (Int) -> Unit,
+  onNavigateBack: () -> Unit,
 ) {
   TrackRecomposition(
-      id = "screen.demo.performance.list",
-      composableName = "PerformanceListScreen",
+    id = "screen.demo.performance.list",
+    composableName = "PerformanceListScreen",
   ) {
     Scaffold(
-        topBar = {
-          TopAppBar(
-              title = { Text(text = "Performance List") },
-              navigationIcon = {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.semantics { testTag = "performance_list_back" },
-                ) {
-                  Icon(
-                      imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                      contentDescription = "Back",
-                  )
-                }
-              },
-          )
-        }
+      topBar = {
+        TopAppBar(
+          title = { Text(text = "Performance List") },
+          navigationIcon = {
+            IconButton(
+              onClick = onNavigateBack,
+              modifier = Modifier.semantics { testTag = "performance_list_back" },
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+              )
+            }
+          },
+        )
+      }
     ) { paddingValues ->
       LazyColumn(
-          modifier =
-              Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp).semantics {
-                testTag = "performance_list"
-              },
-          verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier =
+          Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp).semantics {
+            testTag = "performance_list"
+          },
+        verticalArrangement = Arrangement.spacedBy(12.dp),
       ) {
         items(performanceItems, key = { it.id }) { item ->
           Card(
-              modifier =
-                  Modifier.fillMaxWidth().semantics { testTag = "performance_item_${item.id}" },
-              elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier =
+              Modifier.fillMaxWidth().semantics { testTag = "performance_item_${item.id}" },
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
           ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+              modifier = Modifier.fillMaxWidth().padding(16.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
             ) {
               Column(
-                  modifier = Modifier.weight(1f),
-                  verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
               ) {
                 Text(text = item.title, style = MaterialTheme.typography.titleMedium)
                 Text(text = item.subtitle, style = MaterialTheme.typography.bodySmall)
                 Text(text = item.price, style = MaterialTheme.typography.bodySmall)
               }
               Button(
-                  onClick = { onNavigateToDetail(item.id) },
-                  modifier = Modifier.semantics { testTag = "performance_item_${item.id}_action" },
+                onClick = { onNavigateToDetail(item.id) },
+                modifier = Modifier.semantics { testTag = "performance_item_${item.id}_action" },
               ) {
                 Text("View")
               }
@@ -171,49 +171,49 @@ fun PerformanceListScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PerformanceDetailScreen(
-    itemId: Int,
-    onNavigateBack: () -> Unit,
+  itemId: Int,
+  onNavigateBack: () -> Unit,
 ) {
   TrackRecomposition(
-      id = "screen.demo.performance.detail.$itemId",
-      composableName = "PerformanceDetailScreen",
+    id = "screen.demo.performance.detail.$itemId",
+    composableName = "PerformanceDetailScreen",
   ) {
     Scaffold(
-        topBar = {
-          TopAppBar(
-              title = { Text(text = "Performance Detail") },
-              navigationIcon = {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.semantics { testTag = "performance_detail_back" },
-                ) {
-                  Icon(
-                      imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                      contentDescription = "Back",
-                  )
-                }
-              },
-          )
-        }
+      topBar = {
+        TopAppBar(
+          title = { Text(text = "Performance Detail") },
+          navigationIcon = {
+            IconButton(
+              onClick = onNavigateBack,
+              modifier = Modifier.semantics { testTag = "performance_detail_back" },
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+              )
+            }
+          },
+        )
+      }
     ) { paddingValues ->
       Column(
-          modifier =
-              Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).semantics {
-                testTag = "performance_detail_content"
-              },
-          verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier =
+          Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).semantics {
+            testTag = "performance_detail_content"
+          },
+        verticalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         Text(
-            text = "Detail for Product $itemId",
-            style = MaterialTheme.typography.titleLarge,
+          text = "Detail for Product $itemId",
+          style = MaterialTheme.typography.titleLarge,
         )
         Text(
-            text = "Use this screen as the transition target from the list.",
-            style = MaterialTheme.typography.bodyMedium,
+          text = "Use this screen as the transition target from the list.",
+          style = MaterialTheme.typography.bodyMedium,
         )
         Card(
-            modifier = Modifier.fillMaxWidth().semantics { testTag = "performance_detail_card" },
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+          modifier = Modifier.fillMaxWidth().semantics { testTag = "performance_detail_card" },
+          elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
           Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(text = "Spec $itemId", style = MaterialTheme.typography.titleMedium)
@@ -222,8 +222,8 @@ fun PerformanceDetailScreen(
           }
         }
         Button(
-            onClick = onNavigateBack,
-            modifier = Modifier.semantics { testTag = "performance_detail_back_to_list" },
+          onClick = onNavigateBack,
+          modifier = Modifier.semantics { testTag = "performance_detail_back_to_list" },
         ) {
           Text("Back to List")
         }

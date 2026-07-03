@@ -50,9 +50,9 @@ object Navigation3Adapter : NavigationFrameworkAdapter {
    */
   @Composable
   fun <T : NavKey> TrackNavigation(
-      destination: T,
-      extractArguments: (T) -> Map<String, Any?> = { emptyMap() },
-      extractMetadata: (T) -> Map<String, String> = { emptyMap() },
+    destination: T,
+    extractArguments: (T) -> Map<String, Any?> = { emptyMap() },
+    extractMetadata: (T) -> Map<String, String> = { emptyMap() },
   ) {
     // Enable tracking when first used
     DisposableEffect(Unit) {
@@ -65,25 +65,25 @@ object Navigation3Adapter : NavigationFrameworkAdapter {
 
       val destinationName = destination::class.simpleName ?: destination.toString()
       val arguments =
-          try {
-            extractArguments(destination)
-          } catch (e: Exception) {
-            emptyMap()
-          }
+        try {
+          extractArguments(destination)
+        } catch (e: Exception) {
+          emptyMap()
+        }
       val metadata =
-          try {
-            extractMetadata(destination)
-          } catch (e: Exception) {
-            emptyMap()
-          }
+        try {
+          extractMetadata(destination)
+        } catch (e: Exception) {
+          emptyMap()
+        }
 
       AutoMobileSDK.notifyNavigationEvent(
-          NavigationEvent(
-              destination = destinationName,
-              source = NavigationSource.COMPOSE_NAVIGATION,
-              arguments = arguments,
-              metadata = metadata,
-          )
+        NavigationEvent(
+          destination = destinationName,
+          source = NavigationSource.COMPOSE_NAVIGATION,
+          arguments = arguments,
+          metadata = metadata,
+        )
       )
     }
   }
@@ -92,9 +92,9 @@ object Navigation3Adapter : NavigationFrameworkAdapter {
   @Composable
   fun <T : NavKey> TrackNavigation(destination: T) {
     TrackNavigation(
-        destination = destination,
-        extractArguments = { emptyMap() },
-        extractMetadata = { emptyMap() },
+      destination = destination,
+      extractArguments = { emptyMap() },
+      extractMetadata = { emptyMap() },
     )
   }
 
@@ -107,19 +107,19 @@ object Navigation3Adapter : NavigationFrameworkAdapter {
    * @param metadata Optional metadata
    */
   fun trackManually(
-      destinationName: String,
-      arguments: Map<String, Any?> = emptyMap(),
-      metadata: Map<String, String> = emptyMap(),
+    destinationName: String,
+    arguments: Map<String, Any?> = emptyMap(),
+    metadata: Map<String, String> = emptyMap(),
   ) {
     if (!isActive) start()
 
     AutoMobileSDK.notifyNavigationEvent(
-        NavigationEvent(
-            destination = destinationName,
-            source = NavigationSource.COMPOSE_NAVIGATION,
-            arguments = arguments,
-            metadata = metadata,
-        )
+      NavigationEvent(
+        destination = destinationName,
+        source = NavigationSource.COMPOSE_NAVIGATION,
+        arguments = arguments,
+        metadata = metadata,
+      )
     )
   }
 }

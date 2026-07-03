@@ -15,8 +15,8 @@ internal data class RetryPolicy(
   /**
    * Compute the delay for a given retry attempt (0-indexed).
    *
-   * Uses exponential backoff (`baseDelayMs * 2^attempt`) clamped to [maxDelayMs],
-   * plus random jitter of up to 25% of the clamped delay.
+   * Uses exponential backoff (`baseDelayMs * 2^attempt`) clamped to [maxDelayMs], plus random
+   * jitter of up to 25% of the clamped delay.
    */
   fun delayForAttempt(attempt: Int): Long {
     val clamped = attempt.coerceIn(0, 30)

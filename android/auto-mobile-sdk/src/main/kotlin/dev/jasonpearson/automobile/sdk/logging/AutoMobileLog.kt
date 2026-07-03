@@ -5,8 +5,8 @@ import android.util.Log
 /**
  * Thin wrapper around [android.util.Log] with filter-based log capture.
  *
- * Delegates all logging to the platform Log API. When one or more [CompiledLogFilter]s
- * are registered, matching entries are also forwarded to the SDK event buffer.
+ * Delegates all logging to the platform Log API. When one or more [CompiledLogFilter]s are
+ * registered, matching entries are also forwarded to the SDK event buffer.
  *
  * Severity-level mapping between platforms:
  * - Android `wtf` (What a Terrible Failure) corresponds to iOS `fault`.
@@ -17,18 +17,17 @@ object AutoMobileLog {
   private val filters = mutableMapOf<String, CompiledLogFilter>()
 
   /** No-op retained for source compatibility during migration. */
-  internal fun initialize() {
-  }
+  internal fun initialize() {}
 
   // --- Filter API ---
 
   /**
    * Registers a named filter. If a filter with the same name exists it is replaced.
    *
-   * @param name           Unique filter name used for later removal.
-   * @param tagPattern     Optional regex applied to the log tag. `null` matches any tag.
+   * @param name Unique filter name used for later removal.
+   * @param tagPattern Optional regex applied to the log tag. `null` matches any tag.
    * @param messagePattern Optional regex applied to the log message. `null` matches any message.
-   * @param minLevel       Minimum [android.util.Log] priority (default [Log.VERBOSE]).
+   * @param minLevel Minimum [android.util.Log] priority (default [Log.VERBOSE]).
    */
   fun addFilter(
     name: String,

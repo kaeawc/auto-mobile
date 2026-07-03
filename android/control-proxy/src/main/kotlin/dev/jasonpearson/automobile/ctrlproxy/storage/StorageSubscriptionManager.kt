@@ -19,9 +19,7 @@ import kotlinx.coroutines.flow.asSharedFlow
  * Uses ContentProvider.call() to communicate with SDK-instrumented apps and ContentObserver to
  * receive push notifications when changes occur.
  */
-class StorageSubscriptionManager(
-    private val context: Context,
-) {
+class StorageSubscriptionManager(private val context: Context) {
 
   companion object {
     private const val TAG = "StorageSubscriptionMgr"
@@ -31,18 +29,19 @@ class StorageSubscriptionManager(
 
   /** State for a single subscription. */
   private data class SubscriptionState(
-      val subscription: StorageSubscription,
-      var lastSequence: Long = 0,
+    val subscription: StorageSubscription,
+    var lastSequence: Long = 0,
   )
 
   /** State for a package being observed. */
   private data class PackageObserverState(
-      val observer: ContentObserver,
-      val subscriptions: MutableSet<String> = mutableSetOf(), // file names
+    val observer: ContentObserver,
+    val subscriptions: MutableSet<String> = mutableSetOf(), // file names
   )
 
   private val subscriptions = mutableMapOf<String, SubscriptionState>() // subscriptionId -> state
-  private val packageObservers = mutableMapOf<String, PackageObserverState>() // packageName -> state
+  private val packageObservers =
+    mutableMapOf<String, PackageObserverState>() // packageName -> state
 
   private val _changeEvents = MutableSharedFlow<PreferenceChangeEvent>(extraBufferCapacity = 64)
   val changeEvents: SharedFlow<PreferenceChangeEvent> = _changeEvents.asSharedFlow()
@@ -75,12 +74,13 @@ class StorageSubscriptionManager(
         val responseJson = result.getString("result") ?: "{}"
         val response = StorageProtocolSerializer.responseFromJson(responseJson)
         when (response) {
-          is StorageResponse.Availability -> Result.success(
-            SdkAvailabilityInfo(
-              available = response.available,
-              version = response.version,
+          is StorageResponse.Availability ->
+            Result.success(
+              SdkAvailabilityInfo(
+                available = response.available,
+                version = response.version,
+              )
             )
-          )
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
         }
       }
@@ -120,21 +120,28 @@ class StorageSubscriptionManager(
         val responseJson = result.getString("result") ?: "{}"
         Log.d(TAG, "listPreferenceFiles: responseJson=$responseJson")
         val response = StorageProtocolSerializer.responseFromJson(responseJson)
-        Log.d(TAG, "listPreferenceFiles: parsed response type=${response?.let { it::class.simpleName } ?: "null"}")
+        Log.d(
+          TAG,
+          "listPreferenceFiles: parsed response type=${response?.let { it::class.simpleName } ?: "null"}",
+        )
         when (response) {
           is StorageResponse.FileList -> {
-            val files = response.files.map { file ->
-              PreferenceFileInfo(
-                name = file.name,
-                path = file.path,
-                entryCount = file.entryCount,
-              )
-            }
+            val files =
+              response.files.map { file ->
+                PreferenceFileInfo(
+                  name = file.name,
+                  path = file.path,
+                  entryCount = file.entryCount,
+                )
+              }
             Log.d(TAG, "listPreferenceFiles: returning ${files.size} files")
             Result.success(files)
           }
           else -> {
-            Log.w(TAG, "listPreferenceFiles: unexpected response type: ${response?.let { it::class.simpleName } ?: "null"}")
+            Log.w(
+              TAG,
+              "listPreferenceFiles: unexpected response type: ${response?.let { it::class.simpleName } ?: "null"}",
+            )
             Result.failure(StorageError.SdkError("Unexpected response type"))
           }
         }
@@ -177,13 +184,14 @@ class StorageSubscriptionManager(
         val response = StorageProtocolSerializer.responseFromJson(responseJson)
         when (response) {
           is StorageResponse.Preferences -> {
-            val entries = response.entries.map { entry ->
-              PreferenceEntry(
-                key = entry.key,
-                value = entry.value,
-                type = entry.type,
-              )
-            }
+            val entries =
+              response.entries.map { entry ->
+                PreferenceEntry(
+                  key = entry.key,
+                  value = entry.value,
+                  type = entry.type,
+                )
+              }
             Result.success(entries)
           }
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
@@ -293,10 +301,11 @@ class StorageSubscriptionManager(
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
-      val extras = Bundle().apply {
-        putString("fileName", fileName)
-        putString("key", key)
-      }
+      val extras =
+        Bundle().apply {
+          putString("fileName", fileName)
+          putString("key", key)
+        }
       val result = context.contentResolver.call(uri, "getPreference", null, extras)
 
       if (result == null) {
@@ -314,13 +323,14 @@ class StorageSubscriptionManager(
         val response = StorageProtocolSerializer.responseFromJson(responseJson)
         when (response) {
           is StorageResponse.SinglePreference -> {
-            val entry = response.entry?.let {
-              PreferenceEntry(
-                key = it.key,
-                value = it.value,
-                type = it.type,
-              )
-            }
+            val entry =
+              response.entry?.let {
+                PreferenceEntry(
+                  key = it.key,
+                  value = it.value,
+                  type = it.type,
+                )
+              }
             Result.success(entry)
           }
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
@@ -354,12 +364,13 @@ class StorageSubscriptionManager(
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
-      val extras = Bundle().apply {
-        putString("fileName", fileName)
-        putString("key", key)
-        if (value != null) putString("value", value)
-        putString("type", type)
-      }
+      val extras =
+        Bundle().apply {
+          putString("fileName", fileName)
+          putString("key", key)
+          if (value != null) putString("value", value)
+          putString("type", type)
+        }
       val result = context.contentResolver.call(uri, "setValue", null, extras)
 
       if (result == null) {
@@ -396,10 +407,11 @@ class StorageSubscriptionManager(
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
-      val extras = Bundle().apply {
-        putString("fileName", fileName)
-        putString("key", key)
-      }
+      val extras =
+        Bundle().apply {
+          putString("fileName", fileName)
+          putString("key", key)
+        }
       val result = context.contentResolver.call(uri, "removeValue", null, extras)
 
       if (result == null) {
@@ -435,9 +447,10 @@ class StorageSubscriptionManager(
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
-      val extras = Bundle().apply {
-        putString("fileName", fileName)
-      }
+      val extras =
+        Bundle().apply {
+          putString("fileName", fileName)
+        }
       val result = context.contentResolver.call(uri, "clearFile", null, extras)
 
       if (result == null) {
@@ -488,18 +501,17 @@ class StorageSubscriptionManager(
     val changesUri = Uri.parse("content://$authority/$CHANGES_PATH")
 
     val observer =
-        object : ContentObserver(handler) {
-          override fun onChange(selfChange: Boolean) {
-            super.onChange(selfChange)
-            Log.d(TAG, "ContentObserver notified for $packageName")
-            fetchChangesForPackage(packageName)
-          }
+      object : ContentObserver(handler) {
+        override fun onChange(selfChange: Boolean) {
+          super.onChange(selfChange)
+          Log.d(TAG, "ContentObserver notified for $packageName")
+          fetchChangesForPackage(packageName)
         }
+      }
 
     try {
       context.contentResolver.registerContentObserver(changesUri, false, observer)
-      packageObservers[packageName] =
-          PackageObserverState(observer, mutableSetOf(fileName))
+      packageObservers[packageName] = PackageObserverState(observer, mutableSetOf(fileName))
       Log.d(TAG, "Registered ContentObserver for $packageName")
     } catch (e: Exception) {
       Log.e(TAG, "Failed to register ContentObserver for $packageName", e)
@@ -532,10 +544,10 @@ class StorageSubscriptionManager(
 
       try {
         val extras =
-            Bundle().apply {
-              putString("fileName", fileName)
-              putLong("sinceSequence", subState.lastSequence)
-            }
+          Bundle().apply {
+            putString("fileName", fileName)
+            putLong("sinceSequence", subState.lastSequence)
+          }
         val result = context.contentResolver.call(uri, "getChanges", null, extras)
 
         if (result != null && result.getBoolean("success", false)) {
@@ -545,15 +557,15 @@ class StorageSubscriptionManager(
           if (response is StorageResponse.Changes) {
             for (change in response.changes) {
               val event =
-                  PreferenceChangeEvent(
-                      packageName = packageName,
-                      fileName = fileName,
-                      key = change.key,
-                      value = change.value,
-                      type = change.type,
-                      timestamp = change.timestamp,
-                      sequenceNumber = change.sequenceNumber,
-                  )
+                PreferenceChangeEvent(
+                  packageName = packageName,
+                  fileName = fileName,
+                  key = change.key,
+                  value = change.value,
+                  type = change.type,
+                  timestamp = change.timestamp,
+                  sequenceNumber = change.sequenceNumber,
+                )
 
               _changeEvents.tryEmit(event)
               subState.lastSequence = maxOf(subState.lastSequence, change.sequenceNumber)
@@ -569,17 +581,17 @@ class StorageSubscriptionManager(
 
 /** Information about SDK availability. */
 data class SdkAvailabilityInfo(
-    val available: Boolean,
-    val version: Int,
+  val available: Boolean,
+  val version: Int,
 )
 
 /** Errors that can occur during storage operations. */
 sealed class StorageError(message: String) : Exception(message) {
   class SdkNotInstalled(packageName: String) :
-      StorageError("SDK not installed in package: $packageName")
+    StorageError("SDK not installed in package: $packageName")
 
   class InspectionDisabled(packageName: String) :
-      StorageError("SharedPreferences inspection is disabled in: $packageName")
+    StorageError("SharedPreferences inspection is disabled in: $packageName")
 
   class FileNotFound(fileName: String) : StorageError("Preferences file not found: $fileName")
 

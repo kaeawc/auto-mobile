@@ -1,11 +1,10 @@
 package dev.jasonpearson.automobile.sdk.network
 
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
-import java.util.concurrent.atomic.AtomicInteger
-import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import org.junit.Test
 
 class NetworkMockRuleStoreTest {
 
@@ -14,14 +13,15 @@ class NetworkMockRuleStoreTest {
   }
 
   private fun rule(
-      mockId: String = "mock-1",
-      host: String = "api\\.example\\.com",
-      path: String = "/users",
-      method: String = "*",
-      limit: Int? = null,
-      remaining: Int? = null,
-      statusCode: Int = 500,
-  ) = NetworkMockRuleDto(
+    mockId: String = "mock-1",
+    host: String = "api\\.example\\.com",
+    path: String = "/users",
+    method: String = "*",
+    limit: Int? = null,
+    remaining: Int? = null,
+    statusCode: Int = 500,
+  ) =
+    NetworkMockRuleDto(
       mockId = mockId,
       host = host,
       path = path,
@@ -32,7 +32,7 @@ class NetworkMockRuleStoreTest {
       responseHeaders = mapOf("X-Mock" to "true"),
       responseBody = """{"error":"mocked"}""",
       contentType = "application/json",
-  )
+    )
 
   @Test
   fun `matches rule by host and path`() {
@@ -147,10 +147,12 @@ class NetworkMockRuleStoreTest {
   @Test
   fun `skips rules with invalid regex`() {
     val store = createStore()
-    store.setRules(listOf(
+    store.setRules(
+      listOf(
         rule(mockId = "bad", host = "[invalid"),
         rule(mockId = "good"),
-    ))
+      )
+    )
 
     assertEquals(1, store.getRuleCount())
     val match = store.findMatchingRule("api.example.com", "/users", "GET")

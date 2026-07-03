@@ -40,41 +40,41 @@ class AutoMobileNetworkInterceptorTest {
   private fun collectingBuffer(): Pair<SdkEventBuffer, MutableList<List<SdkEvent>>> {
     val flushed = mutableListOf<List<SdkEvent>>()
     val buffer =
-        SdkEventBuffer(
-            maxBufferSize = 1,
-            flushIntervalMs = 60_000,
-            onFlush = { flushed.add(it) },
-            executor = Executors.newSingleThreadScheduledExecutor(),
-        )
+      SdkEventBuffer(
+        maxBufferSize = 1,
+        flushIntervalMs = 60_000,
+        onFlush = { flushed.add(it) },
+        executor = Executors.newSingleThreadScheduledExecutor(),
+      )
     return buffer to flushed
   }
 
   private fun fakeChain(
-      request: Request = Request.Builder().url("https://api.example.com/users").build(),
-      responseCode: Int = 200,
-      responseBody: String = """{"ok":true}""",
-      responseContentType: String = "application/json",
-      protocol: Protocol = Protocol.HTTP_2,
-      throwOnProceed: Exception? = null,
+    request: Request = Request.Builder().url("https://api.example.com/users").build(),
+    responseCode: Int = 200,
+    responseBody: String = """{"ok":true}""",
+    responseContentType: String = "application/json",
+    protocol: Protocol = Protocol.HTTP_2,
+    throwOnProceed: Exception? = null,
   ): Interceptor.Chain {
     return FakeInterceptorChain(
-        request = request,
-        responseCode = responseCode,
-        responseBody = responseBody,
-        responseContentType = responseContentType,
-        protocol = protocol,
-        throwOnProceed = throwOnProceed,
+      request = request,
+      responseCode = responseCode,
+      responseBody = responseBody,
+      responseContentType = responseContentType,
+      protocol = protocol,
+      throwOnProceed = throwOnProceed,
     )
   }
 
   private class FakeInterceptorChain(
-      private val request: Request = Request.Builder().url("https://api.example.com/users").build(),
-      private val responseCode: Int = 200,
-      private val responseBody: String = """{"ok":true}""",
-      private val responseContentType: String = "application/json",
-      private val protocol: Protocol = Protocol.HTTP_2,
-      private val throwOnProceed: Exception? = null,
-      private val onProceed: (() -> Unit)? = null,
+    private val request: Request = Request.Builder().url("https://api.example.com/users").build(),
+    private val responseCode: Int = 200,
+    private val responseBody: String = """{"ok":true}""",
+    private val responseContentType: String = "application/json",
+    private val protocol: Protocol = Protocol.HTTP_2,
+    private val throwOnProceed: Exception? = null,
+    private val onProceed: (() -> Unit)? = null,
   ) : Interceptor.Chain {
     override fun request(): Request = request
 
@@ -82,13 +82,13 @@ class AutoMobileNetworkInterceptorTest {
       onProceed?.invoke()
       if (throwOnProceed != null) throw throwOnProceed
       return Response.Builder()
-          .request(request)
-          .code(responseCode)
-          .protocol(protocol)
-          .message("OK")
-          .header("Content-Type", responseContentType)
-          .body(responseBody.toResponseBody(responseContentType.toMediaType()))
-          .build()
+        .request(request)
+        .code(responseCode)
+        .protocol(protocol)
+        .message("OK")
+        .header("Content-Type", responseContentType)
+        .body(responseBody.toResponseBody(responseContentType.toMediaType()))
+        .build()
     }
 
     override fun connection(): Connection? = null
@@ -148,8 +148,8 @@ class AutoMobileNetworkInterceptorTest {
     override val sslSocketFactoryOrNull: SSLSocketFactory? = null
 
     override fun withSslSocketFactory(
-        sslSocketFactory: SSLSocketFactory?,
-        x509TrustManager: X509TrustManager?,
+      sslSocketFactory: SSLSocketFactory?,
+      x509TrustManager: X509TrustManager?,
     ) = this
 
     override val x509TrustManagerOrNull: X509TrustManager? = null
@@ -245,10 +245,10 @@ class AutoMobileNetworkInterceptorTest {
     val (buffer, flushed) = collectingBuffer()
     val interceptor = AutoMobileNetworkInterceptor(buffer)
     val request =
-        Request.Builder()
-            .url("https://api.example.com/submit")
-            .post("data".toRequestBody("text/plain".toMediaType()))
-            .build()
+      Request.Builder()
+        .url("https://api.example.com/submit")
+        .post("data".toRequestBody("text/plain".toMediaType()))
+        .build()
 
     interceptor.intercept(fakeChain(request = request, responseCode = 201))
     buffer.flush()
@@ -278,11 +278,11 @@ class AutoMobileNetworkInterceptorTest {
     val (buffer, flushed) = collectingBuffer()
     val interceptor = AutoMobileNetworkInterceptor(buffer, captureHeaders = true)
     val request =
-        Request.Builder()
-            .url("https://api.example.com/users")
-            .header("Accept", "application/json")
-            .header("Authorization", "Bearer token123")
-            .build()
+      Request.Builder()
+        .url("https://api.example.com/users")
+        .header("Accept", "application/json")
+        .header("Authorization", "Bearer token123")
+        .build()
 
     interceptor.intercept(fakeChain(request = request))
     buffer.flush()
@@ -327,10 +327,10 @@ class AutoMobileNetworkInterceptorTest {
     val (buffer, flushed) = collectingBuffer()
     val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
     val request =
-        Request.Builder()
-            .url("https://api.example.com/submit")
-            .post("""{"name":"test"}""".toRequestBody("application/json".toMediaType()))
-            .build()
+      Request.Builder()
+        .url("https://api.example.com/submit")
+        .post("""{"name":"test"}""".toRequestBody("application/json".toMediaType()))
+        .build()
 
     interceptor.intercept(fakeChain(request = request, responseCode = 201))
     buffer.flush()
@@ -356,10 +356,10 @@ class AutoMobileNetworkInterceptorTest {
     val (buffer, flushed) = collectingBuffer()
     val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = false)
     val request =
-        Request.Builder()
-            .url("https://api.example.com/submit")
-            .post("data".toRequestBody("text/plain".toMediaType()))
-            .build()
+      Request.Builder()
+        .url("https://api.example.com/submit")
+        .post("data".toRequestBody("text/plain".toMediaType()))
+        .build()
 
     interceptor.intercept(fakeChain(request = request))
     buffer.flush()
@@ -374,10 +374,10 @@ class AutoMobileNetworkInterceptorTest {
     val (buffer, flushed) = collectingBuffer()
     val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
     val request =
-        Request.Builder()
-            .url("https://api.example.com/image")
-            .post("binary".toRequestBody("image/png".toMediaType()))
-            .build()
+      Request.Builder()
+        .url("https://api.example.com/image")
+        .post("binary".toRequestBody("image/png".toMediaType()))
+        .build()
 
     interceptor.intercept(fakeChain(request = request))
     buffer.flush()
@@ -403,7 +403,7 @@ class AutoMobileNetworkInterceptorTest {
     val (buffer, flushed) = collectingBuffer()
     val interceptor = AutoMobileNetworkInterceptor(buffer, captureHeaders = true)
     val request =
-        Request.Builder().url("https://api.example.com/fail").header("X-Custom", "value").build()
+      Request.Builder().url("https://api.example.com/fail").header("X-Custom", "value").build()
 
     assertFailsWith<IOException> {
       interceptor.intercept(fakeChain(request = request, throwOnProceed = IOException("timeout")))
@@ -419,8 +419,8 @@ class AutoMobileNetworkInterceptorTest {
   // --- Mock enforcement tests ---
 
   private fun fakeRuleMatcher(
-      matchResult: NetworkMockRuleStore.MatchedMockRule? = null,
-      errorSim: NetworkMockRuleStore.ErrorSimulationConfig? = null,
+    matchResult: NetworkMockRuleStore.MatchedMockRule? = null,
+    errorSim: NetworkMockRuleStore.ErrorSimulationConfig? = null,
   ): NetworkMockRuleStore.RuleMatcher {
     return object : NetworkMockRuleStore.RuleMatcher {
       override fun findMatchingRule(host: String, path: String, method: String) = matchResult
@@ -434,22 +434,22 @@ class AutoMobileNetworkInterceptorTest {
     val (buffer, flushed) = collectingBuffer()
     var chainCalled = false
     val chain =
-        FakeInterceptorChain(
-            request = Request.Builder().url("https://api.example.com/users").build(),
-            responseBody = "ok",
-            responseContentType = "text/plain",
-            onProceed = { chainCalled = true },
-        )
+      FakeInterceptorChain(
+        request = Request.Builder().url("https://api.example.com/users").build(),
+        responseBody = "ok",
+        responseContentType = "text/plain",
+        onProceed = { chainCalled = true },
+      )
     val mockRule =
-        NetworkMockRuleStore.MatchedMockRule(
-            mockId = "mock-1",
-            statusCode = 503,
-            responseHeaders = mapOf("X-Mock" to "true"),
-            responseBody = """{"error":"service unavailable"}""",
-            contentType = "application/json",
-        )
+      NetworkMockRuleStore.MatchedMockRule(
+        mockId = "mock-1",
+        statusCode = 503,
+        responseHeaders = mapOf("X-Mock" to "true"),
+        responseBody = """{"error":"service unavailable"}""",
+        contentType = "application/json",
+      )
     val interceptor =
-        AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(matchResult = mockRule))
+      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(matchResult = mockRule))
 
     val response = interceptor.intercept(chain)
 
@@ -480,14 +480,14 @@ class AutoMobileNetworkInterceptorTest {
   fun `error simulation http500 returns 500 response`() {
     val (buffer, flushed) = collectingBuffer()
     val sim =
-        NetworkMockRuleStore.ErrorSimulationConfig(
-            errorType = "http500",
-            limit = null,
-            remaining = null,
-            expiresAtEpochMs = 99999L,
-        )
+      NetworkMockRuleStore.ErrorSimulationConfig(
+        errorType = "http500",
+        limit = null,
+        remaining = null,
+        expiresAtEpochMs = 99999L,
+      )
     val interceptor =
-        AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
+      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
 
     val response = interceptor.intercept(fakeChain())
 
@@ -502,14 +502,14 @@ class AutoMobileNetworkInterceptorTest {
   fun `error simulation timeout throws SocketTimeoutException`() {
     val (buffer, flushed) = collectingBuffer()
     val sim =
-        NetworkMockRuleStore.ErrorSimulationConfig(
-            errorType = "timeout",
-            limit = null,
-            remaining = null,
-            expiresAtEpochMs = 99999L,
-        )
+      NetworkMockRuleStore.ErrorSimulationConfig(
+        errorType = "timeout",
+        limit = null,
+        remaining = null,
+        expiresAtEpochMs = 99999L,
+      )
     val interceptor =
-        AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
+      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
 
     assertFailsWith<java.net.SocketTimeoutException> {
       interceptor.intercept(fakeChain())
@@ -524,14 +524,14 @@ class AutoMobileNetworkInterceptorTest {
   fun `error simulation connectionRefused throws ConnectException`() {
     val (buffer, flushed) = collectingBuffer()
     val sim =
-        NetworkMockRuleStore.ErrorSimulationConfig(
-            errorType = "connectionRefused",
-            limit = null,
-            remaining = null,
-            expiresAtEpochMs = 99999L,
-        )
+      NetworkMockRuleStore.ErrorSimulationConfig(
+        errorType = "connectionRefused",
+        limit = null,
+        remaining = null,
+        expiresAtEpochMs = 99999L,
+      )
     val interceptor =
-        AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
+      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
 
     assertFailsWith<java.net.ConnectException> {
       interceptor.intercept(fakeChain())
@@ -542,14 +542,14 @@ class AutoMobileNetworkInterceptorTest {
   fun `error simulation dnsFailure throws UnknownHostException`() {
     val (buffer, flushed) = collectingBuffer()
     val sim =
-        NetworkMockRuleStore.ErrorSimulationConfig(
-            errorType = "dnsFailure",
-            limit = null,
-            remaining = null,
-            expiresAtEpochMs = 99999L,
-        )
+      NetworkMockRuleStore.ErrorSimulationConfig(
+        errorType = "dnsFailure",
+        limit = null,
+        remaining = null,
+        expiresAtEpochMs = 99999L,
+      )
     val interceptor =
-        AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
+      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
 
     assertFailsWith<java.net.UnknownHostException> {
       interceptor.intercept(fakeChain())
@@ -560,14 +560,14 @@ class AutoMobileNetworkInterceptorTest {
   fun `error simulation tlsFailure throws SSLException`() {
     val (buffer, flushed) = collectingBuffer()
     val sim =
-        NetworkMockRuleStore.ErrorSimulationConfig(
-            errorType = "tlsFailure",
-            limit = null,
-            remaining = null,
-            expiresAtEpochMs = 99999L,
-        )
+      NetworkMockRuleStore.ErrorSimulationConfig(
+        errorType = "tlsFailure",
+        limit = null,
+        remaining = null,
+        expiresAtEpochMs = 99999L,
+      )
     val interceptor =
-        AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
+      AutoMobileNetworkInterceptor(buffer, ruleStore = fakeRuleMatcher(errorSim = sim))
 
     assertFailsWith<javax.net.ssl.SSLException> {
       interceptor.intercept(fakeChain())
@@ -578,25 +578,25 @@ class AutoMobileNetworkInterceptorTest {
   fun `mock rule takes priority over error simulation`() {
     val (buffer, _) = collectingBuffer()
     val mockRule =
-        NetworkMockRuleStore.MatchedMockRule(
-            mockId = "mock-1",
-            statusCode = 404,
-            responseHeaders = emptyMap(),
-            responseBody = "not found",
-            contentType = "text/plain",
-        )
+      NetworkMockRuleStore.MatchedMockRule(
+        mockId = "mock-1",
+        statusCode = 404,
+        responseHeaders = emptyMap(),
+        responseBody = "not found",
+        contentType = "text/plain",
+      )
     val sim =
-        NetworkMockRuleStore.ErrorSimulationConfig(
-            errorType = "http500",
-            limit = null,
-            remaining = null,
-            expiresAtEpochMs = 99999L,
-        )
+      NetworkMockRuleStore.ErrorSimulationConfig(
+        errorType = "http500",
+        limit = null,
+        remaining = null,
+        expiresAtEpochMs = 99999L,
+      )
     val interceptor =
-        AutoMobileNetworkInterceptor(
-            buffer,
-            ruleStore = fakeRuleMatcher(matchResult = mockRule, errorSim = sim),
-        )
+      AutoMobileNetworkInterceptor(
+        buffer,
+        ruleStore = fakeRuleMatcher(matchResult = mockRule, errorSim = sim),
+      )
 
     val response = interceptor.intercept(fakeChain())
 
@@ -607,10 +607,10 @@ class AutoMobileNetworkInterceptorTest {
   fun `null error simulation passes through to real request`() {
     val (buffer, _) = collectingBuffer()
     val interceptor =
-        AutoMobileNetworkInterceptor(
-            buffer,
-            ruleStore = fakeRuleMatcher(matchResult = null, errorSim = null),
-        )
+      AutoMobileNetworkInterceptor(
+        buffer,
+        ruleStore = fakeRuleMatcher(matchResult = null, errorSim = null),
+      )
 
     val response = interceptor.intercept(fakeChain(responseCode = 200))
 

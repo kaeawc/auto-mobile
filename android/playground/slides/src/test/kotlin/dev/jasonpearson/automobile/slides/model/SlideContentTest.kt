@@ -31,10 +31,10 @@ class SlideContentTest {
   fun `BulletPoints slide content should store title and points correctly`() {
     val title = "Features"
     val points =
-        listOf(
-            BulletPoint("Feature 1", listOf("Sub-point 1", "Sub-point 2")),
-            BulletPoint("Feature 2"),
-        )
+      listOf(
+        BulletPoint("Feature 1", listOf("Sub-point 1", "Sub-point 2")),
+        BulletPoint("Feature 2"),
+      )
 
     val slideContent = SlideContent.BulletPoints(title, points)
 

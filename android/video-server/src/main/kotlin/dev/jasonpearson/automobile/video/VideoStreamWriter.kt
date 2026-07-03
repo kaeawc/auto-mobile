@@ -41,9 +41,9 @@ import java.nio.ByteBuffer
  * Followed by `size` bytes of encoded frame data.
  */
 class VideoStreamWriter(
-    private val socketName: String,
-    private val width: Int,
-    private val height: Int,
+  private val socketName: String,
+  private val width: Int,
+  private val height: Int,
 ) {
   private var serverSocket: LocalServerSocket? = null
   private var clientSocket: LocalSocket? = null

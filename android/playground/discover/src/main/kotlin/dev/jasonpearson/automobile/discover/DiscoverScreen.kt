@@ -27,39 +27,39 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiscoverVideoScreen(
-    onNavigateToVideoPlayer: (String) -> Unit,
-    initialSelectedSubTab: Int? = null,
+  onNavigateToVideoPlayer: (String) -> Unit,
+  initialSelectedSubTab: Int? = null,
 ) {
   TrackRecomposition(id = "screen.discover", composableName = "DiscoverVideoScreen") {
     val tabs: Map<String, @Composable () -> Unit> =
-        mapOf(
-            "Tap" to { TapScreen() },
-            "Swipe" to { SwipeScreen() },
-            "Media" to { VideoListScreen(onNavigateToVideoPlayer = onNavigateToVideoPlayer) },
-            "Text" to { InputTextScreen() },
-            "Chat" to { ChatScreen() },
-        )
+      mapOf(
+        "Tap" to { TapScreen() },
+        "Swipe" to { SwipeScreen() },
+        "Media" to { VideoListScreen(onNavigateToVideoPlayer = onNavigateToVideoPlayer) },
+        "Text" to { InputTextScreen() },
+        "Chat" to { ChatScreen() },
+      )
     val tabPageMap: Map<Int, @Composable () -> Unit> =
-        tabs.map { it.value }.mapIndexed { index, entry -> index to entry }.toMap()
+      tabs.map { it.value }.mapIndexed { index, entry -> index to entry }.toMap()
     val tabTitles = tabs.keys
     val initialPage = initialSelectedSubTab?.coerceIn(0, tabTitles.size - 1) ?: 0
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { tabTitles.size })
     val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
-        topBar = {
-          TopAppBar(
-              title = { Text(text = "Discover", fontSize = 24.sp, fontWeight = FontWeight.Bold) }
-          )
-        }
+      topBar = {
+        TopAppBar(
+          title = { Text(text = "Discover", fontSize = 24.sp, fontWeight = FontWeight.Bold) }
+        )
+      }
     ) { paddingValues ->
       Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
         TabRow(selectedTabIndex = pagerState.currentPage, modifier = Modifier.fillMaxWidth()) {
           tabTitles.forEachIndexed { index, title ->
             Tab(
-                selected = pagerState.currentPage == index,
-                onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
-                text = { Text(title) },
+              selected = pagerState.currentPage == index,
+              onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
+              text = { Text(title) },
             )
           }
         }
@@ -73,23 +73,23 @@ fun DiscoverVideoScreen(
 }
 
 @Preview(
-    name = "Discover Screen - Keyboard Open",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_NO,
+  name = "Discover Screen - Keyboard Open",
+  showBackground = true,
+  uiMode = Configuration.UI_MODE_NIGHT_NO,
 )
 @Preview(
-    name = "Discover Screen - Keyboard Open - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
+  name = "Discover Screen - Keyboard Open - Dark",
+  showBackground = true,
+  uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun PreviewDiscoverVideoScreen() {
 
   val isDarkMode =
-      when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
-        Configuration.UI_MODE_NIGHT_YES -> true
-        else -> false
-      }
+    when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
+      Configuration.UI_MODE_NIGHT_YES -> true
+      else -> false
+    }
 
   AutoMobileTheme(darkTheme = isDarkMode) {
     DiscoverVideoScreen(onNavigateToVideoPlayer = {}, initialSelectedSubTab = 0)

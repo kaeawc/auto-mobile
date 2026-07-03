@@ -41,11 +41,11 @@ internal object AutoMobilePlanExecutor {
     for (element in stackTrace) {
       // Skip internal classes
       if (
-          element.className.startsWith("java.") ||
-              element.className.startsWith("kotlin.") ||
-              element.className.startsWith("jdk.") ||
-              element.className.startsWith("sun.") ||
-              element.className.contains("AutoMobilePlan")
+        element.className.startsWith("java.") ||
+          element.className.startsWith("kotlin.") ||
+          element.className.startsWith("jdk.") ||
+          element.className.startsWith("sun.") ||
+          element.className.contains("AutoMobilePlan")
       ) {
         continue
       }
@@ -74,70 +74,70 @@ internal object AutoMobilePlanExecutor {
   /** Build test metadata JSON object for the daemon request. */
   private fun buildTestMetadata(testContext: TestContext): JsonObject {
     val metadata =
-        mutableMapOf<String, JsonElement>(
-            "testClass" to JsonPrimitive(testContext.className),
-            "testMethod" to JsonPrimitive(testContext.methodName),
-            "isCi" to JsonPrimitive(resolveCiMode()),
-        )
+      mutableMapOf<String, JsonElement>(
+        "testClass" to JsonPrimitive(testContext.className),
+        "testMethod" to JsonPrimitive(testContext.methodName),
+        "isCi" to JsonPrimitive(resolveCiMode()),
+      )
 
     // Add optional metadata if available
     val appVersion =
-        firstNonBlank(
-            System.getProperty("automobile.app.version", ""),
-            System.getenv("AUTOMOBILE_APP_VERSION"),
-            System.getenv("APP_VERSION"),
-        )
+      firstNonBlank(
+        System.getProperty("automobile.app.version", ""),
+        System.getenv("AUTOMOBILE_APP_VERSION"),
+        System.getenv("APP_VERSION"),
+      )
     if (appVersion != null) {
       metadata["appVersion"] = JsonPrimitive(appVersion)
     }
 
     val gitCommit =
-        firstNonBlank(
-            System.getProperty("automobile.git.commit", ""),
-            System.getenv("AUTOMOBILE_GIT_COMMIT"),
-            System.getenv("GITHUB_SHA"),
-            System.getenv("GIT_COMMIT"),
-            System.getenv("CI_COMMIT_SHA"),
-        )
+      firstNonBlank(
+        System.getProperty("automobile.git.commit", ""),
+        System.getenv("AUTOMOBILE_GIT_COMMIT"),
+        System.getenv("GITHUB_SHA"),
+        System.getenv("GIT_COMMIT"),
+        System.getenv("CI_COMMIT_SHA"),
+      )
     if (gitCommit != null) {
       metadata["gitCommit"] = JsonPrimitive(gitCommit)
     }
 
     val targetSdk =
-        firstNonBlank(
-                System.getProperty("automobile.android.targetSdk", ""),
-                System.getProperty("automobile.targetSdk", ""),
-                System.getenv("AUTOMOBILE_TARGET_SDK"),
-                System.getenv("ANDROID_TARGET_SDK"),
-            )
-            ?.toIntOrNull()
+      firstNonBlank(
+          System.getProperty("automobile.android.targetSdk", ""),
+          System.getProperty("automobile.targetSdk", ""),
+          System.getenv("AUTOMOBILE_TARGET_SDK"),
+          System.getenv("ANDROID_TARGET_SDK"),
+        )
+        ?.toIntOrNull()
     if (targetSdk != null) {
       metadata["targetSdk"] = JsonPrimitive(targetSdk)
     }
 
     val jdkVersion =
-        firstNonBlank(
-            System.getProperty("java.version"),
-            System.getProperty("java.runtime.version"),
-        )
+      firstNonBlank(
+        System.getProperty("java.version"),
+        System.getProperty("java.runtime.version"),
+      )
     if (jdkVersion != null) {
       metadata["jdkVersion"] = JsonPrimitive(jdkVersion)
     }
 
     val jvmTarget =
-        firstNonBlank(
-            System.getProperty("kotlin.jvm.target"),
-            System.getProperty("java.specification.version"),
-        )
+      firstNonBlank(
+        System.getProperty("kotlin.jvm.target"),
+        System.getProperty("java.specification.version"),
+      )
     if (jvmTarget != null) {
       metadata["jvmTarget"] = JsonPrimitive(jvmTarget)
     }
 
     val gradleVersion =
-        firstNonBlank(
-            System.getProperty("org.gradle.version"),
-            System.getProperty("gradle.version"),
-        )
+      firstNonBlank(
+        System.getProperty("org.gradle.version"),
+        System.getProperty("gradle.version"),
+      )
     if (gradleVersion != null) {
       metadata["gradleVersion"] = JsonPrimitive(gradleVersion)
     }
@@ -161,9 +161,9 @@ internal object AutoMobilePlanExecutor {
 
   /** Execute an AutoMobile plan with parameter substitution. */
   fun execute(
-      planPath: String,
-      parameters: Map<String, Any>,
-      options: AutoMobilePlanExecutionOptions,
+    planPath: String,
+    parameters: Map<String, Any>,
+    options: AutoMobilePlanExecutionOptions,
   ): AutoMobilePlanExecutionResult {
 
     val startTime = System.currentTimeMillis()
@@ -176,11 +176,11 @@ internal object AutoMobilePlanExecutor {
       if (!AutoMobileSharedUtils.deviceChecker.areDevicesAvailable()) {
         val executionTime = System.currentTimeMillis() - startTime
         return AutoMobilePlanExecutionResult(
-            success = false,
-            exitCode = -1,
-            errorMessage = "No Android devices available for plan execution",
-            executionTimeMs = executionTime,
-            parametersUsed = parameters,
+          success = false,
+          exitCode = -1,
+          errorMessage = "No Android devices available for plan execution",
+          executionTimeMs = executionTime,
+          parametersUsed = parameters,
         )
       }
 
@@ -199,24 +199,24 @@ internal object AutoMobilePlanExecutor {
       val executionTime = System.currentTimeMillis() - startTime
 
       return AutoMobilePlanExecutionResult(
-          success = result.success,
-          exitCode = result.exitCode,
-          output = result.output,
-          errorMessage = result.errorMessage,
-          executionTimeMs = executionTime,
-          aiRecoveryAttempted = result.aiRecoveryAttempted,
-          aiRecoverySuccessful = result.aiRecoverySuccessful,
-          parametersUsed = parameters,
-          toolResults = result.toolResults,
+        success = result.success,
+        exitCode = result.exitCode,
+        output = result.output,
+        errorMessage = result.errorMessage,
+        executionTimeMs = executionTime,
+        aiRecoveryAttempted = result.aiRecoveryAttempted,
+        aiRecoverySuccessful = result.aiRecoverySuccessful,
+        parametersUsed = parameters,
+        toolResults = result.toolResults,
       )
     } catch (e: Exception) {
       val executionTime = System.currentTimeMillis() - startTime
       return AutoMobilePlanExecutionResult(
-          success = false,
-          exitCode = -1,
-          errorMessage = "Plan execution failed: ${e.message}",
-          executionTimeMs = executionTime,
-          parametersUsed = parameters,
+        success = false,
+        exitCode = -1,
+        errorMessage = "Plan execution failed: ${e.message}",
+        executionTimeMs = executionTime,
+        parametersUsed = parameters,
       )
     }
   }
@@ -248,11 +248,11 @@ internal object AutoMobilePlanExecutor {
       parameters.forEach { (key, value) ->
         val placeholder = "\${$key}"
         val stringValue =
-            when (value) {
-              is String -> value
-              is Enum<*> -> value.name
-              else -> value.toString()
-            }
+          when (value) {
+            is String -> value
+            is Enum<*> -> value.name
+            else -> value.toString()
+          }
         processedContent = processedContent.replace(placeholder, stringValue)
       }
     }
@@ -261,14 +261,14 @@ internal object AutoMobilePlanExecutor {
     val validationResult = PlanSchemaValidator.validateYaml(processedContent)
     if (!validationResult.valid) {
       val errorMessages =
-          validationResult.errors.joinToString("\n") { err ->
-            val location = if (err.line != null) " (line ${err.line})" else ""
-            "${err.field}: ${err.message}$location"
-          }
+        validationResult.errors.joinToString("\n") { err ->
+          val location = if (err.line != null) " (line ${err.line})" else ""
+          "${err.field}: ${err.message}$location"
+        }
       throw IllegalArgumentException(
-          "Plan YAML validation failed:\n$errorMessages\n\n" +
-              "The plan does not conform to the AutoMobile test plan schema. " +
-              "Check schemas/test-plan.schema.json for details."
+        "Plan YAML validation failed:\n$errorMessages\n\n" +
+          "The plan does not conform to the AutoMobile test plan schema. " +
+          "Check schemas/test-plan.schema.json for details."
       )
     }
 
@@ -278,14 +278,14 @@ internal object AutoMobilePlanExecutor {
   // ── Plan execution with recovery ──────────────────────────────────────────
 
   private fun executeProcessedPlan(
-      planContent: String,
-      options: AutoMobilePlanExecutionOptions,
+    planContent: String,
+    options: AutoMobilePlanExecutionOptions,
   ): InternalExecutionResult {
     return executePlanFromStep(
-        planContent,
-        options,
-        startStep = 0,
-        recoveryAlreadyAttempted = false,
+      planContent,
+      options,
+      startStep = 0,
+      recoveryAlreadyAttempted = false,
     )
   }
 
@@ -299,11 +299,11 @@ internal object AutoMobilePlanExecutor {
    *   ensure the resumed plan runs on the same device the agent just recovered.
    */
   private fun executePlanFromStep(
-      planContent: String,
-      options: AutoMobilePlanExecutionOptions,
-      startStep: Int,
-      recoveryAlreadyAttempted: Boolean,
-      deviceIdOverride: String? = null,
+    planContent: String,
+    options: AutoMobilePlanExecutionOptions,
+    startStep: Int,
+    recoveryAlreadyAttempted: Boolean,
+    deviceIdOverride: String? = null,
   ): InternalExecutionResult {
 
     val json = Json { ignoreUnknownKeys = true }
@@ -321,16 +321,15 @@ internal object AutoMobilePlanExecutor {
       val sessionUuid = UUID.randomUUID().toString()
 
       val args =
-          mutableMapOf<String, JsonElement>(
-              "planContent" to
-                  JsonPrimitive(
-                      "base64:" +
-                          java.util.Base64.getEncoder().encodeToString(planContent.toByteArray())
-                  ),
-              "platform" to JsonPrimitive("android"),
-              "startStep" to JsonPrimitive(startStep),
-              "sessionUuid" to JsonPrimitive(sessionUuid),
-          )
+        mutableMapOf<String, JsonElement>(
+          "planContent" to
+            JsonPrimitive(
+              "base64:" + java.util.Base64.getEncoder().encodeToString(planContent.toByteArray())
+            ),
+          "platform" to JsonPrimitive("android"),
+          "startStep" to JsonPrimitive(startStep),
+          "sessionUuid" to JsonPrimitive(sessionUuid),
+        )
 
       // Pin to the recovered device if specified, otherwise use the configured device
       val effectiveDeviceId = deviceIdOverride ?: options.device.takeIf { it != "auto" }
@@ -349,23 +348,23 @@ internal object AutoMobilePlanExecutor {
 
       if (options.debugMode) {
         println(
-            "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)"
+          "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)"
         )
       }
 
       DaemonHeartbeat.registerSession(sessionUuid)
       response =
-          try {
-            DaemonSocketClientManager.callTool(
-                "executePlan",
-                JsonObject(args),
-                options.effectiveExecutePlanTimeoutMs(),
-            )
-          } finally {
-            DaemonHeartbeat.unregisterSession(sessionUuid)
-          }
+        try {
+          DaemonSocketClientManager.callTool(
+            "executePlan",
+            JsonObject(args),
+            options.effectiveExecutePlanTimeoutMs(),
+          )
+        } finally {
+          DaemonHeartbeat.unregisterSession(sessionUuid)
+        }
       outputPayload =
-          response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
+        response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
       parsed = parseDaemonToolResult(response, json)
       toolResults = parseToolResults(response, json, options.debugMode)
 
@@ -379,10 +378,10 @@ internal object AutoMobilePlanExecutor {
       val success = response.success && parsed.success
       if (success) {
         return InternalExecutionResult(
-            success = true,
-            exitCode = 0,
-            output = outputPayload,
-            toolResults = toolResults,
+          success = true,
+          exitCode = 0,
+          output = outputPayload,
+          toolResults = toolResults,
         )
       }
 
@@ -398,40 +397,40 @@ internal object AutoMobilePlanExecutor {
     // Non-transient failure or retries exhausted — attempt recovery if allowed
     val failedStepContext = buildFailedStepContext(response, json, planContent, options.device)
     return handleFailure(
-        result = CommandResult(1, outputPayload, response.error ?: parsed.errorMessage),
-        options = options,
-        toolResults = toolResults,
-        failedStepContext = failedStepContext,
-        planContent = planContent,
-        recoveryAlreadyAttempted = recoveryAlreadyAttempted,
+      result = CommandResult(1, outputPayload, response.error ?: parsed.errorMessage),
+      options = options,
+      toolResults = toolResults,
+      failedStepContext = failedStepContext,
+      planContent = planContent,
+      recoveryAlreadyAttempted = recoveryAlreadyAttempted,
     )
   }
 
   // ── Failure handling & recovery ───────────────────────────────────────────
 
   private fun handleFailure(
-      result: CommandResult,
-      options: AutoMobilePlanExecutionOptions,
-      toolResults: List<ToolResultEntry>,
-      failedStepContext: FailedStepContext?,
-      planContent: String,
-      recoveryAlreadyAttempted: Boolean,
+    result: CommandResult,
+    options: AutoMobilePlanExecutionOptions,
+    toolResults: List<ToolResultEntry>,
+    failedStepContext: FailedStepContext?,
+    planContent: String,
+    recoveryAlreadyAttempted: Boolean,
   ): InternalExecutionResult {
 
     val errorMessage =
-        "AutoMobile plan execution failed with exit code ${result.exitCode}" +
-            if (result.errorOutput.isNotEmpty()) "\nErrors: ${result.errorOutput}" else ""
+      "AutoMobile plan execution failed with exit code ${result.exitCode}" +
+        if (result.errorOutput.isNotEmpty()) "\nErrors: ${result.errorOutput}" else ""
 
     System.err.println(errorMessage)
 
     val ciMode = resolveCiMode()
     val recoveryFlagEnabled = agent.recoveryConfigProvider.isRecoveryEnabled()
     if (
-        !options.aiAssistance ||
-            !recoveryFlagEnabled ||
-            ciMode ||
-            recoveryAlreadyAttempted ||
-            failedStepContext == null
+      !options.aiAssistance ||
+        !recoveryFlagEnabled ||
+        ciMode ||
+        recoveryAlreadyAttempted ||
+        failedStepContext == null
     ) {
       if (recoveryAlreadyAttempted) {
         println("Recovery already attempted for this test — failing without retry")
@@ -440,17 +439,17 @@ internal object AutoMobilePlanExecutor {
         println("AI recovery disabled via ai-recovery feature flag")
       }
       return InternalExecutionResult(
-          success = false,
-          exitCode = result.exitCode,
-          output = result.output,
-          errorMessage = errorMessage,
-          toolResults = toolResults,
+        success = false,
+        exitCode = result.exitCode,
+        output = result.output,
+        errorMessage = errorMessage,
+        toolResults = toolResults,
       )
     }
 
     // Attempt Koog-powered recovery
     println(
-        "Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})"
+      "Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})"
     )
 
     val recoveryOutcome = agent.attemptAiRecovery(failedStepContext)
@@ -458,13 +457,13 @@ internal object AutoMobilePlanExecutor {
     if (!recoveryOutcome.success) {
       println("AI recovery failed")
       return InternalExecutionResult(
-          success = false,
-          exitCode = result.exitCode,
-          output = result.output,
-          errorMessage = errorMessage,
-          aiRecoveryAttempted = true,
-          aiRecoverySuccessful = false,
-          toolResults = toolResults,
+        success = false,
+        exitCode = result.exitCode,
+        output = result.output,
+        errorMessage = errorMessage,
+        aiRecoveryAttempted = true,
+        aiRecoverySuccessful = false,
+        toolResults = toolResults,
       )
     }
 
@@ -474,50 +473,50 @@ internal object AutoMobilePlanExecutor {
     println("AI recovery succeeded, resuming plan from step ${resumeStep + 1}")
 
     val resumeResult =
-        executePlanFromStep(
-            planContent = planContent,
-            options = options,
-            startStep = resumeStep,
-            recoveryAlreadyAttempted = true, // prevent recursive recovery
-            deviceIdOverride = failedStepContext.deviceId,
-        )
+      executePlanFromStep(
+        planContent = planContent,
+        options = options,
+        startStep = resumeStep,
+        recoveryAlreadyAttempted = true, // prevent recursive recovery
+        deviceIdOverride = failedStepContext.deviceId,
+      )
 
     return InternalExecutionResult(
-        success = resumeResult.success,
-        exitCode = resumeResult.exitCode,
-        output = resumeResult.output,
-        errorMessage = resumeResult.errorMessage,
-        aiRecoveryAttempted = true,
-        aiRecoverySuccessful = resumeResult.success,
-        toolResults = toolResults + resumeResult.toolResults,
+      success = resumeResult.success,
+      exitCode = resumeResult.exitCode,
+      output = resumeResult.output,
+      errorMessage = resumeResult.errorMessage,
+      aiRecoveryAttempted = true,
+      aiRecoverySuccessful = resumeResult.success,
+      toolResults = toolResults + resumeResult.toolResults,
     )
   }
 
   // ── Build FailedStepContext from daemon response ──────────────────────────
 
   private fun buildFailedStepContext(
-      response: DaemonResponse,
-      json: Json,
-      planContent: String,
-      deviceId: String?,
+    response: DaemonResponse,
+    json: Json,
+    planContent: String,
+    deviceId: String?,
   ): FailedStepContext? {
     try {
       val resultElement = response.result ?: return null
       val contentArray = resultElement.jsonObject["content"] as? JsonArray ?: return null
       val contentText =
-          contentArray
-              .firstOrNull { element ->
-                (element as? JsonObject)?.get("type")?.jsonPrimitive?.content == "text"
-              }
-              ?.jsonObject
-              ?.get("text")
-              ?.jsonPrimitive
-              ?.content ?: return null
+        contentArray
+          .firstOrNull { element ->
+            (element as? JsonObject)?.get("type")?.jsonPrimitive?.content == "text"
+          }
+          ?.jsonObject
+          ?.get("text")
+          ?.jsonPrimitive
+          ?.content ?: return null
       val payload = json.parseToJsonElement(contentText).jsonObject
 
       val failedStepObj = payload["failedStep"]?.jsonObject ?: return null
       val failedStepIndex =
-          failedStepObj["stepIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
+        failedStepObj["stepIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
       val failedTool = failedStepObj["tool"]?.jsonPrimitive?.content ?: "unknown"
       val error = failedStepObj["error"]?.jsonPrimitive?.content ?: "Unknown error"
       val failedDevice = failedStepObj["device"]?.jsonPrimitive?.content
@@ -530,20 +529,20 @@ internal object AutoMobilePlanExecutor {
           if (index >= failedStepIndex) break
           val stepObj = stepElement as? JsonObject ?: continue
           val tool =
-              stepObj["toolName"]?.jsonPrimitive?.content
-                  ?: stepObj["tool"]?.jsonPrimitive?.content
-                  ?: "unknown"
+            stepObj["toolName"]?.jsonPrimitive?.content
+              ?: stepObj["tool"]?.jsonPrimitive?.content
+              ?: "unknown"
           succeededSteps.add(SucceededStepSummary(stepIndex = index, tool = tool))
         }
       }
 
       return FailedStepContext(
-          failedStepIndex = failedStepIndex,
-          failedTool = failedTool,
-          error = error,
-          succeededSteps = succeededSteps,
-          planContent = planContent,
-          deviceId = failedDevice ?: deviceId?.takeIf { it != "auto" },
+        failedStepIndex = failedStepIndex,
+        failedTool = failedTool,
+        error = error,
+        succeededSteps = succeededSteps,
+        planContent = planContent,
+        deviceId = failedDevice ?: deviceId?.takeIf { it != "auto" },
       )
     } catch (e: Exception) {
       println("Warning: Failed to build recovery context: ${e.message}")
@@ -559,7 +558,7 @@ internal object AutoMobilePlanExecutor {
     }
 
     val resultElement =
-        response.result ?: return ParsedToolResult(false, "Daemon returned empty result")
+      response.result ?: return ParsedToolResult(false, "Daemon returned empty result")
     val resultObject = resultElement.jsonObject
     val contentArray = resultObject["content"]
     if (contentArray is JsonArray && contentArray.isNotEmpty()) {
@@ -573,24 +572,24 @@ internal object AutoMobilePlanExecutor {
           if (success == false) {
             val failedStepObj = parsed["failedStep"]?.jsonObject
             val errorMessage =
-                if (failedStepObj != null) {
-                  val stepIndex =
-                      failedStepObj["stepIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                  val tool = failedStepObj["tool"]?.jsonPrimitive?.content ?: "unknown"
-                  val stepError =
-                      failedStepObj["error"]?.jsonPrimitive?.content ?: "Unknown step error"
-                  val executedSteps = parsed["executedSteps"]?.jsonPrimitive?.content?.toIntOrNull()
-                  val totalSteps = parsed["totalSteps"]?.jsonPrimitive?.content?.toIntOrNull()
-                  buildString {
-                    append("Test plan execution failed at step ${stepIndex + 1} ($tool):")
-                    append("\n  Error: $stepError")
-                    if (executedSteps != null && totalSteps != null) {
-                      append("\n  Executed: $executedSteps/$totalSteps steps")
-                    }
+              if (failedStepObj != null) {
+                val stepIndex =
+                  failedStepObj["stepIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                val tool = failedStepObj["tool"]?.jsonPrimitive?.content ?: "unknown"
+                val stepError =
+                  failedStepObj["error"]?.jsonPrimitive?.content ?: "Unknown step error"
+                val executedSteps = parsed["executedSteps"]?.jsonPrimitive?.content?.toIntOrNull()
+                val totalSteps = parsed["totalSteps"]?.jsonPrimitive?.content?.toIntOrNull()
+                buildString {
+                  append("Test plan execution failed at step ${stepIndex + 1} ($tool):")
+                  append("\n  Error: $stepError")
+                  if (executedSteps != null && totalSteps != null) {
+                    append("\n  Executed: $executedSteps/$totalSteps steps")
                   }
-                } else {
-                  parsed["error"]?.jsonPrimitive?.content ?: "AutoMobile plan failed"
                 }
+              } else {
+                parsed["error"]?.jsonPrimitive?.content ?: "AutoMobile plan failed"
+              }
             return ParsedToolResult(false, errorMessage)
           }
           return ParsedToolResult(true, "")
@@ -602,22 +601,22 @@ internal object AutoMobilePlanExecutor {
   }
 
   private fun parseToolResults(
-      response: DaemonResponse,
-      json: Json,
-      debugMode: Boolean,
+    response: DaemonResponse,
+    json: Json,
+    debugMode: Boolean,
   ): List<ToolResultEntry> {
     return try {
       val resultElement = response.result ?: return emptyList()
       val contentArray = resultElement.jsonObject["content"] as? JsonArray ?: return emptyList()
       val contentText =
-          contentArray
-              .firstOrNull { element ->
-                (element as? JsonObject)?.get("type")?.jsonPrimitive?.content == "text"
-              }
-              ?.jsonObject
-              ?.get("text")
-              ?.jsonPrimitive
-              ?.content ?: return emptyList()
+        contentArray
+          .firstOrNull { element ->
+            (element as? JsonObject)?.get("type")?.jsonPrimitive?.content == "text"
+          }
+          ?.jsonObject
+          ?.get("text")
+          ?.jsonPrimitive
+          ?.content ?: return emptyList()
       val payload = json.parseToJsonElement(contentText).jsonObject
       val stepsElement = payload["toolResults"] ?: payload["toolResult"] ?: return emptyList()
       val stepsArray = stepsElement as? JsonArray ?: return emptyList()
@@ -630,121 +629,121 @@ internal object AutoMobilePlanExecutor {
         println("Warning: Failed to parse tool results: ${e.message}")
       }
       listOf(
-          buildErrorToolResult(
-              stepIndex = -1,
-              toolName = null,
-              errorMessage = e.message ?: "Failed to parse tool results",
-          )
+        buildErrorToolResult(
+          stepIndex = -1,
+          toolName = null,
+          errorMessage = e.message ?: "Failed to parse tool results",
+        )
       )
     }
   }
 
   private fun parseToolResultStep(
-      stepIndex: Int,
-      stepElement: JsonElement,
-      debugMode: Boolean,
+    stepIndex: Int,
+    stepElement: JsonElement,
+    debugMode: Boolean,
   ): ToolResultEntry {
     val stepObject =
-        stepElement as? JsonObject
-            ?: return buildErrorToolResult(
-                stepIndex = stepIndex,
-                toolName = null,
-                errorMessage = "Tool result is not a JSON object",
-                payload = stepElement,
-            )
+      stepElement as? JsonObject
+        ?: return buildErrorToolResult(
+          stepIndex = stepIndex,
+          toolName = null,
+          errorMessage = "Tool result is not a JSON object",
+          payload = stepElement,
+        )
     val toolName =
-        stepObject["toolName"]?.jsonPrimitive?.content
-            ?: stepObject["tool"]?.jsonPrimitive?.content
-            ?: stepObject["name"]?.jsonPrimitive?.content
+      stepObject["toolName"]?.jsonPrimitive?.content
+        ?: stepObject["tool"]?.jsonPrimitive?.content
+        ?: stepObject["name"]?.jsonPrimitive?.content
 
     val resolvedStepIndex =
-        (stepObject["stepIndex"] as? JsonPrimitive)?.intOrNull
-            ?: (stepObject["index"] as? JsonPrimitive)?.intOrNull
-            ?: stepIndex
+      (stepObject["stepIndex"] as? JsonPrimitive)?.intOrNull
+        ?: (stepObject["index"] as? JsonPrimitive)?.intOrNull
+        ?: stepIndex
 
     if (toolName.isNullOrBlank()) {
       val errorMessage =
-          extractErrorMessage(stepObject) ?: "Missing tool name for step $resolvedStepIndex"
+        extractErrorMessage(stepObject) ?: "Missing tool name for step $resolvedStepIndex"
       if (debugMode) {
         println("Warning: $errorMessage")
       }
       return buildErrorToolResult(
-          stepIndex = resolvedStepIndex,
-          toolName = null,
-          errorMessage = errorMessage,
-          payload = stepObject,
+        stepIndex = resolvedStepIndex,
+        toolName = null,
+        errorMessage = errorMessage,
+        payload = stepObject,
       )
     }
 
     val responseElement =
-        stepObject["response"]
-            ?: stepObject["result"]
-            ?: stepObject["payload"]
-            ?: stepObject["output"]
+      stepObject["response"]
+        ?: stepObject["result"]
+        ?: stepObject["payload"]
+        ?: stepObject["output"]
 
     return try {
       when {
         responseElement != null ->
-            parseToolResultElement(resolvedStepIndex, toolName, responseElement)
+          parseToolResultElement(resolvedStepIndex, toolName, responseElement)
         stepObject["content"] != null ->
-            ToolResultParser.parseToolResultFromMcpResponse(
-                resolvedStepIndex,
-                toolName,
-                stepObject,
-            )
+          ToolResultParser.parseToolResultFromMcpResponse(
+            resolvedStepIndex,
+            toolName,
+            stepObject,
+          )
         else -> ToolResultParser.parseToolResult(resolvedStepIndex, toolName, stepObject)
       }
     } catch (e: Exception) {
       val errorMessage =
-          extractErrorMessage(stepObject, responseElement)
-              ?: e.message
-              ?: "Failed to parse tool result"
+        extractErrorMessage(stepObject, responseElement)
+          ?: e.message
+          ?: "Failed to parse tool result"
       if (debugMode) {
         println("Warning: Failed to parse tool result at step $resolvedStepIndex: $errorMessage")
       }
       buildErrorToolResult(
-          stepIndex = resolvedStepIndex,
-          toolName = toolName,
-          errorMessage = errorMessage,
-          payload = stepObject,
+        stepIndex = resolvedStepIndex,
+        toolName = toolName,
+        errorMessage = errorMessage,
+        payload = stepObject,
       )
     }
   }
 
   private fun parseToolResultElement(
-      stepIndex: Int,
-      toolName: String,
-      element: JsonElement,
+    stepIndex: Int,
+    toolName: String,
+    element: JsonElement,
   ): ToolResult {
     return when (element) {
       is JsonObject ->
-          if (element.containsKey("content")) {
-            ToolResultParser.parseToolResultFromMcpResponse(stepIndex, toolName, element)
-          } else {
-            ToolResultParser.parseToolResult(stepIndex, toolName, element)
-          }
+        if (element.containsKey("content")) {
+          ToolResultParser.parseToolResultFromMcpResponse(stepIndex, toolName, element)
+        } else {
+          ToolResultParser.parseToolResult(stepIndex, toolName, element)
+        }
       is JsonPrimitive -> ToolResultParser.parseToolResult(stepIndex, toolName, element.content)
       else -> ToolResultParser.parseToolResult(stepIndex, toolName, element)
     }
   }
 
   private fun buildErrorToolResult(
-      stepIndex: Int,
-      toolName: String?,
-      errorMessage: String,
-      payload: JsonElement? = null,
+    stepIndex: Int,
+    toolName: String?,
+    errorMessage: String,
+    payload: JsonElement? = null,
   ): ErrorToolResult {
     return ErrorToolResult(
-        stepIndex = stepIndex,
-        toolName = toolName,
-        errorMessage = errorMessage,
-        payload = payload,
+      stepIndex = stepIndex,
+      toolName = toolName,
+      errorMessage = errorMessage,
+      payload = payload,
     )
   }
 
   private fun extractErrorMessage(
-      stepObject: JsonObject,
-      responseElement: JsonElement? = null,
+    stepObject: JsonObject,
+    responseElement: JsonElement? = null,
   ): String? {
     val stepError = (stepObject["error"] as? JsonPrimitive)?.content
     if (!stepError.isNullOrBlank()) {
@@ -796,15 +795,12 @@ internal object AutoMobilePlanExecutor {
       return t.equals("true", ignoreCase = true) || t == "1"
     }
     val env =
-        System.getenv("AUTOMOBILE_EXECUTE_PLAN_CLEANUP_CLEAR_APP_DATA")
-            ?.trim()
-            ?.lowercase()
-            .orEmpty()
+      System.getenv("AUTOMOBILE_EXECUTE_PLAN_CLEANUP_CLEAR_APP_DATA")?.trim()?.lowercase().orEmpty()
     return env == "true" || env == "1" || env == "yes"
   }
 
   internal const val CAPTURE_OBSERVE_STEPS_PROPERTY =
-      "automobile.junit.executePlan.captureObserveSteps"
+    "automobile.junit.executePlan.captureObserveSteps"
   internal const val CAPTURE_OBSERVE_STEPS_ENV = "AUTOMOBILE_EXECUTE_PLAN_CAPTURE_OBSERVE_STEPS"
 
   /**
@@ -827,9 +823,9 @@ internal object AutoMobilePlanExecutor {
   @JvmStatic
   internal fun resolveCaptureObserveSteps(): String? {
     val v =
-        System.getProperty(CAPTURE_OBSERVE_STEPS_PROPERTY)?.trim()?.lowercase()
-            ?: System.getenv(CAPTURE_OBSERVE_STEPS_ENV)?.trim()?.lowercase()
-            ?: return null
+      System.getProperty(CAPTURE_OBSERVE_STEPS_PROPERTY)?.trim()?.lowercase()
+        ?: System.getenv(CAPTURE_OBSERVE_STEPS_ENV)?.trim()?.lowercase()
+        ?: return null
     return v.takeIf { it == "summary" || it == "full" }
   }
 
@@ -841,20 +837,20 @@ internal object AutoMobilePlanExecutor {
     if (errorMessage.isNullOrBlank()) return false
     val normalized = errorMessage.lowercase()
     return normalized.contains("request timed out") ||
-        normalized.contains("plan execution in progress") ||
-        normalized.contains("daemon request timeout")
+      normalized.contains("plan execution in progress") ||
+      normalized.contains("daemon request timeout")
   }
 
   // ── Internal types ────────────────────────────────────────────────────────
 
   private data class InternalExecutionResult(
-      val success: Boolean,
-      val exitCode: Int,
-      val output: String = "",
-      val errorMessage: String = "",
-      val aiRecoveryAttempted: Boolean = false,
-      val aiRecoverySuccessful: Boolean = false,
-      val toolResults: List<ToolResultEntry> = emptyList(),
+    val success: Boolean,
+    val exitCode: Int,
+    val output: String = "",
+    val errorMessage: String = "",
+    val aiRecoveryAttempted: Boolean = false,
+    val aiRecoverySuccessful: Boolean = false,
+    val toolResults: List<ToolResultEntry> = emptyList(),
   )
 
   private data class ParsedToolResult(val success: Boolean, val errorMessage: String)

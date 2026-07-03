@@ -8,7 +8,7 @@ class NavigationEventTest {
   @Test
   fun `NavigationEvent should have default values`() {
     val event =
-        NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
+      NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
 
     assertEquals("TestScreen", event.destination)
     assertEquals(NavigationSource.COMPOSE_NAVIGATION, event.source)
@@ -21,11 +21,11 @@ class NavigationEventTest {
   fun `NavigationEvent should accept custom arguments`() {
     val arguments = mapOf("key1" to "value1", "key2" to 123)
     val event =
-        NavigationEvent(
-            destination = "TestScreen",
-            source = NavigationSource.COMPOSE_NAVIGATION,
-            arguments = arguments,
-        )
+      NavigationEvent(
+        destination = "TestScreen",
+        source = NavigationSource.COMPOSE_NAVIGATION,
+        arguments = arguments,
+      )
 
     assertEquals(arguments, event.arguments)
   }
@@ -34,11 +34,11 @@ class NavigationEventTest {
   fun `NavigationEvent should accept custom metadata`() {
     val metadata = mapOf("route" to "/test", "label" to "Test Screen")
     val event =
-        NavigationEvent(
-            destination = "TestScreen",
-            source = NavigationSource.COMPOSE_NAVIGATION,
-            metadata = metadata,
-        )
+      NavigationEvent(
+        destination = "TestScreen",
+        source = NavigationSource.COMPOSE_NAVIGATION,
+        metadata = metadata,
+      )
 
     assertEquals(metadata, event.metadata)
   }
@@ -47,11 +47,11 @@ class NavigationEventTest {
   fun `NavigationEvent should accept custom timestamp`() {
     val customTimestamp = 1234567890L
     val event =
-        NavigationEvent(
-            destination = "TestScreen",
-            source = NavigationSource.COMPOSE_NAVIGATION,
-            timestamp = customTimestamp,
-        )
+      NavigationEvent(
+        destination = "TestScreen",
+        source = NavigationSource.COMPOSE_NAVIGATION,
+        timestamp = customTimestamp,
+      )
 
     assertEquals(customTimestamp, event.timestamp)
   }
@@ -59,14 +59,14 @@ class NavigationEventTest {
   @Test
   fun `NavigationEvent should support all NavigationSource types`() {
     val sources =
-        listOf(
-            NavigationSource.NAVIGATION_COMPONENT,
-            NavigationSource.COMPOSE_NAVIGATION,
-            NavigationSource.CIRCUIT,
-            NavigationSource.CUSTOM,
-            NavigationSource.DEEP_LINK,
-            NavigationSource.ACTIVITY,
-        )
+      listOf(
+        NavigationSource.NAVIGATION_COMPONENT,
+        NavigationSource.COMPOSE_NAVIGATION,
+        NavigationSource.CIRCUIT,
+        NavigationSource.CUSTOM,
+        NavigationSource.DEEP_LINK,
+        NavigationSource.ACTIVITY,
+      )
 
     sources.forEach { source ->
       val event = NavigationEvent(destination = "TestScreen", source = source)
@@ -77,11 +77,11 @@ class NavigationEventTest {
   @Test
   fun `NavigationEvent data class should support copy`() {
     val original =
-        NavigationEvent(
-            destination = "Screen1",
-            source = NavigationSource.COMPOSE_NAVIGATION,
-            arguments = mapOf("key" to "value"),
-        )
+      NavigationEvent(
+        destination = "Screen1",
+        source = NavigationSource.COMPOSE_NAVIGATION,
+        arguments = mapOf("key" to "value"),
+      )
 
     val copied = original.copy(destination = "Screen2")
 
@@ -93,18 +93,18 @@ class NavigationEventTest {
   @Test
   fun `NavigationEvent data class should support equality`() {
     val event1 =
-        NavigationEvent(
-            destination = "TestScreen",
-            source = NavigationSource.COMPOSE_NAVIGATION,
-            timestamp = 1000L,
-        )
+      NavigationEvent(
+        destination = "TestScreen",
+        source = NavigationSource.COMPOSE_NAVIGATION,
+        timestamp = 1000L,
+      )
 
     val event2 =
-        NavigationEvent(
-            destination = "TestScreen",
-            source = NavigationSource.COMPOSE_NAVIGATION,
-            timestamp = 1000L,
-        )
+      NavigationEvent(
+        destination = "TestScreen",
+        source = NavigationSource.COMPOSE_NAVIGATION,
+        timestamp = 1000L,
+      )
 
     assertEquals(event1, event2)
     assertEquals(event1.hashCode(), event2.hashCode())

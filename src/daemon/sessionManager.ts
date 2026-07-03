@@ -14,13 +14,18 @@ import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
  *
  * The observe cache lives in the typed top-level slots below — they are the
  * canonical source of truth (issue #2917). Write them through the dedicated
- * `setLastHierarchy` / `setLastScreenshot` setters. `customData` is reserved
- * for genuinely ad-hoc tool state (e.g. keep-awake, device-label maps).
+ * `setLastHierarchy` / `setLastScreenshot` setters.
+ *
+ * `customData` still holds other keyed tool state accessed via well-known
+ * constants (keep-awake `KeepScreenAwakeState`, the device-label map, the
+ * ad-hoc `lastActionTime`). Those remain untyped and are candidates for the
+ * same typed-slot treatment — the `Record<string, any>` shape is an escape
+ * hatch that can reintroduce the #2917 decoy bug for any future key.
  */
 export interface SessionCacheData {
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
   lastScreenshot?: string;     // Base64 encoded last screenshot
-  lastObserveTime?: number;    // Timestamp of last hierarchy observation
+  lastObserveTime?: number;    // Timestamp of last hierarchy observation (hierarchy only, not screenshot)
   customData?: Record<string, any>; // Custom data set by tools
 }
 

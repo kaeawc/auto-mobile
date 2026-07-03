@@ -458,7 +458,11 @@ class ToolRegistryClass {
               sessionManager.setLastScreenshot(sessionUuid, observeScreenshot);
             }
 
-            // Update last action timestamp for interaction tools
+            // Update last action timestamp for interaction tools. Unlike the
+            // observe hierarchy/screenshot above, `lastActionTime` is ad-hoc
+            // interaction bookkeeping with no typed slot or consumer, so it
+            // intentionally stays on the generic `customData` path (see #2917
+            // follow-up to type or remove it).
             if (["tapOn", "swipeOn", "pinchOn", "dragAndDrop", "scroll", "inputText", "clearText", "pressButton"].includes(name)) {
               await updateSessionCache(context, "lastActionTime", this.timer.now());
             }

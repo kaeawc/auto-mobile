@@ -13,6 +13,7 @@ import {
   TransactionSettings,
 } from "kysely";
 import { CompiledQuery } from "kysely";
+import { ActionableError } from "../models/ActionableError";
 
 /**
  * Kysely dialect for Bun's built-in SQLite.
@@ -100,7 +101,7 @@ class BunSqliteDriver implements Driver {
   }
 }
 
-class BunSqliteConnectionState {
+export class BunSqliteConnectionState {
   readonly #databaseSource: BunDatabase | (() => BunDatabase);
   readonly #beforeQuery?: () => Promise<void>;
   #db: BunDatabase | null = null;
@@ -164,7 +165,10 @@ class BunSqliteConnectionState {
       // Check if this is a SELECT query or query with RETURNING clause
       const sqlLower = sql.trim().toLowerCase();
       const isSelect = sqlLower.startsWith("select");
-      const hasReturning = sqlLower.includes("returning");
+      // Word boundary (not a bare substring) so an identifier like
+      // `returning_items` isn't misclassified as a RETURNING clause. `_` is a
+      // word char, so `\breturning\b` correctly rejects `returning_items`.
+      const hasReturning = /\breturning\b/.test(sqlLower);
 
       if (isSelect || hasReturning) {
         // For SELECT queries or queries with RETURNING, return all rows
@@ -186,9 +190,24 @@ class BunSqliteConnectionState {
         };
       }
     } catch (error) {
-      throw new Error(
-        `Query failed: ${error}\nSQL: ${sql}\nParameters: ${JSON.stringify(parameters)}`
+      // BigInt-safe: Kysely can bind BigInt params, and a bare
+      // JSON.stringify(parameters) throws on BigInt — which would mask the real
+      // SqliteError with a TypeError from the error reporter itself.
+      const params = JSON.stringify(parameters, (_key, value) =>
+        typeof value === "bigint" ? value.toString() : value
       );
+      // Preserve the original SqliteError (code/stack) via `cause` so future
+      // BUSY/constraint-aware retries and describeUnknownError (which recurses
+      // into `.cause`) can reach it. ActionableError drops `cause`, so use a
+      // plain Error here. Keep the original error text inline too: the
+      // `#beforeQuery` migration gate above runs inside this try, so its
+      // "startup migrations failed" throw is caught and rewrapped here — and
+      // databaseLazyPath.test.ts asserts that text via `.message`. The inline
+      // `${error}` is BigInt-safe (unlike JSON.stringify) since it goes
+      // through toString().
+      throw new Error(`Query failed: ${error}\nSQL: ${sql}\nParameters: ${params}`, {
+        cause: error,
+      });
     } finally {
       this.#activeQueries -= 1;
       this.#notifyWaiters();
@@ -214,6 +233,15 @@ class BunSqliteConnectionState {
   }
 
   async #reserveTransaction(owner: symbol): Promise<void> {
+    // A nested beginTransaction on a lease that already holds the transaction
+    // lock would busy-loop forever here (the owner waiting for itself to
+    // release), deadlocking the daemon's only DB connection. Mirror
+    // #enterQuery's `=== owner` carve-out by failing fast with a clear error
+    // instead. The caller (beginTransaction) still decrements
+    // #pendingTransactions and wakes waiters in its finally, so no counter leak.
+    if (this.#transactionOwner === owner) {
+      throw new ActionableError("Nested transactions are not supported by BunSqliteDialect");
+    }
     while (this.#transactionOwner !== null || this.#activeQueries > 0) {
       await this.#waitForStateChange();
     }

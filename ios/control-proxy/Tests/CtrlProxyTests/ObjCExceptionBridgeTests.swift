@@ -1,4 +1,5 @@
 @testable import CtrlProxy
+import ObjCExceptionCatcher
 import XCTest
 
 final class ObjCExceptionBridgeTests: XCTestCase {
@@ -140,5 +141,22 @@ final class ObjCExceptionBridgeTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(ts, beforeMs)
             XCTAssertLessThanOrEqual(ts, afterMs)
         }
+    }
+
+    // MARK: - Pinch Symbol Availability (issue #2910)
+
+    /// Off-device (this test host is macOS, not iOS), the private XCTest pinch
+    /// symbols are definitionally unavailable, so `synthesizePinch` must report
+    /// `symbolsUnavailable == true` and fail — this is exactly the signal that
+    /// tells `GesturePerformer.pinch` to take the public-API fallback path.
+    func testSynthesizePinchReportsSymbolsUnavailableOffDevice() {
+        var symbolsUnavailable: ObjCBool = false
+        var errorMessage: NSString?
+        let succeeded = ObjCExceptionCatcher_synthesizePinch(
+            100, 200, 40, 120, 0, 0.3, 0, &symbolsUnavailable, &errorMessage
+        )
+        XCTAssertFalse(succeeded, "private synthesis cannot succeed off-device")
+        XCTAssertTrue(symbolsUnavailable.boolValue, "must flag the private symbols as unavailable")
+        XCTAssertNotNil(errorMessage)
     }
 }

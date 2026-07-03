@@ -471,6 +471,7 @@ public class GesturePerformer: GesturePerforming {
 
         // MARK: - Pinch Gestures
 
+        @discardableResult
         public func pinch(
             centerX: Double,
             centerY: Double,
@@ -479,15 +480,16 @@ public class GesturePerformer: GesturePerforming {
             rotationDegrees: Double,
             duration: TimeInterval
         )
-            throws
+            throws -> PinchGesturePath
         {
-            guard application != nil else {
+            guard let app = application else {
                 throw GestureError.noApplication
             }
 
-            try runOnMainThread {
+            return try runOnMainThread {
                 let orientation = GesturePerformer.currentInterfaceOrientation()
                 var errorMessage: NSString?
+                var symbolsUnavailable: ObjCBool = false
                 let succeeded = ObjCExceptionCatcher_synthesizePinch(
                     CGFloat(centerX),
                     CGFloat(centerY),
@@ -496,12 +498,30 @@ public class GesturePerformer: GesturePerforming {
                     CGFloat(rotationDegrees),
                     duration,
                     orientation.rawValue,
+                    &symbolsUnavailable,
                     &errorMessage
                 )
 
-                if !succeeded {
+                if succeeded {
+                    return .eventPath
+                }
+
+                // Only degrade to the public API when the private symbols are
+                // genuinely absent. A real synthesis error still surfaces as a
+                // structured failure (issue #2910).
+                guard symbolsUnavailable.boolValue else {
                     throw GestureError.gestureFailed(errorMessage as String? ?? "pinch synthesis failed")
                 }
+
+                // Public element-anchored fallback: honors scale/velocity but
+                // centers on the SpringBoard anchor, ignoring centerX/centerY.
+                let params = PinchFallback.parameters(
+                    distanceStart: distanceStart,
+                    distanceEnd: distanceEnd,
+                    duration: duration
+                )
+                app.pinch(withScale: params.scale, velocity: params.velocity)
+                return .elementAnchored
             }
         }
 
@@ -1314,6 +1334,7 @@ public class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
+        @discardableResult
         public func pinch(
             centerX _: Double,
             centerY _: Double,
@@ -1322,7 +1343,7 @@ public class GesturePerformer: GesturePerforming {
             rotationDegrees _: Double,
             duration _: TimeInterval
         )
-            throws
+            throws -> PinchGesturePath
         {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }

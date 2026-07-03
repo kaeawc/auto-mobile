@@ -555,6 +555,8 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertTrue(response.success ?? false)
         XCTAssertEqual(response.type, "pinch_result")
         XCTAssertEqual(response.requestId, "test-pinch")
+        // Default path is the private event-path synthesis (honors center).
+        XCTAssertEqual(response.pinchPath, "event-path")
 
         let history = fakeGesturePerformer.getPinchHistory()
         XCTAssertEqual(history.count, 1)
@@ -584,6 +586,27 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertFalse(response.success ?? true)
         XCTAssertEqual(response.type, "pinch_result")
         XCTAssertTrue(response.error?.contains("pinch synthesis failed") ?? false)
+    }
+
+    /// When the performer falls back to the public element-anchored pinch (private
+    /// XCTest symbols unavailable), the success response must report the
+    /// `element-anchored` path so callers know the center was not honored. See
+    /// issue #2910.
+    func testPinchFallbackSurfacesElementAnchoredPath() {
+        fakeGesturePerformer.pinchPathToReturn = .elementAnchored
+        let request = WebSocketRequest.pinch(RequestPinch(
+            requestId: "test-pinch-fallback",
+            centerX: 100,
+            centerY: 200,
+            distanceStart: 40,
+            distanceEnd: 120
+        ))
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertTrue(response.success ?? false)
+        XCTAssertEqual(response.type, "pinch_result")
+        XCTAssertEqual(response.pinchPath, "element-anchored")
     }
 
     // MARK: - Text Input Tests

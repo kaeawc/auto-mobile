@@ -437,6 +437,11 @@ public class FakeGesturePerformer: GesturePerforming {
         ))
     }
 
+    /// Path returned by `pinch`; defaults to the private event-path synthesis.
+    /// Set to `.elementAnchored` to simulate the public-API fallback (issue #2910).
+    public var pinchPathToReturn: PinchGesturePath = .eventPath
+
+    @discardableResult
     public func pinch(
         centerX: Double,
         centerY: Double,
@@ -445,7 +450,7 @@ public class FakeGesturePerformer: GesturePerforming {
         rotationDegrees: Double,
         duration: TimeInterval
     )
-        throws
+        throws -> PinchGesturePath
     {
         try checkFailure("pinch")
         pinchHistory.append(PinchCall(
@@ -456,6 +461,7 @@ public class FakeGesturePerformer: GesturePerforming {
             rotationDegrees: rotationDegrees,
             duration: duration
         ))
+        return pinchPathToReturn
     }
 
     public func typeText(text: String) throws {

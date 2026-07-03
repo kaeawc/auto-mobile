@@ -22,7 +22,7 @@ import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
-import { closeDatabase, getDatabasePath } from "../db";
+import { closeDatabase, getDatabasePath, getDbWriteBarrier } from "../db";
 import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 import { handleFatalDatabaseStartupFailure } from "./daemonStartupGuard";
@@ -76,6 +76,10 @@ import {
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
+// Upper bound on how long graceful shutdown waits for in-flight best-effort DB
+// writes to quiesce before closing the connection (issue #2792). Best-effort
+// writes are best-effort: if the bound elapses, shutdown proceeds anyway.
+const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 
 /**
  * Main daemon process
@@ -1266,6 +1270,17 @@ export class Daemon {
     }
 
     await cleanupDaemonFiles(this.getDaemonFileCleanupOptions());
+
+    // Quiesce in-flight best-effort DB writes (fire-and-forget telemetry ingest,
+    // background retention cleanup) BEFORE closing the connection, so a query
+    // queued in Kysely's ConnectionMutex can't strand shutdown on an unsettled
+    // promise (issue #2792). Bounded: a wedged write cannot itself hang shutdown.
+    const drained = await getDbWriteBarrier().drain(DB_WRITE_DRAIN_TIMEOUT_MS);
+    if (!drained) {
+      logger.warn(
+        `Timed out after ${DB_WRITE_DRAIN_TIMEOUT_MS}ms draining in-flight DB writes; closing database anyway`
+      );
+    }
 
     await closeDatabase();
 

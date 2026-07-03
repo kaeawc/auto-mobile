@@ -12,6 +12,8 @@ import type { RecordOsEventInput } from "../../../src/db/osEventRepository";
 import type { RecordNavigationEventInput } from "../../../src/db/navigationEventRepository";
 import type { RecordStorageEventInput } from "../../../src/db/storageEventRepository";
 import type { RecordLayoutEventInput } from "../../../src/db/layoutEventRepository";
+import { InMemoryDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 class FakeRepository implements TelemetryRepository {
   networkEvents: RecordNetworkEventInput[] = [];
@@ -507,5 +509,66 @@ describe("TelemetryRecorder", () => {
     const data = pushTarget.pushedEvents[0].data as any;
     expect(data.requestHeaders).toEqual({ "Content-Type": "application/json" });
     expect(data.responseBody).toBe('{"id":1}');
+  });
+
+  describe("shutdown draining (issue #2792)", () => {
+    it("skips the DB write once the barrier is draining, still pushes to socket (A5)", async () => {
+      const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
+      const drainingRecorder = new TelemetryRecorder(repo, () => pushTarget, barrier);
+      drainingRecorder.setContext("device-1", "session-1");
+      barrier.beginDrain();
+
+      await drainingRecorder.recordNetworkEvent({
+        timestamp: 1000, applicationId: null, url: "u", method: "GET",
+        statusCode: 200, durationMs: 0, requestBodySize: 0, responseBodySize: 0,
+        protocol: null, host: null, path: null, error: null,
+      });
+      await drainingRecorder.recordLogEvent({
+        timestamp: 1000, applicationId: null, level: 3, tag: "t", message: "m", filterName: "f",
+      });
+
+      // No DB write hit the closing connection.
+      expect(repo.networkEvents).toHaveLength(0);
+      expect(repo.logEvents).toHaveLength(0);
+      // Push side is unaffected (socket teardown is handled separately).
+      expect(pushTarget.pushedEvents.map(e => e.category)).toEqual(["network", "log"]);
+    });
+
+    it("does not throw to callers when draining even if the repo would fail", async () => {
+      repo.shouldThrow = true;
+      const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
+      const drainingRecorder = new TelemetryRecorder(repo, () => pushTarget, barrier);
+      barrier.beginDrain();
+
+      // Would throw "db error" if the write were attempted; draining skips it.
+      await expect(
+        drainingRecorder.recordOsEvent({
+          timestamp: 1, applicationId: null, category: "c", kind: "k", details: null,
+        })
+      ).resolves.toBeUndefined();
+    });
+
+    it("routes writes through the barrier so drain awaits them", async () => {
+      const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
+      let resolveWrite: (() => void) | null = null;
+      const slowRepo: TelemetryRepository = {
+        ...repo,
+        recordLogEvent: async input => {
+          repo.logEvents.push(input);
+          await new Promise<void>(r => { resolveWrite = r; });
+        },
+      };
+      const slowRecorder = new TelemetryRecorder(slowRepo, () => pushTarget, barrier);
+
+      const p = slowRecorder.recordLogEvent({
+        timestamp: 1, applicationId: null, level: 3, tag: "t", message: "m", filterName: "f",
+      });
+      // The in-flight write is visible to the barrier's drain set.
+      expect(barrier.inFlightCount()).toBe(1);
+
+      resolveWrite!();
+      await p;
+      expect(barrier.inFlightCount()).toBe(0);
+    });
   });
 });

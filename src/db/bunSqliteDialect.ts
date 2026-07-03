@@ -87,10 +87,12 @@ class BunSqliteDriver implements Driver {
   }
 
   async destroy(): Promise<void> {
-    if (this.#connectionState) {
-      this.#connectionState.close();
-      this.#connectionState = undefined;
-    }
+    // Close the handle but KEEP the connection state so acquireConnection keeps
+    // resolving a (closed) lease. Kysely's ConnectionMutex releases its lock only
+    // when the driver's acquireConnection RESOLVES; throwing here would strand the
+    // next queued waiter with an unsettled promise (issue #2792). The closed state
+    // rejects any query that reaches it instead.
+    this.#connectionState?.close();
   }
 
   #lease(connection: DatabaseConnection): BunSqliteConnectionLease {
@@ -109,6 +111,7 @@ export class BunSqliteConnectionState {
   #pendingTransactions = 0;
   #activeQueries = 0;
   #waiters: Array<() => void> = [];
+  #closed = false;
 
   constructor(database: BunDatabase | (() => BunDatabase), beforeQuery?: () => Promise<void>) {
     this.#databaseSource = database;
@@ -117,6 +120,7 @@ export class BunSqliteConnectionState {
   }
 
   async beginTransaction(owner: symbol): Promise<void> {
+    this.#assertOpen();
     this.#pendingTransactions += 1;
     try {
       await this.#reserveTransaction(owner);
@@ -156,58 +160,73 @@ export class BunSqliteConnectionState {
     const { sql, parameters } = compiledQuery;
 
     try {
-      await this.#beforeQuery?.();
-      const db = this.#getDatabase();
-
-      // Prepare statement
-      const stmt = db.prepare(sql);
-
-      // Check if this is a SELECT query or query with RETURNING clause
-      const sqlLower = sql.trim().toLowerCase();
-      const isSelect = sqlLower.startsWith("select");
-      // Word boundary (not a bare substring) so an identifier like
-      // `returning_items` isn't misclassified as a RETURNING clause. `_` is a
-      // word char, so `\breturning\b` correctly rejects `returning_items`.
-      const hasReturning = /\breturning\b/.test(sqlLower);
-
-      if (isSelect || hasReturning) {
-        // For SELECT queries or queries with RETURNING, return all rows
-        const rows = stmt.all(...(parameters as any[])) as R[];
-        return {
-          rows,
-          numAffectedRows: hasReturning ? BigInt(rows.length) : undefined,
-        };
-      } else {
-        // For INSERT/UPDATE/DELETE queries without RETURNING, execute and return changes
-        const result = stmt.run(...(parameters as any[]));
-        return {
-          rows: [],
-          numAffectedRows: BigInt(result.changes),
-          insertId:
-            result.lastInsertRowid !== undefined
-              ? BigInt(result.lastInsertRowid)
-              : undefined,
-        };
+      // Reject before touching (or reopening) the handle. A query that lost the
+      // shutdown race must fail cleanly here rather than silently reopening a new
+      // handle via #getDatabase() (issue #2792). Thrown outside the SQL-wrapping
+      // catch so callers see the closed-db cause, not a generic "Query failed".
+      if (this.#closed) {
+        throw new Error("Cannot use a closed database");
       }
-    } catch (error) {
-      // BigInt-safe: Kysely can bind BigInt params, and a bare
-      // JSON.stringify(parameters) throws on BigInt — which would mask the real
-      // SqliteError with a TypeError from the error reporter itself.
-      const params = JSON.stringify(parameters, (_key, value) =>
-        typeof value === "bigint" ? value.toString() : value
-      );
-      // Preserve the original SqliteError (code/stack) via `cause` so future
-      // BUSY/constraint-aware retries and describeUnknownError (which recurses
-      // into `.cause`) can reach it. ActionableError drops `cause`, so use a
-      // plain Error here. Keep the original error text inline too: the
-      // `#beforeQuery` migration gate above runs inside this try, so its
-      // "startup migrations failed" throw is caught and rewrapped here — and
-      // databaseLazyPath.test.ts asserts that text via `.message`. The inline
-      // `${error}` is BigInt-safe (unlike JSON.stringify) since it goes
-      // through toString().
-      throw new Error(`Query failed: ${error}\nSQL: ${sql}\nParameters: ${params}`, {
-        cause: error,
-      });
+
+      try {
+        await this.#beforeQuery?.();
+        // beforeQuery can await (e.g. migration gating), during which close() may
+        // run — re-check so a parked query rejects rather than reopening the handle.
+        if (this.#closed) {
+          throw new Error("Cannot use a closed database");
+        }
+        const db = this.#getDatabase();
+
+        // Prepare statement
+        const stmt = db.prepare(sql);
+
+        // Check if this is a SELECT query or query with RETURNING clause
+        const sqlLower = sql.trim().toLowerCase();
+        const isSelect = sqlLower.startsWith("select");
+        // Word boundary (not a bare substring) so an identifier like
+        // `returning_items` isn't misclassified as a RETURNING clause. `_` is a
+        // word char, so `\breturning\b` correctly rejects `returning_items`.
+        const hasReturning = /\breturning\b/.test(sqlLower);
+
+        if (isSelect || hasReturning) {
+          // For SELECT queries or queries with RETURNING, return all rows
+          const rows = stmt.all(...(parameters as any[])) as R[];
+          return {
+            rows,
+            numAffectedRows: hasReturning ? BigInt(rows.length) : undefined,
+          };
+        } else {
+          // For INSERT/UPDATE/DELETE queries without RETURNING, execute and return changes
+          const result = stmt.run(...(parameters as any[]));
+          return {
+            rows: [],
+            numAffectedRows: BigInt(result.changes),
+            insertId:
+              result.lastInsertRowid !== undefined
+                ? BigInt(result.lastInsertRowid)
+                : undefined,
+          };
+        }
+      } catch (error) {
+        // BigInt-safe: Kysely can bind BigInt params, and a bare
+        // JSON.stringify(parameters) throws on BigInt — which would mask the real
+        // SqliteError with a TypeError from the error reporter itself.
+        const params = JSON.stringify(parameters, (_key, value) =>
+          typeof value === "bigint" ? value.toString() : value
+        );
+        // Preserve the original SqliteError (code/stack) via `cause` so future
+        // BUSY/constraint-aware retries and describeUnknownError (which recurses
+        // into `.cause`) can reach it. ActionableError drops `cause`, so use a
+        // plain Error here. Keep the original error text inline too: the
+        // `#beforeQuery` migration gate above runs inside this try, so its
+        // "startup migrations failed" throw is caught and rewrapped here — and
+        // databaseLazyPath.test.ts asserts that text via `.message`. The inline
+        // `${error}` is BigInt-safe (unlike JSON.stringify) since it goes
+        // through toString().
+        throw new Error(`Query failed: ${error}\nSQL: ${sql}\nParameters: ${params}`, {
+          cause: error,
+        });
+      }
     } finally {
       this.#activeQueries -= 1;
       this.#notifyWaiters();
@@ -215,10 +234,15 @@ export class BunSqliteConnectionState {
   }
 
   close(): void {
+    // Mark closed FIRST so any query that wakes from #waitForStateChange (below)
+    // observes the closed state and rejects instead of running against a dead
+    // handle. Then wake waiters so queued queries settle promptly.
+    this.#closed = true;
     if (this.#db) {
       this.#db.close();
       this.#db = null;
     }
+    this.#notifyWaiters();
   }
 
   #getDatabase(): BunDatabase {
@@ -232,6 +256,12 @@ export class BunSqliteConnectionState {
     return this.#db;
   }
 
+  #assertOpen(): void {
+    if (this.#closed) {
+      throw new Error("Cannot use a closed database");
+    }
+  }
+
   async #reserveTransaction(owner: symbol): Promise<void> {
     // A nested beginTransaction on a lease that already holds the transaction
     // lock would busy-loop forever here (the owner waiting for itself to
@@ -243,8 +273,10 @@ export class BunSqliteConnectionState {
       throw new ActionableError("Nested transactions are not supported by BunSqliteDialect");
     }
     while (this.#transactionOwner !== null || this.#activeQueries > 0) {
+      this.#assertOpen();
       await this.#waitForStateChange();
     }
+    this.#assertOpen();
     this.#transactionOwner = owner;
   }
 
@@ -253,6 +285,10 @@ export class BunSqliteConnectionState {
       (this.#transactionOwner !== null && this.#transactionOwner !== owner) ||
       (this.#transactionOwner === null && this.#pendingTransactions > 0)
     ) {
+      // Bail if the handle closed while queued so a parked query can't spin
+      // forever after shutdown (issue #2792). Thrown before the activeQueries
+      // increment, so no counter is leaked.
+      this.#assertOpen();
       await this.#waitForStateChange();
     }
     this.#activeQueries += 1;

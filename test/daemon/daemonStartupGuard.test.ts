@@ -3,10 +3,16 @@ import { ActionableError } from "../../src/models/ActionableError";
 import {
   guardDatabaseStartup,
   handleFatalDatabaseStartupFailure,
+  resolveDaemonStartupExitCode,
   MAX_STARTUP_BACKOFF_MS,
 } from "../../src/daemon/daemonStartupGuard";
 import { DAEMON_STARTUP_TIMEOUT_MS } from "../../src/daemon/constants";
 import { DefaultStartupFailureTracker } from "../../src/daemon/DaemonStartupFailureTracker";
+import {
+  createIncompleteExtractionError,
+  isIncompleteExtractionError,
+  INCOMPLETE_EXTRACTION_EXIT_CODE,
+} from "../../src/db/migrationDependencyIntegrity";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
@@ -132,5 +138,45 @@ describe("guardDatabaseStartup", () => {
 
     expect(timer.getSleepHistory()).toEqual([]);
     expect(tracker.recorded[0]!.kind).toBe("transient");
+  });
+
+  test("an incomplete-extraction failure re-stamps its code onto the rethrown error", async () => {
+    // `toActionableError` rewraps the plain Error and drops its `code`; the
+    // handler must re-stamp it so main()'s exit-code resolution can detect the
+    // recoverable case (issue #2833). It still classifies permanent (the same
+    // half-linked extraction reproduces every respawn) → backoff applies.
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const tracker = new FakeStartupFailureTracker();
+    tracker.setCounts([1]);
+
+    let thrown: unknown;
+    try {
+      await handleFatalDatabaseStartupFailure(
+        createIncompleteExtractionError("kysely"),
+        tracker,
+        timer
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect(isIncompleteExtractionError(thrown)).toBe(true);
+    expect(tracker.recorded[0]!.kind).toBe("permanent");
+  });
+});
+
+describe("resolveDaemonStartupExitCode", () => {
+  test("returns EX_TEMPFAIL (75) for an incomplete-extraction failure", () => {
+    expect(resolveDaemonStartupExitCode(createIncompleteExtractionError("kysely"))).toBe(
+      INCOMPLETE_EXTRACTION_EXIT_CODE
+    );
+  });
+
+  test("returns 1 for every other fatal (generic, unchanged behavior)", () => {
+    expect(resolveDaemonStartupExitCode(new Error("file is not a database"))).toBe(1);
+    expect(resolveDaemonStartupExitCode(new ActionableError("something else"))).toBe(1);
+    expect(resolveDaemonStartupExitCode(undefined)).toBe(1);
   });
 });

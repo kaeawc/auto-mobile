@@ -776,6 +776,7 @@ export class DaemonManager implements DaemonManagerLike {
         port: pidData.port,
         socketPath: pidData.socketPath,
         sockets: pidData.sockets,
+        dbPath: pidData.dbPath,
         startedAt: pidData.startedAt,
         version: pidData.version,
         entryScript: pidData.entryScript,
@@ -1105,6 +1106,7 @@ export async function runDaemonCommand(
           console.log(`  PID: ${status.pid}`);
           console.log(`  Port: ${status.port}`);
           console.log(`  Socket: ${status.socketPath}`);
+          console.log(`  Database: ${status.dbPath || "unknown"}`);
           console.log(`  Version: ${status.version || "unknown"}`);
           console.log(
             `  Started: ${status.startedAt ? new Date(status.startedAt).toISOString() : "unknown"}`

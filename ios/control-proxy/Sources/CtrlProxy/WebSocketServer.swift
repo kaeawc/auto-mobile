@@ -132,10 +132,10 @@ public class WebSocketServer: WebSocketServing {
 
         do {
             let request = try JSONDecoder().decode(WebSocketRequest.self, from: data)
-            print("[WebSocketServer] Received request type=\(request.type) requestId=\(request.requestId ?? "nil")")
+            print("[WebSocketServer] Received request type=\(request.typeString) requestId=\(request.requestId ?? "nil")")
 
             // Track the entire request handling with PerfProvider
-            perfProvider.serial("handleRequest:\(request.type)")
+            perfProvider.serial("handleRequest:\(request.typeString)")
             let startTime = Date()
 
             let response = commandHandler.handle(request)

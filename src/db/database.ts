@@ -1,4 +1,4 @@
-import { Kysely } from "kysely";
+import { Kysely, sql } from "kysely";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
@@ -6,8 +6,14 @@ import type { Database as DatabaseSchema } from "./types";
 import { runMigrations } from "./migrator";
 import { createFileMigrationLock } from "./migrationLock";
 import { logger } from "../utils/logger";
+import { toActionableError } from "../models/ActionableError";
 import { BunSqliteDialect } from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import {
+  createIncompleteExtractionError,
+  extractMissingPackageName,
+  isMissingMigrationDependencyError,
+} from "./migrationDependencyIntegrity";
 
 type BunDatabaseConstructor = typeof import("bun:sqlite").Database;
 type BunDatabase = import("bun:sqlite").Database;
@@ -105,6 +111,16 @@ export const DATABASE_STARTUP_MIGRATION_FAILURE =
   "Database startup migrations failed; refusing to run queries until the daemon restarts.";
 
 function createStartupMigrationError(cause: unknown): Error {
+  // A half-linked bunx extraction (a known migration runtime dependency such as
+  // `kysely` missing from this run's node_modules) surfaces as a "Cannot find
+  // package" resolve error while the migrator dynamically imports a migration
+  // file. Map that to the distinct, recoverable incomplete-extraction error
+  // instead of the generic fatal crash so the caller knows to remove the
+  // extraction and re-run (issue #2833). Scoped to known dependencies so a
+  // genuine code-level bad import in a migration is not mislabeled.
+  if (isMissingMigrationDependencyError(cause)) {
+    return createIncompleteExtractionError(extractMissingPackageName(cause), cause);
+  }
   const causeMessage = cause instanceof Error ? cause.message : String(cause);
   return new Error(`${DATABASE_STARTUP_MIGRATION_FAILURE} Cause: ${causeMessage}`, { cause });
 }
@@ -142,14 +158,39 @@ function openConfiguredSqliteDatabase(dbPath: string): BunDatabase {
   return sqliteDb;
 }
 
+/**
+ * Write a WAL-safe, timestamped backup of the database before a destructive
+ * migration reset drops user tables. Uses SQLite's `VACUUM INTO`, which writes a
+ * transactionally-consistent single-file snapshot *through the live connection* —
+ * it captures uncheckpointed WAL frames without an OS-level copy of the open (and,
+ * on Windows, locked) database file, and produces no `-wal`/`-shm` sidecars.
+ */
+export async function backupDatabaseFile(db: Kysely<unknown>, dbPath: string): Promise<void> {
+  try {
+    // Include the pid so a daemon that restart-loops on a corrupt DB (#2784) does
+    // not clobber an earlier backup written in the same millisecond.
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = `${dbPath}.corrupt-backup-${timestamp}-${process.pid}`;
+    // The interpolated path is bound as a parameter, not concatenated into SQL.
+    await sql`VACUUM INTO ${backupPath}`.execute(db);
+
+    logger.warn(`Wrote pre-reset database backup to ${backupPath}`);
+  } catch (error) {
+    throw toActionableError(error, "Failed to back up the database before migration reset");
+  }
+}
+
 async function startMigrations(dbPath: string): Promise<void> {
   const migrationDb = createSqliteKysely<unknown>(dbPath);
 
   try {
-    // Serialize the migration run across processes: two openers on the same DB
-    // file (override env / --no-proxy alongside a daemon) must not both enter
-    // migrateToLatest() and collide on the kysely_migration PRIMARY KEY (#2794).
-    await runMigrations(migrationDb, createFileMigrationLock(dbPath));
+    await runMigrations(migrationDb, {
+      // Serialize the migration run across processes: two openers on the same DB
+      // file (override env / --no-proxy alongside a daemon) must not both enter
+      // migrateToLatest() and collide on the kysely_migration PRIMARY KEY (#2794).
+      lock: createFileMigrationLock(dbPath),
+      backup: () => backupDatabaseFile(migrationDb, dbPath),
+    });
     migrationsRun = true;
   } catch (error) {
     logger.error("Failed to run migrations on database initialization:", error);

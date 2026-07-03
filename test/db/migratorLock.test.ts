@@ -91,7 +91,7 @@ describe("runMigrations lock integration", () => {
     const db = memoryDb();
     const lock = new RecordingMigrationLock();
 
-    await runMigrations(db, lock);
+    await runMigrations(db, { lock });
 
     expect(lock.calls).toEqual(["acquire", "release"]);
 
@@ -113,7 +113,7 @@ describe("runMigrations lock integration", () => {
     process.env.AUTOMOBILE_MIGRATIONS_DIR = join(tmpdir(), "auto-mobile-does-not-exist-migrations");
 
     try {
-      await expect(runMigrations(db, lock)).rejects.toBeDefined();
+      await expect(runMigrations(db, { lock })).rejects.toBeDefined();
     } finally {
       if (previous === undefined) {
         delete process.env.AUTOMOBILE_MIGRATIONS_DIR;
@@ -139,12 +139,12 @@ describe("runMigrations lock integration", () => {
       // Opener B's migration must block on the lock; with a short ceiling it times
       // out rather than proceeding — proof it is gated by the lock.
       const lockB = opener(lockPath, 2, 50);
-      await expect(runMigrations(db, lockB)).rejects.toThrow(/migration lock/);
+      await expect(runMigrations(db, { lock: lockB })).rejects.toThrow(/migration lock/);
 
       // Once A releases, B proceeds and migrates the DB exactly once (no
       // double-write / PRIMARY-KEY collision).
       await holder.release();
-      await runMigrations(db, opener(lockPath, 2));
+      await runMigrations(db, { lock: opener(lockPath, 2) });
 
       const rows = await db
         .selectFrom("kysely_migration" as any)
@@ -168,7 +168,7 @@ describe("runMigrations lock integration", () => {
       // Opener A acquires the real lock, then fails (bad migrations folder). Its
       // finally-release must free the lock so B is not wedged.
       process.env.AUTOMOBILE_MIGRATIONS_DIR = join(tmpdir(), "auto-mobile-missing-migrations");
-      await expect(runMigrations(dbA, opener(lockPath, 1))).rejects.toBeDefined();
+      await expect(runMigrations(dbA, { lock: opener(lockPath, 1) })).rejects.toBeDefined();
       expect(existsSync(lockPath)).toBe(false); // A released the lock on failure
 
       // Restore the real migrations folder; B acquires cleanly and migrates.
@@ -177,7 +177,7 @@ describe("runMigrations lock integration", () => {
       } else {
         process.env.AUTOMOBILE_MIGRATIONS_DIR = previous;
       }
-      await runMigrations(dbB, opener(lockPath, 2));
+      await runMigrations(dbB, { lock: opener(lockPath, 2) });
 
       const rows = await dbB
         .selectFrom("kysely_migration" as any)

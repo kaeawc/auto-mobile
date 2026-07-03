@@ -4,6 +4,11 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { exponentialBackoff } from "../utils/Backoff";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import { classifyDatabaseFailure } from "../db/databaseFailureClassification";
+import {
+  INCOMPLETE_EXTRACTION_CODE,
+  INCOMPLETE_EXTRACTION_EXIT_CODE,
+  isIncompleteExtractionError,
+} from "../db/migrationDependencyIntegrity";
 import { DAEMON_STARTUP_TIMEOUT_MS } from "./constants";
 import {
   StartupFailureTracker,
@@ -40,8 +45,12 @@ export async function handleFatalDatabaseStartupFailure(
 ): Promise<never> {
   const kind = classifyDatabaseFailure(error);
   const recentFailures = tracker.recordFailure(kind, timer.now());
+  // Tag an incomplete-extraction failure with its distinct code so log-based
+  // alerting can count it without regex-matching prose, and so the process can
+  // exit with a distinct, recoverable code (issue #2833).
+  const failureLabel = isIncompleteExtractionError(error) ? `${kind}/${INCOMPLETE_EXTRACTION_CODE}` : kind;
   logger.error(
-    `Fatal: database initialization failed (${kind}; ${recentFailures} recent failure(s)); ` +
+    `Fatal: database initialization failed (${failureLabel}; ${recentFailures} recent failure(s)); ` +
       `daemon cannot serve queries and will exit for a clean restart: ${describeUnknownError(error)}`
   );
 
@@ -57,7 +66,23 @@ export async function handleFatalDatabaseStartupFailure(
     await timer.sleep(backoffMs);
   }
 
-  throw toActionableError(error, "Database initialization failed at daemon startup");
+  const actionable = toActionableError(error, "Database initialization failed at daemon startup");
+  // `toActionableError` rewraps a plain Error, dropping its `code`. Re-stamp the
+  // incomplete-extraction marker so the fatal handler in main() can resolve a
+  // distinct, recoverable process exit code (issue #2833).
+  if (isIncompleteExtractionError(error)) {
+    (actionable as { code?: string }).code = INCOMPLETE_EXTRACTION_CODE;
+  }
+  throw actionable;
+}
+
+/**
+ * Resolve the process exit code for a fatal daemon-startup error. An incomplete
+ * extraction (issue #2833) exits with `EX_TEMPFAIL` (75) so a wrapper can tell
+ * the recoverable "re-extract and retry" case apart from a generic fatal (1).
+ */
+export function resolveDaemonStartupExitCode(error: unknown): number {
+  return isIncompleteExtractionError(error) ? INCOMPLETE_EXTRACTION_EXIT_CODE : 1;
 }
 
 /**

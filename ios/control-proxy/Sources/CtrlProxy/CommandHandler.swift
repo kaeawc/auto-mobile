@@ -64,148 +64,140 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    /// Handle an incoming request and return a response
+    /// Handle an incoming request and return a response.
+    ///
+    /// The `switch` is exhaustive over the typed `WebSocketRequest` enum: adding
+    /// a new command case without a branch here fails compilation, so the
+    /// dispatch table can never silently drop a command.
     public func handle(_ request: WebSocketRequest) -> Any {
         let startTime = Date()
 
         do {
-            switch request.type {
+            switch request {
             // View hierarchy commands
-            case RequestType.requestHierarchy.rawValue,
-                 RequestType.requestHierarchyIfStale.rawValue:
-                return try handleRequestHierarchy(request, startTime: startTime)
+            case let .requestHierarchy(payload), let .requestHierarchyIfStale(payload):
+                return try handleRequestHierarchy(payload, startTime: startTime)
 
-            case RequestType.requestScreenshot.rawValue:
-                return try handleRequestScreenshot(request, startTime: startTime)
+            case let .requestScreenshot(payload):
+                return try handleRequestScreenshot(payload, startTime: startTime)
 
             // Gesture commands
-            case RequestType.requestTapCoordinates.rawValue:
-                return try handleTapCoordinates(request, startTime: startTime)
+            case let .tapCoordinates(payload):
+                return try handleTapCoordinates(payload, startTime: startTime)
 
-            case RequestType.requestSwipe.rawValue:
-                return try handleSwipe(request, startTime: startTime)
+            case let .swipe(payload):
+                return try handleSwipe(payload, startTime: startTime)
 
-            case RequestType.requestTwoFingerSwipe.rawValue:
-                return try handleTwoFingerSwipe(request, startTime: startTime)
+            case let .twoFingerSwipe(payload), let .multiFingerSwipe(payload):
+                return try handleMultiFingerSwipe(payload, startTime: startTime)
 
-            case RequestType.requestMultiFingerSwipe.rawValue:
-                return try handleMultiFingerSwipe(request, startTime: startTime)
+            case let .drag(payload):
+                return try handleDrag(payload, startTime: startTime)
 
-            case RequestType.requestDrag.rawValue:
-                return try handleDrag(request, startTime: startTime)
-
-            case RequestType.requestPinch.rawValue:
-                return try handlePinch(request, startTime: startTime)
+            case let .pinch(payload):
+                return try handlePinch(payload, startTime: startTime)
 
             // Text input commands
-            case RequestType.requestSetText.rawValue:
-                return try handleSetText(request, startTime: startTime)
+            case let .setText(payload):
+                return try handleSetText(payload, startTime: startTime)
 
-            case RequestType.requestClearText.rawValue:
-                return try handleClearText(request, startTime: startTime)
+            case let .clearText(payload):
+                return try handleClearText(payload, startTime: startTime)
 
-            case RequestType.requestImeAction.rawValue:
-                return try handleImeAction(request, startTime: startTime)
+            case let .imeAction(payload):
+                return try handleImeAction(payload, startTime: startTime)
 
-            case RequestType.requestSelectAll.rawValue:
-                return try handleSelectAll(request, startTime: startTime)
+            case let .selectAll(payload):
+                return try handleSelectAll(payload, startTime: startTime)
 
-            case RequestType.requestKeyboard.rawValue:
-                return try handleKeyboard(request, startTime: startTime)
+            case let .keyboard(payload):
+                return try handleKeyboard(payload, startTime: startTime)
 
-            case RequestType.requestPressButton.rawValue:
-                return try handlePressButton(request, startTime: startTime)
+            case let .pressButton(payload):
+                return try handlePressButton(payload, startTime: startTime)
 
-            case RequestType.requestPressHome.rawValue:
-                return try handlePressHome(request, startTime: startTime)
+            case let .pressHome(payload):
+                return try handlePressHome(payload, startTime: startTime)
 
-            case RequestType.requestPressBack.rawValue:
-                return try handlePressBack(request, startTime: startTime)
+            case let .pressBack(payload):
+                return try handlePressBack(payload, startTime: startTime)
 
-            case RequestType.requestShake.rawValue:
-                return try handleShake(request, startTime: startTime)
+            case let .shake(payload):
+                return try handleShake(payload, startTime: startTime)
 
-            case RequestType.requestRecentApps.rawValue:
-                return try handleRecentApps(request, startTime: startTime)
+            case let .recentApps(payload):
+                return try handleRecentApps(payload, startTime: startTime)
 
             // Action commands
-            case RequestType.requestAction.rawValue:
-                return try handleAction(request, startTime: startTime)
+            case let .action(payload):
+                return try handleAction(payload, startTime: startTime)
 
-            case RequestType.requestLaunchApp.rawValue:
-                return try handleLaunchApp(request, startTime: startTime)
+            case let .launchApp(payload):
+                return try handleLaunchApp(payload, startTime: startTime)
 
             // Device control
-            case RequestType.requestRotate.rawValue:
-                return try handleRotate(request, startTime: startTime)
+            case let .rotate(payload):
+                return try handleRotate(payload, startTime: startTime)
 
             // Clipboard commands
-            case RequestType.requestClipboard.rawValue:
-                return try handleClipboard(request, startTime: startTime)
+            case let .clipboard(payload):
+                return try handleClipboard(payload, startTime: startTime)
 
             // Accessibility features
-            case RequestType.getCurrentFocus.rawValue:
-                return try handleGetCurrentFocus(request, startTime: startTime)
+            case let .getCurrentFocus(payload):
+                return try handleGetCurrentFocus(payload, startTime: startTime)
 
-            case RequestType.getTraversalOrder.rawValue:
-                return try handleGetTraversalOrder(request, startTime: startTime)
+            case let .getTraversalOrder(payload):
+                return try handleGetTraversalOrder(payload, startTime: startTime)
 
-            case RequestType.addHighlight.rawValue:
-                return try handleAddHighlight(request, startTime: startTime)
+            case let .addHighlight(payload):
+                return try handleAddHighlight(payload, startTime: startTime)
 
-            case RequestType.getVoiceOverState.rawValue:
-                return try handleGetVoiceOverState(request, startTime: startTime)
+            case let .getVoiceOverState(payload):
+                return try handleGetVoiceOverState(payload, startTime: startTime)
 
             // Storage commands
-            case RequestType.listPreferenceFiles.rawValue:
-                return handleListPreferenceFiles(request, startTime: startTime)
+            case let .listPreferenceFiles(payload):
+                return handleListPreferenceFiles(payload, startTime: startTime)
 
-            case RequestType.getPreferences.rawValue:
-                return handleGetPreferences(request, startTime: startTime)
+            case let .getPreferences(payload):
+                return handleGetPreferences(payload, startTime: startTime)
 
-            case RequestType.getPreference.rawValue:
-                return handleGetPreference(request, startTime: startTime)
+            case let .getPreference(payload):
+                return handleGetPreference(payload, startTime: startTime)
 
-            case RequestType.setPreference.rawValue:
-                return try handleSetPreference(request, startTime: startTime)
+            case let .setPreference(payload):
+                return try handleSetPreference(payload, startTime: startTime)
 
-            case RequestType.removePreference.rawValue:
-                return try handleRemovePreference(request, startTime: startTime)
+            case let .removePreference(payload):
+                return try handleRemovePreference(payload, startTime: startTime)
 
-            case RequestType.clearPreferences.rawValue:
-                return try handleClearPreferences(request, startTime: startTime)
+            case let .clearPreferences(payload):
+                return try handleClearPreferences(payload, startTime: startTime)
 
             // Network mocking
-            case RequestType.setNetworkMockRules.rawValue:
-                return try handleSetNetworkMockRules(request, startTime: startTime)
+            case let .setNetworkMockRules(payload):
+                return try handleSetNetworkMockRules(payload, startTime: startTime)
 
             // Database commands
-            case RequestType.executeSql.rawValue:
-                return handleExecuteSql(request, startTime: startTime)
+            case let .executeSql(payload):
+                return handleExecuteSql(payload, startTime: startTime)
 
-            case RequestType.listDatabases.rawValue:
-                return handleListDatabases(request, startTime: startTime)
+            case let .listDatabases(payload):
+                return handleListDatabases(payload, startTime: startTime)
 
-            case RequestType.listTables.rawValue:
-                return handleListTables(request, startTime: startTime)
+            case let .listTables(payload):
+                return handleListTables(payload, startTime: startTime)
 
-            case RequestType.getTableData.rawValue:
-                return handleGetTableData(request, startTime: startTime)
+            case let .getTableData(payload):
+                return handleGetTableData(payload, startTime: startTime)
 
-            case RequestType.getTableStructure.rawValue:
-                return handleGetTableStructure(request, startTime: startTime)
-
-            default:
-                return WebSocketResponse.error(
-                    type: "error",
-                    requestId: request.requestId,
-                    error: "Unknown command type: \(request.type)",
-                    totalTimeMs: totalTimeMs(from: startTime)
-                )
+            case let .getTableStructure(payload):
+                return handleGetTableStructure(payload, startTime: startTime)
             }
         } catch {
             return WebSocketResponse.error(
-                type: responseType(for: request.type),
+                type: responseType(for: request.typeString),
                 requestId: request.requestId,
                 error: error.localizedDescription,
                 totalTimeMs: totalTimeMs(from: startTime)
@@ -216,15 +208,12 @@ public class CommandHandler: CommandHandling {
     // MARK: - Network Mocking
 
     private func handleSetNetworkMockRules(
-        _ request: WebSocketRequest,
+        _ request: RequestSetNetworkMockRules,
         startTime: Date
     )
         throws -> SetNetworkMockRulesResponse
     {
-        guard let rules = request.rules else {
-            throw CommandError.missingParameter("rules")
-        }
-        let succeeded = sdkHierarchyClient?.setMockRules(rules) ?? false
+        let succeeded = sdkHierarchyClient?.setMockRules(request.rules) ?? false
         return SetNetworkMockRulesResponse(
             requestId: request.requestId,
             ok: succeeded,
@@ -235,7 +224,7 @@ public class CommandHandler: CommandHandling {
     // MARK: - View Hierarchy
 
     private func handleRequestHierarchy(
-        _ request: WebSocketRequest,
+        _ request: RequestHierarchy,
         startTime _: Date
     )
         throws -> HierarchyUpdateResponse
@@ -343,7 +332,7 @@ public class CommandHandler: CommandHandling {
         return normalized
     }
 
-    private func handleRequestScreenshot(_ request: WebSocketRequest, startTime _: Date) throws -> ScreenshotResponse {
+    private func handleRequestScreenshot(_ request: RequestEnvelope, startTime _: Date) throws -> ScreenshotResponse {
         let data = try gesturePerformer.getScreenshot()
         let base64 = data.base64EncodedString()
 
@@ -356,13 +345,9 @@ public class CommandHandler: CommandHandling {
 
     // MARK: - Gestures
 
-    private func handleTapCoordinates(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        guard let x = request.x, let y = request.y else {
-            throw CommandError.missingParameter("x and y coordinates")
-        }
-
+    private func handleTapCoordinates(_ request: RequestTapCoordinates, startTime: Date) throws -> WebSocketResponse {
         let duration = request.duration ?? 0
-        try gesturePerformer.tap(x: Double(x), y: Double(y), duration: TimeInterval(duration) / 1000.0)
+        try gesturePerformer.tap(x: Double(request.x), y: Double(request.y), duration: TimeInterval(duration) / 1000.0)
 
         return WebSocketResponse.success(
             type: ResponseType.tapCoordinatesResult.rawValue,
@@ -371,17 +356,11 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleSwipe(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        guard let x1 = request.x1, let y1 = request.y1,
-              let x2 = request.x2, let y2 = request.y2
-        else {
-            throw CommandError.missingParameter("x1, y1, x2, y2")
-        }
-
+    private func handleSwipe(_ request: RequestSwipe, startTime: Date) throws -> WebSocketResponse {
         let duration = request.duration ?? 300
         try gesturePerformer.swipe(
-            startX: Double(x1), startY: Double(y1),
-            endX: Double(x2), endY: Double(y2),
+            startX: Double(request.x1), startY: Double(request.y1),
+            endX: Double(request.x2), endY: Double(request.y2),
             duration: TimeInterval(duration) / 1000.0
         )
 
@@ -392,32 +371,23 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleTwoFingerSwipe(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        try handleMultiFingerSwipe(request, startTime: startTime, defaultFingers: 2)
-    }
-
     private func handleMultiFingerSwipe(
-        _ request: WebSocketRequest,
-        startTime: Date,
-        defaultFingers: Int = 2
+        _ request: RequestMultiFingerSwipe,
+        startTime: Date
     )
         throws -> WebSocketResponse
     {
-        guard let x1 = request.x1, let y1 = request.y1,
-              let x2 = request.x2, let y2 = request.y2
-        else {
-            throw CommandError.missingParameter("x1, y1, x2, y2")
-        }
-
-        let fingerCount = request.fingerCount ?? defaultFingers
+        // Both request_two_finger_swipe and request_multi_finger_swipe route here;
+        // fingerCount defaults to 2 when the client omits it (two-finger never sends it).
+        let fingerCount = request.fingerCount ?? 2
         let duration = request.duration ?? 300
         let fingerSpacing = request.offset ?? 25
 
         try gesturePerformer.multiFingerSwipe(
-            startX: Double(x1),
-            startY: Double(y1),
-            endX: Double(x2),
-            endY: Double(y2),
+            startX: Double(request.x1),
+            startY: Double(request.y1),
+            endX: Double(request.x2),
+            endY: Double(request.y2),
             fingerCount: fingerCount,
             fingerSpacing: fingerSpacing,
             duration: TimeInterval(duration) / 1000.0
@@ -430,20 +400,14 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleDrag(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        guard let x1 = request.x1, let y1 = request.y1,
-              let x2 = request.x2, let y2 = request.y2
-        else {
-            throw CommandError.missingParameter("x1, y1, x2, y2")
-        }
-
+    private func handleDrag(_ request: RequestDrag, startTime: Date) throws -> WebSocketResponse {
         let pressDuration = request.pressDurationMs ?? request.holdTime ?? 600
         let dragDuration = request.dragDurationMs ?? 300
         let holdDuration = request.holdDurationMs ?? 100
 
         try gesturePerformer.drag(
-            startX: Double(x1), startY: Double(y1),
-            endX: Double(x2), endY: Double(y2),
+            startX: Double(request.x1), startY: Double(request.y1),
+            endX: Double(request.x2), endY: Double(request.y2),
             pressDuration: TimeInterval(pressDuration) / 1000.0,
             dragDuration: TimeInterval(dragDuration) / 1000.0,
             holdDuration: TimeInterval(holdDuration) / 1000.0
@@ -456,18 +420,12 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handlePinch(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        guard let centerX = request.centerX, let centerY = request.centerY,
-              let distanceStart = request.distanceStart, let distanceEnd = request.distanceEnd
-        else {
-            throw CommandError.missingParameter("centerX, centerY, distanceStart, distanceEnd")
-        }
-
+    private func handlePinch(_ request: RequestPinch, startTime: Date) throws -> WebSocketResponse {
         try gesturePerformer.pinch(
-            centerX: Double(centerX),
-            centerY: Double(centerY),
-            distanceStart: Double(distanceStart),
-            distanceEnd: Double(distanceEnd),
+            centerX: Double(request.centerX),
+            centerY: Double(request.centerY),
+            distanceStart: Double(request.distanceStart),
+            distanceEnd: Double(request.distanceEnd),
             rotationDegrees: Double(request.rotationDegrees ?? 0),
             duration: TimeInterval(request.duration ?? 300) / 1000.0
         )
@@ -481,10 +439,8 @@ public class CommandHandler: CommandHandling {
 
     // MARK: - Text Input
 
-    private func handleSetText(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        guard let text = request.text else {
-            throw CommandError.missingParameter("text")
-        }
+    private func handleSetText(_ request: RequestSetText, startTime: Date) throws -> WebSocketResponse {
+        let text = request.text
 
         perfProvider.serial("handleSetText")
         defer { perfProvider.end() }
@@ -526,7 +482,7 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleClearText(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleClearText(_ request: RequestClearText, startTime: Date) throws -> WebSocketResponse {
         perfProvider.serial("handleClearText")
         defer { perfProvider.end() }
 
@@ -561,10 +517,8 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleImeAction(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        guard let action = request.action else {
-            throw CommandError.missingParameter("action")
-        }
+    private func handleImeAction(_ request: RequestImeAction, startTime: Date) throws -> WebSocketResponse {
+        let action = request.action
 
         perfProvider.serial("handleImeAction")
         defer { perfProvider.end() }
@@ -599,7 +553,7 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleSelectAll(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleSelectAll(_ request: RequestEnvelope, startTime: Date) throws -> WebSocketResponse {
         perfProvider.serial("handleSelectAll")
         defer { perfProvider.end() }
 
@@ -627,10 +581,8 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleKeyboard(_ request: WebSocketRequest, startTime: Date) throws -> KeyboardResponse {
-        guard let action = request.action else {
-            throw CommandError.missingParameter("action")
-        }
+    private func handleKeyboard(_ request: RequestKeyboard, startTime: Date) throws -> KeyboardResponse {
+        let action = request.action
 
         perfProvider.serial("handleKeyboard")
         defer { perfProvider.end() }
@@ -662,10 +614,8 @@ public class CommandHandler: CommandHandling {
         }
     }
 
-    private func handlePressButton(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        guard let button = request.action else {
-            throw CommandError.missingParameter("action")
-        }
+    private func handlePressButton(_ request: RequestPressButton, startTime: Date) throws -> WebSocketResponse {
+        let button = request.action
 
         perfProvider.serial("handlePressButton")
         defer { perfProvider.end() }
@@ -690,7 +640,7 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handlePressHome(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handlePressHome(_ request: RequestEnvelope, startTime: Date) throws -> WebSocketResponse {
         perfProvider.serial("handlePressHome")
         defer { perfProvider.end() }
 
@@ -713,7 +663,7 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handlePressBack(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handlePressBack(_ request: RequestEnvelope, startTime: Date) throws -> WebSocketResponse {
         perfProvider.serial("handlePressBack")
         defer { perfProvider.end() }
 
@@ -728,7 +678,7 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleShake(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleShake(_ request: RequestEnvelope, startTime: Date) throws -> WebSocketResponse {
         perfProvider.serial("handleShake")
         defer { perfProvider.end() }
 
@@ -743,7 +693,7 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleRecentApps(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleRecentApps(_ request: RequestEnvelope, startTime: Date) throws -> WebSocketResponse {
         perfProvider.serial("handleRecentApps")
         defer { perfProvider.end() }
 
@@ -777,12 +727,8 @@ public class CommandHandler: CommandHandling {
 
     // MARK: - Actions
 
-    private func handleAction(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        guard let action = request.action else {
-            throw CommandError.missingParameter("action")
-        }
-
-        try gesturePerformer.performAction(action, resourceId: request.resourceId, label: request.label)
+    private func handleAction(_ request: RequestAction, startTime: Date) throws -> WebSocketResponse {
+        try gesturePerformer.performAction(request.action, resourceId: request.resourceId, label: request.label)
 
         return WebSocketResponse.success(
             type: ResponseType.actionResult.rawValue,
@@ -791,14 +737,11 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleLaunchApp(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleLaunchApp(_ request: RequestLaunchApp, startTime: Date) throws -> WebSocketResponse {
         perfProvider.serial("handleLaunchApp")
         defer { perfProvider.end() }
 
-        guard let bundleId = request.bundleId else {
-            throw CommandError.missingParameter("bundleId")
-        }
-
+        let bundleId = request.bundleId
         let coldBoot = request.coldBoot ?? false
 
         // Check current app state to decide launch strategy
@@ -873,10 +816,8 @@ public class CommandHandler: CommandHandling {
 
     // MARK: - Device Control
 
-    private func handleRotate(_ request: WebSocketRequest, startTime: Date) throws -> RotateResponse {
-        guard let orientation = request.orientation else {
-            throw CommandError.missingParameter("orientation")
-        }
+    private func handleRotate(_ request: RequestRotate, startTime: Date) throws -> RotateResponse {
+        let orientation = request.orientation
 
         let previousOrientation = gesturePerformer.getOrientation()
 
@@ -930,12 +871,8 @@ public class CommandHandler: CommandHandling {
 
     // MARK: - Clipboard
 
-    private func handleClipboard(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        guard let action = request.action else {
-            throw CommandError.missingParameter("action")
-        }
-
-        let resultText = try gesturePerformer.clipboard(action: action, text: request.text)
+    private func handleClipboard(_ request: RequestClipboard, startTime: Date) throws -> WebSocketResponse {
+        let resultText = try gesturePerformer.clipboard(action: request.action, text: request.text)
 
         return WebSocketResponse.success(
             type: ResponseType.clipboardResult.rawValue,
@@ -947,7 +884,7 @@ public class CommandHandler: CommandHandling {
 
     // MARK: - Accessibility Features
 
-    private func handleGetCurrentFocus(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleGetCurrentFocus(_ request: RequestEnvelope, startTime: Date) throws -> WebSocketResponse {
         // Stub: Focus tracking not yet implemented
         return WebSocketResponse.error(
             type: ResponseType.currentFocusResult.rawValue,
@@ -957,7 +894,7 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleGetTraversalOrder(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleGetTraversalOrder(_ request: RequestEnvelope, startTime: Date) throws -> WebSocketResponse {
         // Stub: Traversal order not yet implemented
         return WebSocketResponse.error(
             type: ResponseType.traversalOrderResult.rawValue,
@@ -967,7 +904,7 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleAddHighlight(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleAddHighlight(_ request: RequestAddHighlight, startTime: Date) throws -> WebSocketResponse {
         guard let shape = request.shape else {
             return WebSocketResponse.error(
                 type: ResponseType.highlightResponse.rawValue,
@@ -1017,7 +954,7 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleGetVoiceOverState(
-        _ request: WebSocketRequest,
+        _ request: RequestEnvelope,
         startTime: Date
     )
         throws -> VoiceOverStateResponse
@@ -1043,7 +980,7 @@ public class CommandHandler: CommandHandling {
         return name
     }
 
-    private func handleListPreferenceFiles(_ request: WebSocketRequest, startTime: Date) -> StorageFilesResponse {
+    private func handleListPreferenceFiles(_ request: RequestEnvelope, startTime: Date) -> StorageFilesResponse {
         guard let inspector = storageInspector else {
             return StorageFilesResponse(
                 requestId: request.requestId,
@@ -1062,7 +999,7 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleGetPreferences(_ request: WebSocketRequest, startTime: Date) -> StorageEntriesResponse {
+    private func handleGetPreferences(_ request: RequestGetPreferences, startTime: Date) -> StorageEntriesResponse {
         guard let inspector = storageInspector else {
             return StorageEntriesResponse(
                 requestId: request.requestId,
@@ -1082,7 +1019,7 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleGetPreference(_ request: WebSocketRequest, startTime: Date) -> StorageEntryResponse {
+    private func handleGetPreference(_ request: RequestGetPreference, startTime: Date) -> StorageEntryResponse {
         guard let inspector = storageInspector else {
             return StorageEntryResponse(
                 requestId: request.requestId,
@@ -1124,7 +1061,7 @@ public class CommandHandler: CommandHandling {
         }
     }
 
-    private func handleSetPreference(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleSetPreference(_ request: RequestSetPreference, startTime: Date) throws -> WebSocketResponse {
         guard let inspector = storageInspector else {
             return WebSocketResponse.error(
                 type: ResponseType.setPreferenceResult.rawValue,
@@ -1134,15 +1071,8 @@ public class CommandHandler: CommandHandling {
             )
         }
 
-        guard let key = request.key else {
-            throw CommandError.missingParameter("key")
-        }
-        guard let valueType = request.valueType else {
-            throw CommandError.missingParameter("valueType")
-        }
-
         let suiteName = resolveSuiteName(request.fileName)
-        try inspector.setEntry(suiteName: suiteName, key: key, value: request.value, type: valueType)
+        try inspector.setEntry(suiteName: suiteName, key: request.key, value: request.value, type: request.valueType)
 
         return WebSocketResponse.success(
             type: ResponseType.setPreferenceResult.rawValue,
@@ -1151,7 +1081,12 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleRemovePreference(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleRemovePreference(
+        _ request: RequestRemovePreference,
+        startTime: Date
+    )
+        throws -> WebSocketResponse
+    {
         guard let inspector = storageInspector else {
             return WebSocketResponse.error(
                 type: ResponseType.removePreferenceResult.rawValue,
@@ -1161,12 +1096,8 @@ public class CommandHandler: CommandHandling {
             )
         }
 
-        guard let key = request.key else {
-            throw CommandError.missingParameter("key")
-        }
-
         let suiteName = resolveSuiteName(request.fileName)
-        try inspector.removeEntry(suiteName: suiteName, key: key)
+        try inspector.removeEntry(suiteName: suiteName, key: request.key)
 
         return WebSocketResponse.success(
             type: ResponseType.removePreferenceResult.rawValue,
@@ -1175,7 +1106,12 @@ public class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleClearPreferences(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+    private func handleClearPreferences(
+        _ request: RequestClearPreferences,
+        startTime: Date
+    )
+        throws -> WebSocketResponse
+    {
         guard let inspector = storageInspector else {
             return WebSocketResponse.error(
                 type: ResponseType.clearPreferencesResult.rawValue,
@@ -1197,7 +1133,7 @@ public class CommandHandler: CommandHandling {
 
     // MARK: - Database
 
-    private func handleExecuteSql(_ request: WebSocketRequest, startTime: Date) -> ExecuteSqlResponse {
+    private func handleExecuteSql(_ request: RequestExecuteSql, startTime: Date) -> ExecuteSqlResponse {
         guard let client = sdkDatabaseClient else {
             return ExecuteSqlResponse(
                 requestId: request.requestId,
@@ -1224,7 +1160,7 @@ public class CommandHandler: CommandHandling {
         }
 
         do {
-            try validateDatabaseAppId(request)
+            try validateDatabaseAppId(request.appId)
             let result = try client.executeSQL(databasePath: databasePath, query: query)
             if let error = result.error {
                 return ExecuteSqlResponse(
@@ -1253,7 +1189,7 @@ public class CommandHandler: CommandHandling {
         }
     }
 
-    private func handleListDatabases(_ request: WebSocketRequest, startTime: Date) -> ListDatabasesResponse {
+    private func handleListDatabases(_ request: RequestListDatabases, startTime: Date) -> ListDatabasesResponse {
         guard let client = sdkDatabaseClient else {
             return ListDatabasesResponse(
                 requestId: request.requestId,
@@ -1264,7 +1200,7 @@ public class CommandHandler: CommandHandling {
         }
 
         do {
-            try validateDatabaseAppId(request)
+            try validateDatabaseAppId(request.appId)
             return try ListDatabasesResponse(
                 requestId: request.requestId,
                 success: true,
@@ -1281,7 +1217,7 @@ public class CommandHandler: CommandHandling {
         }
     }
 
-    private func handleListTables(_ request: WebSocketRequest, startTime: Date) -> ListTablesResponse {
+    private func handleListTables(_ request: RequestListTables, startTime: Date) -> ListTablesResponse {
         guard let client = sdkDatabaseClient else {
             return ListTablesResponse(
                 requestId: request.requestId,
@@ -1300,7 +1236,7 @@ public class CommandHandler: CommandHandling {
         }
 
         do {
-            try validateDatabaseAppId(request)
+            try validateDatabaseAppId(request.appId)
             return try ListTablesResponse(
                 requestId: request.requestId,
                 success: true,
@@ -1317,7 +1253,7 @@ public class CommandHandler: CommandHandling {
         }
     }
 
-    private func handleGetTableData(_ request: WebSocketRequest, startTime: Date) -> TableDataResponse {
+    private func handleGetTableData(_ request: RequestGetTableData, startTime: Date) -> TableDataResponse {
         guard let client = sdkDatabaseClient else {
             return TableDataResponse(
                 requestId: request.requestId,
@@ -1344,7 +1280,7 @@ public class CommandHandler: CommandHandling {
         }
 
         do {
-            try validateDatabaseAppId(request)
+            try validateDatabaseAppId(request.appId)
             let data = try client.getTableData(
                 databasePath: databasePath,
                 table: table,
@@ -1369,7 +1305,12 @@ public class CommandHandler: CommandHandling {
         }
     }
 
-    private func handleGetTableStructure(_ request: WebSocketRequest, startTime: Date) -> TableStructureResponse {
+    private func handleGetTableStructure(
+        _ request: RequestGetTableStructure,
+        startTime: Date
+    )
+        -> TableStructureResponse
+    {
         guard let client = sdkDatabaseClient else {
             return TableStructureResponse(
                 requestId: request.requestId,
@@ -1396,7 +1337,7 @@ public class CommandHandler: CommandHandling {
         }
 
         do {
-            try validateDatabaseAppId(request)
+            try validateDatabaseAppId(request.appId)
             let structure = try client.getTableStructure(databasePath: databasePath, table: table)
             return TableStructureResponse(
                 requestId: request.requestId,
@@ -1420,8 +1361,8 @@ public class CommandHandler: CommandHandling {
         "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
     }
 
-    private func validateDatabaseAppId(_ request: WebSocketRequest) throws {
-        guard let requestedAppId = normalizedBundleId(request.appId) else {
+    private func validateDatabaseAppId(_ appId: String?) throws {
+        guard let requestedAppId = normalizedBundleId(appId) else {
             throw CommandError.missingParameter("appId")
         }
 
@@ -1533,7 +1474,9 @@ public enum CommandError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case let .unknownCommand(cmd):
-            return "Unknown command: \(cmd)"
+            // Wire text must stay "Unknown command type: <type>" — the TS client's
+            // rewriteUnknownCommandError matches it to warn the runner is stale.
+            return "Unknown command type: \(cmd)"
         case let .missingParameter(param):
             return "Missing required parameter: \(param)"
         case let .invalidParameter(param, value):

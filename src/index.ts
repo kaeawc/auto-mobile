@@ -540,6 +540,17 @@ async function main() {
         await applyFeatureFlagStartup();
       });
     } else {
+      // Direct mode (--no-proxy/--direct) opens the shared SQLite DB in-process
+      // with no cross-process lock. Refuse BEFORE the first DB touch (feature-flag
+      // startup below opens the DB and runs migrations) if a live daemon already
+      // owns the SAME resolved DB file, to avoid two writers on one sqlite file
+      // (SQLITE_BUSY stalls, competing migrations, aux-socket bind conflicts).
+      // File-scoped, so an isolated AUTOMOBILE_DB_PATH still starts normally. #2795
+      if (noProxy) {
+        const { assertDirectModeDbOwnership, createDefaultDirectModeGuardDeps } =
+          await import("./daemon/directModeGuard");
+        assertDirectModeDbOwnership(createDefaultDirectModeGuardDeps());
+      }
       await applyFeatureFlagStartup();
     }
 
@@ -731,9 +742,14 @@ async function main() {
   }
 }
 
-main().catch(err => {
+main().catch(async err => {
   console.error("Fatal error in main():", err);
   fatalLogger?.error("Fatal error in main():", err);
   fatalLogger?.close();
-  process.exit(1);
+  // An incomplete-extraction startup failure exits with a distinct, recoverable
+  // code (EX_TEMPFAIL) so a wrapper can re-extract and retry (issue #2833);
+  // every other fatal keeps exit 1. Resolved lazily to match this file's
+  // deferred-import startup pattern.
+  const { resolveDaemonStartupExitCode } = await import("./daemon/daemonStartupGuard");
+  process.exit(resolveDaemonStartupExitCode(err));
 });

@@ -22,7 +22,7 @@ import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
-import { closeDatabase } from "../db";
+import { closeDatabase, getDatabasePath } from "../db";
 import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 import { handleFatalDatabaseStartupFailure } from "./daemonStartupGuard";
@@ -640,6 +640,7 @@ export class Daemon {
       socketPath: SOCKET_PATH,
       sockets: getDaemonSocketPaths(),
       port: this.port,
+      dbPath: getDatabasePath(),
       startedAt: this.timer.now(),
       version: DAEMON_VERSION,
       entryScript: buildIdentity.entryScript,

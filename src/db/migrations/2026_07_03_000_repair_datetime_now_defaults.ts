@@ -1,89 +1,231 @@
 import { type Kysely, sql } from "kysely";
 
 /**
- * #2895 — data repair for the string-literal `datetime('now')` default bug.
+ * #2895 — repair the string-literal timestamp-default bug on already-migrated
+ * databases.
  *
- * Every migration column that passed the plain string `datetime('now')` to
- * `col.defaultTo(...)` bound the argument as a VALUE, not raw SQL, so its DDL
- * emitted `DEFAULT 'datetime(''now'')'`. Any row inserted without an explicit value for
- * such a column stored the useless literal text `datetime('now')` instead of a
- * timestamp. The DDL is fixed forward (all columns now use
- * `defaultTo(sql`(datetime('now'))`)`), but databases that already ran the buggy
- * migrations carry poisoned rows this migration heals in place.
+ * Every migration column that passed a plain SQL time-expression string to
+ * `col.defaultTo(...)` — `"datetime('now')"` or `"CURRENT_TIMESTAMP"` — bound the
+ * argument as a VALUE, not raw SQL, so its DDL emitted `DEFAULT 'datetime(''now'')'`
+ * / `DEFAULT 'CURRENT_TIMESTAMP'`. Any row inserted without an explicit value for
+ * such a column stored the useless literal text instead of a timestamp.
  *
- * STRATEGY — generic schema introspection rather than a hand-maintained
- * (table, column) list. The poisoned rows hold the exact literal SQL expression
- * that was meant to be evaluated — `datetime('now')` or `CURRENT_TIMESTAMP` (the
- * two forms that appeared as string-literal defaults in migrations). Those exact
- * strings are the corruption signature: no legitimate write path stores them
- * (real values are ISO timestamps or evaluated `YYYY-MM-DD HH:MM:SS`), so a
- * targeted `WHERE "<col>" IN (<literals>)` predicate touches ONLY poisoned rows.
- * Iterating every table/column guarantees completeness — a new defaulted column
- * can never be silently missed by this repair the way an enumerated list would.
+ * The DDL is fixed FORWARD (all columns now use `defaultTo(sql`(datetime('now'))`)`),
+ * so fresh databases are already correct. But a database that already ran the
+ * buggy migrations keeps the broken `DEFAULT` in its stored schema — editing a
+ * historical migration does NOT re-run it (Kysely tracks migrations by name, no
+ * content checksum). So on an upgraded DB this migration must do TWO things:
  *
- * The evaluated `datetime('now')` written here is the best available timestamp
- * for a row that never had a real one (its true creation time is unrecoverable).
- * It is stored in SQLite's `YYYY-MM-DD HH:MM:SS` format — the same format the
- * fixed column defaults now emit and the format the codebase's other
+ *   1. REBUILD each column whose live default is the broken string literal, so
+ *      FUTURE inserts that omit the column (e.g. `getOrCreateApp`, which omits
+ *      `created_at`) stop re-poisoning it. SQLite cannot alter a column default
+ *      in place, and bun:sqlite forbids editing `sqlite_master` directly, so we
+ *      use the standard table-rebuild: create a twin table with the corrected
+ *      default, copy the rows, drop the original, rename the twin back, and
+ *      recreate its indexes/triggers. FK enforcement is toggled OFF around the
+ *      rebuild (see `up`) so dropping a referenced parent cannot cascade-delete
+ *      its children, then `PRAGMA foreign_key_check` verifies integrity before it
+ *      is restored.
+ *   2. REPAIR the existing poisoned rows in those columns to an evaluated
+ *      timestamp.
+ *
+ * TARGETING — the fix keys off `pragma_table_info(...).dflt_value`, which reports
+ * a column's stored default. Only the two broken string-literal forms match
+ * ({@link BROKEN_DEFAULTS}); a corrected `(datetime('now'))` default, a bare
+ * `CURRENT_TIMESTAMP` keyword, and legitimate value defaults (`'{}'`, `'success'`)
+ * all report a different `dflt_value` and are skipped. This is deliberately
+ * NARROWER than "rewrite any TEXT cell equal to the literal": columns like
+ * `storage_events.value` persist arbitrary app data (an app could legitimately
+ * store the string `datetime('now')`), so restricting the row repair to columns
+ * that actually carry the broken default is what keeps it from corrupting real
+ * data.
+ *
+ * The evaluated `datetime('now')` written for repaired rows is the best available
+ * timestamp for a row that never had a real one (its true creation time is
+ * unrecoverable). It is stored in SQLite's `YYYY-MM-DD HH:MM:SS` format — the same
+ * format the fixed column defaults now emit and the codebase's other
  * server-evaluated-now writes use (`sql`datetime('now')`` in ThresholdManager /
  * MemoryThresholdManager) — rather than the app's ISO-8601. This divergence is
- * deliberate and harmless: no column is both defaulted AND written explicit ISO
- * at an ordered/compared read site (audited during #2895 review), and every TTL
+ * deliberate and harmless: no column is both defaulted AND written explicit ISO at
+ * an ordered/compared read site (audited during #2895 review), and every TTL
  * comparison wraps the value in `datetime(...)`, which normalizes both formats.
  *
- * Safe on an empty/fresh DB and idempotent: on the destructive-recovery replay
- * (`resetDatabaseState` drops every table and re-runs all migrations) the schema
- * is rebuilt with the fixed defaults, so no row holds the literal and every
- * UPDATE is a no-op. A second run finds nothing left to repair.
+ * Safe on a fresh DB and idempotent: fresh/replayed schemas carry the corrected
+ * default, so no column matches {@link BROKEN_DEFAULTS} and the whole pass is a
+ * no-op. A second run finds nothing left to rebuild or repair.
  */
-// The exact string-literal SQL expressions that the buggy `defaultTo("...")`
-// stored verbatim instead of evaluating. Both yield SQLite's `YYYY-MM-DD
-// HH:MM:SS` when evaluated, so a single repaired value heals either.
-const POISONED_LITERALS = ["datetime('now')", "CURRENT_TIMESTAMP"];
 
-interface TableRow {
+/**
+ * A column's stored default (as reported by `pragma_table_info(...).dflt_value`)
+ * mapped to the corrected default expression it should carry and the literal
+ * value its poisoned rows hold. The `dflt_value` keys are the exact broken
+ * string-literal forms — a correct `datetime('now')` / `CURRENT_TIMESTAMP`
+ * default reports differently and never matches.
+ */
+const BROKEN_DEFAULTS: Record<string, { corrected: string; poisonedValue: string }> = {
+  "'datetime(''now'')'": { corrected: "(datetime('now'))", poisonedValue: "datetime('now')" },
+  "'CURRENT_TIMESTAMP'": { corrected: "CURRENT_TIMESTAMP", poisonedValue: "CURRENT_TIMESTAMP" },
+};
+
+interface NamedRow {
   name: string;
 }
 
-interface ColumnRow {
+interface ColumnInfoRow {
   name: string;
-  type: string;
+  dflt_value: string | null;
+}
+
+interface SqlRow {
+  sql: string | null;
 }
 
 export async function up(db: Kysely<unknown>): Promise<void> {
-  // Wrap the whole sweep in ONE transaction so a mid-way failure cannot leave the
-  // database half-repaired. These SQLite migrations are not auto-wrapped by the
-  // migrator (`SqliteAdapter.supportsTransactionalDdl === false`), but the repair
-  // is pure DML, so an explicit transaction gives atomicity — matching the
-  // convention in `2026_07_01_000_failure_groups_signature_unique`.
-  await db.transaction().execute(async trx => {
-    const tables = await sql<TableRow>`
-      SELECT name FROM sqlite_master
-      WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+  // Fast path: on a fresh/already-fixed schema no column carries a broken default,
+  // so there is nothing to rebuild. Return WITHOUT touching PRAGMA foreign_keys so
+  // the common case (every existing DB and test) leaves the connection's FK state
+  // exactly as the caller set it. Only the rare upgraded-DB path below toggles it.
+  const brokenTables = await findTablesWithBrokenDefaults(db);
+  if (brokenTables.length === 0) {
+    return;
+  }
+
+  // Rebuilding a table that OTHER tables reference by foreign key requires FK
+  // enforcement OFF: `DROP TABLE` performs an implicit DELETE that would otherwise
+  // fire `ON DELETE CASCADE` and wipe the child rows (deferral only delays the
+  // constraint *check*, not the cascade *action*). `PRAGMA foreign_keys` is a
+  // no-op inside a transaction, so it is toggled on the connection around the
+  // transaction — safe because the migrator does not wrap SQLite migrations in a
+  // transaction and the run is serialized by the migration lock. It is restored to
+  // ON afterwards: this branch only runs on an upgraded production DB, whose
+  // connection is configured FK-ON (`configureSqliteDatabase`), which is also the
+  // state the rest of the migration chain expects.
+  await sql`PRAGMA foreign_keys = OFF`.execute(db);
+  try {
+    // One transaction so a mid-rebuild failure cannot leave a half-swapped schema.
+    await db.transaction().execute(async trx => {
+      await rebuildAndRepair(trx, brokenTables);
+    });
+  } finally {
+    await sql`PRAGMA foreign_keys = ON`.execute(db);
+  }
+}
+
+/**
+ * Return the tables that have at least one column whose stored default is a
+ * broken string literal. Uses a `SELECT`-shaped `pragma_table_info(...)` read so
+ * the bunSqliteDialect returns rows (a bare `PRAGMA x` value read does not).
+ */
+async function findTablesWithBrokenDefaults(db: Kysely<unknown>): Promise<string[]> {
+  const tables = await sql<NamedRow>`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+  `.execute(db);
+
+  const broken: string[] = [];
+  for (const { name: table } of tables.rows) {
+    const columns = await sql<ColumnInfoRow>`
+      SELECT dflt_value FROM pragma_table_info(${table})
+    `.execute(db);
+    if (columns.rows.some(column => column.dflt_value !== null && column.dflt_value in BROKEN_DEFAULTS)) {
+      broken.push(table);
+    }
+  }
+  return broken;
+}
+
+async function rebuildAndRepair(trx: Kysely<unknown>, tables: string[]): Promise<void> {
+  for (const table of tables) {
+    const columns = await sql<ColumnInfoRow>`
+      SELECT name, dflt_value FROM pragma_table_info(${table})
     `.execute(trx);
 
-    for (const { name: table } of tables.rows) {
-      const columns = await sql<ColumnRow>`
-        SELECT name, type FROM pragma_table_info(${table})
-      `.execute(trx);
-
-      for (const column of columns.rows) {
-        // Only TEXT-affinity columns can hold the literal string; skip the rest so
-        // we never coerce a numeric/blob column.
-        if (!/char|clob|text/i.test(column.type)) {
-          continue;
-        }
-        await sql`
-          UPDATE ${sql.ref(table)}
-          SET ${sql.ref(column.name)} = datetime('now')
-          WHERE ${sql.ref(column.name)} IN (${sql.join(POISONED_LITERALS)})
-        `.execute(trx);
-      }
+    const brokenColumns = columns.rows.filter(
+      column => column.dflt_value !== null && column.dflt_value in BROKEN_DEFAULTS
+    );
+    if (brokenColumns.length === 0) {
+      continue;
     }
-  });
+
+    await rebuildTableWithCorrectedDefaults(trx, table);
+
+    // Rows copied verbatim during the rebuild still hold the literal; heal them
+    // now, restricted to the columns that actually carried the broken default.
+    for (const column of brokenColumns) {
+      const { poisonedValue } = BROKEN_DEFAULTS[column.dflt_value as string];
+      await sql`
+        UPDATE ${sql.ref(table)}
+        SET ${sql.ref(column.name)} = datetime('now')
+        WHERE ${sql.ref(column.name)} = ${poisonedValue}
+      `.execute(trx);
+    }
+  }
+}
+
+/**
+ * Rebuild `table` so every broken string-literal default becomes its corrected
+ * raw-SQL form, preserving data, indexes, and triggers. Only the `DEFAULT`
+ * clauses change; column set and order are untouched, so `INSERT ... SELECT *`
+ * lines the rows up 1:1.
+ */
+async function rebuildTableWithCorrectedDefaults(
+  trx: Kysely<unknown>,
+  table: string
+): Promise<void> {
+  const createRow = await sql<SqlRow>`
+    SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ${table}
+  `.execute(trx);
+  const createSql = createRow.rows[0]?.sql;
+  if (!createSql) {
+    return;
+  }
+
+  const tempTable = `__rebuild_${table}`;
+  let correctedSql = replaceFirstTableName(createSql, table, tempTable);
+  for (const brokenDefault of Object.keys(BROKEN_DEFAULTS)) {
+    // The broken literal only appears in the schema as a column default, so a
+    // global replace cannot touch anything else.
+    correctedSql = correctedSql.split(brokenDefault).join(BROKEN_DEFAULTS[brokenDefault].corrected);
+  }
+
+  // Capture the table's own indexes and triggers before the drop — auto-indexes
+  // backing PRIMARY KEY / UNIQUE constraints have a NULL `sql` and are recreated
+  // by the CREATE TABLE itself, so only the explicit ones need replaying.
+  const auxiliary = await sql<SqlRow>`
+    SELECT sql FROM sqlite_master
+    WHERE tbl_name = ${table} AND type IN ('index', 'trigger') AND sql IS NOT NULL
+  `.execute(trx);
+
+  await sql.raw(correctedSql).execute(trx);
+  await sql`INSERT INTO ${sql.ref(tempTable)} SELECT * FROM ${sql.ref(table)}`.execute(trx);
+  await sql`DROP TABLE ${sql.ref(table)}`.execute(trx);
+  await sql`ALTER TABLE ${sql.ref(tempTable)} RENAME TO ${sql.ref(table)}`.execute(trx);
+  for (const { sql: auxSql } of auxiliary.rows) {
+    if (auxSql) {
+      await sql.raw(auxSql).execute(trx);
+    }
+  }
+}
+
+/**
+ * Replace the table name in a `CREATE TABLE` statement, tolerating the double-
+ * quoted (Kysely) and bare forms and arbitrary whitespace after the keyword.
+ * Only the first occurrence — the table being declared — is rewritten; a later
+ * self-reference (e.g. a table-level FK) keeps pointing at the real name so the
+ * copy still works.
+ */
+function replaceFirstTableName(createSql: string, from: string, to: string): string {
+  // Match the declared table name as either a double-quoted identifier (Kysely's
+  // form) or a bare word, and rewrite only when it is exactly `from` so a later
+  // self-reference in the body is left untouched.
+  return createSql.replace(
+    /^(\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)(?:"([^"]+)"|(\w+))/i,
+    (match, prefix: string, quotedName: string | undefined, bareName: string | undefined) =>
+      (quotedName ?? bareName) === from ? `${prefix}"${to}"` : match
+  );
 }
 
 export async function down(): Promise<void> {
-  // Irreversible data repair: the original poisoned literals carried no
-  // information worth restoring, so the down migration is intentionally a no-op.
+  // Irreversible repair: the corrected defaults and healed rows carry no
+  // information worth reverting, so the down migration is intentionally a no-op.
 }

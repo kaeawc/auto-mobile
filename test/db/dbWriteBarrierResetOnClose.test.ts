@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
-import { defaultTimer } from "../../src/utils/SystemTimer";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import { removeTempDbDir } from "./tempDbDir";
 
 /**
  * Regression tests for issue #2896 (follow-up to #2796).
@@ -28,6 +28,12 @@ import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarr
  * `beforeEach`/`afterEach` isolates these tests from the rest of the suite.
  */
 describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)", () => {
+  // Opens a real file-backed DB (needs a shared on-disk file across the
+  // migration and app connections); give it a generous timeout so slow Windows
+  // disk I/O plus bounded best-effort temp-dir cleanup can never trip the
+  // default per-test timeout (issue #2916).
+  const FILE_BACKED_TEST_TIMEOUT_MS = 30000;
+
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
   const originalDbDir = process.env.AUTOMOBILE_DB_DIR;
   const originalDbPath = process.env.AUTOMOBILE_DB_PATH;
@@ -54,7 +60,7 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
     restore("AUTOMOBILE_DB_DIR", originalDbDir);
     restore("AUTOMOBILE_DB_PATH", originalDbPath);
     for (const dir of tempDirs.splice(0)) {
-      await removeTempDirWithRetry(dir);
+      await removeTempDbDir(dir);
     }
   });
 
@@ -71,22 +77,6 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
     const dir = await mkdtemp(path.join(tmpdir(), prefix));
     tempDirs.push(dir);
     return dir;
-  }
-
-  async function removeTempDirWithRetry(dir: string): Promise<void> {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      try {
-        await rm(dir, { recursive: true, force: true });
-        return;
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
-          throw error;
-        }
-        await defaultTimer.sleep(50);
-      }
-    }
-    await rm(dir, { recursive: true, force: true });
   }
 
   test("a tracked best-effort write after drain -> close -> reopen is NOT skipped", async () => {
@@ -129,7 +119,7 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
     expect(result).toBe("written");
 
     await databaseModule.closeDatabase();
-  });
+  }, FILE_BACKED_TEST_TIMEOUT_MS);
 
   test("closeDatabase clears a drain latch even with no open connection", async () => {
     const dir = await makeTempDbDir("auto-mobile-barrier-reset-noconn-");

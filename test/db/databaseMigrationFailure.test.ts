@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import path from "path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { removeTempDbDir } from "./tempDbDir";
 
 /**
  * Verifies the cached-error migration contract that issue #2784 depends on and
@@ -33,7 +34,7 @@ describe("database startup migration failure contract", () => {
   afterEach(async () => {
     restore("AUTOMOBILE_DB_PATH", originalDbPath);
     if (tempDir) {
-      await rm(tempDir, { recursive: true, force: true });
+      await removeTempDbDir(tempDir);
       tempDir = undefined;
     }
   });

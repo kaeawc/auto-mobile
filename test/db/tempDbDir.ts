@@ -1,6 +1,7 @@
 import { rm as fsRm } from "node:fs/promises";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { logger } from "../../src/utils/logger";
 
 /**
  * Shared bounded, best-effort temp-dir cleanup for file-backed DB tests (issue
@@ -23,6 +24,16 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * `rm`/`timer` are injectable so the retry/give-up behavior is unit-tested with
  * a fake filesystem and {@link FakeTimer} (no real handle livelock exists off
  * Windows to reproduce).
+ *
+ * Why not eliminate the file entirely? The migration-dependent close/reopen
+ * tests need the app connection to see a schema migrated on a SEPARATE
+ * connection (`startMigrations` in `src/db/database.ts` opens and destroys its
+ * own Kysely), so a plain `:memory:` DB — private per connection — cannot work.
+ * `file::memory:?cache=shared` would give one shared in-memory DB with no handle
+ * to leak, but bun:sqlite URI-filename support plus the real file-based
+ * migration lock (`createFileMigrationLock(dbPath)`) make it higher-risk than a
+ * real temp file with bounded cleanup. The issue (#2916) explicitly sanctioned
+ * this bounded-retry approach.
  */
 export interface RemoveTempDbDirOptions {
   /** Removal primitive. Defaults to `rm(dir, { recursive: true, force: true })`. */
@@ -35,7 +46,7 @@ export interface RemoveTempDbDirOptions {
   delayMs?: number;
   /**
    * Invoked once if every attempt loses to a persistent lock. Defaults to a
-   * single `console.warn` so a leaked dir is visible in CI logs; the unit test
+   * single `logger.warn` so a leaked dir is visible in CI logs; the unit test
    * injects a spy instead.
    */
   onGiveUp?: (dir: string, error: unknown) => void;
@@ -53,8 +64,9 @@ function defaultOnGiveUp(dir: string, error: unknown): void {
   const code = (error as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
   // Log-and-continue: the dir is a throwaway temp dir the OS will sweep; a
   // Windows handle livelock is the expected reason and is safe to swallow.
-  console.warn(
-    `removeTempDbDir: gave up removing ${dir} after ${code}; leaving it for OS temp cleanup (issue #2916)`
+  logger.warn(
+    `removeTempDbDir: gave up removing ${dir} after ${code}; leaving it for OS temp cleanup (issue #2916)`,
+    error
   );
 }
 

@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import path from "path";
+import { existsSync } from "node:fs";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { removeTempDbDir } from "./tempDbDir";
 
@@ -106,6 +110,31 @@ describe("removeTempDbDir (issue #2916)", () => {
       expect(gaveUp).toBe(true);
     }
   );
+
+  test("removes a real temp dir (and its contents) through the default rm/timer", async () => {
+    // Exercises the un-injected happy path: the default `fsRm(..., recursive,
+    // force)` closure and the default timer. macOS/Linux release handles
+    // immediately, so this resolves on the first attempt.
+    const dir = await mkdtemp(path.join(tmpdir(), "auto-mobile-tempdbdir-real-"));
+    await writeFile(path.join(dir, "auto-mobile.db"), "not-a-real-db");
+    expect(existsSync(dir)).toBe(true);
+
+    await removeTempDbDir(dir);
+
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  test("the default onGiveUp runs without throwing when a lock never clears", async () => {
+    // Drives the default onGiveUp (logger.warn) branch — omit `onGiveUp` but keep
+    // `rm` failing. Must still resolve, never reject.
+    const rm = async () => {
+      throw ebusy();
+    };
+
+    await expect(
+      removeTempDbDir("/tmp/auto-mobile-locked", { rm, maxAttempts: 2, delayMs: 1 })
+    ).resolves.toBeUndefined();
+  });
 
   test("rethrows an unexpected (non-lock) error code without retrying", async () => {
     const timer = new FakeTimer();

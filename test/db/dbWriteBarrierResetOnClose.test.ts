@@ -29,9 +29,11 @@ import { removeTempDbDir } from "./tempDbDir";
  */
 describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)", () => {
   // Opens a real file-backed DB (needs a shared on-disk file across the
-  // migration and app connections); give it a generous timeout so slow Windows
-  // disk I/O plus bounded best-effort temp-dir cleanup can never trip the
-  // default per-test timeout (issue #2916).
+  // migration and app connections). This timeout only covers the test BODY
+  // (migrations + queries on slow Windows disk I/O); it does NOT govern the
+  // `afterEach` hook, which uses bun's default hook timeout independently. The
+  // cleanup stall from issue #2916 is bounded separately by `removeTempDbDir`
+  // (best-effort, ~200ms/dir).
   const FILE_BACKED_TEST_TIMEOUT_MS = 30000;
 
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];

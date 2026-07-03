@@ -25,9 +25,12 @@ import { removeTempDbDir } from "./tempDbDir";
 describe("closeDatabase resets migration + path globals (issue #2796)", () => {
   // Tests that genuinely open a real file-backed DB (migration/query paths use a
   // separate connection from the app connection, so they need a shared on-disk
-  // file — `:memory:` gives each connection its own empty DB). Give them a
-  // generous timeout so slow Windows disk I/O plus bounded best-effort cleanup
-  // can never trip the default per-test timeout (issue #2916).
+  // file — `:memory:` gives each connection its own empty DB). This timeout only
+  // covers the test BODY (migrations + queries on slow Windows disk I/O); it does
+  // NOT govern the `afterEach` hook, which uses bun's default hook timeout
+  // independently. The cleanup stall from issue #2916 is bounded separately by
+  // `removeTempDbDir` (best-effort, ~200ms/dir), keeping afterEach well under the
+  // hook timeout.
   const FILE_BACKED_TEST_TIMEOUT_MS = 30000;
 
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];

@@ -135,6 +135,20 @@ if builtin help mapfile >/dev/null 2>&1; then
     supports_mapfile=true
 fi
 
+# If a base SHA was requested but does not resolve in this checkout (base branch
+# force-pushed/rebased, or its commit was never fetched), fall back to a
+# full-tree check instead of silently passing. get_changed_files_since_sha also
+# guards the SHA, but its `exit 1` runs inside the `< <(...)` process
+# substitution below and only kills that subshell -- the main script would
+# continue with an empty file list and exit 0, a false green (the worst outcome
+# for a linter). Verifying here, in the main shell, keeps the failure fatal to
+# the scoped path while still validating every file via the full-tree fallback.
+if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]] \
+    && ! git rev-parse --verify -q "${ONLY_CHANGED_SINCE_SHA}^{commit}" >/dev/null 2>&1; then
+    echo -e "${YELLOW}Base SHA '${ONLY_CHANGED_SINCE_SHA}' does not resolve; falling back to a full-tree ktfmt check.${NC}"
+    ONLY_CHANGED_SINCE_SHA=""
+fi
+
 if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]]; then
     echo -e "${YELLOW}Processing files changed since SHA: $ONLY_CHANGED_SINCE_SHA${NC}"
 

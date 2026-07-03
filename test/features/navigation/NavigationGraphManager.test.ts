@@ -893,6 +893,20 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     return Number(row?.count ?? 0);
   }
 
+  async function sessionTotals(
+    sessionId: number
+  ): Promise<{ nodes: number; edges: number }> {
+    const row = await db
+      .selectFrom("test_coverage_sessions")
+      .select(["total_nodes_visited", "total_edges_traversed"])
+      .where("id", "=", sessionId)
+      .executeTakeFirstOrThrow();
+    return {
+      nodes: Number(row.total_nodes_visited),
+      edges: Number(row.total_edges_traversed),
+    };
+  }
+
   beforeEach(async () => {
     db = await createTestDatabase({ foreignKeys: true });
     // Replace the telemetry singleton method so recordNavigationEvent's
@@ -948,9 +962,11 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     await manager.recordNavigationEvent(createEvent("Screen1", 1000));
     expect(manager.getCurrentScreen()).toBe("Screen1");
 
+    const sessionId = manager.getActiveTestSession()!.id;
     const nodesBefore = await countNodes();
     const edgesBefore = await countEdges();
     const edgeCoverageBefore = await countEdgeCoverageRows();
+    const totalsBefore = await sessionTotals(sessionId);
     telemetrySpy.mockClear();
 
     let notifyCount = 0;
@@ -969,6 +985,10 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     expect(await countEdges()).toBe(edgesBefore);
     expect(await countEdgeCoverageRows()).toBe(edgeCoverageBefore);
 
+    // The session total counters (bumped by recordNodeVisit before the throw)
+    // are rolled back too — they run on the same transaction.
+    expect(await sessionTotals(sessionId)).toEqual(totalsBefore);
+
     // In-memory field rollback invariant: currentScreen (and therefore the
     // together-assigned activeNavigation) is unchanged from before the call.
     expect(manager.getCurrentScreen()).toBe("Screen1");
@@ -983,27 +1003,30 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     const manager = makeManager(coverage);
     await manager.setCurrentApp(APP_ID);
 
-    // touchApp is the final write inside the transaction; assert it has already
-    // run by the time the post-commit side effects (notify + telemetry) fire.
+    // touchApp is the final write inside the transaction. Record the number of
+    // times it had run at EVERY notify/telemetry fire (not just the last), so a
+    // stray side effect firing BEFORE the transaction — when touchApp's call count
+    // is still 0 — is caught rather than masked by a later post-commit fire.
     const touchSpy = spyOn(NavigationRepository.prototype, "touchApp");
 
-    let notifyTouchCountAtFire = -1;
+    const notifyTouchCounts: number[] = [];
     manager.setGraphUpdateListener(() => {
-      notifyTouchCountAtFire = touchSpy.mock.calls.length;
+      notifyTouchCounts.push(touchSpy.mock.calls.length);
     });
 
-    let telemetryTouchCountAtFire = -1;
+    const telemetryTouchCounts: number[] = [];
     telemetrySpy.mockImplementation(async () => {
-      telemetryTouchCountAtFire = touchSpy.mock.calls.length;
+      telemetryTouchCounts.push(touchSpy.mock.calls.length);
     });
 
     await manager.recordNavigationEvent(createEvent("Screen1", 1000));
 
-    expect(touchSpy).toHaveBeenCalled();
-    // notify + telemetry both observed touchApp already invoked → they run after
-    // the transaction body, never inside it.
-    expect(notifyTouchCountAtFire).toBeGreaterThanOrEqual(1);
-    expect(telemetryTouchCountAtFire).toBeGreaterThanOrEqual(1);
+    // touchApp runs exactly once (one event), and notify + telemetry each fire
+    // exactly once, each AFTER that final in-transaction write completed — never
+    // inside the transaction and never before it.
+    expect(touchSpy).toHaveBeenCalledTimes(1);
+    expect(notifyTouchCounts).toEqual([1]);
+    expect(telemetryTouchCounts).toEqual([1]);
 
     touchSpy.mockRestore();
   });

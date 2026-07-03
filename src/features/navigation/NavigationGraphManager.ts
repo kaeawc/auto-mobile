@@ -202,6 +202,15 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   /**
    * Create a new instance for testing with injected dependencies.
+   *
+   * Precondition for recordNavigationEvent's atomicity: `repository` and
+   * `testCoverageRepository` MUST resolve to the same underlying connection
+   * (the default is both unbound → shared `getDatabase()` singleton). The
+   * transactional write opens one transaction on the navigation connection and
+   * enlists the coverage repo onto it via withExecutor; injecting a coverage
+   * repo bound to a DIFFERENT Kysely handle would split writes across
+   * connections and silently defeat the rollback guarantee. Tests that inject a
+   * db must pass the SAME instance to both repositories.
    */
   public static createForTesting(
     repository?: NavigationRepository,
@@ -332,6 +341,13 @@ export class NavigationGraphManager implements NavigationGraphService {
     // to DB statements only: telemetry push, notifications, screenshot capture and
     // in-memory field assignments stay OUTSIDE so the exclusive connection is not
     // held across non-DB IO, and so they never run when the transaction rolls back.
+    //
+    // Atomicity precondition: this.repository and this.testCoverageRepository must
+    // share the same underlying connection (both default to the getDatabase()
+    // singleton). The transaction is opened on the navigation connection and the
+    // coverage repo is enlisted onto that same `trx`; a coverage repo bound to a
+    // different connection would split writes and defeat the rollback. See
+    // createForTesting.
     const node = await this.repository.runInTransaction(async trx => {
       const repository = this.repository.withExecutor(trx);
       const testCoverageRepository = this.testCoverageRepository.withExecutor(trx);

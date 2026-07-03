@@ -21,26 +21,36 @@ interface CtrlProxyActions {
 
   fun requestScreenshot(requestId: String?)
 
-  fun requestSwipe(requestId: String?, x1: Int, y1: Int, x2: Int, y2: Int, duration: Long)
+  // Coordinate params are `Double` so fractional wire values pass through untruncated to the
+  // gesture engine (which builds float `Path`s). `offset`, durations, and `rotationDegrees` are not
+  // coordinates and stay their original types. Symmetric to iOS; see #2927 / WebSocketRequest.kt.
+  fun requestSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+  )
 
-  fun requestTapCoordinates(requestId: String?, x: Int, y: Int, duration: Long)
+  fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long)
 
   fun requestTwoFingerSwipe(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     duration: Long,
     offset: Int,
   )
 
   fun requestDrag(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     pressDurationMs: Long,
     dragDurationMs: Long,
     holdDurationMs: Long,
@@ -48,10 +58,10 @@ interface CtrlProxyActions {
 
   fun requestPinch(
     requestId: String?,
-    centerX: Int,
-    centerY: Int,
-    distanceStart: Int,
-    distanceEnd: Int,
+    centerX: Double,
+    centerY: Double,
+    distanceStart: Double,
+    distanceEnd: Double,
     rotationDegrees: Float,
     duration: Long,
   )

@@ -15,31 +15,31 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun requestSwipe(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     duration: Long,
   ) {}
 
-  override fun requestTapCoordinates(requestId: String?, x: Int, y: Int, duration: Long) {}
+  override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) {}
 
   override fun requestTwoFingerSwipe(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     duration: Long,
     offset: Int,
   ) {}
 
   override fun requestDrag(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     pressDurationMs: Long,
     dragDurationMs: Long,
     holdDurationMs: Long,
@@ -47,10 +47,10 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun requestPinch(
     requestId: String?,
-    centerX: Int,
-    centerY: Int,
-    distanceStart: Int,
-    distanceEnd: Int,
+    centerX: Double,
+    centerY: Double,
+    distanceStart: Double,
+    distanceEnd: Double,
     rotationDegrees: Float,
     duration: Long,
   ) {}
@@ -192,32 +192,32 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun requestSwipe(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     duration: Long,
   ) = record("requestSwipe", requestId, x1, y1, x2, y2, duration)
 
-  override fun requestTapCoordinates(requestId: String?, x: Int, y: Int, duration: Long) =
+  override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
     record("requestTapCoordinates", requestId, x, y, duration)
 
   override fun requestTwoFingerSwipe(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     duration: Long,
     offset: Int,
   ) = record("requestTwoFingerSwipe", requestId, x1, y1, x2, y2, duration, offset)
 
   override fun requestDrag(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     pressDurationMs: Long,
     dragDurationMs: Long,
     holdDurationMs: Long,
@@ -236,10 +236,10 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun requestPinch(
     requestId: String?,
-    centerX: Int,
-    centerY: Int,
-    distanceStart: Int,
-    distanceEnd: Int,
+    centerX: Double,
+    centerY: Double,
+    distanceStart: Double,
+    distanceEnd: Double,
     rotationDegrees: Float,
     duration: Long,
   ) =

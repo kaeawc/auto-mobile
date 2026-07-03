@@ -932,32 +932,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestSwipe(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     duration: Long,
   ) = performSwipe(requestId, x1, y1, x2, y2, duration)
 
-  override fun requestTapCoordinates(requestId: String?, x: Int, y: Int, duration: Long) =
+  override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
     performTapCoordinates(requestId, x, y, duration)
 
   override fun requestTwoFingerSwipe(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     duration: Long,
     offset: Int,
   ) = performTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset)
 
   override fun requestDrag(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     pressDurationMs: Long,
     dragDurationMs: Long,
     holdDurationMs: Long,
@@ -965,10 +965,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestPinch(
     requestId: String?,
-    centerX: Int,
-    centerY: Int,
-    distanceStart: Int,
-    distanceEnd: Int,
+    centerX: Double,
+    centerY: Double,
+    distanceStart: Double,
+    distanceEnd: Double,
     rotationDegrees: Float,
     duration: Long,
   ) =
@@ -2070,7 +2070,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Perform a swipe gesture using AccessibilityService's dispatchGesture API. This is significantly
    * faster than ADB's input swipe command.
    */
-  private fun performSwipe(requestId: String?, x1: Int, y1: Int, x2: Int, y2: Int, duration: Long) {
+  private fun performSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+  ) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performSwipe: ($x1, $y1) -> ($x2, $y2) duration=${duration}ms")
     perfProvider.serial("performSwipe")
@@ -2169,10 +2176,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    */
   private fun performDrag(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     pressDurationMs: Long,
     dragDurationMs: Long,
     holdDurationMs: Long,
@@ -2361,7 +2368,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * @param y Y coordinate to tap
    * @param duration Duration of the tap in milliseconds (default 10ms for a quick tap)
    */
-  private fun performTapCoordinates(requestId: String?, x: Int, y: Int, duration: Long = 10) {
+  private fun performTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long = 10) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performTapCoordinates: ($x, $y) duration=${duration}ms")
     perfProvider.serial("performTapCoordinates")
@@ -2474,10 +2481,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    */
   private fun performTwoFingerSwipe(
     requestId: String?,
-    x1: Int,
-    y1: Int,
-    x2: Int,
-    y2: Int,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
     duration: Long,
     offset: Int = 100,
   ) {
@@ -2581,10 +2588,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   /** Perform a pinch gesture using AccessibilityService's dispatchGesture API. */
   private fun performPinch(
     requestId: String?,
-    centerX: Int,
-    centerY: Int,
-    distanceStart: Int,
-    distanceEnd: Int,
+    centerX: Double,
+    centerY: Double,
+    distanceStart: Double,
+    distanceEnd: Double,
     rotationDegrees: Float,
     duration: Long,
   ) {
@@ -2597,14 +2604,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       perfProvider.startOperation("buildPath")
-      val startRadius = distanceStart / 2f
-      val endRadius = distanceEnd / 2f
+      val startRadius = distanceStart / 2.0
+      val endRadius = distanceEnd / 2.0
       val startAngle = 0.0
       val endAngle = Math.toRadians(rotationDegrees.toDouble())
 
-      fun pointAt(radius: Float, angleRad: Double): Pair<Float, Float> {
-        val x = centerX + (radius * kotlin.math.cos(angleRad)).toFloat()
-        val y = centerY + (radius * kotlin.math.sin(angleRad)).toFloat()
+      fun pointAt(radius: Double, angleRad: Double): Pair<Float, Float> {
+        val x = (centerX + radius * kotlin.math.cos(angleRad)).toFloat()
+        val y = (centerY + radius * kotlin.math.sin(angleRad)).toFloat()
         return x to y
       }
 

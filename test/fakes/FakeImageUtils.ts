@@ -9,36 +9,23 @@ export class FakeImageUtils implements ImageUtils {
   private originalBufferResult: Buffer = Buffer.from("original buffer data");
   private resizeResult: Buffer = Buffer.from("resized buffer data");
   private cropResult: Buffer = Buffer.from("cropped buffer data");
-  private rotateResult: Buffer = Buffer.from("rotated buffer data");
-  private flipResult: Buffer = Buffer.from("flipped buffer data");
-  private blurResult: Buffer = Buffer.from("blurred buffer data");
-  private jpegResult: Buffer = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]); // JPEG magic bytes
   private pngResult: Buffer = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]); // PNG magic bytes
   private webpResult: Buffer = Buffer.from("RIFF");
   private metadataResult = {
     width: 1080,
     height: 2400,
     format: "png",
-    size: 1024000,
-    colorSpace: "srgb",
-    hasAlpha: false,
-    exif: undefined
+    size: 1024000
   };
-  private exifMetadataResult: Record<string, any> = {};
   private batchProcessResult: Buffer[] = [];
 
   // Error injection
   private shouldThrowOnGetOriginalBuffer: boolean = false;
   private shouldThrowOnResize: boolean = false;
   private shouldThrowOnCrop: boolean = false;
-  private shouldThrowOnRotate: boolean = false;
-  private shouldThrowOnFlip: boolean = false;
-  private shouldThrowOnBlur: boolean = false;
-  private shouldThrowOnToJpeg: boolean = false;
   private shouldThrowOnToPng: boolean = false;
   private shouldThrowOnToWebp: boolean = false;
   private shouldThrowOnGetMetadata: boolean = false;
-  private shouldThrowOnGetExifMetadata: boolean = false;
   private shouldThrowOnBatchProcess: boolean = false;
 
   // Call tracking
@@ -66,34 +53,6 @@ export class FakeImageUtils implements ImageUtils {
   }
 
   /**
-   * Configure rotate result
-   */
-  setRotateResult(buffer: Buffer): void {
-    this.rotateResult = buffer;
-  }
-
-  /**
-   * Configure flip result
-   */
-  setFlipResult(buffer: Buffer): void {
-    this.flipResult = buffer;
-  }
-
-  /**
-   * Configure blur result
-   */
-  setBlurResult(buffer: Buffer): void {
-    this.blurResult = buffer;
-  }
-
-  /**
-   * Configure JPEG result
-   */
-  setJpegResult(buffer: Buffer): void {
-    this.jpegResult = buffer;
-  }
-
-  /**
    * Configure PNG result
    */
   setPngResult(buffer: Buffer): void {
@@ -115,18 +74,8 @@ export class FakeImageUtils implements ImageUtils {
     height: number;
     format: string;
     size: number;
-    colorSpace?: string;
-    hasAlpha?: boolean;
-    exif?: Record<string, any>;
   }): void {
     this.metadataResult = metadata;
-  }
-
-  /**
-   * Configure EXIF metadata result
-   */
-  setExifMetadataResult(exif: Record<string, any>): void {
-    this.exifMetadataResult = exif;
   }
 
   /**
@@ -158,34 +107,6 @@ export class FakeImageUtils implements ImageUtils {
   }
 
   /**
-   * Enable error throwing for rotate
-   */
-  setShouldThrowOnRotate(shouldThrow: boolean): void {
-    this.shouldThrowOnRotate = shouldThrow;
-  }
-
-  /**
-   * Enable error throwing for flip
-   */
-  setShouldThrowOnFlip(shouldThrow: boolean): void {
-    this.shouldThrowOnFlip = shouldThrow;
-  }
-
-  /**
-   * Enable error throwing for blur
-   */
-  setShouldThrowOnBlur(shouldThrow: boolean): void {
-    this.shouldThrowOnBlur = shouldThrow;
-  }
-
-  /**
-   * Enable error throwing for toJpeg
-   */
-  setShouldThrowOnToJpeg(shouldThrow: boolean): void {
-    this.shouldThrowOnToJpeg = shouldThrow;
-  }
-
-  /**
    * Enable error throwing for toPng
    */
   setShouldThrowOnToPng(shouldThrow: boolean): void {
@@ -204,13 +125,6 @@ export class FakeImageUtils implements ImageUtils {
    */
   setShouldThrowOnGetMetadata(shouldThrow: boolean): void {
     this.shouldThrowOnGetMetadata = shouldThrow;
-  }
-
-  /**
-   * Enable error throwing for getExifMetadata
-   */
-  setShouldThrowOnGetExifMetadata(shouldThrow: boolean): void {
-    this.shouldThrowOnGetExifMetadata = shouldThrow;
   }
 
   /**
@@ -297,41 +211,6 @@ export class FakeImageUtils implements ImageUtils {
     return this.cropResult;
   }
 
-  async rotate(buffer: Buffer, degrees: number): Promise<Buffer> {
-    this.recordCall("rotate", { bufferLength: buffer.length, degrees });
-    if (this.shouldThrowOnRotate) {
-      throw new Error("Simulated error in rotate");
-    }
-    return this.rotateResult;
-  }
-
-  async flip(
-    buffer: Buffer,
-    direction: "horizontal" | "vertical" | "both"
-  ): Promise<Buffer> {
-    this.recordCall("flip", { bufferLength: buffer.length, direction });
-    if (this.shouldThrowOnFlip) {
-      throw new Error("Simulated error in flip");
-    }
-    return this.flipResult;
-  }
-
-  async blur(buffer: Buffer, radius: number): Promise<Buffer> {
-    this.recordCall("blur", { bufferLength: buffer.length, radius });
-    if (this.shouldThrowOnBlur) {
-      throw new Error("Simulated error in blur");
-    }
-    return this.blurResult;
-  }
-
-  async toJpeg(buffer: Buffer, quality = 75): Promise<Buffer> {
-    this.recordCall("toJpeg", { bufferLength: buffer.length, quality });
-    if (this.shouldThrowOnToJpeg) {
-      throw new Error("Simulated error in toJpeg");
-    }
-    return this.jpegResult;
-  }
-
   async toPng(buffer: Buffer): Promise<Buffer> {
     this.recordCall("toPng", { bufferLength: buffer.length });
     if (this.shouldThrowOnToPng) {
@@ -365,23 +244,12 @@ export class FakeImageUtils implements ImageUtils {
     height: number;
     format: string;
     size: number;
-    colorSpace?: string;
-    hasAlpha?: boolean;
-    exif?: Record<string, any>;
   }> {
     this.recordCall("getMetadata", { bufferLength: buffer.length });
     if (this.shouldThrowOnGetMetadata) {
       throw new Error("Simulated error in getMetadata");
     }
     return this.metadataResult;
-  }
-
-  async getExifMetadata(buffer: Buffer): Promise<Record<string, any>> {
-    this.recordCall("getExifMetadata", { bufferLength: buffer.length });
-    if (this.shouldThrowOnGetExifMetadata) {
-      throw new Error("Simulated error in getExifMetadata");
-    }
-    return this.exifMetadataResult;
   }
 
   clearCache(): void {

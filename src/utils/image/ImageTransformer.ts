@@ -7,8 +7,8 @@ import { loadJimp, type JimpImage } from "./loadJimp";
 const DEFAULT_JPEG_QUALITY = 75;
 
 interface ImageOptions {
-  format?: "jpg" | "png" | "webp";
-  quality?: number; // 1-100, for jpg and webp
+  format?: "png" | "webp";
+  quality?: number; // 1-100, for webp
   lossless?: boolean;
   nearLossless?: boolean;
   resize?: {
@@ -22,9 +22,6 @@ interface ImageOptions {
     x: number;
     y: number;
   };
-  rotate?: number; // degrees
-  flip?: "horizontal" | "vertical" | "both";
-  blur?: number; // radius
 }
 
 export interface ImageMetadata {
@@ -32,13 +29,10 @@ export interface ImageMetadata {
   height: number;
   format: string;
   size: number;
-  colorSpace?: string;
-  hasAlpha?: boolean;
-  exif?: Record<string, any>;
 }
 
 type OutputFormat = {
-  mime: "image/png" | "image/jpeg" | "image/webp";
+  mime: "image/png" | "image/webp";
   opts?: Record<string, unknown>;
 };
 
@@ -103,44 +97,6 @@ class JimpImageTransformer {
 
     this.options.crop = { width, height, x, y };
     this.operations.push(image => image.crop({ x, y, w: width, h: height }));
-    return this;
-  }
-
-  public rotate(degrees: number): JimpImageTransformer {
-    this.options.rotate = degrees;
-    this.operations.push(image => image.rotate(degrees));
-    return this;
-  }
-
-  public flip(direction: "horizontal" | "vertical" | "both"): JimpImageTransformer {
-    this.options.flip = direction;
-    this.operations.push(image => image.flip({
-      horizontal: direction === "horizontal" || direction === "both",
-      vertical: direction === "vertical" || direction === "both"
-    }));
-    return this;
-  }
-
-  public blur(radius: number): JimpImageTransformer {
-    if (radius < 0) {
-      throw new Error("Blur radius must be a non-negative number");
-    }
-
-    this.options.blur = radius;
-    this.operations.push(image => image.blur(radius));
-    return this;
-  }
-
-  public jpeg(options?: { quality: number }): JimpImageTransformer {
-    const quality = options?.quality || DEFAULT_JPEG_QUALITY;
-
-    if (quality < 1 || quality > 100) {
-      throw new Error("JPEG quality must be between 1 and 100");
-    }
-
-    this.options.format = "jpg";
-    this.options.quality = quality;
-    this.outputFormat = { mime: "image/jpeg", opts: { quality } };
     return this;
   }
 
@@ -266,22 +222,6 @@ export class Image {
     return new JimpImageTransformer(this.buffer, this.timer).crop(width, height, x, y);
   }
 
-  public rotate(degrees: number): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.timer).rotate(degrees);
-  }
-
-  public flip(direction: "horizontal" | "vertical" | "both"): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.timer).flip(direction);
-  }
-
-  public blur(radius: number): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.timer).blur(radius);
-  }
-
-  public jpeg(options?: { quality: number }): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.timer).jpeg(options);
-  }
-
   public png(): JimpImageTransformer {
     return new JimpImageTransformer(this.buffer, this.timer).png();
   }
@@ -315,16 +255,6 @@ export class Image {
       const errorMessage = e instanceof Error ? e.message : String(e);
       throw new Error(`Failed to get image metadata: ${errorMessage}`);
     }
-  }
-
-  /**
-   * Extract EXIF metadata if available
-   *
-   * Note: the previous sharp-based implementation also always returned an
-   * empty object; jimp does not parse EXIF, so this stays a stub.
-   */
-  public async getExifMetadata(): Promise<Record<string, any>> {
-    return {};
   }
 
   // Enhanced utility methods

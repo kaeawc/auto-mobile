@@ -135,15 +135,46 @@ export const createStructuredToolResponse = <T>(content: T): StructuredToolRespo
 };
 
 /**
- * The single typed seam for reading a payload field off an MCP tool-call
+ * Reads the whole payload object off an MCP tool-call envelope (issue #2907).
+ * The payload lives under `structuredContent`; the top level carries only the
+ * serialized `content` and the hoisted `success`/`error`. This is the seam for
+ * consumers that need the entire payload (e.g. to unwrap and inspect several
+ * fields), the companion to {@link getStructuredField} for single-field reads.
+ *
+ * Returns `undefined` for null/undefined responses or a missing/non-object
+ * `structuredContent`. Does NOT fall back to parsing the serialized text part —
+ * callers that need that (older `content[0].text`-only results) must handle it
+ * themselves.
+ *
+ * @param response The tool-call envelope (or anything envelope-shaped).
+ */
+export const getStructuredPayload = <T = Record<string, unknown>>(
+  response: { structuredContent?: unknown } | null | undefined
+): T | undefined => {
+  const structuredContent = response?.structuredContent;
+  if (structuredContent && typeof structuredContent === "object") {
+    return structuredContent as T;
+  }
+  return undefined;
+};
+
+/**
+ * The typed seam for reading a single payload field off an MCP tool-call
  * envelope (issue #2907). Payload fields live under `structuredContent`, not on
  * the envelope top level — a raw `response.found` read is always `undefined`
  * and produces a silently-dead branch. Route every payload-field read through
- * this accessor so the intent is explicit and the foot-gun is impossible.
+ * this accessor so the read targets `structuredContent`, not the envelope.
+ *
+ * This is a *structural* guard: it guarantees you read from `structuredContent`
+ * and not the envelope top level, and only an own key resolves. It does NOT
+ * validate that `key` exists on the payload or that the value matches `T` — the
+ * caller asserts `T`, so a wrong `key` or `T` still yields a silent `undefined`
+ * / mistyped value. Making those a compile error requires a fully typed handler
+ * boundary (see follow-up); this accessor closes the envelope-vs-payload half.
  *
  * Accepts a loosely-typed envelope (handlers hand back `any`), safely narrows,
  * and returns `undefined` for null/undefined responses, a missing or
- * non-object `structuredContent`, or an absent field.
+ * non-object `structuredContent`, or an absent (or non-own) field.
  *
  * @param response The tool-call envelope (or anything envelope-shaped).
  * @param key The payload field to read from `structuredContent`.
@@ -154,6 +185,9 @@ export const getStructuredField = <T = unknown>(
 ): T | undefined => {
   const structuredContent = response?.structuredContent;
   if (structuredContent && typeof structuredContent === "object") {
+    if (!Object.hasOwn(structuredContent, key)) {
+      return undefined;
+    }
     return (structuredContent as Record<string, unknown>)[key] as T | undefined;
   }
   return undefined;

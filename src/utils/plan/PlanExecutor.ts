@@ -14,7 +14,7 @@ import {
   ExecutePlanStepDebugInfo,
   type PlanExecutionOptions,
 } from "../../models/ExecutePlanResult";
-import { throwIfAborted } from "../toolUtils";
+import { throwIfAborted, getStructuredPayload } from "../toolUtils";
 import { ZodError } from "zod";
 import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
 import { DaemonState } from "../../daemon/daemonState";
@@ -113,8 +113,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
       return null;
     }
     const r = response as Record<string, unknown>;
-    if (r.structuredContent && typeof r.structuredContent === "object") {
-      return r.structuredContent as Record<string, unknown>;
+    const structuredPayload = getStructuredPayload<Record<string, unknown>>(r);
+    if (structuredPayload) {
+      return structuredPayload;
     }
     const content = r.content;
     if (Array.isArray(content) && content.length > 0) {
@@ -160,9 +161,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       return;
     }
     const tr = toolResult as Record<string, unknown>;
-    const payload = (tr.structuredContent && typeof tr.structuredContent === "object")
-      ? tr.structuredContent as Record<string, unknown>
-      : tr;
+    const payload = getStructuredPayload<Record<string, unknown>>(tr) ?? tr;
     if (payload.tapDebug !== undefined && payload.tapDebug !== null) {
       details.tapDebug = payload.tapDebug;
     }

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createStructuredToolResponse,
   getStructuredField,
+  getStructuredPayload,
 } from "../../src/utils/toolUtils";
 
 /**
@@ -55,6 +56,47 @@ describe("getStructuredField", () => {
     expect((response as Record<string, unknown>).found).toBeUndefined();
     // Accessor gets the real value.
     expect(getStructuredField<boolean>(response, "found")).toBe(true);
+  });
+
+  test("does not resolve inherited (non-own) keys like prototype methods", () => {
+    const response = createStructuredToolResponse({ success: true });
+    // `toString`/`constructor` exist on Object.prototype but are not payload
+    // fields — an own-key guard must keep them from leaking through.
+    expect(getStructuredField(response, "toString")).toBeUndefined();
+    expect(getStructuredField(response, "constructor")).toBeUndefined();
+    expect(getStructuredField(response, "__proto__")).toBeUndefined();
+  });
+
+  test("resolves an own key whose value is falsy (found: false)", () => {
+    const response = createStructuredToolResponse({ success: true, found: false });
+    expect(getStructuredField<boolean>(response, "found")).toBe(false);
+  });
+});
+
+describe("getStructuredPayload", () => {
+  test("returns the whole payload object under structuredContent", () => {
+    const payload = { success: true, found: true, awaitTimeout: false };
+    const response = createStructuredToolResponse(payload);
+    expect(getStructuredPayload(response)).toEqual(payload);
+    expect(getStructuredPayload(response)).toBe(response.structuredContent);
+  });
+
+  test("returns undefined for null / undefined responses", () => {
+    expect(getStructuredPayload(null)).toBeUndefined();
+    expect(getStructuredPayload(undefined)).toBeUndefined();
+  });
+
+  test("returns undefined when structuredContent is missing or not an object", () => {
+    expect(getStructuredPayload({ content: [] })).toBeUndefined();
+    expect(getStructuredPayload({ structuredContent: "text" })).toBeUndefined();
+    expect(getStructuredPayload({ structuredContent: null })).toBeUndefined();
+  });
+
+  test("does NOT fall back to parsing the serialized text part", () => {
+    // A text-only envelope carries the payload as JSON in content[0].text, not
+    // under structuredContent — getStructuredPayload deliberately ignores it.
+    const textOnly = { content: [{ type: "text", text: JSON.stringify({ success: true }) }] };
+    expect(getStructuredPayload(textOnly)).toBeUndefined();
   });
 });
 

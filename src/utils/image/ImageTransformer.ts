@@ -1,9 +1,8 @@
-import type { ResizeOptions, Sharp, WebpOptions } from "sharp";
 import { logger } from "../logger";
 import { NodeCryptoService } from "../crypto";
 import { ImageCache } from "./ImageCache";
 import { defaultTimer, type Timer } from "../SystemTimer";
-import { loadSharp } from "./loadSharp";
+import { loadJimp, type JimpImage } from "./loadJimp";
 
 const DEFAULT_JPEG_QUALITY = 75;
 
@@ -38,24 +37,21 @@ export interface ImageMetadata {
   exif?: Record<string, any>;
 }
 
-class SharpImageTransformer {
+type OutputFormat = {
+  mime: "image/png" | "image/jpeg" | "image/webp";
+  opts?: Record<string, unknown>;
+};
+
+class JimpImageTransformer {
   private options: ImageOptions = {};
   private cacheKey: string | null = null;
   private useCache: boolean = true;
   private timer: Timer;
-  private operations: Array<(sharpInstance: Sharp) => Sharp> = [];
+  private operations: Array<(image: JimpImage) => JimpImage> = [];
+  private outputFormat: OutputFormat | null = null;
 
   constructor(private buffer: Buffer, timer: Timer = defaultTimer) {
     this.timer = timer;
-  }
-
-  private async createSharpInstance(): Promise<Sharp> {
-    const sharp = await loadSharp();
-    let sharpInstance = sharp(this.buffer);
-    for (const operation of this.operations) {
-      sharpInstance = operation(sharpInstance);
-    }
-    return sharpInstance;
   }
 
   private generateCacheKey(): string {
@@ -65,27 +61,18 @@ class SharpImageTransformer {
     return `${bufferHash}_${optionsStr}`;
   }
 
-  public disableCache(): SharpImageTransformer {
+  public disableCache(): JimpImageTransformer {
     this.useCache = false;
     return this;
   }
 
-  public resize(width: number, height?: number, maintainAspectRatio = true): SharpImageTransformer {
+  public resize(width: number, height?: number, maintainAspectRatio = true): JimpImageTransformer {
     if (width <= 0) {
       throw new Error("Width must be a positive number");
     }
 
-    const resizeOptions: ResizeOptions = { width };
-
-    if (height !== undefined) {
-      if (height <= 0) {
-        throw new Error("Height must be a positive number");
-      }
-      resizeOptions.height = height;
-    }
-
-    if (!maintainAspectRatio) {
-      resizeOptions.fit = "fill";
+    if (height !== undefined && height <= 0) {
+      throw new Error("Height must be a positive number");
     }
 
     this.options.resize = {
@@ -94,55 +81,57 @@ class SharpImageTransformer {
       maintainAspectRatio
     };
 
-    this.operations.push(sharpInstance => sharpInstance.resize(resizeOptions));
+    this.operations.push(image => {
+      if (height === undefined) {
+        // Width only: scale preserving aspect ratio
+        return image.resize({ w: width });
+      }
+      if (maintainAspectRatio) {
+        // Match sharp's default fit "cover": exact WxH, center-cropped
+        return image.cover({ w: width, h: height });
+      }
+      // fit "fill": stretch to exact WxH
+      return image.resize({ w: width, h: height });
+    });
     return this;
   }
 
-  public crop(width: number, height: number, x = 0, y = 0): SharpImageTransformer {
+  public crop(width: number, height: number, x = 0, y = 0): JimpImageTransformer {
     if (width <= 0 || height <= 0) {
       throw new Error("Crop dimensions must be positive numbers");
     }
 
     this.options.crop = { width, height, x, y };
-    this.operations.push(sharpInstance => sharpInstance.extract({ width, height, left: x, top: y }));
+    this.operations.push(image => image.crop({ x, y, w: width, h: height }));
     return this;
   }
 
-  public rotate(degrees: number): SharpImageTransformer {
+  public rotate(degrees: number): JimpImageTransformer {
     this.options.rotate = degrees;
-    this.operations.push(sharpInstance => sharpInstance.rotate(degrees));
+    this.operations.push(image => image.rotate(degrees));
     return this;
   }
 
-  public flip(direction: "horizontal" | "vertical" | "both"): SharpImageTransformer {
+  public flip(direction: "horizontal" | "vertical" | "both"): JimpImageTransformer {
     this.options.flip = direction;
-
-    switch (direction) {
-      case "horizontal":
-        this.operations.push(sharpInstance => sharpInstance.flop());
-        break;
-      case "vertical":
-        this.operations.push(sharpInstance => sharpInstance.flip());
-        break;
-      case "both":
-        this.operations.push(sharpInstance => sharpInstance.flip().flop());
-        break;
-    }
-
+    this.operations.push(image => image.flip({
+      horizontal: direction === "horizontal" || direction === "both",
+      vertical: direction === "vertical" || direction === "both"
+    }));
     return this;
   }
 
-  public blur(radius: number): SharpImageTransformer {
+  public blur(radius: number): JimpImageTransformer {
     if (radius < 0) {
       throw new Error("Blur radius must be a non-negative number");
     }
 
     this.options.blur = radius;
-    this.operations.push(sharpInstance => sharpInstance.blur(radius));
+    this.operations.push(image => image.blur(radius));
     return this;
   }
 
-  public jpeg(options?: { quality: number }): SharpImageTransformer {
+  public jpeg(options?: { quality: number }): JimpImageTransformer {
     const quality = options?.quality || DEFAULT_JPEG_QUALITY;
 
     if (quality < 1 || quality > 100) {
@@ -151,13 +140,13 @@ class SharpImageTransformer {
 
     this.options.format = "jpg";
     this.options.quality = quality;
-    this.operations.push(sharpInstance => sharpInstance.jpeg({ quality }));
+    this.outputFormat = { mime: "image/jpeg", opts: { quality } };
     return this;
   }
 
-  public png(): SharpImageTransformer {
+  public png(): JimpImageTransformer {
     this.options.format = "png";
-    this.operations.push(sharpInstance => sharpInstance.png());
+    this.outputFormat = { mime: "image/png" };
     return this;
   }
 
@@ -168,7 +157,7 @@ class SharpImageTransformer {
    * @param options.lossless Whether to use lossless compression
    * @param options.nearLossless Whether to use near-lossless compression
    */
-  public webp(options?: { quality?: number; lossless?: boolean; nearLossless?: boolean }): SharpImageTransformer {
+  public webp(options?: { quality?: number; lossless?: boolean; nearLossless?: boolean }): JimpImageTransformer {
     const quality = options?.quality || DEFAULT_JPEG_QUALITY;
 
     if (quality < 1 || quality > 100) {
@@ -180,17 +169,19 @@ class SharpImageTransformer {
     this.options.lossless = options?.lossless;
     this.options.nearLossless = options?.nearLossless;
 
-    const webpOptions: WebpOptions = { quality };
+    // The wasm-webp encoder takes libwebp-style numeric flags. Keys are
+    // camelCase (validated by the plugin's zod schema — an unknown key is
+    // silently dropped, and `quality` defaults to 100). In lossless mode
+    // `quality` still controls compression effort/ratio, so pass it through.
+    // near-lossless runs inside lossless mode; sharp used `quality` as the
+    // near-lossless preprocessing level, so mirror that.
+    const webpOptions: Record<string, unknown> = options?.lossless
+      ? { lossless: 1, quality }
+      : options?.nearLossless
+        ? { lossless: 1, nearLossless: quality }
+        : { quality };
 
-    if (options?.lossless) {
-      webpOptions.lossless = true;
-    }
-
-    if (options?.nearLossless) {
-      webpOptions.nearLossless = true;
-    }
-
-    this.operations.push(sharpInstance => sharpInstance.webp(webpOptions));
+    this.outputFormat = { mime: "image/webp", opts: webpOptions };
     return this;
   }
 
@@ -217,8 +208,17 @@ class SharpImageTransformer {
 
     try {
       const processStartTime = this.timer.now();
-      const sharpInstance = await this.createSharpInstance();
-      const resultBuffer = await sharpInstance.toBuffer();
+      const Jimp = await loadJimp();
+      let image = await Jimp.fromBuffer(this.buffer) as JimpImage;
+      for (const operation of this.operations) {
+        image = operation(image);
+      }
+      // Fall back to the decoded input format when no output format was requested
+      const mime = this.outputFormat?.mime ?? image.mime ?? "image/png";
+      const resultBuffer = await (image.getBuffer as (m: string, o?: Record<string, unknown>) => Promise<Buffer>)(
+        mime,
+        this.outputFormat?.opts
+      );
       const processDuration = this.timer.now() - processStartTime;
 
       // Store result in cache if caching is enabled
@@ -235,7 +235,7 @@ class SharpImageTransformer {
     } catch (error) {
       const totalDuration = this.timer.now() - startTime;
       logger.warn(`[IMAGE] Processing failed after ${totalDuration}ms: ${(error as Error).message}`);
-      throw new Error(`Sharp image processing error: ${(error as Error).message}`);
+      throw new Error(`Image processing error: ${(error as Error).message}`);
     }
   }
 }
@@ -258,43 +258,43 @@ export class Image {
     return Buffer.from(this.buffer);
   }
 
-  public resize(width: number, height?: number, maintainAspectRatio = true): SharpImageTransformer {
-    return new SharpImageTransformer(this.buffer, this.timer).resize(width, height, maintainAspectRatio);
+  public resize(width: number, height?: number, maintainAspectRatio = true): JimpImageTransformer {
+    return new JimpImageTransformer(this.buffer, this.timer).resize(width, height, maintainAspectRatio);
   }
 
-  public crop(width: number, height: number, x = 0, y = 0): SharpImageTransformer {
-    return new SharpImageTransformer(this.buffer, this.timer).crop(width, height, x, y);
+  public crop(width: number, height: number, x = 0, y = 0): JimpImageTransformer {
+    return new JimpImageTransformer(this.buffer, this.timer).crop(width, height, x, y);
   }
 
-  public rotate(degrees: number): SharpImageTransformer {
-    return new SharpImageTransformer(this.buffer, this.timer).rotate(degrees);
+  public rotate(degrees: number): JimpImageTransformer {
+    return new JimpImageTransformer(this.buffer, this.timer).rotate(degrees);
   }
 
-  public flip(direction: "horizontal" | "vertical" | "both"): SharpImageTransformer {
-    return new SharpImageTransformer(this.buffer, this.timer).flip(direction);
+  public flip(direction: "horizontal" | "vertical" | "both"): JimpImageTransformer {
+    return new JimpImageTransformer(this.buffer, this.timer).flip(direction);
   }
 
-  public blur(radius: number): SharpImageTransformer {
-    return new SharpImageTransformer(this.buffer, this.timer).blur(radius);
+  public blur(radius: number): JimpImageTransformer {
+    return new JimpImageTransformer(this.buffer, this.timer).blur(radius);
   }
 
-  public jpeg(options?: { quality: number }): SharpImageTransformer {
-    return new SharpImageTransformer(this.buffer, this.timer).jpeg(options);
+  public jpeg(options?: { quality: number }): JimpImageTransformer {
+    return new JimpImageTransformer(this.buffer, this.timer).jpeg(options);
   }
 
-  public png(): SharpImageTransformer {
-    return new SharpImageTransformer(this.buffer, this.timer).png();
+  public png(): JimpImageTransformer {
+    return new JimpImageTransformer(this.buffer, this.timer).png();
   }
 
   /**
    * Convert the image to WebP format
    */
-  public webp(options?: { quality?: number; lossless?: boolean; nearLossless?: boolean }): SharpImageTransformer {
-    return new SharpImageTransformer(this.buffer, this.timer).webp(options);
+  public webp(options?: { quality?: number; lossless?: boolean; nearLossless?: boolean }): JimpImageTransformer {
+    return new JimpImageTransformer(this.buffer, this.timer).webp(options);
   }
 
-  public transform(): SharpImageTransformer {
-    return new SharpImageTransformer(this.buffer, this.timer);
+  public transform(): JimpImageTransformer {
+    return new JimpImageTransformer(this.buffer, this.timer);
   }
 
   /**
@@ -302,17 +302,14 @@ export class Image {
    */
   public async getMetadata(): Promise<ImageMetadata> {
     try {
-      const sharp = await loadSharp();
-      const { width, height, format, space, hasAlpha, exif } = await sharp(this.buffer).metadata();
+      const Jimp = await loadJimp();
+      const image = await Jimp.fromBuffer(this.buffer);
 
       return {
-        width: width || 0,
-        height: height || 0,
-        format: format || "",
-        size: this.buffer.length,
-        colorSpace: space,
-        hasAlpha: hasAlpha || false,
-        exif: exif ? {} : undefined
+        width: image.bitmap.width,
+        height: image.bitmap.height,
+        format: image.mime ? image.mime.replace("image/", "") : "",
+        size: this.buffer.length
       };
     } catch (e: unknown) {
       const errorMessage = e instanceof Error ? e.message : String(e);
@@ -322,16 +319,12 @@ export class Image {
 
   /**
    * Extract EXIF metadata if available
+   *
+   * Note: the previous sharp-based implementation also always returned an
+   * empty object; jimp does not parse EXIF, so this stays a stub.
    */
   public async getExifMetadata(): Promise<Record<string, any>> {
-    try {
-      const sharp = await loadSharp();
-      const { exif } = await sharp(this.buffer).metadata();
-      return exif ? {} : {};
-    } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      throw new Error(`Failed to get EXIF metadata: ${errorMessage}`);
-    }
+    return {};
   }
 
   // Enhanced utility methods

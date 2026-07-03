@@ -2,7 +2,7 @@ import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import sharp from "sharp";
+import { Jimp, rgbaToInt } from "jimp";
 import { ScreenshotCache } from "../../src/utils/screenshot/ScreenshotCache";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -59,12 +59,6 @@ describe("ScreenshotCache", function() {
 });
 
 async function createTestImage(color: { r: number; g: number; b: number }): Promise<Buffer> {
-  return sharp({
-    create: {
-      width: 10,
-      height: 10,
-      channels: 3,
-      background: color
-    }
-  }).png().toBuffer();
+  const image = new Jimp({ width: 10, height: 10, color: rgbaToInt(color.r, color.g, color.b, 255) });
+  return image.getBuffer("image/png");
 }

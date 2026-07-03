@@ -1,9 +1,7 @@
 /**
  * Interface for image utilities
- * Provides image manipulation, transformation, and metadata extraction capabilities
- *
- * @deprecated This interface has been moved to ../image-utils.ts
- * Import from there instead for better co-location with implementation
+ * Provides image manipulation, transformation, and metadata extraction capabilities.
+ * Implemented by JimpImageUtils in ../image-utils.ts.
  */
 export interface ImageUtils {
   /**

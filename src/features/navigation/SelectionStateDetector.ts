@@ -2,7 +2,7 @@ import { Element, ElementBounds, ObserveResult, ScreenSize } from "../../models"
 import { SelectedElement, SelectedElementDetection } from "../../utils/interfaces/NavigationGraph";
 import { ScreenshotUtils, screenshotUtilsAdapter } from "../../utils/ScreenshotUtilsAdapter";
 import { ImageUtils } from "../../utils/interfaces/ImageUtils";
-import { SharpImageUtils } from "../../utils/image-utils";
+import { JimpImageUtils } from "../../utils/image-utils";
 import { logger } from "../../utils/logger";
 import { UIStateExtractor } from "./UIStateExtractor";
 
@@ -45,7 +45,7 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
 
   constructor(options: SelectionStateDetectorOptions = {}) {
     this.screenshotUtils = options.screenshotUtils ?? screenshotUtilsAdapter;
-    this.imageUtils = options.imageUtils ?? new SharpImageUtils();
+    this.imageUtils = options.imageUtils ?? new JimpImageUtils();
     this.config = {
       ...DEFAULT_VISUAL_SELECTION_CONFIG,
       ...options.config

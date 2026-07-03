@@ -989,8 +989,8 @@ jobs:
       - name: "Run Bun MCP startup smoke"
         run: bun run test:startup:bun
 
-      - name: "Run Bun sharp runtime smoke"
-        run: bun run test:sharp:bun
+      - name: "Run Bun image runtime smoke"
+        run: bun run test:image:bun
 
       - name: "Run Tests with Coverage"
         run: bash scripts/ci/run-ts-coverage.sh

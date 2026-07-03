@@ -1,12 +1,12 @@
 import { expect, describe, test, beforeEach } from "bun:test";
-import { SharpImageUtils } from "../../src/utils/image-utils";
+import { JimpImageUtils } from "../../src/utils/image-utils";
 import { FakeImageUtils } from "../fakes/FakeImageUtils";
 
 describe("ImageUtils", () => {
-  let imageUtils: SharpImageUtils;
+  let imageUtils: JimpImageUtils;
 
   beforeEach(() => {
-    imageUtils = new SharpImageUtils();
+    imageUtils = new JimpImageUtils();
   });
 
   describe("getOriginalBuffer", () => {

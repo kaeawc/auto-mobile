@@ -8,6 +8,7 @@ import { NavigationEdge, UIState } from "./NavigationGraphManager";
 import { ModalState, ScrollPosition } from "../../utils/interfaces/NavigationGraph";
 import { UIStateExtractor } from "./UIStateExtractor";
 import { RealObserveScreen } from "../observe/ObserveScreen";
+import { getStructuredField } from "../../utils/toolUtils";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
 import { defaultTimer } from "../../utils/SystemTimer";
 
@@ -165,7 +166,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // undefined, so this success branch was dead and setup always logged the
       // "could not find" warning even on a successful scroll (issue #2897; same class
       // as the toolRegistry scroll-position and #2758 lastHierarchy fixes).
-      if (result?.structuredContent?.success && result?.structuredContent?.found) {
+      if (getStructuredField<boolean>(result, "success") && getStructuredField<boolean>(result, "found")) {
         logger.info(`[UI_STATE_SETUP] Successfully scrolled to target element`);
         return `swipeOn(lookFor: ${JSON.stringify(scrollPosition.targetElement)})`;
       } else {

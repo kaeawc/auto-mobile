@@ -1,7 +1,7 @@
 import type { ObserveResult } from "../models/ObserveResult";
 import { sanitizeObserveResult, type SanitizeObserveConfig } from "../features/observe/output/ObserveResultOutput";
 import { serverConfig } from "../utils/ServerConfig";
-import { stringifyToolResponse } from "../utils/toolUtils";
+import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
 
 /**
  * Context needed to finalize a tool response at the serialization chokepoint.
@@ -39,10 +39,8 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
 
   // Prefer structuredContent; fall back to the serialized text part when a tool
   // returned text only. Anything else (image parts, non-JSON text) is left alone.
-  const hasStructured =
-    envelope.structuredContent !== undefined &&
-    envelope.structuredContent !== null &&
-    typeof envelope.structuredContent === "object";
+  const structuredPayload = getStructuredPayload<Record<string, unknown>>(envelope);
+  const hasStructured = structuredPayload !== undefined;
 
   const textPart =
     Array.isArray(envelope.content) &&
@@ -52,8 +50,8 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       : undefined;
 
   let payload: Record<string, unknown> | undefined;
-  if (hasStructured) {
-    payload = envelope.structuredContent as Record<string, unknown>;
+  if (structuredPayload) {
+    payload = structuredPayload;
   } else if (textPart) {
     try {
       const parsed = JSON.parse(textPart.text as string);

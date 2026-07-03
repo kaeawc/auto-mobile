@@ -25,6 +25,7 @@ import { getMcpRecorder } from "./mcpRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { finalizeToolResponse } from "./finalizeToolResponse";
+import { getStructuredField } from "../utils/toolUtils";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -419,7 +420,7 @@ class ToolRegistryClass {
           // `success`/`error` to the envelope top level. The former `response?.found`
           // read was always undefined, so this block was dead and scroll-position
           // tracking never fired (issue #2897; same class as the #2758 lastHierarchy fix).
-          if (name === "swipeOn" && args.lookFor && response?.structuredContent?.success && response?.structuredContent?.found) {
+          if (name === "swipeOn" && args.lookFor && getStructuredField<boolean>(response, "success") && getStructuredField<boolean>(response, "found")) {
             const scrollPosition = UIStateExtractor.createScrollPosition(args);
             if (scrollPosition) {
               const scrollNavManager = sessionUuid
@@ -445,11 +446,13 @@ class ToolRegistryClass {
             // `lastHierarchy` never populated — the #2761 diff baseline needs it).
             // Runs before finalizeToolResponse, so the cache keeps the full,
             // untrimmed hierarchy while the wire copy is sanitized.
-            if (name === "observe" && response?.structuredContent?.viewHierarchy) {
-              await updateSessionCache(context, "lastHierarchy", response.structuredContent.viewHierarchy);
+            const observeHierarchy = name === "observe" ? getStructuredField(response, "viewHierarchy") : undefined;
+            if (observeHierarchy) {
+              await updateSessionCache(context, "lastHierarchy", observeHierarchy);
             }
-            if (name === "observe" && response?.structuredContent?.screenshot) {
-              await updateSessionCache(context, "lastScreenshot", response.structuredContent.screenshot);
+            const observeScreenshot = name === "observe" ? getStructuredField(response, "screenshot") : undefined;
+            if (observeScreenshot) {
+              await updateSessionCache(context, "lastScreenshot", observeScreenshot);
             }
 
             // Update last action timestamp for interaction tools

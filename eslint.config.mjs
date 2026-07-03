@@ -168,6 +168,15 @@ export const baseRules = {
 			selector: "CallExpression[callee.name='setInterval']",
 			message: "Use Timer.setInterval() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
 		},
+		{
+			// Reading a payload field off an MCP envelope's `structuredContent`
+			// (e.g. `response.structuredContent.found`) is the #2907 dead-read
+			// foot-gun: only `success`/`error` are hoisted, and a field name that
+			// isn't there is a silent `undefined`. Route reads through the typed
+			// seam so the intent is explicit and the miss surfaces.
+			selector: "MemberExpression[object.property.name='structuredContent']",
+			message: "Do not read a field off `structuredContent` directly. Use getStructuredField(response, key) for one field or getStructuredPayload(response) for the whole payload. Import from 'utils/toolUtils' (issue #2907).",
+		},
 	],
 
 	// file whitespace

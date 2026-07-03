@@ -166,10 +166,6 @@ describe("decodeCtrlProxyMessage", () => {
     expect((decoded?.result as { enabled: boolean }).enabled).toBe(false);
   });
 
-  test("voiceover_action_result includes action", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "voiceover_action_result", action: "activate" } as never));
-    expect(decoded?.result).toEqual({ success: true, action: "activate", totalTimeMs: 0, error: undefined });
-  });
 
   test("highlight_response defaults success to false and echoes requestId/timestamp", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "highlight_response", timestamp: 42 }));

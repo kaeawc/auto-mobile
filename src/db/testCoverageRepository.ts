@@ -70,18 +70,32 @@ export class TestCoverageRepository {
    */
   async getOrCreateSession(sessionUuid: string, appId: string): Promise<TestCoverageSession> {
     const db = this.getDb();
+    const now = this.timer.now();
 
-    const existing = await db
-      .selectFrom("test_coverage_sessions")
-      .selectAll()
-      .where("session_uuid", "=", sessionUuid)
-      .executeTakeFirst();
+    // Atomic get-or-create on the session_uuid UNIQUE constraint. A SELECT-then-INSERT
+    // would let two concurrent callers for the same uuid both read "not found" and race,
+    // with the loser throwing a UNIQUE collision (R2356). The conflict path is a no-op
+    // touch (session_uuid set to its own value) so an existing session is returned
+    // unchanged, while DO UPDATE keeps RETURNING returning the row.
+    const newSession: NewTestCoverageSession = {
+      session_uuid: sessionUuid,
+      app_id: appId,
+      start_time: now,
+      end_time: null,
+      total_nodes_visited: 0,
+      total_edges_traversed: 0,
+    };
 
-    if (existing) {
-      return existing;
-    }
-
-    return this.startSession(sessionUuid, appId);
+    return db
+      .insertInto("test_coverage_sessions")
+      .values(newSession)
+      .onConflict(oc =>
+        oc.column("session_uuid").doUpdateSet(eb => ({
+          session_uuid: eb.ref("test_coverage_sessions.session_uuid"),
+        }))
+      )
+      .returningAll()
+      .executeTakeFirstOrThrow();
   }
 
   /**

@@ -250,6 +250,21 @@ describe("TestCoverageRepository", () => {
   });
 
   describe("concurrency (R2356)", () => {
+    test("N concurrent getOrCreateSession yield one row and return the same session id, never reject", async () => {
+      await insertApp("com.example.app");
+
+      const N = 10;
+      const results = await Promise.all(
+        Array.from({ length: N }, () => repo.getOrCreateSession("uuid-1", "com.example.app"))
+      );
+
+      const sessions = await repo.getSessionsForApp("com.example.app");
+      expect(sessions).toHaveLength(1);
+      const ids = new Set(results.map(r => r.id));
+      expect(ids.size).toBe(1);
+      expect(results.every(r => r.id === sessions[0].id)).toBe(true);
+    });
+
     test("N concurrent recordNodeVisit yield one row with visit_count === N and never reject", async () => {
       await insertApp("com.example.app");
       const nodeId = await insertNode("com.example.app", "HomeScreen");

@@ -21,8 +21,10 @@ import { type Kysely, sql } from "kysely";
  *      `created_at`) stop re-poisoning it. SQLite cannot alter a column default
  *      in place, and bun:sqlite forbids editing `sqlite_master` directly, so we
  *      use the standard table-rebuild: create a twin table with the corrected
- *      default, copy the rows, drop the original, rename the twin back, and
- *      recreate its indexes/triggers. FK enforcement is toggled OFF around the
+ *      default, copy the rows, drop the original, rename the twin back, recreate
+ *      its indexes/triggers, and restore its `sqlite_sequence` AUTOINCREMENT
+ *      high-water mark (so a rebuilt table cannot reuse a deleted top id). FK
+ *      enforcement is toggled OFF around the
  *      rebuild (see `up`) so dropping a referenced parent cannot cascade-delete
  *      its children, then `PRAGMA foreign_key_check` verifies integrity before it
  *      is restored.
@@ -196,6 +198,13 @@ async function rebuildTableWithCorrectedDefaults(
     WHERE tbl_name = ${table} AND type IN ('index', 'trigger') AND sql IS NOT NULL
   `.execute(trx);
 
+  // Capture the AUTOINCREMENT high-water mark. `sqlite_sequence` records the
+  // highest rowid EVER used so AUTOINCREMENT never reuses a deleted id; the
+  // copy/drop/rename below would otherwise reset it to `max(current id)` and let a
+  // deleted top id be handed out again — aliasing ids that other tables reference
+  // as plain integers. Restored after the rename.
+  const originalSequence = await captureSequence(trx, table);
+
   await sql.raw(correctedSql).execute(trx);
   await sql`INSERT INTO ${sql.ref(tempTable)} SELECT * FROM ${sql.ref(table)}`.execute(trx);
   await sql`DROP TABLE ${sql.ref(table)}`.execute(trx);
@@ -205,6 +214,34 @@ async function rebuildTableWithCorrectedDefaults(
       await sql.raw(auxSql).execute(trx);
     }
   }
+
+  if (originalSequence !== undefined) {
+    await sql`DELETE FROM sqlite_sequence WHERE name = ${table}`.execute(trx);
+    await sql`INSERT INTO sqlite_sequence (name, seq) VALUES (${table}, ${originalSequence})`.execute(
+      trx
+    );
+  }
+}
+
+/**
+ * Read a table's `sqlite_sequence` high-water mark, or `undefined` when the table
+ * is not AUTOINCREMENT / has never been inserted into (no sequence row) or the
+ * `sqlite_sequence` table does not exist (no AUTOINCREMENT table in the DB).
+ */
+async function captureSequence(
+  trx: Kysely<unknown>,
+  table: string
+): Promise<number | undefined> {
+  const hasSequenceTable = await sql<NamedRow>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'
+  `.execute(trx);
+  if (hasSequenceTable.rows.length === 0) {
+    return undefined;
+  }
+  const seqRow = await sql<{ seq: number }>`
+    SELECT seq FROM sqlite_sequence WHERE name = ${table}
+  `.execute(trx);
+  return seqRow.rows[0]?.seq;
 }
 
 /**

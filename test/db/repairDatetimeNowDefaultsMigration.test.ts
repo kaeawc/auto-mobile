@@ -127,6 +127,25 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
       expect(Number.isNaN(Date.parse(row.created_at))).toBe(false);
     });
 
+    test("preserves the AUTOINCREMENT high-water mark so deleted ids are not reused", async () => {
+      bunDb.exec(
+        `CREATE TABLE "recomp" (` +
+          `"id" integer primary key autoincrement, ` +
+          `"created_at" text default 'datetime(''now'')' not null)`
+      );
+      bunDb.query(`INSERT INTO recomp (created_at) VALUES ('a')`).run(); // id 1
+      bunDb.query(`INSERT INTO recomp (created_at) VALUES ('b')`).run(); // id 2
+      bunDb.query(`DELETE FROM recomp WHERE id = 2`).run();
+
+      await repairUp(db);
+
+      // Without sqlite_sequence preservation the rebuild would reset the counter
+      // to max(current id)=1 and hand out 2 again; the next id must be 3.
+      bunDb.query(`INSERT INTO recomp (created_at) VALUES ('c')`).run();
+      const next = bunDb.query(`SELECT MAX(id) AS id FROM recomp`).get() as { id: number };
+      expect(next.id).toBe(3);
+    });
+
     test("preserves child rows and foreign keys across the rebuild", async () => {
       bunDb.exec(`PRAGMA foreign_keys = ON`);
       bunDb.exec(

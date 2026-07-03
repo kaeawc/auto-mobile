@@ -9,7 +9,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { KEEP_SCREEN_AWAKE_STATE_KEY } from "../../src/utils/KeepScreenAwakeManager";
-import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 
@@ -47,6 +47,34 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     } as ObserveResult;
   }
 
+  /**
+   * Stand up a daemon-backed session locked to `androidA` and pre-seed keep-awake
+   * state so `createToolExecutionContext` performs no real device I/O. Returns the
+   * resolved autolock sessionId whose cache the tool call will populate.
+   */
+  async function setupAutolockedSession(): Promise<string> {
+    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [androidA]);
+    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    await pool.initializeWithDevices([androidA]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    const sessionId = (await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1"))!;
+
+    const session = daemonSessionManager.getSession(sessionId)!;
+    daemonSessionManager.updateSessionCache(sessionId, {
+      ...session.cacheData,
+      customData: {
+        ...(session.cacheData.customData ?? {}),
+        [KEEP_SCREEN_AWAKE_STATE_KEY]: { applied: false, skipReason: "test" },
+      },
+    });
+    return sessionId;
+  }
+
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
@@ -67,37 +95,21 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
   });
 
-  test("populates lastHierarchy from structuredContent and sanitizes the returned response", async () => {
-    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+  const toolSchema = z.object({
+    platform: z.enum(["ios", "android"]).optional(),
+    deviceId: z.string().optional(),
+    sessionUuid: z.string().optional(),
+  });
 
-    const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
-    const fakeDeviceUtils = new FakeDeviceUtils();
-    fakeDeviceUtils.setBootedDevices("android", [androidA]);
-    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
-    await pool.initializeWithDevices([androidA]);
-    DaemonState.getInstance().initialize(daemonSessionManager, pool);
-    const sessionId = await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1");
-
-    // Pre-seed keep-awake state so createToolExecutionContext skips real device I/O.
-    const session = daemonSessionManager.getSession(sessionId)!;
-    daemonSessionManager.updateSessionCache(sessionId, {
-      ...session.cacheData,
-      customData: {
-        ...(session.cacheData.customData ?? {}),
-        [KEEP_SCREEN_AWAKE_STATE_KEY]: { applied: false, skipReason: "test" },
-      },
-    });
+  test("populates lastHierarchy + lastScreenshot from structuredContent and sanitizes the returned response", async () => {
+    const sessionId = await setupAutolockedSession();
 
     const observeResult = makeObserveResult();
+    (observeResult as any).screenshot = "base64-screenshot-data";
     ToolRegistry.registerDeviceAware(
       "observe",
       "observe",
-      z.object({
-        platform: z.enum(["ios", "android"]).optional(),
-        deviceId: z.string().optional(),
-        sessionUuid: z.string().optional(),
-      }),
+      toolSchema,
       async () => createStructuredToolResponse(observeResult)
     );
     const tool = ToolRegistry.getTool("observe")!;
@@ -107,16 +119,51 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
       __mcpSessionId: "mcp-session-1",
     });
 
-    // Cache is populated (was dormant before the fix) with the FULL hierarchy.
-    const cached = daemonSessionManager.getSession(sessionId)!.cacheData.customData?.lastHierarchy as any;
-    expect(cached).toBeDefined();
-    expect(cached.hierarchy.node["view-id"]).toBe("com.example:id/root");
-    expect(cached.hierarchy.node.clickable).toBe("false");
+    // Caches are populated (were dormant before the fix) with the FULL hierarchy.
+    const cache = daemonSessionManager!.getSession(sessionId)!.cacheData.customData!;
+    const cachedHierarchy = cache.lastHierarchy as any;
+    expect(cachedHierarchy).toBeDefined();
+    expect(cachedHierarchy.hierarchy.node["view-id"]).toBe("com.example:id/root");
+    expect(cachedHierarchy.hierarchy.node.clickable).toBe("false");
+    // Screenshot cache repair (symmetric structuredContent read).
+    expect(cache.lastScreenshot).toBe("base64-screenshot-data");
 
     // Returned wire response is sanitized at the chokepoint.
     const returnedRoot = (response.structuredContent as ObserveResult).viewHierarchy!.hierarchy.node as any;
     expect(returnedRoot["view-id"]).toBeUndefined();
     expect(returnedRoot.clickable).toBeUndefined();
     expect(returnedRoot["content-desc"]).toBe("root");
+  });
+
+  test("sanitizes a tapOn action response's .observation end-to-end through the chokepoint", async () => {
+    await setupAutolockedSession();
+
+    const observation = makeObserveResult();
+    ToolRegistry.registerDeviceAware(
+      "tapOn",
+      "tapOn",
+      toolSchema,
+      async () => createStructuredToolResponse({
+        success: true,
+        message: "Tapped on element",
+        observation,
+      })
+    );
+    const tool = ToolRegistry.getTool("tapOn")!;
+
+    const response = await tool.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+    });
+
+    // Action's nested observation is sanitized in BOTH representations.
+    const scRoot = (response.structuredContent as any).observation.viewHierarchy.hierarchy.node;
+    expect(scRoot["view-id"]).toBeUndefined();
+    expect(scRoot.clickable).toBeUndefined();
+    expect((response.structuredContent as any).success).toBe(true);
+
+    const parsed = JSON.parse(response.content[0].text);
+    expect(parsed.observation.viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
+    expect(response.content[0].text).toBe(stringifyToolResponse(response.structuredContent));
   });
 });

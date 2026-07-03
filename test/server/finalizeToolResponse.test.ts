@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { GFXINFO_DUMP_MARKER } from "../../src/features/observe/output/ObserveResultOutput";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 
 /**
@@ -153,6 +154,57 @@ describe("finalizeToolResponse", () => {
     const response = createStructuredToolResponse(payload);
     const finalized = finalizeToolResponse(response, { name: "observe" });
     expect(finalized.structuredContent).toEqual(payload);
+  });
+
+  test("strips the performance-audit raw dumps and truncates diagnostics at the GFXINFO marker", () => {
+    const obs = makeObserveResult();
+    (obs as any).performanceAudit = {
+      metrics: { gfxinfoRaw: "HUGE RAW DUMP", cpuStatsRaw: "CPU RAW", p99: 16 },
+      diagnostics: `summary line\n${GFXINFO_DUMP_MARKER}\nmegabytes of raw frame data`,
+    };
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
+
+    const audit = (finalized.structuredContent as any).performanceAudit;
+    expect(audit.metrics.gfxinfoRaw).toBeNull();
+    expect(audit.metrics.cpuStatsRaw).toBeNull();
+    expect(audit.metrics.p99).toBe(16); // computed metric preserved
+    expect(audit.diagnostics).toBe("summary line");
+    // Original in-memory audit is untouched (output-only).
+    expect((obs as any).performanceAudit.metrics.gfxinfoRaw).toBe("HUGE RAW DUMP");
+  });
+
+  test("preserves the observe-only awaitedElement extras spread into the payload", () => {
+    const obs = makeObserveResult();
+    const withExtras = { ...obs, awaitedElement: { text: "Found" }, awaitDuration: 250, awaitTimeout: false };
+    const finalized = finalizeToolResponse(createStructuredToolResponse(withExtras), { name: "observe" });
+
+    const sc = finalized.structuredContent as any;
+    expect(sc.awaitedElement).toEqual({ text: "Found" });
+    expect(sc.awaitDuration).toBe(250);
+    // Hierarchy still trimmed alongside the preserved extras.
+    expect(sc.viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
+  });
+
+  test("drops elements on an action's nested .observation when the gate is enabled", () => {
+    serverConfig.setObserveResultDropElementsEnabled(true);
+    const response = createStructuredToolResponse({ success: true, observation: makeObserveResult() });
+    const finalized = finalizeToolResponse(response, { name: "tapOn" });
+    expect((finalized.structuredContent as any).observation.elements).toBeUndefined();
+    expect(JSON.parse(finalized.content[0].text).observation.elements).toBeUndefined();
+  });
+
+  test("trims an array-shaped root node (both roots)", () => {
+    const obs = makeObserveResult();
+    obs.viewHierarchy!.hierarchy.node = [
+      { "resource-id": "a", "view-id": "a", "clickable": "false" } as any,
+      { "resource-id": "b", "view-id": "b", "focusable": "false" } as any,
+    ] as any;
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
+    const roots = (finalized.structuredContent as any).viewHierarchy.hierarchy.node;
+    expect(roots[0]["view-id"]).toBeUndefined();
+    expect(roots[0].clickable).toBeUndefined();
+    expect(roots[1]["view-id"]).toBeUndefined();
+    expect(roots[1].focusable).toBeUndefined();
   });
 
   test("falls back to content text when structuredContent is absent", () => {

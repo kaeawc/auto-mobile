@@ -14,6 +14,7 @@ import {
   extractMissingPackageName,
   isMissingMigrationDependencyError,
 } from "./migrationDependencyIntegrity";
+import { resetDbWriteBarrier } from "./dbWriteBarrier";
 
 type BunDatabaseConstructor = typeof import("bun:sqlite").Database;
 type BunDatabase = import("bun:sqlite").Database;
@@ -302,6 +303,17 @@ export async function closeDatabase(): Promise<void> {
   migrationsPromise = null;
   migrationsError = null;
   resolvedDbPath = null;
+
+  // Cold-start the write barrier too (issue #2896, follow-up to #2796). Its
+  // draining flag latches for the process lifetime, so shutdown's
+  // `getDbWriteBarrier().drain(...)` before this close (issue #2792 ordering)
+  // would otherwise leave the shared barrier permanently draining. Any future
+  // in-process reopen (config reload / DB path switch / restart-without-exit)
+  // would then silently skip every tracked best-effort write against the
+  // reopened DB. Resetting here makes the "reopen behaves like a cold start"
+  // contract fully true instead of carrying a barrier-shaped exception. Inert
+  // in the daemon, where the only caller is shutdown-then-`process.exit`.
+  resetDbWriteBarrier();
 }
 
 /**

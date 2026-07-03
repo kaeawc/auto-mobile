@@ -236,6 +236,75 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         XCTAssertEqual(history.first?.rotationDegrees, 15)
     }
 
+    // MARK: - Fractional coordinates (issue #2909)
+
+    /// The iOS TS wire path sets `roundCoordinates: false`, so a direct/future
+    /// caller can send sub-pixel coordinates. The runner must decode fractional
+    /// gesture coordinates instead of throwing an opaque `Int` decode error, and
+    /// must preserve the fraction end-to-end (not truncate it).
+    func testTapCoordinatesDecodeAcceptsFractionalCoordinates() {
+        let response = dispatch(
+            #"{"type":"request_tap_coordinates","requestId":"tap-frac","x":100.5,"y":200.25,"duration":50}"#,
+            as: WebSocketResponse.self
+        )
+        XCTAssertEqual(response?.type, "tap_coordinates_result")
+        let history = fakeGesturePerformer.getTapHistory()
+        XCTAssertEqual(history.first?.x ?? .nan, 100.5, accuracy: 0.0001)
+        XCTAssertEqual(history.first?.y ?? .nan, 200.25, accuracy: 0.0001)
+    }
+
+    func testSwipeDecodeAcceptsFractionalCoordinates() {
+        let response = dispatch(
+            #"{"type":"request_swipe","requestId":"sw-frac","x1":10.5,"y1":20.5,"x2":30.25,"y2":40.75,"duration":250}"#,
+            as: WebSocketResponse.self
+        )
+        XCTAssertEqual(response?.type, "swipe_result")
+        let history = fakeGesturePerformer.getSwipeHistory()
+        XCTAssertEqual(history.first?.startX ?? .nan, 10.5, accuracy: 0.0001)
+        XCTAssertEqual(history.first?.endY ?? .nan, 40.75, accuracy: 0.0001)
+    }
+
+    func testMultiFingerSwipeDecodeAcceptsFractionalCoordinates() {
+        let response = dispatch(
+            #"""
+            {"type":"request_multi_finger_swipe","requestId":"mfs-frac","x1":10.5,"y1":20.5,"x2":30.25,"y2":40.75,"fingerCount":3,"offset":31.5}
+            """#,
+            as: WebSocketResponse.self
+        )
+        XCTAssertEqual(response?.type, "multi_finger_swipe_result")
+        let history = fakeGesturePerformer.getMultiFingerSwipeHistory()
+        XCTAssertEqual(history.first?.startX ?? .nan, 10.5, accuracy: 0.0001)
+        XCTAssertEqual(history.first?.endY ?? .nan, 40.75, accuracy: 0.0001)
+    }
+
+    func testDragDecodeAcceptsFractionalCoordinates() {
+        let response = dispatch(
+            #"""
+            {"type":"request_drag","requestId":"drag-frac","x1":10.5,"y1":20.5,"x2":30.25,"y2":40.75,"dragDurationMs":250}
+            """#,
+            as: WebSocketResponse.self
+        )
+        XCTAssertEqual(response?.type, "drag_result")
+        let history = fakeGesturePerformer.getDragHistory()
+        XCTAssertEqual(history.first?.startX ?? .nan, 10.5, accuracy: 0.0001)
+        XCTAssertEqual(history.first?.endY ?? .nan, 40.75, accuracy: 0.0001)
+    }
+
+    func testPinchDecodeAcceptsFractionalCoordinates() {
+        let response = dispatch(
+            #"""
+            {"type":"request_pinch","requestId":"pinch-frac","centerX":100.5,"centerY":200.25,"distanceStart":40.5,"distanceEnd":120.75,"rotationDegrees":15,"duration":700}
+            """#,
+            as: WebSocketResponse.self
+        )
+        XCTAssertEqual(response?.type, "pinch_result")
+        let history = fakeGesturePerformer.getPinchHistory()
+        XCTAssertEqual(history.first?.centerX ?? .nan, 100.5, accuracy: 0.0001)
+        XCTAssertEqual(history.first?.centerY ?? .nan, 200.25, accuracy: 0.0001)
+        XCTAssertEqual(history.first?.distanceStart ?? .nan, 40.5, accuracy: 0.0001)
+        XCTAssertEqual(history.first?.distanceEnd ?? .nan, 120.75, accuracy: 0.0001)
+    }
+
     // MARK: - Text input
 
     func testSetTextDecodeDispatchTypesText() {

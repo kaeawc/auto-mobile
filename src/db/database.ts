@@ -75,7 +75,62 @@ export function resolveDatabasePathFromEnvironment(
   return path.join(dbDir, "auto-mobile.db");
 }
 
-let resolvedDbPath: string | null = null;
+/**
+ * The migration/path lifecycle state that outlives a single DB connection.
+ *
+ * These fields were four bare module globals (`resolvedDbPath` plus the
+ * `migrationsRun` / `migrationsPromise` / `migrationsError` state machine) that
+ * `closeDatabase()` had to remember to reset one-by-one so a same-process reopen
+ * behaves like a cold start (issue #2796). Collapsing them into one holder with a
+ * single {@link reset} makes "reset them as a set" true *by construction*: a
+ * fifth lifecycle field is cleared by the same `reset()`, closing the "forgot to
+ * reset the Nth global" regression class (issue #2900).
+ *
+ * The three migration fields are one state machine and are documented together
+ * where they are read/written; `resolvedDbPath` is the lazily-cached path (see
+ * {@link resolveDbPath}). All are reset together — never individually — so the
+ * invariants they encode ("reopen == cold start", "no stale error against a
+ * healthy reopen", "re-read the DB path env") hold as a set.
+ */
+class MigrationLifecycleState {
+  /**
+   * Resolved database file path, cached on first use (see {@link resolveDbPath}).
+   * Cleared on reset so a reopen re-reads AUTOMOBILE_DB_PATH / AUTOMOBILE_DB_DIR.
+   */
+  resolvedDbPath: string | null = null;
+
+  /** True once startup migrations have completed successfully. */
+  migrationsRun = false;
+
+  /**
+   * In-flight/settled startup-migration run. RESOLVES even on failure (never
+   * floats a rejection — that would trip `unhandledRejection` before the
+   * daemon's fatal path runs); the failure is cached in {@link migrationsError}
+   * so every awaiter can re-check and rethrow it. The failure is sticky: this is
+   * never nulled to auto-retry (see issues #2784/#2786/#2796).
+   */
+  migrationsPromise: Promise<void> | null = null;
+
+  /**
+   * Cached startup-migration failure so awaiters (queries via
+   * `waitForMigrationsBeforeQuery`, startup via `ensureMigrations`) can re-check
+   * and rethrow it without depending on the resolved promise rejecting.
+   */
+  migrationsError: Error | null = null;
+
+  /**
+   * Clear the whole lifecycle as a set so a same-process reopen cold-starts.
+   * Adding a field above is reset-by-construction: extend this method with it.
+   */
+  reset(): void {
+    this.resolvedDbPath = null;
+    this.migrationsRun = false;
+    this.migrationsPromise = null;
+    this.migrationsError = null;
+  }
+}
+
+const lifecycle = new MigrationLifecycleState();
 
 /**
  * Resolve the database file path lazily, on first use rather than at module load.
@@ -91,22 +146,13 @@ let resolvedDbPath: string | null = null;
  * is cached so getDatabasePath() always matches the path the database was opened at.
  */
 function resolveDbPath(): string {
-  if (resolvedDbPath === null) {
-    resolvedDbPath = resolveDatabasePathFromEnvironment();
+  if (lifecycle.resolvedDbPath === null) {
+    lifecycle.resolvedDbPath = resolveDatabasePathFromEnvironment();
   }
-  return resolvedDbPath;
+  return lifecycle.resolvedDbPath;
 }
 
 let dbInstance: Kysely<DatabaseSchema> | null = null;
-let migrationsRun = false;
-let migrationsPromise: Promise<void> | null = null;
-// Cached startup-migration failure. When migrations fail, `migrationsPromise`
-// RESOLVES (never floats a rejection — that would trip `unhandledRejection`
-// before the daemon's fatal path runs) and the error is cached here so every
-// awaiter (queries via `waitForMigrationsBeforeQuery`, startup via
-// `ensureMigrations`) can re-check and rethrow it. The failure is sticky: we
-// never null `migrationsPromise` to auto-retry (see issues #2784/#2786/#2796).
-let migrationsError: Error | null = null;
 
 export const DATABASE_STARTUP_MIGRATION_FAILURE =
   "Database startup migrations failed; refusing to run queries until the daemon restarts.";
@@ -127,16 +173,16 @@ function createStartupMigrationError(cause: unknown): Error {
 }
 
 async function waitForMigrationsBeforeQuery(): Promise<void> {
-  if (migrationsRun) {
+  if (lifecycle.migrationsRun) {
     return;
   }
 
-  if (migrationsPromise) {
-    await migrationsPromise;
+  if (lifecycle.migrationsPromise) {
+    await lifecycle.migrationsPromise;
   }
 
-  if (migrationsError) {
-    throw migrationsError;
+  if (lifecycle.migrationsError) {
+    throw lifecycle.migrationsError;
   }
 }
 
@@ -192,7 +238,7 @@ async function startMigrations(dbPath: string): Promise<void> {
       lock: createFileMigrationLock(dbPath),
       backup: () => backupDatabaseFile(migrationDb, dbPath),
     });
-    migrationsRun = true;
+    lifecycle.migrationsRun = true;
   } catch (error) {
     logger.error("Failed to run migrations on database initialization:", error);
     throw error;
@@ -202,15 +248,15 @@ async function startMigrations(dbPath: string): Promise<void> {
 }
 
 function ensureMigrationsStarted(dbPath: string): void {
-  if (!migrationsRun && !migrationsPromise) {
+  if (!lifecycle.migrationsRun && !lifecycle.migrationsPromise) {
     // Resolve (never reject) so a failed migration does not float an unhandled
     // rejection; cache the error for synchronous re-checking by awaiters.
-    migrationsPromise = startMigrations(dbPath).then(
+    lifecycle.migrationsPromise = startMigrations(dbPath).then(
       () => {
-        migrationsError = null;
+        lifecycle.migrationsError = null;
       },
       error => {
-        migrationsError = createStartupMigrationError(error);
+        lifecycle.migrationsError = createStartupMigrationError(error);
       }
     );
   }
@@ -245,7 +291,7 @@ export function getDatabase(): Kysely<DatabaseSchema> {
 }
 
 export async function ensureMigrations(): Promise<void> {
-  if (migrationsRun) {
+  if (lifecycle.migrationsRun) {
     return;
   }
 
@@ -255,13 +301,13 @@ export async function ensureMigrations(): Promise<void> {
 
   ensureMigrationsStarted(resolveDbPath());
 
-  await migrationsPromise;
+  await lifecycle.migrationsPromise;
 
   // Under the resolved-promise model the await above never rejects; re-check the
   // cached error so a startup migration failure stays fatal for callers that
   // await migrations at startup (e.g. Daemon.initializeDatabase — issue #2784).
-  if (migrationsError) {
-    throw migrationsError;
+  if (lifecycle.migrationsError) {
+    throw lifecycle.migrationsError;
   }
 }
 
@@ -271,7 +317,7 @@ export async function ensureMigrations(): Promise<void> {
  * DB without floating a rejection.
  */
 export function getMigrationsError(): Error | null {
-  return migrationsError;
+  return lifecycle.migrationsError;
 }
 
 /**
@@ -285,24 +331,20 @@ export async function closeDatabase(): Promise<void> {
   }
 
   // Reset the module-global state that outlives the connection so a same-process
-  // reopen behaves like a cold start (issue #2796). These are reset
-  // unconditionally — outside the `if (dbInstance)` guard — so a
-  // partially-initialized state (migrations started but `dbInstance` already
-  // nulled) is still cleaned up.
+  // reopen behaves like a cold start (issue #2796). This is done unconditionally
+  // — outside the `if (dbInstance)` guard — so a partially-initialized state
+  // (migrations started but `dbInstance` already nulled) is still cleaned up.
   //
-  // - `migrationsRun` / `migrationsPromise` / `migrationsError` are one state
-  //   machine; leaving any set would let `ensureMigrationsStarted()` no-op and
-  //   `waitForMigrationsBeforeQuery()` short-circuit (skipping migration gating
-  //   on the new connection), or rethrow a stale startup error against an
-  //   otherwise-healthy reopened DB.
-  // - `resolvedDbPath` is cleared so a reopen re-reads AUTOMOBILE_DB_PATH /
-  //   AUTOMOBILE_DB_DIR. In the daemon the only caller is shutdown-then-exit
-  //   (daemon.ts), so this is inert there and the "path always matches" invariant
-  //   from resolveDbPath() holds; the reset is what gives tests full isolation.
-  migrationsRun = false;
-  migrationsPromise = null;
-  migrationsError = null;
-  resolvedDbPath = null;
+  // The migration/path lifecycle is now one object reset as a set (issue #2900):
+  // leaving any field set would let `ensureMigrationsStarted()` no-op and
+  // `waitForMigrationsBeforeQuery()` short-circuit (skipping migration gating on
+  // the new connection), rethrow a stale startup error against an
+  // otherwise-healthy reopened DB, or redirect the reopen to the stale
+  // `resolvedDbPath` instead of re-reading AUTOMOBILE_DB_PATH / AUTOMOBILE_DB_DIR.
+  // In the daemon the only caller is shutdown-then-exit (daemon.ts), so this is
+  // inert there and the "path always matches" invariant from resolveDbPath()
+  // holds; the reset is what gives tests full isolation.
+  lifecycle.reset();
 
   // Cold-start the write barrier too (issue #2896, follow-up to #2796). Its
   // draining flag latches for the process lifetime, so shutdown's
@@ -315,8 +357,11 @@ export async function closeDatabase(): Promise<void> {
   // `getDbWriteBarrier()` at use-time; construction-captured consumers keep
   // their pinned barrier and remain the documented reopen exception (#2912).
   // Inert in the daemon, where the only caller is
-  // shutdown-then-`process.exit`. If the migration/path resets above are ever
-  // consolidated into a single reset(), this must move with them.
+  // shutdown-then-`process.exit`. This is a deliberate sibling of
+  // `lifecycle.reset()` rather than a field on it: the barrier is a separate,
+  // already-encapsulated module global (`dbWriteBarrier.ts`), not part of the
+  // migration/path state machine. `closeDatabase()` is the single place that
+  // expresses "reopen == cold start"; keep both resets here together (#2900).
   resetDbWriteBarrier();
 }
 

@@ -8,11 +8,13 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 
 #### Interactions
 
-- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selector strategies include `text`, `elementId`, `clickable` (first clickable element), `siblingOfText` (clickable sibling of a text element), and `tapClickableParent` (nearest clickable ancestor of a text match). <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd>
-- 👉 `swipeOn` handles directional swipes and scrolling within container bounds. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd>
-- ↔️ `dragAndDrop` for element-to-element moves. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd>
-- 🔍 `pinchOn` for zoom in/out gestures. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd>
-- 📳 `shake` for accelerometer simulation. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd> <kbd>📱 Simulator Only</kbd> *(iOS: XCTest exposes no shake API for physical devices, so `shake` returns an actionable error there.)*
+- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selector strategies include `text`, `elementId`, `clickable` (first clickable element), `siblingOfText` (clickable sibling of a text element), and `tapClickableParent` (nearest clickable ancestor of a text match).
+- 👉 `swipeOn` handles directional swipes and scrolling within container bounds.
+- ↔️ `dragAndDrop` for element-to-element moves.
+- 🔍 `pinchOn` for zoom in/out gestures.
+- 📳 `shake` for accelerometer simulation.
+
+All Interactions tools — including `pinchOn`, which routes coordinate-based pinch/zoom through the runner's synthesized two-finger events — run on **Android** (physical devices and emulators) and **iOS** via the XCUITest CtrlProxy runner. iOS support is currently <kbd>📱 Simulator Only</kbd> (see the [iOS overview](../plat/ios/index.md)). `shake` is the one exception with no physical-iOS path even once physical support lands, because XCTest exposes no shake API for real devices — it returns an actionable error there.
 
 #### App Management
 

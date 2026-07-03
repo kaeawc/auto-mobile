@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
@@ -23,7 +23,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("partial_match", "integer", col => col.notNull())
     .addColumn("error_type", "text")
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 
@@ -72,7 +72,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("brier_score_sum", "real", col => col.notNull())
     .addColumn("updated_at", "text", col => col.notNull())
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 

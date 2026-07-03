@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
@@ -9,7 +9,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("timestamp", "text", col => col.notNull())
     .addColumn("session_uuid", "text")
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 

@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Create device_configs table
@@ -11,7 +11,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("active_mode", "text")
     .addColumn("config_json", "text", col => col.notNull().defaultTo("{}"))
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .addColumn("updated_at", "text", col => col.notNull())
     .execute();

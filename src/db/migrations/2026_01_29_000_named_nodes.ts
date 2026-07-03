@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   // 1. Clear all existing navigation data (cascade handles related tables)
@@ -25,7 +25,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("last_seen_at", "integer", col => col.notNull())
     .addColumn("occurrence_count", "integer", col => col.notNull().defaultTo(1))
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 
@@ -64,7 +64,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       col.references("navigation_node_fingerprints.id").onDelete("set null")
     )
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 

@@ -66,7 +66,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("error_message", "text") // Error message if step failed
       .addColumn("details_json", "text") // Additional step details as JSON
       .addColumn("created_at", "text", col =>
-        col.notNull().defaultTo("datetime('now')")
+        col.notNull().defaultTo(sql`(datetime('now'))`)
       )
       .execute();
 
@@ -91,7 +91,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("visit_order", "integer", col => col.notNull())
       .addColumn("timestamp", "integer", col => col.notNull())
       .addColumn("created_at", "text", col =>
-        col.notNull().defaultTo("datetime('now')")
+        col.notNull().defaultTo(sql`(datetime('now'))`)
       )
       .execute();
 

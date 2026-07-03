@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Create navigation_apps table
@@ -7,7 +7,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .ifNotExists()
     .addColumn("app_id", "text", col => col.primaryKey())
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .addColumn("updated_at", "text", col => col.notNull())
     .execute();
@@ -27,7 +27,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("back_stack_depth", "integer")
     .addColumn("task_id", "integer")
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 
@@ -54,7 +54,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("tool_args", "text")
     .addColumn("timestamp", "integer", col => col.notNull())
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 
@@ -101,7 +101,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("first_seen_at", "integer", col => col.notNull())
     .addColumn("last_seen_at", "integer", col => col.notNull())
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 
@@ -145,7 +145,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("modal_identifier", "text", col => col.notNull())
     .addColumn("stack_level", "integer", col => col.notNull())
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 
@@ -169,7 +169,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("modal_identifier", "text", col => col.notNull())
     .addColumn("stack_level", "integer", col => col.notNull())
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 
@@ -199,7 +199,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("speed", "text")
     .addColumn("swipe_count", "integer")
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 }

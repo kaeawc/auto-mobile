@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Create accessibility_baselines table
@@ -9,7 +9,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("screen_id", "text", col => col.notNull().unique())
     .addColumn("violations_json", "text", col => col.notNull()) // JSON blob of WcagViolation[]
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .addColumn("updated_at", "text", col => col.notNull())
     .execute();

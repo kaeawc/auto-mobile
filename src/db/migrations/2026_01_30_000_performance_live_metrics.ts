@@ -86,7 +86,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     .addColumn("touch_latency_ms", "real")
     .addColumn("diagnostics_json", "text")
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 

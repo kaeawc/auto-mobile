@@ -24,6 +24,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getMcpRecorder } from "./mcpRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
+import { finalizeToolResponse } from "./finalizeToolResponse";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -432,12 +433,18 @@ class ToolRegistryClass {
               platform: platform === "android" || platform === "ios" ? platform : undefined
             });
 
-            // Cache observation data for certain tools to reduce API calls
-            if (name === "observe" && response?.viewHierarchy) {
-              await updateSessionCache(context, "lastHierarchy", response.viewHierarchy);
+            // Cache observation data for certain tools to reduce API calls.
+            // Handlers pre-serialize into an MCP envelope, so the ObserveResult
+            // lives under `structuredContent`, not on `response` directly (the
+            // former read of `response.viewHierarchy` was always undefined, so
+            // `lastHierarchy` never populated — the #2761 diff baseline needs it).
+            // Runs before finalizeToolResponse, so the cache keeps the full,
+            // untrimmed hierarchy while the wire copy is sanitized.
+            if (name === "observe" && response?.structuredContent?.viewHierarchy) {
+              await updateSessionCache(context, "lastHierarchy", response.structuredContent.viewHierarchy);
             }
-            if (name === "observe" && response?.screenshot) {
-              await updateSessionCache(context, "lastScreenshot", response.screenshot);
+            if (name === "observe" && response?.structuredContent?.screenshot) {
+              await updateSessionCache(context, "lastScreenshot", response.structuredContent.screenshot);
             }
 
             // Update last action timestamp for interaction tools
@@ -446,7 +453,7 @@ class ToolRegistryClass {
             }
           }
 
-          return response;
+          return finalizeToolResponse(response, { name, sessionUuid });
         } catch (error) {
           if (error instanceof ActionableError) {
             throw error;

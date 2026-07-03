@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema.dropTable("custom_events").ifExists().execute();
@@ -15,7 +15,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     .addColumn("session_id", "text")
     .addColumn("name", "text", col => col.notNull())
     .addColumn("properties_json", "text")
-    .addColumn("created_at", "text", col => col.notNull().defaultTo("datetime('now')"))
+    .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   await db.schema

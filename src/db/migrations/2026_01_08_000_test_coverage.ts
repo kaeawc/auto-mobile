@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Create test_coverage_sessions table to track test run sessions
@@ -15,7 +15,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("total_nodes_visited", "integer", col => col.notNull().defaultTo(0))
     .addColumn("total_edges_traversed", "integer", col => col.notNull().defaultTo(0))
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 
@@ -50,7 +50,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("first_visit_time", "integer", col => col.notNull())
     .addColumn("last_visit_time", "integer", col => col.notNull())
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 
@@ -86,7 +86,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("first_traversal_time", "integer", col => col.notNull())
     .addColumn("last_traversal_time", "integer", col => col.notNull())
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 

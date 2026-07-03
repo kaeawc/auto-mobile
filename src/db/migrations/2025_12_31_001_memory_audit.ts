@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Create memory_thresholds table for per-app threshold configuration
@@ -15,7 +15,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("unreachable_objects_threshold", "integer", col => col.notNull()) // Max unreachable objects
     .addColumn("weight", "real", col => col.notNull().defaultTo(1.0)) // For weighted threshold calculation
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .addColumn("ttl_hours", "integer", col => col.notNull().defaultTo(24)) // TTL in hours
     .execute();
@@ -44,7 +44,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("sample_count", "integer", col => col.notNull().defaultTo(1)) // Number of samples in baseline
     .addColumn("last_updated", "text", col => col.notNull())
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 
@@ -90,7 +90,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("violations_json", "text") // JSON array of MemoryViolation[]
     .addColumn("diagnostics_json", "text") // JSON blob for detailed diagnostics
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 

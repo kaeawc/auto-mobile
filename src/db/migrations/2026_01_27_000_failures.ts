@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 async function tableExists(
   db: Kysely<unknown>,
@@ -31,8 +31,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("unique_sessions", "integer", col => col.notNull().defaultTo(0))
       .addColumn("stack_trace_json", "text") // JSON array of StackTraceElement
       .addColumn("tool_call_info_json", "text") // JSON of AggregatedToolCallInfo
-      .addColumn("created_at", "text", col => col.notNull().defaultTo("datetime('now')"))
-      .addColumn("updated_at", "text", col => col.notNull().defaultTo("datetime('now')"))
+      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+      .addColumn("updated_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -78,7 +78,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("error_code", "text") // For tool failures
       .addColumn("duration_ms", "integer") // For tool failures
       .addColumn("tool_args_json", "text") // For tool failures - JSON of parameters
-      .addColumn("created_at", "text", col => col.notNull().defaultTo("datetime('now')"))
+      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -121,7 +121,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       )
       .addColumn("screen_name", "text", col => col.notNull())
       .addColumn("visit_order", "integer", col => col.notNull())
-      .addColumn("created_at", "text", col => col.notNull().defaultTo("datetime('now')"))
+      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -145,7 +145,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("path", "text", col => col.notNull())
       .addColumn("timestamp", "integer", col => col.notNull())
       .addColumn("device_model", "text", col => col.notNull())
-      .addColumn("created_at", "text", col => col.notNull().defaultTo("datetime('now')"))
+      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -171,7 +171,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("title", "text", col => col.notNull())
       .addColumn("timestamp", "integer", col => col.notNull())
       .addColumn("acknowledged", "integer", col => col.notNull().defaultTo(0)) // SQLite boolean
-      .addColumn("created_at", "text", col => col.notNull().defaultTo("datetime('now')"))
+      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema

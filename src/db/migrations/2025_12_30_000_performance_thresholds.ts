@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Create performance_thresholds table
@@ -19,7 +19,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("touch_latency_threshold_ms", "real", col => col.notNull())
     .addColumn("weight", "real", col => col.notNull().defaultTo(1.0)) // For weighted average
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .addColumn("ttl_hours", "integer", col => col.notNull().defaultTo(24)) // TTL in hours
     .execute();
@@ -70,7 +70,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("touch_latency_ms", "real")
     .addColumn("diagnostics_json", "text") // JSON blob for detailed diagnostics
     .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo("datetime('now')")
+      col.notNull().defaultTo(sql`(datetime('now'))`)
     )
     .execute();
 

@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 
 async function tableExists(
   db: Kysely<unknown>,
@@ -34,7 +34,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("host", "text")
       .addColumn("path", "text")
       .addColumn("error", "text")
-      .addColumn("created_at", "text", col => col.notNull().defaultTo("datetime('now')"))
+      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -73,7 +73,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("tag", "text", col => col.notNull())
       .addColumn("message", "text", col => col.notNull())
       .addColumn("filter_name", "text", col => col.notNull())
-      .addColumn("created_at", "text", col => col.notNull().defaultTo("datetime('now')"))
+      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -110,7 +110,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("session_id", "text")
       .addColumn("name", "text", col => col.notNull())
       .addColumn("properties_json", "text") // JSON of string key-value pairs
-      .addColumn("created_at", "text", col => col.notNull().defaultTo("datetime('now')"))
+      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema
@@ -148,7 +148,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn("category", "text", col => col.notNull()) // lifecycle, broadcast, websocket_frame
       .addColumn("kind", "text", col => col.notNull()) // e.g., foreground, screen_on, connectivity_change
       .addColumn("details_json", "text") // JSON of additional details
-      .addColumn("created_at", "text", col => col.notNull().defaultTo("datetime('now')"))
+      .addColumn("created_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
       .execute();
 
     await db.schema

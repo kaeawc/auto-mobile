@@ -111,7 +111,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       )
       .addColumn("session_uuid", "text")
       .addColumn("created_at", "text", col =>
-        col.notNull().defaultTo("datetime('now')")
+        col.notNull().defaultTo(sql`(datetime('now'))`)
       )
       .execute();
 
@@ -179,7 +179,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       )
       .addColumn("session_uuid", "text")
       .addColumn("created_at", "text", col =>
-        col.notNull().defaultTo("datetime('now')")
+        col.notNull().defaultTo(sql`(datetime('now'))`)
       )
       .execute();
 

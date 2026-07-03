@@ -38,6 +38,35 @@ export class NavigationRepository {
     }
     return getDatabase();
   }
+
+  /**
+   * Return a repository instance whose every read and write runs on the supplied
+   * executor (a Kysely transaction handle) instead of the shared singleton
+   * connection.
+   *
+   * This is the safe way to enlist navigation writes in a caller-owned
+   * transaction: binding the whole instance means no method can accidentally fall
+   * back to `getDatabase()` mid-transaction. A stray singleton query while a
+   * transaction holds the single bun:sqlite connection deadlocks the daemon —
+   * `#enterQuery` (bunSqliteDialect) spins forever for a non-owner and there is no
+   * busy_timeout escape (the in-process JS mutex, not SQLite's lock).
+   */
+  withExecutor(executor: Kysely<Database>): NavigationRepository {
+    return new NavigationRepository(executor);
+  }
+
+  /**
+   * Run `fn` inside a single transaction on this repository's connection, passing
+   * the transaction executor to thread into `withExecutor`. Mirrors
+   * `installedAppsRepository`'s in-repo transaction so callers never touch a raw
+   * database handle. Keep the callback body to DB statements only — the
+   * transaction takes exclusive ownership of the single connection, so any awaited
+   * non-DB IO inside it stalls every other daemon writer for its duration.
+   */
+  async runInTransaction<T>(fn: (trx: Kysely<Database>) => Promise<T>): Promise<T> {
+    return this.getDb().transaction().execute(fn);
+  }
+
   /**
    * Get or create a navigation app record.
    */
@@ -343,74 +372,100 @@ export class NavigationRepository {
     // callers for the same element serialize rather than both inserting duplicate rows
     // (R2356). Keep the body to DB reads/writes only — no IO — since it blocks the daemon
     // for its duration.
-    return db.transaction().execute(async trx => {
-      // Try to find existing element with same properties
-      let query = trx
-        .selectFrom("ui_elements")
-        .selectAll()
-        .where("app_id", "=", appId);
+    //
+    // When this repo is already bound to a caller's transaction (via withExecutor),
+    // opening another transaction would be a nested BEGIN on the same connection —
+    // `#reserveTransaction` throws "Nested transactions are not supported". Run the
+    // body directly on the existing executor instead; it is already serialized and
+    // atomic under the enclosing transaction.
+    if (db.isTransaction) {
+      return this.getOrCreateUIElementWithin(db, appId, element, timestamp);
+    }
+    return db.transaction().execute(trx =>
+      this.getOrCreateUIElementWithin(trx, appId, element, timestamp)
+    );
+  }
 
-      if (element.text !== undefined) {
-        query = query.where("text", "=", element.text);
-      }
-      if (element.resourceId !== undefined) {
-        query = query.where("resource_id", "=", element.resourceId);
-      }
-      if (element.contentDescription !== undefined) {
-        query = query.where("content_description", "=", element.contentDescription);
-      }
-      if (element.className !== undefined) {
-        query = query.where("class_name", "=", element.className);
-      }
-      if (element.bounds) {
-        query = query
-          .where("bounds_left", "=", element.bounds.left)
-          .where("bounds_top", "=", element.bounds.top)
-          .where("bounds_right", "=", element.bounds.right)
-          .where("bounds_bottom", "=", element.bounds.bottom);
-      }
+  private async getOrCreateUIElementWithin(
+    trx: Kysely<Database>,
+    appId: string,
+    element: {
+      text?: string;
+      resourceId?: string;
+      contentDescription?: string;
+      className?: string;
+      bounds?: { left: number; top: number; right: number; bottom: number };
+      clickable?: boolean;
+      scrollable?: boolean;
+    },
+    timestamp: number
+  ): Promise<UIElement> {
+    // Try to find existing element with same properties
+    let query = trx
+      .selectFrom("ui_elements")
+      .selectAll()
+      .where("app_id", "=", appId);
 
-      const existing = await query.executeTakeFirst();
+    if (element.text !== undefined) {
+      query = query.where("text", "=", element.text);
+    }
+    if (element.resourceId !== undefined) {
+      query = query.where("resource_id", "=", element.resourceId);
+    }
+    if (element.contentDescription !== undefined) {
+      query = query.where("content_description", "=", element.contentDescription);
+    }
+    if (element.className !== undefined) {
+      query = query.where("class_name", "=", element.className);
+    }
+    if (element.bounds) {
+      query = query
+        .where("bounds_left", "=", element.bounds.left)
+        .where("bounds_top", "=", element.bounds.top)
+        .where("bounds_right", "=", element.bounds.right)
+        .where("bounds_bottom", "=", element.bounds.bottom);
+    }
 
-      if (existing) {
-        // Update last_seen_at
-        await trx
-          .updateTable("ui_elements")
-          .set({ last_seen_at: timestamp })
-          .where("id", "=", existing.id)
-          .execute();
+    const existing = await query.executeTakeFirst();
 
-        return {
-          ...existing,
-          last_seen_at: timestamp,
-        };
-      }
+    if (existing) {
+      // Update last_seen_at
+      await trx
+        .updateTable("ui_elements")
+        .set({ last_seen_at: timestamp })
+        .where("id", "=", existing.id)
+        .execute();
 
-      // Create new UI element
-      const newElement: NewUIElement = {
-        app_id: appId,
-        text: element.text || null,
-        resource_id: element.resourceId || null,
-        content_description: element.contentDescription || null,
-        class_name: element.className || null,
-        bounds_left: element.bounds?.left || null,
-        bounds_top: element.bounds?.top || null,
-        bounds_right: element.bounds?.right || null,
-        bounds_bottom: element.bounds?.bottom || null,
-        clickable: element.clickable !== undefined ? (element.clickable ? 1 : 0) : null,
-        scrollable: element.scrollable !== undefined ? (element.scrollable ? 1 : 0) : null,
-        first_seen_at: timestamp,
+      return {
+        ...existing,
         last_seen_at: timestamp,
       };
+    }
 
-      const result = await trx
-        .insertInto("ui_elements")
-        .values(newElement)
-        .returningAll()
-        .executeTakeFirstOrThrow();
+    // Create new UI element
+    const newElement: NewUIElement = {
+      app_id: appId,
+      text: element.text || null,
+      resource_id: element.resourceId || null,
+      content_description: element.contentDescription || null,
+      class_name: element.className || null,
+      bounds_left: element.bounds?.left || null,
+      bounds_top: element.bounds?.top || null,
+      bounds_right: element.bounds?.right || null,
+      bounds_bottom: element.bounds?.bottom || null,
+      clickable: element.clickable !== undefined ? (element.clickable ? 1 : 0) : null,
+      scrollable: element.scrollable !== undefined ? (element.scrollable ? 1 : 0) : null,
+      first_seen_at: timestamp,
+      last_seen_at: timestamp,
+    };
 
-      return result;
-    });
+    const result = await trx
+      .insertInto("ui_elements")
+      .values(newElement)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+
+    return result;
   }
 
   /**

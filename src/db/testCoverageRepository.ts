@@ -37,6 +37,20 @@ export class TestCoverageRepository {
   }
 
   /**
+   * Return a repository instance whose every read and write runs on the supplied
+   * executor (a Kysely transaction handle) instead of the shared singleton
+   * connection, so coverage writes can enlist in a caller-owned transaction
+   * alongside navigation writes on the same connection.
+   *
+   * Binding the whole instance means no method can fall back to `getDatabase()`
+   * mid-transaction — a stray singleton query while a transaction holds the single
+   * bun:sqlite connection deadlocks the daemon (see `NavigationRepository.withExecutor`).
+   */
+  withExecutor(executor: Kysely<Database>): TestCoverageRepository {
+    return new TestCoverageRepository(this.timer, executor);
+  }
+
+  /**
    * Start a new test coverage session for an app.
    */
   async startSession(sessionUuid: string, appId: string): Promise<TestCoverageSession> {

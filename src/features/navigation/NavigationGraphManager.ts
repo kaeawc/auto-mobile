@@ -312,115 +312,135 @@ export class NavigationGraphManager implements NavigationGraphService {
       return;
     }
 
+    const appId = this.currentAppId;
     const screenName = event.destination;
     const timestamp = event.timestamp ?? this.timer.now();
 
-    // Get or create node and update visit count
-    const node = await this.repository.getOrCreateNode(
-      this.currentAppId,
-      screenName,
-      timestamp
-    );
+    // Capture the previous screen up front. The edge is computed from it and the
+    // in-memory field assignments below only happen AFTER the transaction commits,
+    // so on rollback `this.currentScreen` stays the previous screen and the next
+    // event still computes the correct edge.
+    const previousScreen = this.currentScreen;
 
-    // Record node visit for test coverage if session is active
-    if (this.activeTestSession) {
-      await this.testCoverageRepository.recordNodeVisit(
-        this.activeTestSession.id,
-        node.id,
-        timestamp
-      );
-    }
+    // Get modal stack from the most recent tool call (if any)
+    const recentToolCall = this.findCorrelatedToolCall(timestamp);
+    const currentModalStack = recentToolCall?.uiState?.modalStack;
 
-    // Set active navigation state for fingerprint correlation
-    // Fingerprints seen within ACTIVE_NAVIGATION_WINDOW_MS will be correlated to this node
+    // Persist the whole graph write atomically. Every read and write inside the
+    // callback runs on `trx` (via withExecutor) — a stray singleton query here
+    // would deadlock the daemon's only connection (bunSqliteDialect). Keep the body
+    // to DB statements only: telemetry push, notifications, screenshot capture and
+    // in-memory field assignments stay OUTSIDE so the exclusive connection is not
+    // held across non-DB IO, and so they never run when the transaction rolls back.
+    const node = await this.repository.runInTransaction(async trx => {
+      const repository = this.repository.withExecutor(trx);
+      const testCoverageRepository = this.testCoverageRepository.withExecutor(trx);
+
+      // Get or create node and update visit count
+      const n = await repository.getOrCreateNode(appId, screenName, timestamp);
+
+      // Record node visit for test coverage if session is active
+      if (this.activeTestSession) {
+        await testCoverageRepository.recordNodeVisit(
+          this.activeTestSession.id,
+          n.id,
+          timestamp
+        );
+      }
+
+      // Update node modals if present
+      if (currentModalStack && currentModalStack.length > 0) {
+        const modalIds = currentModalStack.map(m => m.identifier || `${m.type}-${m.layer}`);
+        await repository.setNodeModals(n.id, modalIds);
+
+        logger.info(
+          `[NAVIGATION_GRAPH] Screen ${screenName} has ${modalIds.length} modal(s)`
+        );
+      }
+
+      // Create edge from previous screen to current screen
+      if (previousScreen && previousScreen !== screenName) {
+        const interaction = this.findCorrelatedToolCall(timestamp);
+
+        const toolName = interaction?.toolName || null;
+        const toolArgs = interaction?.args || null;
+
+        const edge = await repository.createEdge(
+          appId,
+          previousScreen,
+          screenName,
+          toolName,
+          toolArgs,
+          timestamp
+        );
+
+        // Record edge traversal for test coverage if session is active
+        if (this.activeTestSession) {
+          await testCoverageRepository.recordEdgeTraversal(
+            this.activeTestSession.id,
+            edge.id,
+            timestamp
+          );
+        }
+
+        // Store UI elements if present in interaction
+        if (interaction?.uiState?.selectedElements) {
+          await this.storeUIElements(
+            repository,
+            edge.id,
+            interaction.uiState.selectedElements,
+            timestamp
+          );
+        }
+
+        // Store modal stacks for from/to
+        const fromNode = await repository.getNode(appId, previousScreen);
+        if (fromNode) {
+          const fromModals = await repository.getNodeModals(fromNode.id);
+          if (fromModals.length > 0) {
+            await repository.setEdgeModals(edge.id, "from", fromModals);
+          }
+        }
+
+        if (currentModalStack && currentModalStack.length > 0) {
+          const toModalIds = currentModalStack.map(
+            m => m.identifier || `${m.type}-${m.layer}`
+          );
+          await repository.setEdgeModals(edge.id, "to", toModalIds);
+        }
+
+        // Store scroll position if present
+        if (interaction?.uiState?.scrollPosition) {
+          await this.storeScrollPosition(
+            repository,
+            edge.id,
+            interaction.uiState.scrollPosition,
+            timestamp
+          );
+        }
+      }
+
+      await repository.touchApp(appId);
+      return n;
+    });
+
+    // ---- Post-commit side effects (never inside the transaction) ----
+
+    // Set active navigation state for fingerprint correlation. Fingerprints seen
+    // within ACTIVE_NAVIGATION_WINDOW_MS will be correlated to this node.
     this.activeNavigation = {
       nodeId: node.id,
       screenName: screenName,
       startTime: timestamp,
     };
 
-    // Get modal stack from the most recent tool call (if any)
-    const recentToolCall = this.findCorrelatedToolCall(timestamp);
-    const currentModalStack = recentToolCall?.uiState?.modalStack;
-
-    // Update node modals if present
-    if (currentModalStack && currentModalStack.length > 0) {
-      const modalIds = currentModalStack.map(m => m.identifier || `${m.type}-${m.layer}`);
-      await this.repository.setNodeModals(node.id, modalIds);
-
-      logger.info(
-        `[NAVIGATION_GRAPH] Screen ${screenName} has ${modalIds.length} modal(s)`
-      );
-    }
-
-    // Create edge from previous screen to current screen
-    if (this.currentScreen && this.currentScreen !== screenName) {
-      const interaction = this.findCorrelatedToolCall(timestamp);
-
-      const toolName = interaction?.toolName || null;
-      const toolArgs = interaction?.args || null;
-
-      const edge = await this.repository.createEdge(
-        this.currentAppId,
-        this.currentScreen,
-        screenName,
-        toolName,
-        toolArgs,
-        timestamp
-      );
-
-      // Record edge traversal for test coverage if session is active
-      if (this.activeTestSession) {
-        await this.testCoverageRepository.recordEdgeTraversal(
-          this.activeTestSession.id,
-          edge.id,
-          timestamp
-        );
-      }
-
-      // Store UI elements if present in interaction
-      if (interaction?.uiState?.selectedElements) {
-        await this.storeUIElements(
-          edge.id,
-          interaction.uiState.selectedElements,
-          timestamp
-        );
-      }
-
-      // Store modal stacks for from/to
-      const fromNode = await this.repository.getNode(this.currentAppId, this.currentScreen);
-      if (fromNode) {
-        const fromModals = await this.repository.getNodeModals(fromNode.id);
-        if (fromModals.length > 0) {
-          await this.repository.setEdgeModals(edge.id, "from", fromModals);
-        }
-      }
-
-      if (currentModalStack && currentModalStack.length > 0) {
-        const toModalIds = currentModalStack.map(
-          m => m.identifier || `${m.type}-${m.layer}`
-        );
-        await this.repository.setEdgeModals(edge.id, "to", toModalIds);
-      }
-
-      // Store scroll position if present
-      if (interaction?.uiState?.scrollPosition) {
-        await this.storeScrollPosition(
-          edge.id,
-          interaction.uiState.scrollPosition,
-          timestamp
-        );
-      }
-    }
-
     this.currentScreen = screenName;
-    await this.repository.touchApp(this.currentAppId);
     this.notifyGraphUpdated();
 
     // Push to telemetry dashboard via TelemetryRecorder (has device context for subscriber filtering)
     TelemetryRecorder.getInstance().recordNavigationEvent({
       timestamp,
-      applicationId: this.currentAppId,
+      applicationId: appId,
       destination: screenName,
       source: event.source ?? null,
       arguments: event.arguments ?? null,
@@ -531,8 +551,14 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   /**
    * Store UI elements used in an edge transition.
+   *
+   * `repository` is the transaction-bound repository from the enclosing
+   * recordNavigationEvent write, so these element writes are part of the same
+   * atomic transaction. getOrCreateUIElement runs directly on the executor (it
+   * detects it is already inside a transaction) rather than opening a nested one.
    */
   private async storeUIElements(
+    repository: NavigationRepository,
     edgeId: number,
     selectedElements: SelectedElement[],
     timestamp: number
@@ -544,7 +570,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     const elementIds: number[] = [];
 
     for (const selected of selectedElements) {
-      const element = await this.repository.getOrCreateUIElement(
+      const element = await repository.getOrCreateUIElement(
         this.currentAppId,
         {
           text: selected.text,
@@ -556,13 +582,18 @@ export class NavigationGraphManager implements NavigationGraphService {
       elementIds.push(element.id);
     }
 
-    await this.repository.linkUIElementsToEdge(edgeId, elementIds);
+    await repository.linkUIElementsToEdge(edgeId, elementIds);
   }
 
   /**
    * Store scroll position for an edge.
+   *
+   * `repository` is the transaction-bound repository from the enclosing
+   * recordNavigationEvent write, so these writes are part of the same atomic
+   * transaction.
    */
   private async storeScrollPosition(
+    repository: NavigationRepository,
     edgeId: number,
     scrollPosition: ScrollPosition,
     timestamp: number
@@ -572,7 +603,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     }
 
     // Store the target element
-    const targetElement = await this.repository.getOrCreateUIElement(
+    const targetElement = await repository.getOrCreateUIElement(
       this.currentAppId,
       {
         text: scrollPosition.targetElement.text,
@@ -585,7 +616,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     // Store the container element if present
     let containerElementId: number | undefined;
     if (scrollPosition.container) {
-      const containerElement = await this.repository.getOrCreateUIElement(
+      const containerElement = await repository.getOrCreateUIElement(
         this.currentAppId,
         {
           text: scrollPosition.container.text,
@@ -597,7 +628,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       containerElementId = containerElement.id;
     }
 
-    await this.repository.setScrollPosition(
+    await repository.setScrollPosition(
       edgeId,
       targetElement.id,
       scrollPosition.direction,

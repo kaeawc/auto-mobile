@@ -65,9 +65,14 @@ runFileDownloaderContract("FakeFileDownloader", payload => {
   return downloader;
 });
 
+// Real subprocess: a contended CI runner can stall the fork/exec, so allow a
+// generous timeout (matching the ProcessExecutor smoke test) instead of bun's default (#2914).
+const REAL_SUBPROCESS_CONTRACT_TIMEOUT_MS = 30_000;
+
 runProcessExecutorContract("DefaultProcessExecutor", {
   make: () => new DefaultProcessExecutor(),
-  command: "echo contract-output"
+  command: "echo contract-output",
+  timeoutMs: REAL_SUBPROCESS_CONTRACT_TIMEOUT_MS
 });
 runProcessExecutorContract("FakeProcessExecutor", {
   make: () => {
@@ -87,7 +92,8 @@ runProcessExecutorContract("FakeProcessExecutor", {
 runHostCommandExecutorContract("DefaultHostCommandExecutor", {
   make: () => new DefaultHostCommandExecutor(),
   file: process.execPath,
-  args: ["-e", "process.stdout.write('contract-output')"]
+  args: ["-e", "process.stdout.write('contract-output')"],
+  timeoutMs: REAL_SUBPROCESS_CONTRACT_TIMEOUT_MS
 });
 runHostCommandExecutorContract("FakeHostCommandExecutor", {
   make: () => {

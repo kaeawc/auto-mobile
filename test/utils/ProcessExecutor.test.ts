@@ -226,7 +226,9 @@ describe("DefaultProcessExecutor real-subprocess smoke test", function() {
   test("round-trips a real echo through exec and spawn", async function() {
     const executor = new DefaultProcessExecutor();
     await withSubprocessRetry(async () => {
-      const result = await executor.exec("echo hello", { timeoutMs: 8_000 });
+      // Keep each attempt well under SMOKE_TEST_TIMEOUT_MS so 3 retries plus the
+      // synchronous spawn assertion stay comfortably inside the 30s test budget (#2914).
+      const result = await executor.exec("echo hello", { timeoutMs: 4_000 });
       expect(result.stdout.trim()).toBe("hello");
 
       const child = executor.spawn("echo", ["hi"]);

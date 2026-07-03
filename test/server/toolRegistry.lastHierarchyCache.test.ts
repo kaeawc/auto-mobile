@@ -120,13 +120,19 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     });
 
     // Caches are populated (were dormant before the fix) with the FULL hierarchy.
-    const cache = daemonSessionManager!.getSession(sessionId)!.cacheData.customData!;
-    const cachedHierarchy = cache.lastHierarchy as any;
+    // #2917: the canonical slots are the typed top-level fields, NOT customData.
+    const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
+    const cachedHierarchy = cacheData.lastHierarchy as any;
     expect(cachedHierarchy).toBeDefined();
     expect(cachedHierarchy.hierarchy.node["view-id"]).toBe("com.example:id/root");
     expect(cachedHierarchy.hierarchy.node.clickable).toBe("false");
+    // Observe timestamp is stamped alongside the hierarchy.
+    expect(typeof cacheData.lastObserveTime).toBe("number");
     // Screenshot cache repair (symmetric structuredContent read).
-    expect(cache.lastScreenshot).toBe("base64-screenshot-data");
+    expect(cacheData.lastScreenshot).toBe("base64-screenshot-data");
+    // The dormant-decoy keys must NOT be written under customData anymore (#2917).
+    expect(cacheData.customData?.lastHierarchy).toBeUndefined();
+    expect(cacheData.customData?.lastScreenshot).toBeUndefined();
 
     // Returned wire response is sanitized at the chokepoint.
     const returnedRoot = (response.structuredContent as ObserveResult).viewHierarchy!.hierarchy.node as any;

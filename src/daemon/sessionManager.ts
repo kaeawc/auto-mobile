@@ -4,17 +4,28 @@ import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KEEP_SCREEN_AWAKE_STATE_KEY, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
+import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 
 /**
  * Session Cache Data
  *
  * Stores data that can be reused across multiple tool calls
  * within the same test session, reducing redundant API calls.
+ *
+ * The observe cache lives in the typed top-level slots below — they are the
+ * canonical source of truth (issue #2917). Write them through the dedicated
+ * `setLastHierarchy` / `setLastScreenshot` setters.
+ *
+ * `customData` still holds other keyed tool state accessed via well-known
+ * constants (keep-awake `KeepScreenAwakeState`, the device-label map, the
+ * ad-hoc `lastActionTime`). Those remain untyped and are candidates for the
+ * same typed-slot treatment — the `Record<string, any>` shape is an escape
+ * hatch that can reintroduce the #2917 decoy bug for any future key.
  */
 export interface SessionCacheData {
-  lastHierarchy?: string;      // Last observed view hierarchy
+  lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
   lastScreenshot?: string;     // Base64 encoded last screenshot
-  lastObserveTime?: number;    // Timestamp of last hierarchy observation
+  lastObserveTime?: number;    // Timestamp of last hierarchy observation (hierarchy only, not screenshot)
   customData?: Record<string, any>; // Custom data set by tools
 }
 
@@ -305,6 +316,29 @@ export class SessionManager {
       .catch(error => logger.warn(`[SessionManager] Failed to record session activity: ${error}`));
 
     logger.debug(`Updated cache for session ${sessionId}`);
+  }
+
+  /**
+   * Cache the most recent observed view hierarchy for a session.
+   *
+   * Writes the typed top-level `lastHierarchy` slot (the canonical source of
+   * truth per issue #2917) and stamps `lastObserveTime`. Consumers such as the
+   * hierarchy-diff baseline (#2761) read the typed slot directly rather than
+   * fishing a differently-typed value out of `customData`.
+   */
+  setLastHierarchy(sessionId: string, hierarchy: ViewHierarchyResult): void {
+    this.updateSessionCache(sessionId, {
+      lastHierarchy: hierarchy,
+      lastObserveTime: this.timer.now(),
+    });
+  }
+
+  /**
+   * Cache the most recent base64-encoded screenshot for a session in the typed
+   * top-level `lastScreenshot` slot (canonical source of truth per #2917).
+   */
+  setLastScreenshot(sessionId: string, screenshot: string): void {
+    this.updateSessionCache(sessionId, { lastScreenshot: screenshot });
   }
 
   /**

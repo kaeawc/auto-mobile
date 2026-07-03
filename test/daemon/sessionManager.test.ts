@@ -2,6 +2,18 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
+
+function makeHierarchy(label: string): ViewHierarchyResult {
+  return {
+    hierarchy: {
+      node: {
+        "$": { "resource-id": `com.example:id/${label}` },
+        "view-id": `com.example:id/${label}`,
+      },
+    },
+  };
+}
 
 const HEARTBEAT_ENV_KEYS = [
   "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
@@ -144,13 +156,45 @@ describe("SessionManager", () => {
   describe("cache management", () => {
     test("should update session cache data", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
+      const hierarchy = makeHierarchy("root");
       sessionManager.updateSessionCache("session-1", {
-        lastHierarchy: "test-hierarchy",
+        lastHierarchy: hierarchy,
         lastScreenshot: "base64-data",
       });
       const cache = sessionManager.getSessionCache("session-1");
-      expect(cache?.lastHierarchy).toBe("test-hierarchy");
+      expect(cache?.lastHierarchy).toEqual(hierarchy);
       expect(cache?.lastScreenshot).toBe("base64-data");
+    });
+
+    test("setLastHierarchy stores a ViewHierarchyResult in the typed top-level slot and stamps lastObserveTime (#2917)", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+      fakeTimer.setCurrentTime(123456);
+      const hierarchy = makeHierarchy("root");
+
+      sessionManager.setLastHierarchy("session-1", hierarchy);
+
+      const session = sessionManager.getSession("session-1")!;
+      // Canonical slot is the typed top-level field, NOT customData.
+      expect(session.cacheData.lastHierarchy).toEqual(hierarchy);
+      expect(session.cacheData.lastHierarchy?.hierarchy.node?.["view-id"]).toBe("com.example:id/root");
+      expect(session.cacheData.lastObserveTime).toBe(123456);
+      // The dormant-decoy key must not reappear under customData.
+      expect(session.cacheData.customData?.lastHierarchy).toBeUndefined();
+    });
+
+    test("setLastScreenshot stores the base64 string in the typed top-level slot (#2917)", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+
+      sessionManager.setLastScreenshot("session-1", "base64-screenshot");
+
+      const session = sessionManager.getSession("session-1")!;
+      expect(session.cacheData.lastScreenshot).toBe("base64-screenshot");
+      expect(session.cacheData.customData?.lastScreenshot).toBeUndefined();
+    });
+
+    test("setLastHierarchy on a missing session is a no-op (no throw)", () => {
+      expect(() => sessionManager.setLastHierarchy("nope", makeHierarchy("x"))).not.toThrow();
+      expect(sessionManager.getSession("nope")).toBeNull();
     });
 
     test("should get session cache without modifying other fields", async () => {
@@ -170,7 +214,7 @@ describe("SessionManager", () => {
     test("should clear specific cache key", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
       sessionManager.updateSessionCache("session-1", {
-        lastHierarchy: "test-hierarchy",
+        lastHierarchy: makeHierarchy("root"),
         lastScreenshot: "base64-data",
       });
       sessionManager.clearSessionCache("session-1", "lastHierarchy");
@@ -182,7 +226,7 @@ describe("SessionManager", () => {
     test("should clear all cache when no key specified", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
       sessionManager.updateSessionCache("session-1", {
-        lastHierarchy: "test-hierarchy",
+        lastHierarchy: makeHierarchy("root"),
         lastScreenshot: "base64-data",
         customData: { key: "value" },
       });

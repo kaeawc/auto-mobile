@@ -364,4 +364,161 @@ describe("FailureAnalyticsRepository", () => {
       expect(ackedOnly.notifications[0].acknowledged).toBe(true);
     });
   });
+
+  // Regression coverage for #2789: recordFailure() must be an atomic upsert so a
+  // burst of same-signature failures collapses to a single group with a correct
+  // total_count and a derived unique_sessions. These run against the real
+  // in-memory bun:sqlite from createTestDatabase(), where the single-connection
+  // mutex genuinely releases across awaits — so the get-or-create version of
+  // recordFailure() FAILS these (duplicate groups + lost increments) and the
+  // atomic upsert passes. Deterministic (no sleeps), < 100ms.
+  describe("recordFailure concurrency (#2789)", () => {
+    test("N concurrent calls for one signature yield exactly one group with total_count === N", async () => {
+      const N = 20;
+      await Promise.all(
+        Array.from({ length: N }, (_unused, i) =>
+          repo.recordFailure(
+            makeFailureInput({
+              occurrence: {
+                deviceModel: "Pixel 7",
+                os: "Android 14",
+                appVersion: "1.0.0",
+                sessionId: `session-${i}`,
+              },
+            })
+          )
+        )
+      );
+
+      const groups = await db.selectFrom("failure_groups").selectAll().execute();
+      expect(groups).toHaveLength(1);
+      expect(groups[0].total_count).toBe(N);
+
+      const occurrences = await db.selectFrom("failure_occurrences").selectAll().execute();
+      expect(occurrences).toHaveLength(N);
+    });
+
+    test("N concurrent calls spanning M distinct sessions yield unique_sessions === M (derived, not incremented)", async () => {
+      const N = 24;
+      const M = 6;
+      await Promise.all(
+        Array.from({ length: N }, (_unused, i) =>
+          repo.recordFailure(
+            makeFailureInput({
+              occurrence: {
+                deviceModel: "Pixel 7",
+                os: "Android 14",
+                appVersion: "1.0.0",
+                sessionId: `session-${i % M}`,
+              },
+            })
+          )
+        )
+      );
+
+      const groups = await db.selectFrom("failure_groups").selectAll().execute();
+      expect(groups).toHaveLength(1);
+      expect(groups[0].total_count).toBe(N);
+      expect(groups[0].unique_sessions).toBe(M);
+
+      // Assert it is genuinely derived from committed occurrences, not an
+      // increment on a stale read.
+      const distinct = await db
+        .selectFrom("failure_occurrences")
+        .select("session_id")
+        .where("group_id", "=", groups[0].id)
+        .distinct()
+        .execute();
+      expect(distinct).toHaveLength(M);
+    });
+
+    test("concurrent same-signature bursts across distinct signatures keep each group isolated", async () => {
+      const perSignature = 8;
+      const signatures = ["sig-a", "sig-b", "sig-c"];
+      await Promise.all(
+        signatures.flatMap(sig =>
+          Array.from({ length: perSignature }, (_unused, i) =>
+            repo.recordFailure(
+              makeFailureInput({
+                signature: sig,
+                occurrence: {
+                  deviceModel: "Pixel 7",
+                  os: "Android 14",
+                  appVersion: "1.0.0",
+                  sessionId: `session-${i}`,
+                },
+              })
+            )
+          )
+        )
+      );
+
+      const groups = await db
+        .selectFrom("failure_groups")
+        .selectAll()
+        .orderBy("signature", "asc")
+        .execute();
+      expect(groups).toHaveLength(signatures.length);
+      for (const group of groups) {
+        expect(group.total_count).toBe(perSignature);
+        expect(group.unique_sessions).toBe(perSignature);
+      }
+    });
+
+    function toolFailureInput(i: number): RecordFailureInput {
+      return makeFailureInput({
+        type: "tool_failure",
+        signature: "tapOn::element_not_found",
+        toolCallInfo: {
+          toolName: "tapOn",
+          errorCodes: { ELEMENT_NOT_FOUND: 1 },
+          parameterVariants: { selector: [`btn-${i}`] },
+          durationStats: { minMs: 10, maxMs: 10, avgMs: 10, medianMs: 10, p95Ms: 10 },
+        },
+        occurrence: {
+          deviceModel: "Pixel 7",
+          os: "Android 14",
+          appVersion: "1.0.0",
+          sessionId: `session-${i}`,
+          errorCode: "ELEMENT_NOT_FOUND",
+        },
+      });
+    }
+
+    // N == 10 keeps every distinct selector inside mergeToolCallInfo's 10-variant
+    // cap, so a lossless merge yields exactly 10 selectors and an error count of 10.
+    test("merges tool-call-info losslessly across SERIAL tool_failure occurrences", async () => {
+      const N = 10;
+      for (let i = 0; i < N; i++) {
+        await repo.recordFailure(toolFailureInput(i));
+      }
+
+      const groups = await db.selectFrom("failure_groups").selectAll().execute();
+      expect(groups).toHaveLength(1);
+      expect(groups[0].total_count).toBe(N);
+
+      const toolInfo = JSON.parse(groups[0].tool_call_info_json ?? "{}");
+      expect(toolInfo.toolName).toBe("tapOn");
+      expect(toolInfo.errorCodes.ELEMENT_NOT_FOUND).toBe(N);
+      expect(new Set(toolInfo.parameterVariants.selector).size).toBe(N);
+    });
+
+    // The merge is a read-modify-write; the transaction in recordFailure must
+    // serialize concurrent merges so none clobber another's contribution. A
+    // lossy RMW here would drop selectors/error counts below N.
+    test("merges tool-call-info losslessly across CONCURRENT tool_failure occurrences", async () => {
+      const N = 10;
+      await Promise.all(Array.from({ length: N }, (_unused, i) => repo.recordFailure(toolFailureInput(i))));
+
+      const groups = await db.selectFrom("failure_groups").selectAll().execute();
+      expect(groups).toHaveLength(1);
+      expect(groups[0].total_count).toBe(N);
+
+      const toolInfo = JSON.parse(groups[0].tool_call_info_json ?? "{}");
+      expect(toolInfo.toolName).toBe("tapOn");
+      // Lossless: every occurrence's ELEMENT_NOT_FOUND and distinct selector survived.
+      expect(toolInfo.errorCodes.ELEMENT_NOT_FOUND).toBe(N);
+      expect(new Set(toolInfo.parameterVariants.selector).size).toBe(N);
+    });
+  });
 });

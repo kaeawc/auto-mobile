@@ -37,6 +37,7 @@ import { NavigationGraphManager, NavigationEvent } from "../../navigation/Naviga
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
+import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
 import { PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
@@ -2312,6 +2313,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           }
 
           logger.info(`[CTRL_PROXY] Navigation event: ${event.destination} (app: ${event.applicationId})`);
+          // Not routed through the DB-write barrier on purpose: this write
+          // interleaves with hierarchy_update processing to preserve SDK screen
+          // names, and adding a drain await hop would perturb that ordering on
+          // the hot path. A shutdown race here is already made safe by the
+          // dialect's reject-on-closed handling (issue #2792), so the row is
+          // dropped cleanly rather than stranding.
           await this.getNavigationGraphManager().recordNavigationEvent(event);
 
           if (event.applicationId && event.destination && serverConfig.isNavigationScreenshotsEnabled()) {
@@ -3025,7 +3032,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     try {
-      await this.getInstalledAppsRepository().markDeviceStale(this.device.deviceId);
+      // Fired fire-and-forget on WS close, which happens during shutdown socket
+      // teardown — route through the barrier so it drains (or is skipped) before
+      // closeDatabase() rather than racing the closing connection (issue #2792).
+      await getDbWriteBarrier().track(() =>
+        this.getInstalledAppsRepository().markDeviceStale(this.device.deviceId)
+      );
       logger.info(`[CTRL_PROXY] Marked installed apps cache stale (${reason})`);
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to mark installed apps stale: ${error}`);

@@ -154,9 +154,9 @@ export class SessionManager {
       logger.info(`Session ${sessionId} has expired, removing`);
       const deviceId = session.assignedDevice;
       this.removeSession(sessionId);
-      void this.barrier.track(() =>
-        this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "lazy-expiry")
-      );
+      void this.barrier
+        .track(() => this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "lazy-expiry"))
+        .catch(error => logger.warn(`[SessionManager] Failed to mark session released (lazy-expiry): ${error}`));
       // Notify release callbacks so session-scoped state is cleaned up
       for (const callback of this.releaseCallbacks) {
         try {
@@ -297,7 +297,9 @@ export class SessionManager {
     };
     session.lastUsedAt = this.timer.now();
     session.lastHeartbeat = this.timer.now();
-    void this.barrier.track(() => this.recordSessionActivity(session));
+    void this.barrier
+      .track(() => this.recordSessionActivity(session))
+      .catch(error => logger.warn(`[SessionManager] Failed to record session activity: ${error}`));
 
     logger.debug(`Updated cache for session ${sessionId}`);
   }
@@ -314,7 +316,9 @@ export class SessionManager {
     // Update last used time when accessing cache
     session.lastUsedAt = this.timer.now();
     session.lastHeartbeat = this.timer.now();
-    void this.barrier.track(() => this.recordSessionActivity(session));
+    void this.barrier
+      .track(() => this.recordSessionActivity(session))
+      .catch(error => logger.warn(`[SessionManager] Failed to record session activity: ${error}`));
 
     return session.cacheData;
   }
@@ -333,7 +337,9 @@ export class SessionManager {
     session.lastUsedAt = now;
     session.expiresAt = now + session.sessionTimeoutMs;
     session.hasReceivedHeartbeat = true;
-    void this.barrier.track(() => this.recordSessionActivity(session));
+    void this.barrier
+      .track(() => this.recordSessionActivity(session))
+      .catch(error => logger.warn(`[SessionManager] Failed to record session activity: ${error}`));
   }
 
   /**
@@ -452,9 +458,9 @@ export class SessionManager {
       this.removeSession(sessionId);
       // Notify release callbacks so session-scoped state is cleaned up
       if (deviceId) {
-        void this.barrier.track(() =>
-          this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "cleanup-expired")
-        );
+        void this.barrier
+          .track(() => this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "cleanup-expired"))
+          .catch(error => logger.warn(`[SessionManager] Failed to mark session released (cleanup-expired): ${error}`));
         for (const callback of this.releaseCallbacks) {
           try {
             callback(sessionId, deviceId);

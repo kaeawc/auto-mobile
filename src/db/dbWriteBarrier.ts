@@ -25,7 +25,12 @@ export interface DbWriteBarrier {
    */
   track<T>(work: () => Promise<T>): Promise<T | undefined>;
 
-  /** Flip the draining flag so subsequent {@link track} calls short-circuit. */
+  /**
+   * Flip the draining flag so subsequent {@link track} calls short-circuit.
+   * The flag latches for the process lifetime: production exits after shutdown,
+   * and a same-process restart (tests) starts from a fresh barrier via
+   * {@link resetDbWriteBarrier} or an injected instance.
+   */
   beginDrain(): void;
 
   /**

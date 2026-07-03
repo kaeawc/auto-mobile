@@ -123,6 +123,10 @@ export interface WebSocketMessage {
   currentOrientation?: string;
   value?: number;
   rotationPerformed?: boolean;
+  // Pinch-only: which mechanism performed the gesture — "event-path" (private
+  // synthesis, honors center) or "element-anchored" (public fallback, center-less).
+  // See issue #2910.
+  pinchPath?: string;
 }
 
 /**

@@ -100,29 +100,39 @@ BOOL ObjCExceptionCatcher_synthesizePinch(
     CGFloat rotationDegrees,
     NSTimeInterval duration,
     NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable,
     NSString *_Nullable *_Nullable errorMessage
 ) {
+    // Default: symbols are assumed present until a guard proves otherwise, so a
+    // genuine synthesis error is not misreported as an availability gap.
+    if (symbolsUnavailable != NULL) {
+        *symbolsUnavailable = NO;
+    }
 #if TARGET_OS_IOS
     __block BOOL success = NO;
     __block NSString *failure = nil;
+    __block BOOL unavailable = NO;
 
     NSException *exception = ObjCExceptionCatcher_tryBlock(^{
         Class pathClass = NSClassFromString(@"XCPointerEventPath");
         Class recordClass = NSClassFromString(@"XCSynthesizedEventRecord");
 
         if (pathClass == Nil || recordClass == Nil) {
+            unavailable = YES;
             failure = @"XCTest private pinch event synthesis classes are unavailable";
             return;
         }
         if (![pathClass instancesRespondToSelector:@selector(initForTouchAtPoint:offset:)] ||
             ![pathClass instancesRespondToSelector:@selector(moveToPoint:atOffset:)] ||
             ![pathClass instancesRespondToSelector:@selector(liftUpAtOffset:)]) {
+            unavailable = YES;
             failure = @"XCPointerEventPath does not support the expected pinch selectors";
             return;
         }
         if (![recordClass instancesRespondToSelector:@selector(initWithName:interfaceOrientation:)] ||
             ![recordClass instancesRespondToSelector:@selector(addPointerEventPath:)] ||
             ![recordClass instancesRespondToSelector:@selector(synthesizeWithError:)]) {
+            unavailable = YES;
             failure = @"XCSynthesizedEventRecord does not support the expected pinch synthesis selectors";
             return;
         }
@@ -170,16 +180,28 @@ BOOL ObjCExceptionCatcher_synthesizePinch(
     });
 
     if (exception != nil) {
+        // A caught exception is a genuine synthesis failure, not an availability
+        // gap, so leave `unavailable` as-is (NO unless a guard already set it).
         NSString *reason = exception.reason != nil ? exception.reason : @"no reason";
         failure = [NSString stringWithFormat:@"Objective-C exception during pinch synthesis: %@ - %@",
                    exception.name, reason];
     }
-    if (!success && errorMessage != NULL) {
-        *errorMessage = failure != nil ? failure : @"pinch synthesis failed";
+    if (!success) {
+        if (symbolsUnavailable != NULL) {
+            *symbolsUnavailable = unavailable;
+        }
+        if (errorMessage != NULL) {
+            *errorMessage = failure != nil ? failure : @"pinch synthesis failed";
+        }
     }
 
     return success;
 #else
+    // Off-iOS the private symbols are definitionally unavailable, so signal the
+    // caller to take the public-API fallback path.
+    if (symbolsUnavailable != NULL) {
+        *symbolsUnavailable = YES;
+    }
     if (errorMessage != NULL) {
         *errorMessage = @"XCTest private pinch event synthesis is only available on iOS";
     }

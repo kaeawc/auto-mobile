@@ -46,6 +46,13 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
 /// Synthesizes a two-finger pinch through XCTest private event APIs.
 /// Returns NO with a descriptive error message when the private symbols are unavailable
 /// or synthesis fails. Objective-C exceptions are caught and reported through errorMessage.
+///
+/// `symbolsUnavailable` distinguishes the two failure modes so the caller can degrade
+/// gracefully (see issue #2910): it is set to YES only when the required private
+/// classes/selectors are missing (or the platform is not iOS), and left NO for a
+/// genuine synthesis error or a caught Objective-C exception. When YES, the caller
+/// should fall back to the public element-anchored `pinch(withScale:velocity:)`
+/// rather than surfacing a hard failure.
 FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizePinch(
     CGFloat centerX,
     CGFloat centerY,
@@ -54,6 +61,7 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizePinch(
     CGFloat rotationDegrees,
     NSTimeInterval duration,
     NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable,
     NSString *_Nullable *_Nullable errorMessage
 );
 

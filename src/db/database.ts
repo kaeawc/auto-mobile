@@ -84,7 +84,9 @@ export function resolveDatabasePathFromEnvironment(
  * behaves like a cold start (issue #2796). Collapsing them into one holder with a
  * single {@link reset} makes "reset them as a set" true *by construction*: a
  * fifth lifecycle field is cleared by the same `reset()`, closing the "forgot to
- * reset the Nth global" regression class (issue #2900).
+ * reset the Nth global" regression class (issues #2900/#2944). The next field to
+ * arrive is the `migrationsGeneration` fence (#2898/PR #2936); it lands as one
+ * more property here and its reset/bump joins {@link reset} for free.
  *
  * The three migration fields are one state machine and are documented together
  * where they are read/written; `resolvedDbPath` is the lazily-cached path (see
@@ -120,7 +122,8 @@ class MigrationLifecycleState {
 
   /**
    * Clear the whole lifecycle as a set so a same-process reopen cold-starts.
-   * Adding a field above is reset-by-construction: extend this method with it.
+   * Adding a field above is reset-by-construction: extend this method with it
+   * (e.g. `migrationsGeneration` from #2898/PR #2936 resets/bumps here).
    */
   reset(): void {
     this.resolvedDbPath = null;
@@ -322,23 +325,29 @@ export function getMigrationsError(): Error | null {
 
 /**
  * Reset every piece of module-global state that outlives a single DB connection
- * so a same-process reopen behaves like a cold start. This is THE one place the
- * "reopen == cold start" contract is expressed (issue #2900): a future reset
- * hangs off here, not off a fresh call site, so there is exactly one function to
- * grep and extend. Called by `closeDatabase()` unconditionally (partial-init
- * cleanup); inert in the daemon, whose only caller is shutdown-then-exit.
+ * so a same-process reopen behaves like a cold start. This is THE single named
+ * entry point the reset checklist hangs off (issues #2900/#2935): adding a reset
+ * is done by editing this one function, not by finding the right spot inside
+ * `closeDatabase()`. The "if these resets are ever consolidated, X must move with
+ * them" prose caveat that had already failed twice (#2796, #2896) is now
+ * structural. Called by `closeDatabase()` unconditionally (partial-init cleanup);
+ * inert in the daemon, whose only caller is shutdown-then-exit.
  *
- * Two resets with two different lifecycle semantics live here as deliberate
- * siblings:
+ * Each owning module keeps its own private reset; the *orchestration* lives here.
+ * Two resets with two different lifecycle semantics are deliberate siblings:
  *
- * - `lifecycle.reset()` clears the migration/path state machine as a set (issue
- *   #2796). Leaving any field set would let `ensureMigrationsStarted()` no-op and
- *   `waitForMigrationsBeforeQuery()` short-circuit (skipping migration gating on
- *   the new connection), rethrow a stale startup error against an
+ * - `lifecycle.reset()` clears the migration/path state machine as a set (issues
+ *   #2796/#2900). Leaving any field set would let `ensureMigrationsStarted()`
+ *   no-op and `waitForMigrationsBeforeQuery()` short-circuit (skipping migration
+ *   gating on the new connection), rethrow a stale startup error against an
  *   otherwise-healthy reopened DB, or redirect the reopen to the stale
  *   `resolvedDbPath` instead of re-reading AUTOMOBILE_DB_PATH / AUTOMOBILE_DB_DIR.
  *   In the daemon this is inert and the "path always matches" invariant from
- *   resolveDbPath() holds; the reset is what gives tests full isolation.
+ *   resolveDbPath() holds; the reset is what gives tests full isolation. Because
+ *   this is a single object reset, a new migration-lifecycle field is cleared by
+ *   construction — e.g. the `migrationsGeneration` fence (#2898/PR #2936) slots
+ *   in as one more field on `MigrationLifecycleState` and its reset/bump becomes
+ *   part of `lifecycle.reset()` for free, no new line here (#2944).
  *
  * - `resetDbWriteBarrier()` cold-starts the write barrier (issue #2896). Its
  *   draining flag latches for the process lifetime, so shutdown's
@@ -351,9 +360,11 @@ export function getMigrationsError(): Error | null {
  *   sibling call here rather than a field on `MigrationLifecycleState`. It only
  *   covers consumers that resolve `getDbWriteBarrier()` at use-time;
  *   construction-captured consumers keep their pinned barrier and remain the
- *   documented reopen exception (#2912).
+ *   documented reopen exception (#2912). If #2912 moves those consumers to a
+ *   use-time getter so the barrier no longer needs a lifecycle reset, drop this
+ *   sibling call from here.
  */
-function resetDatabaseLifecycleForReopen(): void {
+function resetDbLifecycleState(): void {
   lifecycle.reset();
   resetDbWriteBarrier();
 }
@@ -371,7 +382,7 @@ export async function closeDatabase(): Promise<void> {
   // Reset unconditionally — outside the `if (dbInstance)` guard — so a
   // partially-initialized state (migrations started but `dbInstance` already
   // nulled) is still cleaned up.
-  resetDatabaseLifecycleForReopen();
+  resetDbLifecycleState();
 }
 
 /**

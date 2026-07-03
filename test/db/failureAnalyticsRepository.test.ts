@@ -5,7 +5,7 @@ import { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsReposit
 import type { RecordFailureInput } from "../../src/db/failureAnalyticsRepository";
 import { createTestDatabase } from "./testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { DbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 
 describe("FailureAnalyticsRepository", () => {
   let db: Kysely<Database>;
@@ -367,24 +367,8 @@ describe("FailureAnalyticsRepository", () => {
   });
 
   describe("shutdown draining (issue #2792)", () => {
-    class RecordingBarrier implements DbWriteBarrier {
-      draining = false;
-      trackCalls = 0;
-      ranCount = 0;
-      isDraining(): boolean { return this.draining; }
-      inFlightCount(): number { return 0; }
-      beginDrain(): void { this.draining = true; }
-      async drain(): Promise<boolean> { return true; }
-      async track<T>(work: () => Promise<T>): Promise<T | undefined> {
-        this.trackCalls += 1;
-        if (this.draining) { return undefined; }
-        this.ranCount += 1;
-        return work();
-      }
-    }
-
     test("routes background retention cleanup through the barrier", async () => {
-      const barrier = new RecordingBarrier();
+      const barrier = new FakeDbWriteBarrier();
       const barrierRepo = new FailureAnalyticsRepository(timer, db, () => barrier);
 
       await barrierRepo.recordFailure(makeFailureInput());
@@ -395,7 +379,7 @@ describe("FailureAnalyticsRepository", () => {
     });
 
     test("skips background retention cleanup while draining, still records the failure", async () => {
-      const barrier = new RecordingBarrier();
+      const barrier = new FakeDbWriteBarrier();
       barrier.beginDrain();
       const barrierRepo = new FailureAnalyticsRepository(timer, db, () => barrier);
 

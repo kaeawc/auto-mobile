@@ -21,6 +21,7 @@ import { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsReposit
 import type { RecordFailureInput } from "../../src/db/failureAnalyticsRepository";
 import { createTestDatabase } from "./testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 
 /**
  * Regression tests for issue #2912 (follow-up to #2896 / PR #2905).
@@ -51,23 +52,6 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
     resetDbWriteBarrier();
   });
 
-  /** Records whether tracked work ran, and short-circuits while draining. */
-  class RecordingBarrier implements DbWriteBarrier {
-    draining = false;
-    trackCalls = 0;
-    ranCount = 0;
-    isDraining(): boolean { return this.draining; }
-    inFlightCount(): number { return 0; }
-    beginDrain(): void { this.draining = true; }
-    async drain(): Promise<boolean> { this.draining = true; return true; }
-    async track<T>(work: () => Promise<T>): Promise<T | undefined> {
-      this.trackCalls += 1;
-      if (this.draining) { return undefined; }
-      this.ranCount += 1;
-      return work();
-    }
-  }
-
   describe("TelemetryRecorder", () => {
     class FakeRepository implements TelemetryRepository {
       logEvents: RecordLogEventInput[] = [];
@@ -92,13 +76,13 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
     test("resolves the barrier per write, not the construction-time instance (acceptance #1)", async () => {
       const repo = new FakeRepository();
       // Construct against a drained barrier (models the barrier pinned at shutdown).
-      const drained = new RecordingBarrier();
+      const drained = new FakeDbWriteBarrier();
       drained.beginDrain();
       let current: DbWriteBarrier = drained;
       const recorder = new TelemetryRecorder(repo, () => null, () => current);
 
       // Reopen swaps in a fresh, non-draining barrier.
-      const reopened = new RecordingBarrier();
+      const reopened = new FakeDbWriteBarrier();
       current = reopened;
 
       await recorder.recordLogEvent(makeLogInput());
@@ -111,7 +95,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
 
     test("still short-circuits while the resolved barrier is draining (acceptance #2)", async () => {
       const repo = new FakeRepository();
-      const draining = new RecordingBarrier();
+      const draining = new FakeDbWriteBarrier();
       draining.beginDrain();
       const recorder = new TelemetryRecorder(repo, () => null, () => draining);
 
@@ -150,14 +134,14 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
     test("resolves the barrier per write, not the construction-time instance (acceptance #1)", async () => {
       const timer = new FakeTimer();
       const { repo, activity } = makeRepo();
-      const drained = new RecordingBarrier();
+      const drained = new FakeDbWriteBarrier();
       drained.beginDrain();
       let current: DbWriteBarrier = drained;
       const mgr = new SessionManager(timer, repo, () => current);
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
 
-        const reopened = new RecordingBarrier();
+        const reopened = new FakeDbWriteBarrier();
         current = reopened;
 
         mgr.recordHeartbeat("s1");
@@ -174,7 +158,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
     test("still short-circuits while the resolved barrier is draining (acceptance #2)", async () => {
       const timer = new FakeTimer();
       const { repo, activity } = makeRepo();
-      const draining = new RecordingBarrier();
+      const draining = new FakeDbWriteBarrier();
       draining.beginDrain();
       const mgr = new SessionManager(timer, repo, () => draining);
       try {
@@ -218,12 +202,12 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
     test("resolves the barrier per write, not the construction-time instance (acceptance #1)", async () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000000);
-      const drained = new RecordingBarrier();
+      const drained = new FakeDbWriteBarrier();
       drained.beginDrain();
       let current: DbWriteBarrier = drained;
       const repo = new FailureAnalyticsRepository(timer, db, () => current);
 
-      const reopened = new RecordingBarrier();
+      const reopened = new FakeDbWriteBarrier();
       current = reopened;
 
       await repo.recordFailure(makeFailureInput());
@@ -237,7 +221,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
     test("still short-circuits while the resolved barrier is draining (acceptance #2)", async () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000000);
-      const draining = new RecordingBarrier();
+      const draining = new FakeDbWriteBarrier();
       draining.beginDrain();
       const repo = new FailureAnalyticsRepository(timer, db, () => draining);
 

@@ -216,13 +216,74 @@ describe("sanitizeObserveResult", () => {
       expect(node["resource-id"]).toBe("id/keep");
     });
 
-    test("measurably shrinks the payload from node trim", () => {
+    test("drops enabled when true but preserves enabled=false (default-true convention)", () => {
+      const makeObs = (enabled: string): ObserveResult => ({
+        updatedAt: 0,
+        screenSize: { width: 1, height: 1 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: {
+          hierarchy: {
+            node: {
+              "enabled": enabled,
+              "resource-id": "id/keep",
+              "node": [],
+              "$": {},
+            } as any,
+          },
+        },
+      });
+
+      const enabledTrue = sanitizeObserveResult(makeObs("true"), DROP_NONE);
+      const enabledFalse = sanitizeObserveResult(makeObs("false"), DROP_NONE);
+      const trueNode = enabledTrue.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+      const falseNode = enabledFalse.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+
+      // enabled defaults to true → absence is lossless; a disabled control is high-signal.
+      expect(trueNode).not.toHaveProperty("enabled");
+      expect(falseNode.enabled).toBe("false");
+    });
+
+    test("measurably shrinks the payload from node trim (view-id dedup, real fixture)", () => {
       const { observe } = loadAndroidHomeObserve();
       // Isolate node-trim: strip perf first so the delta is attributable to trim.
       const perfStripped = sanitizeObserveResult(observe, DROP_NONE);
       // Re-run with trim disabled to get a trim-off baseline of the same output.
       const trimOff = sanitizeObserveResult(observe, { dropElements: false, trimNodes: false });
       expect(measureValue(perfStripped).bytes).toBeLessThan(measureValue(trimOff).bytes);
+    });
+
+    test("measurably shrinks a hierarchy carrying false booleans, empty strings, and enabled=true", () => {
+      // The committed fixture is already boolean/empty-string-clean (the extractor
+      // only emits meaningful attrs), so this synthetic tree exercises the
+      // boolean/empty-string/enabled drop paths against a real byte measurement.
+      const node = (id: number): Record<string, unknown> => ({
+        "view-id": `v-${id}`,
+        "resource-id": `r-${id}`,
+        "className": "android.widget.TextView",
+        "clickable": "false",
+        "long-clickable": "false",
+        "scrollable": "false",
+        "checkable": "false",
+        "checked": "false",
+        "selected": "false",
+        "focused": "false",
+        "enabled": "true",
+        "text": "",
+        "content-desc": `desc ${id}`,
+        "node": [],
+      });
+      const obs: ObserveResult = {
+        updatedAt: 0,
+        screenSize: { width: 1, height: 1 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: {
+          hierarchy: { node: Array.from({ length: 20 }, (_, i) => node(i)) as any },
+        },
+      };
+
+      const trimmed = sanitizeObserveResult(obs, { dropElements: false, trimNodes: true });
+      const untrimmed = sanitizeObserveResult(obs, { dropElements: false, trimNodes: false });
+      expect(measureValue(trimmed).bytes).toBeLessThan(measureValue(untrimmed).bytes);
     });
 
     test("does not touch rawViewHierarchy (raw stays raw)", () => {
@@ -286,6 +347,16 @@ describe("sanitizeObserveResult", () => {
       const before = measureValue(observe).bytes;
       const after = measureValue(out).bytes;
       // Perf strip (~17k) + elements drop + node trim take a large bite.
+      expect(after).toBeLessThan(before * 0.7);
+    });
+
+    test("also reduces the token count — the metric the MCP output cap enforces", () => {
+      // Tokens (not bytes) are what the tool-output cap is measured in, so the
+      // reduction must hold on tokens as well. See observeFixture.ts / #2755.
+      const { observe } = loadAndroidHomeObserve();
+      const out = sanitizeObserveResult(observe, DROP_ELEMENTS);
+      const before = measureValue(observe).tokens;
+      const after = measureValue(out).tokens;
       expect(after).toBeLessThan(before * 0.7);
     });
   });

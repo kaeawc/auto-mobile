@@ -10,6 +10,14 @@ import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
  * `ObserveResult`. Internal consumers (`BaseVisualChange`,
  * `summarizeFailureObservation`, action selection, predictions) read the
  * original object and must be unaffected, so this is a pure function.
+ *
+ * Distinct concern from `ViewHierarchy.cleanNodeProperties`: that is an
+ * allow-list normalizer applied during capture (it *drops* any attribute not
+ * on its list, e.g. `className`). This is a lossless deny-list shrink of the
+ * already-materialized output tree — it only removes redundant/default fields
+ * and must preserve everything else the result carries. The two share the
+ * empty-string / default-boolean / `enabled`-default-true rules on purpose so
+ * their trimmed output agrees; they are not interchangeable.
  */
 
 /** Marker that separates the human-readable perf summary from the raw dump. */
@@ -21,6 +29,10 @@ export const GFXINFO_DUMP_MARKER = "--- GFXINFO DUMP ---";
  * `"false"` / `false` value is lossless for decision-making. Restricting the
  * drop to this known set (rather than any falsy value) avoids nuking a legit
  * text field that happens to hold the string `"false"`.
+ *
+ * `enabled` is deliberately absent: its default is *true*, so it is handled
+ * separately (dropped when true, kept when `"false"`) — the same rule the
+ * repo's canonical node cleaner uses (`ViewHierarchy.cleanNodeProperties`).
  */
 const DEFAULT_FALSE_BOOLEAN_ATTRS: ReadonlySet<string> = new Set([
   "clickable",
@@ -36,8 +48,10 @@ const DEFAULT_FALSE_BOOLEAN_ATTRS: ReadonlySet<string> = new Set([
 
 export interface SanitizeObserveConfig {
   /**
-   * Gate for elements-drop (`--observe-result-drop-elements`). When true the
-   * flattened `elements` block is omitted from the output copy.
+   * Gate for elements-drop. Maps to the `observeResultDropElements` output-
+   * reduction flag (`--observe-result-drop-elements`); the wiring layer (#2758)
+   * supplies it from `ServerConfig.isObserveResultDropElementsEnabled()`. When
+   * true the flattened `elements` block is omitted from the output copy.
    */
   dropElements: boolean;
   /**
@@ -134,6 +148,13 @@ function trimHierarchyNodes(node: ViewHierarchyNode | undefined): void {
   for (const [key, value] of Object.entries(attrs)) {
     // Omit empty-string fields.
     if (value === "") {
+      delete attrs[key];
+      continue;
+    }
+    // Omit `enabled` when true: it defaults to true, so absence reads as
+    // enabled by convention. A disabled control keeps its explicit
+    // `enabled: "false"`. Mirrors ViewHierarchy.cleanNodeProperties.
+    if (key === "enabled" && (value === true || value === "true")) {
       delete attrs[key];
       continue;
     }

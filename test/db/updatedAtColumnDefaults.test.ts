@@ -9,12 +9,24 @@ import { createTestDatabase } from "./testDbHelper";
  * `updated_at` as `.notNull()` with NO default, forcing every writer to supply
  * it. Two newer tables (`failure_groups`, `device_sessions`) already default
  * `updated_at` the same way `created_at` is defaulted, so the fix reconciles the
- * older eight to that established convention (option (a) in the issue).
+ * older eight schema declarations to that established convention (option (a)).
  *
  * Each row below inserts ONLY the columns that are required with no default,
- * deliberately OMITTING `updated_at`, so the default path is exercised exactly
- * the way a future defaulted writer would hit it. Before the fix these inserts
- * throw a NOT NULL constraint failure; after it they store a real timestamp.
+ * deliberately OMITTING `updated_at`, so the SQL-level default path is exercised
+ * exactly the way a future defaulted writer would hit it. Before the fix these
+ * inserts throw a NOT NULL constraint failure; after it they store a real
+ * timestamp.
+ *
+ * NOTE the insert casts (`as never`): the `updated_at` TypeScript type is
+ * INTENTIONALLY left required (`string`, not `Generated<string>`) even though
+ * the fresh schema now carries a default. An upgraded database — one that
+ * already ran the historical migration — keeps the old no-default column, since
+ * editing a migration body does not re-run it (Kysely tracks migrations by name).
+ * Advertising the column as omittable in TypeScript would let a writer pass local
+ * validation yet fail `NOT NULL` for upgraded users. The type may be relaxed once
+ * a repair migration rebuilds these columns' defaults on upgraded DBs (unlike
+ * `created_at`, whose default #2915 already repaired everywhere). The cast lets
+ * this test exercise the SQL default directly, which is what the fix delivers.
  *
  * The source-grep guard that rejects the buggy string-literal form
  * (`defaultTo("datetime('now')")`, the #2895 class) lives in

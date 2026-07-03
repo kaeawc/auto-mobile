@@ -38,53 +38,53 @@ data class BottomNavItem(val label: String, val icon: ImageVector, val route: St
 
 @Composable
 fun HomeScreen(
-    modifier: Modifier = Modifier,
-    initialSelectedTab: Int = 0,
-    initialSelectedSubTab: Int? = null,
-    onNavigateToVideoPlayer: (String) -> Unit = {},
-    onNavigateToDemos: () -> Unit = {},
-    onNavigateToSlides: (Int) -> Unit = {},
-    onLogout: () -> Unit = {},
-    onGuestModeNavigateToLogin: () -> Unit = {},
+  modifier: Modifier = Modifier,
+  initialSelectedTab: Int = 0,
+  initialSelectedSubTab: Int? = null,
+  onNavigateToVideoPlayer: (String) -> Unit = {},
+  onNavigateToDemos: () -> Unit = {},
+  onNavigateToSlides: (Int) -> Unit = {},
+  onLogout: () -> Unit = {},
+  onGuestModeNavigateToLogin: () -> Unit = {},
 ) {
   TrackRecomposition(id = "screen.home", composableName = "HomeScreen") {
     var bottomNavSelection by remember { mutableIntStateOf(initialSelectedTab) }
     HomeScreenCore(
-        modifier = modifier,
-        bottomNavSelected = bottomNavSelection,
-        setBottomNavSelection = { bottomNavSelection = it },
-        initialSelectedSubTab = initialSelectedSubTab,
-        onNavigateToVideoPlayer = onNavigateToVideoPlayer,
-        onNavigateToDemos = onNavigateToDemos,
-        onNavigateToSlides = onNavigateToSlides,
-        onLogout = onLogout,
-        onGuestModeNavigateToLogin = onGuestModeNavigateToLogin,
+      modifier = modifier,
+      bottomNavSelected = bottomNavSelection,
+      setBottomNavSelection = { bottomNavSelection = it },
+      initialSelectedSubTab = initialSelectedSubTab,
+      onNavigateToVideoPlayer = onNavigateToVideoPlayer,
+      onNavigateToDemos = onNavigateToDemos,
+      onNavigateToSlides = onNavigateToSlides,
+      onLogout = onLogout,
+      onGuestModeNavigateToLogin = onGuestModeNavigateToLogin,
     )
   }
 }
 
 @Composable
 fun HomeScreenCore(
-    bottomNavSelected: Int,
-    modifier: Modifier = Modifier,
-    setBottomNavSelection: (Int) -> Unit = {},
-    initialSelectedSubTab: Int? = null,
-    onNavigateToVideoPlayer: (String) -> Unit = {},
-    onNavigateToDemos: () -> Unit = {},
-    onNavigateToSlides: (Int) -> Unit = {},
-    onLogout: () -> Unit = {},
-    onGuestModeNavigateToLogin: () -> Unit = {},
+  bottomNavSelected: Int,
+  modifier: Modifier = Modifier,
+  setBottomNavSelection: (Int) -> Unit = {},
+  initialSelectedSubTab: Int? = null,
+  onNavigateToVideoPlayer: (String) -> Unit = {},
+  onNavigateToDemos: () -> Unit = {},
+  onNavigateToSlides: (Int) -> Unit = {},
+  onLogout: () -> Unit = {},
+  onGuestModeNavigateToLogin: () -> Unit = {},
 ) {
   val context = LocalContext.current
   val analyticsTracker = remember { AnalyticsTracker.getInstance().apply { initialize(context) } }
 
   val navItems =
-      listOf(
-          BottomNavItem("Discover", Icons.Filled.Search, "discover"),
-          BottomNavItem("Demos", Icons.Filled.PlayArrow, "demos"),
-          BottomNavItem("Slides", Icons.Filled.Slideshow, "slides"),
-          BottomNavItem("Settings", Icons.Filled.Settings, "settings"),
-      )
+    listOf(
+      BottomNavItem("Discover", Icons.Filled.Search, "discover"),
+      BottomNavItem("Demos", Icons.Filled.PlayArrow, "demos"),
+      BottomNavItem("Slides", Icons.Filled.Slideshow, "slides"),
+      BottomNavItem("Settings", Icons.Filled.Settings, "settings"),
+    )
 
   // Track screen view when tab changes
   LaunchedEffect(bottomNavSelected) {
@@ -95,34 +95,34 @@ fun HomeScreenCore(
   }
 
   Scaffold(
-      contentWindowInsets = WindowInsets.systemBars,
-      bottomBar = {
-        NavigationBar(windowInsets = WindowInsets.navigationBars) {
-          navItems.forEachIndexed { index, item ->
-            NavigationBarItem(
-                selected = bottomNavSelected == index,
-                onClick = {
-                  when (item.route) {
-                    "demos" -> onNavigateToDemos()
-                    "slides" -> onNavigateToSlides(0) // Navigate to first slide
-                    else -> setBottomNavSelection(index)
-                  }
-                },
-                icon = { Icon(item.icon, contentDescription = item.label) },
-                label = { Text(item.label) },
-            )
-          }
+    contentWindowInsets = WindowInsets.systemBars,
+    bottomBar = {
+      NavigationBar(windowInsets = WindowInsets.navigationBars) {
+        navItems.forEachIndexed { index, item ->
+          NavigationBarItem(
+            selected = bottomNavSelected == index,
+            onClick = {
+              when (item.route) {
+                "demos" -> onNavigateToDemos()
+                "slides" -> onNavigateToSlides(0) // Navigate to first slide
+                else -> setBottomNavSelection(index)
+              }
+            },
+            icon = { Icon(item.icon, contentDescription = item.label) },
+            label = { Text(item.label) },
+          )
         }
-      },
-      modifier = modifier,
+      }
+    },
+    modifier = modifier,
   ) { paddingValues ->
     Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
       when (bottomNavSelected) {
         0 ->
-            DiscoverVideoScreen(
-                onNavigateToVideoPlayer = onNavigateToVideoPlayer,
-                initialSelectedSubTab = initialSelectedSubTab,
-            )
+          DiscoverVideoScreen(
+            onNavigateToVideoPlayer = onNavigateToVideoPlayer,
+            initialSelectedSubTab = initialSelectedSubTab,
+          )
         1 -> {
           // Demos handled by navigation - this case shouldn't be reached
         }
@@ -131,55 +131,55 @@ fun HomeScreenCore(
           // since we navigate away when slides is selected
         }
         3 ->
-            SettingsScreen(
-                onLogout = onLogout,
-                onGuestModeNavigateToLogin = onGuestModeNavigateToLogin,
-            )
+          SettingsScreen(
+            onLogout = onLogout,
+            onGuestModeNavigateToLogin = onGuestModeNavigateToLogin,
+          )
       }
     }
   }
 }
 
 @Preview(
-    name = "Home - Tap - Keyboard Open",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_NO,
+  name = "Home - Tap - Keyboard Open",
+  showBackground = true,
+  uiMode = Configuration.UI_MODE_NIGHT_NO,
 )
 @Preview(
-    name = "Home - Tap - Keyboard Open - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
+  name = "Home - Tap - Keyboard Open - Dark",
+  showBackground = true,
+  uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun HomeScreenTapPreview() {
 
   val isDarkMode =
-      when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
-        Configuration.UI_MODE_NIGHT_YES -> true
-        else -> false
-      }
+    when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
+      Configuration.UI_MODE_NIGHT_YES -> true
+      else -> false
+    }
 
   AutoMobileTheme(darkTheme = isDarkMode) { HomeScreenCore(bottomNavSelected = 0) }
 }
 
 @Preview(
-    name = "Home - Settings - Keyboard Open",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_NO,
+  name = "Home - Settings - Keyboard Open",
+  showBackground = true,
+  uiMode = Configuration.UI_MODE_NIGHT_NO,
 )
 @Preview(
-    name = "Home - Settings - Keyboard Open - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
+  name = "Home - Settings - Keyboard Open - Dark",
+  showBackground = true,
+  uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun HomeScreenSettingsPreview() {
 
   val isDarkMode =
-      when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
-        Configuration.UI_MODE_NIGHT_YES -> true
-        else -> false
-      }
+    when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
+      Configuration.UI_MODE_NIGHT_YES -> true
+      else -> false
+    }
 
   AutoMobileTheme(darkTheme = isDarkMode) { HomeScreenCore(bottomNavSelected = 3) }
 }

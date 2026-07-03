@@ -6,12 +6,12 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class HighlightBounds(
-    val x: Int,
-    val y: Int,
-    val width: Int,
-    val height: Int,
-    val sourceWidth: Int? = null,
-    val sourceHeight: Int? = null,
+  val x: Int,
+  val y: Int,
+  val width: Int,
+  val height: Int,
+  val sourceWidth: Int? = null,
+  val sourceHeight: Int? = null,
 ) {
   fun hasValidSize(): Boolean = width > 0 && height > 0
 
@@ -26,8 +26,8 @@ data class HighlightBounds(
 
 @Serializable
 data class HighlightPoint(
-    val x: Float,
-    val y: Float,
+  val x: Float,
+  val y: Float,
 )
 
 @Serializable
@@ -54,19 +54,19 @@ enum class HighlightLineJoin {
 
 @Serializable
 data class HighlightStyle(
-    val strokeColor: String? = null,
-    val strokeWidth: Float? = null,
-    val dashPattern: List<Float>? = null,
-    val smoothing: SmoothingAlgorithm? = null,
-    val tension: Float? = null,
-    val capStyle: HighlightLineCap? = null,
-    val joinStyle: HighlightLineJoin? = null,
+  val strokeColor: String? = null,
+  val strokeWidth: Float? = null,
+  val dashPattern: List<Float>? = null,
+  val smoothing: SmoothingAlgorithm? = null,
+  val tension: Float? = null,
+  val capStyle: HighlightLineCap? = null,
+  val joinStyle: HighlightLineJoin? = null,
 )
 
 @Serializable
 data class HighlightShape(
-    val type: String,
-    val bounds: HighlightBounds? = null,
-    val points: List<HighlightPoint>? = null,
-    val style: HighlightStyle? = null,
+  val type: String,
+  val bounds: HighlightBounds? = null,
+  val points: List<HighlightPoint>? = null,
+  val style: HighlightStyle? = null,
 )

@@ -4,6 +4,7 @@ import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
+import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
@@ -22,7 +23,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
 
 /**
  * WebSocket server that streams view hierarchy updates to connected clients and dispatches inbound
@@ -33,11 +33,11 @@ import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
  * which case inbound messages are ignored.
  */
 class WebSocketServer(
-    private val port: Int = 8765,
-    private val scope: CoroutineScope,
-    private val perfProvider: PerfProvider = PerfProvider.instance,
-    /** Type-safe handler that receives decoded requests. When null, inbound messages are ignored. */
-    private val messageHandler: WebSocketMessageHandler? = null,
+  private val port: Int = 8765,
+  private val scope: CoroutineScope,
+  private val perfProvider: PerfProvider = PerfProvider.instance,
+  /** Type-safe handler that receives decoded requests. When null, inbound messages are ignored. */
+  private val messageHandler: WebSocketMessageHandler? = null,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -78,59 +78,59 @@ class WebSocketServer(
 
     try {
       server =
-          embeddedServer(CIO, port = port) {
-                install(WebSockets) {
-                  pingPeriod = 15.seconds
-                  timeout = 60.seconds
-                  maxFrameSize = Long.MAX_VALUE
-                  masking = false
-                }
+        embeddedServer(CIO, port = port) {
+            install(WebSockets) {
+              pingPeriod = 15.seconds
+              timeout = 60.seconds
+              maxFrameSize = Long.MAX_VALUE
+              masking = false
+            }
 
-                install(ContentNegotiation) { json(json) }
+            install(ContentNegotiation) { json(json) }
 
-                routing {
-                  webSocket("/ws") {
-                    val connectionId = connectionCount.incrementAndGet()
-                    Log.d(TAG, "Client #$connectionId connected")
+            routing {
+              webSocket("/ws") {
+                val connectionId = connectionCount.incrementAndGet()
+                Log.d(TAG, "Client #$connectionId connected")
 
-                    try {
-                      // Send connection greeting before registering for broadcasts
-                      send(Frame.Text("""{"type":"connected","id":$connectionId}"""))
+                try {
+                  // Send connection greeting before registering for broadcasts
+                  send(Frame.Text("""{"type":"connected","id":$connectionId}"""))
 
-                      synchronized(connections) { connections.add(this) }
+                  synchronized(connections) { connections.add(this) }
 
-                      // Listen for incoming messages
-                      for (frame in incoming) {
-                        when (frame) {
-                          is Frame.Text -> {
-                            val text = frame.readText()
-                            Log.d(TAG, "Received from client #$connectionId: $text")
-                            handleClientMessage(text)
-                          }
-                          is Frame.Close -> {
-                            Log.d(TAG, "Client #$connectionId closed connection")
-                          }
-                          else -> {
-                            Log.d(TAG, "Received frame type: ${frame.frameType}")
-                          }
-                        }
+                  // Listen for incoming messages
+                  for (frame in incoming) {
+                    when (frame) {
+                      is Frame.Text -> {
+                        val text = frame.readText()
+                        Log.d(TAG, "Received from client #$connectionId: $text")
+                        handleClientMessage(text)
                       }
-                    } catch (e: Exception) {
-                      Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
-                    } finally {
-                      synchronized(connections) { connections.remove(this) }
-                      Log.d(
-                          TAG,
-                          "Client #$connectionId disconnected. Active connections: ${connections.size}",
-                      )
+                      is Frame.Close -> {
+                        Log.d(TAG, "Client #$connectionId closed connection")
+                      }
+                      else -> {
+                        Log.d(TAG, "Received frame type: ${frame.frameType}")
+                      }
                     }
                   }
-
-                  // Health check endpoint
-                  get("/health") { call.respond(HttpStatusCode.OK, "OK") }
+                } catch (e: Exception) {
+                  Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
+                } finally {
+                  synchronized(connections) { connections.remove(this) }
+                  Log.d(
+                    TAG,
+                    "Client #$connectionId disconnected. Active connections: ${connections.size}",
+                  )
                 }
               }
-              .start(wait = false)
+
+              // Health check endpoint
+              get("/health") { call.respond(HttpStatusCode.OK, "OK") }
+            }
+          }
+          .start(wait = false)
 
       // Launch coroutine to handle message broadcasting
       scope.launch {
@@ -203,9 +203,7 @@ class WebSocketServer(
   // Type-Safe Broadcast API (Protocol Types)
   // =============================================================================
 
-  /**
-   * Broadcast mode for controlling message delivery.
-   */
+  /** Broadcast mode for controlling message delivery. */
   sealed interface BroadcastMode {
     /** Async broadcast via SharedFlow - non-blocking, best for event-driven updates */
     data object Async : BroadcastMode
@@ -252,14 +250,14 @@ class WebSocketServer(
     val deadConnections = mutableListOf<DefaultWebSocketSession>()
 
     synchronized(connections) { connections.toList() }
-        .forEach { connection ->
-          try {
-            connection.send(Frame.Text(message))
-          } catch (e: Exception) {
-            Log.w(TAG, "Failed to send to connection, marking as dead", e)
-            deadConnections.add(connection)
-          }
+      .forEach { connection ->
+        try {
+          connection.send(Frame.Text(message))
+        } catch (e: Exception) {
+          Log.w(TAG, "Failed to send to connection, marking as dead", e)
+          deadConnections.add(connection)
         }
+      }
 
     // Remove dead connections
     if (deadConnections.isNotEmpty()) {
@@ -301,12 +299,12 @@ class WebSocketServer(
     }
 
     val request =
-        try {
-          protocolJson.decodeFromString<ProtocolRequest>(message)
-        } catch (e: Exception) {
-          Log.w(TAG, "Failed to parse client message: $message", e)
-          return
-        }
+      try {
+        protocolJson.decodeFromString<ProtocolRequest>(message)
+      } catch (e: Exception) {
+        Log.w(TAG, "Failed to parse client message: $message", e)
+        return
+      }
 
     Log.d(TAG, "Received ${request::class.simpleName} (requestId: ${request.requestId})")
     // Dispatch inline on the WebSocket read loop (already a coroutine) rather than launching into

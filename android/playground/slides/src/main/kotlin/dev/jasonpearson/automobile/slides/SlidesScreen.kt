@@ -65,10 +65,10 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun SlidesScreen(
-    slides: List<SlideContent> = getAllSlides(),
-    initialSlideIndex: Int = 0,
-    modifier: Modifier = Modifier,
-    onNavigateBack: (() -> Unit)? = null,
+  slides: List<SlideContent> = getAllSlides(),
+  initialSlideIndex: Int = 0,
+  modifier: Modifier = Modifier,
+  onNavigateBack: (() -> Unit)? = null,
 ) {
   TrackRecomposition(id = "screen.slides", composableName = "SlidesScreen") {
     val context = LocalContext.current
@@ -87,7 +87,7 @@ fun SlidesScreen(
         // Hide system bars
         insetsController.hide(WindowInsetsCompat.Type.systemBars())
         insetsController.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+          WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
         // Make content appear behind system bars
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -108,10 +108,10 @@ fun SlidesScreen(
     val savedPage: MutableState<Int> = rememberSaveable { mutableIntStateOf(initialSlideIndex) }
 
     val pagerState =
-        rememberPagerState(
-            initialPage = savedPage.value.coerceIn(0, slides.size - 1),
-            pageCount = { slides.size },
-        )
+      rememberPagerState(
+        initialPage = savedPage.value.coerceIn(0, slides.size - 1),
+        pageCount = { slides.size },
+      )
 
     // Update saved page when current page changes
     LaunchedEffect(pagerState.currentPage) { savedPage.value = pagerState.currentPage }
@@ -128,83 +128,83 @@ fun SlidesScreen(
         // Slide content with floating day/night button and tap navigation
         Box(modifier = Modifier.weight(1f)) {
           HorizontalPager(
-              state = pagerState,
-              userScrollEnabled = false,
-              modifier = Modifier.fillMaxSize(),
+            state = pagerState,
+            userScrollEnabled = false,
+            modifier = Modifier.fillMaxSize(),
           ) { page ->
             SlideItem(
-                slideContent = slides[page],
-                isDarkMode = isDarkMode,
-                modifier =
-                    Modifier.fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background)
-                        .windowInsetsPadding(WindowInsets.displayCutout),
+              slideContent = slides[page],
+              isDarkMode = isDarkMode,
+              modifier =
+                Modifier.fillMaxSize()
+                  .background(MaterialTheme.colorScheme.background)
+                  .windowInsetsPadding(WindowInsets.displayCutout),
             )
           }
 
           // Left tap area for previous slide
           Box(
-              modifier =
-                  Modifier.width((configuration.screenWidthDp * 0.3f).dp)
-                      .fillMaxHeight()
-                      .align(Alignment.CenterStart)
-                      .semantics { contentDescription = "Previous" }
-                      .clickable(
-                          interactionSource = remember { MutableInteractionSource() },
-                          indication = null,
-                      ) {
-                        if (pagerState.currentPage > 0) {
-                          coroutineScope.launch {
-                            pagerState.scrollToPage(pagerState.currentPage - 1)
-                          }
-                        }
-                      }
+            modifier =
+              Modifier.width((configuration.screenWidthDp * 0.3f).dp)
+                .fillMaxHeight()
+                .align(Alignment.CenterStart)
+                .semantics { contentDescription = "Previous" }
+                .clickable(
+                  interactionSource = remember { MutableInteractionSource() },
+                  indication = null,
+                ) {
+                  if (pagerState.currentPage > 0) {
+                    coroutineScope.launch {
+                      pagerState.scrollToPage(pagerState.currentPage - 1)
+                    }
+                  }
+                }
           )
 
           // Right tap area for next slide
           Box(
-              modifier =
-                  Modifier.width((configuration.screenWidthDp * 0.3f).dp)
-                      .fillMaxHeight()
-                      .align(Alignment.CenterEnd)
-                      .semantics { contentDescription = "Next" }
-                      .clickable(
-                          interactionSource = remember { MutableInteractionSource() },
-                          indication = null,
-                      ) {
-                        if (pagerState.currentPage < slides.size - 1) {
-                          coroutineScope.launch {
-                            pagerState.scrollToPage(pagerState.currentPage + 1)
-                          }
-                        }
-                      }
+            modifier =
+              Modifier.width((configuration.screenWidthDp * 0.3f).dp)
+                .fillMaxHeight()
+                .align(Alignment.CenterEnd)
+                .semantics { contentDescription = "Next" }
+                .clickable(
+                  interactionSource = remember { MutableInteractionSource() },
+                  indication = null,
+                ) {
+                  if (pagerState.currentPage < slides.size - 1) {
+                    coroutineScope.launch {
+                      pagerState.scrollToPage(pagerState.currentPage + 1)
+                    }
+                  }
+                }
           )
 
           // Day/Night mode toggle - floating in bottom right corner
           IconButton(
-              onClick = { themeManager.toggleTheme() },
-              modifier =
-                  Modifier.size(64.dp)
-                      .align(Alignment.BottomEnd)
-                      .windowInsetsPadding(WindowInsets.systemBars)
-                      .padding(16.dp),
+            onClick = { themeManager.toggleTheme() },
+            modifier =
+              Modifier.size(64.dp)
+                .align(Alignment.BottomEnd)
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .padding(16.dp),
           ) {
             Icon(
-                imageVector = if (!isDarkMode) Icons.Filled.LightMode else Icons.Filled.DarkMode,
-                contentDescription = if (!isDarkMode) "Light Mode" else "Dark Mode",
-                modifier = Modifier.size(32.dp),
-                tint = MaterialTheme.colorScheme.onSurface,
+              imageVector = if (!isDarkMode) Icons.Filled.LightMode else Icons.Filled.DarkMode,
+              contentDescription = if (!isDarkMode) "Light Mode" else "Dark Mode",
+              modifier = Modifier.size(32.dp),
+              tint = MaterialTheme.colorScheme.onSurface,
             )
           }
         }
 
         // Progress bar - pinned to bottom with minimal height and no padding
         LinearProgressIndicator(
-            progress = (pagerState.currentPage + 1f) / slides.size,
-            modifier =
-                Modifier.fillMaxWidth()
-                    .size(height = 2.dp, width = 0.dp)
-                    .windowInsetsPadding(WindowInsets.navigationBars),
+          progress = (pagerState.currentPage + 1f) / slides.size,
+          modifier =
+            Modifier.fillMaxWidth()
+              .size(height = 2.dp, width = 0.dp)
+              .windowInsetsPadding(WindowInsets.navigationBars),
         )
       }
     }
@@ -215,80 +215,80 @@ fun SlidesScreen(
 @androidx.media3.common.util.UnstableApi
 @Composable
 private fun SlideItem(
-    slideContent: SlideContent,
-    isDarkMode: Boolean,
-    modifier: Modifier = Modifier,
+  slideContent: SlideContent,
+  isDarkMode: Boolean,
+  modifier: Modifier = Modifier,
 ) {
   when (slideContent) {
     is SlideContent.LargeText -> {
       LargeTextSlideItem(
-          title = slideContent.title,
-          subtitle = slideContent.subtitle,
-          modifier = modifier,
+        title = slideContent.title,
+        subtitle = slideContent.subtitle,
+        modifier = modifier,
       )
     }
 
     is SlideContent.BulletPoints -> {
       BulletPointSlideItem(
-          title = slideContent.title,
-          points = slideContent.points,
-          modifier = modifier,
+        title = slideContent.title,
+        points = slideContent.points,
+        modifier = modifier,
       )
     }
 
     is SlideContent.Emoji -> {
       EmojiSlideItem(
-          emoji = slideContent.emoji,
-          caption = slideContent.caption,
-          modifier = modifier,
+        emoji = slideContent.emoji,
+        caption = slideContent.caption,
+        modifier = modifier,
       )
     }
 
     is SlideContent.CodeSample -> {
       CodeSampleSlideItem(
-          code = slideContent.code,
-          language = slideContent.language,
-          title = slideContent.title,
-          highlight = slideContent.highlight,
-          isDarkMode = isDarkMode,
-          modifier = modifier,
+        code = slideContent.code,
+        language = slideContent.language,
+        title = slideContent.title,
+        highlight = slideContent.highlight,
+        isDarkMode = isDarkMode,
+        modifier = modifier,
       )
     }
 
     is SlideContent.Visualization -> {
       VisualizationSlideItem(
-          imageUrl = slideContent.imageUrl,
-          caption = slideContent.caption,
-          contentDescription = slideContent.contentDescription,
-          modifier = modifier,
+        imageUrl = slideContent.imageUrl,
+        caption = slideContent.caption,
+        contentDescription = slideContent.contentDescription,
+        modifier = modifier,
       )
     }
 
     is SlideContent.Video -> {
       VideoPlayerSlideItem(
-          videoUrl = slideContent.videoUrl,
-          caption = slideContent.caption,
-          contentDescription = slideContent.contentDescription,
-          modifier = modifier,
+        videoUrl = slideContent.videoUrl,
+        caption = slideContent.caption,
+        contentDescription = slideContent.contentDescription,
+        modifier = modifier,
       )
     }
 
     is SlideContent.MermaidDiagram -> {
       MermaidDiagramSlideItem(
-          mermaidCode = slideContent.code,
-          title = slideContent.title,
-          isDarkMode = isDarkMode,
-          modifier = modifier,
+        mermaidCode = slideContent.code,
+        title = slideContent.title,
+        isDarkMode = isDarkMode,
+        modifier = modifier,
       )
     }
 
     is SlideContent.Screenshot -> {
       ScreenshotSlideItem(
-          lightScreenshot = slideContent.lightScreenshot,
-          darkScreenshot = slideContent.darkScreenshot,
-          caption = slideContent.caption,
-          contentDescription = slideContent.contentDescription,
-          modifier = modifier,
+        lightScreenshot = slideContent.lightScreenshot,
+        darkScreenshot = slideContent.darkScreenshot,
+        caption = slideContent.caption,
+        contentDescription = slideContent.contentDescription,
+        modifier = modifier,
       )
     }
   }

@@ -21,15 +21,15 @@ fun AutoMobileLogo() {
   val mood = getExperiment<MoodExperiment>(MoodExperiment.EXPERIMENT_NAME)
   when (mood?.currentTreatment) {
     MoodTreatment.PARTY ->
-        Image(
-            painter = painterResource(R.drawable.auto_mobile_holo),
-            contentDescription = "AutoMobile Party Logo",
-        )
+      Image(
+        painter = painterResource(R.drawable.auto_mobile_holo),
+        contentDescription = "AutoMobile Party Logo",
+      )
     else ->
-        Image(
-            painter = painterResource(R.drawable.auto_mobile_sticker),
-            contentDescription = "AutoMobile Logo",
-        )
+      Image(
+        painter = painterResource(R.drawable.auto_mobile_sticker),
+        contentDescription = "AutoMobile Logo",
+      )
   }
 }
 
@@ -38,10 +38,10 @@ fun AutoMobileLogo() {
 @Composable
 private fun AutoMobileLogoPreview() {
   val isDarkMode =
-      when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
-        Configuration.UI_MODE_NIGHT_YES -> true
-        else -> false
-      }
+    when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
+      Configuration.UI_MODE_NIGHT_YES -> true
+      else -> false
+    }
 
   AutoMobileTheme(darkTheme = isDarkMode) {
     Column(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {

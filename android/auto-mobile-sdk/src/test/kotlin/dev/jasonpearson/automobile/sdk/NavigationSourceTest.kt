@@ -21,13 +21,13 @@ class NavigationSourceTest {
   @Test
   fun `NavigationSource valueOf should work correctly`() {
     assertEquals(
-        NavigationSource.COMPOSE_NAVIGATION,
-        NavigationSource.valueOf("COMPOSE_NAVIGATION"),
+      NavigationSource.COMPOSE_NAVIGATION,
+      NavigationSource.valueOf("COMPOSE_NAVIGATION"),
     )
     assertEquals(NavigationSource.CIRCUIT, NavigationSource.valueOf("CIRCUIT"))
     assertEquals(
-        NavigationSource.NAVIGATION_COMPONENT,
-        NavigationSource.valueOf("NAVIGATION_COMPONENT"),
+      NavigationSource.NAVIGATION_COMPONENT,
+      NavigationSource.valueOf("NAVIGATION_COMPONENT"),
     )
   }
 

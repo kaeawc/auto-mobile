@@ -84,9 +84,7 @@ data class HandledExceptionEvent(
   val event: HandledExceptionData,
 ) : WebSocketResponse()
 
-/**
- * Device information captured at the time of an exception.
- */
+/** Device information captured at the time of an exception. */
 @Serializable
 data class DeviceInfo(
   val model: String,

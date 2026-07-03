@@ -9,7 +9,7 @@ import dev.jasonpearson.automobile.experimentation.experiments.MoodTreatment
 class ExperimentRepository(context: Context) {
 
   private val sharedPreferences: SharedPreferences =
-      context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
   fun getExperiments(): List<Experiment<*>> {
     return getActiveExperiments().mapNotNull { experiment ->
@@ -17,8 +17,7 @@ class ExperimentRepository(context: Context) {
         ActiveExperiments.Mood -> {
           val currentTreatmentId = getExperimentCurrentTreatmentId(experiment.experimentName)
           val currentTreatment =
-              MoodExperiment.treatments.find { it.id == currentTreatmentId }
-                  ?: MoodTreatment.CONTROL
+            MoodExperiment.treatments.find { it.id == currentTreatmentId } ?: MoodTreatment.CONTROL
           MoodExperiment(currentTreatment)
         }
         else -> {
@@ -30,7 +29,7 @@ class ExperimentRepository(context: Context) {
 
   internal fun getExperimentCurrentTreatmentId(experimentName: String): String {
     return sharedPreferences.getString("${KEY_CURRENT_TREATMENT_PREFIX}$experimentName", CONTROL)
-        ?: CONTROL
+      ?: CONTROL
   }
 
   fun getActiveExperiments(): Set<ActiveExperiments> {
@@ -39,8 +38,8 @@ class ExperimentRepository(context: Context) {
 
   fun <T : Treatment> saveExperiment(experiment: Experiment<T>) {
     val experimentNames =
-        sharedPreferences.getStringSet(KEY_EXPERIMENT_NAMES, emptySet())?.toMutableSet()
-            ?: mutableSetOf()
+      sharedPreferences.getStringSet(KEY_EXPERIMENT_NAMES, emptySet())?.toMutableSet()
+        ?: mutableSetOf()
     experimentNames.add(experiment.name)
 
     sharedPreferences.edit {

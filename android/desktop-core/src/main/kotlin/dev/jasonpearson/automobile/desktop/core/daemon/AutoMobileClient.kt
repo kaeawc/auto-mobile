@@ -31,10 +31,10 @@ interface AutoMobileClient {
   fun setFeatureFlag(key: String, enabled: Boolean, config: JsonObject? = null): FeatureFlagState
 
   fun listPerformanceAuditResults(
-      startTime: String? = null,
-      endTime: String? = null,
-      limit: Int? = null,
-      offset: Int? = null,
+    startTime: String? = null,
+    endTime: String? = null,
+    limit: Int? = null,
+    offset: Int? = null,
   ): PerformanceAuditHistoryResult
 
   fun getTestTimings(query: TestTimingQuery = TestTimingQuery()): TestTimingSummary
@@ -44,21 +44,21 @@ interface AutoMobileClient {
   fun startTestRecording(platform: String = "android"): TestRecordingStartResult
 
   fun stopTestRecording(
-      recordingId: String? = null,
-      planName: String? = null,
+    recordingId: String? = null,
+    planName: String? = null,
   ): TestRecordingStopResult
 
   fun executePlan(
-      planContent: String,
-      platform: String = "android",
-      startStep: Int? = null,
-      sessionUuid: String? = null,
+    planContent: String,
+    platform: String = "android",
+    startStep: Int? = null,
+    sessionUuid: String? = null,
   ): ExecutePlanResult
 
   fun startDevice(
-      name: String,
-      platform: String,
-      deviceId: String? = null,
+    name: String,
+    platform: String,
+    deviceId: String? = null,
   ): StartDeviceResult
 
   fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult
@@ -72,25 +72,25 @@ interface AutoMobileClient {
   fun updateService(deviceId: String, platform: String): UpdateServiceResult
 
   fun setKeyValue(
-      deviceId: String,
-      appId: String,
-      fileName: String,
-      key: String,
-      value: String?,
-      type: String,
+    deviceId: String,
+    appId: String,
+    fileName: String,
+    key: String,
+    value: String?,
+    type: String,
   ): SetKeyValueResult
 
   fun removeKeyValue(
-      deviceId: String,
-      appId: String,
-      fileName: String,
-      key: String,
+    deviceId: String,
+    appId: String,
+    fileName: String,
+    key: String,
   ): RemoveKeyValueResult
 
   fun clearKeyValueFile(
-      deviceId: String,
-      appId: String,
-      fileName: String,
+    deviceId: String,
+    appId: String,
+    fileName: String,
   ): ClearKeyValueResult
 
   fun callTool(name: String, arguments: JsonObject): JsonElement
@@ -100,141 +100,135 @@ interface AutoMobileClient {
 
 @Serializable
 data class KillDeviceResult(
-    val success: Boolean = true,
-    val message: String? = null,
+  val success: Boolean = true,
+  val message: String? = null,
 )
 
 @Serializable
 data class UpdateServiceResult(
-    val success: Boolean = true,
-    val message: String? = null,
+  val success: Boolean = true,
+  val message: String? = null,
 )
 
 @Serializable
 data class SetKeyValueResult(
-    val success: Boolean = true,
-    val message: String? = null,
+  val success: Boolean = true,
+  val message: String? = null,
 )
 
 @Serializable
 data class RemoveKeyValueResult(
-    val success: Boolean = true,
-    val message: String? = null,
+  val success: Boolean = true,
+  val message: String? = null,
 )
 
 @Serializable
 data class ClearKeyValueResult(
-    val success: Boolean = true,
-    val message: String? = null,
+  val success: Boolean = true,
+  val message: String? = null,
 )
 
 @Serializable
 data class StartDeviceResult(
-    val success: Boolean = true,
-    val deviceId: String? = null,
-    val message: String? = null,
+  val success: Boolean = true,
+  val deviceId: String? = null,
+  val message: String? = null,
 )
 
 @Serializable
 data class SetActiveDeviceResult(
-    val success: Boolean = true,
-    val message: String? = null,
+  val success: Boolean = true,
+  val message: String? = null,
 )
 
 @Serializable
 data class ObserveResult(
-    val updatedAt: Long? = null,
-    val screenSize: ObserveScreenSize? = null,
-    val viewHierarchy: JsonElement? = null,
-    /** Display rotation: 0=portrait, 1=landscape 90deg, 2=reverse portrait, 3=reverse landscape */
-    val rotation: Int? = null,
+  val updatedAt: Long? = null,
+  val screenSize: ObserveScreenSize? = null,
+  val viewHierarchy: JsonElement? = null,
+  /** Display rotation: 0=portrait, 1=landscape 90deg, 2=reverse portrait, 3=reverse landscape */
+  val rotation: Int? = null,
 )
 
 @Serializable
 data class ObserveScreenSize(
-    val width: Int? = null,
-    val height: Int? = null,
+  val width: Int? = null,
+  val height: Int? = null,
 )
 
 open class McpConnectionException(message: String, cause: Throwable? = null) :
-    Exception(message, cause)
+  Exception(message, cause)
 
 @Serializable
 data class McpResource(
-    val uri: String,
-    val name: String,
-    val description: String? = null,
-    val mimeType: String? = null,
+  val uri: String,
+  val name: String,
+  val description: String? = null,
+  val mimeType: String? = null,
 )
 
 @Serializable
 data class McpResourceTemplate(
-    @SerialName("uriTemplate") val uriTemplate: String,
-    val name: String,
-    val description: String? = null,
-    val mimeType: String? = null,
+  @SerialName("uriTemplate") val uriTemplate: String,
+  val name: String,
+  val description: String? = null,
+  val mimeType: String? = null,
 )
 
 @Serializable
 data class McpTool(
-    val name: String,
-    val description: String? = null,
-    val inputSchema: JsonObject? = null,
+  val name: String,
+  val description: String? = null,
+  val inputSchema: JsonObject? = null,
 )
 
 @Serializable
 data class McpResourceContent(
-    val uri: String,
-    val mimeType: String? = null,
-    val text: String? = null,
-    val blob: String? = null,
+  val uri: String,
+  val mimeType: String? = null,
+  val text: String? = null,
+  val blob: String? = null,
 )
 
 @Serializable
 data class McpToolContent(
-    val type: String,
-    val text: String? = null,
+  val type: String,
+  val text: String? = null,
 )
 
-@Serializable
-data class McpToolResponse(
-    val content: List<McpToolContent>,
-)
+@Serializable data class McpToolResponse(val content: List<McpToolContent>)
 
 @Serializable
 data class FeatureFlagState(
-    val key: String,
-    val label: String,
-    val description: String? = null,
-    val enabled: Boolean,
-    val config: JsonObject? = null,
+  val key: String,
+  val label: String,
+  val description: String? = null,
+  val enabled: Boolean,
+  val config: JsonObject? = null,
 )
 
-@Serializable
-data class FeatureFlagListResult(
-    val flags: List<FeatureFlagState>,
-)
+@Serializable data class FeatureFlagListResult(val flags: List<FeatureFlagState>)
 
 @Serializable
 data class JsonRpcRequest(
-    val jsonrpc: String = "2.0",
-    val id: JsonElement? = null,
-    val method: String,
-    val params: JsonElement? = null,
+  val jsonrpc: String = "2.0",
+  val id: JsonElement? = null,
+  val method: String,
+  val params: JsonElement? = null,
 )
 
 @Serializable
 data class JsonRpcResponse(
-    val jsonrpc: String,
-    val id: JsonElement? = null,
-    val result: JsonElement? = null,
-    val error: JsonRpcError? = null,
+  val jsonrpc: String,
+  val id: JsonElement? = null,
+  val result: JsonElement? = null,
+  val error: JsonRpcError? = null,
 )
 
 @Serializable
 data class JsonRpcError(
-    val code: Int,
-    val message: String,
+  val code: Int,
+  val message: String,
 )
 
 @Serializable internal data class ListResourcesResult(val resources: List<McpResource>)
@@ -249,25 +243,25 @@ internal data class ListResourceTemplatesResult(val resourceTemplates: List<McpR
 internal const val LATEST_MCP_PROTOCOL_VERSION = "2025-11-25"
 
 internal fun <T> decodeToolResponse(
-    json: Json,
-    element: JsonElement,
-    serializer: KSerializer<T>,
+  json: Json,
+  element: JsonElement,
+  serializer: KSerializer<T>,
 ): T {
   val response = json.decodeFromJsonElement(McpToolResponse.serializer(), element)
   val text =
-      response.content.firstOrNull { it.type == "text" }?.text
-          ?: throw McpConnectionException("Tool response missing text content")
+    response.content.firstOrNull { it.type == "text" }?.text
+      ?: throw McpConnectionException("Tool response missing text content")
   return json.decodeFromString(serializer, text)
 }
 
 internal fun <T> decodeResourceResponse(
-    json: Json,
-    contents: List<McpResourceContent>,
-    serializer: KSerializer<T>,
+  json: Json,
+  contents: List<McpResourceContent>,
+  serializer: KSerializer<T>,
 ): T {
   val text =
-      contents.firstOrNull { !it.text.isNullOrBlank() }?.text
-          ?: throw McpConnectionException("Resource response missing text content")
+    contents.firstOrNull { !it.text.isNullOrBlank() }?.text
+      ?: throw McpConnectionException("Resource response missing text content")
   val element = json.decodeFromString(JsonElement.serializer(), text)
   val error = (element as? JsonObject)?.get("error")?.jsonPrimitive?.content
   if (!error.isNullOrBlank()) {

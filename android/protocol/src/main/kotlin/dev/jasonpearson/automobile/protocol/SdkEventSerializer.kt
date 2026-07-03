@@ -5,11 +5,11 @@ import kotlinx.serialization.json.Json
 /**
  * Serializer for converting SdkEvent sealed classes to/from JSON strings.
  *
- * This provides type-safe serialization for SDK events that can be used for
- * Intent extras, Bundle values, or any other string-based transport.
+ * This provides type-safe serialization for SDK events that can be used for Intent extras, Bundle
+ * values, or any other string-based transport.
  *
- * The protocol module is pure Kotlin/JVM without Android dependencies, so Intent/Bundle
- * wrapping must be done by the consumer (SDK or AccessibilityService).
+ * The protocol module is pure Kotlin/JVM without Android dependencies, so Intent/Bundle wrapping
+ * must be done by the consumer (SDK or AccessibilityService).
  *
  * Usage:
  * ```kotlin
@@ -36,20 +36,18 @@ object SdkEventSerializer {
   const val ACTION_SDK_EVENT_BATCH = "dev.jasonpearson.automobile.sdk.EVENT_BATCH"
 
   /**
-   * Intent extra key for the serialized event JSON.
-   * Uses a namespaced key to avoid collisions with other Intent extras.
+   * Intent extra key for the serialized event JSON. Uses a namespaced key to avoid collisions with
+   * other Intent extras.
    */
   const val EXTRA_SDK_EVENT_JSON = "dev.jasonpearson.automobile.sdk.EVENT_JSON"
 
   /**
-   * Intent extra key for the event type discriminator.
-   * This allows receivers to quickly determine the event type without parsing JSON.
+   * Intent extra key for the event type discriminator. This allows receivers to quickly determine
+   * the event type without parsing JSON.
    */
   const val EXTRA_SDK_EVENT_TYPE = "dev.jasonpearson.automobile.sdk.EVENT_TYPE"
 
-  /**
-   * Event type discriminator values.
-   */
+  /** Event type discriminator values. */
   object EventTypes {
     const val NAVIGATION = "navigation"
     const val HANDLED_EXCEPTION = "handled_exception"
@@ -65,9 +63,7 @@ object SdkEventSerializer {
     const val EVENT_BATCH = "event_batch"
   }
 
-  /**
-   * JSON instance configured for lenient parsing.
-   */
+  /** JSON instance configured for lenient parsing. */
   private val json = Json {
     ignoreUnknownKeys = true
     isLenient = true

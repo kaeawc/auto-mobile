@@ -11,18 +11,18 @@ import kotlinx.serialization.json.encodeToJsonElement
 /** Performance timing entry that matches the TypeScript implementation format. */
 @Serializable
 data class PerfTiming(
-    val name: String,
-    val durationMs: Long,
-    val children: List<PerfTiming>? = null,
+  val name: String,
+  val durationMs: Long,
+  val children: List<PerfTiming>? = null,
 )
 
 /** Internal mutable timing entry for building up timing data. */
 internal data class MutablePerfEntry(
-    val name: String,
-    val startTime: Long,
-    var endTime: Long? = null,
-    val children: MutableList<MutablePerfEntry> = mutableListOf(),
-    val isParallel: Boolean = false,
+  val name: String,
+  val startTime: Long,
+  var endTime: Long? = null,
+  val children: MutableList<MutablePerfEntry> = mutableListOf(),
+  val isParallel: Boolean = false,
 ) {
   fun toTiming(): PerfTiming {
     val duration = (endTime ?: System.currentTimeMillis()) - startTime
@@ -244,23 +244,23 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
 
     // Include debounce info if any
     val debounceInfo =
-        if (debounceCount > 0) {
-          val info =
-              PerfTiming(
-                  name = "debounce",
-                  durationMs = 0,
-                  children =
-                      listOf(
-                          PerfTiming(name = "count", durationMs = debounceCount.toLong()),
-                          PerfTiming(name = "lastTime", durationMs = lastDebounceTime ?: 0),
-                      ),
-              )
-          debounceCount = 0
-          lastDebounceTime = null
-          info
-        } else {
-          null
-        }
+      if (debounceCount > 0) {
+        val info =
+          PerfTiming(
+            name = "debounce",
+            durationMs = 0,
+            children =
+              listOf(
+                PerfTiming(name = "count", durationMs = debounceCount.toLong()),
+                PerfTiming(name = "lastTime", durationMs = lastDebounceTime ?: 0),
+              ),
+          )
+        debounceCount = 0
+        lastDebounceTime = null
+        info
+      } else {
+        null
+      }
 
     if (debounceInfo != null) {
       entries.add(debounceInfo)

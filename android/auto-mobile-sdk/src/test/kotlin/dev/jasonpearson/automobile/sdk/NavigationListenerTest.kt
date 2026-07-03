@@ -11,7 +11,7 @@ class NavigationListenerTest {
     val listener = NavigationListener { callCount++ }
 
     listener.onNavigationEvent(
-        NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
+      NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
     )
 
     assertEquals(1, callCount)
@@ -28,7 +28,7 @@ class NavigationListenerTest {
     }
 
     listener.onNavigationEvent(
-        NavigationEvent(destination = "ProfileScreen", source = NavigationSource.CIRCUIT)
+      NavigationEvent(destination = "ProfileScreen", source = NavigationSource.CIRCUIT)
     )
 
     assertEquals("ProfileScreen", receivedDestination)
@@ -58,7 +58,7 @@ class NavigationListenerTest {
     // Should not throw exception to caller
     try {
       listener.onNavigationEvent(
-          NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
+        NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
       )
       fail("Expected exception to be thrown")
     } catch (e: RuntimeException) {

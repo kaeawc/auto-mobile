@@ -10,13 +10,14 @@ import org.junit.Test
 
 class DaemonSocketPathsFlagWiringTest {
 
-  private val flagProperties = listOf(
+  private val flagProperties =
+    listOf(
       "automobile.daemon.dismiss.keyboard.after.input",
       "automobile.daemon.no.ui.perf.mode",
       "automobile.daemon.no.navigation.screenshots",
       "automobile.daemon.no.waitfor.polling.overhead",
       "automobile.daemon.package.version",
-  )
+    )
 
   @Before
   fun setUp() {
@@ -35,20 +36,20 @@ class DaemonSocketPathsFlagWiringTest {
     val command = DaemonSocketPaths.buildDaemonStartCommand()
 
     assertFalse(
-        "should not contain --dismiss-keyboard-after-input",
-        command.contains("--dismiss-keyboard-after-input"),
+      "should not contain --dismiss-keyboard-after-input",
+      command.contains("--dismiss-keyboard-after-input"),
     )
     assertFalse(
-        "should not contain --no-ui-perf-mode",
-        command.contains("--no-ui-perf-mode"),
+      "should not contain --no-ui-perf-mode",
+      command.contains("--no-ui-perf-mode"),
     )
     assertFalse(
-        "should not contain --no-navigation-screenshots",
-        command.contains("--no-navigation-screenshots"),
+      "should not contain --no-navigation-screenshots",
+      command.contains("--no-navigation-screenshots"),
     )
     assertFalse(
-        "should not contain --no-waitfor-polling-overhead",
-        command.contains("--no-waitfor-polling-overhead"),
+      "should not contain --no-waitfor-polling-overhead",
+      command.contains("--no-waitfor-polling-overhead"),
     )
   }
 
@@ -60,8 +61,8 @@ class DaemonSocketPathsFlagWiringTest {
     val command = DaemonSocketPaths.buildDaemonStartCommand()
 
     assertTrue(
-        "should contain --dismiss-keyboard-after-input",
-        command.contains("--dismiss-keyboard-after-input"),
+      "should contain --dismiss-keyboard-after-input",
+      command.contains("--dismiss-keyboard-after-input"),
     )
   }
 
@@ -73,8 +74,8 @@ class DaemonSocketPathsFlagWiringTest {
     val command = DaemonSocketPaths.buildDaemonStartCommand()
 
     assertTrue(
-        "should contain --no-ui-perf-mode",
-        command.contains("--no-ui-perf-mode"),
+      "should contain --no-ui-perf-mode",
+      command.contains("--no-ui-perf-mode"),
     )
   }
 
@@ -86,8 +87,8 @@ class DaemonSocketPathsFlagWiringTest {
     val command = DaemonSocketPaths.buildDaemonStartCommand()
 
     assertTrue(
-        "should contain --no-navigation-screenshots",
-        command.contains("--no-navigation-screenshots"),
+      "should contain --no-navigation-screenshots",
+      command.contains("--no-navigation-screenshots"),
     )
   }
 
@@ -99,8 +100,8 @@ class DaemonSocketPathsFlagWiringTest {
     val command = DaemonSocketPaths.buildDaemonStartCommand()
 
     assertTrue(
-        "should contain --no-waitfor-polling-overhead",
-        command.contains("--no-waitfor-polling-overhead"),
+      "should contain --no-waitfor-polling-overhead",
+      command.contains("--no-waitfor-polling-overhead"),
     )
   }
 
@@ -145,41 +146,39 @@ class DaemonSocketPathsFlagWiringTest {
 
     assertTrue(command.contains("--dismiss-keyboard-after-input"))
     assertTrue(
-        "restart subcommand should be present",
-        command.contains("restart"),
+      "restart subcommand should be present",
+      command.contains("restart"),
     )
   }
 
   @Test
   fun `bunx package command pins configured AutoMobile version`() {
-    val command =
-        DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "0.0.32")
+    val command = DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "0.0.32")
 
     assertEquals(
-        listOf("bunx", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
-        command,
+      listOf("bunx", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
+      command,
     )
   }
 
   @Test
   fun `npx package command pins configured AutoMobile version with yes flag`() {
-    val command =
-        DaemonSocketPaths.buildPackageDaemonCommand("npx", "restart", "0.0.32")
+    val command = DaemonSocketPaths.buildPackageDaemonCommand("npx", "restart", "0.0.32")
 
     assertEquals(
-        listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.32", "--daemon", "restart"),
-        command,
+      listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.32", "--daemon", "restart"),
+      command,
     )
   }
 
   @Test
   fun `npx command detection handles resolved executable paths`() {
     val command =
-        DaemonSocketPaths.buildPackageDaemonCommand("/usr/local/bin/npx", "start", "0.0.32")
+      DaemonSocketPaths.buildPackageDaemonCommand("/usr/local/bin/npx", "start", "0.0.32")
 
     assertEquals(
-        listOf("/usr/local/bin/npx", "-y", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
-        command,
+      listOf("/usr/local/bin/npx", "-y", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
+      command,
     )
   }
 
@@ -191,24 +190,24 @@ class DaemonSocketPathsFlagWiringTest {
     val command = DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start")
 
     assertEquals(
-        listOf("bunx", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
-        command,
+      listOf("bunx", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
+      command,
     )
   }
 
   @Test
   fun `package command does not fall back to latest when version is absent`() {
     assertNull(
-        "blank versions should not produce a package command",
-        DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", " "),
+      "blank versions should not produce a package command",
+      DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", " "),
     )
     assertNull(
-        "unknown versions should not produce a package command",
-        DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "unknown"),
+      "unknown versions should not produce a package command",
+      DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "unknown"),
     )
     assertNull(
-        "latest should not be used as a daemon package version",
-        DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "latest"),
+      "latest should not be used as a daemon package version",
+      DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "latest"),
     )
   }
 }

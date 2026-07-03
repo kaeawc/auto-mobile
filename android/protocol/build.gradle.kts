@@ -29,9 +29,9 @@ tasks.test {
 mavenPublishing {
   // Coordinates: group and version from root, artifact from local gradle.properties
   coordinates(
-      property("GROUP").toString(),
-      property("POM_ARTIFACT_ID").toString(),
-      version.toString(),
+    property("GROUP").toString(),
+    property("POM_ARTIFACT_ID").toString(),
+    version.toString(),
   )
 
   pom {
@@ -66,9 +66,7 @@ mavenPublishing {
 tasks.withType<KotlinCompile>().configureEach {
   compilerOptions {
     languageVersion.set(
-      KotlinVersion.valueOf(
-        "KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}"
-      )
+      KotlinVersion.valueOf("KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}")
     )
   }
 }

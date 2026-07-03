@@ -217,6 +217,15 @@ jobs:
         with:
           lfs: false
 
+      # Pin the JDK so ktfmt output is deterministic and matches local dev
+      # (the project targets Java 21), rather than depending on whatever JDK the
+      # runner image ships by default.
+      - name: "Set up JDK"
+        uses: actions/setup-java@v5
+        with:
+          distribution: "zulu"
+          java-version: "21"
+
       - name: "Run ktfmt"
         shell: "bash"
         run: |

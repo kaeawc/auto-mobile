@@ -23,8 +23,7 @@ class LiveDemoTest {
   @Test
   fun `AutoMobile playground`() {
 
-    val result =
-      AutoMobilePlan("test-plans/auto-mobile-playground.yaml").execute()
+    val result = AutoMobilePlan("test-plans/auto-mobile-playground.yaml").execute()
 
     assertTrue(result.success)
   }
@@ -33,8 +32,7 @@ class LiveDemoTest {
   @Test
   fun `Bug Reproduction Demo`() {
 
-    val result =
-      AutoMobilePlan("test-plans/bug-repro.yaml").execute()
+    val result = AutoMobilePlan("test-plans/bug-repro.yaml").execute()
 
     assertTrue(result.success)
   }
@@ -42,8 +40,7 @@ class LiveDemoTest {
   @Test
   fun `Browse YouTube`() {
 
-    val result =
-      AutoMobilePlan("test-plans/youtube-search.yaml").execute()
+    val result = AutoMobilePlan("test-plans/youtube-search.yaml").execute()
 
     assertTrue(result.success)
   }
@@ -51,8 +48,7 @@ class LiveDemoTest {
   @Test
   fun `Browse Google Maps`() {
 
-    val result =
-      AutoMobilePlan("test-plans/google-maps.yaml").execute()
+    val result = AutoMobilePlan("test-plans/google-maps.yaml").execute()
 
     assertTrue(result.success)
   }
@@ -60,8 +56,7 @@ class LiveDemoTest {
   @Test
   fun `Explore Camera App`() {
 
-    val result =
-      AutoMobilePlan("test-plans/camera-app.yaml").execute()
+    val result = AutoMobilePlan("test-plans/camera-app.yaml").execute()
 
     assertTrue(result.success)
   }

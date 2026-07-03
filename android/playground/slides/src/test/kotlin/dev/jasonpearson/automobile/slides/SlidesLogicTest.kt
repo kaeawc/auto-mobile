@@ -44,16 +44,16 @@ class SlidesLogicTest {
     assertTrue("Should be able to navigate to last slide", (totalSlides - 1) in 0 until totalSlides)
     assertFalse("Should not be able to navigate to negative index", -1 in 0 until totalSlides)
     assertFalse(
-        "Should not be able to navigate beyond last slide",
-        totalSlides in 0 until totalSlides,
+      "Should not be able to navigate beyond last slide",
+      totalSlides in 0 until totalSlides,
     )
 
     // Test coercion logic
     assertEquals("Negative index should coerce to 0", 0, (-5).coerceIn(0, totalSlides - 1))
     assertEquals(
-        "Index beyond range should coerce to last",
-        totalSlides - 1,
-        (totalSlides + 5).coerceIn(0, totalSlides - 1),
+      "Index beyond range should coerce to last",
+      totalSlides - 1,
+      (totalSlides + 5).coerceIn(0, totalSlides - 1),
     )
     assertEquals("Valid index should remain unchanged", 2, 2.coerceIn(0, totalSlides - 1))
   }
@@ -100,8 +100,8 @@ class SlidesLogicTest {
 
         is SlideContent.Screenshot -> {
           assertTrue(
-              "Screenshot should have at least one screenshot",
-              slide.lightScreenshot != null || slide.darkScreenshot != null,
+            "Screenshot should have at least one screenshot",
+            slide.lightScreenshot != null || slide.darkScreenshot != null,
           )
         }
       }
@@ -111,11 +111,11 @@ class SlidesLogicTest {
   @Test
   fun `bullet points should support nested structure`() {
     val bulletPoints =
-        listOf(
-            BulletPoint("Main point 1", listOf("Sub 1", "Sub 2")),
-            BulletPoint("Main point 2", emptyList()),
-            BulletPoint("Main point 3", listOf("Sub A", "Sub B", "Sub C")),
-        )
+      listOf(
+        BulletPoint("Main point 1", listOf("Sub 1", "Sub 2")),
+        BulletPoint("Main point 2", emptyList()),
+        BulletPoint("Main point 3", listOf("Sub A", "Sub B", "Sub C")),
+      )
 
     val slide = SlideContent.BulletPoints("Test Features", bulletPoints)
 
@@ -128,16 +128,16 @@ class SlidesLogicTest {
   @Test
   fun `emoji enum should provide all expected values`() {
     val expectedEmojis =
-        mapOf(
-            PresentationEmoji.CONSTRUCTION to "🚧",
-            PresentationEmoji.THINKING to "🤔",
-            PresentationEmoji.ROCKET to "🚀",
-            PresentationEmoji.LIGHTBULB to "💡",
-            PresentationEmoji.CHECKMARK to "✅",
-            PresentationEmoji.WARNING to "⚠️",
-            PresentationEmoji.FIRE to "🔥",
-            PresentationEmoji.THUMBS_UP to "👍",
-        )
+      mapOf(
+        PresentationEmoji.CONSTRUCTION to "🚧",
+        PresentationEmoji.THINKING to "🤔",
+        PresentationEmoji.ROCKET to "🚀",
+        PresentationEmoji.LIGHTBULB to "💡",
+        PresentationEmoji.CHECKMARK to "✅",
+        PresentationEmoji.WARNING to "⚠️",
+        PresentationEmoji.FIRE to "🔥",
+        PresentationEmoji.THUMBS_UP to "👍",
+      )
 
     expectedEmojis.forEach { (emoji, expectedUnicode) ->
       assertEquals("Emoji $emoji should have correct unicode", expectedUnicode, emoji.unicode)
@@ -200,30 +200,30 @@ class SlidesLogicTest {
   }
 
   private fun createTestSlides(): List<SlideContent> =
-      listOf(
-          SlideContent.LargeText("AutoMobile", "Testing Framework"),
-          SlideContent.Emoji(PresentationEmoji.ROCKET, "Lightning Fast"),
-          SlideContent.BulletPoints(
-              "Features",
-              listOf(
-                  BulletPoint("Source Intelligence", listOf("Code analysis", "Smart selectors")),
-                  BulletPoint("Cross-platform", listOf("Android", "iOS")),
-                  BulletPoint("JUnit Integration"),
-              ),
-          ),
-          SlideContent.CodeSample(
-              code =
-                  "@Test\nfun testExample() {\n    tapOn(text = \"Button\")\n    observe(waitFor = WaitFor(text = \"Success\"))\n}",
-              language = "kotlin",
-              title = "Simple Test",
-          ),
-          SlideContent.Visualization("architecture.png", "System Architecture"),
-          SlideContent.Video("demo.mp4", "Live Demo"),
-          SlideContent.MermaidDiagram("mermaidCode", "Mermaid Diagram"),
-          SlideContent.Screenshot(
-              lightScreenshot = 1,
-              darkScreenshot = 2,
-              caption = "Screenshot Example",
-          ),
-      )
+    listOf(
+      SlideContent.LargeText("AutoMobile", "Testing Framework"),
+      SlideContent.Emoji(PresentationEmoji.ROCKET, "Lightning Fast"),
+      SlideContent.BulletPoints(
+        "Features",
+        listOf(
+          BulletPoint("Source Intelligence", listOf("Code analysis", "Smart selectors")),
+          BulletPoint("Cross-platform", listOf("Android", "iOS")),
+          BulletPoint("JUnit Integration"),
+        ),
+      ),
+      SlideContent.CodeSample(
+        code =
+          "@Test\nfun testExample() {\n    tapOn(text = \"Button\")\n    observe(waitFor = WaitFor(text = \"Success\"))\n}",
+        language = "kotlin",
+        title = "Simple Test",
+      ),
+      SlideContent.Visualization("architecture.png", "System Architecture"),
+      SlideContent.Video("demo.mp4", "Live Demo"),
+      SlideContent.MermaidDiagram("mermaidCode", "Mermaid Diagram"),
+      SlideContent.Screenshot(
+        lightScreenshot = 1,
+        darkScreenshot = 2,
+        caption = "Screenshot Example",
+      ),
+    )
 }

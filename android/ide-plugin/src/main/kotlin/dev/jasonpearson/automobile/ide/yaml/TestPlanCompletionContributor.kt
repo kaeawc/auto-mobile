@@ -8,9 +8,9 @@ import org.jetbrains.yaml.YAMLLanguage
 class TestPlanCompletionContributor : CompletionContributor() {
   init {
     extend(
-        CompletionType.BASIC,
-        psiElement().withLanguage(YAMLLanguage.INSTANCE),
-        TestPlanCompletionProvider(),
+      CompletionType.BASIC,
+      psiElement().withLanguage(YAMLLanguage.INSTANCE),
+      TestPlanCompletionProvider(),
     )
   }
 }

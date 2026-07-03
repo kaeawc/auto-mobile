@@ -3,10 +3,7 @@ package dev.jasonpearson.automobile.protocol
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * Bounds for a highlight shape.
- * Pure Kotlin version without Android dependencies.
- */
+/** Bounds for a highlight shape. Pure Kotlin version without Android dependencies. */
 @Serializable
 data class HighlightBounds(
   val x: Int,
@@ -19,18 +16,14 @@ data class HighlightBounds(
   fun hasValidSize(): Boolean = width > 0 && height > 0
 }
 
-/**
- * A point in a highlight path.
- */
+/** A point in a highlight path. */
 @Serializable
 data class HighlightPoint(
   val x: Float,
   val y: Float,
 )
 
-/**
- * Smoothing algorithm for path highlights.
- */
+/** Smoothing algorithm for path highlights. */
 @Serializable
 enum class SmoothingAlgorithm {
   @SerialName("none") NONE,
@@ -39,9 +32,7 @@ enum class SmoothingAlgorithm {
   @SerialName("douglas-peucker") DOUGLAS_PEUCKER,
 }
 
-/**
- * Line cap style for highlight strokes.
- */
+/** Line cap style for highlight strokes. */
 @Serializable
 enum class HighlightLineCap {
   @SerialName("butt") BUTT,
@@ -49,9 +40,7 @@ enum class HighlightLineCap {
   @SerialName("square") SQUARE,
 }
 
-/**
- * Line join style for highlight strokes.
- */
+/** Line join style for highlight strokes. */
 @Serializable
 enum class HighlightLineJoin {
   @SerialName("miter") MITER,
@@ -59,9 +48,7 @@ enum class HighlightLineJoin {
   @SerialName("bevel") BEVEL,
 }
 
-/**
- * Style configuration for a highlight.
- */
+/** Style configuration for a highlight. */
 @Serializable
 data class HighlightStyle(
   val strokeColor: String? = null,
@@ -73,10 +60,7 @@ data class HighlightStyle(
   val joinStyle: HighlightLineJoin? = null,
 )
 
-/**
- * A highlight shape to draw on the device screen.
- * Supports box, circle, and path shapes.
- */
+/** A highlight shape to draw on the device screen. Supports box, circle, and path shapes. */
 @Serializable
 data class HighlightShape(
   val type: String, // "box", "circle", or "path"

@@ -7,16 +7,16 @@ import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 /**
  * Interface exposing the dependencies the UI layer needs from the DI graph.
  *
- * Implemented by the Metro-generated graph so that Compose code can access
- * graph-provided instances via [LocalAutoMobileGraph].
+ * Implemented by the Metro-generated graph so that Compose code can access graph-provided instances
+ * via [LocalAutoMobileGraph].
  */
 interface AutoMobileGraphProvider {
-    /** The default MCP client for communicating with the AutoMobile daemon. */
-    val autoMobileClient: AutoMobileClient
+  /** The default MCP client for communicating with the AutoMobile daemon. */
+  val autoMobileClient: AutoMobileClient
 
-    /** Application settings provider. */
-    val settingsProvider: SettingsProvider
+  /** Application settings provider. */
+  val settingsProvider: SettingsProvider
 
-    /** Factory for creating data source instances. */
-    val dataSourceFactory: DataSourceFactory
+  /** Factory for creating data source instances. */
+  val dataSourceFactory: DataSourceFactory
 }

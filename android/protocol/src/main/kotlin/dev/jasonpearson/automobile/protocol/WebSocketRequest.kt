@@ -6,8 +6,8 @@ import kotlinx.serialization.Serializable
 /**
  * Sealed class hierarchy for all inbound WebSocket messages from MCP server to Android.
  *
- * Each request type is a separate data class with only the fields it needs,
- * replacing the flat WebSocketRequest with 25+ optional fields.
+ * Each request type is a separate data class with only the fields it needs, replacing the flat
+ * WebSocketRequest with 25+ optional fields.
  */
 @Serializable
 sealed class WebSocketRequest {
@@ -39,9 +39,7 @@ data class RequestHierarchyIfStale(
 
 @Serializable
 @SerialName("request_screenshot")
-data class RequestScreenshot(
-  override val requestId: String? = null,
-) : WebSocketRequest()
+data class RequestScreenshot(override val requestId: String? = null) : WebSocketRequest()
 
 // =============================================================================
 // Gesture Requests
@@ -137,9 +135,7 @@ data class RequestImeAction(
 
 @Serializable
 @SerialName("request_select_all")
-data class RequestSelectAll(
-  override val requestId: String? = null,
-) : WebSocketRequest()
+data class RequestSelectAll(override val requestId: String? = null) : WebSocketRequest()
 
 // =============================================================================
 // Node Action Request
@@ -238,9 +234,7 @@ data class RemoveCaCert(
 
 @Serializable
 @SerialName("get_device_owner_status")
-data class GetDeviceOwnerStatus(
-  override val requestId: String? = null,
-) : WebSocketRequest()
+data class GetDeviceOwnerStatus(override val requestId: String? = null) : WebSocketRequest()
 
 @Serializable
 @SerialName("get_permission")
@@ -256,15 +250,11 @@ data class GetPermission(
 
 @Serializable
 @SerialName("get_current_focus")
-data class GetCurrentFocus(
-  override val requestId: String? = null,
-) : WebSocketRequest()
+data class GetCurrentFocus(override val requestId: String? = null) : WebSocketRequest()
 
 @Serializable
 @SerialName("get_traversal_order")
-data class GetTraversalOrder(
-  override val requestId: String? = null,
-) : WebSocketRequest()
+data class GetTraversalOrder(override val requestId: String? = null) : WebSocketRequest()
 
 // =============================================================================
 // Highlight Request
@@ -312,7 +302,8 @@ data class UnsubscribeStorage(
   // The TS client sends only `subscriptionId` (formatted as "packageName:fileName"); packageName
   // and fileName are kept nullable so the real wire message decodes without throwing. When only
   // subscriptionId is present, CtrlProxyMessageHandler splits it on the first ':' to recover
-  // packageName/fileName before dispatching the unsubscribe. See CtrlProxyMessageHandler for details.
+  // packageName/fileName before dispatching the unsubscribe. See CtrlProxyMessageHandler for
+  // details.
   val subscriptionId: String? = null,
   val packageName: String? = null,
   val fileName: String? = null,
@@ -372,9 +363,7 @@ data class RequestGlobalAction(
 
 @Serializable
 @SerialName("request_device_info")
-data class RequestDeviceInfo(
-  override val requestId: String? = null,
-) : WebSocketRequest()
+data class RequestDeviceInfo(override val requestId: String? = null) : WebSocketRequest()
 
 // =============================================================================
 // Configuration Requests
@@ -460,12 +449,8 @@ data class RequestLaunchIntent(
 
 @Serializable
 @SerialName("start_recording")
-data class StartRecording(
-  override val requestId: String? = null,
-) : WebSocketRequest()
+data class StartRecording(override val requestId: String? = null) : WebSocketRequest()
 
 @Serializable
 @SerialName("stop_recording")
-data class StopRecording(
-  override val requestId: String? = null,
-) : WebSocketRequest()
+data class StopRecording(override val requestId: String? = null) : WebSocketRequest()

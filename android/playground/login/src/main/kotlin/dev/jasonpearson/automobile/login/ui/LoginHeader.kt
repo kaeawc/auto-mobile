@@ -16,9 +16,7 @@ import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 /** Header section of the login screen containing logo and title. */
 @Composable
 internal fun LoginHeader() {
-  Column(
-      horizontalAlignment = Alignment.CenterHorizontally,
-  ) {
+  Column(horizontalAlignment = Alignment.CenterHorizontally) {
     AutoMobileLogo()
     AutoMobileHeadline(text = "AutoMobile")
   }
@@ -26,18 +24,18 @@ internal fun LoginHeader() {
 
 @Preview(name = "Login Header", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Preview(
-    name = "Login Header - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
+  name = "Login Header - Dark",
+  showBackground = true,
+  uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
 fun LoginHeaderPreview() {
   // Explicitly check if we're in dark mode based on the configuration
   val isDarkMode =
-      when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
-        Configuration.UI_MODE_NIGHT_YES -> true
-        else -> false
-      }
+    when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
+      Configuration.UI_MODE_NIGHT_YES -> true
+      else -> false
+    }
 
   AutoMobileTheme(darkTheme = isDarkMode) {
     Column(modifier = Modifier.background(MaterialTheme.colorScheme.background)) { LoginHeader() }

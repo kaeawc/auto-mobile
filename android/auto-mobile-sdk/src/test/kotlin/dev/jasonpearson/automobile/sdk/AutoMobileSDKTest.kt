@@ -54,7 +54,7 @@ class AutoMobileSDKTest {
 
     AutoMobileSDK.addNavigationListener(listener)
     val event =
-        NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
+      NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
     AutoMobileSDK.notifyNavigationEvent(event)
 
     assertNotNull(receivedEvent)
@@ -74,7 +74,7 @@ class AutoMobileSDKTest {
     AutoMobileSDK.addNavigationListener(listener3)
 
     val event =
-        NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
+      NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
     AutoMobileSDK.notifyNavigationEvent(event)
 
     assertEquals(3, callCount)
@@ -89,7 +89,7 @@ class AutoMobileSDKTest {
     AutoMobileSDK.setEnabled(false)
 
     val event =
-        NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
+      NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
     AutoMobileSDK.notifyNavigationEvent(event)
 
     assertNull(receivedEvent)
@@ -116,7 +116,7 @@ class AutoMobileSDKTest {
     AutoMobileSDK.addNavigationListener(workingListener)
 
     val event =
-        NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
+      NavigationEvent(destination = "TestScreen", source = NavigationSource.COMPOSE_NAVIGATION)
 
     // Should not throw exception
     AutoMobileSDK.notifyNavigationEvent(event)
@@ -155,12 +155,12 @@ class AutoMobileSDKTest {
     AutoMobileSDK.addNavigationListener { event -> receivedEvent = event }
 
     val event =
-        NavigationEvent(
-            destination = "ProfileScreen",
-            source = NavigationSource.COMPOSE_NAVIGATION,
-            arguments = arguments,
-            metadata = metadata,
-        )
+      NavigationEvent(
+        destination = "ProfileScreen",
+        source = NavigationSource.COMPOSE_NAVIGATION,
+        arguments = arguments,
+        metadata = metadata,
+      )
     AutoMobileSDK.notifyNavigationEvent(event)
 
     assertNotNull(receivedEvent)

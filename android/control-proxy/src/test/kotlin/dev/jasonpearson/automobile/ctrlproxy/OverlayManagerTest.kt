@@ -38,9 +38,9 @@ class OverlayManagerTest {
 
   private fun createOverlayManager(canDrawOverlays: Boolean): OverlayManager {
     return OverlayManager(
-        RuntimeEnvironment.getApplication(),
-        windowManager = windowManager,
-        canDrawOverlays = { canDrawOverlays },
+      RuntimeEnvironment.getApplication(),
+      windowManager = windowManager,
+      canDrawOverlays = { canDrawOverlays },
     )
   }
 
@@ -57,12 +57,8 @@ class OverlayManagerTest {
     assertEquals(WindowManager.LayoutParams.MATCH_PARENT, layoutParams.width)
     assertEquals(WindowManager.LayoutParams.MATCH_PARENT, layoutParams.height)
     assertEquals(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, layoutParams.type)
-    assertTrue(
-        layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0,
-    )
-    assertTrue(
-        layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0,
-    )
+    assertTrue(layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+    assertTrue(layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
   }
 
   @Test

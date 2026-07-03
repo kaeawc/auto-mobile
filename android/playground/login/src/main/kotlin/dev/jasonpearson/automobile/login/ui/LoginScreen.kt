@@ -45,10 +45,10 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun LoginScreenCore(
-    viewModel: LoginViewModel,
-    onLoginSuccess: (LoggedInUserView) -> Unit,
-    onLoginError: (Int) -> Unit,
-    onGuestMode: () -> Unit = {},
+  viewModel: LoginViewModel,
+  onLoginSuccess: (LoggedInUserView) -> Unit,
+  onLoginError: (Int) -> Unit,
+  onGuestMode: () -> Unit = {},
 ) {
   val loginFormState by viewModel.loginFormState.collectAsStateWithLifecycle()
   val loginResult by viewModel.loginResult.collectAsStateWithLifecycle()
@@ -98,12 +98,12 @@ fun LoginScreenCore(
   val scrollState = rememberScrollState()
 
   Column(
-      modifier =
-          Modifier.fillMaxSize()
-              .background(MaterialTheme.colorScheme.background)
-              .then(if (isLandscape) Modifier.verticalScroll(scrollState) else Modifier)
-              .padding(16.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
+    modifier =
+      Modifier.fillMaxSize()
+        .background(MaterialTheme.colorScheme.background)
+        .then(if (isLandscape) Modifier.verticalScroll(scrollState) else Modifier)
+        .padding(16.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     Spacer(modifier = Modifier.height(AutoMobileDimensions.spacing12))
 
@@ -112,42 +112,42 @@ fun LoginScreenCore(
     Spacer(modifier = Modifier.height(AutoMobileDimensions.spacing12))
 
     LoginForm(
-        username = username,
-        password = password,
-        onUsernameChange = {
-          username = it
-          if (it.length >= 5) usernameHadContent = true
-        },
-        onPasswordChange = {
-          password = it
-          if (it.length >= 5) passwordHadContent = true
-        },
-        loginFormState = loginFormState,
-        usernameHadContent = usernameHadContent,
-        passwordHadContent = passwordHadContent,
-        usernameBlurred = usernameBlurred,
-        passwordBlurred = passwordBlurred,
-        onPasswordDone = {
-          passwordBlurred = true
-          if (isFormValid) {
-            isLoading = true
-            viewModel.login(username, password)
-          }
-        },
+      username = username,
+      password = password,
+      onUsernameChange = {
+        username = it
+        if (it.length >= 5) usernameHadContent = true
+      },
+      onPasswordChange = {
+        password = it
+        if (it.length >= 5) passwordHadContent = true
+      },
+      loginFormState = loginFormState,
+      usernameHadContent = usernameHadContent,
+      passwordHadContent = passwordHadContent,
+      usernameBlurred = usernameBlurred,
+      passwordBlurred = passwordBlurred,
+      onPasswordDone = {
+        passwordBlurred = true
+        if (isFormValid) {
+          isLoading = true
+          viewModel.login(username, password)
+        }
+      },
     )
 
     Spacer(modifier = Modifier.height(AutoMobileDimensions.spacing6))
 
     LoginActions(
-        isFormValid = isFormValid,
-        isLoading = isLoading,
-        onSignInClick = {
-          usernameBlurred = true
-          passwordBlurred = true
-          isLoading = true
-          viewModel.login(username, password)
-        },
-        onGuestModeClick = onGuestMode,
+      isFormValid = isFormValid,
+      isLoading = isLoading,
+      onSignInClick = {
+        usernameBlurred = true
+        passwordBlurred = true
+        isLoading = true
+        viewModel.login(username, password)
+      },
+      onGuestModeClick = onGuestMode,
     )
 
     Spacer(modifier = Modifier.weight(1f))
@@ -175,36 +175,35 @@ fun LoginScreen(userPreferences: Any, onNavigateToHome: () -> Unit, onGuestMode:
     var showErrorMessage by remember { mutableStateOf(false) }
 
     LoginScreenCore(
-        viewModel = loginViewModel,
-        onLoginSuccess = { user ->
-          // Clear any previous errors
-          loginError = null
-          showErrorMessage = false
+      viewModel = loginViewModel,
+      onLoginSuccess = { user ->
+        // Clear any previous errors
+        loginError = null
+        showErrorMessage = false
 
-          // Mark user as authenticated using reflection to avoid tight coupling
-          try {
-            val isAuthenticatedField =
-                userPreferences::class.java.getDeclaredField("isAuthenticated")
-            isAuthenticatedField.isAccessible = true
-            isAuthenticatedField.setBoolean(userPreferences, true)
-            onNavigateToHome()
-          } catch (e: Exception) {
-            loginError = "Authentication successful but navigation failed"
-            showErrorMessage = true
-          }
-        },
-        onLoginError = { errorString ->
-          // Handle login error - show error message instead of crashing
-          loginError =
-              when (errorString) {
-                R.string.login_failed -> "Invalid email or password"
-                R.string.invalid_username -> "Please enter a valid email address"
-                R.string.invalid_password -> "Password must be at least 6 characters"
-                else -> "Login failed. Please try again."
-              }
+        // Mark user as authenticated using reflection to avoid tight coupling
+        try {
+          val isAuthenticatedField = userPreferences::class.java.getDeclaredField("isAuthenticated")
+          isAuthenticatedField.isAccessible = true
+          isAuthenticatedField.setBoolean(userPreferences, true)
+          onNavigateToHome()
+        } catch (e: Exception) {
+          loginError = "Authentication successful but navigation failed"
           showErrorMessage = true
-        },
-        onGuestMode = onGuestMode,
+        }
+      },
+      onLoginError = { errorString ->
+        // Handle login error - show error message instead of crashing
+        loginError =
+          when (errorString) {
+            R.string.login_failed -> "Invalid email or password"
+            R.string.invalid_username -> "Please enter a valid email address"
+            R.string.invalid_password -> "Password must be at least 6 characters"
+            else -> "Login failed. Please try again."
+          }
+        showErrorMessage = true
+      },
+      onGuestMode = onGuestMode,
     )
 
     // Show error message if login fails
@@ -216,8 +215,8 @@ fun LoginScreen(userPreferences: Any, onNavigateToHome: () -> Unit, onGuestMode:
       }
 
       Box(
-          modifier = Modifier.fillMaxWidth().padding(16.dp),
-          contentAlignment = Alignment.BottomCenter,
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        contentAlignment = Alignment.BottomCenter,
       ) {
         AutoMobileOutlinedCard { AutoMobileText(text = loginError!!) }
       }
@@ -235,18 +234,18 @@ fun LoginScreen(userPreferences: Any, onNavigateToHome: () -> Unit, onGuestMode:
     val mockViewModel = remember { LoginViewModel(mockRepository) }
 
     val isDarkMode =
-        when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
-          Configuration.UI_MODE_NIGHT_YES -> true
-          else -> false
-        }
+      when (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
+        Configuration.UI_MODE_NIGHT_YES -> true
+        else -> false
+      }
 
     AutoMobileTheme(darkTheme = isDarkMode) {
       Column(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
         LoginScreenCore(
-            viewModel = mockViewModel,
-            onLoginSuccess = { /* Preview login success */ },
-            onLoginError = { /* Preview login error */ },
-            onGuestMode = { /* Preview guest mode */ },
+          viewModel = mockViewModel,
+          onLoginSuccess = { /* Preview login success */ },
+          onLoginError = { /* Preview login error */ },
+          onGuestMode = { /* Preview guest mode */ },
         )
       }
     }

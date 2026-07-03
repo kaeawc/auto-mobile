@@ -61,54 +61,54 @@ private fun AutoMobileSettingsContent(onModified: () -> Unit) {
   }
 
   Column(
-      modifier = Modifier.fillMaxSize().padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
+    modifier = Modifier.fillMaxSize().padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     Text("AutoMobile settings")
     Text(
-        "Use Feature Flags to toggle experimental behavior and diagnostics.",
-        color = colors.text.normal.copy(alpha = 0.7f),
+      "Use Feature Flags to toggle experimental behavior and diagnostics.",
+      color = colors.text.normal.copy(alpha = 0.7f),
     )
     Text(
-        "Changes apply immediately and are shared across all projects.",
-        color = colors.text.normal.copy(alpha = 0.7f),
+      "Changes apply immediately and are shared across all projects.",
+      color = colors.text.normal.copy(alpha = 0.7f),
     )
 
     Column(
-        modifier = Modifier.padding(top = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+      modifier = Modifier.padding(top = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       Text("Test Plan Authoring", fontSize = 14.sp)
       CheckboxRow(
-          text = "Enable YAML validation for test plans",
-          checked = enableYamlLinting,
-          onCheckedChange = { enabled ->
-            enableYamlLinting = enabled
-            settings.enableYamlLinting = enabled
-            onModified()
-          },
+        text = "Enable YAML validation for test plans",
+        checked = enableYamlLinting,
+        onCheckedChange = { enabled ->
+          enableYamlLinting = enabled
+          settings.enableYamlLinting = enabled
+          onModified()
+        },
       )
       Text(
-          "Validates test plan YAML files against the schema for immediate feedback on errors and deprecated fields.",
-          color = colors.text.normal.copy(alpha = 0.7f),
-          fontSize = 12.sp,
-          modifier = Modifier.padding(start = 28.dp),
+        "Validates test plan YAML files against the schema for immediate feedback on errors and deprecated fields.",
+        color = colors.text.normal.copy(alpha = 0.7f),
+        fontSize = 12.sp,
+        modifier = Modifier.padding(start = 28.dp),
       )
     }
 
     Column(
-        modifier = Modifier.padding(top = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+      modifier = Modifier.padding(top = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       Text("Recording", fontSize = 14.sp)
       LabeledTextField(
-          label = "Test plan output directory (relative to project root or absolute)",
-          state = outputDirectoryState,
+        label = "Test plan output directory (relative to project root or absolute)",
+        state = outputDirectoryState,
       )
       Text(
-          "New recordings are saved here and opened in the editor after stopping.",
-          color = colors.text.normal.copy(alpha = 0.7f),
-          fontSize = 12.sp,
+        "New recordings are saved here and opened in the editor after stopping.",
+        color = colors.text.normal.copy(alpha = 0.7f),
+        fontSize = 12.sp,
       )
     }
   }

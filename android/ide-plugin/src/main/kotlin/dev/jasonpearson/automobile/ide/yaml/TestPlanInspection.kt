@@ -56,10 +56,10 @@ class TestPlanInspection : LocalInspectionTool() {
         for (error in result.errors) {
           val target = findTargetElement(file, error) ?: element
           val highlightType =
-              when (error.severity) {
-                ValidationSeverity.ERROR -> ProblemHighlightType.ERROR
-                ValidationSeverity.WARNING -> ProblemHighlightType.WARNING
-              }
+            when (error.severity) {
+              ValidationSeverity.ERROR -> ProblemHighlightType.ERROR
+              ValidationSeverity.WARNING -> ProblemHighlightType.WARNING
+            }
 
           val quickFixes = TestPlanQuickFixFactory.createQuickFixes(error)
 

@@ -46,7 +46,11 @@ internal class SharedPreferencesDriverImpl(
       .map { file ->
         val name = file.name.removeSuffix(".xml")
         val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-        PreferenceFileDescriptor(name = name, path = file.absolutePath, entryCount = prefs.all.size)
+        PreferenceFileDescriptor(
+          name = name,
+          path = file.absolutePath,
+          entryCount = prefs.all.size,
+        )
       }
   }
 
@@ -221,10 +225,13 @@ internal class SharedPreferencesDriverImpl(
       KeyValueType.BOOLEAN -> editor.putBoolean(key, value as Boolean)
       KeyValueType.STRING_SET -> {
         @Suppress("UNCHECKED_CAST")
-        val set = value as? Set<String> ?: throw SharedPreferencesError.InvalidType(type.name, "value is not a Set<String>")
+        val set =
+          value as? Set<String>
+            ?: throw SharedPreferencesError.InvalidType(type.name, "value is not a Set<String>")
         editor.putStringSet(key, set)
       }
-      KeyValueType.UNKNOWN -> throw SharedPreferencesError.InvalidType(type.name, "cannot set value with UNKNOWN type")
+      KeyValueType.UNKNOWN ->
+        throw SharedPreferencesError.InvalidType(type.name, "cannot set value with UNKNOWN type")
     }
 
     editor.apply()

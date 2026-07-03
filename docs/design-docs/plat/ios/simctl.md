@@ -21,6 +21,23 @@ system-level simulator behaviors.
 - Per-app notification authorization read via BulletinBoard (see below).
 - Device settings capture/restore for `deviceSnapshot` (see below).
 
+## App lifecycle: simulators vs physical devices
+
+<kbd>✅ Implemented</kbd>
+
+`launchApp`, `terminateApp`, `installApp`, and `uninstallApp` pick their transport
+from the target's UDID form (`isIosSimulatorUdid`): the 8-4-4-4-12 UUID means a
+**simulator** (`simctl`); anything else (e.g. the `00008XXX-…` form) means a
+**physical device** (`devicectl`, macOS + iOS 17+).
+
+For `launchApp` specifically:
+
+- **Simulator** — `xcrun simctl launch` / `terminate` (unchanged). On cold boot the app is terminated first because `simctl launch` does not terminate an already-running instance.
+- **Physical device** — `xcrun devicectl device process launch --device <udid> --terminate-existing --json-output <file> --quiet <bundle-id>`; the launched PID is read from `result.process.processIdentifier` in the JSON output. `--terminate-existing` is the **authoritative cold-boot relaunch**: it terminates any already-running instance and starts a fresh process (which foregrounds). `devicectl` has no foreground-if-running verb, so a warm launch also relaunches this way. The device path therefore issues **no separate pre-terminate** — that would be a redundant round-trip.
+- **No standalone devicectl terminate here (deferred).** `devicectl` has no terminate-by-bundle-id verb, and its `device info processes` listing exposes only `executable` + `processIdentifier` — no stable bundle-id field to resolve a PID by bundle (only `install` / `info apps` carry `bundleIdentifier`). A reliable terminate-by-bundle needs the follow-up device app-listing work, so `launchApp` relies on `--terminate-existing` instead.
+- **`clearAppData` on a device** — wipes the sandbox via `devicectl` uninstall+reinstall (`clearAppDataViaReinstall`) before relaunching; a failed clear aborts the launch rather than launching with stale data.
+- **Docker / host control** — no `devicectl` launch bridge exists, so `launchApp` returns an explicit, actionable error instead of a confusing simctl failure.
+
 ## Live locale changes
 
 <kbd>✅ Implemented</kbd>

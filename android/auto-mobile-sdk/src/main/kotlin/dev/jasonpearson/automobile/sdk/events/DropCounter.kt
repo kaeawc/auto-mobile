@@ -17,7 +17,9 @@ enum class DropReason {
 /** Tracks counts of dropped events by reason. */
 internal interface DropCounter {
   fun increment(reason: DropReason, count: Int = 1)
+
   fun snapshot(): Map<DropReason, Long>
+
   fun reset()
 }
 

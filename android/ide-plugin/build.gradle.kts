@@ -66,7 +66,7 @@ intellijPlatform {
     name.set("AutoMobile")
     version.set("0.1.0")
     description.set(
-        "AutoMobile IDE integration for authoring tests and visualizing navigation graphs."
+      "AutoMobile IDE integration for authoring tests and visualizing navigation graphs."
     )
 
     ideaVersion {

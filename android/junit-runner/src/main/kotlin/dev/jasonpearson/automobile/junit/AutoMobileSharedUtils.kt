@@ -11,9 +11,9 @@ object AutoMobileSharedUtils {
     get() = testDeviceChecker ?: defaultDeviceChecker
 
   fun executeCommand(
-      command: List<String>,
-      timeoutMs: Long,
-      environmentOverrides: Map<String, String> = emptyMap(),
+    command: List<String>,
+    timeoutMs: Long,
+    environmentOverrides: Map<String, String> = emptyMap(),
   ): CommandResult {
     val processBuilder = ProcessBuilder(command)
     if (environmentOverrides.isNotEmpty()) {
@@ -32,14 +32,14 @@ object AutoMobileSharedUtils {
 
     // Read output and error streams concurrently to prevent deadlock
     val outputFuture =
-        java.util.concurrent.CompletableFuture.supplyAsync {
-          process.inputStream.bufferedReader().use { it.readText() }
-        }
+      java.util.concurrent.CompletableFuture.supplyAsync {
+        process.inputStream.bufferedReader().use { it.readText() }
+      }
 
     val errorFuture =
-        java.util.concurrent.CompletableFuture.supplyAsync {
-          process.errorStream.bufferedReader().use { it.readText() }
-        }
+      java.util.concurrent.CompletableFuture.supplyAsync {
+        process.errorStream.bufferedReader().use { it.readText() }
+      }
 
     val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
 
@@ -144,19 +144,19 @@ class DeviceAvailabilityChecker : DeviceChecker {
 
         // Check for ADB server issues that warrant a retry
         val isAdbServerError =
-            result.errorOutput.contains("ADB server didn't ACK") ||
-                result.errorOutput.contains("Address already in use") ||
-                result.errorOutput.contains("failed to start daemon") ||
-                result.errorOutput.contains("cannot connect to daemon")
+          result.errorOutput.contains("ADB server didn't ACK") ||
+            result.errorOutput.contains("Address already in use") ||
+            result.errorOutput.contains("failed to start daemon") ||
+            result.errorOutput.contains("cannot connect to daemon")
 
         if (result.exitCode == 0) {
           // Parse adb devices output to count connected devices
           deviceCount =
-              result.output
-                  .lines()
-                  .drop(1) // Skip the "List of devices attached" header
-                  .filter { line -> line.trim().isNotEmpty() && line.contains("\t") }
-                  .size
+            result.output
+              .lines()
+              .drop(1) // Skip the "List of devices attached" header
+              .filter { line -> line.trim().isNotEmpty() && line.contains("\t") }
+              .size
 
           if (deviceCount > 0) {
             println("Found $deviceCount connected device(s)")
@@ -172,7 +172,7 @@ class DeviceAvailabilityChecker : DeviceChecker {
           // ADB server issue - retry with backoff
           val backoffMs = INITIAL_BACKOFF_MS * (1 shl (attempt - 1)) // Exponential backoff
           println(
-              "ADB server issue detected (attempt $attempt/$MAX_RETRIES), retrying in ${backoffMs}ms..."
+            "ADB server issue detected (attempt $attempt/$MAX_RETRIES), retrying in ${backoffMs}ms..."
           )
           Thread.sleep(backoffMs)
           continue
@@ -182,7 +182,7 @@ class DeviceAvailabilityChecker : DeviceChecker {
           println("Warning: Device check failed with exit code ${result.exitCode}")
           if (attempt == MAX_RETRIES && isAdbServerError) {
             println(
-                "ADB server failed to start after $MAX_RETRIES attempts. This may be a CI environment issue."
+              "ADB server failed to start after $MAX_RETRIES attempts. This may be a CI environment issue."
             )
           }
         }
@@ -249,10 +249,10 @@ class DeviceAvailabilityChecker : DeviceChecker {
 
   private fun getAndroidHome(): String {
     val androidHome =
-        System.getenv("ANDROID_HOME")
-            ?: System.getenv("ANDROID_SDK_ROOT")
-            ?: System.getenv("ANDROID_SDK_HOME")
-            ?: throw IllegalStateException("ANDROID_HOME environment variable is not set")
+      System.getenv("ANDROID_HOME")
+        ?: System.getenv("ANDROID_SDK_ROOT")
+        ?: System.getenv("ANDROID_SDK_HOME")
+        ?: throw IllegalStateException("ANDROID_HOME environment variable is not set")
 
     // Validate the path to prevent command injection
     // Phase 6: Use cached regex to avoid repeated compilation

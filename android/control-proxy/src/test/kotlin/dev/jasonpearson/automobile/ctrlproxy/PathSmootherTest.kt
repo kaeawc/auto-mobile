@@ -40,13 +40,13 @@ class PathSmootherTest {
   @Test
   fun `smoothPath keeps endpoints for douglas peucker`() {
     val points =
-        listOf(
-            PointF(0f, 0f),
-            PointF(25f, 5f),
-            PointF(50f, 10f),
-            PointF(75f, 6f),
-            PointF(100f, 0f),
-        )
+      listOf(
+        PointF(0f, 0f),
+        PointF(25f, 5f),
+        PointF(50f, 10f),
+        PointF(75f, 6f),
+        PointF(100f, 0f),
+      )
     val path = smoother.smoothPath(points, SmoothingAlgorithm.DOUGLAS_PEUCKER, 1f)
     assertPathEndpoints(path, points.first(), points.last())
   }

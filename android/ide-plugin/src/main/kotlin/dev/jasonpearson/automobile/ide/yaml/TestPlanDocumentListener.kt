@@ -16,12 +16,12 @@ import dev.jasonpearson.automobile.ide.settings.AutoMobileSettings
  * - Validation trigger handles all async work off EDT
  */
 class TestPlanDocumentListener(
-    private val validationTrigger: ValidationTrigger,
-    parentDisposable: Disposable,
-    private val isLintingEnabled: () -> Boolean = {
-      AutoMobileSettings.getInstance().enableYamlLinting
-    },
-    private val delayMs: Int = 300,
+  private val validationTrigger: ValidationTrigger,
+  parentDisposable: Disposable,
+  private val isLintingEnabled: () -> Boolean = {
+    AutoMobileSettings.getInstance().enableYamlLinting
+  },
+  private val delayMs: Int = 300,
 ) : BulkAwareDocumentListener {
 
   private val alarm = Alarm(Alarm.ThreadToUse.POOLED_THREAD, parentDisposable)

@@ -10,12 +10,12 @@ class TestPlanValidatorTest {
   @Test
   fun `validates valid test plan`() {
     val yaml =
-        """
-        name: test-plan
-        steps:
-          - tool: observe
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertTrue("Valid YAML should pass validation", result.valid)
@@ -25,11 +25,11 @@ class TestPlanValidatorTest {
   @Test
   fun `detects missing name field`() {
     val yaml =
-        """
-        steps:
-          - tool: observe
-        """
-            .trimIndent()
+      """
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertFalse("YAML missing 'name' should fail validation", result.valid)
@@ -43,10 +43,10 @@ class TestPlanValidatorTest {
   @Test
   fun `detects missing steps field`() {
     val yaml =
-        """
-        name: test-plan
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertFalse("YAML missing 'steps' should fail validation", result.valid)
@@ -59,13 +59,13 @@ class TestPlanValidatorTest {
   @Test
   fun `detects unknown property as error`() {
     val yaml =
-        """
-        name: test-plan
-        steps:
-          - tool: observe
-        unknownField: value
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      steps:
+        - tool: observe
+      unknownField: value
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertFalse("YAML with unknown property should fail validation", result.valid)
@@ -77,13 +77,13 @@ class TestPlanValidatorTest {
   @Test
   fun `detects deprecated generated field as warning`() {
     val yaml =
-        """
-        name: test-plan
-        generated: "2024-01-01T00:00:00Z"
-        steps:
-          - tool: observe
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      generated: "2024-01-01T00:00:00Z"
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     // Deprecated fields may or may not trigger errors depending on schema settings
@@ -94,13 +94,13 @@ class TestPlanValidatorTest {
   @Test
   fun `detects deprecated appId field as warning`() {
     val yaml =
-        """
-        name: test-plan
-        appId: com.example.app
-        steps:
-          - tool: observe
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      appId: com.example.app
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     // Deprecated fields may or may not trigger errors depending on schema settings
@@ -111,12 +111,12 @@ class TestPlanValidatorTest {
   @Test
   fun `detects missing tool field in step`() {
     val yaml =
-        """
-        name: test-plan
-        steps:
-          - label: some step
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      steps:
+        - label: some step
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertFalse("Step missing 'tool' should fail validation", result.valid)
@@ -129,24 +129,24 @@ class TestPlanValidatorTest {
   @Test
   fun `validates complex test plan with metadata`() {
     val yaml =
-        """
-        name: complex-test-plan
-        description: A complex test plan
-        steps:
-          - tool: launchApp
-            params:
-              appId: com.example.app
-            label: Launch the app
-          - tool: tapOn
-            params:
-              text: button
-            label: Tap button
-        metadata:
-          createdAt: "2024-01-01T00:00:00Z"
-          appId: com.example.app
-          version: "1.0.0"
-        """
-            .trimIndent()
+      """
+      name: complex-test-plan
+      description: A complex test plan
+      steps:
+        - tool: launchApp
+          params:
+            appId: com.example.app
+          label: Launch the app
+        - tool: tapOn
+          params:
+            text: button
+          label: Tap button
+      metadata:
+        createdAt: "2024-01-01T00:00:00Z"
+        appId: com.example.app
+        version: "1.0.0"
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertTrue("Valid complex YAML should pass validation: ${result.errors}", result.valid)
@@ -155,13 +155,13 @@ class TestPlanValidatorTest {
   @Test
   fun `provides line numbers for errors`() {
     val yaml =
-        """
-        name: test-plan
-        unknownField: value
-        steps:
-          - tool: observe
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      unknownField: value
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertFalse("Should fail validation", result.valid)
@@ -170,19 +170,19 @@ class TestPlanValidatorTest {
     assertNotNull("Should report unknown property", unknownError)
     // Line number may or may not be present - just verify it doesn't crash
     assertTrue(
-        "Should handle line numbers",
-        unknownError!!.line != null || unknownError.line == null,
+      "Should handle line numbers",
+      unknownError!!.line != null || unknownError.line == null,
     )
   }
 
   @Test
   fun `handles YAML parsing errors`() {
     val yaml =
-        """
-        name: test-plan
-        steps: [invalid
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      steps: [invalid
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertFalse("Invalid YAML should fail validation", result.valid)
@@ -195,11 +195,11 @@ class TestPlanValidatorTest {
   @Test
   fun `validates empty steps array as invalid`() {
     val yaml =
-        """
-        name: test-plan
-        steps: []
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      steps: []
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertFalse("Empty steps array should fail validation", result.valid)
@@ -209,72 +209,72 @@ class TestPlanValidatorTest {
   @Test
   fun `detects invalid tool name`() {
     val yaml =
-        """
-        name: test-plan
-        steps:
-          - tool: invalidTool
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      steps:
+        - tool: invalidTool
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertFalse("YAML with invalid tool should fail validation", result.valid)
 
     val toolError =
-        result.errors.find {
-          it.message.contains("Unknown tool") && it.message.contains("invalidTool")
-        }
+      result.errors.find {
+        it.message.contains("Unknown tool") && it.message.contains("invalidTool")
+      }
     assertNotNull("Should report unknown tool", toolError)
   }
 
   @Test
   fun `accepts valid tool name`() {
     val yaml =
-        """
-        name: test-plan
-        steps:
-          - tool: observe
-          - tool: tapOn
-            params:
-              text: button
-          - tool: launchApp
-            params:
-              appId: com.example.app
-          - tool: setAppPermissions
-            params:
-              appId: com.example.app
-              permissions:
-                - camera
-          - tool: getAppPermissions
-            params:
-              appId: com.example.app
-          - tool: getDeviceState
-            params:
-              include:
-                - doNotDisturb
-          - tool: setDeviceState
-            params:
-              doNotDisturb:
-                mode: priority
-          - tool: getNotificationPolicy
-            params:
-              appId: com.example.app
-          - tool: setNotificationPolicy
-            params:
-              appId: com.example.app
-              policyAccess: true
-          - tool: setAppPermissions
-            params:
-              appId: com.example.app
-              action: revoke
-              permissions:
-                - camera
-          - tool: getAppPermissions
-            params:
-              appId: com.example.app
-              permissions:
-                - camera
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      steps:
+        - tool: observe
+        - tool: tapOn
+          params:
+            text: button
+        - tool: launchApp
+          params:
+            appId: com.example.app
+        - tool: setAppPermissions
+          params:
+            appId: com.example.app
+            permissions:
+              - camera
+        - tool: getAppPermissions
+          params:
+            appId: com.example.app
+        - tool: getDeviceState
+          params:
+            include:
+              - doNotDisturb
+        - tool: setDeviceState
+          params:
+            doNotDisturb:
+              mode: priority
+        - tool: getNotificationPolicy
+          params:
+            appId: com.example.app
+        - tool: setNotificationPolicy
+          params:
+            appId: com.example.app
+            policyAccess: true
+        - tool: setAppPermissions
+          params:
+            appId: com.example.app
+            action: revoke
+            permissions:
+              - camera
+        - tool: getAppPermissions
+          params:
+            appId: com.example.app
+            permissions:
+              - camera
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertTrue("YAML with valid tools should pass validation: ${result.errors}", result.valid)
@@ -283,14 +283,14 @@ class TestPlanValidatorTest {
   @Test
   fun `detects multiple invalid tool names`() {
     val yaml =
-        """
-        name: test-plan
-        steps:
-          - tool: invalidTool1
-          - tool: observe
-          - tool: invalidTool2
-        """
-            .trimIndent()
+      """
+      name: test-plan
+      steps:
+        - tool: invalidTool1
+        - tool: observe
+        - tool: invalidTool2
+      """
+        .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertFalse("YAML with invalid tools should fail validation", result.valid)

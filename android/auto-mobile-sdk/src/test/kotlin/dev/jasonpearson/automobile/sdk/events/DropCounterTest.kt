@@ -1,10 +1,9 @@
 package dev.jasonpearson.automobile.sdk.events
 
-import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
+import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -52,12 +51,13 @@ class DropCounterTest {
   fun `concurrent increments produce correct total`() {
     val counter = DefaultDropCounter()
     val latch = CountDownLatch(1)
-    val threads = (1..10).map {
-      Thread {
-        latch.await()
-        repeat(1_000) { counter.increment(DropReason.DISABLED) }
+    val threads =
+      (1..10).map {
+        Thread {
+          latch.await()
+          repeat(1_000) { counter.increment(DropReason.DISABLED) }
+        }
       }
-    }
     threads.forEach { it.start() }
     latch.countDown()
     threads.forEach { it.join(5_000) }
@@ -67,21 +67,23 @@ class DropCounterTest {
 
   // -- SdkEventBuffer integration tests --
 
-  private fun makeEvent(i: Int): SdkEvent = SdkLifecycleEvent(
-    timestamp = i.toLong(),
-    kind = "event-$i",
-  )
+  private fun makeEvent(i: Int): SdkEvent =
+    SdkLifecycleEvent(
+      timestamp = i.toLong(),
+      kind = "event-$i",
+    )
 
   @Test
   fun `buffer counts drops when disabled`() {
     val counter = DefaultDropCounter()
-    val buffer = SdkEventBuffer(
-      maxBufferSize = 100,
-      flushIntervalMs = 60_000,
-      onFlush = {},
-      executor = Executors.newSingleThreadScheduledExecutor(),
-      dropCounter = counter,
-    )
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 100,
+        flushIntervalMs = 60_000,
+        onFlush = {},
+        executor = Executors.newSingleThreadScheduledExecutor(),
+        dropCounter = counter,
+      )
 
     buffer.isEnabled = false
     buffer.add(makeEvent(1))
@@ -93,13 +95,14 @@ class DropCounterTest {
   @Test
   fun `buffer counts drops when shutdown`() {
     val counter = DefaultDropCounter()
-    val buffer = SdkEventBuffer(
-      maxBufferSize = 100,
-      flushIntervalMs = 60_000,
-      onFlush = {},
-      executor = Executors.newSingleThreadScheduledExecutor(),
-      dropCounter = counter,
-    )
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 100,
+        flushIntervalMs = 60_000,
+        onFlush = {},
+        executor = Executors.newSingleThreadScheduledExecutor(),
+        dropCounter = counter,
+      )
 
     buffer.shutdown()
     buffer.add(makeEvent(1))
@@ -111,18 +114,23 @@ class DropCounterTest {
   fun `buffer counts drops on flush error`() {
     val counter = DefaultDropCounter()
     val executor = Executors.newSingleThreadScheduledExecutor()
-    val buffer = SdkEventBuffer(
-      maxBufferSize = 2,
-      flushIntervalMs = 60_000,
-      onFlush = { throw RuntimeException("boom") },
-      executor = executor,
-      dropCounter = counter,
-    )
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 2,
+        flushIntervalMs = 60_000,
+        onFlush = { throw RuntimeException("boom") },
+        executor = executor,
+        dropCounter = counter,
+      )
 
     buffer.add(makeEvent(1))
     buffer.add(makeEvent(2)) // triggers capacity flush which throws
     executor.submit {}.get(1, TimeUnit.SECONDS) // wait for async capacity flush
 
-    assertEquals(2L, counter.snapshot()[DropReason.FLUSH_ERROR], "Each dropped event should be counted")
+    assertEquals(
+      2L,
+      counter.snapshot()[DropReason.FLUSH_ERROR],
+      "Each dropped event should be counted",
+    )
   }
 }

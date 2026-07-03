@@ -92,16 +92,16 @@ class SlideContentTestHelper {
   }
 
   private fun createTestSlides(): List<SlideContent> =
-      listOf(
-          SlideContent.LargeText("Test Title", "Test Subtitle"),
-          SlideContent.Emoji(PresentationEmoji.ROCKET, "Test Caption"),
-          SlideContent.BulletPoints(
-              "Test Features",
-              listOf(BulletPoint("Feature 1", listOf("Sub 1", "Sub 2")), BulletPoint("Feature 2")),
-          ),
-          SlideContent.CodeSample("fun test() {}", "kotlin", "Test Code"),
-          SlideContent.Visualization("test-image.png", "Test Image"),
-      )
+    listOf(
+      SlideContent.LargeText("Test Title", "Test Subtitle"),
+      SlideContent.Emoji(PresentationEmoji.ROCKET, "Test Caption"),
+      SlideContent.BulletPoints(
+        "Test Features",
+        listOf(BulletPoint("Feature 1", listOf("Sub 1", "Sub 2")), BulletPoint("Feature 2")),
+      ),
+      SlideContent.CodeSample("fun test() {}", "kotlin", "Test Code"),
+      SlideContent.Visualization("test-image.png", "Test Image"),
+    )
 
   private fun createEmptySlideList(): List<SlideContent> = emptyList()
 
@@ -113,11 +113,11 @@ class SlideNavigationTest {
   @Test
   fun `slide index should be coerced within valid range`() {
     val slides =
-        listOf(
-            SlideContent.LargeText("Slide 1"),
-            SlideContent.LargeText("Slide 2"),
-            SlideContent.LargeText("Slide 3"),
-        )
+      listOf(
+        SlideContent.LargeText("Slide 1"),
+        SlideContent.LargeText("Slide 2"),
+        SlideContent.LargeText("Slide 3"),
+      )
 
     // Test negative index
     val negativeIndex = -5
@@ -154,11 +154,11 @@ class SlideNavigationTest {
     assertEquals("Single slide should have count 1", 1, singleSlide.size)
 
     val multipleSlides =
-        listOf(
-            SlideContent.LargeText("First"),
-            SlideContent.Emoji(PresentationEmoji.ROCKET),
-            SlideContent.BulletPoints("Third", emptyList()),
-        )
+      listOf(
+        SlideContent.LargeText("First"),
+        SlideContent.Emoji(PresentationEmoji.ROCKET),
+        SlideContent.BulletPoints("Third", emptyList()),
+      )
     assertEquals("Multiple slides should have correct count", 3, multipleSlides.size)
   }
 }

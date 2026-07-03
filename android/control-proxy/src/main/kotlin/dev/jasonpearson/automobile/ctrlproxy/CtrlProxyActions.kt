@@ -26,37 +26,42 @@ interface CtrlProxyActions {
   fun requestTapCoordinates(requestId: String?, x: Int, y: Int, duration: Long)
 
   fun requestTwoFingerSwipe(
-      requestId: String?,
-      x1: Int,
-      y1: Int,
-      x2: Int,
-      y2: Int,
-      duration: Long,
-      offset: Int,
+    requestId: String?,
+    x1: Int,
+    y1: Int,
+    x2: Int,
+    y2: Int,
+    duration: Long,
+    offset: Int,
   )
 
   fun requestDrag(
-      requestId: String?,
-      x1: Int,
-      y1: Int,
-      x2: Int,
-      y2: Int,
-      pressDurationMs: Long,
-      dragDurationMs: Long,
-      holdDurationMs: Long,
+    requestId: String?,
+    x1: Int,
+    y1: Int,
+    x2: Int,
+    y2: Int,
+    pressDurationMs: Long,
+    dragDurationMs: Long,
+    holdDurationMs: Long,
   )
 
   fun requestPinch(
-      requestId: String?,
-      centerX: Int,
-      centerY: Int,
-      distanceStart: Int,
-      distanceEnd: Int,
-      rotationDegrees: Float,
-      duration: Long,
+    requestId: String?,
+    centerX: Int,
+    centerY: Int,
+    distanceStart: Int,
+    distanceEnd: Int,
+    rotationDegrees: Float,
+    duration: Long,
   )
 
-  fun requestSetText(requestId: String?, text: String, resourceId: String?, dismissKeyboard: Boolean)
+  fun requestSetText(
+    requestId: String?,
+    text: String,
+    resourceId: String?,
+    dismissKeyboard: Boolean,
+  )
 
   fun requestImeAction(requestId: String?, action: String)
 
@@ -83,18 +88,18 @@ interface CtrlProxyActions {
   fun setRecompositionTracking(enabled: Boolean)
 
   fun setAccessibilityFlags(
-      includeNotImportantViews: Boolean,
-      reportViewIds: Boolean,
-      retrieveInteractiveWindows: Boolean,
+    includeNotImportantViews: Boolean,
+    reportViewIds: Boolean,
+    retrieveInteractiveWindows: Boolean,
   )
 
   fun setNetworkMockRules(rulesJson: String)
 
   fun setNetworkErrorSimulation(
-      enabled: Boolean,
-      errorType: String?,
-      limit: Int?,
-      expiresAtEpochMs: Long?,
+    enabled: Boolean,
+    errorType: String?,
+    limit: Int?,
+    expiresAtEpochMs: Long?,
   )
 
   fun getCurrentFocus(requestId: String?)
@@ -114,12 +119,12 @@ interface CtrlProxyActions {
   fun getPreference(requestId: String?, packageName: String, fileName: String, key: String)
 
   fun setPreference(
-      requestId: String?,
-      packageName: String,
-      fileName: String,
-      key: String,
-      value: String?,
-      type: String,
+    requestId: String?,
+    packageName: String,
+    fileName: String,
+    key: String,
+    value: String?,
+    type: String,
   )
 
   fun removePreference(requestId: String?, packageName: String, fileName: String, key: String)
@@ -133,11 +138,11 @@ interface CtrlProxyActions {
   fun requestSettingsGet(requestId: String?, namespace: String, key: String)
 
   fun requestSettingsPut(
-      requestId: String?,
-      namespace: String,
-      key: String,
-      value: String?,
-      valueType: String,
+    requestId: String?,
+    namespace: String,
+    key: String,
+    value: String?,
+    valueType: String,
   )
 
   fun requestSettingsList(requestId: String?, namespace: String)

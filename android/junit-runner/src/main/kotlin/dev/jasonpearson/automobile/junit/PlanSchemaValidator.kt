@@ -8,10 +8,10 @@ data class PlanValidationResult(val valid: Boolean, val errors: List<ValidationE
 
 /** Structured validation error (backward-compatible wrapper) */
 data class ValidationError(
-    val field: String,
-    val message: String,
-    val line: Int? = null,
-    val column: Int? = null,
+  val field: String,
+  val message: String,
+  val line: Int? = null,
+  val column: Int? = null,
 )
 
 /**
@@ -31,16 +31,16 @@ object PlanSchemaValidator {
 
     // Convert to backward-compatible format (filter out warnings, keep only errors)
     val errors =
-        result.errors
-            .filter { it.severity == ValidationSeverity.ERROR }
-            .map { sharedError ->
-              ValidationError(
-                  field = sharedError.field,
-                  message = sharedError.message,
-                  line = sharedError.line,
-                  column = sharedError.column,
-              )
-            }
+      result.errors
+        .filter { it.severity == ValidationSeverity.ERROR }
+        .map { sharedError ->
+          ValidationError(
+            field = sharedError.field,
+            message = sharedError.message,
+            line = sharedError.line,
+            column = sharedError.column,
+          )
+        }
 
     return PlanValidationResult(valid = result.valid, errors = errors)
   }

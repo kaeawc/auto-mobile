@@ -15,14 +15,14 @@ class PermissionManager(private val context: Context) {
   }
 
   data class PermissionState(
-      val permission: String,
-      val granted: Boolean,
-      val requestLaunched: Boolean,
-      val canRequest: Boolean,
-      val requiresSettings: Boolean,
-      val error: String?,
-      val instructions: String?,
-      val adbCommand: String?,
+    val permission: String,
+    val granted: Boolean,
+    val requestLaunched: Boolean,
+    val canRequest: Boolean,
+    val requiresSettings: Boolean,
+    val error: String?,
+    val instructions: String?,
+    val adbCommand: String?,
   )
 
   fun canDrawOverlays(): Boolean {
@@ -37,27 +37,27 @@ class PermissionManager(private val context: Context) {
     return when (permission) {
       PERMISSION_DRAW_OVERLAY -> getDrawOverlayState(requestPermission)
       null ->
-          PermissionState(
-              permission = "unknown",
-              granted = false,
-              requestLaunched = false,
-              canRequest = false,
-              requiresSettings = false,
-              error = "Permission name is required",
-              instructions = null,
-              adbCommand = null,
-          )
+        PermissionState(
+          permission = "unknown",
+          granted = false,
+          requestLaunched = false,
+          canRequest = false,
+          requiresSettings = false,
+          error = "Permission name is required",
+          instructions = null,
+          adbCommand = null,
+        )
       else ->
-          PermissionState(
-              permission = permission,
-              granted = false,
-              requestLaunched = false,
-              canRequest = false,
-              requiresSettings = false,
-              error = "Unknown permission: $permission",
-              instructions = null,
-              adbCommand = null,
-          )
+        PermissionState(
+          permission = permission,
+          granted = false,
+          requestLaunched = false,
+          canRequest = false,
+          requiresSettings = false,
+          error = "Unknown permission: $permission",
+          instructions = null,
+          adbCommand = null,
+        )
     }
   }
 
@@ -68,10 +68,10 @@ class PermissionManager(private val context: Context) {
 
     return try {
       val intent =
-          Intent(
-              Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-              Uri.parse("package:${context.packageName}"),
-          )
+        Intent(
+          Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+          Uri.parse("package:${context.packageName}"),
+        )
       intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
       context.startActivity(intent)
       true
@@ -92,7 +92,7 @@ class PermissionManager(private val context: Context) {
 
     if (!granted) {
       instructions =
-          "Enable Display over other apps for AutoMobile Accessibility Service in system settings."
+        "Enable Display over other apps for AutoMobile Accessibility Service in system settings."
       error = "SYSTEM_ALERT_WINDOW permission not granted."
 
       if (requestPermission && canRequest) {
@@ -104,21 +104,21 @@ class PermissionManager(private val context: Context) {
     }
 
     val adbCommand =
-        if (!granted) {
-          "adb shell appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow"
-        } else {
-          null
-        }
+      if (!granted) {
+        "adb shell appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow"
+      } else {
+        null
+      }
 
     return PermissionState(
-        permission = PERMISSION_DRAW_OVERLAY,
-        granted = granted,
-        requestLaunched = requestLaunched,
-        canRequest = canRequest,
-        requiresSettings = requiresSettings,
-        error = error,
-        instructions = instructions,
-        adbCommand = adbCommand,
+      permission = PERMISSION_DRAW_OVERLAY,
+      granted = granted,
+      requestLaunched = requestLaunched,
+      canRequest = canRequest,
+      requiresSettings = requiresSettings,
+      error = error,
+      instructions = instructions,
+      adbCommand = adbCommand,
     )
   }
 
@@ -128,10 +128,10 @@ class PermissionManager(private val context: Context) {
     }
 
     val intent =
-        Intent(
-            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            Uri.parse("package:${context.packageName}"),
-        )
+      Intent(
+        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+        Uri.parse("package:${context.packageName}"),
+      )
     return intent.resolveActivity(context.packageManager) != null
   }
 }

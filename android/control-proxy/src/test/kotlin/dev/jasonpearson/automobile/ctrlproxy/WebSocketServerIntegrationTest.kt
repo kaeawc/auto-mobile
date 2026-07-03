@@ -54,28 +54,28 @@ class WebSocketServerIntegrationTest {
     testScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     // Use port 0 to let OS assign an available port, avoiding conflicts when tests run in parallel
     server =
-        WebSocketServer(
-            port = 0,
-            scope = testScope,
-            messageHandler =
-                CtrlProxyMessageHandler(
-                    object : NoOpCtrlProxyActions() {
-                      override fun addHighlight(
-                          requestId: String?,
-                          highlightId: String?,
-                          shape: HighlightShape?,
-                      ) {
-                        val error =
-                            when {
-                              highlightId.isNullOrBlank() -> "Missing highlight id"
-                              shape == null -> "Missing highlight shape"
-                              else -> null
-                            }
-                        enqueueHighlightResponse(requestId, error == null, error)
-                      }
-                    }
-                ),
-        )
+      WebSocketServer(
+        port = 0,
+        scope = testScope,
+        messageHandler =
+          CtrlProxyMessageHandler(
+            object : NoOpCtrlProxyActions() {
+              override fun addHighlight(
+                requestId: String?,
+                highlightId: String?,
+                shape: HighlightShape?,
+              ) {
+                val error =
+                  when {
+                    highlightId.isNullOrBlank() -> "Missing highlight id"
+                    shape == null -> "Missing highlight shape"
+                    else -> null
+                  }
+                enqueueHighlightResponse(requestId, error == null, error)
+              }
+            }
+          ),
+      )
   }
 
   /** Get the actual port the server is listening on. Must be called after server.start(). */
@@ -98,9 +98,9 @@ class WebSocketServerIntegrationTest {
    * condition becomes true quickly.
    */
   private suspend fun waitFor(
-      timeoutMs: Long = 1000,
-      checkIntervalMs: Long = 10,
-      condition: () -> Boolean,
+    timeoutMs: Long = 1000,
+    checkIntervalMs: Long = 10,
+    condition: () -> Boolean,
   ) {
     withTimeout(timeoutMs) {
       while (!condition()) {
@@ -110,9 +110,9 @@ class WebSocketServerIntegrationTest {
   }
 
   private fun enqueueHighlightResponse(
-      requestId: String?,
-      success: Boolean,
-      error: String?,
+    requestId: String?,
+    success: Boolean,
+    error: String?,
   ) {
     val errorJson = json.encodeToString<String?>(error)
     val message = buildString {
@@ -165,10 +165,10 @@ class WebSocketServerIntegrationTest {
 
     client.use { client ->
       client.webSocket(
-          method = HttpMethod.Get,
-          host = "localhost",
-          port = getServerPort(),
-          path = "/ws",
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
       ) {
         // Then - connection established
         waitFor { server.getConnectionCount() == 1 }
@@ -199,10 +199,10 @@ class WebSocketServerIntegrationTest {
     client.use { client ->
       val job = launch {
         client.webSocket(
-            method = HttpMethod.Get,
-            host = "localhost",
-            port = getServerPort(),
-            path = "/ws",
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = getServerPort(),
+          path = "/ws",
         ) {
           // Receive and discard connection message
           incoming.receive()
@@ -248,10 +248,10 @@ class WebSocketServerIntegrationTest {
     client.use { client ->
       val job = launch {
         client.webSocket(
-            method = HttpMethod.Get,
-            host = "localhost",
-            port = getServerPort(),
-            path = "/ws",
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = getServerPort(),
+          path = "/ws",
         ) {
           incoming.receive() // Discard connection message
           var messageCount = 0
@@ -270,19 +270,19 @@ class WebSocketServerIntegrationTest {
 
       // When - create and broadcast a hierarchy update
       val hierarchy =
-          ViewHierarchy(
-              packageName = "com.example.app",
-              hierarchy =
-                  UIElementInfo(
-                      text = "Hello",
-                      clickable = "true",
-                      bounds = ElementBounds(0, 0, 100, 50),
-                  ),
-          )
+        ViewHierarchy(
+          packageName = "com.example.app",
+          hierarchy =
+            UIElementInfo(
+              text = "Hello",
+              clickable = "true",
+              bounds = ElementBounds(0, 0, 100, 50),
+            ),
+        )
 
       val hierarchyJson = json.encodeToString(ViewHierarchy.serializer(), hierarchy)
       val message =
-          """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$hierarchyJson}"""
+        """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$hierarchyJson}"""
       server.broadcast(message)
 
       // Wait for message to be received
@@ -331,10 +331,10 @@ class WebSocketServerIntegrationTest {
     client.use { client ->
       val job = launch {
         client.webSocket(
-            method = HttpMethod.Get,
-            host = "localhost",
-            port = getServerPort(),
-            path = "/ws",
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = getServerPort(),
+          path = "/ws",
         ) {
           incoming.receive() // Connection message
           delay(10)
@@ -361,16 +361,16 @@ class WebSocketServerIntegrationTest {
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { client ->
       client.webSocket(
-          method = HttpMethod.Get,
-          host = "localhost",
-          port = getServerPort(),
-          path = "/ws",
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
       ) {
         incoming.receive() // Connection message
 
         val requestId = "req-add"
         val message =
-            """{"type":"add_highlight","requestId":"$requestId","id":"highlight-1","shape":{"type":"box","bounds":{"x":10,"y":20,"width":100,"height":80},"style":{"strokeColor":"#FF0000","strokeWidth":4,"dashPattern":null}}}"""
+          """{"type":"add_highlight","requestId":"$requestId","id":"highlight-1","shape":{"type":"box","bounds":{"x":10,"y":20,"width":100,"height":80},"style":{"strokeColor":"#FF0000","strokeWidth":4,"dashPattern":null}}}"""
         send(Frame.Text(message))
 
         val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
@@ -391,16 +391,16 @@ class WebSocketServerIntegrationTest {
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { client ->
       client.webSocket(
-          method = HttpMethod.Get,
-          host = "localhost",
-          port = getServerPort(),
-          path = "/ws",
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
       ) {
         incoming.receive() // Connection message
 
         val requestId = "req-add-path"
         val message =
-            """{"type":"add_highlight","requestId":"$requestId","id":"path-1","shape":{"type":"path","points":[{"x":10,"y":20},{"x":40,"y":35},{"x":80,"y":25}],"style":{"strokeColor":"#FF8800","strokeWidth":5,"smoothing":"catmull-rom","tension":0.6}}}"""
+          """{"type":"add_highlight","requestId":"$requestId","id":"path-1","shape":{"type":"path","points":[{"x":10,"y":20},{"x":40,"y":35},{"x":80,"y":25}],"style":{"strokeColor":"#FF8800","strokeWidth":5,"smoothing":"catmull-rom","tension":0.6}}}"""
         send(Frame.Text(message))
 
         val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
@@ -420,16 +420,16 @@ class WebSocketServerIntegrationTest {
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { client ->
       client.webSocket(
-          method = HttpMethod.Get,
-          host = "localhost",
-          port = getServerPort(),
-          path = "/ws",
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
       ) {
         incoming.receive() // Connection message
 
         val requestId = "req-invalid"
         val message =
-            """{"type":"add_highlight","requestId":"$requestId","shape":{"type":"box","bounds":{"x":10,"y":20,"width":100,"height":80},"style":{"strokeColor":"#FF0000","strokeWidth":4,"dashPattern":null}}}"""
+          """{"type":"add_highlight","requestId":"$requestId","shape":{"type":"box","bounds":{"x":10,"y":20,"width":100,"height":80},"style":{"strokeColor":"#FF0000","strokeWidth":4,"dashPattern":null}}}"""
         send(Frame.Text(message))
 
         val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
@@ -450,31 +450,31 @@ class WebSocketServerIntegrationTest {
     // the read loop; if dispatch were launched into a background scope, these could reorder.
     val order = java.util.Collections.synchronizedList(mutableListOf<String>())
     val orderedServer =
-        WebSocketServer(
-            port = 0,
-            scope = testScope,
-            messageHandler =
-                CtrlProxyMessageHandler(
-                    object : NoOpCtrlProxyActions() {
-                      override fun setRecompositionTracking(enabled: Boolean) {
-                        order.add("flags")
-                      }
+      WebSocketServer(
+        port = 0,
+        scope = testScope,
+        messageHandler =
+          CtrlProxyMessageHandler(
+            object : NoOpCtrlProxyActions() {
+              override fun setRecompositionTracking(enabled: Boolean) {
+                order.add("flags")
+              }
 
-                      override fun requestScreenshot(requestId: String?) {
-                        order.add("screenshot")
-                      }
-                    }
-                ),
-        )
+              override fun requestScreenshot(requestId: String?) {
+                order.add("screenshot")
+              }
+            }
+          ),
+      )
     orderedServer.start()
     try {
       val client = HttpClient(CIO) { install(WebSockets) }
       client.use { c ->
         c.webSocket(
-            method = HttpMethod.Get,
-            host = "localhost",
-            port = orderedServer.getActualPort() ?: error("Server not running"),
-            path = "/ws",
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = orderedServer.getActualPort() ?: error("Server not running"),
+          path = "/ws",
         ) {
           incoming.receive() // connection greeting
           send(Frame.Text("""{"type":"set_recomposition_tracking","enabled":true}"""))

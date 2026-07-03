@@ -7,24 +7,22 @@ plugins {
 // Signing configuration: reads from environment variables (CI) or gradle.properties (local)
 // Paths are resolved relative to project root using rootProject.file()
 val releaseStoreFilePath: String? =
-    System.getenv("RELEASE_KEYSTORE_PATH") ?: findProperty("RELEASE_KEYSTORE_PATH") as String?
+  System.getenv("RELEASE_KEYSTORE_PATH") ?: findProperty("RELEASE_KEYSTORE_PATH") as String?
 val releaseStorePassword: String? =
-    System.getenv("RELEASE_KEYSTORE_PASSWORD")
-        ?: findProperty("RELEASE_KEYSTORE_PASSWORD") as String?
+  System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: findProperty("RELEASE_KEYSTORE_PASSWORD") as String?
 val releaseKeyAlias: String? =
-    System.getenv("RELEASE_KEY_ALIAS") ?: findProperty("RELEASE_KEY_ALIAS") as String?
+  System.getenv("RELEASE_KEY_ALIAS") ?: findProperty("RELEASE_KEY_ALIAS") as String?
 val releaseKeyPassword: String? =
-    System.getenv("RELEASE_KEY_PASSWORD") ?: findProperty("RELEASE_KEY_PASSWORD") as String?
-val releaseStoreFile: File? =
-    releaseStoreFilePath?.let { path ->
-      val file = File(path)
-      if (file.isAbsolute) file else rootProject.file(path)
-    }
+  System.getenv("RELEASE_KEY_PASSWORD") ?: findProperty("RELEASE_KEY_PASSWORD") as String?
+val releaseStoreFile: File? = releaseStoreFilePath?.let { path ->
+  val file = File(path)
+  if (file.isAbsolute) file else rootProject.file(path)
+}
 val hasReleaseSigning =
-    releaseStoreFile?.exists() == true &&
-        !releaseStorePassword.isNullOrBlank() &&
-        !releaseKeyAlias.isNullOrBlank() &&
-        !releaseKeyPassword.isNullOrBlank()
+  releaseStoreFile?.exists() == true &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
 
 android {
   namespace = "dev.jasonpearson.automobile.ctrlproxy"
@@ -55,19 +53,19 @@ android {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig =
-          if (hasReleaseSigning) {
-            signingConfigs.getByName("release")
-          } else {
-            signingConfigs.getByName("debug")
-          }
+        if (hasReleaseSigning) {
+          signingConfigs.getByName("release")
+        } else {
+          signingConfigs.getByName("debug")
+        }
     }
     debug {
       signingConfig =
-          if (hasReleaseSigning) {
-            signingConfigs.getByName("release")
-          } else {
-            signingConfigs.getByName("debug")
-          }
+        if (hasReleaseSigning) {
+          signingConfigs.getByName("release")
+        } else {
+          signingConfigs.getByName("debug")
+        }
     }
   }
 
@@ -96,24 +94,24 @@ android {
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
   compilerOptions {
     jvmTarget.set(
-        org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(libs.versions.build.java.target.get())
+      org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(libs.versions.build.java.target.get())
     )
     languageVersion.set(
-        org.jetbrains.kotlin.gradle.dsl.KotlinVersion.fromVersion(
-            libs.versions.build.kotlin.language.get()
-        )
+      org.jetbrains.kotlin.gradle.dsl.KotlinVersion.fromVersion(
+        libs.versions.build.kotlin.language.get()
+      )
     )
     freeCompilerArgs =
-        listOf(
-            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
-            "-opt-in=androidx.media3.common.util.UnstableApi",
-            "-opt-in=kotlin.time.ExperimentalTime,kotlin.RequiresOptIn",
-            "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-            "-opt-in=kotlin.ExperimentalUnsignedTypes",
-            "-opt-in=kotlin.time.ExperimentalTime",
-            "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-            "-opt-in=kotlinx.coroutines.FlowPreview",
-        )
+      listOf(
+        "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+        "-opt-in=androidx.media3.common.util.UnstableApi",
+        "-opt-in=kotlin.time.ExperimentalTime,kotlin.RequiresOptIn",
+        "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
+        "-opt-in=kotlin.ExperimentalUnsignedTypes",
+        "-opt-in=kotlin.time.ExperimentalTime",
+        "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
+        "-opt-in=kotlinx.coroutines.FlowPreview",
+      )
   }
 }
 

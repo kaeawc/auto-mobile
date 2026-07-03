@@ -6,8 +6,8 @@ import kotlinx.serialization.Serializable
 /**
  * Sealed class hierarchy for SDK events broadcast from the AutoMobile SDK.
  *
- * These events are sent from the app-under-test to the accessibility service,
- * which then forwards them over WebSocket to the MCP server.
+ * These events are sent from the app-under-test to the accessibility service, which then forwards
+ * them over WebSocket to the MCP server.
  *
  * Event types:
  * - Navigation events: App screen/destination changes
@@ -25,9 +25,7 @@ sealed class SdkEvent {
 // Navigation Events
 // =============================================================================
 
-/**
- * Navigation source/framework identifier.
- */
+/** Navigation source/framework identifier. */
 @Serializable
 enum class NavigationSourceType {
   @SerialName("NAVIGATION_COMPONENT") NAVIGATION_COMPONENT,
@@ -38,9 +36,7 @@ enum class NavigationSourceType {
   @SerialName("ACTIVITY") ACTIVITY,
 }
 
-/**
- * Represents a navigation event - the user moved to a new screen/destination.
- */
+/** Represents a navigation event - the user moved to a new screen/destination. */
 @Serializable
 @SerialName("navigation")
 data class SdkNavigationEvent(
@@ -60,9 +56,7 @@ data class SdkNavigationEvent(
 // Exception Events
 // =============================================================================
 
-/**
- * Device information captured at the time of an exception.
- */
+/** Device information captured at the time of an exception. */
 @Serializable
 data class SdkDeviceInfo(
   val model: String,
@@ -71,9 +65,7 @@ data class SdkDeviceInfo(
   val sdkInt: Int,
 )
 
-/**
- * Represents a handled (non-fatal) exception that was caught and reported by the app.
- */
+/** Represents a handled (non-fatal) exception that was caught and reported by the app. */
 @Serializable
 @SerialName("handled_exception")
 data class SdkHandledExceptionEvent(
@@ -99,9 +91,7 @@ data class SdkHandledExceptionEvent(
 // Notification Events
 // =============================================================================
 
-/**
- * Represents a notification action triggered by the user.
- */
+/** Represents a notification action triggered by the user. */
 @Serializable
 @SerialName("notification_action")
 data class SdkNotificationActionEvent(
@@ -119,9 +109,7 @@ data class SdkNotificationActionEvent(
 // Recomposition Events
 // =============================================================================
 
-/**
- * Represents a Compose recomposition tracking snapshot.
- */
+/** Represents a Compose recomposition tracking snapshot. */
 @Serializable
 @SerialName("recomposition_snapshot")
 data class SdkRecompositionSnapshotEvent(
@@ -136,8 +124,8 @@ data class SdkRecompositionSnapshotEvent(
 // =============================================================================
 
 /**
- * Represents an unhandled crash detected by the SDK's UncaughtExceptionHandler.
- * This is a fatal crash that will terminate the app.
+ * Represents an unhandled crash detected by the SDK's UncaughtExceptionHandler. This is a fatal
+ * crash that will terminate the app.
  */
 @Serializable
 @SerialName("crash")
@@ -165,9 +153,9 @@ data class SdkCrashEvent(
 // =============================================================================
 
 /**
- * Represents an ANR (Application Not Responding) detected via ApplicationExitInfo API.
- * This is captured on app restart after an ANR occurred in a previous session.
- * Requires Android 11+ (API 30).
+ * Represents an ANR (Application Not Responding) detected via ApplicationExitInfo API. This is
+ * captured on app restart after an ANR occurred in a previous session. Requires Android 11+ (API
+ * 30).
  */
 @Serializable
 @SerialName("anr")
@@ -194,9 +182,7 @@ data class SdkAnrEvent(
 // Network Events
 // =============================================================================
 
-/**
- * Represents an HTTP request/response captured by the network interceptor.
- */
+/** Represents an HTTP request/response captured by the network interceptor. */
 @Serializable
 @SerialName("network_request")
 data class SdkNetworkRequestEvent(
@@ -234,18 +220,14 @@ data class SdkNetworkRequestEvent(
   val contentType: String? = null,
 ) : SdkEvent()
 
-/**
- * Direction of a WebSocket frame.
- */
+/** Direction of a WebSocket frame. */
 @Serializable
 enum class WebSocketFrameDirection {
   @SerialName("sent") SENT,
   @SerialName("received") RECEIVED,
 }
 
-/**
- * Type of a WebSocket frame.
- */
+/** Type of a WebSocket frame. */
 @Serializable
 enum class WebSocketFrameType {
   @SerialName("text") TEXT,
@@ -255,9 +237,7 @@ enum class WebSocketFrameType {
   @SerialName("close") CLOSE,
 }
 
-/**
- * Represents a WebSocket frame sent or received.
- */
+/** Represents a WebSocket frame sent or received. */
 @Serializable
 @SerialName("websocket_frame")
 data class SdkWebSocketFrameEvent(
@@ -279,9 +259,7 @@ data class SdkWebSocketFrameEvent(
 // Log Events
 // =============================================================================
 
-/**
- * Represents a log entry captured from logcat or the SDK log API.
- */
+/** Represents a log entry captured from logcat or the SDK log API. */
 @Serializable
 @SerialName("log")
 data class SdkLogEvent(
@@ -303,9 +281,7 @@ data class SdkLogEvent(
 // Broadcast Events
 // =============================================================================
 
-/**
- * Represents a system or app broadcast that was intercepted.
- */
+/** Represents a system or app broadcast that was intercepted. */
 @Serializable
 @SerialName("broadcast")
 data class SdkBroadcastEvent(
@@ -323,15 +299,15 @@ data class SdkBroadcastEvent(
 // Lifecycle Events
 // =============================================================================
 
-/**
- * Represents an OS lifecycle event (foreground/background, connectivity, battery, screen).
- */
+/** Represents an OS lifecycle event (foreground/background, connectivity, battery, screen). */
 @Serializable
 @SerialName("lifecycle")
 data class SdkLifecycleEvent(
   override val timestamp: Long,
   override val applicationId: String? = null,
-  /** Event kind: foreground, background, connectivity_change, battery_change, screen_on, screen_off */
+  /**
+   * Event kind: foreground, background, connectivity_change, battery_change, screen_on, screen_off
+   */
   val kind: String,
   /** Additional details about the event */
   val details: Map<String, String>? = null,
@@ -342,8 +318,8 @@ data class SdkLifecycleEvent(
 // =============================================================================
 
 /**
- * Batched transport wrapper containing multiple SDK events.
- * Used to reduce Intent broadcast frequency for high-volume events.
+ * Batched transport wrapper containing multiple SDK events. Used to reduce Intent broadcast
+ * frequency for high-volume events.
  */
 @Serializable
 @SerialName("event_batch")

@@ -3,10 +3,9 @@ package dev.jasonpearson.automobile.protocol
 /**
  * Interface for handling WebSocket messages from the MCP server.
  *
- * Implementations receive typed request objects and return optional response objects.
- * When a response is returned, the server broadcasts it to connected clients.
- * When null is returned, no response is broadcast (useful for async operations
- * that broadcast their own responses later).
+ * Implementations receive typed request objects and return optional response objects. When a
+ * response is returned, the server broadcasts it to connected clients. When null is returned, no
+ * response is broadcast (useful for async operations that broadcast their own responses later).
  */
 interface WebSocketMessageHandler {
   /**

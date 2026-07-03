@@ -4,6 +4,7 @@ import * as os from "os";
 import * as fs from "fs";
 import type { Database as DatabaseSchema } from "./types";
 import { runMigrations } from "./migrator";
+import { createFileMigrationLock } from "./migrationLock";
 import { logger } from "../utils/logger";
 import { toActionableError } from "../models/ActionableError";
 import { BunSqliteDialect } from "./bunSqliteDialect";
@@ -184,6 +185,10 @@ async function startMigrations(dbPath: string): Promise<void> {
 
   try {
     await runMigrations(migrationDb, {
+      // Serialize the migration run across processes: two openers on the same DB
+      // file (override env / --no-proxy alongside a daemon) must not both enter
+      // migrateToLatest() and collide on the kysely_migration PRIMARY KEY (#2794).
+      lock: createFileMigrationLock(dbPath),
       backup: () => backupDatabaseFile(migrationDb, dbPath),
     });
     migrationsRun = true;

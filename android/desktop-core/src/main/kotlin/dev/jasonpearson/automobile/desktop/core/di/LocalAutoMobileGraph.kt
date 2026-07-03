@@ -8,15 +8,15 @@ import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 /**
  * CompositionLocal providing the DI graph to the Compose UI tree.
  *
- * When no graph is explicitly provided (e.g. in the IDE plugin), a default
- * provider is used that creates instances via factories — matching the
- * pre-DI behavior.
+ * When no graph is explicitly provided (e.g. in the IDE plugin), a default provider is used that
+ * creates instances via factories — matching the pre-DI behavior.
  */
-val LocalAutoMobileGraph = staticCompositionLocalOf<AutoMobileGraphProvider> {
+val LocalAutoMobileGraph =
+  staticCompositionLocalOf<AutoMobileGraphProvider> {
     val client = McpClientFactory.createPreferred(null)
     object : AutoMobileGraphProvider {
-        override val autoMobileClient = client
-        override val settingsProvider = FakeSettingsProvider()
-        override val dataSourceFactory = DefaultDataSourceFactory(client)
+      override val autoMobileClient = client
+      override val settingsProvider = FakeSettingsProvider()
+      override val dataSourceFactory = DefaultDataSourceFactory(client)
     }
-}
+  }

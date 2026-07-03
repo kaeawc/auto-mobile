@@ -86,11 +86,11 @@ class MainActivity : ComponentActivity() {
       EnableComposeObservableApi()
       AutoMobileTheme(experimentRepository = experimentRepository) {
         AppNavigation(
-            deepLinkUri = pendingDeepLink,
-            onDeepLinkCallbackSet = { callback ->
-              Log.d(TAG, "Deep link callback set")
-              deepLinkCallback = callback
-            },
+          deepLinkUri = pendingDeepLink,
+          onDeepLinkCallbackSet = { callback ->
+            Log.d(TAG, "Deep link callback set")
+            deepLinkCallback = callback
+          },
         )
       }
     }
@@ -117,14 +117,14 @@ class MainActivity : ComponentActivity() {
 
       // Analytics tracking for deep link usage
       AnalyticsTracker.getInstance()
-          .trackEvent(
-              "deep_link_opened",
-              mapOf(
-                  "uri" to data.toString(),
-                  "destination" to (destinationName ?: "unknown"),
-                  "isNewIntent" to isNewIntent.toString(),
-              ),
-          )
+        .trackEvent(
+          "deep_link_opened",
+          mapOf(
+            "uri" to data.toString(),
+            "destination" to (destinationName ?: "unknown"),
+            "isNewIntent" to isNewIntent.toString(),
+          ),
+        )
     } else {
       Log.d(TAG, "No valid deep link found, clearing pending deep link")
       // Clear any previous deep link if this isn't a deep link intent

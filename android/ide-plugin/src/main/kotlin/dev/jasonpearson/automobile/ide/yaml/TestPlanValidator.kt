@@ -16,17 +16,17 @@ enum class ValidationSeverity {
 
 /** Result of test plan validation */
 data class TestPlanValidationResult(
-    val valid: Boolean,
-    val errors: List<TestPlanValidationError> = emptyList(),
+  val valid: Boolean,
+  val errors: List<TestPlanValidationError> = emptyList(),
 )
 
 /** Structured validation error with severity and location information */
 data class TestPlanValidationError(
-    val field: String,
-    val message: String,
-    val severity: ValidationSeverity = ValidationSeverity.ERROR,
-    val line: Int? = null,
-    val column: Int? = null,
+  val field: String,
+  val message: String,
+  val severity: ValidationSeverity = ValidationSeverity.ERROR,
+  val line: Int? = null,
+  val column: Int? = null,
 )
 
 /**
@@ -45,11 +45,11 @@ object TestPlanValidator {
     }
 
     val schemaStream =
-        getResourceStream("test-plan.schema.json", "schemas/test-plan.schema.json")
-            ?: throw IllegalStateException(
-                "Could not find test-plan.schema.json in classpath resources. " +
-                    "Ensure schemas/test-plan.schema.json is included in the plugin resources."
-            )
+      getResourceStream("test-plan.schema.json", "schemas/test-plan.schema.json")
+        ?: throw IllegalStateException(
+          "Could not find test-plan.schema.json in classpath resources. " +
+            "Ensure schemas/test-plan.schema.json is included in the plugin resources."
+        )
 
     val schemaJson = schemaStream.bufferedReader().use { it.readText() }
 
@@ -87,38 +87,38 @@ object TestPlanValidator {
       parsedObject = yaml.load(yamlContent)
     } catch (e: Exception) {
       return TestPlanValidationResult(
-          valid = false,
-          errors =
-              listOf(
-                  TestPlanValidationError(
-                      field = "root",
-                      message = "YAML parsing failed: ${e.message}",
-                      severity = ValidationSeverity.ERROR,
-                  )
-              ),
+        valid = false,
+        errors =
+          listOf(
+            TestPlanValidationError(
+              field = "root",
+              message = "YAML parsing failed: ${e.message}",
+              severity = ValidationSeverity.ERROR,
+            )
+          ),
       )
     }
 
     // Convert to JSON string for validation
     val jsonString =
-        try {
-          kotlinx.serialization.json.Json.encodeToString(
-              kotlinx.serialization.json.JsonElement.serializer(),
-              convertToJsonElement(parsedObject),
-          )
-        } catch (e: Exception) {
-          return TestPlanValidationResult(
-              valid = false,
-              errors =
-                  listOf(
-                      TestPlanValidationError(
-                          field = "root",
-                          message = "Failed to convert YAML to JSON: ${e.message}",
-                          severity = ValidationSeverity.ERROR,
-                      )
-                  ),
-          )
-        }
+      try {
+        kotlinx.serialization.json.Json.encodeToString(
+          kotlinx.serialization.json.JsonElement.serializer(),
+          convertToJsonElement(parsedObject),
+        )
+      } catch (e: Exception) {
+        return TestPlanValidationResult(
+          valid = false,
+          errors =
+            listOf(
+              TestPlanValidationError(
+                field = "root",
+                message = "Failed to convert YAML to JSON: ${e.message}",
+                severity = ValidationSeverity.ERROR,
+              )
+            ),
+        )
+      }
 
     // Validate against schema
     val validationErrors: List<Error> = schema.validate(jsonString, InputFormat.JSON)
@@ -141,8 +141,8 @@ object TestPlanValidator {
 
   /** Validate that all tool names in steps are valid AutoMobile tools */
   private fun validateToolNames(
-      parsedObject: Any?,
-      yamlContent: String,
+    parsedObject: Any?,
+    yamlContent: String,
   ): List<TestPlanValidationError> {
     val errors = mutableListOf<TestPlanValidationError>()
 
@@ -161,13 +161,13 @@ object TestPlanValidator {
         if (toolName != null && toolName.isNotEmpty() && !ValidTools.TOOLS.contains(toolName)) {
           val lineInfo = findToolNameLine(yamlContent, index, toolName)
           errors.add(
-              TestPlanValidationError(
-                  field = "steps[$index].tool",
-                  message = "Unknown tool '$toolName'. Must be one of the valid AutoMobile tools.",
-                  severity = ValidationSeverity.ERROR,
-                  line = lineInfo?.line,
-                  column = lineInfo?.column,
-              )
+            TestPlanValidationError(
+              field = "steps[$index].tool",
+              message = "Unknown tool '$toolName'. Must be one of the valid AutoMobile tools.",
+              severity = ValidationSeverity.ERROR,
+              line = lineInfo?.line,
+              column = lineInfo?.column,
+            )
           )
         }
       }
@@ -200,7 +200,7 @@ object TestPlanValidator {
       if (inTargetStep) {
         // Match both inline (- tool: asdf) and separate line (  tool: asdf)
         val toolPattern =
-            Regex("(?:^\\s*-\\s+)?tool:\\s*[\"']?${Regex.escape(toolName)}[\"']?\\s*$")
+          Regex("(?:^\\s*-\\s+)?tool:\\s*[\"']?${Regex.escape(toolName)}[\"']?\\s*$")
         if (toolPattern.find(line) != null) {
           val column = line.indexOf("tool") + 1
           return LineInfo(line = lineIndex + 1, column = column)
@@ -259,54 +259,54 @@ object TestPlanValidator {
 
     // Determine severity based on whether this is a deprecated field
     val severity =
-        if (isDeprecatedFieldError(field, rawMessage, messageType)) {
-          ValidationSeverity.WARNING
-        } else {
-          ValidationSeverity.ERROR
-        }
+      if (isDeprecatedFieldError(field, rawMessage, messageType)) {
+        ValidationSeverity.WARNING
+      } else {
+        ValidationSeverity.ERROR
+      }
 
     // Create more user-friendly messages based on error type
     val message =
-        when {
-          messageType == "required" || rawMessage.contains("required") -> {
-            // Try to extract property name from message
-            val propertyMatch = Regex("required property '([^']+)'").find(rawMessage)
-            val property = propertyMatch?.groupValues?.getOrNull(1) ?: "property"
-            "Missing required property '$property'"
-          }
-          messageType.contains("additionalProperties") || rawMessage.contains("additional") -> {
-            val propertyMatch = Regex("property '([^']+)'").find(rawMessage)
-            val property = propertyMatch?.groupValues?.getOrNull(1) ?: "property"
-            if (severity == ValidationSeverity.WARNING) {
-              "Property '$property' is deprecated. Consider using the new format."
-            } else {
-              "Unknown property '$property'. This property is not allowed by the schema."
-            }
-          }
-          messageType == "enum" || rawMessage.contains("enum") -> {
-            "Must be one of the allowed values"
-          }
-          messageType == "type" || rawMessage.contains("type") -> {
-            rawMessage
-          }
-          messageType.contains("minItems") || rawMessage.contains("minimum") -> {
-            rawMessage
-          }
-          messageType.contains("minLength") -> {
-            rawMessage
-          }
-          else -> rawMessage
+      when {
+        messageType == "required" || rawMessage.contains("required") -> {
+          // Try to extract property name from message
+          val propertyMatch = Regex("required property '([^']+)'").find(rawMessage)
+          val property = propertyMatch?.groupValues?.getOrNull(1) ?: "property"
+          "Missing required property '$property'"
         }
+        messageType.contains("additionalProperties") || rawMessage.contains("additional") -> {
+          val propertyMatch = Regex("property '([^']+)'").find(rawMessage)
+          val property = propertyMatch?.groupValues?.getOrNull(1) ?: "property"
+          if (severity == ValidationSeverity.WARNING) {
+            "Property '$property' is deprecated. Consider using the new format."
+          } else {
+            "Unknown property '$property'. This property is not allowed by the schema."
+          }
+        }
+        messageType == "enum" || rawMessage.contains("enum") -> {
+          "Must be one of the allowed values"
+        }
+        messageType == "type" || rawMessage.contains("type") -> {
+          rawMessage
+        }
+        messageType.contains("minItems") || rawMessage.contains("minimum") -> {
+          rawMessage
+        }
+        messageType.contains("minLength") -> {
+          rawMessage
+        }
+        else -> rawMessage
+      }
 
     // Try to find line number for the field in YAML
     val lineInfo = findLineNumber(yamlContent, field)
 
     return TestPlanValidationError(
-        field = field.ifEmpty { "root" },
-        message = message,
-        severity = severity,
-        line = lineInfo?.line,
-        column = lineInfo?.column,
+      field = field.ifEmpty { "root" },
+      message = message,
+      severity = severity,
+      line = lineInfo?.line,
+      column = lineInfo?.column,
     )
   }
 

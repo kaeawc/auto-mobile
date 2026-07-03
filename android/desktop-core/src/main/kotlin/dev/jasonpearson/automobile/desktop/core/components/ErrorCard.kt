@@ -18,34 +18,35 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun ErrorCard(
-    title: String,
-    message: String,
-    modifier: Modifier = Modifier,
-    onDismiss: (() -> Unit)? = null,
-    onRetry: (() -> Unit)? = null,
+  title: String,
+  message: String,
+  modifier: Modifier = Modifier,
+  onDismiss: (() -> Unit)? = null,
+  onRetry: (() -> Unit)? = null,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = message, style = MaterialTheme.typography.bodyMedium)
-            if (onDismiss != null || onRetry != null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    onRetry?.let {
-                        TextButton(onClick = it) { Text("Retry") }
-                    }
-                    onDismiss?.let {
-                        TextButton(onClick = it) { Text("Dismiss") }
-                    }
-                }
-            }
+  Card(
+    modifier = modifier.fillMaxWidth(),
+    colors =
+      CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+      ),
+  ) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Text(text = title, style = MaterialTheme.typography.titleMedium)
+      Spacer(modifier = Modifier.height(8.dp))
+      Text(text = message, style = MaterialTheme.typography.bodyMedium)
+      if (onDismiss != null || onRetry != null) {
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          onRetry?.let {
+            TextButton(onClick = it) { Text("Retry") }
+          }
+          onDismiss?.let {
+            TextButton(onClick = it) { Text("Dismiss") }
+          }
         }
+      }
     }
+  }
 }

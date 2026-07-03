@@ -87,17 +87,17 @@ object AutoMobileNotifications {
    * @return true if the notification was posted successfully
    */
   fun post(
-      title: String,
-      body: String,
-      style: NotificationStyle = NotificationStyle.DEFAULT,
-      imagePath: String? = null,
-      actions: List<NotificationAction> = emptyList(),
-      channelId: String? = null,
+    title: String,
+    body: String,
+    style: NotificationStyle = NotificationStyle.DEFAULT,
+    imagePath: String? = null,
+    actions: List<NotificationAction> = emptyList(),
+    channelId: String? = null,
   ): Boolean {
     val ctx = context
     if (ctx == null) {
       AutoMobileSDK.logger.w(TAG) {
-          "AutoMobileNotifications not initialized; call AutoMobileSDK.initialize() or AutoMobileNotifications.initialize()."
+        "AutoMobileNotifications not initialized; call AutoMobileSDK.initialize() or AutoMobileNotifications.initialize()."
       }
       return false
     }
@@ -106,26 +106,26 @@ object AutoMobileNotifications {
   }
 
   internal fun postWithContext(
-      context: Context,
-      title: String,
-      body: String,
-      style: NotificationStyle,
-      imagePath: String?,
-      actions: List<NotificationAction>,
-      channelId: String?,
+    context: Context,
+    title: String,
+    body: String,
+    style: NotificationStyle,
+    imagePath: String?,
+    actions: List<NotificationAction>,
+    channelId: String?,
   ): Boolean {
     return try {
       val notificationManager =
-          context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
       val effectiveChannelId = channelId?.takeIf { it.isNotBlank() } ?: DEFAULT_CHANNEL_ID
       ensureChannel(notificationManager, effectiveChannelId, channelId)
 
       val builder =
-          NotificationCompat.Builder(context, effectiveChannelId)
-              .setContentTitle(title)
-              .setContentText(body)
-              .setSmallIcon(resolveSmallIcon(context))
-              .setAutoCancel(true)
+        NotificationCompat.Builder(context, effectiveChannelId)
+          .setContentTitle(title)
+          .setContentText(body)
+          .setSmallIcon(resolveSmallIcon(context))
+          .setAutoCancel(true)
 
       when (style) {
         NotificationStyle.BIG_TEXT -> {
@@ -135,10 +135,12 @@ object AutoMobileNotifications {
           val bitmap = imagePath?.let { loadBitmap(context, it) }
           if (bitmap != null) {
             builder
-                .setStyle(NotificationCompat.BigPictureStyle().bigPicture(bitmap))
-                .setLargeIcon(bitmap)
+              .setStyle(NotificationCompat.BigPictureStyle().bigPicture(bitmap))
+              .setLargeIcon(bitmap)
           } else {
-            AutoMobileSDK.logger.w(TAG) { "Big picture style requested but image could not be loaded." }
+            AutoMobileSDK.logger.w(TAG) {
+              "Big picture style requested but image could not be loaded."
+            }
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(body))
           }
         }
@@ -164,46 +166,46 @@ object AutoMobileNotifications {
   }
 
   private fun ensureChannel(
-      notificationManager: NotificationManager,
-      channelId: String,
-      customChannelId: String?,
+    notificationManager: NotificationManager,
+    channelId: String,
+    customChannelId: String?,
   ) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
     val name =
-        if (customChannelId != null && customChannelId.isNotBlank()) {
-          "AutoMobile: $customChannelId"
-        } else {
-          DEFAULT_CHANNEL_NAME
-        }
+      if (customChannelId != null && customChannelId.isNotBlank()) {
+        "AutoMobile: $customChannelId"
+      } else {
+        DEFAULT_CHANNEL_NAME
+      }
     val description = DEFAULT_CHANNEL_DESCRIPTION
 
     val channel =
-        NotificationChannel(channelId, name, NotificationManager.IMPORTANCE_DEFAULT).apply {
-          setDescription(description)
-        }
+      NotificationChannel(channelId, name, NotificationManager.IMPORTANCE_DEFAULT).apply {
+        setDescription(description)
+      }
 
     notificationManager.createNotificationChannel(channel)
   }
 
   private fun createAction(
-      context: Context,
-      notificationId: Int,
-      action: NotificationAction,
+    context: Context,
+    notificationId: Int,
+    action: NotificationAction,
   ): NotificationCompat.Action {
     val intent =
-        Intent(ACTION_NOTIFICATION_ACTION).apply {
-          setPackage(context.packageName)
-          putExtra(EXTRA_ACTION_ID, action.actionId)
-          putExtra(EXTRA_NOTIFICATION_ID, notificationId)
-        }
+      Intent(ACTION_NOTIFICATION_ACTION).apply {
+        setPackage(context.packageName)
+        putExtra(EXTRA_ACTION_ID, action.actionId)
+        putExtra(EXTRA_NOTIFICATION_ID, notificationId)
+      }
 
     val flags =
-        PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+      PendingIntent.FLAG_UPDATE_CURRENT or
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
 
     val pendingIntent =
-        PendingIntent.getBroadcast(context, action.actionId.hashCode(), intent, flags)
+      PendingIntent.getBroadcast(context, action.actionId.hashCode(), intent, flags)
 
     return NotificationCompat.Action.Builder(ACTION_ICON_RES, action.label, pendingIntent).build()
   }
@@ -229,7 +231,7 @@ object AutoMobileNotifications {
     if (trimmed.startsWith("content://")) {
       return try {
         decodeBitmapFromStream(
-            context.contentResolver.openInputStream(android.net.Uri.parse(trimmed))
+          context.contentResolver.openInputStream(android.net.Uri.parse(trimmed))
         )
       } catch (e: Exception) {
         AutoMobileSDK.logger.w(TAG, e) { "Failed to open content URI for image" }
@@ -287,10 +289,9 @@ object AutoMobileNotifications {
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
     val options =
-        BitmapFactory.Options().apply {
-          inSampleSize =
-              calculateInSampleSize(bounds.outWidth, bounds.outHeight, MAX_IMAGE_DIMENSION)
-        }
+      BitmapFactory.Options().apply {
+        inSampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, MAX_IMAGE_DIMENSION)
+      }
 
     val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
     return scaleBitmap(decoded, MAX_IMAGE_DIMENSION)

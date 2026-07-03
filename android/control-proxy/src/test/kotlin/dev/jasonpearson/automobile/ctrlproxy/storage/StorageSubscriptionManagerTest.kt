@@ -7,8 +7,6 @@ import android.os.Bundle
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -47,11 +45,11 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `checkSdkAvailability returns failure when inspection disabled`() {
     val bundle =
-        Bundle().apply {
-          putBoolean("success", false)
-          putString("errorType", "DISABLED")
-          putString("error", "Inspection is disabled")
-        }
+      Bundle().apply {
+        putBoolean("success", false)
+        putString("errorType", "DISABLED")
+        putString("error", "Inspection is disabled")
+      }
     every { contentResolver.call(any<Uri>(), eq("checkAvailability"), any(), any()) } returns bundle
 
     val result = manager.checkSdkAvailability("com.example.app")
@@ -63,11 +61,11 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `checkSdkAvailability returns success with version info`() {
     val bundle =
-        Bundle().apply {
-          putBoolean("success", true)
-          // Response uses kotlinx.serialization sealed class format with type discriminator
-          putString("result", """{"type":"availability","available":true,"version":1}""")
-        }
+      Bundle().apply {
+        putBoolean("success", true)
+        // Response uses kotlinx.serialization sealed class format with type discriminator
+        putString("result", """{"type":"availability","available":true,"version":1}""")
+      }
     every { contentResolver.call(any<Uri>(), eq("checkAvailability"), any(), any()) } returns bundle
 
     val result = manager.checkSdkAvailability("com.example.app")
@@ -83,14 +81,14 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `listPreferenceFiles returns files on success`() {
     val bundle =
-        Bundle().apply {
-          putBoolean("success", true)
-          // Response uses kotlinx.serialization sealed class format with type discriminator
-          putString(
-              "result",
-              """{"type":"files","files":[{"name":"auth","path":"/data/auth.xml","entryCount":5},{"name":"settings","path":"/data/settings.xml","entryCount":3}]}""",
-          )
-        }
+      Bundle().apply {
+        putBoolean("success", true)
+        // Response uses kotlinx.serialization sealed class format with type discriminator
+        putString(
+          "result",
+          """{"type":"files","files":[{"name":"auth","path":"/data/auth.xml","entryCount":5},{"name":"settings","path":"/data/settings.xml","entryCount":3}]}""",
+        )
+      }
     every { contentResolver.call(any<Uri>(), eq("listFiles"), any(), any()) } returns bundle
 
     val result = manager.listPreferenceFiles("com.example.app")
@@ -119,14 +117,14 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `getPreferences returns entries on success`() {
     val bundle =
-        Bundle().apply {
-          putBoolean("success", true)
-          // Response uses kotlinx.serialization sealed class format with type discriminator
-          putString(
-              "result",
-              """{"type":"preferences","entries":[{"key":"username","value":"john","type":"STRING"},{"key":"count","value":"42","type":"INT"}]}""",
-          )
-        }
+      Bundle().apply {
+        putBoolean("success", true)
+        // Response uses kotlinx.serialization sealed class format with type discriminator
+        putString(
+          "result",
+          """{"type":"preferences","entries":[{"key":"username","value":"john","type":"STRING"},{"key":"count","value":"42","type":"INT"}]}""",
+        )
+      }
     every { contentResolver.call(any<Uri>(), eq("getPreferences"), any(), any()) } returns bundle
 
     val result = manager.getPreferences("com.example.app", "auth")
@@ -145,11 +143,11 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `getPreferences returns failure for missing file`() {
     val bundle =
-        Bundle().apply {
-          putBoolean("success", false)
-          putString("errorType", "FileNotFound")
-          putString("error", "File not found")
-        }
+      Bundle().apply {
+        putBoolean("success", false)
+        putString("errorType", "FileNotFound")
+        putString("error", "File not found")
+      }
     every { contentResolver.call(any<Uri>(), eq("getPreferences"), any(), any()) } returns bundle
 
     val result = manager.getPreferences("com.example.app", "nonexistent")
@@ -163,10 +161,10 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `subscribe returns subscription on success`() {
     val bundle =
-        Bundle().apply {
-          putBoolean("success", true)
-          putString("result", """{"fileName":"auth","subscribed":true}""")
-        }
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
     every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns bundle
 
     val result = manager.subscribe("com.example.app", "auth")
@@ -181,10 +179,10 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `subscribe returns same subscription when already subscribed`() {
     val bundle =
-        Bundle().apply {
-          putBoolean("success", true)
-          putString("result", """{"fileName":"auth","subscribed":true}""")
-        }
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
     every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns bundle
 
     // Subscribe twice
@@ -202,19 +200,19 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `subscribe registers ContentObserver`() {
     val bundle =
-        Bundle().apply {
-          putBoolean("success", true)
-          putString("result", """{"fileName":"auth","subscribed":true}""")
-        }
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
     every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns bundle
 
     manager.subscribe("com.example.app", "auth")
 
     verify {
       contentResolver.registerContentObserver(
-          match { it.toString().contains("com.example.app.automobile.sharedprefs") },
-          any(),
-          any(),
+        match { it.toString().contains("com.example.app.automobile.sharedprefs") },
+        any(),
+        any(),
       )
     }
   }
@@ -224,14 +222,14 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `unsubscribe returns true when subscribed`() {
     val subscribeBundle =
-        Bundle().apply {
-          putBoolean("success", true)
-          putString("result", """{"fileName":"auth","subscribed":true}""")
-        }
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
     every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
-        subscribeBundle
+      subscribeBundle
     every { contentResolver.call(any<Uri>(), eq("unsubscribeFromFile"), any(), any()) } returns
-        Bundle()
+      Bundle()
 
     manager.subscribe("com.example.app", "auth")
     val result = manager.unsubscribe("com.example.app", "auth")
@@ -249,14 +247,14 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `unsubscribe unregisters ContentObserver when no more subscriptions for package`() {
     val subscribeBundle =
-        Bundle().apply {
-          putBoolean("success", true)
-          putString("result", """{"subscribed":true}""")
-        }
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"subscribed":true}""")
+      }
     every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
-        subscribeBundle
+      subscribeBundle
     every { contentResolver.call(any<Uri>(), eq("unsubscribeFromFile"), any(), any()) } returns
-        Bundle()
+      Bundle()
 
     manager.subscribe("com.example.app", "auth")
     manager.unsubscribe("com.example.app", "auth")
@@ -276,10 +274,10 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `getActiveSubscriptions returns all active subscriptions`() {
     val bundle =
-        Bundle().apply {
-          putBoolean("success", true)
-          putString("result", """{"subscribed":true}""")
-        }
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"subscribed":true}""")
+      }
     every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns bundle
 
     manager.subscribe("com.example.app1", "auth")
@@ -297,14 +295,14 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `destroy clears all subscriptions`() {
     val subscribeBundle =
-        Bundle().apply {
-          putBoolean("success", true)
-          putString("result", """{"subscribed":true}""")
-        }
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"subscribed":true}""")
+      }
     every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
-        subscribeBundle
+      subscribeBundle
     every { contentResolver.call(any<Uri>(), eq("unsubscribeFromFile"), any(), any()) } returns
-        Bundle()
+      Bundle()
 
     manager.subscribe("com.example.app", "auth")
     manager.subscribe("com.example.app", "settings")

@@ -1,13 +1,11 @@
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type {
   Database,
-  NewFailureGroup,
   NewFailureOccurrence,
   NewFailureOccurrenceScreen,
   NewFailureCapture,
   NewFailureNotification,
-  FailureGroupUpdate,
 } from "./types";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
@@ -135,55 +133,20 @@ export class FailureAnalyticsRepository {
     const occurrenceId = crypto.randomUUID();
 
     try {
-      // Check if group exists
-      const existingGroup = await db
-        .selectFrom("failure_groups")
-        .select(["id", "total_count", "unique_sessions", "first_occurrence", "tool_call_info_json"])
-        .where("signature", "=", input.signature)
-        .executeTakeFirst();
+      // Atomic get-or-create keyed on signature (#2789). The daemon's single
+      // connection releases its mutex across every await, so the former
+      // SELECT-then-INSERT/UPDATE interleaved: two same-signature failures could
+      // both INSERT (duplicate groups, now blocked by the UNIQUE index from
+      // migration 2026_07_01_000) or both read a stale total_count and clobber
+      // (lost increments). A single INSERT ... ON CONFLICT DO UPDATE makes the
+      // count bump atomic. The candidate id is used only on the first-seen path.
+      const candidateGroupId = crypto.randomUUID();
+      const nowIso = new Date().toISOString();
 
-      let groupId: string;
-
-      if (existingGroup) {
-        groupId = existingGroup.id;
-
-        // Count unique sessions including this one
-        const sessionExists = await db
-          .selectFrom("failure_occurrences")
-          .select("id")
-          .where("group_id", "=", groupId)
-          .where("session_id", "=", input.occurrence.sessionId)
-          .executeTakeFirst();
-
-        const newUniqueSessions = sessionExists
-          ? existingGroup.unique_sessions
-          : existingGroup.unique_sessions + 1;
-
-        // Merge tool call info if this is a tool failure
-        let mergedToolCallInfo = input.toolCallInfo;
-        if (input.type === "tool_failure" && existingGroup.tool_call_info_json) {
-          const existing = JSON.parse(existingGroup.tool_call_info_json) as AggregatedToolCallInfo;
-          mergedToolCallInfo = this.mergeToolCallInfo(existing, input.toolCallInfo, input.occurrence);
-        }
-
-        const update: FailureGroupUpdate = {
-          last_occurrence: now,
-          total_count: existingGroup.total_count + 1,
-          unique_sessions: newUniqueSessions,
-          tool_call_info_json: mergedToolCallInfo ? JSON.stringify(mergedToolCallInfo) : null,
-          updated_at: new Date().toISOString(),
-        };
-
-        await db
-          .updateTable("failure_groups")
-          .set(update)
-          .where("id", "=", groupId)
-          .execute();
-      } else {
-        groupId = crypto.randomUUID();
-
-        const group: NewFailureGroup = {
-          id: groupId,
+      const upserted = await db
+        .insertInto("failure_groups")
+        .values({
+          id: candidateGroupId,
           type: input.type,
           signature: input.signature,
           title: input.title,
@@ -195,11 +158,22 @@ export class FailureAnalyticsRepository {
           unique_sessions: 1,
           stack_trace_json: input.stackTrace ? JSON.stringify(input.stackTrace) : null,
           tool_call_info_json: input.toolCallInfo ? JSON.stringify(input.toolCallInfo) : null,
-          updated_at: new Date().toISOString(),
-        };
+          updated_at: nowIso,
+        })
+        .onConflict(oc =>
+          oc.column("signature").doUpdateSet(eb => ({
+            last_occurrence: now,
+            total_count: eb("failure_groups.total_count", "+", 1),
+            updated_at: nowIso,
+          }))
+        )
+        .returning("id")
+        .executeTakeFirstOrThrow();
 
-        await db.insertInto("failure_groups").values(group).execute();
-      }
+      const groupId = upserted.id;
+      // RETURNING gives the pre-existing id on the conflict path, so a returned
+      // id equal to our fresh candidate means this call created the group.
+      const isNewGroup = groupId === candidateGroupId;
 
       // Insert occurrence
       const occurrence: NewFailureOccurrence = {
@@ -220,6 +194,62 @@ export class FailureAnalyticsRepository {
       };
 
       await db.insertInto("failure_occurrences").values(occurrence).execute();
+
+      // Derive unique_sessions from the committed occurrence rows rather than
+      // incrementing a stale read (#2789). COUNT(DISTINCT session_id) is
+      // evaluated inside SQLite in one statement, so interleaved recordFailure
+      // calls both write the same correct value — idempotent, not racy. Backed
+      // by idx_failure_occurrences_group_session so it does not scan the group.
+      // Skip it on the first-seen path: the INSERT already set unique_sessions=1
+      // and this call's occurrence is the only one, so the recompute is a no-op
+      // there. A concurrent same-signature call conflicts (isNewGroup=false) and
+      // runs its own recompute, which observes every committed occurrence.
+      if (!isNewGroup) {
+        await db
+          .updateTable("failure_groups")
+          .set({
+            unique_sessions: sql<number>`(
+              SELECT COUNT(DISTINCT session_id)
+              FROM failure_occurrences
+              WHERE group_id = ${groupId}
+            )`,
+          })
+          .where("id", "=", groupId)
+          .execute();
+      }
+
+      // Preserve tool-call-info aggregation. On the first-seen path the upsert
+      // already stored this occurrence's info; on the conflict path we fold the
+      // new contribution into the existing aggregate. The merge is an inherent
+      // read-modify-write (JSON merged in JS), so wrap it in a transaction: the
+      // single-connection dialect reserves the connection for the transaction
+      // owner (bunSqliteDialect.ts #reserveTransaction), serializing concurrent
+      // tool_failure merges so none clobber another's contribution. (Wrapping
+      // the full recordFailure body in one transaction is tracked in #2877.)
+      if (input.type === "tool_failure" && !isNewGroup) {
+        await db.transaction().execute(async trx => {
+          const current = await trx
+            .selectFrom("failure_groups")
+            .select("tool_call_info_json")
+            .where("id", "=", groupId)
+            .executeTakeFirst();
+
+          let mergedToolCallInfo = input.toolCallInfo;
+          if (current?.tool_call_info_json) {
+            const existing = JSON.parse(current.tool_call_info_json) as AggregatedToolCallInfo;
+            mergedToolCallInfo = this.mergeToolCallInfo(existing, input.toolCallInfo, input.occurrence);
+          }
+
+          await trx
+            .updateTable("failure_groups")
+            .set({
+              tool_call_info_json: mergedToolCallInfo ? JSON.stringify(mergedToolCallInfo) : null,
+              updated_at: new Date().toISOString(),
+            })
+            .where("id", "=", groupId)
+            .execute();
+        });
+      }
 
       // Insert screens visited
       if (input.occurrence.screensVisited && input.occurrence.screensVisited.length > 0) {

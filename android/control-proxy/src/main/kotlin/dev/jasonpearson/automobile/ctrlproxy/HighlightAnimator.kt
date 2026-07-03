@@ -8,14 +8,14 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.annotation.VisibleForTesting
 
 internal class HighlightAnimator(
-    private val onAlphaUpdate: (String, Float) -> Unit,
-    private val onDrawProgressUpdate: (String, Float) -> Unit,
-    private val onAnimationComplete: (String) -> Unit,
-    private val onAnimationActiveChanged: (Boolean) -> Unit,
-    private val fadeInDurationMs: Long = DEFAULT_FADE_IN_DURATION_MS,
-    private val fadeOutDurationMs: Long = DEFAULT_FADE_OUT_DURATION_MS,
-    private val displayDurationMs: Long = DEFAULT_DISPLAY_DURATION_MS,
-    private val interpolator: TimeInterpolator = DEFAULT_INTERPOLATOR,
+  private val onAlphaUpdate: (String, Float) -> Unit,
+  private val onDrawProgressUpdate: (String, Float) -> Unit,
+  private val onAnimationComplete: (String) -> Unit,
+  private val onAnimationActiveChanged: (Boolean) -> Unit,
+  private val fadeInDurationMs: Long = DEFAULT_FADE_IN_DURATION_MS,
+  private val fadeOutDurationMs: Long = DEFAULT_FADE_OUT_DURATION_MS,
+  private val displayDurationMs: Long = DEFAULT_DISPLAY_DURATION_MS,
+  private val interpolator: TimeInterpolator = DEFAULT_INTERPOLATOR,
 ) {
   companion object {
     const val DEFAULT_FADE_IN_DURATION_MS = 500L
@@ -36,57 +36,57 @@ internal class HighlightAnimator(
     val displayEnd = (fadeInDurationMs + displayDurationMs).toFloat() / totalDuration
 
     val animator =
-        ValueAnimator.ofFloat(0f, 1f).apply {
-          duration = totalDuration
-          interpolator = this@HighlightAnimator.interpolator
-          addUpdateListener { animatorUpdate ->
-            if (activeAnimations[highlightId] !== this) {
-              return@addUpdateListener
-            }
-            val progress = animatorUpdate.animatedValue as? Float ?: return@addUpdateListener
+      ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = totalDuration
+        interpolator = this@HighlightAnimator.interpolator
+        addUpdateListener { animatorUpdate ->
+          if (activeAnimations[highlightId] !== this) {
+            return@addUpdateListener
+          }
+          val progress = animatorUpdate.animatedValue as? Float ?: return@addUpdateListener
 
-            when {
-              // Draw phase: alpha stays at 1, draw progress goes 0->1 with easing
-              progress <= fadeInEnd -> {
-                val linearPhase = progress / fadeInEnd
-                val easedPhase = interpolator.getInterpolation(linearPhase)
-                onAlphaUpdate(highlightId, 1f)
-                onDrawProgressUpdate(highlightId, easedPhase.coerceIn(0f, 1f))
-              }
-              // Display phase: stay at full alpha and full draw
-              progress <= displayEnd -> {
-                onAlphaUpdate(highlightId, 1f)
-                onDrawProgressUpdate(highlightId, 1f)
-              }
-              // Fade-out phase: alpha goes 1->0, draw stays at 1
-              else -> {
-                val phase = (progress - displayEnd) / (1f - displayEnd)
-                onAlphaUpdate(highlightId, (1f - phase).coerceIn(0f, 1f))
-                onDrawProgressUpdate(highlightId, 1f)
-              }
+          when {
+            // Draw phase: alpha stays at 1, draw progress goes 0->1 with easing
+            progress <= fadeInEnd -> {
+              val linearPhase = progress / fadeInEnd
+              val easedPhase = interpolator.getInterpolation(linearPhase)
+              onAlphaUpdate(highlightId, 1f)
+              onDrawProgressUpdate(highlightId, easedPhase.coerceIn(0f, 1f))
+            }
+            // Display phase: stay at full alpha and full draw
+            progress <= displayEnd -> {
+              onAlphaUpdate(highlightId, 1f)
+              onDrawProgressUpdate(highlightId, 1f)
+            }
+            // Fade-out phase: alpha goes 1->0, draw stays at 1
+            else -> {
+              val phase = (progress - displayEnd) / (1f - displayEnd)
+              onAlphaUpdate(highlightId, (1f - phase).coerceIn(0f, 1f))
+              onDrawProgressUpdate(highlightId, 1f)
             }
           }
         }
+      }
 
     animator.addListener(
-        object : AnimatorListenerAdapter() {
-          private var canceled = false
+      object : AnimatorListenerAdapter() {
+        private var canceled = false
 
-          override fun onAnimationCancel(animation: Animator) {
-            canceled = true
+        override fun onAnimationCancel(animation: Animator) {
+          canceled = true
+        }
+
+        override fun onAnimationEnd(animation: Animator) {
+          val current = activeAnimations[highlightId]
+          if (current === animator) {
+            activeAnimations.remove(highlightId)
           }
-
-          override fun onAnimationEnd(animation: Animator) {
-            val current = activeAnimations[highlightId]
-            if (current === animator) {
-              activeAnimations.remove(highlightId)
-            }
-            updateActiveState()
-            if (!canceled && current === animator) {
-              onAnimationComplete(highlightId)
-            }
+          updateActiveState()
+          if (!canceled && current === animator) {
+            onAnimationComplete(highlightId)
           }
         }
+      }
     )
 
     activeAnimations[highlightId] = animator
@@ -113,7 +113,7 @@ internal class HighlightAnimator(
 
   @VisibleForTesting
   internal fun getAnimatorForTest(highlightId: String): ValueAnimator? =
-      activeAnimations[highlightId]
+    activeAnimations[highlightId]
 
   private fun cancelInternal(highlightId: String, updateState: Boolean) {
     val animator = activeAnimations.remove(highlightId) ?: return

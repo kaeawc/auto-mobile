@@ -12,16 +12,17 @@ import kotlin.concurrent.withLock
 /**
  * Thread-safe buffer for SDK events that flushes on capacity or timer.
  *
- * Events are collected and flushed as a batch to reduce Intent broadcast frequency.
- * Flush occurs when [maxBufferSize] is reached or every [flushIntervalMs] milliseconds,
- * whichever comes first.
+ * Events are collected and flushed as a batch to reduce Intent broadcast frequency. Flush occurs
+ * when [maxBufferSize] is reached or every [flushIntervalMs] milliseconds, whichever comes first.
  *
  * @param maxBufferSize Maximum events before forced flush (default 50)
  * @param flushIntervalMs Periodic flush interval in milliseconds (default 500)
  * @param onFlush Callback invoked with the batch of events to send
- * @param persistence Optional disk persistence — events are written before broadcast and removed on success
+ * @param persistence Optional disk persistence — events are written before broadcast and removed on
+ *   success
  * @param executor Optional executor for periodic flush scheduling (for testing)
- * @param processors Event processors invoked in order before buffering; returning null drops the event
+ * @param processors Event processors invoked in order before buffering; returning null drops the
+ *   event
  * @param maxPendingEvents Hard cap on buffered events; oldest events are evicted when exceeded
  */
 internal class SdkEventBuffer(
@@ -47,12 +48,13 @@ internal class SdkEventBuffer(
   fun start() {
     lock.withLock {
       if (flushTask == null && !isShutdown) {
-        flushTask = executor.scheduleAtFixedRate(
-          { flush() },
-          flushIntervalMs,
-          flushIntervalMs,
-          TimeUnit.MILLISECONDS,
-        )
+        flushTask =
+          executor.scheduleAtFixedRate(
+            { flush() },
+            flushIntervalMs,
+            flushIntervalMs,
+            TimeUnit.MILLISECONDS,
+          )
       }
     }
   }
@@ -71,10 +73,12 @@ internal class SdkEventBuffer(
     var current: SdkEvent = event
     for (processor in processors) {
       try {
-        current = processor.process(current) ?: run {
-          dropCounter?.increment(DropReason.FILTERED)
-          return
-        }
+        current =
+          processor.process(current)
+            ?: run {
+              dropCounter?.increment(DropReason.FILTERED)
+              return
+            }
       } catch (_: Exception) {
         dropCounter?.increment(DropReason.PROCESSOR_ERROR)
         return

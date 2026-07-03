@@ -10,12 +10,11 @@ import java.util.concurrent.TimeUnit
  * executor to maintain ordering.
  */
 object AsyncLogWriter {
-  private val executor: Executor =
-      Executors.newSingleThreadExecutor { runnable ->
-        val thread = Thread(runnable, "AsyncLogWriter")
-        thread.isDaemon = false // Keep JVM alive until all logs are written
-        thread
-      }
+  private val executor: Executor = Executors.newSingleThreadExecutor { runnable ->
+    val thread = Thread(runnable, "AsyncLogWriter")
+    thread.isDaemon = false // Keep JVM alive until all logs are written
+    thread
+  }
 
   private val shutdownHook = Runtime.getRuntime().addShutdownHook(Thread { shutdown() })
 

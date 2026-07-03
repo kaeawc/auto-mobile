@@ -23,54 +23,54 @@ import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 
 @Composable
 fun AutoMobileAlertDialog(
-    onDismissRequest: () -> Unit,
-    title: String,
-    text: String,
-    confirmButtonText: String,
-    onConfirmClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    dismissButtonText: String? = null,
-    onDismissClick: (() -> Unit)? = null,
-    properties: DialogProperties = DialogProperties(),
+  onDismissRequest: () -> Unit,
+  title: String,
+  text: String,
+  confirmButtonText: String,
+  onConfirmClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  dismissButtonText: String? = null,
+  onDismissClick: (() -> Unit)? = null,
+  properties: DialogProperties = DialogProperties(),
 ) {
   AlertDialog(
-      onDismissRequest = onDismissRequest,
-      title = { AutoMobileTitle(title) },
-      text = { AutoMobileBodyText(text) },
-      confirmButton = { AutoMobileButton(text = confirmButtonText, onClick = onConfirmClick) },
-      dismissButton =
-          if (dismissButtonText != null && onDismissClick != null) {
-            { AutoMobileTextButton(text = dismissButtonText, onClick = onDismissClick) }
-          } else null,
-      modifier = modifier,
-      containerColor = MaterialTheme.colorScheme.surface,
-      titleContentColor = MaterialTheme.colorScheme.onSurface,
-      textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-      properties = properties,
+    onDismissRequest = onDismissRequest,
+    title = { AutoMobileTitle(title) },
+    text = { AutoMobileBodyText(text) },
+    confirmButton = { AutoMobileButton(text = confirmButtonText, onClick = onConfirmClick) },
+    dismissButton =
+      if (dismissButtonText != null && onDismissClick != null) {
+        { AutoMobileTextButton(text = dismissButtonText, onClick = onDismissClick) }
+      } else null,
+    modifier = modifier,
+    containerColor = MaterialTheme.colorScheme.surface,
+    titleContentColor = MaterialTheme.colorScheme.onSurface,
+    textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    properties = properties,
   )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AutoMobileCustomDialog(
-    onDismissRequest: () -> Unit,
-    modifier: Modifier = Modifier,
-    properties: DialogProperties = DialogProperties(),
-    content: @Composable () -> Unit,
+  onDismissRequest: () -> Unit,
+  modifier: Modifier = Modifier,
+  properties: DialogProperties = DialogProperties(),
+  content: @Composable () -> Unit,
 ) {
   BasicAlertDialog(
-      onDismissRequest = onDismissRequest,
-      modifier = modifier,
-      properties = properties,
+    onDismissRequest = onDismissRequest,
+    modifier = modifier,
+    properties = properties,
   ) {
     Card(
-        colors =
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            ),
-        elevation =
-            CardDefaults.cardElevation(defaultElevation = AutoMobileDimensions.elevationLarge),
+      colors =
+        CardDefaults.cardColors(
+          containerColor = MaterialTheme.colorScheme.surface,
+          contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+      elevation =
+        CardDefaults.cardElevation(defaultElevation = AutoMobileDimensions.elevationLarge),
     ) {
       Column(modifier = Modifier.padding(AutoMobileDimensions.spacing6)) { content() }
     }
@@ -79,24 +79,24 @@ fun AutoMobileCustomDialog(
 
 @Composable
 fun AutoMobileConfirmationDialog(
-    onDismissRequest: () -> Unit,
-    title: String,
-    text: String,
-    onConfirm: () -> Unit,
-    onCancel: () -> Unit,
-    modifier: Modifier = Modifier,
-    confirmText: String = "Confirm",
-    cancelText: String = "Cancel",
+  onDismissRequest: () -> Unit,
+  title: String,
+  text: String,
+  onConfirm: () -> Unit,
+  onCancel: () -> Unit,
+  modifier: Modifier = Modifier,
+  confirmText: String = "Confirm",
+  cancelText: String = "Cancel",
 ) {
   AutoMobileAlertDialog(
-      onDismissRequest = onDismissRequest,
-      title = title,
-      text = text,
-      confirmButtonText = confirmText,
-      onConfirmClick = onConfirm,
-      dismissButtonText = cancelText,
-      onDismissClick = onCancel,
-      modifier = modifier,
+    onDismissRequest = onDismissRequest,
+    title = title,
+    text = text,
+    confirmButtonText = confirmText,
+    onConfirmClick = onConfirm,
+    dismissButtonText = cancelText,
+    onDismissClick = onCancel,
+    modifier = modifier,
   )
 }
 

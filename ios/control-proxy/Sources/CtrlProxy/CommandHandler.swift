@@ -345,7 +345,27 @@ public class CommandHandler: CommandHandling {
 
     // MARK: - Gestures
 
+    /// Reject a non-finite gesture coordinate (`NaN` / `±Infinity`) at the
+    /// handler boundary before it flows into `CGVector` / `XCUICoordinate`.
+    ///
+    /// JSON has no `NaN`/`Infinity` literal and Apple's `JSONDecoder` rejects an
+    /// overflow literal (`1e309`) at pre-parse, so a non-finite value cannot
+    /// arrive over the wire today. This guard is defense-in-depth for the
+    /// non-wire path — a caller constructing a request directly, or a computed
+    /// coordinate (division, `hypot`, normalized offset) that yields a non-finite
+    /// `Double`. Throwing `CommandError.invalidParameter` makes `handle`'s catch
+    /// return a clean, actionable per-command error response (see #2909's thesis
+    /// that the runner must never surface an opaque failure for unusual input)
+    /// rather than the silent no-op XCUITest would produce.
+    private func requireFinite(_ value: Double, field: String) throws {
+        guard value.isFinite else {
+            throw CommandError.invalidParameter(field, value.description)
+        }
+    }
+
     private func handleTapCoordinates(_ request: RequestTapCoordinates, startTime: Date) throws -> WebSocketResponse {
+        try requireFinite(request.x, field: "x")
+        try requireFinite(request.y, field: "y")
         let duration = request.duration ?? 0
         try gesturePerformer.tap(x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0)
 
@@ -357,6 +377,10 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleSwipe(_ request: RequestSwipe, startTime: Date) throws -> WebSocketResponse {
+        try requireFinite(request.x1, field: "x1")
+        try requireFinite(request.y1, field: "y1")
+        try requireFinite(request.x2, field: "x2")
+        try requireFinite(request.y2, field: "y2")
         let duration = request.duration ?? 300
         try gesturePerformer.swipe(
             startX: request.x1, startY: request.y1,
@@ -377,6 +401,10 @@ public class CommandHandler: CommandHandling {
     )
         throws -> WebSocketResponse
     {
+        try requireFinite(request.x1, field: "x1")
+        try requireFinite(request.y1, field: "y1")
+        try requireFinite(request.x2, field: "x2")
+        try requireFinite(request.y2, field: "y2")
         // Both request_two_finger_swipe and request_multi_finger_swipe route here;
         // fingerCount defaults to 2 when the client omits it (two-finger never sends it).
         let fingerCount = request.fingerCount ?? 2
@@ -401,6 +429,10 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleDrag(_ request: RequestDrag, startTime: Date) throws -> WebSocketResponse {
+        try requireFinite(request.x1, field: "x1")
+        try requireFinite(request.y1, field: "y1")
+        try requireFinite(request.x2, field: "x2")
+        try requireFinite(request.y2, field: "y2")
         let pressDuration = request.pressDurationMs ?? request.holdTime ?? 600
         let dragDuration = request.dragDurationMs ?? 300
         let holdDuration = request.holdDurationMs ?? 100
@@ -421,6 +453,10 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handlePinch(_ request: RequestPinch, startTime: Date) throws -> WebSocketResponse {
+        try requireFinite(request.centerX, field: "centerX")
+        try requireFinite(request.centerY, field: "centerY")
+        try requireFinite(request.distanceStart, field: "distanceStart")
+        try requireFinite(request.distanceEnd, field: "distanceEnd")
         let path = try gesturePerformer.pinch(
             centerX: request.centerX,
             centerY: request.centerY,

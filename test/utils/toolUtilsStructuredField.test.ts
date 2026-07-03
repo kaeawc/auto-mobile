@@ -29,14 +29,11 @@ describe("getStructuredField", () => {
     expect(getStructuredField(response, "found")).toBeUndefined();
   });
 
-  test("returns undefined when the field only exists at the envelope top level", () => {
-    // This is the whole point: `success`/`error` are hoisted, but reading them
-    // as payload fields off `structuredContent` still works because the payload
-    // also carries them. A field that the caller mistakenly expects at the top
-    // level (never hoisted) must not leak through.
-    const response = createStructuredToolResponse({ success: true, error: "boom" });
-    // A hoisted-only field like a hypothetical top-level `found` is not present.
-    expect(getStructuredField(response, "found")).toBeUndefined();
+  test("ignores a field that exists only at the envelope top level, not in structuredContent", () => {
+    // Hand-built envelope where `found` sits at the top level but NOT in the
+    // payload — the accessor must read only `structuredContent` and not leak it.
+    const envelope = { content: [], structuredContent: { success: true }, found: true };
+    expect(getStructuredField<boolean>(envelope, "found")).toBeUndefined();
   });
 
   test("returns undefined for null / undefined responses", () => {

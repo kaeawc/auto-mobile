@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.protocol
 
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 
@@ -158,6 +160,16 @@ class WebSocketRequestTest {
     assertEquals(80.5, request.distanceStart)
     assertEquals(120.75, request.distanceEnd)
     assertEquals(45.0f, request.rotationDegrees)
+    assertEquals(500L, request.duration)
+  }
+
+  @Test
+  fun `request_pinch still rejects a missing required coordinate`() {
+    // Widening the coordinate fields to Double (#2927) must not weaken required-field decode:
+    // they stay non-null with no default, so an absent coordinate is still a decode error.
+    val message =
+      """{"type":"request_pinch","requestId":"pinch-missing","centerX":100.0,"centerY":200.0,"distanceStart":80.0,"rotationDegrees":45.0,"duration":500}"""
+    assertFailsWith<SerializationException> { json.decodeFromString<WebSocketRequest>(message) }
   }
 
   @Test

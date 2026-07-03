@@ -36,28 +36,37 @@ public struct RequestHierarchy: Decodable {
 
 // MARK: Gestures
 
+// Coordinate fields are `Double`, not `Int`: the iOS TS wire path runs with
+// `roundCoordinates: false` (see `CtrlProxyGestures.ts`), so a direct or future
+// caller can legitimately send sub-pixel coordinates or computed distances. An
+// `Int` field would reject those with an opaque `Decodable` failure (issue
+// #2909). `Double` decodes both integer and fractional JSON numbers, so the
+// existing rounded-input path is unaffected. The gesture engine
+// (`GesturePerformer`) already operates in `Double`; only durations, finger
+// counts, and rotation stay in their original numeric types below.
+
 public struct RequestTapCoordinates: Decodable {
     public var requestId: String?
-    public var x: Int
-    public var y: Int
+    public var x: Double
+    public var y: Double
     public var duration: Int?
 }
 
 public struct RequestSwipe: Decodable {
     public var requestId: String?
-    public var x1: Int
-    public var y1: Int
-    public var x2: Int
-    public var y2: Int
+    public var x1: Double
+    public var y1: Double
+    public var x2: Double
+    public var y2: Double
     public var duration: Int?
 }
 
 public struct RequestMultiFingerSwipe: Decodable {
     public var requestId: String?
-    public var x1: Int
-    public var y1: Int
-    public var x2: Int
-    public var y2: Int
+    public var x1: Double
+    public var y1: Double
+    public var x2: Double
+    public var y2: Double
     public var fingerCount: Int?
     public var duration: Int?
     public var offset: Double?
@@ -65,10 +74,10 @@ public struct RequestMultiFingerSwipe: Decodable {
 
 public struct RequestDrag: Decodable {
     public var requestId: String?
-    public var x1: Int
-    public var y1: Int
-    public var x2: Int
-    public var y2: Int
+    public var x1: Double
+    public var y1: Double
+    public var x2: Double
+    public var y2: Double
     public var pressDurationMs: Int?
     public var dragDurationMs: Int?
     public var holdDurationMs: Int?
@@ -77,10 +86,10 @@ public struct RequestDrag: Decodable {
 
 public struct RequestPinch: Decodable {
     public var requestId: String?
-    public var centerX: Int
-    public var centerY: Int
-    public var distanceStart: Int
-    public var distanceEnd: Int
+    public var centerX: Double
+    public var centerY: Double
+    public var distanceStart: Double
+    public var distanceEnd: Double
     public var rotationDegrees: Float?
     public var duration: Int?
 }

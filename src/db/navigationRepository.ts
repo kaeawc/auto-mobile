@@ -44,35 +44,30 @@ export class NavigationRepository {
   async getOrCreateApp(appId: string): Promise<NavigationApp> {
     const db = this.getDb();
 
-    // Check if app exists
-    const existing = await db
-      .selectFrom("navigation_apps")
-      .selectAll()
-      .where("app_id", "=", appId)
-      .executeTakeFirst();
-
-    if (existing) {
-      return existing;
-    }
-
-    // Create new app record
+    // Atomic upsert on the app_id PRIMARY KEY. A concurrent first-create would
+    // otherwise have one caller lose the SELECT/INSERT race and throw a UNIQUE
+    // collision (R2356). The conflict path is a no-op touch (updated_at set to its
+    // own value) so this stays a pure get-or-create that never mutates an existing
+    // row — timestamp bumps remain the job of touchApp — while DO UPDATE still lets
+    // RETURNING return the existing row.
     const now = new Date().toISOString();
     const newApp: NewNavigationApp = {
       app_id: appId,
       updated_at: now,
     };
 
-    await db
+    const result = await db
       .insertInto("navigation_apps")
       .values(newApp)
-      .execute();
+      .onConflict(oc =>
+        oc.column("app_id").doUpdateSet(eb => ({
+          updated_at: eb.ref("navigation_apps.updated_at"),
+        }))
+      )
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
-    logger.info(`[NAV_REPO] Created app record: ${appId}`);
-
-    return {
-      ...newApp,
-      created_at: now,
-    };
+    return result;
   }
 
   /**
@@ -97,33 +92,10 @@ export class NavigationRepository {
   ): Promise<NavigationNode> {
     const db = this.getDb();
 
-    // Check if node exists
-    const existing = await db
-      .selectFrom("navigation_nodes")
-      .selectAll()
-      .where("app_id", "=", appId)
-      .where("screen_name", "=", screenName)
-      .executeTakeFirst();
-
-    if (existing) {
-      // Update last_seen_at and increment visit_count
-      await db
-        .updateTable("navigation_nodes")
-        .set({
-          last_seen_at: timestamp,
-          visit_count: existing.visit_count + 1,
-        })
-        .where("id", "=", existing.id)
-        .execute();
-
-      return {
-        ...existing,
-        last_seen_at: timestamp,
-        visit_count: existing.visit_count + 1,
-      };
-    }
-
-    // Create new node
+    // Atomic upsert on UNIQUE(app_id, screen_name) (idx_navigation_nodes_app_screen).
+    // visit_count increments in SQL so concurrent revisits don't lose increments and a
+    // concurrent first-discovery doesn't throw a UNIQUE collision (R2356). first_seen_at
+    // is left untouched on the conflict path. returningAll preserves the row return value.
     const newNode: NewNavigationNode = {
       app_id: appId,
       screen_name: screenName,
@@ -135,10 +107,14 @@ export class NavigationRepository {
     const result = await db
       .insertInto("navigation_nodes")
       .values(newNode)
+      .onConflict(oc =>
+        oc.columns(["app_id", "screen_name"]).doUpdateSet(eb => ({
+          last_seen_at: timestamp,
+          visit_count: eb("navigation_nodes.visit_count", "+", 1),
+        }))
+      )
       .returningAll()
       .executeTakeFirstOrThrow();
-
-    logger.debug(`[NAV_REPO] New screen discovered: ${screenName} (id=${result.id})`);
 
     return result;
   }
@@ -360,76 +336,81 @@ export class NavigationRepository {
   ): Promise<UIElement> {
     const db = this.getDb();
 
-    // Try to find existing element with same properties
-    let query = db
-      .selectFrom("ui_elements")
-      .selectAll()
-      .where("app_id", "=", appId);
+    // ui_elements has no UNIQUE index and matching is on a *dynamic* subset of columns,
+    // so this get-or-create cannot be expressed as a single onConflict upsert. Wrap the
+    // SELECT-then-INSERT/UPDATE in a transaction instead: BEGIN takes exclusive ownership
+    // of the single connection (bunSqliteDialect #reserveTransaction), so concurrent
+    // callers for the same element serialize rather than both inserting duplicate rows
+    // (R2356). Keep the body to DB reads/writes only — no IO — since it blocks the daemon
+    // for its duration.
+    return db.transaction().execute(async trx => {
+      // Try to find existing element with same properties
+      let query = trx
+        .selectFrom("ui_elements")
+        .selectAll()
+        .where("app_id", "=", appId);
 
-    if (element.text !== undefined) {
-      query = query.where("text", "=", element.text);
-    }
-    if (element.resourceId !== undefined) {
-      query = query.where("resource_id", "=", element.resourceId);
-    }
-    if (element.contentDescription !== undefined) {
-      query = query.where("content_description", "=", element.contentDescription);
-    }
-    if (element.className !== undefined) {
-      query = query.where("class_name", "=", element.className);
-    }
-    if (element.bounds) {
-      query = query
-        .where("bounds_left", "=", element.bounds.left)
-        .where("bounds_top", "=", element.bounds.top)
-        .where("bounds_right", "=", element.bounds.right)
-        .where("bounds_bottom", "=", element.bounds.bottom);
-    }
+      if (element.text !== undefined) {
+        query = query.where("text", "=", element.text);
+      }
+      if (element.resourceId !== undefined) {
+        query = query.where("resource_id", "=", element.resourceId);
+      }
+      if (element.contentDescription !== undefined) {
+        query = query.where("content_description", "=", element.contentDescription);
+      }
+      if (element.className !== undefined) {
+        query = query.where("class_name", "=", element.className);
+      }
+      if (element.bounds) {
+        query = query
+          .where("bounds_left", "=", element.bounds.left)
+          .where("bounds_top", "=", element.bounds.top)
+          .where("bounds_right", "=", element.bounds.right)
+          .where("bounds_bottom", "=", element.bounds.bottom);
+      }
 
-    const existing = await query.executeTakeFirst();
+      const existing = await query.executeTakeFirst();
 
-    if (existing) {
-      // Update last_seen_at
-      await db
-        .updateTable("ui_elements")
-        .set({ last_seen_at: timestamp })
-        .where("id", "=", existing.id)
-        .execute();
+      if (existing) {
+        // Update last_seen_at
+        await trx
+          .updateTable("ui_elements")
+          .set({ last_seen_at: timestamp })
+          .where("id", "=", existing.id)
+          .execute();
 
-      return {
-        ...existing,
+        return {
+          ...existing,
+          last_seen_at: timestamp,
+        };
+      }
+
+      // Create new UI element
+      const newElement: NewUIElement = {
+        app_id: appId,
+        text: element.text || null,
+        resource_id: element.resourceId || null,
+        content_description: element.contentDescription || null,
+        class_name: element.className || null,
+        bounds_left: element.bounds?.left || null,
+        bounds_top: element.bounds?.top || null,
+        bounds_right: element.bounds?.right || null,
+        bounds_bottom: element.bounds?.bottom || null,
+        clickable: element.clickable !== undefined ? (element.clickable ? 1 : 0) : null,
+        scrollable: element.scrollable !== undefined ? (element.scrollable ? 1 : 0) : null,
+        first_seen_at: timestamp,
         last_seen_at: timestamp,
       };
-    }
 
-    // Create new UI element
-    const newElement: NewUIElement = {
-      app_id: appId,
-      text: element.text || null,
-      resource_id: element.resourceId || null,
-      content_description: element.contentDescription || null,
-      class_name: element.className || null,
-      bounds_left: element.bounds?.left || null,
-      bounds_top: element.bounds?.top || null,
-      bounds_right: element.bounds?.right || null,
-      bounds_bottom: element.bounds?.bottom || null,
-      clickable: element.clickable !== undefined ? (element.clickable ? 1 : 0) : null,
-      scrollable: element.scrollable !== undefined ? (element.scrollable ? 1 : 0) : null,
-      first_seen_at: timestamp,
-      last_seen_at: timestamp,
-    };
+      const result = await trx
+        .insertInto("ui_elements")
+        .values(newElement)
+        .returningAll()
+        .executeTakeFirstOrThrow();
 
-    const result = await db
-      .insertInto("ui_elements")
-      .values(newElement)
-      .returningAll()
-      .executeTakeFirstOrThrow();
-
-    logger.debug(
-      `[NAV_REPO] New UI element: ${element.text || element.resourceId || "unknown"} (id=${result.id})`
-    );
-
-    return result;
+      return result;
+    });
   }
 
   /**
@@ -814,33 +795,11 @@ export class NavigationRepository {
   ): Promise<NavigationNodeFingerprint> {
     const db = this.getDb();
 
-    // Check if fingerprint already exists for this app
-    const existing = await db
-      .selectFrom("navigation_node_fingerprints")
-      .selectAll()
-      .where("app_id", "=", appId)
-      .where("fingerprint_hash", "=", hash)
-      .executeTakeFirst();
-
-    if (existing) {
-      // Update last_seen_at and increment occurrence_count
-      await db
-        .updateTable("navigation_node_fingerprints")
-        .set({
-          last_seen_at: timestamp,
-          occurrence_count: existing.occurrence_count + 1,
-        })
-        .where("id", "=", existing.id)
-        .execute();
-
-      return {
-        ...existing,
-        last_seen_at: timestamp,
-        occurrence_count: existing.occurrence_count + 1,
-      };
-    }
-
-    // Create new fingerprint record
+    // Atomic upsert on UNIQUE(app_id, fingerprint_hash)
+    // (idx_navigation_node_fingerprints_app_hash). occurrence_count increments in SQL so
+    // a concurrent first-create no longer throws a UNIQUE collision (dropping the write)
+    // and concurrent revisits don't lose increments (R2356). node_id/first_seen_at are
+    // left untouched on the conflict path — the first writer's node association wins.
     const newFingerprint: NewNavigationNodeFingerprint = {
       app_id: appId,
       node_id: nodeId,
@@ -854,12 +813,14 @@ export class NavigationRepository {
     const result = await db
       .insertInto("navigation_node_fingerprints")
       .values(newFingerprint)
+      .onConflict(oc =>
+        oc.columns(["app_id", "fingerprint_hash"]).doUpdateSet(eb => ({
+          last_seen_at: timestamp,
+          occurrence_count: eb("navigation_node_fingerprints.occurrence_count", "+", 1),
+        }))
+      )
       .returningAll()
       .executeTakeFirstOrThrow();
-
-    logger.debug(
-      `[NAV_REPO] New fingerprint for node ${nodeId}: ${hash.substring(0, 12)}...`
-    );
 
     return result;
   }
@@ -912,33 +873,11 @@ export class NavigationRepository {
   ): Promise<NavigationSuggestion> {
     const db = this.getDb();
 
-    // Check if suggestion already exists for this app and hash
-    const existing = await db
-      .selectFrom("navigation_suggestions")
-      .selectAll()
-      .where("app_id", "=", appId)
-      .where("fingerprint_hash", "=", hash)
-      .executeTakeFirst();
-
-    if (existing) {
-      // Update last_seen_at and increment occurrence_count
-      await db
-        .updateTable("navigation_suggestions")
-        .set({
-          last_seen_at: timestamp,
-          occurrence_count: existing.occurrence_count + 1,
-        })
-        .where("id", "=", existing.id)
-        .execute();
-
-      return {
-        ...existing,
-        last_seen_at: timestamp,
-        occurrence_count: existing.occurrence_count + 1,
-      };
-    }
-
-    // Create new suggestion
+    // Atomic upsert on UNIQUE(app_id, fingerprint_hash)
+    // (idx_navigation_suggestions_app_hash). occurrence_count increments in SQL so a
+    // concurrent first-create no longer throws a UNIQUE collision and concurrent
+    // revisits don't lose increments (R2356). first_seen_at and promoted_to_fingerprint_id
+    // are left untouched on the conflict path so a prior promotion is never clobbered.
     const newSuggestion: NewNavigationSuggestion = {
       app_id: appId,
       fingerprint_hash: hash,
@@ -952,12 +891,14 @@ export class NavigationRepository {
     const result = await db
       .insertInto("navigation_suggestions")
       .values(newSuggestion)
+      .onConflict(oc =>
+        oc.columns(["app_id", "fingerprint_hash"]).doUpdateSet(eb => ({
+          last_seen_at: timestamp,
+          occurrence_count: eb("navigation_suggestions.occurrence_count", "+", 1),
+        }))
+      )
       .returningAll()
       .executeTakeFirstOrThrow();
-
-    logger.debug(
-      `[NAV_REPO] New suggestion for app ${appId}: ${hash.substring(0, 12)}...`
-    );
 
     return result;
   }

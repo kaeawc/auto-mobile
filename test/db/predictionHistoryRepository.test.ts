@@ -110,6 +110,36 @@ describe("PredictionHistoryRepository", () => {
     });
   });
 
+  describe("concurrency (R2356)", () => {
+    test("N concurrent upsertTransitionStats yield one row with attempts === N and summed brier, never reject", async () => {
+      const key: TransitionKey = {
+        appId: "com.example.app",
+        fromScreen: "Login",
+        toScreen: "Home",
+        toolName: "tapOn",
+      };
+
+      const N = 10;
+      const confidence = 0.9;
+      const correct = true;
+      // Each call adds the same per-call Brier value; the total must be their sum.
+      const perCallBrier = Math.pow(confidence - (correct ? 1 : 0), 2);
+
+      await expect(
+        Promise.all(
+          Array.from({ length: N }, () => repo.upsertTransitionStats(key, confidence, correct))
+        )
+      ).resolves.toBeDefined();
+
+      const stats = await repo.getTransitionStatsForScreen("com.example.app", "Login");
+      expect(stats).toHaveLength(1);
+      expect(stats[0].attempts).toBe(N);
+      expect(stats[0].successes).toBe(N);
+      expect(stats[0].total_confidence).toBeCloseTo(confidence * N, 5);
+      expect(stats[0].brier_score_sum).toBeCloseTo(perCallBrier * N, 5);
+    });
+  });
+
   describe("getTransitionStatsForScreen", () => {
     test("returns stats for a specific screen", async () => {
       const key1: TransitionKey = {

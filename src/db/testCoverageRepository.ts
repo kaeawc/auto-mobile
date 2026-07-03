@@ -106,39 +106,28 @@ export class TestCoverageRepository {
   async recordNodeVisit(sessionId: number, nodeId: number, timestamp: number): Promise<void> {
     const db = this.getDb();
 
-    // Check if this node was already visited in this session
-    const existing = await db
-      .selectFrom("test_node_coverage")
-      .selectAll()
-      .where("session_id", "=", sessionId)
-      .where("node_id", "=", nodeId)
-      .executeTakeFirst();
+    // Atomic upsert on UNIQUE(session_id, node_id) (idx_test_node_coverage_session_node).
+    // Counter arithmetic runs in SQL so no read-modify-write window exists between a
+    // SELECT and a follow-up INSERT/UPDATE, which under the single-connection async
+    // mutex would otherwise drop first-visit collisions and lose increments (R2356).
+    const newCoverage: NewTestNodeCoverage = {
+      session_id: sessionId,
+      node_id: nodeId,
+      visit_count: 1,
+      first_visit_time: timestamp,
+      last_visit_time: timestamp,
+    };
 
-    if (existing) {
-      // Update visit count and last visit time
-      await db
-        .updateTable("test_node_coverage")
-        .set({
-          visit_count: existing.visit_count + 1,
+    await db
+      .insertInto("test_node_coverage")
+      .values(newCoverage)
+      .onConflict(oc =>
+        oc.columns(["session_id", "node_id"]).doUpdateSet(eb => ({
+          visit_count: eb("test_node_coverage.visit_count", "+", 1),
           last_visit_time: timestamp,
-        })
-        .where("id", "=", existing.id)
-        .execute();
-    } else {
-      // Create new coverage record
-      const newCoverage: NewTestNodeCoverage = {
-        session_id: sessionId,
-        node_id: nodeId,
-        visit_count: 1,
-        first_visit_time: timestamp,
-        last_visit_time: timestamp,
-      };
-
-      await db
-        .insertInto("test_node_coverage")
-        .values(newCoverage)
-        .execute();
-    }
+        }))
+      )
+      .execute();
 
     // Update session totals
     await db
@@ -160,39 +149,26 @@ export class TestCoverageRepository {
   ): Promise<void> {
     const db = this.getDb();
 
-    // Check if this edge was already traversed in this session
-    const existing = await db
-      .selectFrom("test_edge_coverage")
-      .selectAll()
-      .where("session_id", "=", sessionId)
-      .where("edge_id", "=", edgeId)
-      .executeTakeFirst();
+    // Atomic upsert on UNIQUE(session_id, edge_id) (idx_test_edge_coverage_session_edge).
+    // Mirrors recordNodeVisit: counter arithmetic in SQL closes the RMW window (R2356).
+    const newCoverage: NewTestEdgeCoverage = {
+      session_id: sessionId,
+      edge_id: edgeId,
+      traversal_count: 1,
+      first_traversal_time: timestamp,
+      last_traversal_time: timestamp,
+    };
 
-    if (existing) {
-      // Update traversal count and last traversal time
-      await db
-        .updateTable("test_edge_coverage")
-        .set({
-          traversal_count: existing.traversal_count + 1,
+    await db
+      .insertInto("test_edge_coverage")
+      .values(newCoverage)
+      .onConflict(oc =>
+        oc.columns(["session_id", "edge_id"]).doUpdateSet(eb => ({
+          traversal_count: eb("test_edge_coverage.traversal_count", "+", 1),
           last_traversal_time: timestamp,
-        })
-        .where("id", "=", existing.id)
-        .execute();
-    } else {
-      // Create new coverage record
-      const newCoverage: NewTestEdgeCoverage = {
-        session_id: sessionId,
-        edge_id: edgeId,
-        traversal_count: 1,
-        first_traversal_time: timestamp,
-        last_traversal_time: timestamp,
-      };
-
-      await db
-        .insertInto("test_edge_coverage")
-        .values(newCoverage)
-        .execute();
-    }
+        }))
+      )
+      .execute();
 
     // Update session totals
     await db

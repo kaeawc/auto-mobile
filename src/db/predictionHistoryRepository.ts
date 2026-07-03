@@ -6,7 +6,6 @@ import type {
   NewPredictionTransitionStats,
   PredictionTransitionStats
 } from "./types";
-import { logger } from "../utils/logger";
 import { normalizeToolArgs } from "../utils/predictionUtils";
 
 export type PredictionErrorType = "wrong_screen" | "missing_elements" | "unexpected_elements";
@@ -103,41 +102,13 @@ export class PredictionHistoryRepository {
     const toolArgs = normalizeToolArgs(transition.toolArgs ?? undefined);
     const brier = Math.pow(confidence - (correct ? 1 : 0), 2);
 
-    const existing = await db
-      .selectFrom("prediction_transition_stats")
-      .selectAll()
-      .where("app_id", "=", transition.appId)
-      .where("from_screen", "=", transition.fromScreen)
-      .where("to_screen", "=", transition.toScreen)
-      .where("tool_name", "=", transition.toolName)
-      .where("tool_args", "=", toolArgs)
-      .executeTakeFirst();
+    const successIncrement = correct ? 1 : 0;
 
-    if (existing) {
-      const updated: PredictionTransitionStats = {
-        ...existing,
-        attempts: existing.attempts + 1,
-        successes: existing.successes + (correct ? 1 : 0),
-        total_confidence: existing.total_confidence + confidence,
-        brier_score_sum: existing.brier_score_sum + brier,
-        updated_at: now
-      };
-
-      await db
-        .updateTable("prediction_transition_stats")
-        .set({
-          attempts: updated.attempts,
-          successes: updated.successes,
-          total_confidence: updated.total_confidence,
-          brier_score_sum: updated.brier_score_sum,
-          updated_at: updated.updated_at
-        })
-        .where("id", "=", existing.id)
-        .execute();
-
-      return updated;
-    }
-
+    // Atomic upsert on UNIQUE(app_id, from_screen, to_screen, tool_name, tool_args)
+    // (idx_prediction_transition_key). All four accumulators are incremented in SQL so
+    // concurrent callers for the same transition key cannot lose increments or throw a
+    // UNIQUE-constraint collision on a first insert (R2356). DO UPDATE (never DO NOTHING)
+    // guarantees RETURNING yields the row on the conflict path.
     const newStats: NewPredictionTransitionStats = {
       app_id: transition.appId,
       from_screen: transition.fromScreen,
@@ -145,7 +116,7 @@ export class PredictionHistoryRepository {
       tool_name: transition.toolName,
       tool_args: toolArgs,
       attempts: 1,
-      successes: correct ? 1 : 0,
+      successes: successIncrement,
       total_confidence: confidence,
       brier_score_sum: brier,
       updated_at: now,
@@ -155,12 +126,19 @@ export class PredictionHistoryRepository {
     const result = await db
       .insertInto("prediction_transition_stats")
       .values(newStats)
+      .onConflict(oc =>
+        oc
+          .columns(["app_id", "from_screen", "to_screen", "tool_name", "tool_args"])
+          .doUpdateSet(eb => ({
+            attempts: eb("prediction_transition_stats.attempts", "+", 1),
+            successes: eb("prediction_transition_stats.successes", "+", successIncrement),
+            total_confidence: eb("prediction_transition_stats.total_confidence", "+", confidence),
+            brier_score_sum: eb("prediction_transition_stats.brier_score_sum", "+", brier),
+            updated_at: now
+          }))
+      )
       .returningAll()
       .executeTakeFirstOrThrow();
-
-    logger.debug(
-      `[PREDICTION_REPO] New transition stats: ${transition.fromScreen} -> ${transition.toScreen}`
-    );
 
     return result;
   }

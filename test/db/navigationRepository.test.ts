@@ -283,6 +283,95 @@ describe("NavigationRepository", () => {
     });
   });
 
+  describe("concurrency (R2356)", () => {
+    const N = 10;
+
+    test("N concurrent getOrCreateApp yield one row and never reject", async () => {
+      await expect(
+        Promise.all(Array.from({ length: N }, () => repo.getOrCreateApp("com.example.app")))
+      ).resolves.toBeDefined();
+
+      const apps = await db
+        .selectFrom("navigation_apps")
+        .selectAll()
+        .where("app_id", "=", "com.example.app")
+        .execute();
+      expect(apps).toHaveLength(1);
+    });
+
+    test("N concurrent getOrCreateNode yield one row with visit_count === N and return the row id", async () => {
+      await repo.getOrCreateApp("com.example.app");
+
+      const results = await Promise.all(
+        Array.from({ length: N }, () => repo.getOrCreateNode("com.example.app", "HomeScreen", 1000))
+      );
+
+      const nodes = await repo.getNodes("com.example.app");
+      expect(nodes).toHaveLength(1);
+      expect(nodes[0].visit_count).toBe(N);
+
+      // Every returned value carries the same row id (the get-or-create contract).
+      const ids = new Set(results.map(r => r.id));
+      expect(ids.size).toBe(1);
+      expect(results.every(r => r.id === nodes[0].id)).toBe(true);
+    });
+
+    test("N concurrent addOrUpdateSuggestion yield one row with occurrence_count === N and never reject", async () => {
+      await repo.getOrCreateApp("com.example.app");
+
+      const results = await Promise.all(
+        Array.from({ length: N }, () =>
+          repo.addOrUpdateSuggestion("com.example.app", "hash-abc", "{}", 1000)
+        )
+      );
+
+      const suggestions = await repo.getSuggestions("com.example.app");
+      expect(suggestions).toHaveLength(1);
+      expect(suggestions[0].occurrence_count).toBe(N);
+      expect(results.every(r => r.id === suggestions[0].id)).toBe(true);
+    });
+
+    test("N concurrent getOrCreateFingerprint yield one row with occurrence_count === N and never reject", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const node = await repo.getOrCreateNode("com.example.app", "HomeScreen", 1000);
+
+      const results = await Promise.all(
+        Array.from({ length: N }, () =>
+          repo.getOrCreateFingerprint("com.example.app", node.id, "fp-hash", "{}", 1000)
+        )
+      );
+
+      const fingerprints = await repo.getFingerprintsForNode(node.id);
+      expect(fingerprints).toHaveLength(1);
+      expect(fingerprints[0].occurrence_count).toBe(N);
+      expect(results.every(r => r.id === fingerprints[0].id)).toBe(true);
+    });
+
+    test("N concurrent getOrCreateUIElement for one element yield one row and one id", async () => {
+      await repo.getOrCreateApp("com.example.app");
+
+      const results = await Promise.all(
+        Array.from({ length: N }, (_unused, i) =>
+          repo.getOrCreateUIElement(
+            "com.example.app",
+            { text: "Login", resourceId: "btn_login" },
+            1000 + i
+          )
+        )
+      );
+
+      const elements = await db
+        .selectFrom("ui_elements")
+        .selectAll()
+        .where("app_id", "=", "com.example.app")
+        .execute();
+      expect(elements).toHaveLength(1);
+      const ids = new Set(results.map(r => r.id));
+      expect(ids.size).toBe(1);
+      expect(results[0].id).toBe(elements[0].id);
+    });
+  });
+
   describe("getStats", () => {
     test("returns correct counts", async () => {
       await repo.getOrCreateApp("com.example.app");

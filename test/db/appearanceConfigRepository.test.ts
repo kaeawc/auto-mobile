@@ -51,4 +51,16 @@ describe("AppearanceConfigRepository", () => {
     const result = await repo.getConfig();
     expect(result).toBeNull();
   });
+
+  test("N concurrent setConfig never reject and leave exactly one row (R2356)", async () => {
+    const N = 10;
+    await expect(
+      Promise.all(
+        Array.from({ length: N }, (_unused, i) => repo.setConfig({ theme: `t${i}` } as any))
+      )
+    ).resolves.toBeDefined();
+
+    const rows = await db.selectFrom("appearance_configs").selectAll().execute();
+    expect(rows).toHaveLength(1);
+  });
 });

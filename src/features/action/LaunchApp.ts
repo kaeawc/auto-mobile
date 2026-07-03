@@ -8,6 +8,8 @@ import { ClearAppDataIos } from "./ClearAppDataIos";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { DisplayedTimeMetricsCollector } from "../performance/DisplayedTimeMetricsCollector";
 import { setLastTtiMs } from "../performance/PerformanceMonitor";
@@ -28,15 +30,31 @@ export interface InstalledAppsProvider {
   listInstalledApps(): Promise<string[]>;
 }
 
+/**
+ * Launch/terminate an app on a physical iOS device via devicectl. Narrow
+ * injection point so tests never shell out; parallels `DeviceAppUninstaller`
+ * in UninstallApp. Implemented by `DeviceAppInspector`.
+ */
+export interface DeviceAppLauncher {
+  launchApp(
+    deviceUdid: string,
+    bundleId: string,
+    options?: { terminateExisting?: boolean }
+  ): Promise<{ success: boolean; pid?: number; error?: string }>;
+  terminateApp(deviceUdid: string, bundleId: string, knownPid?: number): Promise<void>;
+}
+
 interface LaunchAppDependencies {
   targetUserDetector?: TargetUserDetector;
   installedAppsProvider?: InstalledAppsProvider;
   performanceTrackerFactory?: () => PerformanceTracker;
+  deviceAppLauncher?: DeviceAppLauncher;
 }
 
 export class LaunchApp extends BaseVisualChange {
 
   private simctl: SimCtlClient;
+  private deviceAppLauncher: DeviceAppLauncher;
   private targetUserDetector: TargetUserDetector;
   private installedAppsProvider: InstalledAppsProvider;
   private performanceTrackerFactory: () => PerformanceTracker;
@@ -56,6 +74,7 @@ export class LaunchApp extends BaseVisualChange {
     super(device, adb, timer);
     this.device = device;
     this.simctl = simctl || new SimCtlClient(this.device);
+    this.deviceAppLauncher = dependencies.deviceAppLauncher ?? new DeviceAppInspector();
     this.targetUserDetector = dependencies.targetUserDetector ?? {
       detectTargetUserId: (packageName: string, userId?: number) => this.detectTargetUserId(packageName, userId)
     };
@@ -231,6 +250,14 @@ export class LaunchApp extends BaseVisualChange {
   }
 
   /**
+   * True when the active iOS device is a simulator (simctl) rather than a
+   * physical device (devicectl). Same runtime signal used across the iOS tooling.
+   */
+  private isSimulator(): boolean {
+    return isIosSimulatorUdid(this.device.deviceId);
+  }
+
+  /**
    * Launch an iOS app by bundle identifier
    * @param bundleId - The bundle identifier to launch
    * @param clearAppData - Whether to wipe the app's data container before launch (iOS simulator)
@@ -259,16 +286,26 @@ export class LaunchApp extends BaseVisualChange {
 
         // Clearing app data always implies a fresh process: the app is
         // terminated, its sandbox wiped, then relaunched. Treat it as a cold
-        // boot so we go through the terminate → clearCache → simctl launch path.
+        // boot so we go through the terminate → clearCache → launch path.
         const needsColdStart = coldBoot || clearAppData;
 
+        // Simulators launch/terminate via simctl; physical devices via devicectl
+        // (parity with installApp/uninstallApp). Resolve once so cold and warm
+        // paths agree on the transport.
+        const simulator = this.isSimulator();
+
         if (needsColdStart) {
-          // Cold boot: use simctl directly. XCUIApplication.launch() is slow for heavy
-          // apps (10s+ timeout) while simctl launch completes in ~500ms. CtrlProxy's
-          // value is in the activate() fast path, not cold boot.
+          // Cold boot: use simctl (simulator) / devicectl (device) directly.
+          // XCUIApplication.launch() is slow for heavy apps (10s+ timeout) while
+          // simctl launch completes in ~500ms. CtrlProxy's value is in the
+          // activate() fast path, not cold boot.
           await perf.track("terminateApp", async () => {
             try {
-              await this.simctl.terminateApp(bundleId);
+              if (simulator) {
+                await this.simctl.terminateApp(bundleId);
+              } else {
+                await this.deviceAppLauncher.terminateApp(this.device.deviceId, bundleId);
+              }
             } catch {
               // App might not be running
             }
@@ -301,22 +338,30 @@ export class LaunchApp extends BaseVisualChange {
           // cache fast path. clearCache() nulls the cache entirely; invalidateCache()
           // only marks it not-fresh but the time-based freshness check still matches.
           IOSCtrlProxyClient.getInstance(this.device).clearCache();
-          launchResult = await perf.track("simctlLaunch", () =>
-            this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
+          launchResult = await perf.track("launch", () =>
+            simulator
+              ? this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
+              // devicectl has no foreground-if-running verb; --terminate-existing
+              // gives cold-boot relaunch semantics (a fresh process foregrounds).
+              : this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, { terminateExisting: true })
           );
         } else {
-          // Use simctl for warm launch — simctl launch foregrounds a backgrounded app
-          // and is faster than the CtrlProxy WebSocket round-trip which includes
-          // XCUIApplication.activate() + hierarchy snapshots on the Swift side (~4-5s).
-          launchResult = await perf.track("simctlLaunch", () =>
-            this.simctl.launchApp(bundleId)
+          // Warm launch. Simulator: simctl launch foregrounds a backgrounded app
+          // and is faster than the CtrlProxy WebSocket round-trip (~4-5s). Device:
+          // devicectl has no foreground verb, so relaunch via --terminate-existing.
+          launchResult = await perf.track("launch", () =>
+            simulator
+              ? this.simctl.launchApp(bundleId)
+              : this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, { terminateExisting: true })
           );
 
           if (!launchResult.success) {
-            logger.warn(`[LaunchApp] simctl launch failed: ${launchResult.error ?? "unknown error"}`);
+            logger.warn(`[LaunchApp] launch failed: ${launchResult.error ?? "unknown error"}`);
 
-            // Only check installed apps on the fallback path — simctl listapps is slow (~2s)
-            if (!isSystemBundleId) {
+            // Only check installed apps on the fallback path, and only on
+            // simulators — simctl listapps is slow (~2s) and returns nothing for
+            // a physical device, where devicectl's launch error is authoritative.
+            if (!isSystemBundleId && simulator) {
               const installedApps = await perf.track("checkInstalled", () =>
                 this.installedAppsProvider.listInstalledApps()
               );

@@ -21,6 +21,23 @@ system-level simulator behaviors.
 - Per-app notification authorization read via BulletinBoard (see below).
 - Device settings capture/restore for `deviceSnapshot` (see below).
 
+## App lifecycle: simulators vs physical devices
+
+<kbd>✅ Implemented</kbd>
+
+`launchApp`, `terminateApp`, `installApp`, and `uninstallApp` pick their transport
+from the target's UDID form (`isIosSimulatorUdid`): the 8-4-4-4-12 UUID means a
+**simulator** (`simctl`); anything else (e.g. the `00008XXX-…` form) means a
+**physical device** (`devicectl`, macOS + iOS 17+).
+
+For `launchApp` specifically:
+
+- **Simulator** — `xcrun simctl launch` / `terminate` (unchanged).
+- **Physical device** — `xcrun devicectl device process launch --device <udid> --terminate-existing --json-output <file> --quiet <bundle-id>`; the launched PID is read from `result.process.processIdentifier` in the JSON output. `devicectl` has no foreground-if-running verb, so a warm launch also relaunches via `--terminate-existing` (a fresh process always foregrounds).
+- **Terminate** — `xcrun devicectl device process terminate --device <udid> --pid <pid> --kill --quiet`. `devicectl` has no terminate-by-bundle-id verb, so the PID is taken from a prior launch or resolved best-effort via `xcrun devicectl device info processes`. A not-running app is a no-op (parity with simctl "found nothing to terminate").
+- **`clearAppData` on a device** — wipes the sandbox via `devicectl` uninstall+reinstall (`clearAppDataViaReinstall`) before relaunching; a failed clear aborts the launch rather than launching with stale data.
+- **Docker / host control** — no `devicectl` launch bridge exists, so `launchApp` returns an explicit, actionable error instead of a confusing simctl failure.
+
 ## Live locale changes
 
 <kbd>✅ Implemented</kbd>

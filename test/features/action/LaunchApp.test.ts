@@ -13,6 +13,7 @@ import { FakeTargetUserDetector } from "../../fakes/FakeTargetUserDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 
@@ -269,7 +270,7 @@ describe("LaunchApp", () => {
 
   test("launches iOS system apps even when installed list is empty", async () => {
     fakeTimer.enableAutoAdvance();
-    const iosDevice: BootedDevice = { name: "test-ios-device", platform: "ios", deviceId: "ios-123" };
+    const iosDevice: BootedDevice = { name: "test-ios-device", platform: "ios", deviceId: "11111111-1111-1111-1111-111111111111" };
     const systemBundleId = "com.apple.Preferences";
     const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
     const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
@@ -328,7 +329,7 @@ describe("LaunchApp", () => {
       bundleId: string;
       launchSuccess?: boolean;
     }) {
-      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "ios-target" };
+      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "22222222-2222-2222-2222-222222222222" };
       const fakeCtrlProxy = new FakeIOSCtrlProxy();
 
       const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
@@ -373,7 +374,7 @@ describe("LaunchApp", () => {
 
     test("sets targetBundleId BEFORE simctl launch so CtrlProxy targets the app, not SpringBoard", async () => {
       fakeTimer.enableAutoAdvance();
-      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "ios-order" };
+      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "33333333-3333-3333-3333-333333333333" };
       const callOrder: string[] = [];
 
       const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
@@ -422,7 +423,7 @@ describe("LaunchApp", () => {
 
     test("re-observes until the iOS launch observation hierarchy reports the launched bundle", async () => {
       fakeTimer.enableAutoAdvance();
-      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "ios-observation" };
+      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "44444444-4444-4444-4444-444444444444" };
       const previousBundleId = "com.apple.Maps";
       const observations = [
         {
@@ -522,6 +523,142 @@ describe("LaunchApp", () => {
         const result = await iosLaunchApp.execute(systemBundleId, false, false);
         expect(result.success).toBe(true);
         expect(targetBundleIdCalls).toEqual([]);
+      } finally {
+        cleanup();
+      }
+    });
+  });
+
+  describe("iOS physical device (devicectl)", () => {
+    const userBundleId = "com.example.myapp";
+    // Physical-device UDID form (00008XXX-…), NOT the simulator 8-4-4-4-12 UUID.
+    const physicalUdid = "00008120-000A123456789012";
+    const simulatorUdid = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
+
+    function createDeviceHarness(opts: {
+      deviceId: string;
+      launchResult?: { success: boolean; pid?: number; error?: string };
+    }) {
+      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: opts.deviceId };
+      const fakeCtrlProxy = new FakeIOSCtrlProxy();
+      const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeCtrlProxy as unknown as IOSCtrlProxyClient
+      );
+      const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+        setTargetBundleId: () => {},
+      } as unknown as IOSCtrlProxyManager);
+
+      const simctlCalls: string[] = [];
+      const fakeSimctl = {
+        launchApp: async (id: string) => { simctlCalls.push(`launch:${id}`); return { success: true, pid: 999 }; },
+        terminateApp: async (id: string) => { simctlCalls.push(`terminate:${id}`); },
+      };
+
+      const deviceAppLauncher = new FakeDeviceAppLauncher(
+        opts.launchResult ? { launchResult: opts.launchResult } : {}
+      );
+
+      const iosObserveScreen = new FakeObserveScreen();
+      iosObserveScreen.setObserveResult({
+        updatedAt: Date.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
+      });
+      const iosWindow = new FakeWindow();
+      iosWindow.configureCachedActiveWindow({ appId: userBundleId, activityName: "Main", layoutSeqSum: 1 });
+      const installedApps = new FakeInstalledAppsProvider(fakeTimer, { installedApps: [userBundleId] });
+
+      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, {
+        installedAppsProvider: installedApps,
+        deviceAppLauncher,
+      });
+      (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
+      (iosLaunchApp as any).observeScreen = iosObserveScreen;
+      (iosLaunchApp as any).window = iosWindow;
+      (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
+
+      return { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup: () => { ctrlProxySpy.mockRestore(); managerSpy.mockRestore(); } };
+    }
+
+    test("cold boot on a physical device launches via devicectl (not simctl) and propagates the PID", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({
+        deviceId: physicalUdid,
+        launchResult: { success: true, pid: 4321 },
+      });
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ false, /* coldBoot */ true);
+        expect(result.success).toBe(true);
+        expect(result.pid).toBe(4321);
+        // Routed through devicectl with cold-boot relaunch semantics.
+        expect(deviceAppLauncher.launchCalls).toHaveLength(1);
+        expect(deviceAppLauncher.launchCalls[0]).toMatchObject({
+          deviceUdid: physicalUdid,
+          bundleId: userBundleId,
+          terminateExisting: true,
+        });
+        // simctl must never be used for a physical device.
+        expect(simctlCalls).toEqual([]);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("cold boot terminates via devicectl before launching", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, deviceAppLauncher, cleanup } = createDeviceHarness({ deviceId: physicalUdid });
+      try {
+        await iosLaunchApp.execute(userBundleId, false, true);
+        expect(deviceAppLauncher.terminateCalls).toHaveLength(1);
+        expect(deviceAppLauncher.terminateCalls[0]).toMatchObject({ deviceUdid: physicalUdid, bundleId: userBundleId });
+        expect(deviceAppLauncher.launchCalls).toHaveLength(1);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("warm launch on a physical device relaunches via devicectl --terminate-existing", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({ deviceId: physicalUdid });
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ false, /* coldBoot */ false);
+        expect(result.success).toBe(true);
+        // Warm path does not pre-terminate; it relaunches with terminateExisting.
+        expect(deviceAppLauncher.terminateCalls).toHaveLength(0);
+        expect(deviceAppLauncher.launchCalls).toHaveLength(1);
+        expect(deviceAppLauncher.launchCalls[0].terminateExisting).toBe(true);
+        expect(simctlCalls).toEqual([]);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("a devicectl launch failure propagates as { success: false } with the error", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, cleanup } = createDeviceHarness({
+        deviceId: physicalUdid,
+        launchResult: { success: false, error: "Application not found on device" },
+      });
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, false, true);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Application not found on device");
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("a simulator UDID still routes through simctl, never devicectl (regression)", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({ deviceId: simulatorUdid });
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, false, true);
+        expect(result.success).toBe(true);
+        // Simulator path untouched: simctl used, devicectl launcher never called.
+        expect(simctlCalls.some(c => c === `launch:${userBundleId}`)).toBe(true);
+        expect(deviceAppLauncher.launchCalls).toHaveLength(0);
+        expect(deviceAppLauncher.terminateCalls).toHaveLength(0);
       } finally {
         cleanup();
       }

@@ -272,4 +272,21 @@ describe("migrationLockPathFor", () => {
       expect(viaLink).toBe(viaReal);
     }
   );
+
+  test.skipIf(process.platform === "win32")(
+    "resolves a symlinked DB file to the same lock path as its real path",
+    () => {
+      const realDb = join(dir, "auto-mobile.db");
+      const aliasDb = join(dir, "alias.db");
+      writeFileSync(realDb, ""); // the DB file exists; alias is a symlink to it
+      symlinkSync(realDb, aliasDb);
+
+      const viaReal = migrationLockPathFor(realDb);
+      const viaAlias = migrationLockPathFor(aliasDb);
+
+      // A symlinked DB file itself must derive the SAME lock as its real path.
+      expect(viaAlias).toBe(viaReal);
+      expect(viaReal).toBe(`${realpathSync(realDb)}.migrate.lock`);
+    }
+  );
 });

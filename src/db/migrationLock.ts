@@ -1,4 +1,4 @@
-import { realpathSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 import { basename, dirname, join } from "path";
 import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
@@ -143,9 +143,15 @@ export class FileMigrationLock implements MigrationLock {
 export function migrationLockPathFor(dbPath: string): string {
   let canonical = dbPath;
   try {
-    canonical = join(realpathSync(dirname(dbPath)), basename(dbPath));
+    // If the DB file already exists, resolve it fully so a symlinked DB file
+    // *itself* (e.g. AUTOMOBILE_DB_PATH pointing at an alias of the real file)
+    // maps to the same lock as its real path. Before first creation the file is
+    // absent, so fall back to canonicalizing the (existing) parent dir + basename.
+    canonical = existsSync(dbPath)
+      ? realpathSync(dbPath)
+      : join(realpathSync(dirname(dbPath)), basename(dbPath));
   } catch {
-    // Parent dir not resolvable yet — fall back to the raw path (best effort).
+    // Path not resolvable yet — fall back to the raw path (best effort).
   }
   return `${canonical}.migrate.lock`;
 }

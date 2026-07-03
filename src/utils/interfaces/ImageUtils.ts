@@ -1,9 +1,7 @@
 /**
- * Interface for image utilities
- * Provides image manipulation, transformation, and metadata extraction capabilities
- *
- * @deprecated This interface has been moved to ../image-utils.ts
- * Import from there instead for better co-location with implementation
+ * Interface for image utilities.
+ * Provides resize/crop, PNG/WebP encoding, and basic metadata
+ * (dimensions/format/size). Implemented by JimpImageUtils in ../image-utils.ts.
  */
 export interface ImageUtils {
   /**
@@ -46,41 +44,6 @@ export interface ImageUtils {
   ): Promise<Buffer>;
 
   /**
-   * Rotate an image
-   * @param buffer Image buffer
-   * @param degrees Rotation degrees
-   * @returns Promise with rotated buffer
-   */
-  rotate(buffer: Buffer, degrees: number): Promise<Buffer>;
-
-  /**
-   * Flip an image
-   * @param buffer Image buffer
-   * @param direction Flip direction (horizontal, vertical, or both)
-   * @returns Promise with flipped buffer
-   */
-  flip(
-    buffer: Buffer,
-    direction: "horizontal" | "vertical" | "both"
-  ): Promise<Buffer>;
-
-  /**
-   * Blur an image
-   * @param buffer Image buffer
-   * @param radius Blur radius
-   * @returns Promise with blurred buffer
-   */
-  blur(buffer: Buffer, radius: number): Promise<Buffer>;
-
-  /**
-   * Convert image to JPEG format
-   * @param buffer Image buffer
-   * @param quality JPEG quality (1-100, default 75)
-   * @returns Promise with JPEG buffer
-   */
-  toJpeg(buffer: Buffer, quality?: number): Promise<Buffer>;
-
-  /**
    * Convert image to PNG format
    * @param buffer Image buffer
    * @returns Promise with PNG buffer
@@ -114,17 +77,7 @@ export interface ImageUtils {
     height: number;
     format: string;
     size: number;
-    colorSpace?: string;
-    hasAlpha?: boolean;
-    exif?: Record<string, any>;
   }>;
-
-  /**
-   * Get EXIF metadata from an image
-   * @param buffer Image buffer
-   * @returns Promise with EXIF metadata
-   */
-  getExifMetadata(buffer: Buffer): Promise<Record<string, any>>;
 
   /**
    * Clear the image cache

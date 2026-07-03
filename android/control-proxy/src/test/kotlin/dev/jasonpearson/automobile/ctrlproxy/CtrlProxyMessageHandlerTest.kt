@@ -71,13 +71,14 @@ class CtrlProxyMessageHandlerTest {
     dispatch(
       """{"type":"request_swipe","requestId":"sw1","x1":0,"y1":100,"x2":0,"y2":500,"duration":400}"""
     )
-    assertEquals("requestSwipe" to listOf<Any?>("sw1", 0, 100, 0, 500, 400L), lastCall)
+    // Coordinates dispatch as Double (#2927); integer JSON decodes to identical .0 values.
+    assertEquals("requestSwipe" to listOf<Any?>("sw1", 0.0, 100.0, 0.0, 500.0, 400L), lastCall)
   }
 
   @Test
   fun `dispatches request_tap_coordinates with default duration`() = runTest {
     dispatch("""{"type":"request_tap_coordinates","requestId":"t1","x":100,"y":200}""")
-    assertEquals("requestTapCoordinates" to listOf<Any?>("t1", 100, 200, 10L), lastCall)
+    assertEquals("requestTapCoordinates" to listOf<Any?>("t1", 100.0, 200.0, 10L), lastCall)
   }
 
   @Test
@@ -85,8 +86,9 @@ class CtrlProxyMessageHandlerTest {
     dispatch(
       """{"type":"request_two_finger_swipe","requestId":"tf1","x1":0,"y1":0,"x2":10,"y2":20,"duration":300,"offset":50}"""
     )
+    // offset stays Int (pixel offset, not a coordinate).
     assertEquals(
-      "requestTwoFingerSwipe" to listOf<Any?>("tf1", 0, 0, 10, 20, 300L, 50),
+      "requestTwoFingerSwipe" to listOf<Any?>("tf1", 0.0, 0.0, 10.0, 20.0, 300L, 50),
       lastCall,
     )
   }
@@ -98,7 +100,7 @@ class CtrlProxyMessageHandlerTest {
     )
     // holdTime resolves press duration, duration resolves drag duration, hold defaults to 100.
     assertEquals(
-      "requestDrag" to listOf<Any?>("d1", 50, 50, 150, 150, 800L, 500L, 100L),
+      "requestDrag" to listOf<Any?>("d1", 50.0, 50.0, 150.0, 150.0, 800L, 500L, 100L),
       lastCall,
     )
   }
@@ -109,7 +111,31 @@ class CtrlProxyMessageHandlerTest {
       """{"type":"request_pinch","requestId":"pi1","centerX":540,"centerY":960,"distanceStart":100,"distanceEnd":300,"rotationDegrees":45.0,"duration":500}"""
     )
     assertEquals(
-      "requestPinch" to listOf<Any?>("pi1", 540, 960, 100, 300, 45.0f, 500L),
+      "requestPinch" to listOf<Any?>("pi1", 540.0, 960.0, 100.0, 300.0, 45.0f, 500L),
+      lastCall,
+    )
+  }
+
+  @Test
+  fun `dispatches request_pinch preserving fractional coordinates`() = runTest {
+    // #2927: a fractional center/distance survives decode and reaches the action as Double,
+    // not truncated to Int.
+    dispatch(
+      """{"type":"request_pinch","requestId":"pi-frac","centerX":100.5,"centerY":200.25,"distanceStart":80.5,"distanceEnd":120.75,"rotationDegrees":45.0,"duration":500}"""
+    )
+    assertEquals(
+      "requestPinch" to listOf<Any?>("pi-frac", 100.5, 200.25, 80.5, 120.75, 45.0f, 500L),
+      lastCall,
+    )
+  }
+
+  @Test
+  fun `dispatches request_swipe preserving fractional coordinates`() = runTest {
+    dispatch(
+      """{"type":"request_swipe","requestId":"sw-frac","x1":0.5,"y1":100.25,"x2":10.75,"y2":500.125,"duration":400}"""
+    )
+    assertEquals(
+      "requestSwipe" to listOf<Any?>("sw-frac", 0.5, 100.25, 10.75, 500.125, 400L),
       lastCall,
     )
   }

@@ -78,21 +78,19 @@ export function resolveDatabasePathFromEnvironment(
 /**
  * The migration/path lifecycle state that outlives a single DB connection.
  *
- * These fields were four bare module globals (`resolvedDbPath` plus the
- * `migrationsRun` / `migrationsPromise` / `migrationsError` state machine) that
- * `closeDatabase()` had to remember to reset one-by-one so a same-process reopen
- * behaves like a cold start (issue #2796). Collapsing them into one holder with a
- * single {@link reset} makes "reset them as a set" true *by construction*: a
- * fifth lifecycle field is cleared by the same `reset()`, closing the "forgot to
- * reset the Nth global" regression class (issues #2900/#2944). The next field to
- * arrive is the `migrationsGeneration` fence (#2898/PR #2936); it lands as one
- * more property here and its reset/bump joins {@link reset} for free.
+ * These were five bare module globals (`resolvedDbPath` plus the
+ * `migrationsRun` / `migrationsPromise` / `migrationsError` state machine and the
+ * `migrationsGeneration` fence) that `closeDatabase()` had to remember to reset
+ * one-by-one so a same-process reopen behaves like a cold start (issues #2796,
+ * #2898). Collapsing them into one holder with a single {@link reset} makes
+ * "reset them as a set" true *by construction*: a sixth lifecycle field is
+ * cleared by the same `reset()`, closing the "forgot to reset the Nth global"
+ * regression class (issues #2900/#2944).
  *
- * The three migration fields are one state machine and are documented together
- * where they are read/written; `resolvedDbPath` is the lazily-cached path (see
- * {@link resolveDbPath}). All are reset together — never individually — so the
- * invariants they encode ("reopen == cold start", "no stale error against a
- * healthy reopen", "re-read the DB path env") hold as a set.
+ * All fields are reset together — never individually — so the invariants they
+ * encode ("reopen == cold start", "no stale error against a healthy reopen",
+ * "re-read the DB path env", "stale in-flight completions are fenced off") hold
+ * as a set.
  */
 class MigrationLifecycleState {
   /**
@@ -121,15 +119,31 @@ class MigrationLifecycleState {
   migrationsError: Error | null = null;
 
   /**
+   * Monotonic generation token fencing off stale migration completions. Nulling
+   * `migrationsPromise` in {@link reset} does NOT cancel the still-running
+   * detached `startMigrations().then(...)` chain — it runs on its own
+   * `migrationDb` and settles independently. If a `getDatabase()` reopen starts a
+   * NEW generation before the old chain settles, the stale handler would
+   * overwrite the new generation's `migrationsRun`/`migrationsError`.
+   * `ensureMigrationsStarted()` captures this counter when it creates the
+   * promise; its handlers only write the fields if their captured generation
+   * still matches. {@link reset} bumps it, so any handler from a superseded run
+   * no-ops (#2898).
+   */
+  migrationsGeneration = 0;
+
+  /**
    * Clear the whole lifecycle as a set so a same-process reopen cold-starts.
-   * Adding a field above is reset-by-construction: extend this method with it
-   * (e.g. `migrationsGeneration` from #2898/PR #2936 resets/bumps here).
+   * Adding a field above is reset-by-construction: extend this method with it.
+   * `migrationsGeneration` is BUMPED (monotonic), never zeroed, so a superseded
+   * run's completion can't collide with a reopened generation (#2898).
    */
   reset(): void {
     this.resolvedDbPath = null;
     this.migrationsRun = false;
     this.migrationsPromise = null;
     this.migrationsError = null;
+    this.migrationsGeneration += 1;
   }
 }
 
@@ -241,7 +255,9 @@ async function startMigrations(dbPath: string): Promise<void> {
       lock: createFileMigrationLock(dbPath),
       backup: () => backupDatabaseFile(migrationDb, dbPath),
     });
-    lifecycle.migrationsRun = true;
+    // `migrationsRun` is NOT set here: it is a fenced global written only by the
+    // generation-guarded success handler in `ensureMigrationsStarted()`, so a
+    // superseded run (closeDatabase()+reopen) can't flip it on the new generation.
   } catch (error) {
     logger.error("Failed to run migrations on database initialization:", error);
     throw error;
@@ -252,13 +268,24 @@ async function startMigrations(dbPath: string): Promise<void> {
 
 function ensureMigrationsStarted(dbPath: string): void {
   if (!lifecycle.migrationsRun && !lifecycle.migrationsPromise) {
+    // Capture the generation so a completion that lands after a
+    // closeDatabase()+reopen (which bumps the counter) is dropped instead of
+    // stomping the newer generation's `migrationsRun`/`migrationsError` (#2898).
+    const generation = lifecycle.migrationsGeneration;
     // Resolve (never reject) so a failed migration does not float an unhandled
     // rejection; cache the error for synchronous re-checking by awaiters.
     lifecycle.migrationsPromise = startMigrations(dbPath).then(
       () => {
+        if (generation !== lifecycle.migrationsGeneration) {
+          return; // Superseded run; its DB is already destroyed. Drop silently.
+        }
+        lifecycle.migrationsRun = true;
         lifecycle.migrationsError = null;
       },
       error => {
+        if (generation !== lifecycle.migrationsGeneration) {
+          return; // Superseded run; do not resurrect a stale failure.
+        }
         lifecycle.migrationsError = createStartupMigrationError(error);
       }
     );
@@ -324,6 +351,19 @@ export function getMigrationsError(): Error | null {
 }
 
 /**
+ * Test-only handle on the in-flight migration promise (the resolve-never-reject
+ * `.then` chain built in {@link ensureMigrationsStarted}), or null when no run is
+ * in flight. Exposed so the generation-fence regression test can capture a
+ * generation's promise while it is blocked, then deterministically `await` its
+ * completion after a `closeDatabase()` + reopen — proving the settled stale
+ * handler no-ops instead of racing a fixed delay. Not part of the daemon
+ * contract; do not use in production paths (issue #2898).
+ */
+export function getMigrationsPromiseForTest(): Promise<void> | null {
+  return lifecycle.migrationsPromise;
+}
+
+/**
  * Reset every piece of module-global state that outlives a single DB connection
  * so a same-process reopen behaves like a cold start. This is THE single named
  * entry point the reset checklist hangs off (issues #2900/#2935): adding a reset
@@ -337,17 +377,15 @@ export function getMigrationsError(): Error | null {
  * Two resets with two different lifecycle semantics are deliberate siblings:
  *
  * - `lifecycle.reset()` clears the migration/path state machine as a set (issues
- *   #2796/#2900). Leaving any field set would let `ensureMigrationsStarted()`
- *   no-op and `waitForMigrationsBeforeQuery()` short-circuit (skipping migration
- *   gating on the new connection), rethrow a stale startup error against an
- *   otherwise-healthy reopened DB, or redirect the reopen to the stale
- *   `resolvedDbPath` instead of re-reading AUTOMOBILE_DB_PATH / AUTOMOBILE_DB_DIR.
+ *   #2796/#2900/#2944) and bumps the generation fence (#2898). Leaving any field
+ *   set would let `ensureMigrationsStarted()` no-op and
+ *   `waitForMigrationsBeforeQuery()` short-circuit (skipping migration gating on
+ *   the new connection), rethrow a stale startup error against an
+ *   otherwise-healthy reopened DB, redirect the reopen to the stale
+ *   `resolvedDbPath` instead of re-reading AUTOMOBILE_DB_PATH / AUTOMOBILE_DB_DIR,
+ *   or let a superseded in-flight migration completion stomp the new generation.
  *   In the daemon this is inert and the "path always matches" invariant from
- *   resolveDbPath() holds; the reset is what gives tests full isolation. Because
- *   this is a single object reset, a new migration-lifecycle field is cleared by
- *   construction — e.g. the `migrationsGeneration` fence (#2898/PR #2936) slots
- *   in as one more field on `MigrationLifecycleState` and its reset/bump becomes
- *   part of `lifecycle.reset()` for free, no new line here (#2944).
+ *   resolveDbPath() holds; the reset is what gives tests full isolation.
  *
  * - `resetDbWriteBarrier()` cold-starts the write barrier (issue #2896). Its
  *   draining flag latches for the process lifetime, so shutdown's
@@ -355,14 +393,13 @@ export function getMigrationsError(): Error | null {
  *   otherwise leave the shared barrier permanently draining, and any future
  *   in-process reopen (config reload / DB path switch / restart-without-exit)
  *   would silently skip every tracked best-effort write against the reopened DB.
- *   This is an identity swap in a separate, already-encapsulated module
- *   (`dbWriteBarrier.ts`), not part of the migration/path state machine — hence a
- *   sibling call here rather than a field on `MigrationLifecycleState`. It only
- *   covers consumers that resolve `getDbWriteBarrier()` at use-time;
- *   construction-captured consumers keep their pinned barrier and remain the
- *   documented reopen exception (#2912). If #2912 moves those consumers to a
- *   use-time getter so the barrier no longer needs a lifecycle reset, drop this
- *   sibling call from here.
+ *   Every shared-barrier consumer resolves `getDbWriteBarrier()` at use-time (per
+ *   write), so this identity swap reaches all of them — the former
+ *   construction-captured consumers were converted to per-write resolution in
+ *   #2912, leaving no reopen exception. It stays a sibling call here rather than a
+ *   field on `MigrationLifecycleState` because it is an identity swap in a
+ *   separate, already-encapsulated module (`dbWriteBarrier.ts`), not part of the
+ *   migration/path state machine.
  */
 function resetDbLifecycleState(): void {
   lifecycle.reset();

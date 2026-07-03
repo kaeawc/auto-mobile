@@ -65,10 +65,21 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       };
       break;
 
+    case "pinch_result":
+      // Carry the runner's pinchPath so PinchOn can warn when the center-less
+      // public fallback was used instead of the center-honoring synthesis (#2910).
+      result = {
+        success: message.success ?? true,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+        perfTiming: message.perfTiming,
+        pinchPath: message.pinchPath,
+      };
+      break;
+
     case "tap_coordinates_result":
     case "swipe_result":
     case "drag_result":
-    case "pinch_result":
     case "set_text_result":
     case "clear_text_result":
     case "select_all_result":
@@ -123,15 +134,6 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       result = {
         success: message.success ?? true,
         enabled: (message as { enabled?: boolean }).enabled ?? false,
-        totalTimeMs: message.totalTimeMs ?? 0,
-        error: message.error,
-      };
-      break;
-
-    case "voiceover_action_result":
-      result = {
-        success: message.success ?? true,
-        action: (message as { action?: string }).action,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
       };

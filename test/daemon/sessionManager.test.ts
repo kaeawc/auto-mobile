@@ -1,7 +1,19 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { DbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
+
+function makeHierarchy(label: string): ViewHierarchyResult {
+  return {
+    hierarchy: {
+      node: {
+        "$": { "resource-id": `com.example:id/${label}` },
+        "view-id": `com.example:id/${label}`,
+      },
+    },
+  };
+}
 
 const HEARTBEAT_ENV_KEYS = [
   "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
@@ -144,13 +156,45 @@ describe("SessionManager", () => {
   describe("cache management", () => {
     test("should update session cache data", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
+      const hierarchy = makeHierarchy("root");
       sessionManager.updateSessionCache("session-1", {
-        lastHierarchy: "test-hierarchy",
+        lastHierarchy: hierarchy,
         lastScreenshot: "base64-data",
       });
       const cache = sessionManager.getSessionCache("session-1");
-      expect(cache?.lastHierarchy).toBe("test-hierarchy");
+      expect(cache?.lastHierarchy).toEqual(hierarchy);
       expect(cache?.lastScreenshot).toBe("base64-data");
+    });
+
+    test("setLastHierarchy stores a ViewHierarchyResult in the typed top-level slot and stamps lastObserveTime (#2917)", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+      fakeTimer.setCurrentTime(123456);
+      const hierarchy = makeHierarchy("root");
+
+      sessionManager.setLastHierarchy("session-1", hierarchy);
+
+      const session = sessionManager.getSession("session-1")!;
+      // Canonical slot is the typed top-level field, NOT customData.
+      expect(session.cacheData.lastHierarchy).toEqual(hierarchy);
+      expect(session.cacheData.lastHierarchy?.hierarchy.node?.["view-id"]).toBe("com.example:id/root");
+      expect(session.cacheData.lastObserveTime).toBe(123456);
+      // The dormant-decoy key must not reappear under customData.
+      expect(session.cacheData.customData?.lastHierarchy).toBeUndefined();
+    });
+
+    test("setLastScreenshot stores the base64 string in the typed top-level slot (#2917)", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+
+      sessionManager.setLastScreenshot("session-1", "base64-screenshot");
+
+      const session = sessionManager.getSession("session-1")!;
+      expect(session.cacheData.lastScreenshot).toBe("base64-screenshot");
+      expect(session.cacheData.customData?.lastScreenshot).toBeUndefined();
+    });
+
+    test("setLastHierarchy on a missing session is a no-op (no throw)", () => {
+      expect(() => sessionManager.setLastHierarchy("nope", makeHierarchy("x"))).not.toThrow();
+      expect(sessionManager.getSession("nope")).toBeNull();
     });
 
     test("should get session cache without modifying other fields", async () => {
@@ -170,7 +214,7 @@ describe("SessionManager", () => {
     test("should clear specific cache key", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
       sessionManager.updateSessionCache("session-1", {
-        lastHierarchy: "test-hierarchy",
+        lastHierarchy: makeHierarchy("root"),
         lastScreenshot: "base64-data",
       });
       sessionManager.clearSessionCache("session-1", "lastHierarchy");
@@ -182,7 +226,7 @@ describe("SessionManager", () => {
     test("should clear all cache when no key specified", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
       sessionManager.updateSessionCache("session-1", {
-        lastHierarchy: "test-hierarchy",
+        lastHierarchy: makeHierarchy("root"),
         lastScreenshot: "base64-data",
         customData: { key: "value" },
       });
@@ -319,19 +363,6 @@ describe("SessionManager", () => {
   });
 
   describe("shutdown draining (issue #2792)", () => {
-    class RecordingBarrier implements DbWriteBarrier {
-      draining = false;
-      ran: string[] = [];
-      isDraining(): boolean { return this.draining; }
-      inFlightCount(): number { return 0; }
-      beginDrain(): void { this.draining = true; }
-      async drain(): Promise<boolean> { return true; }
-      async track<T>(work: () => Promise<T>): Promise<T | undefined> {
-        if (this.draining) { return undefined; }
-        this.ran.push("ran");
-        return work();
-      }
-    }
 
     // Minimal repo double capturing the fire-and-forget session writes.
     function makeRepo(): { repo: any; activity: string[]; released: string[] } {
@@ -348,8 +379,8 @@ describe("SessionManager", () => {
 
     test("routes fire-and-forget session activity writes through the barrier", async () => {
       const { repo, activity } = makeRepo();
-      const barrier = new RecordingBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, barrier);
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         mgr.recordHeartbeat("s1");
@@ -363,8 +394,8 @@ describe("SessionManager", () => {
 
     test("skips fire-and-forget session writes while draining", async () => {
       const { repo, activity } = makeRepo();
-      const barrier = new RecordingBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, barrier);
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         barrier.beginDrain();
@@ -375,6 +406,46 @@ describe("SessionManager", () => {
       } finally {
         mgr.stopCleanupTimer();
       }
+    });
+
+    // The cleanup interval is the ONE best-effort DB writer that fires on its own
+    // timer rather than an external socket. With per-write barrier resolution
+    // (#2912) it would resolve a fresh, non-draining barrier if it fired after
+    // closeDatabase()'s reset — so `daemon.stop()` stops it before draining. These
+    // two tests pin the property that call relies on: the timer routes a tracked
+    // write when it fires, and stopping it neutralizes that writer.
+    test("cleanup timer routes an expired-session release through the barrier", async () => {
+      const { repo, released } = makeRepo();
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      try {
+        await mgr.createSession("s1", "emulator-5554", "android");
+        // Past session timeout (30m) + cleanup interval (5m): the timer fires.
+        fakeTimer.advanceTime(36 * 60 * 1000);
+        await Promise.resolve();
+        expect(released).toContain("s1");
+        expect(barrier.ran.length).toBeGreaterThan(0);
+      } finally {
+        mgr.stopCleanupTimer();
+      }
+    });
+
+    test("stopCleanupTimer prevents the timer from routing any further tracked write", async () => {
+      const { repo, released } = makeRepo();
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      await mgr.createSession("s1", "emulator-5554", "android");
+
+      // Model the shutdown ordering: stop the timer BEFORE the (would-be) drain.
+      mgr.stopCleanupTimer();
+
+      fakeTimer.advanceTime(36 * 60 * 1000);
+      await Promise.resolve();
+
+      // No cleanup fired, so no tracked write was ever attempted against a
+      // reopened/closed connection.
+      expect(released).toHaveLength(0);
+      expect(barrier.trackCalls).toBe(0);
     });
   });
 });

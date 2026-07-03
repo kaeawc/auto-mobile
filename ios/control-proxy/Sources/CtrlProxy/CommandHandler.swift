@@ -421,7 +421,7 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handlePinch(_ request: RequestPinch, startTime: Date) throws -> WebSocketResponse {
-        try gesturePerformer.pinch(
+        let path = try gesturePerformer.pinch(
             centerX: request.centerX,
             centerY: request.centerY,
             distanceStart: request.distanceStart,
@@ -433,7 +433,8 @@ public class CommandHandler: CommandHandling {
         return WebSocketResponse.success(
             type: ResponseType.pinchResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: totalTimeMs(from: startTime),
+            pinchPath: path.rawValue
         )
     }
 

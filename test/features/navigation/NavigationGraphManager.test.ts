@@ -1,9 +1,16 @@
-import { expect, describe, test, beforeEach, afterEach, beforeAll, it } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, beforeAll, it, spyOn } from "bun:test";
+import type { Kysely } from "kysely";
 import {
   NavigationGraphManager,
   NavigationEvent
 } from "../../../src/features/navigation/NavigationGraphManager";
 import { runMigrations } from "../../helpers/database";
+import { createTestDatabase } from "../../db/testDbHelper";
+import { NavigationRepository } from "../../../src/db/navigationRepository";
+import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
+import { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
+import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
+import type { Database } from "../../../src/db/types";
 
 describe("NavigationGraphManager", () => {
   let manager: NavigationGraphManager;
@@ -824,5 +831,236 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
       const freshSession = NavigationGraphManager.getInstanceForSession("session-reset");
       expect(freshSession.getCurrentAppId()).toBeNull();
     });
+  });
+});
+
+/**
+ * A TestCoverageRepository that throws on recordEdgeTraversal to simulate a
+ * mid-sequence write failure inside recordNavigationEvent's transaction. It also
+ * overrides withExecutor so the throwing behavior survives the manager rebinding
+ * the repo to the transaction executor (a base-class instance would silently drop
+ * the override and run recordNodeVisit on the singleton connection — a deadlock).
+ */
+class ThrowingEdgeTraversalCoverageRepo extends TestCoverageRepository {
+  constructor(
+    private readonly injectedTimer: Timer,
+    db?: Kysely<Database>
+  ) {
+    super(injectedTimer, db);
+  }
+
+  override withExecutor(executor: Kysely<Database>): TestCoverageRepository {
+    return new ThrowingEdgeTraversalCoverageRepo(this.injectedTimer, executor);
+  }
+
+  override async recordEdgeTraversal(): Promise<void> {
+    throw new Error("injected recordEdgeTraversal failure");
+  }
+}
+
+describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", () => {
+  const APP_ID = "com.test.txn";
+
+  let db: Kysely<Database>;
+  let telemetrySpy: ReturnType<typeof spyOn>;
+
+  async function countNodes(screenName?: string): Promise<number> {
+    let q = db
+      .selectFrom("navigation_nodes")
+      .select(eb => eb.fn.countAll<number>().as("count"))
+      .where("app_id", "=", APP_ID);
+    if (screenName !== undefined) {
+      q = q.where("screen_name", "=", screenName);
+    }
+    const row = await q.executeTakeFirst();
+    return Number(row?.count ?? 0);
+  }
+
+  async function countEdges(): Promise<number> {
+    const row = await db
+      .selectFrom("navigation_edges")
+      .select(eb => eb.fn.countAll<number>().as("count"))
+      .where("app_id", "=", APP_ID)
+      .executeTakeFirst();
+    return Number(row?.count ?? 0);
+  }
+
+  async function countEdgeCoverageRows(): Promise<number> {
+    const row = await db
+      .selectFrom("test_edge_coverage")
+      .select(eb => eb.fn.countAll<number>().as("count"))
+      .executeTakeFirst();
+    return Number(row?.count ?? 0);
+  }
+
+  async function sessionTotals(
+    sessionId: number
+  ): Promise<{ nodes: number; edges: number }> {
+    const row = await db
+      .selectFrom("test_coverage_sessions")
+      .select(["total_nodes_visited", "total_edges_traversed"])
+      .where("id", "=", sessionId)
+      .executeTakeFirstOrThrow();
+    return {
+      nodes: Number(row.total_nodes_visited),
+      edges: Number(row.total_edges_traversed),
+    };
+  }
+
+  beforeEach(async () => {
+    db = await createTestDatabase({ foreignKeys: true });
+    // Replace the telemetry singleton method so recordNavigationEvent's
+    // fire-and-forget telemetry push is observable and never touches a real DB.
+    TelemetryRecorder.resetInstance();
+    telemetrySpy = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordNavigationEvent"
+    ).mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    telemetrySpy.mockRestore();
+    TelemetryRecorder.resetInstance();
+    await db.destroy();
+  });
+
+  function makeManager(coverage: TestCoverageRepository): NavigationGraphManager {
+    const navRepo = new NavigationRepository(db);
+    return NavigationGraphManager.createForTesting(navRepo, coverage);
+  }
+
+  test("happy path persists node + visit + edge + traversal rows", async () => {
+    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const manager = makeManager(coverage);
+    await manager.setCurrentApp(APP_ID);
+    await manager.startTestSession("session-happy");
+
+    await manager.recordNavigationEvent(createEvent("Screen1", 1000));
+    await manager.recordNavigationEvent(createEvent("Screen2", 2000));
+
+    expect(await countNodes("Screen1")).toBe(1);
+    expect(await countNodes("Screen2")).toBe(1);
+    expect(await countEdges()).toBe(1);
+    // Two node visits + one edge traversal recorded for the session.
+    const nodeCoverage = await coverage.getCoveredNodes(
+      manager.getActiveTestSession()!.id
+    );
+    expect(nodeCoverage.length).toBe(2);
+    expect(await countEdgeCoverageRows()).toBe(1);
+
+    expect(manager.getCurrentScreen()).toBe("Screen2");
+    expect(telemetrySpy).toHaveBeenCalledTimes(2);
+  });
+
+  test("rolls back all rows when a mid-sequence write throws", async () => {
+    const coverage = new ThrowingEdgeTraversalCoverageRepo(defaultTimer, db);
+    const manager = makeManager(coverage);
+    await manager.setCurrentApp(APP_ID);
+    await manager.startTestSession("session-rollback");
+
+    // First event: no edge (previousScreen null) → recordEdgeTraversal not hit → commits.
+    await manager.recordNavigationEvent(createEvent("Screen1", 1000));
+    expect(manager.getCurrentScreen()).toBe("Screen1");
+
+    const sessionId = manager.getActiveTestSession()!.id;
+    const nodesBefore = await countNodes();
+    const edgesBefore = await countEdges();
+    const edgeCoverageBefore = await countEdgeCoverageRows();
+    const totalsBefore = await sessionTotals(sessionId);
+    telemetrySpy.mockClear();
+
+    let notifyCount = 0;
+    manager.setGraphUpdateListener(() => {
+      notifyCount++;
+    });
+
+    // Second event creates an edge, so recordEdgeTraversal fires and throws.
+    await expect(
+      manager.recordNavigationEvent(createEvent("Screen2", 2000))
+    ).rejects.toThrow("injected recordEdgeTraversal failure");
+
+    // Zero new node/edge/coverage rows persisted for the failed event.
+    expect(await countNodes()).toBe(nodesBefore);
+    expect(await countNodes("Screen2")).toBe(0);
+    expect(await countEdges()).toBe(edgesBefore);
+    expect(await countEdgeCoverageRows()).toBe(edgeCoverageBefore);
+
+    // The session total counters (bumped by recordNodeVisit before the throw)
+    // are rolled back too — they run on the same transaction.
+    expect(await sessionTotals(sessionId)).toEqual(totalsBefore);
+
+    // In-memory field rollback invariant: currentScreen (and therefore the
+    // together-assigned activeNavigation) is unchanged from before the call.
+    expect(manager.getCurrentScreen()).toBe("Screen1");
+
+    // Side effects are NOT invoked when the transaction rolls back.
+    expect(telemetrySpy).not.toHaveBeenCalled();
+    expect(notifyCount).toBe(0);
+  });
+
+  test("side effects fire only after the transaction commits", async () => {
+    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const manager = makeManager(coverage);
+    await manager.setCurrentApp(APP_ID);
+
+    // touchApp is the final write inside the transaction. Record the number of
+    // times it had run at EVERY notify/telemetry fire (not just the last), so a
+    // stray side effect firing BEFORE the transaction — when touchApp's call count
+    // is still 0 — is caught rather than masked by a later post-commit fire.
+    const touchSpy = spyOn(NavigationRepository.prototype, "touchApp");
+
+    const notifyTouchCounts: number[] = [];
+    manager.setGraphUpdateListener(() => {
+      notifyTouchCounts.push(touchSpy.mock.calls.length);
+    });
+
+    const telemetryTouchCounts: number[] = [];
+    telemetrySpy.mockImplementation(async () => {
+      telemetryTouchCounts.push(touchSpy.mock.calls.length);
+    });
+
+    await manager.recordNavigationEvent(createEvent("Screen1", 1000));
+
+    // touchApp runs exactly once (one event), and notify + telemetry each fire
+    // exactly once, each AFTER that final in-transaction write completed — never
+    // inside the transaction and never before it.
+    expect(touchSpy).toHaveBeenCalledTimes(1);
+    expect(notifyTouchCounts).toEqual([1]);
+    expect(telemetryTouchCounts).toEqual([1]);
+
+    touchSpy.mockRestore();
+  });
+
+  test("does not deadlock a concurrent writer on the shared connection", async () => {
+    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const manager = makeManager(coverage);
+    await manager.setCurrentApp(APP_ID);
+    await manager.recordNavigationEvent(createEvent("Screen1", 1000));
+
+    // A second repository bound to the SAME connection issues an independent write
+    // concurrently with the transactional recordNavigationEvent. If the transaction
+    // held the connection past its body (or a stray singleton query escaped it), the
+    // in-process mutex would deadlock with no busy_timeout escape.
+    const otherRepo = new NavigationRepository(db);
+
+    const work = Promise.all([
+      manager.recordNavigationEvent(createEvent("Screen2", 2000)),
+      otherRepo.getOrCreateApp("com.test.other"),
+      otherRepo.getOrCreateNode("com.test.other", "OtherScreen", 3000),
+    ]);
+
+    const timeout = new Promise((_resolve, reject) =>
+      defaultTimer.setTimeout(
+        () => reject(new Error("deadlock: concurrent writers did not complete")),
+        2000
+      )
+    );
+
+    await Promise.race([work, timeout]);
+
+    // Both writers succeeded.
+    expect(await countEdges()).toBe(1);
+    const otherNode = await otherRepo.getNode("com.test.other", "OtherScreen");
+    expect(otherNode).toBeDefined();
   });
 });

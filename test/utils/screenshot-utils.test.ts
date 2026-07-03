@@ -4,8 +4,19 @@ import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../src/utils/constants
 import { promises as fsPromises } from "node:fs";
 import path from "path";
 import os from "os";
-import sharp from "sharp";
+import { Jimp, rgbaToInt } from "jimp";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+
+async function createTestImage(
+  width: number,
+  height: number,
+  color: { r: number; g: number; b: number },
+  mime: "image/png" | "image/jpeg" = "image/png"
+): Promise<Buffer> {
+  const image = new Jimp({ width, height, color: rgbaToInt(color.r, color.g, color.b, 255) });
+  return image.getBuffer(mime);
+}
 
 describe("ScreenshotUtils", function() {
   let testDir: string;
@@ -33,14 +44,7 @@ describe("ScreenshotUtils", function() {
 
     test("should convert non-PNG images to PNG", async function() {
       // Create a simple test image
-      const testImage = await sharp({
-        create: {
-          width: 100,
-          height: 100,
-          channels: 3,
-          background: { r: 255, g: 0, b: 0 }
-        }
-      }).jpeg().toBuffer();
+      const testImage = await createTestImage(100, 100, { r: 255, g: 0, b: 0 }, "image/jpeg");
 
       const pngBuffer = await ScreenshotUtils.convertToPng(testImage);
       expect(ScreenshotUtils.isPngBuffer(pngBuffer)).toBe(true);
@@ -49,14 +53,7 @@ describe("ScreenshotUtils", function() {
 
   describe("Image Dimensions", function() {
     test("should get image dimensions correctly", async function() {
-      const testImage = await sharp({
-        create: {
-          width: 200,
-          height: 150,
-          channels: 3,
-          background: { r: 0, g: 255, b: 0 }
-        }
-      }).png().toBuffer();
+      const testImage = await createTestImage(200, 150, { r: 0, g: 255, b: 0 });
 
       const dimensions = await ScreenshotUtils.getImageDimensions(testImage);
       expect(dimensions.width).toBe(200);
@@ -64,14 +61,7 @@ describe("ScreenshotUtils", function() {
     });
 
     test("should resize images correctly", async function() {
-      const testImage = await sharp({
-        create: {
-          width: 400,
-          height: 300,
-          channels: 3,
-          background: { r: 0, g: 0, b: 255 }
-        }
-      }).png().toBuffer();
+      const testImage = await createTestImage(400, 300, { r: 0, g: 0, b: 255 });
 
       const resizedBuffer = await ScreenshotUtils.resizeImageIfNeeded(testImage, 200, 150);
       const dimensions = await ScreenshotUtils.getImageDimensions(resizedBuffer);
@@ -81,14 +71,7 @@ describe("ScreenshotUtils", function() {
     });
 
     test("should not resize images that already match target dimensions", async function() {
-      const testImage = await sharp({
-        create: {
-          width: 100,
-          height: 100,
-          channels: 3,
-          background: { r: 128, g: 128, b: 128 }
-        }
-      }).png().toBuffer();
+      const testImage = await createTestImage(100, 100, { r: 128, g: 128, b: 128 });
 
       const result = await ScreenshotUtils.resizeImageIfNeeded(testImage, 100, 100);
       expect(result).toBe(testImage);
@@ -102,33 +85,12 @@ describe("ScreenshotUtils", function() {
 
     beforeEach(async function() {
       // Create identical images
-      identicalImage1 = await sharp({
-        create: {
-          width: 100,
-          height: 100,
-          channels: 3,
-          background: { r: 255, g: 255, b: 255 }
-        }
-      }).png().toBuffer();
+      identicalImage1 = await createTestImage(100, 100, { r: 255, g: 255, b: 255 });
 
-      identicalImage2 = await sharp({
-        create: {
-          width: 100,
-          height: 100,
-          channels: 3,
-          background: { r: 255, g: 255, b: 255 }
-        }
-      }).png().toBuffer();
+      identicalImage2 = await createTestImage(100, 100, { r: 255, g: 255, b: 255 });
 
       // Create different image
-      differentImage = await sharp({
-        create: {
-          width: 100,
-          height: 100,
-          channels: 3,
-          background: { r: 0, g: 0, b: 0 }
-        }
-      }).png().toBuffer();
+      differentImage = await createTestImage(100, 100, { r: 0, g: 0, b: 0 });
     });
 
     test("should detect identical images with 100% similarity", async function() {
@@ -148,14 +110,7 @@ describe("ScreenshotUtils", function() {
     });
 
     test("should handle comparison of different sized images", async function() {
-      const largeImage = await sharp({
-        create: {
-          width: 200,
-          height: 200,
-          channels: 3,
-          background: { r: 255, g: 255, b: 255 }
-        }
-      }).png().toBuffer();
+      const largeImage = await createTestImage(200, 200, { r: 255, g: 255, b: 255 });
 
       const result = await ScreenshotUtils.compareImages(identicalImage1, largeImage);
 
@@ -222,14 +177,7 @@ describe("ScreenshotUtils", function() {
   describe("Fuzzy Matching", function() {
     test("should find similar screenshots within tolerance", async function() {
       // Create test images
-      const baseImage = await sharp({
-        create: {
-          width: 50,
-          height: 50,
-          channels: 3,
-          background: { r: 100, g: 150, b: 200 }
-        }
-      }).png().toBuffer();
+      const baseImage = await createTestImage(50, 50, { r: 100, g: 150, b: 200 });
 
       const timestamp = fakeTimer.now();
       const testFilename = `screenshot_${timestamp}.png`;
@@ -248,23 +196,9 @@ describe("ScreenshotUtils", function() {
     });
 
     test("should not find matches when no similar screenshots exist", async function() {
-      const targetImage = await sharp({
-        create: {
-          width: 50,
-          height: 50,
-          channels: 3,
-          background: { r: 255, g: 0, b: 0 }
-        }
-      }).png().toBuffer();
+      const targetImage = await createTestImage(50, 50, { r: 255, g: 0, b: 0 });
 
-      const differentImage = await sharp({
-        create: {
-          width: 50,
-          height: 50,
-          channels: 3,
-          background: { r: 0, g: 255, b: 0 }
-        }
-      }).png().toBuffer();
+      const differentImage = await createTestImage(50, 50, { r: 0, g: 255, b: 0 });
 
       // Save a very different image
       const timestamp = fakeTimer.now();
@@ -283,14 +217,7 @@ describe("ScreenshotUtils", function() {
     });
 
     test("should handle empty cache directory", async function() {
-      const testImage = await sharp({
-        create: {
-          width: 50,
-          height: 50,
-          channels: 3,
-          background: { r: 128, g: 128, b: 128 }
-        }
-      }).png().toBuffer();
+      const testImage = await createTestImage(50, 50, { r: 128, g: 128, b: 128 });
 
       const result = await ScreenshotUtils.findSimilarScreenshots(
         testImage,
@@ -305,14 +232,7 @@ describe("ScreenshotUtils", function() {
     });
 
     test("should limit the number of comparisons", async function() {
-      const testImage = await sharp({
-        create: {
-          width: 30,
-          height: 30,
-          channels: 3,
-          background: { r: 64, g: 64, b: 64 }
-        }
-      }).png().toBuffer();
+      const testImage = await createTestImage(30, 30, { r: 64, g: 64, b: 64 });
 
       // Create 10 different screenshot files
       for (let i = 0; i < 10; i++) {

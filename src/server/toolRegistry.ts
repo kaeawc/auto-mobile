@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { ActionableError, BootedDevice, SomePlatform } from "../models";
+import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -444,18 +445,24 @@ class ToolRegistryClass {
             // lives under `structuredContent`, not on `response` directly (the
             // former read of `response.viewHierarchy` was always undefined, so
             // `lastHierarchy` never populated — the #2761 diff baseline needs it).
-            // Runs before finalizeToolResponse, so the cache keeps the full,
-            // untrimmed hierarchy while the wire copy is sanitized.
-            const observeHierarchy = name === "observe" ? getStructuredField(response, "viewHierarchy") : undefined;
+            // Route through the typed setters so the canonical top-level slots
+            // are the source of truth rather than the untyped `customData` bag
+            // (issue #2917). Runs before finalizeToolResponse, so the cache keeps
+            // the full, untrimmed hierarchy while the wire copy is sanitized.
+            const observeHierarchy = name === "observe" ? getStructuredField<ViewHierarchyResult>(response, "viewHierarchy") : undefined;
             if (observeHierarchy) {
-              await updateSessionCache(context, "lastHierarchy", observeHierarchy);
+              sessionManager.setLastHierarchy(sessionUuid, observeHierarchy);
             }
-            const observeScreenshot = name === "observe" ? getStructuredField(response, "screenshot") : undefined;
+            const observeScreenshot = name === "observe" ? getStructuredField<string>(response, "screenshot") : undefined;
             if (observeScreenshot) {
-              await updateSessionCache(context, "lastScreenshot", observeScreenshot);
+              sessionManager.setLastScreenshot(sessionUuid, observeScreenshot);
             }
 
-            // Update last action timestamp for interaction tools
+            // Update last action timestamp for interaction tools. Unlike the
+            // observe hierarchy/screenshot above, `lastActionTime` is ad-hoc
+            // interaction bookkeeping with no typed slot or consumer, so it
+            // intentionally stays on the generic `customData` path (see #2917
+            // follow-up to type or remove it).
             if (["tapOn", "swipeOn", "pinchOn", "dragAndDrop", "scroll", "inputText", "clearText", "pressButton"].includes(name)) {
               await updateSessionCache(context, "lastActionTime", this.timer.now());
             }
@@ -727,8 +734,13 @@ class ToolRegistryClass {
   // Get tools in MCP format
   getToolDefinitions(options: ToolListingOptions = {}) {
     const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
+    // When tool results are stripped of `structuredContent` (issue #2899), do not
+    // advertise an `outputSchema` in `tools/list`: an MCP server that declares an
+    // output schema is expected to return matching `structuredContent`, so keeping
+    // both consistent avoids advertising output the finalize step will strip.
+    const suppressOutputSchema = serverConfig.isToolResultsNoStructuredContentEnabled();
     return this.getAllTools(options).map(tool => {
-      const outputSchema = tool.outputSchema
+      const outputSchema = tool.outputSchema && !suppressOutputSchema
         ? flattenTopLevelUnion(toJSONSchema(tool.outputSchema))
         : undefined;
 

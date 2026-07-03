@@ -555,6 +555,8 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertTrue(response.success ?? false)
         XCTAssertEqual(response.type, "pinch_result")
         XCTAssertEqual(response.requestId, "test-pinch")
+        // Default path is the private event-path synthesis (honors center).
+        XCTAssertEqual(response.pinchPath, "event-path")
 
         let history = fakeGesturePerformer.getPinchHistory()
         XCTAssertEqual(history.count, 1)
@@ -584,6 +586,27 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertFalse(response.success ?? true)
         XCTAssertEqual(response.type, "pinch_result")
         XCTAssertTrue(response.error?.contains("pinch synthesis failed") ?? false)
+    }
+
+    /// When the performer falls back to the public element-anchored pinch (private
+    /// XCTest symbols unavailable), the success response must report the
+    /// `element-anchored` path so callers know the center was not honored. See
+    /// issue #2910.
+    func testPinchFallbackSurfacesElementAnchoredPath() {
+        fakeGesturePerformer.pinchPathToReturn = .elementAnchored
+        let request = WebSocketRequest.pinch(RequestPinch(
+            requestId: "test-pinch-fallback",
+            centerX: 100,
+            centerY: 200,
+            distanceStart: 40,
+            distanceEnd: 120
+        ))
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertTrue(response.success ?? false)
+        XCTAssertEqual(response.type, "pinch_result")
+        XCTAssertEqual(response.pinchPath, "element-anchored")
     }
 
     // MARK: - Text Input Tests
@@ -903,6 +926,45 @@ final class CommandHandlerTests: XCTestCase {
             errorResponse.error,
             "Clipboard read unavailable; live pasteboard access may be restricted, so shadow clipboard content was not returned"
         )
+    }
+
+    // MARK: - Node Action Tests
+
+    /// VoiceOver activation (issue #2857) rides `request_action` with action "activate"
+    /// and an accessibility label. The command must decode and reach `performAction`
+    /// with the label preserved, replying `action_result`.
+    func testActionActivateByLabelReachesPerformAction() {
+        let request = WebSocketRequest.action(RequestAction(
+            requestId: "act-activate-1",
+            action: "activate",
+            resourceId: nil,
+            label: "Submit"
+        ))
+
+        guard let actionResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+        XCTAssertEqual(actionResponse.success, true)
+        XCTAssertEqual(actionResponse.type, "action_result")
+
+        let history = fakeGesturePerformer.getActionHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history[0].action, "activate")
+        XCTAssertEqual(history[0].label, "Submit")
+        XCTAssertNil(history[0].resourceId)
+    }
+
+    /// `request_action` decoded straight from the wire the TS client now emits for
+    /// VoiceOver long-press activation.
+    func testActionLongPressDecodesFromWire() throws {
+        let request = try decodeWebSocketRequest(
+            #"{"type":"request_action","requestId":"act-lp-1","action":"long_press","label":"Row"}"#
+        )
+
+        guard let actionResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+        XCTAssertEqual(actionResponse.success, true)
+
+        let history = fakeGesturePerformer.getActionHistory()
+        XCTAssertEqual(history[0].action, "long_press")
+        XCTAssertEqual(history[0].label, "Row")
     }
 
     // MARK: - Device Control Tests

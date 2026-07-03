@@ -9,7 +9,7 @@ import { SwipeOn } from "../../src/features/action/swipeon";
 import { InputText } from "../../src/features/action/InputText";
 import { ViewHierarchy } from "../../src/features/observe/ViewHierarchy";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { SharpImageUtils } from "../../src/utils/image-utils";
+import { JimpImageUtils } from "../../src/utils/image-utils";
 import type { BootedDevice } from "../../src/models";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../test/fakes/FakeAdbExecutor";
@@ -306,7 +306,7 @@ export async function createStressHarness(): Promise<StressHarness> {
   );
 
   const inputText = new InputText(device, fakeAdb as unknown as any);
-  const imageUtils = new SharpImageUtils();
+  const imageUtils = new JimpImageUtils();
 
   let imageIndex = 0;
 

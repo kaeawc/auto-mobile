@@ -38,7 +38,7 @@ Part of the MCP output-context reduction effort. Each flag can be set either as 
 |---|---|---|
 | **`--observe-result-drop-elements`** | `AUTOMOBILE_OBSERVE_RESULT_DROP_ELEMENTS` | Omit the flattened `elements` array from `observe` results. |
 | **`--observe-result-compact`** | `AUTOMOBILE_OBSERVE_RESULT_COMPACT` | Emit `observe` results in a compact form. |
-| **`--tool-results-no-structured-content`** | `AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT` | Omit the `structuredContent` field from tool results. |
+| **`--tool-results-no-structured-content`** | `AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT` | Omit the `structuredContent` field from tool results (the serialized `content[0].text` still carries the full payload, so no data is lost). Also drops the advertised `outputSchema` from `tools/list` so the server does not declare structured output it will not return. |
 | **`--actions-diff-observe`** | `AUTOMOBILE_ACTIONS_DIFF_OBSERVE` | Return only the diff of the post-action observation instead of the full observation. |
 | **`--actions-no-observe`** | `AUTOMOBILE_ACTIONS_NO_OBSERVE` | Skip returning the post-action observation entirely. |
 

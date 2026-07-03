@@ -50,16 +50,19 @@ export class TelemetryRecorder {
   private sessionId: string | null = null;
   private readonly repository: TelemetryRepository;
   private readonly getPushTarget: () => TelemetryPushTarget | null;
-  private readonly barrier: DbWriteBarrier;
+  private readonly getBarrier: () => DbWriteBarrier;
 
   constructor(
     repository: TelemetryRepository = defaultRepository,
     getPushTarget: () => TelemetryPushTarget | null = () => getTelemetryPushServer(),
-    barrier: DbWriteBarrier = getDbWriteBarrier(),
+    // Resolve the shared barrier per write, not once at construction: a
+    // same-process DB reopen swaps in a fresh barrier via resetDbWriteBarrier(),
+    // and a captured instance would keep the pinned drained one (issue #2912).
+    getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
   ) {
     this.repository = repository;
     this.getPushTarget = getPushTarget;
-    this.barrier = barrier;
+    this.getBarrier = getBarrier;
   }
 
   static getInstance(): TelemetryRecorder {
@@ -117,7 +120,7 @@ export class TelemetryRecorder {
     try {
       // Route through the shutdown barrier so an in-flight write is drained
       // before closeDatabase(); returns undefined (skipped) once draining.
-      recordId = (await this.barrier.track(() => this.repository.recordNetworkEvent(input))) ?? null;
+      recordId = (await this.getBarrier().track(() => this.repository.recordNetworkEvent(input))) ?? null;
     } catch (e) {
       logger.error(`[TelemetryRecorder] Failed to record network event: ${e}`);
     }
@@ -151,7 +154,7 @@ export class TelemetryRecorder {
     const input: RecordLogEventInput = { deviceId, sessionId, ...event };
 
     try {
-      await this.barrier.track(() => this.repository.recordLogEvent(input));
+      await this.getBarrier().track(() => this.repository.recordLogEvent(input));
     } catch (e) {
       logger.error(`[TelemetryRecorder] Failed to record log event: ${e}`);
     }
@@ -170,7 +173,7 @@ export class TelemetryRecorder {
     const input: RecordOsEventInput = { deviceId, sessionId, ...event };
 
     try {
-      await this.barrier.track(() => this.repository.recordOsEvent(input));
+      await this.getBarrier().track(() => this.repository.recordOsEvent(input));
     } catch (e) {
       logger.error(`[TelemetryRecorder] Failed to record OS event: ${e}`);
     }
@@ -192,7 +195,7 @@ export class TelemetryRecorder {
     const input: RecordNavigationEventInput = { deviceId, sessionId, ...event };
 
     try {
-      await this.barrier.track(() => this.repository.recordNavigationEvent(input));
+      await this.getBarrier().track(() => this.repository.recordNavigationEvent(input));
     } catch (e) {
       logger.error(`[TelemetryRecorder] Failed to record navigation event: ${e}`);
     }
@@ -243,7 +246,7 @@ export class TelemetryRecorder {
     const input: RecordStorageEventInput = { deviceId, sessionId, ...event };
 
     try {
-      await this.barrier.track(() => this.repository.recordStorageEvent(input));
+      await this.getBarrier().track(() => this.repository.recordStorageEvent(input));
     } catch (e) {
       logger.error(`[TelemetryRecorder] Failed to record storage event: ${e}`);
     }
@@ -267,7 +270,7 @@ export class TelemetryRecorder {
     const input: RecordLayoutEventInput = { deviceId, sessionId, ...event };
 
     try {
-      await this.barrier.track(() => this.repository.recordLayoutEvent(input));
+      await this.getBarrier().track(() => this.repository.recordLayoutEvent(input));
     } catch (e) {
       logger.error(`[TelemetryRecorder] Failed to record layout event: ${e}`);
     }

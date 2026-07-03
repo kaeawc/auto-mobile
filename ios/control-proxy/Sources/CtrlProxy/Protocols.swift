@@ -105,6 +105,10 @@ public protocol GesturePerforming {
     // MARK: - Pinch Gestures
 
     /// Pinch at center with explicit starting and ending finger distances.
+    /// Returns which mechanism performed the gesture: the private event-path
+    /// synthesis (honors center) or the public element-anchored fallback
+    /// (center-less). See issue #2910.
+    @discardableResult
     func pinch(
         centerX: Double,
         centerY: Double,
@@ -113,7 +117,7 @@ public protocol GesturePerforming {
         rotationDegrees: Double,
         duration: TimeInterval
     )
-        throws
+        throws -> PinchGesturePath
 
     // MARK: - Text Input
 

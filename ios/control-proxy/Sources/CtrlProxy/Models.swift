@@ -531,6 +531,10 @@ public struct WebSocketResponse: Codable {
     public let error: String?
     public let text: String?
     public let perfTiming: PerfTiming?
+    /// Which mechanism performed a pinch: `"event-path"` (private synthesis,
+    /// honors center) or `"element-anchored"` (public fallback, center-less).
+    /// Only set on `pinch_result` responses (issue #2910); nil elsewhere.
+    public let pinchPath: String?
 
     public init(
         type: String,
@@ -540,7 +544,8 @@ public struct WebSocketResponse: Codable {
         totalTimeMs: Int64? = nil,
         error: String? = nil,
         text: String? = nil,
-        perfTiming: PerfTiming? = nil
+        perfTiming: PerfTiming? = nil,
+        pinchPath: String? = nil
     ) {
         self.type = type
         self.timestamp = timestamp
@@ -550,13 +555,15 @@ public struct WebSocketResponse: Codable {
         self.error = error
         self.text = text
         self.perfTiming = perfTiming
+        self.pinchPath = pinchPath
     }
 
     public static func success(
         type: String,
         requestId: String?,
         totalTimeMs: Int64,
-        text: String? = nil
+        text: String? = nil,
+        pinchPath: String? = nil
     )
         -> WebSocketResponse
     {
@@ -565,7 +572,8 @@ public struct WebSocketResponse: Codable {
             requestId: requestId,
             success: true,
             totalTimeMs: totalTimeMs,
-            text: text
+            text: text,
+            pinchPath: pinchPath
         )
     }
 

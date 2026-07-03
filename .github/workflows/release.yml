@@ -130,8 +130,8 @@ jobs:
       - name: Run Bun MCP startup smoke
         run: bun run test:startup:bun
 
-      - name: Run Bun sharp runtime smoke
-        run: bun run test:sharp:bun
+      - name: Run Bun image runtime smoke
+        run: bun run test:image:bun
 
       - name: Create release notes
         id: release_notes

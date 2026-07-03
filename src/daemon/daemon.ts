@@ -1228,6 +1228,14 @@ export class Daemon {
       this.deviceDisconnectTimer = null;
     }
 
+    // Stop the session cleanup interval before the DB drain below. It is the one
+    // best-effort DB writer that fires on its own timer rather than an external
+    // socket (which are all torn down here), so if left running it could route a
+    // tracked `markReleased` write through a freshly-resolved, non-draining
+    // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
+    // and hit the just-closed connection (issue #2912; #2792 safety window).
+    this.sessionManager.stopCleanupTimer();
+
     // Close Unix socket server
     if (this.socketServer) {
       await this.socketServer.close();

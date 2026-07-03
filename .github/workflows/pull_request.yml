@@ -532,6 +532,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+          # Full history so the ktfmt check can diff the PR head against its base
+          # SHA (git diff <base>...HEAD). The default shallow clone would not
+          # contain the base commit and the diff would fail.
+          fetch-depth: 0
 
       # Pin the JDK so the ktfmt check formats deterministically (project targets
       # Java 21) instead of relying on the runner image's default JDK.
@@ -557,6 +561,19 @@ jobs:
         shell: bash
         env:
           INSTALL_KTFMT_WHEN_MISSING: "true"
+          # Scope the Kotlin format check to files this PR changed. validate_ktfmt.sh
+          # diffs `git diff <base>...HEAD` (three-dot, i.e. relative to the merge
+          # base), so it flags only the PR's own changes, not base-branch commits.
+          # The full tree is already conformant and is re-checked in full
+          # post-merge by the `ktfmt` job in merge.yml -- the backstop for any
+          # tool/style/JDK drift a scoped PR check would miss.
+          ONLY_CHANGED_SINCE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Safety net for the degenerate cases: an empty base SHA, or a
+          # non-empty base SHA that does not resolve (base force-pushed/rebased),
+          # both fall back to a full-tree check. KTFMT_ONLY_TOUCHED_FILES=false
+          # ensures that fallback is the full tree, not the working-tree "touched"
+          # mode -- which sees no changes on a clean CI checkout and would
+          # silently pass without validating anything.
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
@@ -989,8 +1006,8 @@ jobs:
       - name: "Run Bun MCP startup smoke"
         run: bun run test:startup:bun
 
-      - name: "Run Bun sharp runtime smoke"
-        run: bun run test:sharp:bun
+      - name: "Run Bun image runtime smoke"
+        run: bun run test:image:bun
 
       - name: "Run Tests with Coverage"
         run: bash scripts/ci/run-ts-coverage.sh

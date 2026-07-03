@@ -227,4 +227,54 @@ describe("PinchOn", () => {
     expect(fakeIosService.getPinchHistory()).toHaveLength(1);
     expect(fakeA11yService.getPinchHistory()).toHaveLength(0);
   });
+
+  test("warns when iOS pinch used the center-less element-anchored fallback (#2910)", async () => {
+    const iosDevice: BootedDevice = {
+      deviceId: "11111111-2222-3333-4444-555555555555",
+      platform: "ios",
+      name: "iPhone 16 Pro"
+    };
+    fakeIosService.setPinchResult({
+      success: true,
+      totalTimeMs: 300,
+      gestureTimeMs: 300,
+      pinchPath: "element-anchored"
+    });
+    pinchOn = new PinchOn(iosDevice);
+    (pinchOn as any).observeScreen = fakeObserveScreen;
+    (pinchOn as any).awaitIdle = fakeAwaitIdle;
+    (pinchOn as any).window = fakeWindow;
+    (pinchOn as any).adb = fakeAdb;
+    (pinchOn as any).timer = fakeTimer;
+
+    const result = await pinchOn.execute({ direction: "out", autoTarget: false });
+
+    expect(result.success).toBe(true);
+    expect(result.warning).toContain("element-anchored fallback");
+  });
+
+  test("does not warn when iOS pinch used the center-honoring event-path (#2910)", async () => {
+    const iosDevice: BootedDevice = {
+      deviceId: "11111111-2222-3333-4444-555555555555",
+      platform: "ios",
+      name: "iPhone 16 Pro"
+    };
+    fakeIosService.setPinchResult({
+      success: true,
+      totalTimeMs: 300,
+      gestureTimeMs: 300,
+      pinchPath: "event-path"
+    });
+    pinchOn = new PinchOn(iosDevice);
+    (pinchOn as any).observeScreen = fakeObserveScreen;
+    (pinchOn as any).awaitIdle = fakeAwaitIdle;
+    (pinchOn as any).window = fakeWindow;
+    (pinchOn as any).adb = fakeAdb;
+    (pinchOn as any).timer = fakeTimer;
+
+    const result = await pinchOn.execute({ direction: "out", autoTarget: false });
+
+    expect(result.success).toBe(true);
+    expect(result.warning).toBeUndefined();
+  });
 });

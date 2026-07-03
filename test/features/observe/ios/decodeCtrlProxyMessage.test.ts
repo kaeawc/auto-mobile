@@ -44,7 +44,6 @@ describe("decodeCtrlProxyMessage", () => {
     "tap_coordinates_result",
     "swipe_result",
     "drag_result",
-    "pinch_result",
     "set_text_result",
     "clear_text_result",
     "select_all_result",
@@ -66,6 +65,27 @@ describe("decodeCtrlProxyMessage", () => {
       });
     });
   }
+
+  test("pinch_result carries element-anchored pinchPath through (#2910)", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "pinch_result", totalTimeMs: 7, pinchPath: "element-anchored" })
+    );
+    expect(decoded).toEqual({
+      requestId: REQ,
+      result: {
+        success: true,
+        totalTimeMs: 7,
+        error: undefined,
+        perfTiming: undefined,
+        pinchPath: "element-anchored",
+      },
+    });
+  });
+
+  test("pinch_result pinchPath is undefined when the runner omits it", () => {
+    const decoded = decodeCtrlProxyMessage(msg({ type: "pinch_result", totalTimeMs: 5 }));
+    expect((decoded?.result as { pinchPath?: string }).pinchPath).toBeUndefined();
+  });
 
   test("base result respects explicit success=false and totalTimeMs default", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "swipe_result", success: false, error: "boom" }));
@@ -146,10 +166,6 @@ describe("decodeCtrlProxyMessage", () => {
     expect((decoded?.result as { enabled: boolean }).enabled).toBe(false);
   });
 
-  test("voiceover_action_result includes action", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "voiceover_action_result", action: "activate" } as never));
-    expect(decoded?.result).toEqual({ success: true, action: "activate", totalTimeMs: 0, error: undefined });
-  });
 
   test("highlight_response defaults success to false and echoes requestId/timestamp", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "highlight_response", timestamp: 42 }));

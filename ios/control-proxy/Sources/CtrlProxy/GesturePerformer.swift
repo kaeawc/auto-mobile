@@ -471,6 +471,7 @@ public class GesturePerformer: GesturePerforming {
 
         // MARK: - Pinch Gestures
 
+        @discardableResult
         public func pinch(
             centerX: Double,
             centerY: Double,
@@ -479,15 +480,16 @@ public class GesturePerformer: GesturePerforming {
             rotationDegrees: Double,
             duration: TimeInterval
         )
-            throws
+            throws -> PinchGesturePath
         {
-            guard application != nil else {
+            guard let app = application else {
                 throw GestureError.noApplication
             }
 
-            try runOnMainThread {
+            return try runOnMainThread {
                 let orientation = GesturePerformer.currentInterfaceOrientation()
                 var errorMessage: NSString?
+                var symbolsUnavailable: ObjCBool = false
                 let succeeded = ObjCExceptionCatcher_synthesizePinch(
                     CGFloat(centerX),
                     CGFloat(centerY),
@@ -496,12 +498,36 @@ public class GesturePerformer: GesturePerforming {
                     CGFloat(rotationDegrees),
                     duration,
                     orientation.rawValue,
+                    &symbolsUnavailable,
                     &errorMessage
                 )
 
-                if !succeeded {
+                if succeeded {
+                    return .eventPath
+                }
+
+                // Only degrade to the public API when the private symbols are
+                // genuinely absent. A real synthesis error still surfaces as a
+                // structured failure (issue #2910).
+                guard symbolsUnavailable.boolValue else {
                     throw GestureError.gestureFailed(errorMessage as String? ?? "pinch synthesis failed")
                 }
+
+                // Public element-anchored fallback: honors scale/velocity but
+                // centers on the SpringBoard anchor, so it ignores centerX/centerY
+                // and rotationDegrees (the public API has no center or rotation).
+                //
+                // This branch runs only on-device. Off-device coverage is split
+                // across PinchFallbackTests (the scale/velocity math) and
+                // ObjCExceptionBridgeTests (the symbolsUnavailable signal that
+                // routes here); the live app.pinch call itself is device-only.
+                let params = PinchFallback.parameters(
+                    distanceStart: distanceStart,
+                    distanceEnd: distanceEnd,
+                    duration: duration
+                )
+                app.pinch(withScale: params.scale, velocity: params.velocity)
+                return .elementAnchored
             }
         }
 
@@ -779,7 +805,9 @@ public class GesturePerformer: GesturePerforming {
 
             try runOnMainThread {
                 switch action.lowercased() {
-                case "click", "tap":
+                case "click", "tap", "activate":
+                    // "activate" is the VoiceOver activation gesture (issue #2857); for an
+                    // element located by label it resolves to a tap, matching "click"/"tap".
                     found.tap()
                 case "long_click", "long_press":
                     found.press(forDuration: 1.0)
@@ -1314,6 +1342,7 @@ public class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
+        @discardableResult
         public func pinch(
             centerX _: Double,
             centerY _: Double,
@@ -1322,7 +1351,7 @@ public class GesturePerformer: GesturePerforming {
             rotationDegrees _: Double,
             duration _: TimeInterval
         )
-            throws
+            throws -> PinchGesturePath
         {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }

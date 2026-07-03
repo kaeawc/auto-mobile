@@ -5,13 +5,12 @@ export { Image } from "./image/ImageTransformer";
 import { Image, ImageMetadata } from "./image/ImageTransformer";
 import { ImageUtils as ImageUtilsInterface } from "./interfaces/ImageUtils";
 
-const DEFAULT_JPEG_QUALITY = 75;
-
 /**
- * Sharp-based implementation for image utilities
- * Provides a functional API for common image operations using the Sharp library
+ * Jimp-based implementation for image utilities
+ * Provides a functional API for common image operations using the Jimp library
+ * (with WebP support via the @jimp/wasm-webp plugin)
  */
-export class SharpImageUtils implements ImageUtilsInterface {
+export class JimpImageUtils implements ImageUtilsInterface {
   public getOriginalBuffer(buffer: Buffer): Buffer {
     return Buffer.from(buffer);
   }
@@ -37,29 +36,6 @@ export class SharpImageUtils implements ImageUtilsInterface {
     return image.crop(width, height, x, y).toBuffer();
   }
 
-  public async rotate(buffer: Buffer, degrees: number): Promise<Buffer> {
-    const image = Image.fromBuffer(buffer);
-    return image.rotate(degrees).toBuffer();
-  }
-
-  public async flip(
-    buffer: Buffer,
-    direction: "horizontal" | "vertical" | "both"
-  ): Promise<Buffer> {
-    const image = Image.fromBuffer(buffer);
-    return image.flip(direction).toBuffer();
-  }
-
-  public async blur(buffer: Buffer, radius: number): Promise<Buffer> {
-    const image = Image.fromBuffer(buffer);
-    return image.blur(radius).toBuffer();
-  }
-
-  public async toJpeg(buffer: Buffer, quality = DEFAULT_JPEG_QUALITY): Promise<Buffer> {
-    const image = Image.fromBuffer(buffer);
-    return image.jpeg({ quality }).toBuffer();
-  }
-
   public async toPng(buffer: Buffer): Promise<Buffer> {
     const image = Image.fromBuffer(buffer);
     return image.png().toBuffer();
@@ -80,11 +56,6 @@ export class SharpImageUtils implements ImageUtilsInterface {
   public async getMetadata(buffer: Buffer): Promise<ImageMetadata> {
     const image = Image.fromBuffer(buffer);
     return image.getMetadata();
-  }
-
-  public async getExifMetadata(buffer: Buffer): Promise<Record<string, any>> {
-    const image = Image.fromBuffer(buffer);
-    return image.getExifMetadata();
   }
 
   public clearCache(): void {

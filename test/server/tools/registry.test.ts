@@ -1,6 +1,7 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { createMcpServer } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
+import { serverConfig } from "../../../src/utils/ServerConfig";
 
 describe("MCP Tools Registry", () => {
   beforeAll(() => {
@@ -69,6 +70,27 @@ describe("MCP Tools Registry", () => {
       expect(tool!.outputSchema.properties).toHaveProperty("success");
       expect(tool!.outputSchema.required).toContain("success");
     }
+  });
+
+  describe("toolResultsNoStructuredContent gate (issue #2899)", () => {
+    afterEach(() => {
+      serverConfig.setToolResultsNoStructuredContentEnabled(false);
+    });
+
+    test("EC-H: omits outputSchema from tool definitions when the gate is enabled", () => {
+      // Baseline: outputSchema advertised when the gate is off.
+      serverConfig.setToolResultsNoStructuredContentEnabled(false);
+      const withSchema = ToolRegistry.getToolDefinitions().find(t => t.name === "tapOn");
+      expect(withSchema).toHaveProperty("outputSchema");
+
+      // With the gate on, the server no longer advertises structuredContent output,
+      // keeping tools/list consistent with the stripped tool results.
+      serverConfig.setToolResultsNoStructuredContentEnabled(true);
+      const defs = ToolRegistry.getToolDefinitions();
+      for (const def of defs) {
+        expect(def.outputSchema).toBeUndefined();
+      }
+    });
   });
 
   test("should register all tool categories", () => {

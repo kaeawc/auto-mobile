@@ -215,4 +215,21 @@ describe("finalizeToolResponse", () => {
     expect(root["view-id"]).toBeUndefined();
     expect(root.clickable).toBeUndefined();
   });
+
+  test("EC-B: finalize never strips structuredContent (that is a wire-boundary concern)", () => {
+    // Even with the strip flag on, finalizeToolResponse keeps structuredContent so
+    // internal handler callers (e.g. DefaultUIStateSetup's swipeOn found-detection)
+    // can still read it — the strip is applied later, only at the MCP boundary.
+    const originalStrip = serverConfig.isToolResultsNoStructuredContentEnabled();
+    serverConfig.setToolResultsNoStructuredContentEnabled(true);
+    try {
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(makeObserveResult()),
+        { name: "observe" }
+      );
+      expect(finalized.structuredContent).toBeDefined();
+    } finally {
+      serverConfig.setToolResultsNoStructuredContentEnabled(originalStrip);
+    }
+  });
 });

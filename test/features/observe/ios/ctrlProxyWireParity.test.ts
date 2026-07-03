@@ -94,36 +94,61 @@ const EXCLUDED_IOS_FILES = new Set([
   "types.ts",
 ]);
 
+/**
+ * Shared delegates the iOS text + gesture paths route through. These files serve BOTH
+ * platforms, so every command they emit must be valid on the iOS runner too — an
+ * Android-only command added to a shared delegate would (correctly) fail this guard.
+ * The list is hardcoded because iOS routes through exactly these two today; a new
+ * shared delegate the iOS client adopts must be added here (tracked follow-up: derive
+ * this from the iOS import graph so a missed delegate can't silently go unscanned).
+ */
+const SHARED_EMIT_FILES = ["SharedTextDelegate.ts", "SharedGestureDelegate.ts"];
+
 function iosEmitSourceFiles(): string[] {
   const iosFiles = readdirSync(IOS_OBSERVE_DIR)
     .filter(f => f.endsWith(".ts") && !f.endsWith(".test.ts") && !EXCLUDED_IOS_FILES.has(f))
     .map(f => resolve(IOS_OBSERVE_DIR, f));
-  // The iOS text + gesture paths go through the shared delegates; scan them too.
-  const sharedFiles = ["SharedTextDelegate.ts", "SharedGestureDelegate.ts"]
-    .map(f => resolve(SHARED_OBSERVE_DIR, f));
+  const sharedFiles = SHARED_EMIT_FILES.map(f => resolve(SHARED_OBSERVE_DIR, f));
   return [...iosFiles, ...sharedFiles];
 }
 
-/** Extract every command `type` string a source file can put on the wire. */
+// A wire command discriminator: lowercase snake_case, may contain digits (e.g. a
+// hypothetical `request_swipe_v2`). Must match the Swift-side rawValue class so a
+// digit-bearing command can't slip past either side of the guard.
+const COMMAND_TOKEN = "[a-z][a-z0-9_]*";
+
+/**
+ * Extract every command `type` string a source file can put on the wire.
+ *
+ * This is a textual scan, not a full parse, so it recognizes only *literal* command
+ * discriminators in three syntactic shapes (below). It deliberately cannot follow a
+ * value hoisted into a `const` or built from a template — see `guardAgainstDynamicCommandTypes`,
+ * which fails loudly on the template case, and the tracked follow-up for a structural
+ * (AST/lint) replacement.
+ */
 function extractEmittedTypes(source: string): Set<string> {
   const found = new Set<string>();
 
   // 1. `messageType: "..."` — the shared sendCommand discriminator (never anything else).
-  for (const m of source.matchAll(/messageType:\s*"([a-z_]+)"/g)) {
+  for (const m of source.matchAll(new RegExp(`messageType:\\s*"(${COMMAND_TOKEN})"`, "g"))) {
     found.add(m[1]);
   }
-  // 2. Any snake_case string literal on a line carrying the `type:` JSON key. Captures
-  //    object-literal sends (`type: "get_preferences"`), the hierarchy ternary
-  //    (`type: cond ? "request_hierarchy" : "request_hierarchy_if_stale"`) and the
-  //    network send. `messageType:`/`responseType:` (capital T) are not matched by \btype:.
+  // 2a. A string literal directly after the `type:` JSON key, tolerating a line break
+  //     between key and value (`type:\n  "get_preferences"`). `messageType:`/
+  //     `responseType:` (capital T) are not matched by \btype:.
+  for (const m of source.matchAll(new RegExp(`\\btype:\\s*"(${COMMAND_TOKEN})"`, "g"))) {
+    found.add(m[1]);
+  }
+  // 2b. Any string literal on a line carrying the `type:` key — catches the hierarchy
+  //     ternary (`type: cond ? "request_hierarchy" : "request_hierarchy_if_stale"`).
   for (const line of source.split("\n")) {
     if (!/\btype:/.test(line)) { continue; }
-    for (const m of line.matchAll(/"([a-z_]+)"/g)) {
+    for (const m of line.matchAll(new RegExp(`"(${COMMAND_TOKEN})"`, "g"))) {
       found.add(m[1]);
     }
   }
   // 3. `CtrlProxyDatabase.request(<T>)("execute_sql", ...)` first-arg sends.
-  for (const m of source.matchAll(/\.request<[^>]*>\(\s*"([a-z_]+)"/g)) {
+  for (const m of source.matchAll(new RegExp(`\\.request<[^>]*>\\(\\s*"(${COMMAND_TOKEN})"`, "g"))) {
     found.add(m[1]);
   }
 
@@ -133,13 +158,25 @@ function extractEmittedTypes(source: string): Set<string> {
   return found;
 }
 
+/**
+ * The scan only understands *literal* command strings. A template-literal discriminator
+ * (`` type: `request_${kind}` ``) would evade it entirely, silently dropping coverage.
+ * Rather than parse it, forbid it in the scanned files so the scan's assumption is
+ * enforced: a build using a dynamic command `type` must be made statically analyzable
+ * (or this guard updated deliberately). Ternaries-of-literals and `{ type }` shorthand
+ * (a variable, covered by rule 3) are intentionally allowed.
+ */
+function findDynamicCommandTypes(source: string): string[] {
+  return [...source.matchAll(/\b(?:messageType|type):\s*`/g)].map(m => m[0]);
+}
+
 function readSwiftRequestTypeRawValues(): string[] {
   const source = readFileSync(MODELS_SWIFT, "utf8");
   const block = source.match(/public enum RequestType: String, CaseIterable \{([\s\S]*?)\n\}/);
   if (!block) {
     throw new Error("Could not locate `enum RequestType` in Models.swift");
   }
-  return [...block[1].matchAll(/case\s+\w+\s*=\s*"([a-z_]+)"/g)].map(m => m[1]);
+  return [...block[1].matchAll(new RegExp(`case\\s+\\w+\\s*=\\s*"(${COMMAND_TOKEN})"`, "g"))].map(m => m[1]);
 }
 
 describe("iOS control-proxy — RequestType contract coverage", () => {
@@ -190,6 +227,15 @@ describe("iOS control-proxy — emitted commands are a subset of the runner cont
     // A non-empty list here is a drift: a TS command the runner cannot decode. Fix by
     // adding a matching `RequestType` case (and rawValue here), or repairing the sender.
     expect(unknown).toEqual([]);
+  });
+
+  test("no scanned file builds a command type from a template literal", () => {
+    // The literal scan can't follow `` type: `request_${kind}` `` and would silently
+    // drop coverage for it. Forbid the pattern so the scan's assumption stays valid.
+    const offenders = files.flatMap(file =>
+      findDynamicCommandTypes(readFileSync(file, "utf8")).map(hit => `${file}: ${hit}`)
+    );
+    expect(offenders).toEqual([]);
   });
 
   test("IOS_RUNNER_FEATURE_COMMANDS is a subset of the known RequestType set", () => {

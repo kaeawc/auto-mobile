@@ -289,4 +289,76 @@ export async function down(db) {
       process.off("unhandledRejection", onUnhandled);
     }
   });
+
+  test("stale FAILURE cannot corrupt a SAME-DB-PATH reopen's generation (default reopen axis)", async () => {
+    // The two tests above switch the DB directory between generations, so they
+    // never exercise the default close+reopen case where the environment is
+    // unchanged and both generations target the SAME database file. Here gen-0
+    // and gen-1 use the same `AUTOMOBILE_DB_DIR` (identical DB path), only the
+    // migrations dir differs, so the fence is proven on the same-file axis.
+    //
+    // NOTE — this also exercises the lock-stealing hazard tracked separately in
+    // issue #2947: while gen-0 is blocked mid-migration it still holds
+    // `${path}.migrate.lock` (owner = our PID), and gen-1 reclaims that lock via
+    // `FileMigrationLock`'s `reclaimOwnPid: true`. The generation fence only
+    // protects the module globals; it does NOT serialize the two migration runs.
+    // This case is benign — gen-0's fail migration throws WITHOUT writing, so the
+    // stolen-lock concurrent access touches no schema — which is exactly why it is
+    // a clean fence proof rather than a lock-safety proof. #2947 covers the
+    // writes-during-reopen concurrency.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const markerRoot = await makeTempDir("auto-mobile-gen-fence-markers3-");
+      const markers = markerPaths(markerRoot);
+      const slowFailDir = await makeSlowMigrationsDir("fail", markers);
+      // One DB dir shared by BOTH generations -> the same DB file path on reopen.
+      const sharedDbDir = await makeTempDir("auto-mobile-gen-fence-samepath-");
+
+      setEnv(DAEMON_LAUNCH_CWD_ENV, undefined);
+      setEnv("AUTOMOBILE_DB_PATH", undefined);
+      setEnv("AUTO_MOBILE_DB_PATH", undefined);
+      setEnv("AUTO_MOBILE_MIGRATIONS_DIR", undefined);
+      setEnv("AUTOMOBILE_DB_DIR", sharedDbDir);
+      setEnv("AUTOMOBILE_MIGRATIONS_DIR", slowFailDir);
+
+      const db = await importFreshDatabaseModule();
+
+      // Generation 0: slow, will-fail migration on the shared DB path, held in flight.
+      db.getDatabase();
+      const gen0DbPath = db.getDatabasePath();
+      await waitForMarker(markers.started, "generation-0 started");
+
+      const staleCompletion = db.getMigrationsPromiseForTest() as Promise<void> | null;
+      expect(staleCompletion).not.toBeNull();
+
+      await db.closeDatabase();
+
+      // Generation 1: reopen at the SAME DB path (env unchanged except a healthy
+      // migrations dir). It reclaims gen-0's still-held own-PID lock and migrates
+      // cleanly, so migrationsError must be null.
+      setEnv("AUTOMOBILE_MIGRATIONS_DIR", await makeHealthyMigrationsDir());
+
+      db.getDatabase();
+      expect(db.getDatabasePath()).toBe(gen0DbPath); // same file across generations
+      await db.ensureMigrations();
+      expect(db.getMigrationsError()).toBeNull();
+
+      // Release the stale gen-0 migration so it throws, then await its detached
+      // chain deterministically. The fence must keep gen-1's clean state.
+      await writeFile(markers.release, "1");
+      await staleCompletion;
+
+      expect(db.getMigrationsError()).toBeNull();
+
+      await db.closeDatabase();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });

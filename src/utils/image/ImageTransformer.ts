@@ -169,11 +169,14 @@ class JimpImageTransformer {
     this.options.lossless = options?.lossless;
     this.options.nearLossless = options?.nearLossless;
 
-    // The wasm-webp encoder takes libwebp-style numeric flags, not booleans
+    // The wasm-webp encoder takes libwebp-style numeric flags. Keys are
+    // camelCase (validated by the plugin's zod schema — an unknown key is
+    // silently dropped). near-lossless runs inside lossless mode; sharp used
+    // `quality` as the near-lossless preprocessing level, so mirror that.
     const webpOptions: Record<string, unknown> = options?.lossless
       ? { lossless: 1 }
       : options?.nearLossless
-        ? { lossless: 1, near_lossless: quality }
+        ? { lossless: 1, nearLossless: quality }
         : { quality };
 
     this.outputFormat = { mime: "image/webp", opts: webpOptions };

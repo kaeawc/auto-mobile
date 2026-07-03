@@ -90,18 +90,31 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
 // Export convenience functions for backward compatibility
 export const createJSONToolResponse = DefaultToolResponseFormatter.createJSONToolResponse;
 /**
+ * Typed MCP tool-call envelope produced by `createStructuredToolResponse`.
+ *
+ * The payload `T` lives under `structuredContent`; the top level carries ONLY
+ * the serialized `content` plus the two hoisted fields `success`/`error`. Every
+ * other payload field (`found`, `viewHierarchy`, `screenshot`, …) exists solely
+ * under `structuredContent`. Reading such a field off the top level silently
+ * yields `undefined` — the envelope-vs-`structuredContent` dead-read bug class
+ * (issue #2907). Read payload fields through {@link getStructuredField}, never
+ * off the envelope directly.
+ */
+export interface StructuredToolResponse<T = unknown> {
+  content: Array<{ type: "text"; text: string }>;
+  structuredContent: T;
+  success?: boolean;
+  error?: string;
+}
+
+/**
  * Creates a structured tool response for tools with outputSchema.
  * MCP tools with outputSchema must return structuredContent.
  * @param content The structured data that matches the tool's outputSchema
  * @returns A properly formatted tool response with both content and structuredContent
  */
-export const createStructuredToolResponse = (content: any): {
-  content: Array<{ type: "text"; text: string }>;
-  structuredContent: any;
-  success?: boolean;
-  error?: string;
-} => {
-  const response: ReturnType<typeof createStructuredToolResponse> = {
+export const createStructuredToolResponse = <T>(content: T): StructuredToolResponse<T> => {
+  const response: StructuredToolResponse<T> = {
     content: [
       {
         type: "text",
@@ -112,13 +125,38 @@ export const createStructuredToolResponse = (content: any): {
   };
   if (content && typeof content === "object") {
     if ("success" in content) {
-      response.success = content.success;
+      response.success = (content as { success?: boolean }).success;
     }
     if ("error" in content) {
-      response.error = content.error;
+      response.error = (content as { error?: string }).error;
     }
   }
   return response;
+};
+
+/**
+ * The single typed seam for reading a payload field off an MCP tool-call
+ * envelope (issue #2907). Payload fields live under `structuredContent`, not on
+ * the envelope top level — a raw `response.found` read is always `undefined`
+ * and produces a silently-dead branch. Route every payload-field read through
+ * this accessor so the intent is explicit and the foot-gun is impossible.
+ *
+ * Accepts a loosely-typed envelope (handlers hand back `any`), safely narrows,
+ * and returns `undefined` for null/undefined responses, a missing or
+ * non-object `structuredContent`, or an absent field.
+ *
+ * @param response The tool-call envelope (or anything envelope-shaped).
+ * @param key The payload field to read from `structuredContent`.
+ */
+export const getStructuredField = <T = unknown>(
+  response: { structuredContent?: unknown } | null | undefined,
+  key: string
+): T | undefined => {
+  const structuredContent = response?.structuredContent;
+  if (structuredContent && typeof structuredContent === "object") {
+    return (structuredContent as Record<string, unknown>)[key] as T | undefined;
+  }
+  return undefined;
 };
 
 export const throwIfAborted = (signal?: AbortSignal): void => {

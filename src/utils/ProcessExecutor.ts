@@ -15,7 +15,7 @@ export interface ProcessExecutor {
   spawn(command: string, args: string[], options?: SpawnOptions): ChildProcess;
 }
 
-type ExecAsync = (
+export type ExecAsync = (
   command: string,
   options?: {
     timeout?: number;
@@ -59,9 +59,18 @@ const createExecResult = (stdout: string | Buffer, stderr: string | Buffer): Exe
 };
 
 export class DefaultProcessExecutor implements ProcessExecutor {
+  private execAsync: ExecAsync;
+
+  // The exec seam is injectable so tests can exercise the ExecResult helpers and
+  // error-context formatting against a fake instead of spawning a real subprocess,
+  // which stalls past the timeout on contended CI runners (#2914).
+  constructor(execAsyncFn: ExecAsync = execAsync) {
+    this.execAsync = execAsyncFn;
+  }
+
   async exec(command: string, options: ProcessExecOptions = {}): Promise<ExecResult> {
     try {
-      const { stdout, stderr } = await execAsync(command, {
+      const { stdout, stderr } = await this.execAsync(command, {
         timeout: options.timeoutMs,
         maxBuffer: options.maxBuffer,
         cwd: options.cwd

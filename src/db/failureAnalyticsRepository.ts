@@ -109,12 +109,19 @@ const STREAM_LIMIT_MAX = 500;
 export class FailureAnalyticsRepository {
   private timer: Timer;
   private db: Kysely<Database> | null;
-  private barrier: DbWriteBarrier;
+  private getBarrier: () => DbWriteBarrier;
 
-  constructor(timer: Timer = defaultTimer, db?: Kysely<Database>, barrier: DbWriteBarrier = getDbWriteBarrier()) {
+  constructor(
+    timer: Timer = defaultTimer,
+    db?: Kysely<Database>,
+    // Resolve the shared barrier per write, not once at construction, so a
+    // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
+    // seen instead of a pinned drained instance (issue #2912).
+    getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
+  ) {
     this.timer = timer;
     this.db = db ?? null;
-    this.barrier = barrier;
+    this.getBarrier = getBarrier;
   }
 
   private getDb(): Kysely<Database> {
@@ -290,7 +297,7 @@ export class FailureAnalyticsRepository {
 
       // Run retention cleanup in background, tracked by the shutdown barrier so
       // this fire-and-forget writer is drained (or skipped) before closeDatabase().
-      this.barrier.track(() => this.cleanupRetention()).catch(() => {});
+      this.getBarrier().track(() => this.cleanupRetention()).catch(() => {});
 
       return occurrenceId;
     } catch (error) {

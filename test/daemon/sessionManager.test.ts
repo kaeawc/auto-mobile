@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { DbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 
 const HEARTBEAT_ENV_KEYS = [
   "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
@@ -319,19 +319,6 @@ describe("SessionManager", () => {
   });
 
   describe("shutdown draining (issue #2792)", () => {
-    class RecordingBarrier implements DbWriteBarrier {
-      draining = false;
-      ran: string[] = [];
-      isDraining(): boolean { return this.draining; }
-      inFlightCount(): number { return 0; }
-      beginDrain(): void { this.draining = true; }
-      async drain(): Promise<boolean> { return true; }
-      async track<T>(work: () => Promise<T>): Promise<T | undefined> {
-        if (this.draining) { return undefined; }
-        this.ran.push("ran");
-        return work();
-      }
-    }
 
     // Minimal repo double capturing the fire-and-forget session writes.
     function makeRepo(): { repo: any; activity: string[]; released: string[] } {
@@ -348,8 +335,8 @@ describe("SessionManager", () => {
 
     test("routes fire-and-forget session activity writes through the barrier", async () => {
       const { repo, activity } = makeRepo();
-      const barrier = new RecordingBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, barrier);
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         mgr.recordHeartbeat("s1");
@@ -363,8 +350,8 @@ describe("SessionManager", () => {
 
     test("skips fire-and-forget session writes while draining", async () => {
       const { repo, activity } = makeRepo();
-      const barrier = new RecordingBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, barrier);
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         barrier.beginDrain();
@@ -375,6 +362,46 @@ describe("SessionManager", () => {
       } finally {
         mgr.stopCleanupTimer();
       }
+    });
+
+    // The cleanup interval is the ONE best-effort DB writer that fires on its own
+    // timer rather than an external socket. With per-write barrier resolution
+    // (#2912) it would resolve a fresh, non-draining barrier if it fired after
+    // closeDatabase()'s reset — so `daemon.stop()` stops it before draining. These
+    // two tests pin the property that call relies on: the timer routes a tracked
+    // write when it fires, and stopping it neutralizes that writer.
+    test("cleanup timer routes an expired-session release through the barrier", async () => {
+      const { repo, released } = makeRepo();
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      try {
+        await mgr.createSession("s1", "emulator-5554", "android");
+        // Past session timeout (30m) + cleanup interval (5m): the timer fires.
+        fakeTimer.advanceTime(36 * 60 * 1000);
+        await Promise.resolve();
+        expect(released).toContain("s1");
+        expect(barrier.ran.length).toBeGreaterThan(0);
+      } finally {
+        mgr.stopCleanupTimer();
+      }
+    });
+
+    test("stopCleanupTimer prevents the timer from routing any further tracked write", async () => {
+      const { repo, released } = makeRepo();
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      await mgr.createSession("s1", "emulator-5554", "android");
+
+      // Model the shutdown ordering: stop the timer BEFORE the (would-be) drain.
+      mgr.stopCleanupTimer();
+
+      fakeTimer.advanceTime(36 * 60 * 1000);
+      await Promise.resolve();
+
+      // No cleanup fired, so no tracked write was ever attempted against a
+      // reopened/closed connection.
+      expect(released).toHaveLength(0);
+      expect(barrier.trackCalls).toBe(0);
     });
   });
 });

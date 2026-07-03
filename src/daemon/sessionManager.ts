@@ -70,7 +70,7 @@ export class SessionManager {
   private timer: Timer;
   private releaseCallbacks: SessionReleaseCallback[] = [];
   private deviceSessionRepository: DeviceSessionRepository;
-  private readonly barrier: DbWriteBarrier;
+  private readonly getBarrier: () => DbWriteBarrier;
 
   // Session timeout: 30 minutes
   private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000;
@@ -83,11 +83,14 @@ export class SessionManager {
   constructor(
     timer: Timer = defaultTimer,
     deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
-    barrier: DbWriteBarrier = getDbWriteBarrier(),
+    // Resolve the shared barrier per write, not once at construction, so a
+    // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
+    // seen instead of a pinned drained instance (issue #2912).
+    getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
   ) {
     this.timer = timer;
     this.deviceSessionRepository = deviceSessionRepository;
-    this.barrier = barrier;
+    this.getBarrier = getBarrier;
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -154,7 +157,7 @@ export class SessionManager {
       logger.info(`Session ${sessionId} has expired, removing`);
       const deviceId = session.assignedDevice;
       this.removeSession(sessionId);
-      void this.barrier
+      void this.getBarrier()
         .track(() => this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "lazy-expiry"))
         .catch(error => logger.warn(`[SessionManager] Failed to mark session released (lazy-expiry): ${error}`));
       // Notify release callbacks so session-scoped state is cleaned up
@@ -297,7 +300,7 @@ export class SessionManager {
     };
     session.lastUsedAt = this.timer.now();
     session.lastHeartbeat = this.timer.now();
-    void this.barrier
+    void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
       .catch(error => logger.warn(`[SessionManager] Failed to record session activity: ${error}`));
 
@@ -316,7 +319,7 @@ export class SessionManager {
     // Update last used time when accessing cache
     session.lastUsedAt = this.timer.now();
     session.lastHeartbeat = this.timer.now();
-    void this.barrier
+    void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
       .catch(error => logger.warn(`[SessionManager] Failed to record session activity: ${error}`));
 
@@ -337,7 +340,7 @@ export class SessionManager {
     session.lastUsedAt = now;
     session.expiresAt = now + session.sessionTimeoutMs;
     session.hasReceivedHeartbeat = true;
-    void this.barrier
+    void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
       .catch(error => logger.warn(`[SessionManager] Failed to record session activity: ${error}`));
   }
@@ -458,7 +461,7 @@ export class SessionManager {
       this.removeSession(sessionId);
       // Notify release callbacks so session-scoped state is cleaned up
       if (deviceId) {
-        void this.barrier
+        void this.getBarrier()
           .track(() => this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "cleanup-expired"))
           .catch(error => logger.warn(`[SessionManager] Failed to mark session released (cleanup-expired): ${error}`));
         for (const callback of this.releaseCallbacks) {

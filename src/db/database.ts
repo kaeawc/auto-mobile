@@ -282,6 +282,26 @@ export async function closeDatabase(): Promise<void> {
     await dbInstance.destroy();
     dbInstance = null;
   }
+
+  // Reset the module-global state that outlives the connection so a same-process
+  // reopen behaves like a cold start (issue #2796). These are reset
+  // unconditionally — outside the `if (dbInstance)` guard — so a
+  // partially-initialized state (migrations started but `dbInstance` already
+  // nulled) is still cleaned up.
+  //
+  // - `migrationsRun` / `migrationsPromise` / `migrationsError` are one state
+  //   machine; leaving any set would let `ensureMigrationsStarted()` no-op and
+  //   `waitForMigrationsBeforeQuery()` short-circuit (skipping migration gating
+  //   on the new connection), or rethrow a stale startup error against an
+  //   otherwise-healthy reopened DB.
+  // - `resolvedDbPath` is cleared so a reopen re-reads AUTOMOBILE_DB_PATH /
+  //   AUTOMOBILE_DB_DIR. In the daemon the only caller is shutdown-then-exit
+  //   (daemon.ts), so this is inert there and the "path always matches" invariant
+  //   from resolveDbPath() holds; the reset is what gives tests full isolation.
+  migrationsRun = false;
+  migrationsPromise = null;
+  migrationsError = null;
+  resolvedDbPath = null;
 }
 
 /**

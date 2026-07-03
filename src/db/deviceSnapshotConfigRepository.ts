@@ -44,11 +44,6 @@ export class DeviceSnapshotConfigRepository {
   async setConfig(config: DeviceSnapshotConfig): Promise<void> {
     const db = await this.getDb();
     const now = new Date().toISOString();
-    const existing = await db
-      .selectFrom("device_snapshot_configs")
-      .select(["key"])
-      .where("key", "=", CONFIG_KEY)
-      .executeTakeFirst();
 
     const payload = {
       key: CONFIG_KEY,
@@ -56,18 +51,17 @@ export class DeviceSnapshotConfigRepository {
       updated_at: now,
     };
 
-    if (existing) {
-      await db
-        .updateTable("device_snapshot_configs")
-        .set(payload)
-        .where("key", "=", CONFIG_KEY)
-        .execute();
-      return;
-    }
-
+    // Atomic upsert on the key PRIMARY KEY. A concurrent first-write would otherwise
+    // have one caller lose the SELECT/INSERT race and throw a UNIQUE collision (R2356).
     await db
       .insertInto("device_snapshot_configs")
       .values(payload)
+      .onConflict(oc =>
+        oc.column("key").doUpdateSet({
+          config_json: payload.config_json,
+          updated_at: payload.updated_at,
+        })
+      )
       .execute();
   }
 

@@ -249,6 +249,60 @@ describe("TestCoverageRepository", () => {
     });
   });
 
+  describe("concurrency (R2356)", () => {
+    test("N concurrent getOrCreateSession yield one row and return the same session id, never reject", async () => {
+      await insertApp("com.example.app");
+
+      const N = 10;
+      const results = await Promise.all(
+        Array.from({ length: N }, () => repo.getOrCreateSession("uuid-1", "com.example.app"))
+      );
+
+      const sessions = await repo.getSessionsForApp("com.example.app");
+      expect(sessions).toHaveLength(1);
+      const ids = new Set(results.map(r => r.id));
+      expect(ids.size).toBe(1);
+      expect(results.every(r => r.id === sessions[0].id)).toBe(true);
+    });
+
+    test("N concurrent recordNodeVisit yield one row with visit_count === N and never reject", async () => {
+      await insertApp("com.example.app");
+      const nodeId = await insertNode("com.example.app", "HomeScreen");
+      const session = await repo.startSession("uuid-1", "com.example.app");
+
+      const N = 10;
+      await expect(
+        Promise.all(
+          Array.from({ length: N }, () => repo.recordNodeVisit(session.id, nodeId, 2000))
+        )
+      ).resolves.toBeDefined();
+
+      const covered = await repo.getCoveredNodes(session.id);
+      expect(covered).toHaveLength(1);
+      expect(covered[0].visit_count).toBe(N);
+      // first_visit_time is preserved across the upsert conflict path.
+      expect(covered[0].first_visit_time).toBe(2000);
+    });
+
+    test("N concurrent recordEdgeTraversal yield one row with traversal_count === N and never reject", async () => {
+      await insertApp("com.example.app");
+      const edgeId = await insertEdge("com.example.app", "Home", "Settings");
+      const session = await repo.startSession("uuid-1", "com.example.app");
+
+      const N = 10;
+      await expect(
+        Promise.all(
+          Array.from({ length: N }, () => repo.recordEdgeTraversal(session.id, edgeId, 2000))
+        )
+      ).resolves.toBeDefined();
+
+      const covered = await repo.getCoveredEdges(session.id);
+      expect(covered).toHaveLength(1);
+      expect(covered[0].traversal_count).toBe(N);
+      expect(covered[0].first_traversal_time).toBe(2000);
+    });
+  });
+
   describe("getCoveredNodes", () => {
     test("returns empty array when no nodes visited", async () => {
       await insertApp("com.example.app");

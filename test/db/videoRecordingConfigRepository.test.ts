@@ -45,4 +45,16 @@ describe("VideoRecordingConfigRepository", () => {
     const result = await repo.getConfig();
     expect(result).toBeNull();
   });
+
+  test("N concurrent setConfig never reject and leave exactly one row (R2356)", async () => {
+    const N = 10;
+    await expect(
+      Promise.all(
+        Array.from({ length: N }, (_unused, i) => repo.setConfig({ enabled: i % 2 === 0 } as any))
+      )
+    ).resolves.toBeDefined();
+
+    const rows = await db.selectFrom("video_recording_configs").selectAll().execute();
+    expect(rows).toHaveLength(1);
+  });
 });

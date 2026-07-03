@@ -70,18 +70,32 @@ export class TestCoverageRepository {
    */
   async getOrCreateSession(sessionUuid: string, appId: string): Promise<TestCoverageSession> {
     const db = this.getDb();
+    const now = this.timer.now();
 
-    const existing = await db
-      .selectFrom("test_coverage_sessions")
-      .selectAll()
-      .where("session_uuid", "=", sessionUuid)
-      .executeTakeFirst();
+    // Atomic get-or-create on the session_uuid UNIQUE constraint. A SELECT-then-INSERT
+    // would let two concurrent callers for the same uuid both read "not found" and race,
+    // with the loser throwing a UNIQUE collision (R2356). The conflict path is a no-op
+    // touch (session_uuid set to its own value) so an existing session is returned
+    // unchanged, while DO UPDATE keeps RETURNING returning the row.
+    const newSession: NewTestCoverageSession = {
+      session_uuid: sessionUuid,
+      app_id: appId,
+      start_time: now,
+      end_time: null,
+      total_nodes_visited: 0,
+      total_edges_traversed: 0,
+    };
 
-    if (existing) {
-      return existing;
-    }
-
-    return this.startSession(sessionUuid, appId);
+    return db
+      .insertInto("test_coverage_sessions")
+      .values(newSession)
+      .onConflict(oc =>
+        oc.column("session_uuid").doUpdateSet(eb => ({
+          session_uuid: eb.ref("test_coverage_sessions.session_uuid"),
+        }))
+      )
+      .returningAll()
+      .executeTakeFirstOrThrow();
   }
 
   /**
@@ -106,39 +120,28 @@ export class TestCoverageRepository {
   async recordNodeVisit(sessionId: number, nodeId: number, timestamp: number): Promise<void> {
     const db = this.getDb();
 
-    // Check if this node was already visited in this session
-    const existing = await db
-      .selectFrom("test_node_coverage")
-      .selectAll()
-      .where("session_id", "=", sessionId)
-      .where("node_id", "=", nodeId)
-      .executeTakeFirst();
+    // Atomic upsert on UNIQUE(session_id, node_id) (idx_test_node_coverage_session_node).
+    // Counter arithmetic runs in SQL so no read-modify-write window exists between a
+    // SELECT and a follow-up INSERT/UPDATE, which under the single-connection async
+    // mutex would otherwise drop first-visit collisions and lose increments (R2356).
+    const newCoverage: NewTestNodeCoverage = {
+      session_id: sessionId,
+      node_id: nodeId,
+      visit_count: 1,
+      first_visit_time: timestamp,
+      last_visit_time: timestamp,
+    };
 
-    if (existing) {
-      // Update visit count and last visit time
-      await db
-        .updateTable("test_node_coverage")
-        .set({
-          visit_count: existing.visit_count + 1,
+    await db
+      .insertInto("test_node_coverage")
+      .values(newCoverage)
+      .onConflict(oc =>
+        oc.columns(["session_id", "node_id"]).doUpdateSet(eb => ({
+          visit_count: eb("test_node_coverage.visit_count", "+", 1),
           last_visit_time: timestamp,
-        })
-        .where("id", "=", existing.id)
-        .execute();
-    } else {
-      // Create new coverage record
-      const newCoverage: NewTestNodeCoverage = {
-        session_id: sessionId,
-        node_id: nodeId,
-        visit_count: 1,
-        first_visit_time: timestamp,
-        last_visit_time: timestamp,
-      };
-
-      await db
-        .insertInto("test_node_coverage")
-        .values(newCoverage)
-        .execute();
-    }
+        }))
+      )
+      .execute();
 
     // Update session totals
     await db
@@ -160,39 +163,26 @@ export class TestCoverageRepository {
   ): Promise<void> {
     const db = this.getDb();
 
-    // Check if this edge was already traversed in this session
-    const existing = await db
-      .selectFrom("test_edge_coverage")
-      .selectAll()
-      .where("session_id", "=", sessionId)
-      .where("edge_id", "=", edgeId)
-      .executeTakeFirst();
+    // Atomic upsert on UNIQUE(session_id, edge_id) (idx_test_edge_coverage_session_edge).
+    // Mirrors recordNodeVisit: counter arithmetic in SQL closes the RMW window (R2356).
+    const newCoverage: NewTestEdgeCoverage = {
+      session_id: sessionId,
+      edge_id: edgeId,
+      traversal_count: 1,
+      first_traversal_time: timestamp,
+      last_traversal_time: timestamp,
+    };
 
-    if (existing) {
-      // Update traversal count and last traversal time
-      await db
-        .updateTable("test_edge_coverage")
-        .set({
-          traversal_count: existing.traversal_count + 1,
+    await db
+      .insertInto("test_edge_coverage")
+      .values(newCoverage)
+      .onConflict(oc =>
+        oc.columns(["session_id", "edge_id"]).doUpdateSet(eb => ({
+          traversal_count: eb("test_edge_coverage.traversal_count", "+", 1),
           last_traversal_time: timestamp,
-        })
-        .where("id", "=", existing.id)
-        .execute();
-    } else {
-      // Create new coverage record
-      const newCoverage: NewTestEdgeCoverage = {
-        session_id: sessionId,
-        edge_id: edgeId,
-        traversal_count: 1,
-        first_traversal_time: timestamp,
-        last_traversal_time: timestamp,
-      };
-
-      await db
-        .insertInto("test_edge_coverage")
-        .values(newCoverage)
-        .execute();
-    }
+        }))
+      )
+      .execute();
 
     // Update session totals
     await db

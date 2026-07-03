@@ -16,6 +16,11 @@ Parameters:
 - `packageName`: App identifier (e.g., `com.android.settings`, `com.apple.Preferences`)
 - `waitUntilLaunched`: Wait for app to be fully loaded (default: true)
 
+On iOS, `launchApp` works on both **simulators** (via `simctl`) and **physical
+devices** (via `devicectl`, macOS + iOS 17+); `coldBoot` and `clearAppData` are
+supported on both. The device transport is selected automatically from the
+device UDID.
+
 ## Terminate App
 
 Use `terminateApp` to stop a running application:

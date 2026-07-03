@@ -153,6 +153,47 @@ const findAppBundleInDir = async (
 const getErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+/**
+ * Recursively find the launched process's `processIdentifier` in a devicectl
+ * `process launch --json-output` payload. The stable location is
+ * `result.process.processIdentifier`; we prefer it and fall back to a deep
+ * search so a devicectl-version reshuffle of the envelope still yields the PID.
+ */
+export const findProcessIdentifier = (data: unknown): number | undefined => {
+  const direct = (data as { result?: { process?: { processIdentifier?: unknown } } })
+    ?.result?.process?.processIdentifier;
+  if (typeof direct === "number") {
+    return direct;
+  }
+
+  const walk = (node: unknown): number | undefined => {
+    if (!node || typeof node !== "object") {
+      return undefined;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = walk(item);
+        if (found !== undefined) {
+          return found;
+        }
+      }
+      return undefined;
+    }
+    const record = node as Record<string, unknown>;
+    if (typeof record.processIdentifier === "number") {
+      return record.processIdentifier;
+    }
+    for (const value of Object.values(record)) {
+      const found = walk(value);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return undefined;
+  };
+  return walk(data);
+};
+
 const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: string): boolean =>
   bundleId.endsWith(".XCTestServiceApp") &&
   (errorMessage.includes("No such file or directory") ||
@@ -377,6 +418,69 @@ export class DeviceAppInspector {
       "--quiet"
     ].join(" ");
     await this.deps.exec(command);
+  }
+
+  /**
+   * Launch an app on a physical iOS device via `devicectl` and return its PID.
+   * Mirrors {@link SimCtlClient.launchApp}'s `{ success; pid?; error? }` contract
+   * so `LaunchApp.executeiOS` can substitute this for the simctl path without
+   * changing downstream handling. `terminateExisting` maps to
+   * `--terminate-existing`, which is the authoritative cold-boot relaunch: it
+   * terminates any already-running instance and starts a fresh process (which
+   * foregrounds). devicectl has no foreground-if-running verb, so warm launches
+   * also relaunch this way. This subsumes a separate "terminate then launch" —
+   * there is intentionally no standalone devicectl terminate here, because
+   * devicectl's `info processes` listing exposes no stable bundle-id field to
+   * resolve a PID by bundle (only `install`/`info apps` do), so a reliable
+   * terminate-by-bundle needs the follow-up device app-listing work.
+   *
+   * Gated to macOS + local devicectl. Host control (Docker) exposes no launch
+   * bridge, so we return an explicit, actionable error rather than a confusing
+   * simctl-style failure.
+   */
+  public async launchApp(
+    deviceUdid: string,
+    bundleId: string,
+    options: { terminateExisting?: boolean } = {}
+  ): Promise<{ success: boolean; pid?: number; error?: string }> {
+    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
+    if (useHostControl) {
+      return {
+        success: false,
+        error: `Launching apps on a physical device is not supported under host control for ${bundleId}: ` +
+          "the host-control bridge exposes install/uninstall but no devicectl process-launch primitive."
+      };
+    }
+
+    if (this.deps.platform() !== "darwin") {
+      return { success: false, error: "Physical device app launch requires macOS" };
+    }
+
+    const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-launch-"));
+    const jsonPath = join(tempDir, "launch.json");
+    try {
+      const command = [
+        "xcrun",
+        "devicectl",
+        "device",
+        "process",
+        "launch",
+        "--device", deviceUdid,
+        ...(options.terminateExisting ? ["--terminate-existing"] : []),
+        "--json-output", quoteShell(jsonPath),
+        "--quiet",
+        quoteShell(bundleId)
+      ].join(" ");
+      await this.deps.exec(command);
+
+      const raw = await this.deps.readFile(jsonPath);
+      const pid = findProcessIdentifier(JSON.parse(raw));
+      return { success: true, pid };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
+    } finally {
+      await this.deps.rm(tempDir);
+    }
   }
 
   private async getSimulatorAppBundleHash(deviceUdid: string, bundleId: string): Promise<string | null> {

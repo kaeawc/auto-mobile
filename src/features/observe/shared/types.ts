@@ -46,6 +46,13 @@ export interface BaseResult {
  */
 export interface GestureTimingResult extends BaseResult {
   gestureTimeMs?: number;
+  /**
+   * Pinch-only (iOS): which mechanism performed the gesture —
+   * "event-path" (private synthesis, honors center) or "element-anchored"
+   * (public fallback, center-less). Undefined for Android and non-pinch
+   * gestures. See issue #2910.
+   */
+  pinchPath?: string;
 }
 
 /**

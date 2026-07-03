@@ -205,6 +205,15 @@ export class PinchOn extends BaseVisualChange {
         };
       }
 
+      // iOS may fall back to the public element-anchored pinch when the private
+      // XCTest event-synthesis symbols are unavailable; that path zooms from the
+      // screen center and ignores the requested centerX/centerY (and rotation).
+      // Surface it so callers know the center was not honored (#2910).
+      const fallbackWarning = pinchResult.pinchPath === "element-anchored"
+        ? "pinchOn used the iOS public element-anchored fallback; the gesture zoomed from the screen center and did not honor the requested center/rotation."
+        : undefined;
+      const warning = [target.warning, fallbackWarning].filter(Boolean).join(" ") || undefined;
+
       return {
         success: true,
         direction: options.direction,
@@ -217,7 +226,7 @@ export class PinchOn extends BaseVisualChange {
         centerY,
         targetType: target.targetType,
         container: target.container,
-        warning: target.warning,
+        warning,
         observation: pinchResult.observation,
         a11yTotalTimeMs: pinchResult.totalTimeMs,
         a11yGestureTimeMs: pinchResult.gestureTimeMs

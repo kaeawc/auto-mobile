@@ -23,10 +23,13 @@ public enum PinchGesturePath: String, Codable, Equatable {
 /// in a macOS test host). See issue #2910.
 public enum PinchFallback {
     /// Clamp bounds keep `scale` a sane, strictly-positive multiplier even for
-    /// degenerate geometry. Apple: `scale` in (0,1) zooms out, `> 1` zooms in.
+    /// degenerate geometry. Apple documents `scale` in (0,1) as zoom-out and
+    /// `> 1` as zoom-in.
     private static let minScale: CGFloat = 0.01
     private static let maxScale: CGFloat = 100
-    /// XCUITest rejects a zero velocity; keep magnitude above this floor.
+    /// Apple documents `velocity` only as "scale factor per second" — it does not
+    /// specify a nonzero requirement, but a zero velocity is a degenerate no-op,
+    /// so we defensively floor the magnitude to stay clear of it.
     private static let minVelocityMagnitude: CGFloat = 0.1
     private static let defaultDuration: TimeInterval = 0.3
 
@@ -35,9 +38,10 @@ public enum PinchFallback {
     ///
     /// - `scale`   = `distanceEnd / distanceStart`, clamped to a positive range.
     /// - `velocity` = `(scale - 1) / duration`, floored to a nonzero magnitude.
-    ///   Sign follows zoom direction: zoom-in (`scale > 1`) is positive,
-    ///   zoom-out (`scale < 1`) is negative — matching Apple's requirement that
-    ///   velocity be negative when zooming out.
+    ///   Deriving velocity as the scale-factor rate of change makes its sign
+    ///   follow the zoom direction (zoom-in `scale > 1` positive, zoom-out
+    ///   `scale < 1` negative), the natural reading of Apple's "scale factor per
+    ///   second"; the floor keeps it clear of a degenerate zero velocity.
     public static func parameters(
         distanceStart: Double,
         distanceEnd: Double,

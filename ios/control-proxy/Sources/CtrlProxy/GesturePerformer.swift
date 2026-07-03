@@ -514,7 +514,13 @@ public class GesturePerformer: GesturePerforming {
                 }
 
                 // Public element-anchored fallback: honors scale/velocity but
-                // centers on the SpringBoard anchor, ignoring centerX/centerY.
+                // centers on the SpringBoard anchor, so it ignores centerX/centerY
+                // and rotationDegrees (the public API has no center or rotation).
+                //
+                // This branch runs only on-device. Off-device coverage is split
+                // across PinchFallbackTests (the scale/velocity math) and
+                // ObjCExceptionBridgeTests (the symbolsUnavailable signal that
+                // routes here); the live app.pinch call itself is device-only.
                 let params = PinchFallback.parameters(
                     distanceStart: distanceStart,
                     distanceEnd: distanceEnd,

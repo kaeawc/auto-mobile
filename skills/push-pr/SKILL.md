@@ -1,6 +1,6 @@
 ---
 name: push-pr
-description: Use this workflow skill to publish the current branch: validate local changes, commit, push, create or update one PR, and optionally enable automerge.
+description: "Use this workflow skill to publish the current branch: validate local changes, commit, push, create or update one PR, and optionally enable automerge."
 ---
 
 # Push PR

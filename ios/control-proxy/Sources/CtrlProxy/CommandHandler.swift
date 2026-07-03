@@ -347,7 +347,7 @@ public class CommandHandler: CommandHandling {
 
     private func handleTapCoordinates(_ request: RequestTapCoordinates, startTime: Date) throws -> WebSocketResponse {
         let duration = request.duration ?? 0
-        try gesturePerformer.tap(x: Double(request.x), y: Double(request.y), duration: TimeInterval(duration) / 1000.0)
+        try gesturePerformer.tap(x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0)
 
         return WebSocketResponse.success(
             type: ResponseType.tapCoordinatesResult.rawValue,
@@ -359,8 +359,8 @@ public class CommandHandler: CommandHandling {
     private func handleSwipe(_ request: RequestSwipe, startTime: Date) throws -> WebSocketResponse {
         let duration = request.duration ?? 300
         try gesturePerformer.swipe(
-            startX: Double(request.x1), startY: Double(request.y1),
-            endX: Double(request.x2), endY: Double(request.y2),
+            startX: request.x1, startY: request.y1,
+            endX: request.x2, endY: request.y2,
             duration: TimeInterval(duration) / 1000.0
         )
 
@@ -384,10 +384,10 @@ public class CommandHandler: CommandHandling {
         let fingerSpacing = request.offset ?? 25
 
         try gesturePerformer.multiFingerSwipe(
-            startX: Double(request.x1),
-            startY: Double(request.y1),
-            endX: Double(request.x2),
-            endY: Double(request.y2),
+            startX: request.x1,
+            startY: request.y1,
+            endX: request.x2,
+            endY: request.y2,
             fingerCount: fingerCount,
             fingerSpacing: fingerSpacing,
             duration: TimeInterval(duration) / 1000.0
@@ -406,8 +406,8 @@ public class CommandHandler: CommandHandling {
         let holdDuration = request.holdDurationMs ?? 100
 
         try gesturePerformer.drag(
-            startX: Double(request.x1), startY: Double(request.y1),
-            endX: Double(request.x2), endY: Double(request.y2),
+            startX: request.x1, startY: request.y1,
+            endX: request.x2, endY: request.y2,
             pressDuration: TimeInterval(pressDuration) / 1000.0,
             dragDuration: TimeInterval(dragDuration) / 1000.0,
             holdDuration: TimeInterval(holdDuration) / 1000.0
@@ -422,10 +422,10 @@ public class CommandHandler: CommandHandling {
 
     private func handlePinch(_ request: RequestPinch, startTime: Date) throws -> WebSocketResponse {
         let path = try gesturePerformer.pinch(
-            centerX: Double(request.centerX),
-            centerY: Double(request.centerY),
-            distanceStart: Double(request.distanceStart),
-            distanceEnd: Double(request.distanceEnd),
+            centerX: request.centerX,
+            centerY: request.centerY,
+            distanceStart: request.distanceStart,
+            distanceEnd: request.distanceEnd,
             rotationDegrees: Double(request.rotationDegrees ?? 0),
             duration: TimeInterval(request.duration ?? 300) / 1000.0
         )

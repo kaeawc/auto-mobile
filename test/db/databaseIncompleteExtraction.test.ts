@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import path from "path";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { isIncompleteExtractionError } from "../../src/db/migrationDependencyIntegrity";
+import { removeTempDbDir } from "./tempDbDir";
 
 /**
  * Issue #2833: the incomplete-extraction mapping is scoped to KNOWN migration
@@ -34,31 +35,13 @@ describe("startup migration failure does not mislabel a genuine bad import", () 
     restore("AUTOMOBILE_DB_PATH", originalDbPath);
     restore("AUTOMOBILE_MIGRATIONS_DIR", originalMigrationsDir);
     if (tempDir) {
-      await removeTempDirWithRetry(tempDir);
+      await removeTempDbDir(tempDir);
       tempDir = undefined;
     }
   });
 
   async function importFreshDatabaseModule() {
     return import(`../../src/db/database.ts?incomplete-extraction-test=${Date.now()}-${Math.random()}`);
-  }
-
-  // Windows holds the sqlite file until the handle is fully released; retry the
-  // removal past a transient EBUSY/EPERM rather than failing the test on cleanup.
-  async function removeTempDirWithRetry(dir: string): Promise<void> {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      try {
-        await rm(dir, { recursive: true, force: true });
-        return;
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
-          throw error;
-        }
-        await defaultTimer.sleep(50);
-      }
-    }
-    await rm(dir, { recursive: true, force: true });
   }
 
   test("an unknown missing package surfaces the generic error, not incomplete-extraction", async () => {

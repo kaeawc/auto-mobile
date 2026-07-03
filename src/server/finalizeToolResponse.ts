@@ -61,40 +61,47 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         payload = parsed as Record<string, unknown>;
       }
     } catch {
-      // Not JSON — nothing to sanitize, leave the response as-is.
-      return response;
+      // Not JSON — nothing to sanitize. Still fall through so the
+      // structuredContent strip below runs (a no-op when it is absent).
     }
   }
 
-  if (!payload) {
-    return response;
-  }
-
-  const cfg: SanitizeObserveConfig = {
-    dropElements: serverConfig.isObserveResultDropElementsEnabled(),
-  };
-
-  // Locate the ObserveResult: the payload itself for `observe`, else `.observation`.
-  let sanitizedPayload: Record<string, unknown> | undefined;
-  if (ctx.name === "observe" && isObserveResult(payload)) {
-    sanitizedPayload = sanitizeObserveResult(payload as unknown as ObserveResult, cfg) as unknown as Record<string, unknown>;
-  } else if (isObserveResult(payload.observation)) {
-    sanitizedPayload = {
-      ...payload,
-      observation: sanitizeObserveResult(payload.observation as ObserveResult, cfg),
+  if (payload) {
+    const cfg: SanitizeObserveConfig = {
+      dropElements: serverConfig.isObserveResultDropElementsEnabled(),
     };
+
+    // Locate the ObserveResult: the payload itself for `observe`, else `.observation`.
+    let sanitizedPayload: Record<string, unknown> | undefined;
+    if (ctx.name === "observe" && isObserveResult(payload)) {
+      sanitizedPayload = sanitizeObserveResult(payload as unknown as ObserveResult, cfg) as unknown as Record<string, unknown>;
+    } else if (isObserveResult(payload.observation)) {
+      sanitizedPayload = {
+        ...payload,
+        observation: sanitizeObserveResult(payload.observation as ObserveResult, cfg),
+      };
+    }
+
+    // Rewrite both representations from the same object so they cannot diverge.
+    if (sanitizedPayload) {
+      if (hasStructured) {
+        envelope.structuredContent = sanitizedPayload;
+      }
+      if (textPart) {
+        textPart.text = stringifyToolResponse(sanitizedPayload);
+      }
+    }
   }
 
-  if (!sanitizedPayload) {
-    return response;
-  }
-
-  // Rewrite both representations from the same object so they cannot diverge.
-  if (hasStructured) {
-    envelope.structuredContent = sanitizedPayload;
-  }
-  if (textPart) {
-    textPart.text = stringifyToolResponse(sanitizedPayload);
+  // Strip `structuredContent` when the gate is enabled (issue #2899). This runs
+  // AFTER the sanitize step, so `content[0].text` already carries the sanitized
+  // payload and remains the single source of truth — dropping the redundant
+  // duplicate halves the wire payload with no information loss. Applies to every
+  // envelope shape (observe, action, and plain payloads alike); the matching
+  // `outputSchema` is dropped from `tools/list` so the server never advertises
+  // structured output it will not return.
+  if (serverConfig.isToolResultsNoStructuredContentEnabled() && "structuredContent" in envelope) {
+    delete envelope.structuredContent;
   }
 
   return response;

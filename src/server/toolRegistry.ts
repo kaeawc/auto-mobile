@@ -724,8 +724,13 @@ class ToolRegistryClass {
   // Get tools in MCP format
   getToolDefinitions(options: ToolListingOptions = {}) {
     const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
+    // When tool results are stripped of `structuredContent` (issue #2899), do not
+    // advertise an `outputSchema` in `tools/list`: an MCP server that declares an
+    // output schema is expected to return matching `structuredContent`, so keeping
+    // both consistent avoids advertising output the finalize step will strip.
+    const suppressOutputSchema = serverConfig.isToolResultsNoStructuredContentEnabled();
     return this.getAllTools(options).map(tool => {
-      const outputSchema = tool.outputSchema
+      const outputSchema = tool.outputSchema && !suppressOutputSchema
         ? flattenTopLevelUnion(toJSONSchema(tool.outputSchema))
         : undefined;
 

@@ -2739,7 +2739,6 @@ start_mcp_daemon() {
 # Install runtime dependencies needed for AutoMobile features.
 # These are not development/CI tools — they are required for end-user functionality:
 #   ffmpeg  - video recording and encoding (videoRecording tool)
-#   vips    - native image processing via sharp (observe screenshots, image comparison)
 # Install a system package using the host's native package manager.
 # Usage: _install_system_package <package_name> <description> [apt_name]
 # apt_name defaults to package_name if not provided.
@@ -2809,46 +2808,6 @@ install_runtime_deps() {
     if ! command_exists ffmpeg; then
         _install_system_package "ffmpeg" "required for video recording" || true
     fi
-
-    # libvips — sharp bundles its own libvips via @img/sharp-libvips-* optional
-    # dependencies, so a system install is not needed. Only log if the bundled
-    # prebuilts are missing (which would cause sharp to fail at runtime).
-    if ! _check_libvips; then
-        # Check if sharp's bundled libvips is available
-        local sharp_bundled=false
-        if [[ -d "${PROJECT_ROOT:-}/node_modules/@img" ]]; then
-            # Bundled prebuilts exist — no system libvips needed
-            sharp_bundled=true
-        fi
-        if [[ "${sharp_bundled}" != "true" ]]; then
-            log_warn "Neither system libvips nor sharp bundled prebuilts found"
-            log_info "Run 'bun install' to fetch sharp's bundled libvips, or install system libvips:"
-            if [[ "${os}" == "macos" ]]; then
-                log_info "  brew install vips"
-            else
-                _log_linux_install_hint "libvips" "libvips-dev" "vips-devel" "libvips"
-            fi
-        fi
-    fi
-}
-
-# Check if libvips shared library is available (not just the CLI tool).
-# sharp links against libvips at runtime; the vips CLI is not sufficient.
-_check_libvips() {
-    # Prefer pkg-config (works on all distros and Homebrew)
-    if command_exists pkg-config && pkg-config --exists vips 2>/dev/null; then
-        return 0
-    fi
-    # Fallback: check for the shared library directly
-    if [[ "$(detect_os)" == "macos" ]]; then
-        # Homebrew installs to /opt/homebrew (arm64) or /usr/local (x64)
-        local brew_prefix
-        brew_prefix=$(brew --prefix 2>/dev/null || echo "/opt/homebrew")
-        [[ -f "${brew_prefix}/lib/libvips.dylib" ]] && return 0
-    else
-        ldconfig -p 2>/dev/null | grep -q libvips && return 0
-    fi
-    return 1
 }
 
 # Install development tools needed by scripts/ (shellcheck, jq, ripgrep, etc.)
@@ -2982,23 +2941,6 @@ _install_dev_tools_apt() {
         log_warn "${missing} dev tool(s) could not be installed"
     else
         log_info "Development tools ready."
-    fi
-}
-
-# Print distro-aware install hints for Linux packages.
-# Usage: _log_linux_install_hint <label> <deb_pkg> <rpm_pkg> <arch_pkg>
-_log_linux_install_hint() {
-    local label="$1" deb_pkg="$2" rpm_pkg="$3" arch_pkg="$4"
-    if command_exists apt-get; then
-        log_info "Install with: sudo apt-get install ${deb_pkg}"
-    elif command_exists dnf; then
-        log_info "Install with: sudo dnf install ${rpm_pkg}"
-    elif command_exists yum; then
-        log_info "Install with: sudo yum install ${rpm_pkg}"
-    elif command_exists pacman; then
-        log_info "Install with: sudo pacman -S ${arch_pkg}"
-    else
-        log_info "Install ${label} using your system package manager"
     fi
 }
 
@@ -3933,7 +3875,6 @@ main() {
 
     # Check runtime dependencies
     spin_check "Checking ffmpeg" "command -v ffmpeg >/dev/null 2>&1" || true
-    spin_check "Checking libvips" "command -v pkg-config >/dev/null 2>&1 && pkg-config --exists vips 2>/dev/null" || true
 
     # Check Android SDK
     local adb_check="command -v adb >/dev/null 2>&1 || [[ -x \"${ANDROID_HOME:-}/platform-tools/adb\" ]] || [[ -x \"${ANDROID_SDK_ROOT:-}/platform-tools/adb\" ]] || [[ -x \"${HOME}/Library/Android/sdk/platform-tools/adb\" ]] || [[ -x \"${HOME}/Android/Sdk/platform-tools/adb\" ]]"

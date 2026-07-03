@@ -57,7 +57,7 @@ class ScreenshotUtilsAdapter implements ScreenshotUtils {
   }
 
   /**
-   * Convert image buffer to PNG format using Sharp
+   * Convert image buffer to PNG format
    * @param buffer Input image buffer
    * @returns Promise with PNG buffer
    */

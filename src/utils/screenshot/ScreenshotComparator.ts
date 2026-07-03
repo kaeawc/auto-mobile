@@ -1,7 +1,8 @@
 import { PNG } from "pngjs";
+import { ResizeStrategy } from "jimp";
 import { logger } from "../logger";
 import { Timer, defaultTimer } from "../SystemTimer";
-import { loadSharp } from "../image/loadSharp";
+import { loadJimp } from "../image/loadJimp";
 
 // Add dynamic import function for pixelmatch
 async function getPixelmatch() {
@@ -32,14 +33,15 @@ export class ScreenshotComparator {
   }
 
   /**
-   * Convert image buffer to PNG format using Sharp
+   * Convert image buffer to PNG format
    * @param buffer Input image buffer
    * @returns Promise with PNG buffer
    */
   static async convertToPng(buffer: Buffer): Promise<Buffer> {
     try {
-      const sharp = await loadSharp();
-      return await sharp(buffer).png().toBuffer();
+      const Jimp = await loadJimp();
+      const image = await Jimp.fromBuffer(buffer);
+      return await image.getBuffer("image/png");
     } catch (error) {
       throw new Error(`Failed to convert image to PNG: ${(error as Error).message}`);
     }
@@ -51,12 +53,20 @@ export class ScreenshotComparator {
    * @returns Promise with width and height
    */
   static async getImageDimensions(buffer: Buffer): Promise<{ width: number; height: number }> {
-    try {
-      const sharp = await loadSharp();
-      const metadata = await sharp(buffer).metadata();
+    // Fast path: PNG stores dimensions in the IHDR chunk, no full decode needed
+    if (ScreenshotComparator.isPngBuffer(buffer) && buffer.length >= 24) {
       return {
-        width: metadata.width || 0,
-        height: metadata.height || 0
+        width: buffer.readUInt32BE(16),
+        height: buffer.readUInt32BE(20)
+      };
+    }
+
+    try {
+      const Jimp = await loadJimp();
+      const image = await Jimp.fromBuffer(buffer);
+      return {
+        width: image.bitmap.width,
+        height: image.bitmap.height
       };
     } catch (error) {
       throw new Error(`Failed to get image dimensions: ${(error as Error).message}`);
@@ -84,14 +94,11 @@ export class ScreenshotComparator {
     logger.debug(`Resizing image from ${width}x${height} to ${targetWidth}x${targetHeight}`);
 
     try {
-      const sharp = await loadSharp();
-      return await sharp(buffer)
-        .resize(targetWidth, targetHeight, {
-          fit: "fill",
-          kernel: "nearest" // Fast resize for comparison purposes
-        })
-        .png()
-        .toBuffer();
+      const Jimp = await loadJimp();
+      const image = await Jimp.fromBuffer(buffer);
+      // Nearest-neighbor stretch to exact target size — fast resize for comparison purposes
+      image.resize({ w: targetWidth, h: targetHeight, mode: ResizeStrategy.NEAREST_NEIGHBOR });
+      return await image.getBuffer("image/png");
     } catch (error) {
       throw new Error(`Failed to resize image: ${(error as Error).message}`);
     }

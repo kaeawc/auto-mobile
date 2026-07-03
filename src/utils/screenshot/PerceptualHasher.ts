@@ -1,5 +1,6 @@
+import { ResizeStrategy } from "jimp";
 import { logger } from "../logger";
-import { loadSharp } from "../image/loadSharp";
+import { loadJimp } from "../image/loadJimp";
 
 export class PerceptualHasher {
   /**
@@ -9,21 +10,23 @@ export class PerceptualHasher {
    */
   static async generatePerceptualHash(buffer: Buffer): Promise<string> {
     try {
-      const sharp = await loadSharp();
+      const Jimp = await loadJimp();
       // Resize to small standard size for consistent hashing
-      const hashBuffer = await sharp(buffer)
-        .resize(8, 8, { fit: "fill", kernel: "nearest" })
-        .greyscale()
-        .raw()
-        .toBuffer();
+      const image = await Jimp.fromBuffer(buffer);
+      image.resize({ w: 8, h: 8, mode: ResizeStrategy.NEAREST_NEIGHBOR }).greyscale();
 
-      // Convert to binary hash using average pixel value
+      // bitmap.data is RGBA; after greyscale r=g=b, so sample the red channel
+      const data = image.bitmap.data;
       const totalPixels = 64; // 8x8
-      const averageValue = hashBuffer.reduce((sum, pixel) => sum + pixel, 0) / totalPixels;
+      let sum = 0;
+      for (let i = 0; i < totalPixels; i++) {
+        sum += data[i * 4];
+      }
+      const averageValue = sum / totalPixels;
 
       let hash = "";
       for (let i = 0; i < totalPixels; i++) {
-        hash += hashBuffer[i] > averageValue ? "1" : "0";
+        hash += data[i * 4] > averageValue ? "1" : "0";
       }
 
       return hash;

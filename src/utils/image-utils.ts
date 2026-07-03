@@ -8,10 +8,11 @@ import { ImageUtils as ImageUtilsInterface } from "./interfaces/ImageUtils";
 const DEFAULT_JPEG_QUALITY = 75;
 
 /**
- * Sharp-based implementation for image utilities
- * Provides a functional API for common image operations using the Sharp library
+ * Jimp-based implementation for image utilities
+ * Provides a functional API for common image operations using the Jimp library
+ * (with WebP support via the @jimp/wasm-webp plugin)
  */
-export class SharpImageUtils implements ImageUtilsInterface {
+export class JimpImageUtils implements ImageUtilsInterface {
   public getOriginalBuffer(buffer: Buffer): Buffer {
     return Buffer.from(buffer);
   }

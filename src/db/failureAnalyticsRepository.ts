@@ -221,8 +221,8 @@ export class FailureAnalyticsRepository {
       // read-modify-write (JSON merged in JS), so wrap it in a transaction: the
       // single-connection dialect reserves the connection for the transaction
       // owner (bunSqliteDialect.ts #reserveTransaction), serializing concurrent
-      // tool_failure merges so none clobber another's contribution. (The full
-      // recordFailure transaction is tracked separately in #2791.)
+      // tool_failure merges so none clobber another's contribution. (Wrapping
+      // the full recordFailure body in one transaction is tracked in #2877.)
       if (input.type === "tool_failure" && !isNewGroup) {
         await db.transaction().execute(async trx => {
           const current = await trx

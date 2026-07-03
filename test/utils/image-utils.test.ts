@@ -47,21 +47,26 @@ describe("ImageUtils", () => {
   });
 
   describe("interface implementation", () => {
-    test("should implement ImageUtils interface", () => {
+    test("should implement the trimmed ImageUtils interface", () => {
       expect(imageUtils).toHaveProperty("getOriginalBuffer");
       expect(imageUtils).toHaveProperty("resize");
       expect(imageUtils).toHaveProperty("crop");
-      expect(imageUtils).toHaveProperty("rotate");
-      expect(imageUtils).toHaveProperty("flip");
-      expect(imageUtils).toHaveProperty("blur");
-      expect(imageUtils).toHaveProperty("toJpeg");
       expect(imageUtils).toHaveProperty("toPng");
       expect(imageUtils).toHaveProperty("toWebp");
       expect(imageUtils).toHaveProperty("getMetadata");
-      expect(imageUtils).toHaveProperty("getExifMetadata");
       expect(imageUtils).toHaveProperty("clearCache");
       expect(imageUtils).toHaveProperty("setCacheSize");
       expect(imageUtils).toHaveProperty("batchProcess");
+    });
+
+    test("should no longer expose the dead image-transform surface", () => {
+      // Removed as dead wrapper surface in the sharp->jimp cleanup (#2938):
+      // zero production consumers existed for any of these.
+      expect(imageUtils).not.toHaveProperty("rotate");
+      expect(imageUtils).not.toHaveProperty("flip");
+      expect(imageUtils).not.toHaveProperty("blur");
+      expect(imageUtils).not.toHaveProperty("toJpeg");
+      expect(imageUtils).not.toHaveProperty("getExifMetadata");
     });
   });
 });
@@ -80,6 +85,17 @@ describe("FakeImageUtils", () => {
       expect(metadata.width).toBe(1080);
       expect(metadata.height).toBe(2400);
       expect(metadata.format).toBe("png");
+    });
+
+    test("Fake metadata stays in parity with the real jimp shape", async () => {
+      // Guards the Fake's defaults, not the real path (which is type-constrained
+      // to width/height/format/size). The real getMetadata only yields those
+      // four fields, so the Fake must not be more capable than production (#2938).
+      const metadata = await fakeImageUtils.getMetadata(Buffer.from("test"));
+
+      expect(metadata).not.toHaveProperty("colorSpace");
+      expect(metadata).not.toHaveProperty("hasAlpha");
+      expect(metadata).not.toHaveProperty("exif");
     });
 
     test("should allow configuring metadata", async () => {
@@ -184,50 +200,6 @@ describe("FakeImageUtils", () => {
       }
     });
 
-    test("should throw on rotate when configured", async () => {
-      fakeImageUtils.setShouldThrowOnRotate(true);
-
-      try {
-        await fakeImageUtils.rotate(Buffer.from("test"), 90);
-        throw new Error("Should have thrown");
-      } catch (error: any) {
-        expect(error.message).toBe("Simulated error in rotate");
-      }
-    });
-
-    test("should throw on flip when configured", async () => {
-      fakeImageUtils.setShouldThrowOnFlip(true);
-
-      try {
-        await fakeImageUtils.flip(Buffer.from("test"), "horizontal");
-        throw new Error("Should have thrown");
-      } catch (error: any) {
-        expect(error.message).toBe("Simulated error in flip");
-      }
-    });
-
-    test("should throw on blur when configured", async () => {
-      fakeImageUtils.setShouldThrowOnBlur(true);
-
-      try {
-        await fakeImageUtils.blur(Buffer.from("test"), 5);
-        throw new Error("Should have thrown");
-      } catch (error: any) {
-        expect(error.message).toBe("Simulated error in blur");
-      }
-    });
-
-    test("should throw on toJpeg when configured", async () => {
-      fakeImageUtils.setShouldThrowOnToJpeg(true);
-
-      try {
-        await fakeImageUtils.toJpeg(Buffer.from("test"));
-        throw new Error("Should have thrown");
-      } catch (error: any) {
-        expect(error.message).toBe("Simulated error in toJpeg");
-      }
-    });
-
     test("should throw on toPng when configured", async () => {
       fakeImageUtils.setShouldThrowOnToPng(true);
 
@@ -261,17 +233,6 @@ describe("FakeImageUtils", () => {
       }
     });
 
-    test("should throw on getExifMetadata when configured", async () => {
-      fakeImageUtils.setShouldThrowOnGetExifMetadata(true);
-
-      try {
-        await fakeImageUtils.getExifMetadata(Buffer.from("test"));
-        throw new Error("Should have thrown");
-      } catch (error: any) {
-        expect(error.message).toBe("Simulated error in getExifMetadata");
-      }
-    });
-
     test("should throw on batchProcess when configured", async () => {
       fakeImageUtils.setShouldThrowOnBatchProcess(true);
 
@@ -290,12 +251,12 @@ describe("FakeImageUtils", () => {
 
       await fakeImageUtils.resize(buffer, 100);
       await fakeImageUtils.crop(buffer, 50, 50);
-      await fakeImageUtils.rotate(buffer, 90);
+      await fakeImageUtils.toWebp(buffer);
       await fakeImageUtils.toPng(buffer);
 
       expect(fakeImageUtils.getMethodCallCount("resize")).toBe(1);
       expect(fakeImageUtils.getMethodCallCount("crop")).toBe(1);
-      expect(fakeImageUtils.getMethodCallCount("rotate")).toBe(1);
+      expect(fakeImageUtils.getMethodCallCount("toWebp")).toBe(1);
       expect(fakeImageUtils.getMethodCallCount("toPng")).toBe(1);
     });
 
@@ -326,21 +287,24 @@ describe("FakeImageUtils", () => {
   });
 
   describe("all methods existence", () => {
-    test("should have all ImageUtils methods", () => {
+    test("should have all retained ImageUtils methods", () => {
       expect(fakeImageUtils).toHaveProperty("getOriginalBuffer");
       expect(fakeImageUtils).toHaveProperty("resize");
       expect(fakeImageUtils).toHaveProperty("crop");
-      expect(fakeImageUtils).toHaveProperty("rotate");
-      expect(fakeImageUtils).toHaveProperty("flip");
-      expect(fakeImageUtils).toHaveProperty("blur");
-      expect(fakeImageUtils).toHaveProperty("toJpeg");
       expect(fakeImageUtils).toHaveProperty("toPng");
       expect(fakeImageUtils).toHaveProperty("toWebp");
       expect(fakeImageUtils).toHaveProperty("getMetadata");
-      expect(fakeImageUtils).toHaveProperty("getExifMetadata");
       expect(fakeImageUtils).toHaveProperty("clearCache");
       expect(fakeImageUtils).toHaveProperty("setCacheSize");
       expect(fakeImageUtils).toHaveProperty("batchProcess");
+    });
+
+    test("should not expose the removed image-transform surface", () => {
+      expect(fakeImageUtils).not.toHaveProperty("rotate");
+      expect(fakeImageUtils).not.toHaveProperty("flip");
+      expect(fakeImageUtils).not.toHaveProperty("blur");
+      expect(fakeImageUtils).not.toHaveProperty("toJpeg");
+      expect(fakeImageUtils).not.toHaveProperty("getExifMetadata");
     });
   });
 });

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import path from "path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
-import { defaultTimer } from "../../src/utils/SystemTimer";
+import { removeTempDbDir } from "./tempDbDir";
 
 /**
  * Regression tests for issue #2796.
@@ -23,6 +23,16 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * than reading internals directly.
  */
 describe("closeDatabase resets migration + path globals (issue #2796)", () => {
+  // Tests that genuinely open a real file-backed DB (migration/query paths use a
+  // separate connection from the app connection, so they need a shared on-disk
+  // file — `:memory:` gives each connection its own empty DB). This timeout only
+  // covers the test BODY (migrations + queries on slow Windows disk I/O); it does
+  // NOT govern the `afterEach` hook, which uses bun's default hook timeout
+  // independently. The cleanup stall from issue #2916 is bounded separately by
+  // `removeTempDbDir` (best-effort, ~200ms/dir), keeping afterEach well under the
+  // hook timeout.
+  const FILE_BACKED_TEST_TIMEOUT_MS = 30000;
+
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
   const originalDbDir = process.env.AUTOMOBILE_DB_DIR;
   const originalDbPath = process.env.AUTOMOBILE_DB_PATH;
@@ -46,7 +56,7 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
     restore("AUTOMOBILE_MIGRATIONS_DIR", originalMigrationsDir);
     restore("AUTO_MOBILE_MIGRATIONS_DIR", originalLegacyMigrationsDir);
     for (const dir of tempDirs.splice(0)) {
-      await removeTempDirWithRetry(dir);
+      await removeTempDbDir(dir);
     }
   });
 
@@ -59,22 +69,6 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
     const dir = await mkdtemp(path.join(tmpdir(), prefix));
     tempDirs.push(dir);
     return dir;
-  }
-
-  async function removeTempDirWithRetry(dir: string): Promise<void> {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      try {
-        await rm(dir, { recursive: true, force: true });
-        return;
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
-          throw error;
-        }
-        await defaultTimer.sleep(50);
-      }
-    }
-    await rm(dir, { recursive: true, force: true });
   }
 
   function queryToolCalls(db: any) {
@@ -113,17 +107,23 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
     expect(await queryToolCalls(secondDb)).toEqual([]);
 
     await databaseModule.closeDatabase();
-  });
+  }, FILE_BACKED_TEST_TIMEOUT_MS);
 
   test("reopen after close re-resolves the DB path under a changed env (resolvedDbPath reset)", async () => {
+    // This assertion is on the pure path-resolution cache (`resolvedDbPath`),
+    // which `resolveDatabasePathFromEnvironment()` computes as a string without
+    // touching the filesystem. Drive it through `getDatabasePath()` alone and
+    // never open a real `auto-mobile.db`, so it carries no dependency on Windows
+    // file-handle release (issue #2916). `closeDatabase()` resets the path cache
+    // unconditionally — even with no open connection — so the reset is still
+    // exercised here.
     const firstDir = await makeTempDbDir("auto-mobile-reset-path-first-");
     process.env.AUTOMOBILE_DB_DIR = firstDir;
     delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
     const databaseModule = await importFreshDatabaseModule();
 
-    // Resolve + open once so resolvedDbPath is cached.
-    databaseModule.getDatabase();
+    // Resolve once so resolvedDbPath is cached (no DB file opened).
     expect(databaseModule.getDatabasePath()).toBe(path.join(firstDir, "auto-mobile.db"));
 
     await databaseModule.closeDatabase();
@@ -167,5 +167,5 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
     expect(databaseModule.getMigrationsError()).toBeNull();
 
     await databaseModule.closeDatabase();
-  });
+  }, FILE_BACKED_TEST_TIMEOUT_MS);
 });

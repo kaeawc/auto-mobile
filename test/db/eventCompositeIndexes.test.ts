@@ -33,7 +33,14 @@ const TABLES = [
   "layout_events",
 ] as const;
 
-/** Build the six event tables via their original migrations (no composite index yet). */
+/**
+ * Build the six event tables via their original migrations (no composite index
+ * yet). The later `alterTable` migrations (…_002_storage_events_previous_value,
+ * …_003_layout_events_screen_name) are intentionally omitted: the composite only
+ * touches `device_id`/`timestamp`, which exist at table creation. The full
+ * migration chain (including those alters) is exercised by the "full replay"
+ * describe below.
+ */
 async function buildEventSchema(db: Kysely<unknown>): Promise<void> {
   await telemetryUp(db); // network_events, log_events, os_events (+ custom_events)
   await navigationUp(db); // navigation_events

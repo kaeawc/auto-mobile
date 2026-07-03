@@ -14,10 +14,20 @@ import type { Kysely } from "kysely";
  *
  * No DESC in the index columns: SQLite scans a plain ascending index backward for
  * `ORDER BY ... DESC`, so a plain composite suffices (mirrors the precedent in
- * 2025_12_30_000_performance_thresholds.ts). Additive and forward-only — the
- * existing single-column indexes are left intact because other queries and the
- * retention cleanup's full-table `ORDER BY timestamp DESC` still use the
- * standalone `timestamp` index.
+ * 2025_12_30_000_performance_thresholds.ts).
+ *
+ * Additive and forward-only, per #2788's explicit scope ("do not modify the
+ * existing single-column indexes"):
+ *   - The standalone `timestamp` index MUST stay — the retention cutoff query
+ *     (`ORDER BY timestamp DESC LIMIT 1 OFFSET <cap>`, no device filter) uses it
+ *     as a covering scan, and the composite cannot substitute because `device_id`
+ *     leads the composite.
+ *   - The standalone `device_id` index is now functionally redundant: the
+ *     composite's `device_id` left-prefix serves every `device_id=?` access path
+ *     (including `COUNT(*) WHERE device_id=?`). It is deliberately RETAINED here
+ *     to keep this migration purely additive; dropping the six redundant
+ *     `idx_<table>_device` indexes to cut per-insert write amplification is
+ *     deferred to a follow-up so the change is reviewed on its own (see #2788).
  */
 const TABLES = [
   "network_events",

@@ -116,6 +116,23 @@ describe("BunSqliteConnectionState — C4 nested-transaction guard", () => {
     // A distinct lease must still be able to open a transaction.
     await expect(withTimeout(state.beginTransaction(owner2), 1000)).resolves.toBeUndefined();
   });
+
+  test("the same lease can reopen a transaction after commit (guard only blocks re-entry)", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    // commit clears #transactionOwner, so a fresh begin on the SAME owner is
+    // NOT a nested re-entry and must be allowed (the guard is scoped to an
+    // already-held lock, not to owner identity).
+    await withTimeout(state.beginTransaction(owner), 1000);
+    await withTimeout(state.commitTransaction(owner), 1000);
+    await expect(withTimeout(state.beginTransaction(owner), 1000)).resolves.toBeUndefined();
+
+    // Same for rollback.
+    await withTimeout(state.rollbackTransaction(owner), 1000);
+    await expect(withTimeout(state.beginTransaction(owner), 1000)).resolves.toBeUndefined();
+  });
 });
 
 describe("BunSqliteConnectionState — C5 error wrapping", () => {

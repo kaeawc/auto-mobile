@@ -197,11 +197,14 @@ export class BunSqliteConnectionState {
         typeof value === "bigint" ? value.toString() : value
       );
       // Preserve the original SqliteError (code/stack) via `cause` so future
-      // BUSY/constraint-aware retries and describeUnknownError can reach it.
-      // ActionableError drops `cause`, so use a plain Error here. Keep the
-      // original error text inline too: callers (e.g. the startup-migration
-      // gate) match on that message, and the inline `${error}` is BigInt-safe
-      // (unlike JSON.stringify) because it goes through toString().
+      // BUSY/constraint-aware retries and describeUnknownError (which recurses
+      // into `.cause`) can reach it. ActionableError drops `cause`, so use a
+      // plain Error here. Keep the original error text inline too: the
+      // `#beforeQuery` migration gate above runs inside this try, so its
+      // "startup migrations failed" throw is caught and rewrapped here — and
+      // databaseLazyPath.test.ts asserts that text via `.message`. The inline
+      // `${error}` is BigInt-safe (unlike JSON.stringify) since it goes
+      // through toString().
       throw new Error(`Query failed: ${error}\nSQL: ${sql}\nParameters: ${params}`, {
         cause: error,
       });

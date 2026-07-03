@@ -16,6 +16,8 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 
 All Interactions tools — including `pinchOn`, which routes coordinate-based pinch/zoom through the runner's synthesized two-finger events — run on **Android** (physical devices and emulators) and **iOS** via the XCUITest CtrlProxy runner. iOS support is currently <kbd>📱 Simulator Only</kbd> (see the [iOS overview](../plat/ios/index.md)). `shake` is the one exception with no physical-iOS path even once physical support lands, because XCTest exposes no shake API for real devices — it returns an actionable error there.
 
+> **`pinchOn` `rotationDegrees` semantics.** `rotationDegrees` (default `0`) is how far the two-finger axis rotates *during* the pinch: the fingers start on the horizontal axis and finish on an axis rotated by `rotationDegrees`. A non-zero value therefore performs a combined **pinch + rotate**, not a pinch along a fixed rotated axis. The default `0` is a plain pinch/zoom and is unaffected. Both the Android and iOS runners deliberately share this convention so pinch results match across platforms — if you ever change it, change both runners together (see issue #2911). **Decision (#2911):** this start-horizontal / end-rotated behavior is intentional and documented rather than changed, to preserve existing cross-platform pinch results; revisit only if a concrete caller needs a pinch along a fixed rotated axis, and then only as a coordinated Android + iOS change.
+
 #### App Management
 
 - 📱 Installed apps are exposed via the `automobile:apps` resource with query filters.

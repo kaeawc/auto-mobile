@@ -142,6 +142,12 @@ BOOL ObjCExceptionCatcher_synthesizePinch(
         // and the target builds with -pedantic -Werror.
         CGFloat startRadius = (distanceStart > 1 ? distanceStart : 1) / 2.0;
         CGFloat endRadius = (distanceEnd > 1 ? distanceEnd : 1) / 2.0;
+        // rotationDegrees rotates the finger axis *during* the pinch, NOT the orientation of a
+        // fixed pinch axis: the fingers start on the horizontal axis (dyStart == 0) and move to an
+        // axis rotated by rotationDegrees. A non-zero value therefore produces a combined
+        // pinch+rotate; rotationDegrees == 0 (the common zoom case) keeps both axes horizontal.
+        // This matches the Android runner's computePinchPoints so cross-platform results agree.
+        // See issue #2911.
         CGFloat endRadians = rotationDegrees * (CGFloat)M_PI / 180.0;
         CGFloat dxStart = startRadius;
         CGFloat dyStart = 0;

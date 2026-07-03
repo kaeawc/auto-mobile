@@ -92,7 +92,9 @@ pinchOn with direction: "out"
 pinchOn with direction: "in"
 ```
 
-**With rotation:**
+**With rotation** — `rotationDegrees` is a *combined pinch + rotate*: the two-finger axis
+starts horizontal and ends rotated by this amount (not a pinch along a fixed rotated axis).
+Default is `0` (a plain pinch/zoom). Same convention on Android and iOS.
 ```
 pinchOn with direction: "out", rotationDegrees: 45
 ```

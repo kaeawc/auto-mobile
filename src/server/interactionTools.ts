@@ -230,7 +230,9 @@ export const pinchOnSchema = addDeviceTargetingToSchema(z.object({
   distanceEnd: z.number().optional().describe("Final finger distance (px, default: 100)"),
   scale: z.number().optional().describe("Scale factor (overrides distances)"),
   duration: z.number().optional().describe("Gesture duration (ms)"),
-  rotationDegrees: z.number().optional().describe("Rotation during pinch (degrees)"),
+  rotationDegrees: z.number().optional().describe(
+    "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS."
+  ),
   includeSystemInsets: z.boolean().optional().describe("Use full screen including status/nav bars"),
   container: elementContainerSchema.optional().describe(
     "Scope search to a container"

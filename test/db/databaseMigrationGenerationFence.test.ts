@@ -96,7 +96,7 @@ describe("closeDatabase fences stale in-flight migration completions (issue #289
    */
   async function makeSlowMigrationsDir(
     mode: "fail" | "succeed",
-    markers: { started: string; release: string; done: string }
+    markers: { started: string; release: string }
   ): Promise<string> {
     const dir = await makeTempDir(`auto-mobile-gen-fence-mig-${mode}-`);
     const throwLine =
@@ -112,7 +112,6 @@ export async function up() {
     if (existsSync(${JSON.stringify(markers.release)})) break;
     await new Promise(resolve => setTimeout(resolve, 2));
   }
-  await fsp.writeFile(${JSON.stringify(markers.done)}, "1");
   ${throwLine}
 }
 
@@ -155,11 +154,10 @@ export async function down(db) {
     throw new Error(`Timed out waiting for ${label} marker: ${marker}`);
   }
 
-  function markerPaths(root: string): { started: string; release: string; done: string } {
+  function markerPaths(root: string): { started: string; release: string } {
     return {
       started: path.join(root, "started"),
       release: path.join(root, "release"),
-      done: path.join(root, "done"),
     };
   }
 
@@ -189,6 +187,12 @@ export async function down(db) {
       db.getDatabase();
       await waitForMarker(markers.started, "generation-0 started");
 
+      // Capture gen-0's resolve-never-reject `.then` chain while it is blocked so
+      // we can deterministically await its completion later (the chain resolves
+      // only after its stale handler runs) instead of racing a fixed delay.
+      const staleCompletion = db.getMigrationsPromiseForTest() as Promise<void> | null;
+      expect(staleCompletion).not.toBeNull();
+
       // Close mid-flight: resets globals + bumps the generation. The detached
       // gen-0 chain is still blocked on the release marker.
       await db.closeDatabase();
@@ -205,11 +209,12 @@ export async function down(db) {
 
       // Release the stale gen-0 migration so it proceeds and THROWS.
       await writeFile(markers.release, "1");
-      await waitForMarker(markers.done, "generation-0 done");
 
-      // Let the detached gen-0 `.then(onRejected)` settle. Without the fence it
-      // would set migrationsError, corrupting the healthy generation 1.
-      await defaultTimer.sleep(60);
+      // Deterministically await the detached gen-0 chain: it resolves (never
+      // rejects) only after its `.then(onRejected)` handler has run. Without the
+      // fence that handler would set migrationsError, corrupting the healthy
+      // generation 1. Awaiting the promise removes any reliance on a fixed delay.
+      await staleCompletion;
 
       expect(db.getMigrationsError()).toBeNull();
 
@@ -246,6 +251,9 @@ export async function down(db) {
       db.getDatabase();
       await waitForMarker(markers.started, "generation-0 started");
 
+      const staleCompletion = db.getMigrationsPromiseForTest() as Promise<void> | null;
+      expect(staleCompletion).not.toBeNull();
+
       await db.closeDatabase();
 
       // Generation 1: reopen against a path that fails to open (a directory), so
@@ -262,12 +270,12 @@ export async function down(db) {
 
       // Release the stale gen-0 migration so it SUCCEEDS.
       await writeFile(markers.release, "1");
-      await waitForMarker(markers.done, "generation-0 done");
 
-      // Let the detached gen-0 `.then(onFulfilled)` settle. Without the fence it
-      // would set migrationsRun=true and clear migrationsError, wrongly reviving a
+      // Deterministically await the detached gen-0 chain (resolves only after its
+      // `.then(onFulfilled)` handler runs). Without the fence that handler would
+      // set migrationsRun=true and clear migrationsError, wrongly reviving a
       // generation whose boot actually failed.
-      await defaultTimer.sleep(60);
+      await staleCompletion;
 
       expect(db.getMigrationsError()).not.toBeNull();
       // The new generation is still query-dead — a stale success did not revive it.

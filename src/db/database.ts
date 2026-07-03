@@ -298,6 +298,19 @@ export function getMigrationsError(): Error | null {
 }
 
 /**
+ * Test-only handle on the in-flight migration promise (the resolve-never-reject
+ * `.then` chain built in {@link ensureMigrationsStarted}), or null when no run is
+ * in flight. Exposed so the generation-fence regression test can capture a
+ * generation's promise while it is blocked, then deterministically `await` its
+ * completion after a `closeDatabase()` + reopen — proving the settled stale
+ * handler no-ops instead of racing a fixed delay. Not part of the daemon
+ * contract; do not use in production paths (issue #2898).
+ */
+export function getMigrationsPromiseForTest(): Promise<void> | null {
+  return migrationsPromise;
+}
+
+/**
  * Close the database connection.
  * Call this during graceful shutdown.
  */

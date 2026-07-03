@@ -1,6 +1,6 @@
 ---
 name: check-ci
-description: Use this workflow skill for PR CI triage: inspect failing or pending checks, mergeability, and related review feedback, then reproduce likely failures locally and summarize next steps.
+description: "Use this workflow skill for PR CI triage: inspect failing or pending checks, mergeability, and related review feedback, then reproduce likely failures locally and summarize next steps."
 ---
 
 # Check CI

@@ -1,6 +1,6 @@
 ---
 name: test
-description: Use this workflow skill for running tests only: choose the narrowest relevant test command first and keep test runs fast and actionable; prefer validate when the user wants broader non-test checks too.
+description: "Use this workflow skill for running tests only: choose the narrowest relevant test command first and keep test runs fast and actionable; prefer validate when the user wants broader non-test checks too."
 ---
 
 # Run Tests

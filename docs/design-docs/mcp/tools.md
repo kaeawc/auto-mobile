@@ -12,7 +12,7 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 - 👉 `swipeOn` handles directional swipes and scrolling within container bounds. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd>
 - ↔️ `dragAndDrop` for element-to-element moves. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd>
 - 🔍 `pinchOn` for zoom in/out gestures. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd>
-- 📳 `shake` for accelerometer simulation. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd>
+- 📳 `shake` for accelerometer simulation. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd> <kbd>📱 Simulator Only</kbd> *(iOS: XCTest exposes no shake API for physical devices, so `shake` returns an actionable error there.)*
 
 #### App Management
 

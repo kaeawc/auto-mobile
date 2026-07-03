@@ -70,7 +70,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("successes", "integer", col => col.notNull())
     .addColumn("total_confidence", "real", col => col.notNull())
     .addColumn("brier_score_sum", "real", col => col.notNull())
-    .addColumn("updated_at", "text", col => col.notNull())
+    .addColumn("updated_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
     .addColumn("created_at", "text", col =>
       col.notNull().defaultTo(sql`(datetime('now'))`)
     )

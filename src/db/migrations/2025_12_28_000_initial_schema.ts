@@ -13,7 +13,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("created_at", "text", col =>
       col.notNull().defaultTo(sql`(datetime('now'))`)
     )
-    .addColumn("updated_at", "text", col => col.notNull())
+    .addColumn("updated_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create index on device_id for fast lookups

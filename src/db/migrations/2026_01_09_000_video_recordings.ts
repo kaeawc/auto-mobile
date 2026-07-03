@@ -55,7 +55,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .ifNotExists()
     .addColumn("key", "text", col => col.primaryKey())
     .addColumn("config_json", "text", col => col.notNull())
-    .addColumn("updated_at", "text", col => col.notNull())
+    .addColumn("updated_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
     .addColumn("created_at", "text", col =>
       col.notNull().defaultTo(sql`(datetime('now'))`)
     )

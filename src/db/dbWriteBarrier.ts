@@ -28,11 +28,17 @@ export interface DbWriteBarrier {
   /**
    * Flip the draining flag so subsequent {@link track} calls short-circuit.
    * The flag latches for the instance's lifetime; a fresh cold start comes from
-   * a new barrier. `closeDatabase()` clears the shared barrier via
+   * a new barrier. `closeDatabase()` clears the *shared* barrier via
    * {@link resetDbWriteBarrier} on every DB close, so a same-process reopen —
-   * whether a real shutdown drain-then-reopen or a test restart — always sees a
-   * fresh, non-draining barrier (issue #2896). Injected instances are reset by
-   * their owner.
+   * whether a real shutdown drain-then-reopen or a test restart — resolves a
+   * fresh, non-draining barrier from {@link getDbWriteBarrier} (issue #2896).
+   *
+   * This only covers consumers that resolve `getDbWriteBarrier()` at use-time.
+   * Consumers that capture a barrier once at construction (TelemetryRecorder,
+   * FailureAnalyticsRepository, SessionManager — all injected) keep their
+   * pinned instance across the null-swap, so a future in-process reopen path
+   * MUST reconstruct them (or the barrier lifecycle must move to in-place
+   * reset). Inert today: no in-process reopen path exists — see #2912.
    */
   beginDrain(): void;
 
@@ -132,6 +138,12 @@ export function getDbWriteBarrier(): DbWriteBarrier {
  * same-process DB reopen cold-starts the barrier (issue #2896) — its draining
  * flag would otherwise latch for the process lifetime after a shutdown drain —
  * and by tests for isolation.
+ *
+ * Identity swap, not in-place reset: callers holding a captured reference keep
+ * the old instance (see {@link beginDrain}). That is intentional for today's
+ * only caller — the daemon closes then exits, so leaving captured barriers
+ * draining keeps a late best-effort write safely short-circuited instead of
+ * hitting the just-destroyed connection.
  */
 export function resetDbWriteBarrier(): void {
   sharedBarrier = null;

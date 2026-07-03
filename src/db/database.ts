@@ -310,9 +310,13 @@ export async function closeDatabase(): Promise<void> {
   // would otherwise leave the shared barrier permanently draining. Any future
   // in-process reopen (config reload / DB path switch / restart-without-exit)
   // would then silently skip every tracked best-effort write against the
-  // reopened DB. Resetting here makes the "reopen behaves like a cold start"
-  // contract fully true instead of carrying a barrier-shaped exception. Inert
-  // in the daemon, where the only caller is shutdown-then-`process.exit`.
+  // reopened DB. Resetting here extends the "reopen behaves like a cold start"
+  // contract to the write barrier for consumers that resolve
+  // `getDbWriteBarrier()` at use-time; construction-captured consumers keep
+  // their pinned barrier and remain the documented reopen exception (#2912).
+  // Inert in the daemon, where the only caller is
+  // shutdown-then-`process.exit`. If the migration/path resets above are ever
+  // consolidated into a single reset(), this must move with them.
   resetDbWriteBarrier();
 }
 

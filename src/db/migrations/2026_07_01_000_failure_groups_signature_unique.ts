@@ -79,10 +79,21 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 
     // 3. Back-fill the keeper's aggregates (only for signatures that actually
     //    had duplicates). total_count is the SUM of the historical counts so we
-    //    do not lose increments that predate retention pruning; unique_sessions
-    //    is DERIVED from the now-repointed occurrences via COUNT(DISTINCT), the
+    //    do not lose increments that predate retention pruning; last_occurrence
+    //    is the MAX so a collapsed group is not sorted stale on the dashboard
+    //    (getFailureGroups orders by last_occurrence); unique_sessions is
+    //    DERIVED from the now-repointed occurrences via COUNT(DISTINCT), the
     //    same definition recordFailure uses post-fix (summing would double-count
     //    a session present in two duplicate groups).
+    //
+    //    Note: single-group signatures whose stored counts drifted from the
+    //    lost-increment path (issue scenario #2, which does NOT create a second
+    //    row) are intentionally left untouched. total_count deliberately
+    //    preserves increments that predate retention pruning, so a blanket
+    //    recompute of COUNT(*) from surviving occurrences would DESTROY
+    //    legitimately-retained historical counts — the two cases are
+    //    indistinguishable after the fact, so we heal only where a duplicate row
+    //    already forces a merge.
     await sql`
       UPDATE failure_groups
       SET

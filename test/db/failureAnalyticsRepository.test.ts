@@ -465,37 +465,33 @@ describe("FailureAnalyticsRepository", () => {
       }
     });
 
-    test("preserves tool-call-info merge across concurrent tool_failure occurrences", async () => {
+    function toolFailureInput(i: number): RecordFailureInput {
+      return makeFailureInput({
+        type: "tool_failure",
+        signature: "tapOn::element_not_found",
+        toolCallInfo: {
+          toolName: "tapOn",
+          errorCodes: { ELEMENT_NOT_FOUND: 1 },
+          parameterVariants: { selector: [`btn-${i}`] },
+          durationStats: { minMs: 10, maxMs: 10, avgMs: 10, medianMs: 10, p95Ms: 10 },
+        },
+        occurrence: {
+          deviceModel: "Pixel 7",
+          os: "Android 14",
+          appVersion: "1.0.0",
+          sessionId: `session-${i}`,
+          errorCode: "ELEMENT_NOT_FOUND",
+        },
+      });
+    }
+
+    // N == 10 keeps every distinct selector inside mergeToolCallInfo's 10-variant
+    // cap, so a lossless merge yields exactly 10 selectors and an error count of 10.
+    test("merges tool-call-info losslessly across SERIAL tool_failure occurrences", async () => {
       const N = 10;
-      await Promise.all(
-        Array.from({ length: N }, (_unused, i) =>
-          repo.recordFailure(
-            makeFailureInput({
-              type: "tool_failure",
-              signature: "tapOn::element_not_found",
-              toolCallInfo: {
-                toolName: "tapOn",
-                errorCodes: { ELEMENT_NOT_FOUND: 1 },
-                parameterVariants: { selector: [`btn-${i}`] },
-                durationStats: {
-                  minMs: 10,
-                  maxMs: 10,
-                  avgMs: 10,
-                  medianMs: 10,
-                  p95Ms: 10,
-                },
-              },
-              occurrence: {
-                deviceModel: "Pixel 7",
-                os: "Android 14",
-                appVersion: "1.0.0",
-                sessionId: `session-${i}`,
-                errorCode: "ELEMENT_NOT_FOUND",
-              },
-            })
-          )
-        )
-      );
+      for (let i = 0; i < N; i++) {
+        await repo.recordFailure(toolFailureInput(i));
+      }
 
       const groups = await db.selectFrom("failure_groups").selectAll().execute();
       expect(groups).toHaveLength(1);
@@ -503,11 +499,26 @@ describe("FailureAnalyticsRepository", () => {
 
       const toolInfo = JSON.parse(groups[0].tool_call_info_json ?? "{}");
       expect(toolInfo.toolName).toBe("tapOn");
-      // Every occurrence contributed an ELEMENT_NOT_FOUND error code.
-      expect(toolInfo.errorCodes.ELEMENT_NOT_FOUND).toBeGreaterThanOrEqual(1);
-      // Parameter variants accumulate distinct selectors (capped at 10).
-      expect(Array.isArray(toolInfo.parameterVariants.selector)).toBe(true);
-      expect(toolInfo.parameterVariants.selector.length).toBeGreaterThan(0);
+      expect(toolInfo.errorCodes.ELEMENT_NOT_FOUND).toBe(N);
+      expect(new Set(toolInfo.parameterVariants.selector).size).toBe(N);
+    });
+
+    // The merge is a read-modify-write; the transaction in recordFailure must
+    // serialize concurrent merges so none clobber another's contribution. A
+    // lossy RMW here would drop selectors/error counts below N.
+    test("merges tool-call-info losslessly across CONCURRENT tool_failure occurrences", async () => {
+      const N = 10;
+      await Promise.all(Array.from({ length: N }, (_unused, i) => repo.recordFailure(toolFailureInput(i))));
+
+      const groups = await db.selectFrom("failure_groups").selectAll().execute();
+      expect(groups).toHaveLength(1);
+      expect(groups[0].total_count).toBe(N);
+
+      const toolInfo = JSON.parse(groups[0].tool_call_info_json ?? "{}");
+      expect(toolInfo.toolName).toBe("tapOn");
+      // Lossless: every occurrence's ELEMENT_NOT_FOUND and distinct selector survived.
+      expect(toolInfo.errorCodes.ELEMENT_NOT_FOUND).toBe(N);
+      expect(new Set(toolInfo.parameterVariants.selector).size).toBe(N);
     });
   });
 });

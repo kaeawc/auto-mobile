@@ -197,42 +197,55 @@ export class FailureAnalyticsRepository {
       // evaluated inside SQLite in one statement, so interleaved recordFailure
       // calls both write the same correct value — idempotent, not racy. Backed
       // by idx_failure_occurrences_group_session so it does not scan the group.
-      await db
-        .updateTable("failure_groups")
-        .set({
-          unique_sessions: sql<number>`(
-            SELECT COUNT(DISTINCT session_id)
-            FROM failure_occurrences
-            WHERE group_id = ${groupId}
-          )`,
-        })
-        .where("id", "=", groupId)
-        .execute();
-
-      // Preserve tool-call-info aggregation. On the first-seen path the upsert
-      // already stored this occurrence's info; on the conflict path we fold the
-      // new contribution into the existing aggregate via a follow-up update.
-      if (input.type === "tool_failure" && !isNewGroup) {
-        const current = await db
-          .selectFrom("failure_groups")
-          .select("tool_call_info_json")
-          .where("id", "=", groupId)
-          .executeTakeFirst();
-
-        let mergedToolCallInfo = input.toolCallInfo;
-        if (current?.tool_call_info_json) {
-          const existing = JSON.parse(current.tool_call_info_json) as AggregatedToolCallInfo;
-          mergedToolCallInfo = this.mergeToolCallInfo(existing, input.toolCallInfo, input.occurrence);
-        }
-
+      // Skip it on the first-seen path: the INSERT already set unique_sessions=1
+      // and this call's occurrence is the only one, so the recompute is a no-op
+      // there. A concurrent same-signature call conflicts (isNewGroup=false) and
+      // runs its own recompute, which observes every committed occurrence.
+      if (!isNewGroup) {
         await db
           .updateTable("failure_groups")
           .set({
-            tool_call_info_json: mergedToolCallInfo ? JSON.stringify(mergedToolCallInfo) : null,
-            updated_at: new Date().toISOString(),
+            unique_sessions: sql<number>`(
+              SELECT COUNT(DISTINCT session_id)
+              FROM failure_occurrences
+              WHERE group_id = ${groupId}
+            )`,
           })
           .where("id", "=", groupId)
           .execute();
+      }
+
+      // Preserve tool-call-info aggregation. On the first-seen path the upsert
+      // already stored this occurrence's info; on the conflict path we fold the
+      // new contribution into the existing aggregate. The merge is an inherent
+      // read-modify-write (JSON merged in JS), so wrap it in a transaction: the
+      // single-connection dialect reserves the connection for the transaction
+      // owner (bunSqliteDialect.ts #reserveTransaction), serializing concurrent
+      // tool_failure merges so none clobber another's contribution. (The full
+      // recordFailure transaction is tracked separately in #2791.)
+      if (input.type === "tool_failure" && !isNewGroup) {
+        await db.transaction().execute(async trx => {
+          const current = await trx
+            .selectFrom("failure_groups")
+            .select("tool_call_info_json")
+            .where("id", "=", groupId)
+            .executeTakeFirst();
+
+          let mergedToolCallInfo = input.toolCallInfo;
+          if (current?.tool_call_info_json) {
+            const existing = JSON.parse(current.tool_call_info_json) as AggregatedToolCallInfo;
+            mergedToolCallInfo = this.mergeToolCallInfo(existing, input.toolCallInfo, input.occurrence);
+          }
+
+          await trx
+            .updateTable("failure_groups")
+            .set({
+              tool_call_info_json: mergedToolCallInfo ? JSON.stringify(mergedToolCallInfo) : null,
+              updated_at: new Date().toISOString(),
+            })
+            .where("id", "=", groupId)
+            .execute();
+        });
       }
 
       // Insert screens visited

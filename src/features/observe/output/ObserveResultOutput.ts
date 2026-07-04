@@ -308,8 +308,17 @@ export const DIFF_SCALAR_FIELDS: readonly string[] = [
   "error",
 ];
 
-/** A flattened node used for keyed multiset diffing. */
+/** A flattened node used for keyed positional diffing. */
 interface FlatObserveNode {
+  /**
+   * Globally-positional match key: the chain of every ancestor's local key plus
+   * this node's own (depth-joined). Two nodes in *different* subtrees that share
+   * a local key — same resource-id/bounds/text/sibling index, common for
+   * repeated list cells — get distinct path keys, so they never collide and
+   * mis-pair. Used for matching, never emitted.
+   */
+  pathKey: string;
+  /** This node's own local key (resource-id + bounds + text + sibling index), for display. */
   key: string;
   attributes: Record<string, unknown>;
 }
@@ -331,16 +340,25 @@ function boundsKey(bounds: unknown): string {
 }
 
 /**
- * Synthetic identity key for a node: `resource-id + bounds + text + sibling
- * index`, NUL-joined so the parts can never run together. Nodes carry no stable
- * id, so this coarse key pins position + geometry + text; state-only changes
- * (e.g. `checked`) keep the same key and surface as `changed`.
+ * A node's *local* identity key: `resource-id + bounds + text + sibling index`,
+ * NUL-joined so the parts can never run together. Nodes carry no stable id, so
+ * this coarse key pins geometry + text + local position; state-only changes
+ * (e.g. `checked`) keep the same key and surface as `changed`. On its own it is
+ * not globally unique — `FlatObserveNode.pathKey` prefixes the ancestor chain to
+ * disambiguate identical cells living in different subtrees.
  */
 function nodeKey(node: Record<string, unknown>, siblingIndex: number): string {
   const resourceId = node["resource-id"] ?? "";
   const text = node["text"] ?? "";
   return [resourceId, boundsKey(node["bounds"]), text, siblingIndex].join(" ");
 }
+
+/**
+ * Depth separator joining ancestor local keys into a positional `pathKey`. A
+ * distinct control char (U+0001) from the intra-key NUL (U+0000) so the two
+ * levels of joining can never be confused.
+ */
+const PATH_KEY_SEP = "";
 
 /** A node's own attributes, excluding the `node` child array (diffed separately). */
 function nodeAttributes(node: Record<string, unknown>): Record<string, unknown> {
@@ -354,27 +372,52 @@ function nodeAttributes(node: Record<string, unknown>): Record<string, unknown> 
   return attrs;
 }
 
-/** Pre-order flatten of an observation's hierarchy into keyed nodes. */
+/**
+ * Pre-order flatten of an observation's hierarchy into positionally-keyed nodes.
+ * Each node's `pathKey` is its ancestor chain of local keys plus its own, so the
+ * key is globally unique by position and identical cells in sibling subtrees do
+ * not collide.
+ */
 function flattenForDiff(obs: ObserveResult): FlatObserveNode[] {
   const out: FlatObserveNode[] = [];
-  const walk = (node: ViewHierarchyNode | undefined, siblingIndex: number): void => {
+  const walk = (node: ViewHierarchyNode | undefined, siblingIndex: number, parentPath: string): void => {
     if (!node || typeof node !== "object") {
       return;
     }
     const rec = node as unknown as Record<string, unknown>;
-    out.push({ key: nodeKey(rec, siblingIndex), attributes: nodeAttributes(rec) });
-    toNodeArray(node.node).forEach((child, index) => walk(child, index));
+    const localKey = nodeKey(rec, siblingIndex);
+    const pathKey = parentPath === "" ? localKey : `${parentPath}${PATH_KEY_SEP}${localKey}`;
+    out.push({ pathKey, key: localKey, attributes: nodeAttributes(rec) });
+    toNodeArray(node.node).forEach((child, index) => walk(child, index, pathKey));
   };
-  toNodeArray(obs.viewHierarchy?.hierarchy?.node).forEach((root, index) => walk(root, index));
+  toNodeArray(obs.viewHierarchy?.hierarchy?.node).forEach((root, index) => walk(root, index, ""));
   return out;
 }
 
-/** Structural equality via canonical JSON (attribute values are plain data). */
+/**
+ * JSON with object keys sorted recursively, so two structurally-equal objects
+ * built with different key insertion order compare equal (avoids phantom
+ * `changed` entries from a differently-ordered attribute object).
+ */
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+        sorted[k] = (v as Record<string, unknown>)[k];
+      }
+      return sorted;
+    }
+    return v;
+  });
+}
+
+/** Structural equality via key-order-insensitive JSON (attributes are plain data). */
 function valuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) {
     return true;
   }
-  return JSON.stringify(a) === JSON.stringify(b);
+  return stableStringify(a) === stableStringify(b);
 }
 
 /** Per-attribute diff of two attribute maps (union of keys). */
@@ -384,22 +427,27 @@ function diffAttributes(
 ): Record<string, { from?: unknown; to?: unknown }> {
   const changes: Record<string, { from?: unknown; to?: unknown }> = {};
   for (const key of new Set([...Object.keys(from), ...Object.keys(to)])) {
-    if (!valuesEqual(from[key], to[key])) {
+    // `bounds` is compared through `boundsKey` so an object-shaped baseline and a
+    // compacted tuple next (identical geometry) are not a spurious change.
+    const equal = key === "bounds"
+      ? boundsKey(from[key]) === boundsKey(to[key])
+      : valuesEqual(from[key], to[key]);
+    if (!equal) {
       changes[key] = { from: from[key], to: to[key] };
     }
   }
   return changes;
 }
 
-/** Group flattened nodes by key, preserving encounter order for pairing. */
+/** Group flattened nodes by their positional `pathKey`, preserving encounter order. */
 function groupByKey(nodes: FlatObserveNode[]): Map<string, FlatObserveNode[]> {
   const map = new Map<string, FlatObserveNode[]>();
   for (const node of nodes) {
-    const bucket = map.get(node.key);
+    const bucket = map.get(node.pathKey);
     if (bucket) {
       bucket.push(node);
     } else {
-      map.set(node.key, [node]);
+      map.set(node.pathKey, [node]);
     }
   }
   return map;
@@ -426,10 +474,13 @@ export function isSameObservationScreen(baseline: ObserveResult, next: ObserveRe
 
 /**
  * Diff `next` against `baseline` into a compact {added, removed, changed, fields}
- * shape. Pure — neither input is mutated. Node identity is the synthetic
- * `nodeKey`; nodes are matched as a multiset (same key paired in encounter
- * order) so duplicate rows diff by count. Callers are expected to gate on
- * `isSameObservationScreen` first.
+ * shape. Pure — neither input is mutated. Node identity is the positional
+ * `pathKey` (ancestor chain + local `nodeKey`), so a node keeps its identity
+ * across state-only changes but a same-key cell in a different subtree never
+ * collides. Any residual same-path duplicates (truly identical siblings) are
+ * paired positionally in encounter order — a best-effort heuristic, since with
+ * no stable ids interchangeable rows cannot be told apart. The emitted `key` is
+ * the node's readable local key. Callers gate on `isSameObservationScreen` first.
  */
 export function diffObserveResult(
   baseline: ObserveResult,
@@ -443,21 +494,21 @@ export function diffObserveResult(
   const removed: ObserveDiffNode[] = [];
   const changed: ObserveDiffNodeChange[] = [];
 
-  for (const key of new Set([...baseByKey.keys(), ...nextByKey.keys()])) {
-    const baseNodes = baseByKey.get(key) ?? [];
-    const nextNodes = nextByKey.get(key) ?? [];
+  for (const pathKey of new Set([...baseByKey.keys(), ...nextByKey.keys()])) {
+    const baseNodes = baseByKey.get(pathKey) ?? [];
+    const nextNodes = nextByKey.get(pathKey) ?? [];
     const paired = Math.min(baseNodes.length, nextNodes.length);
     for (let i = 0; i < paired; i++) {
       const attrChanges = diffAttributes(baseNodes[i].attributes, nextNodes[i].attributes);
       if (Object.keys(attrChanges).length > 0) {
-        changed.push({ key, changes: attrChanges });
+        changed.push({ key: nextNodes[i].key, changes: attrChanges });
       }
     }
     for (let i = paired; i < nextNodes.length; i++) {
-      added.push({ key, attributes: nextNodes[i].attributes });
+      added.push({ key: nextNodes[i].key, attributes: nextNodes[i].attributes });
     }
     for (let i = paired; i < baseNodes.length; i++) {
-      removed.push({ key, attributes: baseNodes[i].attributes });
+      removed.push({ key: baseNodes[i].key, attributes: baseNodes[i].attributes });
     }
   }
 

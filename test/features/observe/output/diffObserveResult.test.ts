@@ -3,8 +3,13 @@ import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import {
   diffObserveResult,
   isSameObservationScreen,
+  sanitizeObserveResult,
   DIFF_SCALAR_FIELDS,
 } from "../../../../src/features/observe/output/ObserveResultOutput";
+import {
+  loadAndroidHomeObserve,
+  measureValue,
+} from "../../../fixtures/observe/observeFixture";
 
 /**
  * Unit tests for `diffObserveResult` / `isSameObservationScreen` (issue #2761).
@@ -168,6 +173,110 @@ describe("diffObserveResult", () => {
     const start = performance.now();
     diffObserveResult(baseline, next);
     expect(performance.now() - start).toBeLessThan(100);
+  });
+
+  test("identical cells in different subtrees do not collide (ancestry path key)", () => {
+    // The synthetic local key (resource-id+bounds+text+index) is identical for
+    // both `cell`s — a same-key collision across subtrees. Without ancestry in
+    // the key, removing P's cell would mis-pair against Q's and report a phantom
+    // `checked false→true` toggle plus remove the wrong cell (PR #3034 review).
+    const cell = (checked: string) => ({
+      "resource-id": "cell",
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+      "text": "",
+      checked,
+    });
+    const baseline = obs({
+      "resource-id": "list",
+      "bounds": { left: 0, top: 0, right: 10, bottom: 100 },
+      "node": [
+        { "resource-id": "P", "bounds": { left: 0, top: 0, right: 10, bottom: 50 }, "node": [cell("false")] },
+        { "resource-id": "Q", "bounds": { left: 0, top: 50, right: 10, bottom: 100 }, "node": [cell("true")] },
+      ],
+    });
+    const next = obs({
+      "resource-id": "list",
+      "bounds": { left: 0, top: 0, right: 10, bottom: 100 },
+      "node": [{ "resource-id": "Q", "bounds": { left: 0, top: 50, right: 10, bottom: 100 }, "node": [cell("true")] }],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    // No phantom toggle: P's cell (checked=false) is genuinely gone, so it shows
+    // up as a removal — not a false→true change on a surviving cell.
+    expect(diff.changed).toEqual([]);
+    expect(diff.removed.some(n => n.attributes.checked === "false")).toBe(true);
+  });
+
+  test("object-shaped baseline vs compacted-tuple next with identical geometry is not a change", () => {
+    // boundsKey normalizes both shapes for the key AND the attribute compare, so
+    // a stream that toggled --observe-result-compact between captures still diffs
+    // clean instead of reporting every node's bounds as changed.
+    const baseline = obs({ "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "same" });
+    const next = obs({ "resource-id": "a", "bounds": [0, 0, 10, 10] as any, "text": "same" });
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toEqual([]);
+  });
+
+  test("on a real observation, a one-node change diffs far smaller than the full observation", () => {
+    // The whole point of the flag: the diff of a same-screen action is a tiny
+    // fraction of re-embedding the full (~50KB) observation.
+    const { observe } = loadAndroidHomeObserve();
+    const baseline = sanitizeObserveResult(observe, { dropElements: false });
+    const next = JSON.parse(JSON.stringify(baseline)) as ObserveResult;
+    const roots = Array.isArray(next.viewHierarchy?.hierarchy?.node)
+      ? (next.viewHierarchy!.hierarchy.node as any[])
+      : [next.viewHierarchy!.hierarchy.node];
+    (roots[0] as any).selected = "true"; // toggle one attribute on one node
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed.length + diff.added.length + diff.removed.length).toBeGreaterThan(0);
+    expect(measureValue(diff).bytes).toBeLessThan(measureValue(baseline).bytes * 0.1);
+  });
+
+  test("empty/absent viewHierarchy on either side yields an empty diff without throwing", () => {
+    const empty = { updatedAt: 1, screenSize: { width: 1, height: 1 }, systemInsets: { top: 0, bottom: 0, left: 0, right: 0 } } as ObserveResult;
+    const withNode = obs({ "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } });
+    expect(diffObserveResult(empty, empty)).toEqual({ isDiff: true, added: [], removed: [], changed: [] });
+    // absent → present is a pure addition; present → absent a pure removal.
+    expect(diffObserveResult(empty, withNode).added).toHaveLength(1);
+    expect(diffObserveResult(withNode, empty).removed).toHaveLength(1);
+  });
+
+  test("diffs an array-shaped root (multiple roots)", () => {
+    const baseline = {
+      updatedAt: 1, screenSize: { width: 1, height: 1 }, systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+      viewHierarchy: { packageName: "com.example", hierarchy: { node: [
+        { "resource-id": "r0", "bounds": { left: 0, top: 0, right: 5, bottom: 5 } },
+        { "resource-id": "r1", "bounds": { left: 5, top: 5, right: 10, bottom: 10 }, "text": "old" },
+      ] as any } },
+    } as ObserveResult;
+    const next = JSON.parse(JSON.stringify(baseline)) as ObserveResult;
+    (next.viewHierarchy!.hierarchy.node as any)[0].selected = "true";
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.selected).toEqual({ from: undefined, to: "true" });
+  });
+
+  test("a removed parent lists every descendant as removed", () => {
+    const baseline = obs({
+      "resource-id": "root",
+      "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+      "node": [{
+        "resource-id": "parent",
+        "bounds": { left: 0, top: 0, right: 50, bottom: 50 },
+        "node": [
+          { "resource-id": "c1", "bounds": { left: 1, top: 1, right: 2, bottom: 2 }, "text": "one" },
+          { "resource-id": "c2", "bounds": { left: 3, top: 3, right: 4, bottom: 4 }, "text": "two" },
+        ],
+      }],
+    });
+    const next = obs({ "resource-id": "root", "bounds": { left: 0, top: 0, right: 100, bottom: 100 } });
+    const diff = diffObserveResult(baseline, next);
+    const removedRids = diff.removed.map(n => n.attributes["resource-id"]).sort();
+    expect(removedRids).toEqual(["c1", "c2", "parent"]);
   });
 });
 

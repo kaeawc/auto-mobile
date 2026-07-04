@@ -1,6 +1,7 @@
 import type { Kysely } from "kysely";
 import type { Database } from "./types";
 import { getDatabase } from "./database";
+import { logger } from "../utils/logger";
 
 export interface RecordStorageEventInput {
   deviceId: string | null;
@@ -28,9 +29,21 @@ export async function recordStorageEvent(
 ): Promise<void> {
   const d = getDb(db);
 
-  // Look up the previous value for this key if not already provided
+  // Look up the previous value for this key only when the caller did not supply
+  // one. `!== undefined` (not `?? null`) is deliberate: a caller that passes an
+  // explicit `previousValue: null` is asserting "there is no prior value" and
+  // must NOT trigger the lookup — otherwise a stale older row would silently
+  // override that intent. Omitting the field (undefined) is the only auto-lookup
+  // trigger.
+  //
+  // The lookup predicate (device_id=? AND file_name=? AND key=? ORDER BY
+  // timestamp DESC LIMIT 1) is served by idx_storage_events_key_lookup as a
+  // prefix seek (#2798). `file_name` is a non-null column on both the table and
+  // RecordStorageEventInput, so it never binds NULL here (a NULL bind would make
+  // `file_name = ?` match nothing regardless of the index).
   let previousValue: string | null = input.previousValue ?? null;
-  if (previousValue === null && input.key !== null && input.deviceId !== null) {
+  const previousValueSupplied = input.previousValue !== undefined;
+  if (!previousValueSupplied && input.key !== null && input.deviceId !== null) {
     try {
       const q = d
         .selectFrom("storage_events")
@@ -44,8 +57,10 @@ export async function recordStorageEvent(
       if (prev) {
         previousValue = prev.value;
       }
-    } catch {
-      // best-effort lookup
+    } catch (error) {
+      // Best-effort lookup: a failure here must not block the insert, but log so
+      // it leaves a trace (CLAUDE.md error-handling convention — no bare swallow).
+      logger.warn(`storage_events previous-value lookup failed: ${error}`, error);
     }
   }
 
@@ -124,8 +139,11 @@ async function cleanupIfNeeded(db?: Kysely<Database>): Promise<void> {
           .execute();
       }
     }
-  } catch {
-    // best-effort cleanup
+  } catch (error) {
+    // Best-effort retention cleanup: a failure must not surface to the telemetry
+    // write path, but log so it leaves a trace (CLAUDE.md error-handling
+    // convention — no bare swallow).
+    logger.warn(`storage_events retention cleanup failed: ${error}`, error);
   } finally {
     cleanupInProgress = false;
   }

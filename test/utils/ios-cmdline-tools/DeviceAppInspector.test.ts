@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { DeviceAppInspector, findProcessIdentifier, findRunningProcessPid, isDevicectlProcessGoneError, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppInspector";
+import { isProcessAlreadyGoneError } from "../../../src/utils/ios-cmdline-tools/iosProcessErrors";
 import { hashAppBundle } from "../../../src/utils/ios-cmdline-tools/AppBundleHasher";
 import { FakeHostControlDeviceAppInspector } from "../../fakes/FakeHostControlDeviceAppInspector";
 
@@ -1059,5 +1060,16 @@ describe("isDevicectlProcessGoneError", () => {
     // "not running" must NOT be swallowed as an already-exited PID.
     expect(isDevicectlProcessGoneError("The device is not running.")).toBe(false);
     expect(isDevicectlProcessGoneError("CoreDevice tunnel is not running")).toBe(false);
+  });
+
+  // Drift guard (issue #3076): devicectl must stay a *superset* of the shared
+  // matcher. If someone drops the `isProcessAlreadyGoneError(...)` delegation,
+  // a shared phrasing that isn't a devicectl-only extra would stop matching and
+  // this fails.
+  test("subsumes every shared already-gone phrasing", () => {
+    for (const shared of ["no such process", "found nothing to terminate", "the process is not running"]) {
+      expect(isProcessAlreadyGoneError(shared)).toBe(true);
+      expect(isDevicectlProcessGoneError(shared)).toBe(true);
+    }
   });
 });

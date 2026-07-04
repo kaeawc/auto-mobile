@@ -523,7 +523,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
       // Persist the counter writes atomically: updateNodeVisit + coverage recordNodeVisit +
       // touchApp span two repos on the shared connection. Enlist both onto one `trx` via
-      // withExecutor so a mid-sequence throw (e.g. the coverage upsert) rolls back the node-visit
+      // withExecutor so a mid-sequence throw (e.g. the coverage recordNodeVisit) rolls back the node-visit
       // increment too, instead of leaving the graph partially applied. Assert the shared-connection
       // precondition first (the coverage repo is enlisted onto the navigation `trx`). In-memory
       // field updates and notifyGraphUpdated stay OUTSIDE so they never run on rollback and the

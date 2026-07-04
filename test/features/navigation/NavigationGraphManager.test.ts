@@ -1211,6 +1211,38 @@ class ThrowingNodeVisitCoverageRepo extends TestCoverageRepository {
   }
 }
 
+/**
+ * A NavigationRepository whose promoteSuggestion creates the fingerprint (a real
+ * write) and then throws, simulating the suggestion-link UPDATE failing AFTER the
+ * node + fingerprint already exist — the exact "orphaned node/fingerprint" partial
+ * write #2968 describes. Overrides withExecutor so the throw survives the manager
+ * rebinding the repo onto the transaction executor. Returns Promise<never> (only
+ * ever throws), which is assignable to the base method's return type.
+ */
+class ThrowingLinkPromoteRepo extends NavigationRepository {
+  constructor(
+    private readonly appId: string,
+    db?: Kysely<Database>
+  ) {
+    super(db);
+  }
+
+  override withExecutor(executor: Kysely<Database>): NavigationRepository {
+    return new ThrowingLinkPromoteRepo(this.appId, executor);
+  }
+
+  override async promoteSuggestion(
+    _suggestionId: number,
+    nodeId: number,
+    timestamp: number
+  ): Promise<never> {
+    // Create the fingerprint first (a real write on the transaction), then throw as
+    // if the suggestion-link UPDATE failed.
+    await this.getOrCreateFingerprint(this.appId, nodeId, "fp_orphan", "{}", timestamp);
+    throw new Error("injected suggestion-link failure");
+  }
+}
+
 describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () => {
   const APP_ID = "com.test.promo";
 
@@ -1305,7 +1337,50 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
     expect(await countNodes()).toBe(nodesBefore);
     expect(await countFingerprints()).toBe(fingerprintsBefore);
   });
+
+  test("rolls back BOTH the node and the fingerprint when the link fails after the fingerprint is created", async () => {
+    // The link failure happens AFTER getOrCreateNode + getOrCreateFingerprint both
+    // wrote — the exact orphaned node/fingerprint partial write #2968 calls out.
+    const navRepo = new ThrowingLinkPromoteRepo(APP_ID, db);
+    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+
+    await expect(
+      manager.promoteSuggestion(42, "OrphanScreen")
+    ).rejects.toThrow(/injected suggestion-link failure/);
+
+    // Both writes rolled back together — no orphan node, no orphan fingerprint.
+    expect(await countNodes("OrphanScreen")).toBe(0);
+    expect(await countFingerprints()).toBe(0);
+  });
 });
+
+/**
+ * A NavigationRepository that throws on touchApp only once a shared control flag is
+ * flipped, so setup writes (which also touchApp) succeed and only the write under
+ * test fails. The control object is threaded through withExecutor so the flag
+ * survives the manager rebinding the repo onto the transaction executor.
+ */
+class ConditionalTouchAppRepo extends NavigationRepository {
+  constructor(
+    private readonly control: { throwOnTouch: boolean },
+    db?: Kysely<Database>
+  ) {
+    super(db);
+  }
+
+  override withExecutor(executor: Kysely<Database>): NavigationRepository {
+    return new ConditionalTouchAppRepo(this.control, executor);
+  }
+
+  override async touchApp(appId: string): Promise<void> {
+    if (this.control.throwOnTouch) {
+      throw new Error("injected touchApp failure");
+    }
+    return super.touchApp(appId);
+  }
+}
 
 describe("NavigationGraphManager - recordHierarchyNavigation Case-1 transaction (#2968)", () => {
   const APP_ID = "com.test.hiernav";
@@ -1428,5 +1503,34 @@ describe("NavigationGraphManager - recordHierarchyNavigation Case-1 transaction 
     // post-commit assignment to "Home" never runs), and no notify fires.
     expect(manager.getCurrentScreen()).toBe("Other");
     expect(notifyCount).toBe(0);
+  });
+
+  test("rolls back updateNodeVisit with NO active session when touchApp throws", async () => {
+    // Case 1 with no test session still wraps two nav-repo writes (updateNodeVisit +
+    // touchApp). Prove that pair is atomic: touchApp throws → the visit increment
+    // rolls back. The control flag lets setup writes (which also touchApp) succeed.
+    const control = { throwOnTouch: false };
+    const navRepo = new ConditionalTouchAppRepo(control, db);
+    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+    await seedCorrelatedNode(manager); // no startTestSession → activeTestSession stays null
+
+    const visitsBefore = await nodeVisitCount("Home");
+    control.throwOnTouch = true;
+
+    await expect(
+      manager.recordHierarchyNavigation({
+        fromFingerprint: null,
+        toFingerprint: "fp_home",
+        timestamp: 8000, // Case 1 (existing-node match)
+        packageName: APP_ID,
+      })
+    ).rejects.toThrow(/injected touchApp failure/);
+
+    // updateNodeVisit ran first inside the transaction; touchApp's throw rolls it back.
+    expect(await nodeVisitCount("Home")).toBe(visitsBefore);
+    // currentScreen unchanged — post-commit assignment never runs.
+    expect(manager.getCurrentScreen()).toBe("Other");
   });
 });

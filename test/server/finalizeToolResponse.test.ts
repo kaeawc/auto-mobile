@@ -595,4 +595,76 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
     });
   });
+
+  // --actions-no-observe (#2762, folded into #3026): strip the embedded
+  // observation from non-observe tool results entirely. Precedence over
+  // --actions-diff-observe — nothing to diff once stripped.
+  describe("actions-no-observe strip + precedence (#2762/#3026)", () => {
+    let originalNoObserve: boolean;
+    let originalDiff: boolean;
+
+    beforeEach(() => {
+      originalNoObserve = serverConfig.isActionsNoObserveEnabled();
+      originalDiff = serverConfig.isActionsDiffObserveEnabled();
+      serverConfig.setActionsNoObserveEnabled(false);
+      serverConfig.setActionsDiffObserveEnabled(false);
+    });
+
+    afterEach(() => {
+      serverConfig.setActionsNoObserveEnabled(originalNoObserve);
+      serverConfig.setActionsDiffObserveEnabled(originalDiff);
+    });
+
+    test("strips the embedded observation from a non-observe action in both representations", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      const response = createStructuredToolResponse({ success: true, observation: makeObserveResult() });
+      const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
+
+      expect((finalized.structuredContent as any).observation).toBeUndefined();
+      expect((finalized.structuredContent as any).success).toBe(true);
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation).toBeUndefined();
+      expect(parsed.success).toBe(true);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("does not strip the observe tool's own observation", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      const finalized = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe", sessionUuid: "s1" });
+      // observe still returns the full (sanitized) observation.
+      expect((finalized.structuredContent as any).viewHierarchy).toBeDefined();
+    });
+
+    test("flag off leaves the observation in place (today's behavior)", () => {
+      serverConfig.setActionsNoObserveEnabled(false);
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
+        { name: "tapOn" }
+      );
+      expect((finalized.structuredContent as any).observation).toBeDefined();
+    });
+
+    test("precedence: with both no-observe and diff on, the observation is stripped (no diff)", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const map = new Map<string, ObserveResult>();
+      const store = { get: (u: string) => map.get(u), set: (u: string, o: ObserveResult) => { map.set(u, o); } };
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc).toBeUndefined(); // stripped, not a diff
+      // Diff moot → baseline never touched.
+      expect(map.size).toBe(0);
+    });
+
+    test("non-observe tool without an observation passes through unchanged", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      const payload = { success: true, message: "done" };
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), { name: "pressButton" });
+      expect(finalized.structuredContent).toEqual(payload);
+    });
+  });
 });

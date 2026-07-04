@@ -8,6 +8,34 @@ func decodeWebSocketRequest(_ json: String) throws -> WebSocketRequest {
     try JSONDecoder().decode(WebSocketRequest.self, from: Data(json.utf8))
 }
 
+/// A minimal `CodingKey` for building synthetic `DecodingError`s whose `codingPath`
+/// pins a specific field name — used to test the field-attributed decode messages
+/// deterministically, independent of the host decoder backend (#2986).
+struct TestCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+    init(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    init?(intValue: Int) {
+        self.intValue = intValue
+        stringValue = String(intValue)
+    }
+
+    /// Non-failable convenience for building a synthetic array-index coding key
+    /// without a force-unwrap in tests.
+    static func index(_ value: Int) -> TestCodingKey {
+        TestCodingKey(stringValue: "Index \(value)", intValue: value)
+    }
+
+    private init(stringValue: String, intValue: Int?) {
+        self.stringValue = stringValue
+        self.intValue = intValue
+    }
+}
+
 /// Round-trip coverage for issue #2846: every inbound command decodes from its
 /// on-the-wire JSON into the correct typed `WebSocketRequest` case with its
 /// fields intact, and dispatches through `CommandHandler.handle` to the correct
@@ -1064,6 +1092,203 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             message.lowercased().contains("not valid json") || message.lowercased().contains("malformed"),
             "malformed JSON should surface an actionable cause, got: \(message)"
         )
+    }
+
+    // MARK: - Field-attributed decode legibility: typeMismatch / valueNotFound (#2986)
+
+    /// Build a synthetic `DecodingError.typeMismatch` with a single-key
+    /// `codingPath` — mirroring what `JSONDecoder` throws when a field holds the
+    /// wrong JSON type. Lets a test pin the field-attributed rewrite deterministically
+    /// on any host regardless of the decoder backend's exact `debugDescription`.
+    private func syntheticTypeMismatch(field: String, debugDescription: String) -> DecodingError {
+        let context = DecodingError.Context(
+            codingPath: [TestCodingKey(stringValue: field)],
+            debugDescription: debugDescription
+        )
+        return DecodingError.typeMismatch(Double.self, context)
+    }
+
+    /// Build a synthetic `DecodingError.valueNotFound` with a single-key `codingPath`.
+    private func syntheticValueNotFound(field: String, debugDescription: String) -> DecodingError {
+        let context = DecodingError.Context(
+            codingPath: [TestCodingKey(stringValue: field)],
+            debugDescription: debugDescription
+        )
+        return DecodingError.valueNotFound(Double.self, context)
+    }
+
+    /// AC1 (#2986): a `typeMismatch` inbound command (a field holding the wrong JSON
+    /// type, e.g. a string where a number is expected) — which carries a non-empty
+    /// `codingPath` — surfaces a *field-attributed* actionable message naming the
+    /// offending field, instead of the opaque "…isn't in the correct format." The
+    /// value is still rejected (diagnostic legibility only) and the requestId is
+    /// preserved. Uses the *real* wire decode path so the codingPath is genuine.
+    func testTypeMismatchWireMessageIsFieldAttributed() {
+        let error = decodeError(#"{"type":"request_tap_coordinates","requestId":"tm-1","x":"hi","y":2}"#)
+        guard case DecodingError.typeMismatch = error else {
+            return XCTFail("expected typeMismatch, got \(error)")
+        }
+        let message = wireErrorMessage(for: error, requestId: "tm-1")
+        XCTAssertNotEqual(
+            message,
+            error.localizedDescription,
+            "typeMismatch message must not stay the opaque decoder default, got: \(message)"
+        )
+        XCTAssertTrue(
+            message.contains("'x'"),
+            "typeMismatch message should name the offending field 'x', got: \(message)"
+        )
+        XCTAssertTrue(
+            message.lowercased().contains("wrong type") || message.lowercased().contains("type"),
+            "typeMismatch message should indicate a wrong type, got: \(message)"
+        )
+    }
+
+    /// AC1 (#2986): a `valueNotFound` inbound command (a field present but `null`
+    /// where a non-optional value is required) surfaces a field-attributed message
+    /// naming the field. `valueNotFound` carries a non-empty `codingPath`, so it is
+    /// fair game for attribution (unlike `keyNotFound`).
+    func testValueNotFoundWireMessageIsFieldAttributed() {
+        let error = decodeError(#"{"type":"request_tap_coordinates","requestId":"vnf-1","x":null,"y":2}"#)
+        guard case DecodingError.valueNotFound = error else {
+            return XCTFail("expected valueNotFound, got \(error)")
+        }
+        let message = wireErrorMessage(for: error, requestId: "vnf-1")
+        XCTAssertNotEqual(
+            message,
+            error.localizedDescription,
+            "valueNotFound message must not stay the opaque decoder default, got: \(message)"
+        )
+        XCTAssertTrue(
+            message.contains("'x'"),
+            "valueNotFound message should name the offending field 'x', got: \(message)"
+        )
+        XCTAssertTrue(
+            message.lowercased().contains("missing") || message.lowercased().contains("null"),
+            "valueNotFound message should indicate a missing/null value, got: \(message)"
+        )
+    }
+
+    /// A `typeMismatch` on a *nested* field is attributed to the deepest key in the
+    /// `codingPath` (the actual field), pinned deterministically via a synthetic
+    /// error so it does not depend on the host decoder's `debugDescription` wording.
+    func testSyntheticTypeMismatchNamesDeepestField() {
+        let error = syntheticTypeMismatch(
+            field: "distanceStart",
+            debugDescription: "Expected to decode Double but found a string instead."
+        )
+        let message = wireErrorMessage(for: error, requestId: "syn-tm")
+        XCTAssertTrue(
+            message.contains("'distanceStart'"),
+            "should name the deepest coding-path field, got: \(message)"
+        )
+    }
+
+    /// A synthetic `valueNotFound` is likewise field-attributed and deterministic.
+    func testSyntheticValueNotFoundNamesField() {
+        let error = syntheticValueNotFound(
+            field: "x2",
+            debugDescription: "Expected Double value but found null instead."
+        )
+        let message = wireErrorMessage(for: error, requestId: "syn-vnf")
+        XCTAssertTrue(
+            message.contains("'x2'"),
+            "should name the coding-path field, got: \(message)"
+        )
+    }
+
+    /// A `typeMismatch` with an *empty* codingPath (no field to attribute) must still
+    /// produce an actionable, non-opaque message — just without a field name.
+    func testTypeMismatchWithoutFieldIsStillActionable() {
+        let context = DecodingError.Context(
+            codingPath: [],
+            debugDescription: "Expected to decode Array<Any> but found a dictionary instead."
+        )
+        let error = DecodingError.typeMismatch([Double].self, context)
+        let message = wireErrorMessage(for: error, requestId: "tm-nofield")
+        XCTAssertNotEqual(message, error.localizedDescription, "got: \(message)")
+        XCTAssertTrue(
+            message.lowercased().contains("malformed") || message.lowercased().contains("type"),
+            "empty-path typeMismatch should still be actionable, got: \(message)"
+        )
+    }
+
+    /// Regression guard (#2986 AC2): `keyNotFound` must remain byte-for-byte
+    /// `error.localizedDescription` even after typeMismatch/valueNotFound are mapped —
+    /// `TypedRequestDecodeTests`' required-field contract depends on it.
+    func testKeyNotFoundStaysUnchangedAfterTypeMismatchMapping() {
+        let error = decodeError(#"{"type":"request_tap_coordinates","requestId":"kn-2","y":2}"#)
+        guard case DecodingError.keyNotFound = error else {
+            return XCTFail("expected keyNotFound, got \(error)")
+        }
+        let message = wireErrorMessage(for: error, requestId: "kn-2")
+        XCTAssertEqual(
+            message,
+            error.localizedDescription,
+            "keyNotFound must stay untouched by the typeMismatch/valueNotFound mapping"
+        )
+    }
+
+    /// Regression guard (#2986 AC2): the `unknownCommand` wire contract still matches
+    /// exactly after the new mapping — the TS `rewriteUnknownCommandError` relies on it.
+    func testUnknownCommandStaysUnchangedAfterTypeMismatchMapping() {
+        let error = decodeError(#"{"type":"unknown_command","requestId":"uc-2"}"#)
+        let message = wireErrorMessage(for: error, requestId: "uc-2")
+        XCTAssertEqual(message, "Unknown command type: unknown_command")
+    }
+
+    /// A wrong-typed *array element* (e.g. a bare string in `rules`, whose elements
+    /// are objects) yields a `codingPath` whose deepest key is a synthetic array
+    /// *index*, not a named field. The message attributes it to the nearest named
+    /// ancestor with the index appended (`rules[0]`) rather than the useless
+    /// "Index 0" key label. Uses the real `request_set_network_mock_rules` decode
+    /// path (`rules: [NetworkMockRuleDTO]`).
+    func testTypeMismatchOnArrayElementNamesParentWithIndex() {
+        let error = decodeError(#"{"type":"set_network_mock_rules","requestId":"arr-1","rules":["hi"]}"#)
+        guard case DecodingError.typeMismatch = error else {
+            return XCTFail("expected typeMismatch on the array element, got \(error)")
+        }
+        let message = wireErrorMessage(for: error, requestId: "arr-1")
+        XCTAssertTrue(
+            message.contains("rules[0]"),
+            "array-element typeMismatch should name the parent field with the index, got: \(message)"
+        )
+        XCTAssertFalse(
+            message.contains("Index 0"),
+            "message should not surface the synthetic 'Index 0' key label, got: \(message)"
+        )
+    }
+
+    /// A synthetic `typeMismatch` whose leaf `codingPath` key is a bare array index
+    /// (no named ancestor) falls back to `[<index>]` — pinned deterministically.
+    func testTypeMismatchOnTopLevelArrayElementUsesBracketIndex() {
+        let context = DecodingError.Context(
+            codingPath: [TestCodingKey.index(2)],
+            debugDescription: "Expected to decode Double but found a string instead."
+        )
+        let error = DecodingError.typeMismatch(Double.self, context)
+        let message = wireErrorMessage(for: error, requestId: "arr-top")
+        XCTAssertTrue(message.contains("[2]"), "got: \(message)")
+        XCTAssertFalse(message.contains("Index"), "got: \(message)")
+    }
+
+    /// Coverage for the `dataCorrupted` **field-attribution fallback** (#2986): a
+    /// *nested* `dataCorrupted` (non-empty `codingPath`, no underlying Cocoa detail)
+    /// — unlike the empty-path top-level overflow case — names the field it occurred
+    /// on instead of dropping it. Synthetic so it is host-independent and reaches the
+    /// no-underlying-detail branch the overflow/malformed-JSON tests never hit.
+    func testNestedDataCorruptedAttributesField() {
+        let context = DecodingError.Context(
+            codingPath: [TestCodingKey(stringValue: "y2")],
+            debugDescription: "Date string does not match format expected by formatter."
+        )
+        let error = DecodingError.dataCorrupted(context)
+        let message = wireErrorMessage(for: error, requestId: "dc-nested")
+        XCTAssertTrue(
+            message.contains("'y2'"),
+            "nested dataCorrupted should attribute the field, got: \(message)"
+        )
+        XCTAssertNotEqual(message, error.localizedDescription, "got: \(message)")
     }
 
     // MARK: - Finite fractional / negative coordinates unaffected (#2909 happy path)

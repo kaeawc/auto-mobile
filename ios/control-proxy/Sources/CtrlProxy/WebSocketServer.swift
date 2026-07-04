@@ -313,23 +313,81 @@ public class WebSocketServer: WebSocketServing {
 
     /// Maps a caught error into the message surfaced on the wire.
     ///
-    /// Most errors pass through `localizedDescription` unchanged — deliberately so:
-    /// this preserves `CommandError.unknownCommand`'s "Unknown command type: <type>"
-    /// contract (a `LocalizedError`, matched by the TS `rewriteUnknownCommandError`)
-    /// and `DecodingError.keyNotFound`'s required-field rejection messages.
+    /// Two `DecodingError` contracts pass through `localizedDescription` **unchanged**
+    /// — deliberately, and load-bearing:
+    /// - `CommandError.unknownCommand`'s "Unknown command type: <type>" (a
+    ///   `LocalizedError`, matched by the TS `rewriteUnknownCommandError`).
+    /// - `DecodingError.keyNotFound`'s required-field rejection messages, which
+    ///   `TypedRequestDecodeTests` pins byte-for-byte (see #2965 AC2).
     ///
-    /// The single rewrite is for `DecodingError.dataCorrupted`, whose
-    /// `localizedDescription` collapses to the opaque "The data couldn't be read
-    /// because it isn't in the correct format." Apple's `JSONDecoder` reports this
-    /// class of failure at top-level pre-parse with an *empty* `codingPath` — most
-    /// notably for an out-of-range numeric literal (e.g. `1e309`) — so a per-field
-    /// message is infeasible, but the real cause survives in the underlying Cocoa
-    /// error's `NSDebugDescription`. Surfacing it turns an opaque decode failure
-    /// into an actionable one. See issue #2965.
+    /// The rewritten cases are the `DecodingError`s whose `localizedDescription`
+    /// collapses to an opaque default even though a more actionable cause is
+    /// recoverable:
+    /// - `dataCorrupted` — "The data couldn't be read because it isn't in the correct
+    ///   format." Apple's `JSONDecoder` reports this at top-level pre-parse with an
+    ///   *empty* `codingPath` (most notably an out-of-range numeric literal like
+    ///   `1e309`), so a per-field message is infeasible there, but the real cause
+    ///   survives in the underlying Cocoa error's `NSDebugDescription`. See #2965.
+    /// - `typeMismatch` / `valueNotFound` — same opaque string, but these carry a
+    ///   *non-empty* `codingPath`, so the offending field can be named. A string
+    ///   where a number is expected, or an explicit `null` for a required field,
+    ///   becomes "…wrong type for field 'x' (…)" / "…missing value for field 'x' (…)"
+    ///   instead of the decoder default. See #2986. (The value is already rejected;
+    ///   this is diagnostic legibility only.)
     static func wireErrorMessage(for error: Error) -> String {
-        guard case let DecodingError.dataCorrupted(context) = error else {
+        switch error {
+        case let DecodingError.typeMismatch(_, context):
+            if let field = fieldName(context) {
+                return "Malformed request: wrong type for field '\(field)' (\(context.debugDescription))"
+            }
+            return "Malformed request: wrong type (\(context.debugDescription))"
+        case let DecodingError.valueNotFound(_, context):
+            if let field = fieldName(context) {
+                return "Malformed request: missing value for field '\(field)' (\(context.debugDescription))"
+            }
+            return "Malformed request: missing value (\(context.debugDescription))"
+        case let DecodingError.dataCorrupted(context):
+            return dataCorruptedMessage(context)
+        default:
+            // keyNotFound + CommandError.unknownCommand + any other error: pass the
+            // localizedDescription through unchanged (the contracts noted above).
             return error.localizedDescription
         }
+    }
+
+    /// A human-readable name for the offending field, derived from the deepest
+    /// `codingPath` key, or `nil` when the path is empty (nothing to attribute).
+    ///
+    /// A named leaf key (the common case — a wrong-typed *field* like `x`) is used
+    /// verbatim. When the leaf is an **array index** (a wrong-typed array *element*,
+    /// e.g. `rules[0]`), the synthetic "Index 0" key `stringValue` would be a poor
+    /// label, so it is attributed to the nearest named ancestor with the index
+    /// appended (`rules[0]`), or just `[0]` if there is no named ancestor.
+    private static func fieldName(_ context: DecodingError.Context) -> String? {
+        let path = context.codingPath
+        guard let last = path.last else {
+            return nil
+        }
+        // Named leaf key — the common case (a wrong-typed field).
+        if last.intValue == nil {
+            return last.stringValue.isEmpty ? nil : last.stringValue
+        }
+        // The leaf is an array index — attribute to the nearest named ancestor.
+        guard let index = last.intValue else {
+            return nil
+        }
+        let parent = path.dropLast().last(where: { $0.intValue == nil })?.stringValue
+        if let parent = parent, !parent.isEmpty {
+            return "\(parent)[\(index)]"
+        }
+        return "[\(index)]"
+    }
+
+    /// Actionable message for a `DecodingError.dataCorrupted`. The overflow / malformed
+    /// -JSON cases (empty `codingPath`, cause in the underlying Cocoa error) are the
+    /// common ones; the final fallback also attributes a field when a *nested*
+    /// `dataCorrupted` carries a `codingPath` (#2986).
+    private static func dataCorruptedMessage(_ context: DecodingError.Context) -> String {
         let underlyingDetail = (context.underlyingError as NSError?)?
             .userInfo[NSDebugDescriptionErrorKey] as? String
 
@@ -341,7 +399,11 @@ public class WebSocketServer: WebSocketServing {
             return "Malformed request: the payload is not valid JSON (\(detail))"
         }
         // No underlying detail available — the decoder's own context description is
-        // still more specific than the opaque `localizedDescription`.
+        // still more specific than the opaque `localizedDescription`; attribute the
+        // field when a nested dataCorrupted carries one.
+        if let field = fieldName(context) {
+            return "Malformed request: field '\(field)' — \(context.debugDescription)"
+        }
         return "Malformed request: \(context.debugDescription)"
     }
 

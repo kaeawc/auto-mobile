@@ -37,6 +37,19 @@ export class TestCoverageRepository {
   }
 
   /**
+   * Resolve the underlying Kysely connection this repository will execute
+   * against (the injected handle, or the shared `getDatabase()` singleton when
+   * unbound). Exposed so a caller enlisting this repo alongside a navigation repo
+   * in one transaction can assert they share a connection before opening it — a
+   * coverage repo bound to a different connection would split writes and defeat
+   * the enclosing transaction's rollback guarantee. Reference identity is the
+   * intended comparison.
+   */
+  getConnection(): Kysely<Database> {
+    return this.getDb();
+  }
+
+  /**
    * Return a repository instance whose every read and write runs on the supplied
    * executor (a Kysely transaction handle) instead of the shared singleton
    * connection, so coverage writes can enlist in a caller-owned transaction

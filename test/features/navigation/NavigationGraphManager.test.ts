@@ -1064,3 +1064,74 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     expect(otherNode).toBeDefined();
   });
 });
+
+describe("NavigationGraphManager - shared-connection assertion (#2968)", () => {
+  const APP_ID = "com.test.conn";
+
+  let dbA: Kysely<Database>;
+  let dbB: Kysely<Database>;
+  let telemetrySpy: ReturnType<typeof spyOn>;
+
+  async function countNodesOn(db: Kysely<Database>): Promise<number> {
+    const row = await db
+      .selectFrom("navigation_nodes")
+      .select(eb => eb.fn.countAll<number>().as("count"))
+      .where("app_id", "=", APP_ID)
+      .executeTakeFirst();
+    return Number(row?.count ?? 0);
+  }
+
+  beforeEach(async () => {
+    dbA = await createTestDatabase({ foreignKeys: true });
+    dbB = await createTestDatabase({ foreignKeys: true });
+    TelemetryRecorder.resetInstance();
+    telemetrySpy = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordNavigationEvent"
+    ).mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    telemetrySpy.mockRestore();
+    TelemetryRecorder.resetInstance();
+    await dbA.destroy();
+    await dbB.destroy();
+  });
+
+  test("records normally when both repositories share the same connection", async () => {
+    const navRepo = new NavigationRepository(dbA);
+    const coverage = new TestCoverageRepository(defaultTimer, dbA);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+
+    await manager.setCurrentApp(APP_ID);
+    await manager.recordNavigationEvent(createEvent("Screen1", 1000));
+
+    expect(await countNodesOn(dbA)).toBe(1);
+    expect(manager.getCurrentScreen()).toBe("Screen1");
+  });
+
+  test("throws before opening the transaction when the coverage repo is bound to a foreign connection", async () => {
+    // Coverage repo bound to a DIFFERENT connection than the navigation repo.
+    // Its writes would silently land on dbB while the transaction runs on dbA,
+    // splitting the write and defeating the rollback guarantee. The assertion
+    // must catch this loudly before any row is written.
+    const navRepo = new NavigationRepository(dbA);
+    const coverage = new TestCoverageRepository(defaultTimer, dbB);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+
+    await manager.setCurrentApp(APP_ID);
+
+    await expect(
+      manager.recordNavigationEvent(createEvent("Screen1", 1000))
+    ).rejects.toThrow(/connection/i);
+
+    // Nothing was written on either connection — the assertion fires before the
+    // transaction opens, so there is no partial state to roll back.
+    expect(await countNodesOn(dbA)).toBe(0);
+    expect(await countNodesOn(dbB)).toBe(0);
+
+    // In-memory state and post-commit side effects are untouched.
+    expect(manager.getCurrentScreen()).toBeNull();
+    expect(telemetrySpy).not.toHaveBeenCalled();
+  });
+});

@@ -1,4 +1,5 @@
 import { logger } from "../../utils/logger";
+import { ActionableError } from "../../models/ActionableError";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { BackStackInfo } from "../../models";
 import { NavigationRepository } from "../../db/navigationRepository";
@@ -335,6 +336,16 @@ export class NavigationGraphManager implements NavigationGraphService {
     const recentToolCall = this.findCorrelatedToolCall(timestamp);
     const currentModalStack = recentToolCall?.uiState?.modalStack;
 
+    // Enforce the atomicity precondition loudly before opening the transaction:
+    // the coverage repo is enlisted onto the navigation repo's `trx`, so both
+    // must resolve to the same underlying connection. A coverage repo bound to a
+    // different connection would split its writes onto a separate connection —
+    // silently defeating the rollback guarantee. Fail fast here (before any row
+    // is written) rather than let a misconfigured repo corrupt the graph. The
+    // invariant holds by construction in production (both default to the
+    // getDatabase() singleton); this guards test wiring and future refactors.
+    this.assertSharedConnection();
+
     // Persist the whole graph write atomically. Every read and write inside the
     // callback runs on `trx` (via withExecutor) — a stray singleton query here
     // would deadlock the daemon's only connection (bunSqliteDialect). Keep the body
@@ -563,6 +574,27 @@ export class NavigationGraphManager implements NavigationGraphService {
     logger.debug(
       `[NAVIGATION_GRAPH] Ignoring hierarchy navigation - app has no named nodes`
     );
+  }
+
+  /**
+   * Assert that the navigation and coverage repositories resolve to the same
+   * underlying connection, the precondition for recordNavigationEvent's atomic
+   * write. The transaction is opened on the navigation connection and the
+   * coverage repo is enlisted onto that same `trx`; if the two repos were wired
+   * to different connections, coverage writes would land on a separate
+   * connection and the rollback guarantee would silently split. Throws before
+   * the transaction opens so a misconfiguration fails loudly rather than
+   * corrupting the graph. See createForTesting.
+   */
+  private assertSharedConnection(): void {
+    if (this.repository.getConnection() !== this.testCoverageRepository.getConnection()) {
+      throw new ActionableError(
+        "[NAVIGATION_GRAPH] NavigationRepository and TestCoverageRepository resolve to different " +
+        "database connections; recordNavigationEvent requires a shared connection so coverage writes " +
+        "enlist in the same transaction. Construct both repositories with the same Kysely handle " +
+        "(both default to the getDatabase() singleton)."
+      );
+    }
   }
 
   /**

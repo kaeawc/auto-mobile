@@ -10,7 +10,10 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
  * the real MCP CallTool boundary (`src/server/index.ts`). Uses a plain
  * `ToolRegistry.register()` probe — the same non-device registration path as
  * `exportPlan`/`recordSteps` — so this also covers the tools that bypass
- * `finalizeToolResponse`.
+ * `finalizeToolResponse`. The probe declares an `outputSchema` (like
+ * `exportPlan`/`recordSteps`) so its `structuredContent` survives the gate-off
+ * case; the no-schema unconditional strip (#2759) is covered separately in
+ * `structuredContentGating.test.ts`.
  */
 describe("CallTool wire boundary strips structuredContent (issue #2899)", () => {
   let fixture: McpTestFixture;
@@ -21,7 +24,10 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
       TOOL,
       "probe tool for structuredContent strip",
       z.object({}).passthrough(),
-      async () => createStructuredToolResponse({ success: true, marker: "probe" })
+      async () => createStructuredToolResponse({ success: true, marker: "probe" }),
+      false,
+      false,
+      z.object({ success: z.boolean(), marker: z.string() })
     );
     fixture = new McpTestFixture();
     await fixture.setup();
@@ -31,6 +37,7 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
     if (fixture) {
       await fixture.teardown();
     }
+    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
   });
 

@@ -1,12 +1,24 @@
 import { serverConfig } from "../utils/ServerConfig";
 
 /**
- * Wire-boundary output policy for the `--tool-results-no-structured-content`
- * flag (issue #2899). When enabled, drops the `structuredContent` field from the
- * MCP tool-result envelope. Handlers pre-serialize the payload into
+ * Wire-boundary policy for the duplicated `structuredContent` tree on MCP
+ * tool-result envelopes. Handlers pre-serialize the payload into
  * `content[0].text` alongside `structuredContent` (see
  * `createStructuredToolResponse`), so the two are byte-identical duplicates —
- * removing `structuredContent` halves the wire payload with no information loss.
+ * dropping `structuredContent` halves the wire payload with no information loss.
+ *
+ * `structuredContent` is dropped when EITHER (issue #2899 + #2759):
+ * - the tool declares no `outputSchema` — per MCP (2025-06-18) `structuredContent`
+ *   is only meaningful for a tool that advertises an `outputSchema`, so it is
+ *   pure duplication for no-schema tools (`observe`, the largest payload, is one)
+ *   and is dropped **unconditionally**; or
+ * - the `--tool-results-no-structured-content` flag is set — which also drops it
+ *   for schema tools (and `getToolDefinitions` drops their `outputSchema`
+ *   advertisement under the same flag, so the server never advertises structured
+ *   output it will not return).
+ *
+ * Equivalently, `structuredContent` is kept only for a schema tool while the flag
+ * is off.
  *
  * This is applied at the MCP CallTool serialization boundary, NOT inside a tool's
  * handler, and that placement is deliberate:
@@ -17,16 +29,19 @@ import { serverConfig } from "../utils/ServerConfig";
  *   server toward the MCP client.
  * - It covers every tool regardless of registration path, including plain
  *   `register()` tools (`exportPlan`, `recordSteps`) that bypass
- *   `finalizeToolResponse`. That keeps the stripped set aligned with the
- *   `outputSchema` omitted from `tools/list` by `getToolDefinitions`, so the
- *   server never advertises structured output it will not return.
+ *   `finalizeToolResponse`.
  *
  * Non-envelope, primitive, and already-`structuredContent`-free responses pass
  * through unchanged — a safe no-op.
+ *
+ * @param response        The MCP tool-call envelope (or anything envelope-shaped).
+ * @param hasOutputSchema Whether the tool declares an `outputSchema`
+ *                        (`toolHasOutputSchema(tool)` at the call site).
  */
-export function stripToolResultStructuredContent<T>(response: T): T {
+export function stripToolResultStructuredContent<T>(response: T, hasOutputSchema: boolean): T {
+  const shouldStrip = !hasOutputSchema || serverConfig.isToolResultsNoStructuredContentEnabled();
   if (
-    serverConfig.isToolResultsNoStructuredContentEnabled() &&
+    shouldStrip &&
     response !== null &&
     typeof response === "object" &&
     "structuredContent" in (response as Record<string, unknown>)

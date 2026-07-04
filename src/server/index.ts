@@ -12,7 +12,7 @@ import { runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 
 // Import the tool registry
-import { ToolRegistry } from "./toolRegistry";
+import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
 import { stripToolResultStructuredContent } from "./stripToolResultStructuredContent";
 
 // Import the resource registry
@@ -341,11 +341,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         execution.abortController.signal,
         () => tool.handler(handlerParams, progressCallback, execution.abortController.signal)
       );
-      // Wire-boundary output policy: strip `structuredContent` when the
-      // `--tool-results-no-structured-content` flag is on (issue #2899). Applied
-      // here — not inside a tool handler — so internal handler callers keep
-      // reading `structuredContent`, and so plain-registered tools are covered.
-      return stripToolResultStructuredContent(result);
+      // Wire-boundary output policy: strip the duplicated `structuredContent`
+      // tree for no-schema tools unconditionally (issue #2759) and for schema
+      // tools when the `--tool-results-no-structured-content` flag is on (issue
+      // #2899). Applied here — not inside a tool handler — so internal handler
+      // callers keep reading `structuredContent`, and so plain-registered tools
+      // are covered.
+      return stripToolResultStructuredContent(result, toolHasOutputSchema(tool));
     } finally {
       executionTracker.endExecution(execution.id);
     }

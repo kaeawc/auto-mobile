@@ -3,6 +3,7 @@ import { DaemonManager, type DaemonManagerLike } from "./manager";
 import { logger } from "../utils/logger";
 import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "./constants";
 import type { DaemonOptions } from "./types";
+import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -184,6 +185,43 @@ export interface ProxiedResourceTemplate {
   name: string;
   description?: string;
   mimeType?: string;
+}
+
+/**
+ * The daemon startup options that change its observable MCP behavior and so must
+ * match before a running daemon can be reused: `embeddedSdk` plus every
+ * output-reduction flag. A same-build MCP client that requests one of these
+ * against an already-running daemon started without it (or vice versa) would
+ * otherwise silently get the wrong tool-output contract until a manual restart
+ * (issue #2759 — the `toolResultsNoStructuredContent` case). The output-reduction
+ * fields are derived from `OUTPUT_REDUCTION_FLAG_SPECS` (whose `field` names map
+ * 1:1 to `DaemonOptions`) so a new flag is covered automatically.
+ */
+const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
+  "embeddedSdk",
+  ...OUTPUT_REDUCTION_FLAG_SPECS.map(spec => spec.field),
+];
+
+/**
+ * Boolean-valued startup options that differ between the requested MCP config
+ * and the running daemon. Each option is compared as a strict boolean
+ * (`=== true`), so `undefined` and `false` are treated identically. Returns a
+ * human-readable list (empty when everything matches) for logging and error
+ * messages.
+ */
+function startupOptionMismatches(
+  requested: DaemonOptions | undefined,
+  running: DaemonOptions | undefined
+): string[] {
+  const mismatches: string[] = [];
+  for (const key of REUSE_CRITICAL_OPTION_KEYS) {
+    const want = requested?.[key] === true;
+    const have = running?.[key] === true;
+    if (want !== have) {
+      mismatches.push(`${key} (requested=${want}, running=${have})`);
+    }
+  }
+  return mismatches;
 }
 
 /**
@@ -477,20 +515,20 @@ export class DaemonMcpProxy {
       return;
     }
 
-    const requestedEmbeddedSdk = this.config.daemonOptions?.embeddedSdk === true;
-    const runningEmbeddedSdk = status.options?.embeddedSdk === true;
-    if (requestedEmbeddedSdk === runningEmbeddedSdk) {
+    const requested = this.config.daemonOptions;
+    const mismatches = startupOptionMismatches(requested, status.options);
+    if (mismatches.length === 0) {
       return;
     }
 
     if (!this.config.autoStartDaemon) {
       throw new DaemonUnavailableError(
-        "Daemon startup options differ from MCP server options and auto-start is disabled"
+        `Daemon startup options differ from MCP server options (${mismatches.join(", ")}) and auto-start is disabled`
       );
     }
 
     logger.info(
-      `[DaemonMcpProxy] Daemon embeddedSdk=${runningEmbeddedSdk} differs from MCP server embeddedSdk=${requestedEmbeddedSdk}, restarting daemon`
+      `[DaemonMcpProxy] Daemon startup options differ (${mismatches.join(", ")}), restarting daemon`
     );
     await this.daemonManager.restart(this.config.daemonOptions ?? {});
     const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
@@ -501,10 +539,10 @@ export class DaemonMcpProxy {
     }
 
     const restartedStatus = await this.daemonManager.status();
-    const restartedEmbeddedSdk = restartedStatus.options?.embeddedSdk === true;
-    if (!restartedStatus.running || restartedEmbeddedSdk !== requestedEmbeddedSdk) {
+    const remaining = startupOptionMismatches(requested, restartedStatus.options);
+    if (!restartedStatus.running || remaining.length > 0) {
       throw new DaemonUnavailableError(
-        "Daemon restart completed but startup options still differ"
+        `Daemon restart completed but startup options still differ (${remaining.join(", ")})`
       );
     }
   }

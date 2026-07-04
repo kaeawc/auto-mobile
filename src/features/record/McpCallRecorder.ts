@@ -1,5 +1,6 @@
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../../utils/logger";
+import { INTERNAL_NO_DIFF_PARAM } from "../../server/internalToolCall";
 
 /**
  * Set of MCP tool names that are relevant for test plan recording.
@@ -39,7 +40,7 @@ export const INTERNAL_PARAMS = new Set([
   "devices",
   "keepScreenAwake",
   "__mcpSessionId",
-  "__internalNoDiff",
+  INTERNAL_NO_DIFF_PARAM,
 ]);
 
 export function stripInternalParams(args: Record<string, unknown>): Record<string, unknown> {

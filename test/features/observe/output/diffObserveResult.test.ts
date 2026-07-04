@@ -407,6 +407,39 @@ describe("diffObserveResult", () => {
     expect(diff.fields).toBeUndefined();
   });
 
+  test("#3064: a focus change carrying a deep-node element does not re-embed the subtree (size guard)", () => {
+    // Structural guard (#3059) proven by `.node`-absent assertions is turned into a
+    // measured, regression-proof one here: if `leanElementForDiff` ever stops
+    // stripping `.node`, both `{from,to}` re-embed ~the whole hierarchy and the diff
+    // balloons past the full observation — exactly what --actions-diff-observe exists
+    // to prevent. This fails the moment the subtree comes back.
+    const { observe } = loadAndroidHomeObserve();
+    const base = sanitizeObserveResult(observe, { dropElements: false });
+    // A rich focused *container* carrying the entire hierarchy as its `node` subtree —
+    // the case `parseNodeBounds` (shallow-copies the source node, keeping children)
+    // can produce.
+    const heavyElement = (rid: string) => ({
+      "resource-id": rid,
+      "bounds": { left: 0, top: 0, right: 1080, bottom: 1920 },
+      "node": JSON.parse(JSON.stringify(base.viewHierarchy!.hierarchy.node)),
+    });
+    const baseline = { ...base, focusedElement: heavyElement("focus-a") } as ObserveResult;
+    const next = {
+      ...(JSON.parse(JSON.stringify(base)) as ObserveResult),
+      focusedElement: heavyElement("focus-b"),
+    } as ObserveResult;
+
+    const diff = diffObserveResult(baseline, next);
+    // The focus change is reported (only the mirror changed; the hierarchy is identical).
+    expect(diff.fields?.focusedElement).toBeDefined();
+    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("focus-b");
+    expect((diff.fields!.focusedElement.from as any).node).toBeUndefined();
+    expect((diff.fields!.focusedElement.to as any).node).toBeUndefined();
+    // The whole diff stays a tiny fraction of the full observation: the deep subtree
+    // is stripped from both sides, so it is never re-embedded.
+    expect(measureValue(diff).bytes).toBeLessThan(measureValue(base).bytes * 0.1);
+  });
+
   test("scalar, element, and node changes all coexist in one diff", () => {
     const baseChild = { "resource-id": "child", "bounds": { left: 1, top: 1, right: 2, bottom: 2 }, "text": "x" };
     const baseline = obs(

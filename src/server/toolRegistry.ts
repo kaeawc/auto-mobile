@@ -27,6 +27,7 @@ import { formatToolResultLog } from "./toolResultLog";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
 import { finalizeToolResponse, type ObservationBaselineStore } from "./finalizeToolResponse";
+import { INTERNAL_NO_DIFF_PARAM } from "./internalToolCall";
 import { getStructuredField } from "../utils/toolUtils";
 
 // Re-exported for backward compatibility; the implementation now lives in
@@ -181,10 +182,12 @@ class ToolRegistryClass {
       const deviceLabel = typeof args.device === "string" ? args.device : undefined;
       const declaredDeviceLabels = Array.isArray(args.devices) ? args.devices : undefined;
       const mcpSessionId = typeof args.__mcpSessionId === "string" ? args.__mcpSessionId : undefined;
-      // Internal tool-to-tool marker (#3053): PlanExecutor sets this on the parsed
-      // params so a plan step's finalized envelope is never diffed/stripped (a
-      // future internal `.observation.viewHierarchy` reader stays correct).
-      const internalCall = args.__internalNoDiff === true;
+      // Internal tool-to-tool marker (#3053 / #3087): internal callers (PlanExecutor
+      // steps, navigation/setup replays) set this via `markInternalToolCall` so a
+      // plan/navigation step's finalized envelope is never diffed/stripped and never
+      // advances the agent-facing diff baseline (a future internal
+      // `.observation.viewHierarchy` reader stays correct).
+      const internalCall = args[INTERNAL_NO_DIFF_PARAM] === true;
       let sessionUuid = baseSessionUuid;
       const keepScreenAwake = typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined;
 

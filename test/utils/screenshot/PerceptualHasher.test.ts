@@ -5,6 +5,11 @@ import { FakeImageBackend } from "../../fakes/FakeImageBackend";
 // Compute the hash the way the pre-seam PerceptualHasher did — via the real jimp
 // resize(8x8, NEAREST)+greyscale+red-channel pipeline — so the backend-routed
 // implementation can be pinned byte-for-byte against jimp (no silent drift).
+//
+// TODO(#3010): this jimp-golden pin is intentional ONLY for the JimpBackend
+// phase. When the sharp backend lands, its resize kernel produces different
+// pHash values by design — retire this byte-identity assertion and replace it
+// with backend-relative checks (A vs A′ similarity, A vs B distinctness).
 async function jimpGoldenHash(buffer: Buffer): Promise<string> {
   const { Jimp, ResizeStrategy } = await import("jimp");
   const image = await Jimp.fromBuffer(buffer);

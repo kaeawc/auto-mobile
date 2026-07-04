@@ -13,7 +13,7 @@ export class JimpBackend implements ImageBackend {
     switch (op.type) {
       case "resize": {
         // `"nearest"` forces the nearest-neighbor kernel (no interpolation);
-        // omitted/`"auto"` leaves `mode` undefined so jimp uses its default.
+        // omitting `mode` leaves it undefined so jimp uses its default kernel.
         const mode = op.mode === "nearest" ? ResizeStrategy.NEAREST_NEIGHBOR : undefined;
         if (op.height === undefined) {
           // Width only: scale preserving aspect ratio.

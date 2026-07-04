@@ -126,8 +126,12 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     key: "observe-result-compact",
     label: "Observe result: compact",
     description:
-      "Emit the observe result text block in a compact form (no-indent JSON tree + TOON " +
-      "element tables) to reduce output size. structuredContent stays valid JSON.",
+      "Experimental. Emit the observe result text block in a compact form (no-indent JSON " +
+      "tree + TOON element tables) to reduce output size. structuredContent stays valid JSON, " +
+      "so this only reduces wire tokens when combined with --tool-results-no-structured-content " +
+      "(otherwise the JSON duplicate negates the saving). Note: the text block is no longer " +
+      "JSON when enabled — programmatic consumers that parse content[].text should read " +
+      "structuredContent instead.",
     defaultValue: false,
   },
   {

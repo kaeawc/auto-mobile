@@ -182,12 +182,9 @@ const ELEMENT_ARRAY_NAMES = ["clickable", "scrollable", "text", "media"] as cons
  * the model can parse the hybrid JSON+TOON format without out-of-band docs.
  */
 export const OBSERVE_COMPACT_LEGEND =
-  "# observe-compact (--observe-result-compact): line 2 = compact JSON of the result " +
-  "(viewHierarchy tree inline) with `elements` moved below as TOON. Each block: " +
-  "`name[count]{columns}:` header then one 2-space-indented CSV row per element; " +
-  "bounds flattened to bounds.left/top/right/bottom, nested node/objects kept as JSON " +
-  "cells; a cell is quoted when it holds a comma, double-quote, or newline (\"\" = a " +
-  "literal quote), and an empty cell means the field is absent.";
+  "# observe-compact: line 2 is compact JSON (viewHierarchy inline); elements.* follow as " +
+  "TOON tables `name[count]{cols}:` + one 2-space CSV row each (bounds->bounds.*, nested " +
+  'objects as JSON cells; cells quoted for , " or newline, "" = a quote, empty = absent).';
 
 /**
  * True when `value` is a plain object whose own values are all scalar — the
@@ -198,7 +195,13 @@ function isFlatScalarObject(value: unknown): value is Record<string, ToonScalar>
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  return Object.values(value as Record<string, unknown>).every(
+  const entries = Object.values(value as Record<string, unknown>);
+  // An empty object has no columns to contribute; treat it as non-flat so it is
+  // preserved losslessly as a `{}` JSON cell rather than vanishing entirely.
+  if (entries.length === 0) {
+    return false;
+  }
+  return entries.every(
     v => v === null || (typeof v !== "object" && typeof v !== "function")
   );
 }
@@ -278,9 +281,12 @@ export function encodeObserveCompact(
   if (elements) {
     for (const name of ELEMENT_ARRAY_NAMES) {
       const arr = (elements as Record<string, unknown>)[name];
-      const records = Array.isArray(arr)
-        ? arr.map(el => flattenElementRecord(el as Record<string, unknown>))
-        : [];
+      // Skip empty arrays: a bare `name[0]{}:` header is pure noise/tokens and
+      // an absent block already reads as "no elements of this kind".
+      if (!Array.isArray(arr) || arr.length === 0) {
+        continue;
+      }
+      const records = arr.map(el => flattenElementRecord(el as Record<string, unknown>));
       blocks.push(encodeToonTable(name, records));
     }
   }

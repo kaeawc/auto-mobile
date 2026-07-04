@@ -133,6 +133,16 @@ describe("encodeToonTable / decodeToonTable", () => {
     expect(table.rows[0]).toEqual(["v", "w"]);
   });
 
+  test("column names containing newlines / braces / colons round-trip", () => {
+    // The header terminator must be found quote-aware, not via a raw indexOf of
+    // the first newline or `}` — otherwise a quoted column name containing one
+    // would truncate the whole header.
+    const block = encodeToonTable("t", [{ "we\nird}:": "v", "a,b": "w" }]);
+    const table = decodeToonTable(block);
+    expect(table.columns).toEqual(["we\nird}:", "a,b"]);
+    expect(table.rows[0]).toEqual(["v", "w"]);
+  });
+
   test("rejects a name that is not a bare identifier", () => {
     expect(() => encodeToonTable("bad name", [{ a: 1 }])).toThrow();
   });

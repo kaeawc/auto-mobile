@@ -154,20 +154,39 @@ export function decodeToonTable(block: string): ToonTable {
   const name = block.slice(0, open);
 
   const close = block.indexOf("]", open);
-  // Column list lives between the first `{` after `]` and the `}:` that ends the
-  // header line. Locate `}:` via the first top-level newline (or EOF) so a
-  // quoted `}` inside a column name cannot be mistaken for the terminator.
+  // Column list lives between the first `{` after `]` and the `}` that closes it.
+  // Scan quote-aware for that closing brace so a quoted `}` OR a quoted newline
+  // inside a column name cannot be mistaken for the header terminator (a raw
+  // `indexOf('\n')` would truncate a column name that legitimately contains one).
   const braceOpen = block.indexOf("{", close);
-  const headerEnd = block.indexOf("\n");
-  const headerLine = headerEnd === -1 ? block : block.slice(0, headerEnd);
-  const braceClose = headerLine.lastIndexOf("}");
+  let braceClose = -1;
+  let inQuotes = false;
+  for (let i = braceOpen + 1; i < block.length; i++) {
+    const ch = block[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (block[i + 1] === '"') {
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === "}") {
+      braceClose = i;
+      break;
+    }
+  }
   const colsRaw = block.slice(braceOpen + 1, braceClose);
 
   const columns = colsRaw.length === 0 ? [] : splitTopLevel(colsRaw, ",").map(decodeColumn);
 
+  // The header ends at `}:`; data rows (if any) begin after the next newline.
+  const rowsStart = block.indexOf("\n", braceClose + 1);
   const rows: (string | null)[][] = [];
-  if (headerEnd !== -1) {
-    const region = block.slice(headerEnd + 1);
+  if (rowsStart !== -1) {
+    const region = block.slice(rowsStart + 1);
     for (const rowStr of splitTopLevel(region, "\n")) {
       // Strip the two-space structural indent, then split into cells.
       const body = rowStr.startsWith("  ") ? rowStr.slice(2) : rowStr;

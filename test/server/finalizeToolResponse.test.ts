@@ -211,6 +211,37 @@ describe("finalizeToolResponse", () => {
       );
       expect(finalized.content[0].text).toBe(stringifyToolResponse(payload));
     });
+
+    test("compact + dropElements compose: no TOON blocks, elements gone from both reps", () => {
+      serverConfig.setObserveResultCompactEnabled(true);
+      serverConfig.setObserveResultDropElementsEnabled(true);
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(makeObserveResult()),
+        { name: "observe" }
+      );
+      // dropElements removes elements before the encoder runs → no TOON blocks,
+      // and structuredContent consistently omits elements too.
+      const text = finalized.content[0].text;
+      expect(text.split("\n")[0]).toContain("observe-compact");
+      expect(text).not.toContain("clickable[");
+      expect((finalized.structuredContent as ObserveResult).elements).toBeUndefined();
+      expect(JSON.parse(text.split("\n")[1]).elements).toBeUndefined();
+    });
+
+    test("compact text survives a later structuredContent strip (compact + no-structured-content)", () => {
+      // #2759 strips structuredContent at the wire boundary AFTER finalize. Here
+      // we simulate that ordering: finalize produces compact text, then the
+      // structuredContent is dropped — the compact text block is unaffected.
+      serverConfig.setObserveResultCompactEnabled(true);
+      const finalized: any = finalizeToolResponse(
+        createStructuredToolResponse(makeObserveResult()),
+        { name: "observe" }
+      );
+      const compactText = finalized.content[0].text;
+      delete finalized.structuredContent;
+      expect(finalized.content[0].text).toBe(compactText);
+      expect(compactText.split("\n")[0]).toContain("observe-compact");
+    });
   });
 
   test("EC5: non-JSON text-only responses pass through unchanged", () => {

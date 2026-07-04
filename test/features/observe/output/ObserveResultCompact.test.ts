@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import {
   encodeObserveCompact,
+  sanitizeObserveResult,
   OBSERVE_COMPACT_LEGEND,
 } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { decodeToonTable } from "../../../../src/utils/toon";
@@ -215,13 +216,59 @@ describe("encodeObserveCompact", () => {
     expect(blocks.clickable.rows.length).toBe(observe.elements!.clickable.length);
   });
 
-  test("compact text is meaningfully smaller than pretty JSON on the #2755 fixture", () => {
+  test("compact text is smaller than the sanitized-pretty ship baseline on the #2755 fixture", () => {
+    // Honest baseline: finalizeToolResponse ALWAYS sanitizes before encoding
+    // (#2757), so the real comparison is compact vs sanitized-pretty, not raw
+    // pretty. Sanitize does most of the reduction; compact/TOON is the marginal
+    // win on top. Measuring against raw pretty would over-credit this change.
     const { observe } = loadAndroidHomeObserve();
-    const prettyBytes = measureValue(observe).bytes;
-    const compactBytes = Buffer.byteLength(encodeObserveCompact(observe, ""), "utf8");
-    expect(compactBytes).toBeLessThan(prettyBytes);
-    // Expect a substantial win from de-indenting + TOON (guard against regressions).
-    expect(compactBytes).toBeLessThan(prettyBytes * 0.75);
+    const sanitized = sanitizeObserveResult(observe, { dropElements: false });
+    const sanitizedPrettyBytes = measureValue(sanitized).bytes;
+    const compactBytes = Buffer.byteLength(
+      encodeObserveCompact(sanitized as unknown as Record<string, unknown>, ""),
+      "utf8"
+    );
+    expect(compactBytes).toBeLessThan(sanitizedPrettyBytes);
+    // De-indent + TOON should still land well under the sanitized-pretty text.
+    expect(compactBytes).toBeLessThan(sanitizedPrettyBytes * 0.6);
+  });
+
+  test("empty element arrays are omitted (no bare name[0]{}: noise)", () => {
+    const observe: ObserveResult = {
+      updatedAt: 1,
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      elements: {
+        clickable: [{ bounds: { left: 0, top: 0, right: 1, bottom: 1 }, text: "hi" }],
+        scrollable: [],
+        text: [],
+        media: [],
+      },
+    } as unknown as ObserveResult;
+    const text = encodeObserveCompact(observe, "");
+    expect(text).toContain("clickable[");
+    expect(text).not.toContain("scrollable[");
+    expect(text).not.toContain("text[");
+    expect(text).not.toContain("media[");
+  });
+
+  test("an empty-object element value is preserved as a {} cell, not dropped", () => {
+    const observe: ObserveResult = {
+      updatedAt: 1,
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      elements: {
+        clickable: [{ bounds: { left: 0, top: 0, right: 1, bottom: 1 }, meta: {} }],
+        scrollable: [],
+        text: [],
+        media: [],
+      },
+    } as unknown as ObserveResult;
+    const { blocks } = parseCompact(encodeObserveCompact(observe, ""));
+    const t = blocks.clickable;
+    const metaCol = t.columns.indexOf("meta");
+    expect(metaCol).toBeGreaterThanOrEqual(0);
+    expect(t.rows[0][metaCol]).toBe("{}");
   });
 
   test("compact text carries the same primitive top-level fields as pretty JSON", () => {

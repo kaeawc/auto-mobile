@@ -75,7 +75,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.107.0",
+    "@anthropic-ai/sdk": "^0.110.0",
     "@jimp/core": "^1.6.1",
     "@jimp/wasm-webp": "^1.6.1",
     "@modelcontextprotocol/sdk": "^1.26.0",

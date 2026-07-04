@@ -80,6 +80,17 @@ final class PinchGeometryTests: XCTestCase {
         XCTAssertEqual(points.end1.x, -100, accuracy: accuracy)
     }
 
+    func testComputePinchPointsDoesNotClampDegenerateDistances() {
+        // The pure function must NOT apply synthesizePinch's minimum-distance floor: a zero
+        // distance yields radius 0, collapsing all four endpoints onto the center. The header
+        // documents this contract (the floor lives in the synthesis wrapper). See #2979.
+        let points = ObjCExceptionCatcher_computePinchPoints(320, 480, 0, 0, 45)
+        for point in [points.start1, points.start2, points.end1, points.end2] {
+            XCTAssertEqual(point.x, 320, accuracy: accuracy)
+            XCTAssertEqual(point.y, 480, accuracy: accuracy)
+        }
+    }
+
     // MARK: - Cross-platform golden parity (issue #2979, Option 2)
 
     /// SHARED GOLDEN TABLE — keep byte-identical with `PinchGeometryTest.kt`
@@ -121,6 +132,16 @@ final class PinchGeometryTests: XCTestCase {
                     CGPoint(x: 156.698730, y: 425), CGPoint(x: 243.301270, y: 375),
                 ]
             ),
+            // A second asymmetric negative angle so drop-rotation-sign / sin-cos-swap detection is
+            // not a single point of failure on the -30 row (the +45 / rot-0 rows are blind to a
+            // dropped sign). distanceStart != distanceEnd also exercises unequal radii.
+            Vector(
+                centerX: 300, centerY: 500, distanceStart: 200, distanceEnd: 80, rotationDegrees: -60,
+                expected: [
+                    CGPoint(x: 200, y: 500), CGPoint(x: 400, y: 500),
+                    CGPoint(x: 280, y: 534.641016), CGPoint(x: 320, y: 465.358984),
+                ]
+            ),
             Vector(
                 centerX: 0, centerY: 0, distanceStart: 200, distanceEnd: 200, rotationDegrees: 0,
                 expected: [
@@ -151,10 +172,13 @@ final class PinchGeometryTests: XCTestCase {
     }
 
     /// Deterministic order-independent sort so the golden comparison ignores finger labeling.
+    /// Uses exact (x, then y) ordering — identical to the Kotlin mirror's
+    /// `compareBy({ it.first }, { it.second })` — so the two platforms can never sort the same
+    /// point set into different orders. Golden inputs keep x-values separated well beyond the
+    /// comparison tolerance, so exact ordering is stable.
     private func sortedPoints(_ points: [CGPoint]) -> [CGPoint] {
         points.sorted { lhs, rhs in
-            if abs(lhs.x - rhs.x) > accuracy { return lhs.x < rhs.x }
-            return lhs.y < rhs.y
+            lhs.x != rhs.x ? lhs.x < rhs.x : lhs.y < rhs.y
         }
     }
 }

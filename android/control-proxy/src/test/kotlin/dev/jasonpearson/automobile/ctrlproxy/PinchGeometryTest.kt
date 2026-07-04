@@ -164,6 +164,17 @@ class PinchGeometryTest {
           -30f,
           listOf(150f to 400f, 250f to 400f, 156.698730f to 425f, 243.301270f to 375f),
         ),
+        // A second asymmetric negative angle so drop-rotation-sign / sin-cos-swap detection is not
+        // a single point of failure on the -30 row (the +45 / rot-0 rows are blind to a dropped
+        // sign). distanceStart != distanceEnd also exercises unequal radii.
+        Vector(
+          300.0,
+          500.0,
+          200.0,
+          80.0,
+          -60f,
+          listOf(200f to 500f, 400f to 500f, 280f to 534.641016f, 320f to 465.358984f),
+        ),
         Vector(
           0.0,
           0.0,
@@ -192,6 +203,31 @@ class PinchGeometryTest {
         assertEquals("y mismatch for $v", e.second, a.second, delta)
       }
     }
+  }
+
+  @Test
+  fun `computePinchPoints does not clamp degenerate distances`() {
+    // The pure function must NOT floor a zero distance: radius 0 collapses all four endpoints
+    // onto the center. The iOS runner mirrors this — any minimum-distance floor is an
+    // iOS-synthesis-wrapper concern, not part of the shared convention. See #2979.
+    val p =
+      computePinchPoints(
+        centerX = 320.0,
+        centerY = 480.0,
+        distanceStart = 0.0,
+        distanceEnd = 0.0,
+        rotationDegrees = 45f,
+      )
+    listOf(
+        p.startX1 to p.startY1,
+        p.startX2 to p.startY2,
+        p.endX1 to p.endY1,
+        p.endX2 to p.endY2,
+      )
+      .forEach { (x, y) ->
+        assertEquals(320f, x, delta)
+        assertEquals(480f, y, delta)
+      }
   }
 
   /** Deterministic order-independent sort so the golden comparison ignores finger labeling. */

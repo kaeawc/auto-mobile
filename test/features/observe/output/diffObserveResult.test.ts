@@ -725,6 +725,27 @@ describe("diffObserveResult", () => {
     expect(withIdentity).toEqual(positional);
   });
 
+  test("spaced content fields that would collide under a space separator do NOT false-merge", () => {
+    // Regression for the content-key separator (PR #3080 review): the identity
+    // parts are NUL-joined, not space-joined. `content-desc:"a", text:"b c"` and
+    // `content-desc:"a b", text:"c"` both collapse to "  a b c" under a space join
+    // — a false-merge that would hide a real UI replacement as a single `changed`.
+    // NUL-joining keeps them distinct, so the unrelated remove/add stays remove+add.
+    const baseline = obs({ "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 }, "node": [
+      { "content-desc": "a", "text": "b c", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } },
+    ] });
+    const next = obs({ "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 }, "node": [
+      { "content-desc": "a b", "text": "c", "bounds": { left: 0, top: 50, right: 10, bottom: 60 } },
+    ] });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.added[0].attributes["content-desc"]).toBe("a b");
+    expect(diff.removed[0].attributes["content-desc"]).toBe("a");
+  });
+
   test("a genuinely new unique row and a genuinely removed unique row are not merged", () => {
     // Different content keys ⇒ no re-pair; a true add stays added, a true remove
     // stays removed even when both are leftover on the same round.

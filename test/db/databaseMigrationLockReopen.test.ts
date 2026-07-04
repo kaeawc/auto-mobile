@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { createFileBackedDbHarness } from "./withFileBackedDb";
 
 /**
  * Regression test for issue #2947 (sibling of the #2898 generation fence).
@@ -30,20 +30,17 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * A fresh module instance per case isolates the lazy globals.
  */
 describe("in-process same-path reopen cannot steal an in-flight migration's lock (issue #2947)", () => {
-  const savedEnv = new Map<string, string | undefined>();
-  const trackedEnvKeys = [
-    DAEMON_LAUNCH_CWD_ENV,
-    "AUTOMOBILE_DB_DIR",
-    "AUTOMOBILE_DB_PATH",
-    "AUTO_MOBILE_DB_PATH",
-    "AUTOMOBILE_MIGRATIONS_DIR",
-    "AUTO_MOBILE_MIGRATIONS_DIR",
-  ];
-  const tempDirs: string[] = [];
+  // Shared harness: fresh module import, tracked temp dirs cleaned with the
+  // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046).
+  let harness = createFileBackedDbHarness();
 
-  for (const key of trackedEnvKeys) {
-    savedEnv.set(key, process.env[key]);
-  }
+  beforeEach(() => {
+    harness = createFileBackedDbHarness();
+  });
+
+  afterEach(async () => {
+    await harness.cleanup();
+  });
 
   function setEnv(key: string, value: string | undefined): void {
     if (value === undefined) {
@@ -53,40 +50,7 @@ describe("in-process same-path reopen cannot steal an in-flight migration's lock
     }
   }
 
-  afterEach(async () => {
-    for (const key of trackedEnvKeys) {
-      setEnv(key, savedEnv.get(key));
-    }
-    for (const dir of tempDirs.splice(0)) {
-      await removeTempDirWithRetry(dir);
-    }
-  });
-
-  async function importFreshDatabaseModule() {
-    return import(`../../src/db/database.ts?lock-reopen-test=${Date.now()}-${Math.random()}`);
-  }
-
-  async function makeTempDir(prefix: string): Promise<string> {
-    const dir = await mkdtemp(path.join(tmpdir(), prefix));
-    tempDirs.push(dir);
-    return dir;
-  }
-
-  async function removeTempDirWithRetry(dir: string): Promise<void> {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      try {
-        await rm(dir, { recursive: true, force: true });
-        return;
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
-          throw error;
-        }
-        await defaultTimer.sleep(50);
-      }
-    }
-    await rm(dir, { recursive: true, force: true });
-  }
+  const makeTempDir = (prefix: string): Promise<string> => harness.makeTempDbDir(prefix);
 
   /**
    * A migrations dir with one migration that WRITES to the DB (creates `probe`
@@ -175,7 +139,7 @@ export async function down(db) {
       // concurrent-migration collision scenario.
       setEnv("AUTOMOBILE_MIGRATIONS_DIR", migrationsDir);
 
-      const db = await importFreshDatabaseModule();
+      const db = await harness.importFreshDatabaseModule();
 
       // Generation 0: start the slow, WRITING migration and hold it in flight
       // (mid-run, still holding the migrate lock).

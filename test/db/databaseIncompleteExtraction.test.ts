@@ -1,10 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { isIncompleteExtractionError } from "../../src/db/migrationDependencyIntegrity";
-import { removeTempDbDir } from "./tempDbDir";
+import { createFileBackedDbHarness } from "./withFileBackedDb";
 
 /**
  * Issue #2833: the incomplete-extraction mapping is scoped to KNOWN migration
@@ -19,33 +18,20 @@ import { removeTempDbDir } from "./tempDbDir";
  * isMissingMigrationDependencyError + createIncompleteExtractionError.)
  */
 describe("startup migration failure does not mislabel a genuine bad import", () => {
-  const originalDbPath = process.env.AUTOMOBILE_DB_PATH;
-  const originalMigrationsDir = process.env.AUTOMOBILE_MIGRATIONS_DIR;
-  let tempDir: string | undefined;
+  // Shared harness: fresh module import, tracked temp dirs cleaned with the
+  // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046).
+  let harness = createFileBackedDbHarness();
 
-  function restore(key: string, value: string | undefined): void {
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
-
-  afterEach(async () => {
-    restore("AUTOMOBILE_DB_PATH", originalDbPath);
-    restore("AUTOMOBILE_MIGRATIONS_DIR", originalMigrationsDir);
-    if (tempDir) {
-      await removeTempDbDir(tempDir);
-      tempDir = undefined;
-    }
+  beforeEach(() => {
+    harness = createFileBackedDbHarness();
   });
 
-  async function importFreshDatabaseModule() {
-    return import(`../../src/db/database.ts?incomplete-extraction-test=${Date.now()}-${Math.random()}`);
-  }
+  afterEach(async () => {
+    await harness.cleanup();
+  });
 
   test("an unknown missing package surfaces the generic error, not incomplete-extraction", async () => {
-    tempDir = await mkdtemp(path.join(tmpdir(), "am-bad-import-"));
+    const tempDir = await harness.makeTempDbDir("am-bad-import-");
     const migrationsDir = path.join(tempDir, "migrations");
     await mkdir(migrationsDir, { recursive: true });
 
@@ -67,9 +53,9 @@ describe("startup migration failure does not mislabel a genuine bad import", () 
     };
     process.on("unhandledRejection", onUnhandled);
 
-    let db: Awaited<ReturnType<typeof importFreshDatabaseModule>> | undefined;
+    let db: Awaited<ReturnType<typeof harness.importFreshDatabaseModule>> | undefined;
     try {
-      db = await importFreshDatabaseModule();
+      db = await harness.importFreshDatabaseModule();
 
       let thrown: unknown;
       try {

@@ -87,6 +87,20 @@ bun test --bail        # Stop on first failure (no cache)
 bun test <file>        # Run specific test file (no cache)
 ```
 
+## File-backed DB lifecycle tests
+
+Any test suite that opens a real `auto-mobile.db` (module close/reopen, migration
+lifecycle, path resolution) MUST go through the shared
+`createFileBackedDbHarness()` in `test/db/withFileBackedDb.ts` — never hand-roll a
+`mkdtemp` + raw `import("database.ts?...")` + env restore. The harness centralizes
+the four-part Windows-flake-avoidance pattern (fresh isolated module import,
+tracked temp dirs cleaned with the bounded `removeTempDbDir`, `getDatabase()` then
+`await ensureMigrations()` before close, and the `WINDOWS_FILE_DB_TEST_TIMEOUT_MS`
+ceiling). Use `openLifecycleTestDb(prefix)` for the common open→migrate→close flow;
+use the `makeTempDbDir` / `importFreshDatabaseModule` primitives for suites that
+must control the migration lifecycle mid-flight. `:memory:`-backed suites (e.g.
+`dbWriteBarrierResetOnClose`) are deliberately exempt — they carry no file handle.
+
 # Validate Shell Scripts
 
 Shell scripts under `scripts/` are tested with [BATS](https://github.com/bats-core/bats-core) and linted with shellcheck.

@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { createFileBackedDbHarness } from "./withFileBackedDb";
 
 /**
  * Regression tests for issue #2898 (follow-up to #2889 / #2796).
@@ -29,20 +29,17 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * lazy globals, matching databaseReset.test.ts / databaseMigrationFailure.test.ts.
  */
 describe("closeDatabase fences stale in-flight migration completions (issue #2898)", () => {
-  const savedEnv = new Map<string, string | undefined>();
-  const trackedEnvKeys = [
-    DAEMON_LAUNCH_CWD_ENV,
-    "AUTOMOBILE_DB_DIR",
-    "AUTOMOBILE_DB_PATH",
-    "AUTO_MOBILE_DB_PATH",
-    "AUTOMOBILE_MIGRATIONS_DIR",
-    "AUTO_MOBILE_MIGRATIONS_DIR",
-  ];
-  const tempDirs: string[] = [];
+  // Shared harness: fresh module import, tracked temp dirs cleaned with the
+  // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046).
+  let harness = createFileBackedDbHarness();
 
-  for (const key of trackedEnvKeys) {
-    savedEnv.set(key, process.env[key]);
-  }
+  beforeEach(() => {
+    harness = createFileBackedDbHarness();
+  });
+
+  afterEach(async () => {
+    await harness.cleanup();
+  });
 
   function setEnv(key: string, value: string | undefined): void {
     if (value === undefined) {
@@ -52,40 +49,7 @@ describe("closeDatabase fences stale in-flight migration completions (issue #289
     }
   }
 
-  afterEach(async () => {
-    for (const key of trackedEnvKeys) {
-      setEnv(key, savedEnv.get(key));
-    }
-    for (const dir of tempDirs.splice(0)) {
-      await removeTempDirWithRetry(dir);
-    }
-  });
-
-  async function importFreshDatabaseModule() {
-    return import(`../../src/db/database.ts?gen-fence-test=${Date.now()}-${Math.random()}`);
-  }
-
-  async function makeTempDir(prefix: string): Promise<string> {
-    const dir = await mkdtemp(path.join(tmpdir(), prefix));
-    tempDirs.push(dir);
-    return dir;
-  }
-
-  async function removeTempDirWithRetry(dir: string): Promise<void> {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      try {
-        await rm(dir, { recursive: true, force: true });
-        return;
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
-          throw error;
-        }
-        await defaultTimer.sleep(50);
-      }
-    }
-    await rm(dir, { recursive: true, force: true });
-  }
+  const makeTempDir = (prefix: string): Promise<string> => harness.makeTempDbDir(prefix);
 
   /**
    * A migrations dir with a single migration whose `up()` blocks until a
@@ -181,7 +145,7 @@ export async function down(db) {
       setEnv("AUTOMOBILE_DB_DIR", dbDir1);
       setEnv("AUTOMOBILE_MIGRATIONS_DIR", slowFailDir);
 
-      const db = await importFreshDatabaseModule();
+      const db = await harness.importFreshDatabaseModule();
 
       // Generation 0: start the slow, will-fail migration and hold it in flight.
       db.getDatabase();
@@ -245,7 +209,7 @@ export async function down(db) {
       setEnv("AUTOMOBILE_DB_DIR", dbDir1);
       setEnv("AUTOMOBILE_MIGRATIONS_DIR", slowSucceedDir);
 
-      const db = await importFreshDatabaseModule();
+      const db = await harness.importFreshDatabaseModule();
 
       // Generation 0: start the slow, will-succeed migration and hold it.
       db.getDatabase();
@@ -326,7 +290,7 @@ export async function down(db) {
       setEnv("AUTOMOBILE_DB_DIR", sharedDbDir);
       setEnv("AUTOMOBILE_MIGRATIONS_DIR", slowFailDir);
 
-      const db = await importFreshDatabaseModule();
+      const db = await harness.importFreshDatabaseModule();
 
       // Generation 0: slow, will-fail migration on the shared DB path, held in flight.
       db.getDatabase();

@@ -708,4 +708,223 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             XCTAssertEqual(key.stringValue, "type")
         }
     }
+
+    // MARK: - Non-finite coordinate rejection (#2928)
+
+    /// Assert that a gesture handler rejected a non-finite coordinate: the
+    /// response is a clean, actionable structured error (`success == false`, the
+    /// command's own result `type`, an `invalidParameter`-style message naming
+    /// the field) rather than an opaque failure — and that nothing was dispatched
+    /// into the gesture engine.
+    private func assertRejectedNonFinite(
+        _ response: WebSocketResponse?,
+        type: String,
+        field: String,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        guard let response = response else {
+            return XCTFail("Expected a WebSocketResponse, got nil", file: file, line: line)
+        }
+        XCTAssertEqual(response.type, type, "wrong result type", file: file, line: line)
+        XCTAssertEqual(response.success, false, "expected failure response", file: file, line: line)
+        let message = response.error ?? ""
+        XCTAssertTrue(
+            message.contains("Invalid value") && message.contains(field),
+            "error should name the invalid field '\(field)', got: \(message)",
+            file: file,
+            line: line
+        )
+    }
+
+    /// A non-finite coordinate reaching each gesture handler is rejected with a
+    /// clean per-command error response and never dispatched to the gesture
+    /// engine — one case per gesture family, covering `+Infinity`, `-Infinity`,
+    /// and `NaN`.
+    ///
+    /// Wire note: Apple's `JSONDecoder` rejects an overflow literal like `1e309`
+    /// at pre-parse (see `testOverflowCoordinateLiteralIsRejectedAtDecode`), so a
+    /// non-finite `Double` cannot arrive over the wire today. This guard is
+    /// defense-in-depth for the typed-initializer / computed-coordinate path
+    /// (division, `hypot`, normalized offsets) where a non-finite value can
+    /// legitimately originate.
+    func testNonFiniteTapCoordinateIsRejected() {
+        let response = commandHandler.handle(.tapCoordinates(
+            RequestTapCoordinates(requestId: "tap-inf", x: .infinity, y: 200)
+        )) as? WebSocketResponse
+        assertRejectedNonFinite(response, type: "tap_coordinates_result", field: "x")
+        XCTAssertTrue(fakeGesturePerformer.getTapHistory().isEmpty, "tap must not reach the engine")
+    }
+
+    func testNonFiniteSwipeCoordinateIsRejected() {
+        let response = commandHandler.handle(.swipe(
+            RequestSwipe(requestId: "swipe-inf", x1: 10, y1: 20, x2: 30, y2: -.infinity)
+        )) as? WebSocketResponse
+        assertRejectedNonFinite(response, type: "swipe_result", field: "y2")
+        XCTAssertTrue(fakeGesturePerformer.getSwipeHistory().isEmpty, "swipe must not reach the engine")
+    }
+
+    func testNonFiniteMultiFingerSwipeCoordinateIsRejected() {
+        let response = commandHandler.handle(.multiFingerSwipe(
+            RequestMultiFingerSwipe(requestId: "mfs-nan", x1: .nan, y1: 20, x2: 30, y2: 40, fingerCount: 3)
+        )) as? WebSocketResponse
+        assertRejectedNonFinite(response, type: "multi_finger_swipe_result", field: "x1")
+        XCTAssertTrue(
+            fakeGesturePerformer.getMultiFingerSwipeHistory().isEmpty,
+            "multi-finger swipe must not reach the engine"
+        )
+    }
+
+    func testNonFiniteDragCoordinateIsRejected() {
+        let response = commandHandler.handle(.drag(
+            RequestDrag(requestId: "drag-inf", x1: 10, y1: 20, x2: .infinity, y2: 40)
+        )) as? WebSocketResponse
+        assertRejectedNonFinite(response, type: "drag_result", field: "x2")
+        XCTAssertTrue(fakeGesturePerformer.getDragHistory().isEmpty, "drag must not reach the engine")
+    }
+
+    func testNonFinitePinchCoordinateIsRejected() {
+        let response = commandHandler.handle(.pinch(
+            RequestPinch(requestId: "pinch-nan", centerX: 100, centerY: 200, distanceStart: 40, distanceEnd: .nan)
+        )) as? WebSocketResponse
+        assertRejectedNonFinite(response, type: "pinch_result", field: "distanceEnd")
+        XCTAssertTrue(fakeGesturePerformer.getPinchHistory().isEmpty, "pinch must not reach the engine")
+    }
+
+    /// The two-finger alias routes through the same multi-finger handler, so it
+    /// gets the same guard.
+    func testNonFiniteTwoFingerSwipeCoordinateIsRejected() {
+        let response = commandHandler.handle(.twoFingerSwipe(
+            RequestMultiFingerSwipe(requestId: "tfs-inf", x1: 10, y1: .infinity, x2: 30, y2: 40)
+        )) as? WebSocketResponse
+        assertRejectedNonFinite(response, type: "multi_finger_swipe_result", field: "y1")
+        XCTAssertTrue(
+            fakeGesturePerformer.getMultiFingerSwipeHistory().isEmpty,
+            "two-finger swipe must not reach the engine"
+        )
+    }
+
+    /// Exhaustively pin *every* coordinate field of *every* gesture family: set
+    /// exactly one coordinate non-finite (all others valid) and assert the guard
+    /// rejects that specific field and dispatches nothing — across `+Infinity`,
+    /// `-Infinity`, and `NaN`. Because `requireFinite` short-circuits on the first
+    /// bad field, the per-family tests above only prove the first-checked field;
+    /// this loop proves each trailing `requireFinite` call is load-bearing (a
+    /// deleted `requireFinite(request.y…)` line would fail here).
+    func testEveryCoordinateFieldIsIndividuallyGuarded() {
+        let base: [Double] = [11, 22, 33, 44]
+
+        func check(
+            family: String,
+            fields: [String],
+            resultType: String,
+            make: ([Double]) -> WebSocketRequest,
+            dispatched: () -> Bool,
+            line: UInt = #line
+        ) {
+            for (index, field) in fields.enumerated() {
+                for bad in [Double.infinity, -.infinity, .nan] {
+                    var coords = base
+                    coords[index] = bad
+                    let response = commandHandler.handle(make(coords)) as? WebSocketResponse
+                    assertRejectedNonFinite(response, type: resultType, field: field, line: line)
+                    XCTAssertFalse(dispatched(), "\(family) \(field)=\(bad) must not dispatch", line: line)
+                }
+            }
+        }
+
+        check(
+            family: "tap",
+            fields: ["x", "y"],
+            resultType: "tap_coordinates_result",
+            make: { .tapCoordinates(RequestTapCoordinates(x: $0[0], y: $0[1])) },
+            dispatched: { !self.fakeGesturePerformer.getTapHistory().isEmpty }
+        )
+        check(
+            family: "swipe",
+            fields: ["x1", "y1", "x2", "y2"],
+            resultType: "swipe_result",
+            make: { .swipe(RequestSwipe(x1: $0[0], y1: $0[1], x2: $0[2], y2: $0[3])) },
+            dispatched: { !self.fakeGesturePerformer.getSwipeHistory().isEmpty }
+        )
+        check(
+            family: "multiFingerSwipe",
+            fields: ["x1", "y1", "x2", "y2"],
+            resultType: "multi_finger_swipe_result",
+            make: { .multiFingerSwipe(RequestMultiFingerSwipe(x1: $0[0], y1: $0[1], x2: $0[2], y2: $0[3])) },
+            dispatched: { !self.fakeGesturePerformer.getMultiFingerSwipeHistory().isEmpty }
+        )
+        check(
+            family: "drag",
+            fields: ["x1", "y1", "x2", "y2"],
+            resultType: "drag_result",
+            make: { .drag(RequestDrag(x1: $0[0], y1: $0[1], x2: $0[2], y2: $0[3])) },
+            dispatched: { !self.fakeGesturePerformer.getDragHistory().isEmpty }
+        )
+        check(
+            family: "pinch",
+            fields: ["centerX", "centerY", "distanceStart", "distanceEnd"],
+            resultType: "pinch_result",
+            make: {
+                .pinch(RequestPinch(centerX: $0[0], centerY: $0[1], distanceStart: $0[2], distanceEnd: $0[3]))
+            },
+            dispatched: { !self.fakeGesturePerformer.getPinchHistory().isEmpty }
+        )
+    }
+
+    /// Documents the decode-boundary reality behind #2928: an overflow numeric
+    /// literal is rejected by `JSONDecoder` during pre-parse (`dataCorrupted`,
+    /// empty codingPath) — it does NOT coerce to `Double.infinity`. So no wire
+    /// payload can deliver a non-finite coordinate to the handler on Apple
+    /// Foundation; the `isFinite` guard defends the non-wire construction path.
+    func testOverflowCoordinateLiteralIsRejectedAtDecode() {
+        XCTAssertThrowsError(
+            try decodeWebSocketRequest(#"{"type":"request_tap_coordinates","x":1e309,"y":2}"#)
+        ) { error in
+            guard case DecodingError.dataCorrupted = error else {
+                return XCTFail("Expected dataCorrupted for an overflow literal, got \(error)")
+            }
+        }
+    }
+
+    // MARK: - Finite fractional / negative coordinates unaffected (#2909 happy path)
+
+    /// Fractional coordinates decode and reach the engine with the fraction
+    /// intact — the widening's whole point — and are not rejected by the guard.
+    func testFractionalTapCoordinateIsPreserved() {
+        let response = dispatch(
+            #"{"type":"request_tap_coordinates","requestId":"tap-frac","x":100.5,"y":200.25}"#,
+            as: WebSocketResponse.self
+        )
+        XCTAssertEqual(response?.success, true)
+        let history = fakeGesturePerformer.getTapHistory()
+        XCTAssertEqual(history.first?.x ?? -1, 100.5, accuracy: 0.0001)
+        XCTAssertEqual(history.first?.y ?? -1, 200.25, accuracy: 0.0001)
+    }
+
+    func testFractionalPinchCoordinatesArePreserved() {
+        let response = dispatch(
+            #"""
+            {"type":"request_pinch","requestId":"pinch-frac","centerX":100.5,"centerY":200.5,"distanceStart":40.25,"distanceEnd":120.75}
+            """#,
+            as: WebSocketResponse.self
+        )
+        XCTAssertEqual(response?.success, true)
+        let history = fakeGesturePerformer.getPinchHistory()
+        XCTAssertEqual(history.first?.centerX ?? -1, 100.5, accuracy: 0.0001)
+        XCTAssertEqual(history.first?.distanceEnd ?? -1, 120.75, accuracy: 0.0001)
+    }
+
+    /// Negative coordinates are finite and legitimate (off-screen anchors); the
+    /// guard must not reject them.
+    func testNegativeSwipeCoordinatesArePreserved() {
+        let response = dispatch(
+            #"{"type":"request_swipe","requestId":"swipe-neg","x1":-5,"y1":-10.5,"x2":30,"y2":40}"#,
+            as: WebSocketResponse.self
+        )
+        XCTAssertEqual(response?.success, true)
+        let history = fakeGesturePerformer.getSwipeHistory()
+        XCTAssertEqual(history.first?.startX ?? .nan, -5, accuracy: 0.0001)
+        XCTAssertEqual(history.first?.startY ?? .nan, -10.5, accuracy: 0.0001)
+    }
 }

@@ -5,7 +5,7 @@ ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-true}
 
 # Pinned ktfmt version + shared enforcement helpers -- single source of truth
 # shared with install_ktfmt.sh and validate_ktfmt.sh.
-# shellcheck source=scripts/ktfmt/ktfmt_version.sh
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
 # Colors for output

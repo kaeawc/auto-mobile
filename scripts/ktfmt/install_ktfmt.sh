@@ -2,7 +2,7 @@
 
 # Pinned ktfmt version -- single source of truth shared with validate_ktfmt.sh.
 # Bump the version in scripts/ktfmt/ktfmt_version.sh (one line) to change it.
-# shellcheck source=scripts/ktfmt/ktfmt_version.sh
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
 # Colors for output

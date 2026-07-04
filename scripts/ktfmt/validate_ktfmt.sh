@@ -6,7 +6,7 @@ ONLY_CHANGED_SINCE_SHA=${ONLY_CHANGED_SINCE_SHA:-""}
 
 # Pinned ktfmt version -- single source of truth shared with install_ktfmt.sh so
 # the installer and this validator's fingerprint gate can never drift apart.
-# shellcheck source=scripts/ktfmt/ktfmt_version.sh
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
 # Colors for output

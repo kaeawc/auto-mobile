@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
-import { removeTempDbDir } from "./tempDbDir";
-import { importFreshDatabaseModule, restoreEnv, snapshotEnv } from "./freshDatabaseModule";
-import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
+import { createFileBackedDbHarness, WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./withFileBackedDb";
 
 /**
  * Regression tests for issue #2796.
@@ -35,27 +31,21 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
   // hook timeout. Shares the one canonical file-backed ceiling (issue #2992).
   const FILE_BACKED_TEST_TIMEOUT_MS = WINDOWS_FILE_DB_TEST_TIMEOUT_MS;
 
-  const tempDirs: string[] = [];
-  let envSnapshot: NodeJS.ProcessEnv;
+  // Shared harness: fresh module import, tracked temp dirs cleaned with the
+  // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046). The
+  // snapshot is taken per test (in `beforeEach`) so every mutated key is restored
+  // regardless of which ones a given test touches.
+  let harness = createFileBackedDbHarness();
 
   beforeEach(() => {
-    // Snapshot the full env so every mutated key is restored regardless of which
-    // ones a given test touches (avoids a hand-maintained key list going stale).
-    envSnapshot = snapshotEnv();
+    harness = createFileBackedDbHarness();
   });
 
   afterEach(async () => {
-    restoreEnv(envSnapshot);
-    for (const dir of tempDirs.splice(0)) {
-      await removeTempDbDir(dir);
-    }
+    await harness.cleanup();
   });
 
-  async function makeTempDbDir(prefix: string): Promise<string> {
-    const dir = await mkdtemp(path.join(tmpdir(), prefix));
-    tempDirs.push(dir);
-    return dir;
-  }
+  const makeTempDbDir = (prefix: string): Promise<string> => harness.makeTempDbDir(prefix);
 
   function queryToolCalls(db: any) {
     return db
@@ -69,7 +59,7 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
     process.env.AUTOMOBILE_DB_DIR = firstDir;
     delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-    const databaseModule = await importFreshDatabaseModule();
+    const databaseModule = await harness.importFreshDatabaseModule();
 
     // Cold start on the first DB: migrations run, migrationsRun becomes true.
     const firstDb = databaseModule.getDatabase();
@@ -107,7 +97,7 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
     process.env.AUTOMOBILE_DB_DIR = firstDir;
     delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-    const databaseModule = await importFreshDatabaseModule();
+    const databaseModule = await harness.importFreshDatabaseModule();
 
     // Resolve once so resolvedDbPath is cached (no DB file opened).
     expect(databaseModule.getDatabasePath()).toBe(path.join(firstDir, "auto-mobile.db"));
@@ -129,7 +119,7 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
     delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
     delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-    const databaseModule = await importFreshDatabaseModule();
+    const databaseModule = await harness.importFreshDatabaseModule();
 
     const failingDb = databaseModule.getDatabase();
     await expect(queryToolCalls(failingDb)).rejects.toThrow(

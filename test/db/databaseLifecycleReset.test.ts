@@ -1,9 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
-import { defaultTimer } from "../../src/utils/SystemTimer";
+import { createFileBackedDbHarness, WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./withFileBackedDb";
 
 /**
  * Structural guard for issue #2900.
@@ -31,59 +29,17 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * internals.
  */
 describe("closeDatabase resets the migration/path lifecycle as one set (issue #2900)", () => {
-  const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
-  const originalDbDir = process.env.AUTOMOBILE_DB_DIR;
-  const originalDbPath = process.env.AUTOMOBILE_DB_PATH;
-  const originalMigrationsDir = process.env.AUTOMOBILE_MIGRATIONS_DIR;
-  const originalLegacyMigrationsDir = process.env.AUTO_MOBILE_MIGRATIONS_DIR;
+  // Shared harness: fresh module import, tracked temp dirs cleaned with the
+  // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046).
+  let harness = createFileBackedDbHarness();
 
-  function restore(key: string, value: string | undefined): void {
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
-
-  const tempDirs: string[] = [];
-
-  afterEach(async () => {
-    restore(DAEMON_LAUNCH_CWD_ENV, originalLaunchCwd);
-    restore("AUTOMOBILE_DB_DIR", originalDbDir);
-    restore("AUTOMOBILE_DB_PATH", originalDbPath);
-    restore("AUTOMOBILE_MIGRATIONS_DIR", originalMigrationsDir);
-    restore("AUTO_MOBILE_MIGRATIONS_DIR", originalLegacyMigrationsDir);
-    for (const dir of tempDirs.splice(0)) {
-      await removeTempDirWithRetry(dir);
-    }
+  beforeEach(() => {
+    harness = createFileBackedDbHarness();
   });
 
-  async function importFreshDatabaseModule() {
-    // Fresh module instance so its lazy globals are not shared with other tests.
-    return import(`../../src/db/database.ts?lifecycle-reset-test=${Date.now()}-${Math.random()}`);
-  }
-
-  async function makeTempDbDir(prefix: string): Promise<string> {
-    const dir = await mkdtemp(path.join(tmpdir(), prefix));
-    tempDirs.push(dir);
-    return dir;
-  }
-
-  async function removeTempDirWithRetry(dir: string): Promise<void> {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      try {
-        await rm(dir, { recursive: true, force: true });
-        return;
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
-          throw error;
-        }
-        await defaultTimer.sleep(50);
-      }
-    }
-    await rm(dir, { recursive: true, force: true });
-  }
+  afterEach(async () => {
+    await harness.cleanup();
+  });
 
   function queryToolCalls(db: any) {
     return db
@@ -99,14 +55,14 @@ describe("closeDatabase resets the migration/path lifecycle as one set (issue #2
     // `migrationsError` reset would go undetected — the axis would be un-proven.
     // Booting failed-then-healthy exercises all four axes in one flow so a
     // partial `reset()` that skips ANY single field fails here.
-    const failDir = await makeTempDbDir("auto-mobile-lifecycle-fail-");
+    const failDir = await harness.makeTempDbDir("auto-mobile-lifecycle-fail-");
     process.env.AUTOMOBILE_DB_DIR = failDir;
     // Force a startup-migration failure: a migrations dir that does not exist.
     process.env.AUTOMOBILE_MIGRATIONS_DIR = path.join(failDir, "missing-migrations");
     delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
     delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-    const databaseModule = await importFreshDatabaseModule();
+    const databaseModule = await harness.importFreshDatabaseModule();
 
     // Cold start on the first DB: path resolves + caches, migrations START and
     // FAIL, so migrationsPromise settles and migrationsError is cached non-null.
@@ -128,7 +84,7 @@ describe("closeDatabase resets the migration/path lifecycle as one set (issue #2
     //   - stale migrationsPromise -> ditto (re-arm is gated on it being null)
     //   - stale migrationsError -> the cached failed-boot error rethrows on query
     //                              against the otherwise-healthy reopened DB
-    const healthyDir = await makeTempDbDir("auto-mobile-lifecycle-healthy-");
+    const healthyDir = await harness.makeTempDbDir("auto-mobile-lifecycle-healthy-");
     process.env.AUTOMOBILE_DB_DIR = healthyDir;
     delete process.env.AUTOMOBILE_MIGRATIONS_DIR;
 
@@ -146,5 +102,5 @@ describe("closeDatabase resets the migration/path lifecycle as one set (issue #2
     expect(databaseModule.getMigrationsError()).toBeNull();
 
     await databaseModule.closeDatabase();
-  });
+  }, WINDOWS_FILE_DB_TEST_TIMEOUT_MS);
 });

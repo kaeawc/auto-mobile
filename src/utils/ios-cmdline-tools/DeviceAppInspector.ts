@@ -156,38 +156,44 @@ const getErrorMessage = (error: unknown): string =>
 /**
  * Full text of a failed `exec` rejection. Promisified `child_process.exec`
  * rejects with an Error whose `message` is "Command failed: <cmd>" and whose
- * `stderr` carries the tool's actual diagnostic — devicectl writes its ESRCH
- * "No such process" text to stderr, so we must inspect stderr, not just message.
+ * `stdout`/`stderr` carry the tool's actual diagnostic — devicectl writes its
+ * ESRCH "No such process" text to stderr, so we must inspect the captured
+ * streams, not just message. stdout is included as a cheap belt-and-suspenders:
+ * with `--quiet` devicectl uses stderr, but its error framing is undocumented.
  */
 const getExecErrorText = (error: unknown): string => {
-  const base = getErrorMessage(error);
+  const parts = [getErrorMessage(error)];
   if (error && typeof error === "object") {
-    const stderr = (error as { stderr?: unknown }).stderr;
-    if (typeof stderr === "string" && stderr.length > 0) {
-      return `${base}\n${stderr}`;
+    for (const field of ["stderr", "stdout"] as const) {
+      const value = (error as Record<string, unknown>)[field];
+      if (typeof value === "string" && value.length > 0) {
+        parts.push(value);
+      }
     }
   }
-  return base;
+  return parts.join("\n");
 };
 
 /**
  * True when a devicectl `process terminate` failure means the target PID was
  * already gone — it exited between our `info processes` resolution and the kill
- * (a real on-device race, issue #3054). devicectl surfaces ESRCH as the
- * localized "No such process" strerror text; we also tolerate a couple of
- * "not running" phrasings for robustness. This mirrors
+ * (a real on-device race, issue #3054). devicectl surfaces ESRCH either as the
+ * localized "No such process" strerror text or, on some builds, the bare
+ * `NSPOSIXErrorDomain error 3` code without the strerror gloss. This mirrors
  * `TerminateApp.isSimctlNotRunningError` on the simulator path, so a raced exit
  * reports an effectively-terminated app instead of a false `success:false`.
  *
  * Deliberately narrow: unrelated failures (device locked, not connected,
- * permission denied) must still propagate as hard errors.
+ * permission denied) must still propagate as hard errors. The "not running"
+ * family is scoped to the *process* so a device/CoreDevice-level "not running"
+ * message can never be mistaken for an already-exited PID.
  */
 export const isDevicectlProcessGoneError = (message: string): boolean => {
   const normalized = message.toLowerCase();
-  return normalized.includes("no such process")
-    || normalized.includes("no longer running")
-    || normalized.includes("not running")
-    || normalized.includes("found nothing to terminate");
+  return normalized.includes("no such process")            // ESRCH strerror
+    || normalized.includes("nsposixerrordomain error 3")   // bare ESRCH code
+    || normalized.includes("found nothing to terminate")   // simctl parity
+    || /process (?:is )?(?:no longer |not )running/.test(normalized);
 };
 
 /**

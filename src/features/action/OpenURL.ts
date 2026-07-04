@@ -11,6 +11,28 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
 
+/**
+ * URL schemes that iOS resolves to a *system* handler (Mail, Phone, Messages,
+ * Maps, …) rather than an arbitrary app. On a physical device these must go
+ * through the system/Safari resolver — never the `launchApp`-cached target
+ * bundle, which almost certainly can't open a `mailto:`/`tel:` payload. The
+ * simulator path already gets this for free via `simctl openurl`.
+ */
+const SYSTEM_URL_SCHEMES = new Set([
+  "mailto",
+  "tel",
+  "sms",
+  "facetime",
+  "facetime-audio",
+  "maps",
+]);
+
+/** True when `url`'s scheme is one iOS routes to a built-in system handler. */
+const isSystemUrlScheme = (url: string): boolean => {
+  const match = url.trim().match(/^([a-z][a-z0-9+.-]*):/i);
+  return match ? SYSTEM_URL_SCHEMES.has(match[1].toLowerCase()) : false;
+};
+
 export class OpenURL extends BaseVisualChange {
 
   private readonly simctl: SimCtlClient | null;
@@ -193,10 +215,11 @@ export class OpenURL extends BaseVisualChange {
 
   /**
    * Open a URL on a physical iOS device (iOS 17+) via `devicectl`. http(s) URLs
-   * launch Safari (which resolves universal links and hands off to the owning
-   * app); custom-scheme deep links launch the resolved target app bundle
-   * (the app targeted by a prior launchApp), falling back to Safari when no
-   * target is known.
+   * and system schemes (`mailto:`/`tel:`/`sms:`/…) launch Safari, which resolves
+   * universal links and hands off to the owning system handler. App-specific
+   * custom-scheme deep links launch the resolved target app bundle (the app
+   * targeted by a prior launchApp), falling back to Safari when no target is
+   * known.
    * @param url - URL to open
    * @returns Result of the URL opening operation
    */
@@ -213,12 +236,15 @@ export class OpenURL extends BaseVisualChange {
     }
 
     try {
-      // http(s) → Safari resolves universal links and hands off to the owning
-      // app. Non-http (custom scheme, and best-effort mailto:/tel:) → the app
-      // targeted by a prior launchApp, else Safari. We read the target with the
-      // non-constructing getExistingTargetBundleId so a bare openLink can't
-      // spin up a CtrlProxy manager (and reserve a service port) just to read it.
-      const bundleId = /^https?:\/\//i.test(url.trim())
+      // http(s) and system schemes (mailto:/tel:/sms:/…) → Safari, so iOS
+      // resolves universal links / hands off to Mail/Phone/etc. Only an
+      // app-specific custom scheme (myapp://) targets the launchApp-cached
+      // bundle — never a system scheme, which the app-under-test can't open.
+      // We read the target with the non-constructing getExistingTargetBundleId
+      // so a bare openLink can't spin up a CtrlProxy manager (and reserve a
+      // service port) just to read it.
+      const useSystemResolver = /^https?:\/\//i.test(url.trim()) || isSystemUrlScheme(url);
+      const bundleId = useSystemResolver
         ? SAFARI_BUNDLE_ID
         : (IOSCtrlProxyManager.getExistingTargetBundleId(this.device) ?? SAFARI_BUNDLE_ID);
       await devicectl.launchWithPayloadUrl(this.device.deviceId, bundleId, url);

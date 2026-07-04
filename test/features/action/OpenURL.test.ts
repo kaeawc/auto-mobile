@@ -89,8 +89,11 @@ describe("OpenURL iOS routing", () => {
     expect(devicectl.launchCalls[0].bundleId).toBe("com.apple.mobilesafari");
   });
 
-  test("(c3) physical UDID + mailto: with no target routes to Safari (best-effort, pinned behavior)", async () => {
-    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue(undefined);
+  test("(c3) physical UDID + system scheme (mailto:) routes to Safari even when a target app is set", async () => {
+    // Regression guard: a prior launchApp sets a cached target bundle. System
+    // schemes (mailto:/tel:/sms:) must STILL go to Safari/system resolution —
+    // never the app-under-test, which can't open a mailto: payload.
+    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue("com.example.MyApp");
     restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
@@ -98,12 +101,22 @@ describe("OpenURL iOS routing", () => {
 
     const result = await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "mailto:a@b.com");
 
-    // mailto:/tel: are not http(s), so they take the non-http branch. With no
-    // target app they fall back to Safari — pinned so a routing change is caught.
     expect(result.success).toBe(true);
     expect(devicectl.launchCalls).toEqual([
       { deviceUdid: PHYSICAL_UDID, bundleId: "com.apple.mobilesafari", url: "mailto:a@b.com" },
     ]);
+  });
+
+  test("(c4) physical UDID + tel: routes to Safari/system resolver, not the target app", async () => {
+    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue("com.example.MyApp");
+    restores.push(() => targetSpy.mockRestore());
+
+    const simctl = new FakeSimCtlClient();
+    const devicectl = new FakeDeviceCtlClient();
+
+    await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "tel:+15551234567");
+
+    expect(devicectl.launchCalls[0].bundleId).toBe("com.apple.mobilesafari");
   });
 
   test("(d) unavailable devicectl returns an explicit iOS 17+/Xcode 15+ error (no throw, no simctl)", async () => {

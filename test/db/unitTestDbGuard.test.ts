@@ -4,6 +4,7 @@ import os from "os";
 import { UNIT_TEST_DB_GUARD_ENV } from "../../src/db/database";
 import { IN_MEMORY_DB_OPT_IN_ENV } from "../../src/db/migrationLock";
 import { ActionableError } from "../../src/models/ActionableError";
+import { importFreshDatabaseModule } from "./freshDatabaseModule";
 
 /**
  * Unit tests for the real-DB guard (issue #3067).
@@ -50,11 +51,12 @@ describe("unit-test real-DB guard (issue #3067)", () => {
     }
   });
 
-  // A fresh module instance so the cached `resolvedDbPath` from a prior case
-  // does not mask the env we set here.
-  async function importFreshDatabaseModule() {
-    return import(`../../src/db/database.ts?guard-test=${Date.now()}-${Math.random()}`);
-  }
+  // Each case needs a fresh module instance so the cached `resolvedDbPath` from a
+  // prior case does not mask the env we set here. Use the single canonical
+  // primitive (freshDatabaseModule.ts) — its collision-proof monotonic cache-bust
+  // key replaces this suite's old ad-hoc `Date.now()-Math.random()` import (which
+  // the repo bans as a randomness source) and keeps the raw cache-busted import in
+  // exactly one place (enforced by fileBackedDbAntiPattern.test.ts, issue #3081).
 
   test("getDatabasePath() throws an ActionableError on the default real path when armed", async () => {
     setEnv(UNIT_TEST_DB_GUARD_ENV, "1");

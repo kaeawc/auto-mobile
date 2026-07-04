@@ -246,7 +246,7 @@ const pathBasename = (path: string): string => {
  * require the path segment after `"<bundle>/"` to contain no further `/`. This
  * also excludes a sibling like `MyApp.app.extension/...` (different prefix).
  *
- * Two-pass, per issue #2488: the strict inside-bundle match is preferred, but if
+ * Two-pass, per issue #2882: the strict inside-bundle match is preferred, but if
  * it finds nothing we fall back to matching a process whose executable
  * **basename** equals the bundle name (minus `.app`). The fallback guards the
  * real-device risk that `info processes` executable paths don't nest under the
@@ -603,21 +603,21 @@ export class DeviceAppInspector {
    * Force-terminate a running app on a physical iOS device (iOS 17+) via
    * devicectl. There is no `terminate-by-bundle-id` verb, so this is a two-step
    * operation: resolve the bundle id to a PID (by matching the on-device bundle
-   * path against `device info processes` executables) then `device process
-   * signal --signal SIGKILL` that PID.
+   * path against `device info processes` executables) then force-kill that PID
+   * with the dedicated `device process terminate --kill` verb (SIGKILL).
    *
    * Returns:
    * - `{ wasInstalled: false, wasRunning: false }` when the bundle isn't installed
-   *   (no process query, no signal),
+   *   (no process query, no terminate),
    * - `{ wasInstalled: true, wasRunning: false }` when installed but no matching
-   *   process is running (no signal),
-   * - `{ wasInstalled: true, wasRunning: true }` after SIGKILL of a running process.
+   *   process is running (no terminate),
+   * - `{ wasInstalled: true, wasRunning: true }` after terminating a running process.
    *
    * Throws on an underlying devicectl failure. Gated to macOS + local devicectl:
    * host control (Docker) exposes no process-management bridge, and non-darwin
    * hosts have no devicectl, so both throw an explicit, actionable error rather
    * than a confusing simctl-style failure (iOS ≤16 devices reject the devicectl
-   * signal at the tool level and surface as a thrown devicectl error).
+   * terminate at the tool level and surface as a thrown devicectl error).
    */
   public async terminateApp(deviceUdid: string, bundleId: string): Promise<{ wasInstalled: boolean; wasRunning: boolean }> {
     const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
@@ -642,17 +642,18 @@ export class DeviceAppInspector {
       return { wasInstalled: true, wasRunning: false };
     }
 
-    const signalCommand = [
+    const terminateCommand = [
       "xcrun",
       "devicectl",
       "device",
       "process",
-      "signal",
+      "terminate",
       "--device", deviceUdid,
       "--pid", String(pid),
-      "--signal", "SIGKILL"
+      "--kill",
+      "--quiet"
     ].join(" ");
-    await this.deps.exec(signalCommand);
+    await this.deps.exec(terminateCommand);
     return { wasInstalled: true, wasRunning: true };
   }
 

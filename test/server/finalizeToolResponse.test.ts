@@ -389,4 +389,184 @@ describe("finalizeToolResponse", () => {
       expect(node.bounds.bottom).toBe(1920);
     });
   });
+
+  // Diff emit (issue #2761): with `--actions-diff-observe` on AND a baseline
+  // store injected, a non-observe action emits a *diff* of its post-action
+  // observation instead of the full observation. `observe` always emits full and
+  // resets the baseline. Falls back to full when the screen changed, the baseline
+  // is missing, or there is no sessionUuid (legacy single-agent path).
+  describe("actions-diff-observe diff emit (#2761)", () => {
+    let originalDiff: boolean;
+
+    /** Same-screen ObserveResult (app/activity/package all match makeObserveResult). */
+    function sameScreenObserve(): ObserveResult {
+      return {
+        ...makeObserveResult(),
+        activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+        viewHierarchy: {
+          packageName: "com.example",
+          hierarchy: {
+            node: {
+              "resource-id": "com.example:id/root",
+              "content-desc": "keep-me",
+              "node": [{ "resource-id": "com.example:id/child", "text": "Hello" } as any],
+            } as any,
+          },
+        },
+      } as ObserveResult;
+    }
+
+    /** In-memory baseline store standing in for the sessionManager cache slot. */
+    function makeStore(): { store: { get: (u: string) => ObserveResult | undefined; set: (u: string, o: ObserveResult) => void }; map: Map<string, ObserveResult> } {
+      const map = new Map<string, ObserveResult>();
+      return {
+        map,
+        store: {
+          get: (u: string) => map.get(u),
+          set: (u: string, o: ObserveResult) => { map.set(u, o); },
+        },
+      };
+    }
+
+    beforeEach(() => {
+      originalDiff = serverConfig.isActionsDiffObserveEnabled();
+      serverConfig.setActionsDiffObserveEnabled(true);
+    });
+
+    afterEach(() => {
+      serverConfig.setActionsDiffObserveEnabled(originalDiff);
+    });
+
+    test("flag off leaves the action observation full and never touches the store", () => {
+      serverConfig.setActionsDiffObserveEnabled(false);
+      const { store, map } = makeStore();
+      const response = createStructuredToolResponse({ success: true, observation: sameScreenObserve() });
+      const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expect(map.size).toBe(0);
+    });
+
+    test("observe emits the full observation and resets the baseline", () => {
+      const { store, map } = makeStore();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      // Full observation emitted (not a diff).
+      expect((finalized.structuredContent as any).isDiff).toBeUndefined();
+      expect((finalized.structuredContent as any).viewHierarchy).toBeDefined();
+      // Baseline reset to the sanitized observation.
+      expect(map.get("s1")).toBeDefined();
+      expect(map.get("s1")!.viewHierarchy).toBeDefined();
+    });
+
+    test("a non-observe action emits a diff vs the baseline in both representations", () => {
+      const { store } = makeStore();
+      // Seed the baseline via an observe.
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      // Next action toggles a child's `checked` on the same screen.
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.viewHierarchy).toBeUndefined();
+      expect(obsSc.changed).toHaveLength(1);
+      expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
+      expect((finalized.structuredContent as any).success).toBe(true);
+
+      // Text mirrors the diffed structuredContent exactly.
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation.isDiff).toBe(true);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("a non-observe action updates the baseline to its own observation (next diff is against current state)", () => {
+      const { store, map } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+
+      // Baseline now reflects the post-action observation (checked=true present).
+      const baseline = map.get("s1")!;
+      expect((baseline.viewHierarchy!.hierarchy.node as any).node[0].checked).toBe("true");
+    });
+
+    test("falls back to the full observation when the baseline is missing", () => {
+      const { store, map } = makeStore();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      // Baseline is now seeded for the next action.
+      expect(map.get("s1")).toBeDefined();
+    });
+
+    test("falls back to full when the screen (app/activity/package) changed", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      const otherScreen = {
+        ...sameScreenObserve(),
+        activeWindow: { appId: "com.other", activityName: ".Other", layoutSeqSum: 2 },
+      } as ObserveResult;
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: otherScreen }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+    });
+
+    test("falls back to full when there is no sessionUuid (legacy single-agent path)", () => {
+      const { store, map } = makeStore();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", baselineStore: store }
+      );
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expect(map.size).toBe(0);
+    });
+
+    test("observe resets the baseline after a diff-producing action", () => {
+      const { store, map } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      const first = map.get("s1");
+      // An observe with a different hierarchy overwrites the baseline wholesale.
+      const reset = sameScreenObserve();
+      (reset.viewHierarchy!.hierarchy.node as any)["content-desc"] = "changed-root";
+      finalizeToolResponse(createStructuredToolResponse(reset), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      const second = map.get("s1")!;
+      expect(second).not.toBe(first);
+      expect((second.viewHierarchy!.hierarchy.node as any)["content-desc"]).toBe("changed-root");
+    });
+
+    test("diff path is output-only — the caller's in-memory observation is untouched", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const before = JSON.stringify(next);
+      finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+      expect(JSON.stringify(next)).toBe(before);
+    });
+  });
 });

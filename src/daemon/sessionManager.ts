@@ -5,6 +5,7 @@ import { KeepScreenAwakeManager, KEEP_SCREEN_AWAKE_STATE_KEY, KeepScreenAwakeSta
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
+import type { ObserveResult } from "../models/ObserveResult";
 
 /**
  * Session Cache Data
@@ -26,6 +27,7 @@ export interface SessionCacheData {
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
   lastScreenshot?: string;     // Base64 encoded last screenshot
   lastObserveTime?: number;    // Timestamp of last hierarchy observation (hierarchy only, not screenshot)
+  lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
   customData?: Record<string, any>; // Custom data set by tools
 }
 
@@ -339,6 +341,22 @@ export class SessionManager {
    */
   setLastScreenshot(sessionId: string, screenshot: string): void {
     this.updateSessionCache(sessionId, { lastScreenshot: screenshot });
+  }
+
+  /**
+   * Cache the most recent observation emitted to the agent (the sanitized
+   * `ObserveResult`) as the diff baseline for `--actions-diff-observe` (#2761).
+   *
+   * This is the "last observation output to the agent": `observe` resets it to
+   * the full sanitized observation, and each non-observe action updates it to
+   * its own post-action observation so the *next* action diffs against current
+   * state. Stored in a typed top-level slot (canonical per #2917) rather than
+   * the untyped `customData` bag. Distinct from `lastHierarchy`, which keeps the
+   * full untrimmed hierarchy for internal reuse; this holds the wire-shaped
+   * observation so diffs compare like-for-like.
+   */
+  setLastRenderedObservation(sessionId: string, observation: ObserveResult): void {
+    this.updateSessionCache(sessionId, { lastRenderedObservation: observation });
   }
 
   /**

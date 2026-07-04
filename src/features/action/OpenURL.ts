@@ -2,15 +2,36 @@ import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, OpenURLResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { DeviceCtlClient, DeviceUrlLauncher } from "../../utils/ios-cmdline-tools/DeviceCtlClient";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { logger } from "../../utils/logger";
 import { LaunchApp } from "./LaunchApp";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 
+const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
+
 export class OpenURL extends BaseVisualChange {
 
-  constructor(device: BootedDevice, adb: AdbClient | null = null) {
+  private readonly simctl: SimCtlClient | null;
+  private readonly devicectl: DeviceUrlLauncher | null;
+
+  /**
+   * @param device - The target device
+   * @param adb - Optional AdbClient instance (for testing)
+   * @param simctl - Optional SimCtlClient for the iOS simulator path (for testing)
+   * @param devicectl - Optional DeviceUrlLauncher for the iOS physical-device path (for testing)
+   */
+  constructor(
+    device: BootedDevice,
+    adb: AdbClient | null = null,
+    simctl: SimCtlClient | null = null,
+    devicectl: DeviceUrlLauncher | null = null
+  ) {
     super(device, adb);
     this.device = device;
+    this.simctl = simctl;
+    this.devicectl = devicectl;
   }
 
   async execute(
@@ -131,13 +152,28 @@ export class OpenURL extends BaseVisualChange {
   }
 
   /**
-   * Execute iOS-specific URL opening using simctl
+   * Execute iOS-specific URL opening. Branches on the canonical
+   * {@link isIosSimulatorUdid} signal: simulators keep the simulator-only
+   * `simctl openurl` path, while physical devices (iOS 17+) go through
+   * `devicectl`, since `simctl` cannot target a physical-device UDID.
    * @param url - URL to open
    * @returns Result of the URL opening operation
    */
   private async executeiOSOpenURL(url: string): Promise<OpenURLResult> {
+    if (isIosSimulatorUdid(this.device.deviceId)) {
+      return this.executeiOSSimulatorOpenURL(url);
+    }
+    return this.executeiOSPhysicalOpenURL(url);
+  }
+
+  /**
+   * Open a URL on an iOS simulator via `xcrun simctl openurl`.
+   * @param url - URL to open
+   * @returns Result of the URL opening operation
+   */
+  private async executeiOSSimulatorOpenURL(url: string): Promise<OpenURLResult> {
     try {
-      const simctl = new SimCtlClient();
+      const simctl = this.simctl ?? new SimCtlClient();
       // Use simctl openurl command: xcrun simctl openurl <device> <url>
       await simctl.executeCommand(`openurl ${this.device.deviceId} "${url}"`);
 
@@ -147,6 +183,51 @@ export class OpenURL extends BaseVisualChange {
       };
     } catch (error) {
       logger.error(`[OpenURL] simctl openurl failed: ${error}`);
+      return {
+        success: false,
+        url,
+        error: String(error)
+      };
+    }
+  }
+
+  /**
+   * Open a URL on a physical iOS device (iOS 17+) via `devicectl`. http(s) URLs
+   * launch Safari (which resolves universal links and hands off to the owning
+   * app); custom-scheme deep links launch the resolved target app bundle
+   * (the app targeted by a prior launchApp), falling back to Safari when no
+   * target is known.
+   * @param url - URL to open
+   * @returns Result of the URL opening operation
+   */
+  private async executeiOSPhysicalOpenURL(url: string): Promise<OpenURLResult> {
+    const devicectl = this.devicectl ?? new DeviceCtlClient();
+
+    if (!(await devicectl.isAvailable())) {
+      return {
+        success: false,
+        url,
+        error: "Opening URLs on a physical iOS device requires Xcode 15+ and iOS 17+ (devicectl). " +
+               "Update Xcode/iOS, or open the URL on a simulator."
+      };
+    }
+
+    try {
+      // http(s) → Safari resolves universal links and hands off to the owning
+      // app. Non-http (custom scheme, and best-effort mailto:/tel:) → the app
+      // targeted by a prior launchApp, else Safari. We read the target with the
+      // non-constructing getExistingTargetBundleId so a bare openLink can't
+      // spin up a CtrlProxy manager (and reserve a service port) just to read it.
+      const bundleId = /^https?:\/\//i.test(url.trim())
+        ? SAFARI_BUNDLE_ID
+        : (IOSCtrlProxyManager.getExistingTargetBundleId(this.device) ?? SAFARI_BUNDLE_ID);
+      await devicectl.launchWithPayloadUrl(this.device.deviceId, bundleId, url);
+      return {
+        success: true,
+        url
+      };
+    } catch (error) {
+      logger.error(`[OpenURL] devicectl open URL failed: ${error}`);
       return {
         success: false,
         url,

@@ -307,6 +307,53 @@ describe("IOSCtrlProxyManager", function() {
     });
   });
 
+  describe("target bundle id resolution", function() {
+    const ENV_KEY = "CTRL_PROXY_IOS_BUNDLE_ID";
+    let prevEnv: string | undefined;
+
+    beforeEach(function() {
+      prevEnv = process.env[ENV_KEY];
+      delete process.env[ENV_KEY];
+    });
+
+    afterEach(function() {
+      if (prevEnv === undefined) {
+        delete process.env[ENV_KEY];
+      } else {
+        process.env[ENV_KEY] = prevEnv;
+      }
+    });
+
+    test("getTargetBundleId precedence: explicit > env var > undefined", function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      expect(manager.getTargetBundleId()).toBeUndefined();
+
+      process.env[ENV_KEY] = "com.env.fallback";
+      expect(manager.getTargetBundleId()).toBe("com.env.fallback");
+
+      manager.setTargetBundleId("com.explicit.app");
+      expect(manager.getTargetBundleId()).toBe("com.explicit.app");
+    });
+
+    test("getExistingTargetBundleId reads env without constructing a manager (no port reserved)", function() {
+      // No instance exists for this device after resetInstances() in beforeEach.
+      expect(IOSCtrlProxyManager.getExistingTargetBundleId(testDevice)).toBeUndefined();
+      // Proof it didn't build a manager: no service port got reserved for the device.
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+
+      process.env[ENV_KEY] = "com.env.fallback";
+      expect(IOSCtrlProxyManager.getExistingTargetBundleId(testDevice)).toBe("com.env.fallback");
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+    });
+
+    test("getExistingTargetBundleId returns an existing instance's explicit target (precedence over env)", function() {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      manager.setTargetBundleId("com.explicit.app");
+      process.env[ENV_KEY] = "com.env.fallback";
+      expect(IOSCtrlProxyManager.getExistingTargetBundleId(testDevice)).toBe("com.explicit.app");
+    });
+  });
+
   describe("getReportedRunnerPort", function() {
     let fakeExecutor: FakeProcessExecutor;
 

@@ -298,7 +298,17 @@ Swipes in a direction within an element or the whole screen.
 
 ### `openLink`
 
-Opens a URL or deep link via `simctl openurl`.
+Opens a URL or deep link.
+
+- **Simulators** use `simctl openurl`.
+- **Physical devices** use `devicectl` (`device process launch --payload-url`),
+  which requires **Xcode 15+** on a **macOS host** and **iOS 17+** on the device.
+  `http(s)://` URLs launch Safari (which resolves universal links and hands off
+  to the owning app); custom-scheme deep links (`yourapp://…`) launch the target
+  app previously selected by `launchApp`, falling back to Safari when no target
+  is known. `mailto:`/`tel:`/`sms:` are opened best-effort via the same fallback.
+  On an older device / missing `devicectl`, `openLink` returns an explicit error
+  rather than silently failing.
 
 ```yaml
 - tool: openLink

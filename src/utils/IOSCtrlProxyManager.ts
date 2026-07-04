@@ -390,6 +390,33 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
+   * Resolve the currently-targeted app bundle ID (explicit
+   * {@link setTargetBundleId} value > `CTRL_PROXY_IOS_BUNDLE_ID` env var >
+   * undefined). Public read-only companion to {@link setTargetBundleId}; used by
+   * OpenURL to route a custom-scheme deep link into the owning/target app on a
+   * physical device. Does not mutate state.
+   */
+  public getTargetBundleId(): string | undefined {
+    return this.resolveTargetBundleId();
+  }
+
+  /**
+   * Read the target bundle ID for a device **without constructing** a manager
+   * instance. Prefer this over `getInstance(device).getTargetBundleId()` for a
+   * pure read: `getInstance` builds the whole per-device proxy stack and
+   * {@link allocateServicePort reserves a global service port} as a side effect,
+   * which is wrong for a caller (e.g. OpenURL's custom-scheme branch) that only
+   * needs to know the currently-targeted app. Returns the explicit target from a
+   * pre-existing instance (set by a prior `launchApp`) > `CTRL_PROXY_IOS_BUNDLE_ID`
+   * env var > undefined.
+   */
+  public static getExistingTargetBundleId(device: BootedDevice): string | undefined {
+    return IOSCtrlProxyManager.instances.get(device.deviceId)?.getTargetBundleId()
+      ?? process.env.CTRL_PROXY_IOS_BUNDLE_ID
+      ?? undefined;
+  }
+
+  /**
    * Resolve the target bundle ID: explicit property > env var > undefined.
    */
   private resolveTargetBundleId(): string | undefined {

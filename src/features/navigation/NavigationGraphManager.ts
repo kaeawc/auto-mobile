@@ -519,18 +519,37 @@ export class NavigationGraphManager implements NavigationGraphService {
     // Case 1: Check if fingerprint is already correlated to a named node (scoped to this app)
     const existingNode = await this.repository.getNodeByFingerprint(this.currentAppId, fingerprintHash);
     if (existingNode) {
-      // Update the existing node's visit count and last_seen_at
-      await this.repository.updateNodeVisit(existingNode.id, timestamp);
+      const appId = this.currentAppId;
 
-      // Record node visit for test coverage if session is active
-      if (this.activeTestSession) {
-        await this.testCoverageRepository.recordNodeVisit(
-          this.activeTestSession.id,
-          existingNode.id,
-          timestamp
-        );
-      }
+      // Persist the counter writes atomically: updateNodeVisit + coverage recordNodeVisit +
+      // touchApp span two repos on the shared connection. Enlist both onto one `trx` via
+      // withExecutor so a mid-sequence throw (e.g. the coverage recordNodeVisit) rolls back the node-visit
+      // increment too, instead of leaving the graph partially applied. Assert the shared-connection
+      // precondition first (the coverage repo is enlisted onto the navigation `trx`). In-memory
+      // field updates and notifyGraphUpdated stay OUTSIDE so they never run on rollback and the
+      // exclusive connection is not held across non-DB work.
+      this.assertSharedConnection();
 
+      await this.repository.runInTransaction(async trx => {
+        const repository = this.repository.withExecutor(trx);
+        const testCoverageRepository = this.testCoverageRepository.withExecutor(trx);
+
+        // Update the existing node's visit count and last_seen_at
+        await repository.updateNodeVisit(existingNode.id, timestamp);
+
+        // Record node visit for test coverage if session is active
+        if (this.activeTestSession) {
+          await testCoverageRepository.recordNodeVisit(
+            this.activeTestSession.id,
+            existingNode.id,
+            timestamp
+          );
+        }
+
+        await repository.touchApp(appId);
+      });
+
+      // ---- Post-commit side effects (never inside the transaction) ----
       // Update current screen to the named screen
       this.currentScreen = existingNode.screen_name;
 
@@ -538,7 +557,6 @@ export class NavigationGraphManager implements NavigationGraphService {
         `[NAVIGATION_GRAPH] Hierarchy fingerprint matched node: ${existingNode.screen_name}`
       );
 
-      await this.repository.touchApp(this.currentAppId);
       this.notifyGraphUpdated();
       return;
     }
@@ -1394,22 +1412,33 @@ export class NavigationGraphManager implements NavigationGraphService {
       throw new Error("No current app set");
     }
 
+    const appId = this.currentAppId;
     const timestamp = this.timer.now();
 
-    // Get or create the named node
-    const node = await this.repository.getOrCreateNode(
-      this.currentAppId,
-      screenName,
-      timestamp
-    );
+    // Persist the node creation + suggestion promotion atomically. repository.promoteSuggestion
+    // does getOrCreateFingerprint + an UPDATE to link the suggestion; without a transaction a
+    // throw after getOrCreateNode/getOrCreateFingerprint leaves an orphaned node/fingerprint with
+    // the suggestion still unpromoted (partial write). Bind the whole repo to `trx` via
+    // withExecutor so every statement — including the nested getOrCreateFingerprint upsert — runs
+    // on the transaction; a stray singleton query would deadlock the daemon's only connection
+    // (bunSqliteDialect). Only the navigation repo participates here, so no coverage enlistment /
+    // shared-connection assertion is needed. Keep notifyGraphUpdated OUTSIDE so it never fires on
+    // rollback and the exclusive connection is not held across it.
+    await this.repository.runInTransaction(async trx => {
+      const repository = this.repository.withExecutor(trx);
 
-    // Promote the suggestion (creates fingerprint and links suggestion)
-    await this.repository.promoteSuggestion(suggestionId, node.id, timestamp);
+      // Get or create the named node
+      const node = await repository.getOrCreateNode(appId, screenName, timestamp);
+
+      // Promote the suggestion (creates fingerprint and links suggestion)
+      await repository.promoteSuggestion(suggestionId, node.id, timestamp);
+    });
 
     logger.info(
       `[NAVIGATION_GRAPH] Promoted suggestion ${suggestionId} to screen: ${screenName}`
     );
 
+    // Post-commit side effect (never inside the transaction).
     this.notifyGraphUpdated();
   }
 

@@ -126,6 +126,7 @@ import type {
   A11yLaunchIntentResult,
   InstalledPackageRecord,
   AndroidPerfTiming,
+  HierarchySyncDiagnostics,
 } from "./types";
 
 
@@ -1177,9 +1178,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     disableAllFiltering: boolean = false,
     signal?: AbortSignal,
-    timeoutMs: number = 10000
+    timeoutMs: number = 10000,
+    diagnostics?: HierarchySyncDiagnostics
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
-    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
+    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, diagnostics);
   }
 
   async requestHierarchySyncWithoutObservationStreamPush(
@@ -1748,14 +1750,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       async attempt => {
         logger.debug(`[CTRL_PROXY] Verifying service ready (attempt ${attempt}/${maxAttempts})`);
 
-        const hierarchyResult = await this.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, timeoutMs);
+        // Capture the runner's structured error text (issue #3062) so a deterministic handler
+        // failure is attributable in the retry log, not collapsed into an anonymous "no hierarchy".
+        const diagnostics: HierarchySyncDiagnostics = {};
+        const hierarchyResult = await this.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, timeoutMs, diagnostics);
 
         if (hierarchyResult && hierarchyResult.hierarchy) {
           logger.debug(`[CTRL_PROXY] Service verified ready after ${attempt} attempt(s)`);
           return true;
         }
 
-        throw new Error(`Verification attempt ${attempt} returned no hierarchy`);
+        const runnerErrorSuffix = diagnostics.runnerError
+          ? `: runner error: ${diagnostics.runnerError}`
+          : "";
+        throw new Error(`Verification attempt ${attempt} returned no hierarchy${runnerErrorSuffix}`);
       },
       {
         maxAttempts,

@@ -20,6 +20,7 @@ import type {
   AccessibilityNode,
   CachedHierarchy,
   AndroidPerfTiming,
+  HierarchySyncDiagnostics,
 } from "./types";
 import { generateSecureId } from "./types";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
@@ -36,6 +37,22 @@ const WEBSOCKET_TIMEOUT_COOLDOWN_MS = 500;
  *  100ms was too aggressive: under contention pushes routinely exceeded
  *  it, silently degrading results to stale cache. See issue #2285. */
 const DEFAULT_FRESH_WAIT_MS = 1000;
+
+/**
+ * Rejection carrier for a correlated runner `type:"error"` frame (issue #3062).
+ *
+ * `waitForFreshData` rejects with this (instead of a bare `Error`) when a runner error frame
+ * unblocks the wait, so `requestHierarchySync`'s catch can distinguish a runner-reported handler
+ * failure from any other thrown cause (abort, connection failure) and surface only the former to
+ * the caller via the `HierarchySyncDiagnostics` out-parameter. Module-private: it is an internal
+ * control-flow signal, not part of any public contract.
+ */
+class HierarchyRunnerError extends Error {
+  constructor(readonly runnerError: string) {
+    super(runnerError);
+    this.name = "HierarchyRunnerError";
+  }
+}
 
 /**
  * Delegate class for handling hierarchy retrieval and caching.
@@ -296,8 +313,9 @@ export class CtrlProxyHierarchy {
       if (needsSync) {
         logger.debug(`[CTRL_PROXY] WebSocket returned ${hierarchyData ? "stale" : "no"} data (fresh=${isFresh}), syncing for fresh data`);
 
+        const syncDiagnostics: HierarchySyncDiagnostics = {};
         const syncResult = await perf.track("syncRequest", () =>
-          this.requestHierarchySync(perf, disableAllFiltering, signal)
+          this.requestHierarchySync(perf, disableAllFiltering, signal, undefined, syncDiagnostics)
         );
 
         if (syncResult) {
@@ -311,7 +329,12 @@ export class CtrlProxyHierarchy {
           }
           logger.debug("[CTRL_PROXY] Successfully retrieved hierarchy via sync ADB method");
         } else if (!hierarchyData) {
-          logger.warn("[CTRL_PROXY] Both WebSocket and sync methods failed, will use fallback");
+          // Surface the runner's structured error text when the sync failed on a correlated runner
+          // error frame, so the fallback is attributable rather than an anonymous timeout (#3062).
+          const runnerErrorSuffix = syncDiagnostics.runnerError
+            ? ` (runner error: ${syncDiagnostics.runnerError})`
+            : "";
+          logger.warn(`[CTRL_PROXY] Both WebSocket and sync methods failed, will use fallback${runnerErrorSuffix}`);
           perf.end();
           return null;
         }
@@ -355,7 +378,8 @@ export class CtrlProxyHierarchy {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     disableAllFiltering: boolean = false,
     signal?: AbortSignal,
-    timeoutMs: number = 10000
+    timeoutMs: number = 10000,
+    diagnostics?: HierarchySyncDiagnostics
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     const startTime = this.context.timer.now();
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
@@ -408,6 +432,12 @@ export class CtrlProxyHierarchy {
       return null;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
+      // A correlated runner type:"error" frame (issue #3032 / #3061) rejects the wait with a typed
+      // HierarchyRunnerError. Surface its text on the caller-provided diagnostics so the caller can
+      // tell this deterministic handler failure apart from a plain timeout `null` (issue #3062).
+      if (error instanceof HierarchyRunnerError && diagnostics) {
+        diagnostics.runnerError = error.runnerError;
+      }
       logger.warn(`[CTRL_PROXY] Sync hierarchy request failed after ${duration}ms: ${error}`);
       return null;
     }
@@ -615,7 +645,9 @@ export class CtrlProxyHierarchy {
         this.pendingHierarchyRejectors.set(id, {
           reject: (error: string) => {
             logger.warn(`[CTRL_PROXY] ${label} ${id} failed via runner error: ${error}`);
-            settleReject(new Error(error));
+            // Reject with a typed carrier so requestHierarchySync's catch can tell a runner-reported
+            // handler failure apart from other thrown causes and surface it via diagnostics (#3062).
+            settleReject(new HierarchyRunnerError(error));
           }
         });
       };

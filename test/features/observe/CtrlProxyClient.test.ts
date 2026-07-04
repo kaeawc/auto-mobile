@@ -16,6 +16,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import type { DeviceConnectionLostNotifier } from "../../../src/features/observe/DeviceConnectionLostNotifier";
 import { PortManager } from "../../../src/utils/PortManager";
 import { installInMemoryNavManager } from "../../helpers/navigationTestHarness";
+import type { HierarchySyncDiagnostics } from "../../../src/features/observe/android/types";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -1413,6 +1414,204 @@ describe("AndroidCtrlProxyClient", function() {
         expect(result.hierarchy).not.toBeNull();
         expect(result.hierarchy!.hierarchy.text).toBe("Stale cache preserved");
         expect(result.fresh).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("runner error surfacing via diagnostics (issue #3062)", function() {
+    // Follow-up to #3032 / #3061. Those made a correlated runner type:"error" frame fail the
+    // hierarchy wait fast, but requestHierarchySync still collapsed the rejection to `null` —
+    // indistinguishable from a plain timeout `null`. #3062 threads a per-call `diagnostics`
+    // out-parameter so a caller can tell "runner reported a structured handler failure" (text
+    // populated) apart from "the push never arrived" (timeout: null result, diagnostics untouched).
+
+    const findSentMessageOfType = (socket: CapturingWebSocket, type: string): any | undefined => {
+      const raw = socket.sentMessages.find(m => {
+        try { return JSON.parse(m).type === type; } catch { return false; }
+      });
+      return raw ? JSON.parse(raw) : undefined;
+    };
+
+    const driveUntilStaleNudge = async (socket: CapturingWebSocket, timer: FakeTimer): Promise<any> => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await flushPromises();
+        timer.advanceTime(2100);
+        await flushPromises();
+        const staleMsg = findSentMessageOfType(socket, "request_hierarchy_if_stale");
+        if (staleMsg) {
+          return staleMsg;
+        }
+      }
+      return undefined;
+    };
+
+    test("a correlated runner error populates diagnostics.runnerError while still returning null", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        const diagnostics: HierarchySyncDiagnostics = {};
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, diagnostics);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const hierarchyMsg = findSentMessageOfType(socket, "request_hierarchy");
+        expect(hierarchyMsg).toBeDefined();
+        expect(hierarchyMsg.requestId).toBeDefined();
+
+        const runnerText = "request_hierarchy handler failed: view hierarchy extraction threw";
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: hierarchyMsg.requestId,
+          success: false,
+          error: runnerText,
+          timestamp: errorTimer.now()
+        }));
+
+        await flushPromises();
+        const result = await syncPromise;
+
+        // Contract unchanged: still null so existing callers keep working.
+        expect(result).toBeNull();
+        // But the runner text is now surfaced to the caller, distinct from a timeout.
+        expect(diagnostics.runnerError).toBe(runnerText);
+        // Fast-fail: no sitting through the 10s timeout.
+        expect(errorTimer.getCurrentTime()).toBeLessThan(10000);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("a plain timeout leaves diagnostics.runnerError undefined (no misattribution)", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        const diagnostics: HierarchySyncDiagnostics = {};
+        // Short timeout; never deliver a push or an error frame -> genuine timeout.
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 3000, diagnostics);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const result = await errorTimer.resolvePromise(syncPromise);
+
+        expect(result).toBeNull();
+        // Crucially: a timeout must NOT surface a runner error.
+        expect(diagnostics.runnerError).toBeUndefined();
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("an uncorrelated error id leaves diagnostics.runnerError undefined and the push still resolves", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        const diagnostics: HierarchySyncDiagnostics = {};
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, diagnostics);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: "some-unrelated-id",
+          success: false,
+          error: "Malformed request: the payload is not valid JSON",
+          timestamp: errorTimer.now()
+        }));
+
+        socket.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: errorTimer.now(),
+          data: {
+            updatedAt: errorTimer.now(),
+            packageName: "com.example.app",
+            hierarchy: { text: "Recovered after uncorrelated error" }
+          }
+        }));
+
+        const result = await errorTimer.resolvePromise(syncPromise);
+
+        expect(result).not.toBeNull();
+        expect(result!.hierarchy.hierarchy.text).toBe("Recovered after uncorrelated error");
+        expect(diagnostics.runnerError).toBeUndefined();
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("a correlated stale-nudge runner error also populates diagnostics.runnerError", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        const diagnostics: HierarchySyncDiagnostics = {};
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, diagnostics);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const staleMsg = await driveUntilStaleNudge(socket, errorTimer);
+        expect(staleMsg).toBeDefined();
+        expect(String(staleMsg.requestId).startsWith("stale_")).toBe(true);
+
+        const runnerText = "request_hierarchy_if_stale handler failed: view hierarchy extraction threw";
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: staleMsg.requestId,
+          success: false,
+          error: runnerText,
+          timestamp: errorTimer.now()
+        }));
+
+        await flushPromises();
+        const result = await syncPromise;
+
+        expect(result).toBeNull();
+        expect(diagnostics.runnerError).toBe(runnerText);
+        expect(errorTimer.getCurrentTime()).toBeLessThan(10000);
       } finally {
         await testClient.close();
       }

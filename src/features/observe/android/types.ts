@@ -122,6 +122,23 @@ export interface AccessibilityHierarchy {
 export type AndroidPerfTiming = PerfTiming;
 
 /**
+ * Per-call diagnostics out-parameter for `CtrlProxyHierarchy.requestHierarchySync` (issue #3062).
+ *
+ * `requestHierarchySync` returns `null` on BOTH a plain timeout (the runner never pushed a
+ * hierarchy) and a correlated runner `type:"error"` frame (#3032 / #3061 fail the wait fast).
+ * The two are indistinguishable from the return value alone. Callers that care can pass a fresh
+ * `{}` and inspect `runnerError` afterward: it is populated with the runner's structured error
+ * text ONLY on the runner-error path, and left `undefined` on timeout or success. Passing no
+ * object preserves the original behavior — this is a purely additive, per-call channel with no
+ * shared state (so concurrent syncs cannot misattribute one another's errors).
+ */
+export interface HierarchySyncDiagnostics {
+  /** The runner's structured error text when the sync failed fast on a correlated runner
+   *  `type:"error"` frame; `undefined` on a plain timeout or a successful sync. */
+  runnerError?: string;
+}
+
+/**
  * Interface for cached hierarchy with metadata
  */
 export interface CachedHierarchy {

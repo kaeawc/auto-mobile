@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { DeviceAppInspector, findProcessIdentifier, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppInspector, findProcessIdentifier, findRunningProcessPid, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppInspector";
 import { hashAppBundle } from "../../../src/utils/ios-cmdline-tools/AppBundleHasher";
 import { FakeHostControlDeviceAppInspector } from "../../fakes/FakeHostControlDeviceAppInspector";
 
@@ -705,5 +705,266 @@ describe("DeviceAppInspector launch (devicectl)", () => {
     expect(findProcessIdentifier({ result: { process: { processIdentifier: 7 } } })).toBe(7);
     expect(findProcessIdentifier({ a: { b: [{ processIdentifier: 9 }] } })).toBe(9);
     expect(findProcessIdentifier({ result: {} })).toBeUndefined();
+  });
+});
+
+describe("findRunningProcessPid", () => {
+  const bundlePath = "/private/var/containers/Bundle/Application/ABC/MyApp.app";
+
+  test("matches a process whose executable lives inside the bundle path", () => {
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 100, executable: "/usr/libexec/other" },
+          { processIdentifier: 4321, executable: `${bundlePath}/MyApp` }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBe(4321);
+  });
+
+  test("normalizes file:// executable URLs before matching", () => {
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 55, executable: `file://${bundlePath}/MyApp` }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBe(55);
+  });
+
+  test("supports executable given as an object with a url/path", () => {
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 77, executable: { url: `file://${bundlePath}/MyApp` } }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBe(77);
+  });
+
+  test("supports the `pid` field name as an alias for processIdentifier", () => {
+    const data = { runningProcesses: [{ pid: 88, executable: `${bundlePath}/MyApp` }] };
+    expect(findRunningProcessPid(data, bundlePath)).toBe(88);
+  });
+
+  test("tolerates a stringified integer PID", () => {
+    const data = { runningProcesses: [{ processIdentifier: "88", executable: `${bundlePath}/MyApp` }] };
+    expect(findRunningProcessPid(data, bundlePath)).toBe(88);
+  });
+
+  test("matches the main app binary, never a nested .appex extension inside the bundle", () => {
+    // Extension listed FIRST — a naive prefix match would wrongly kill it.
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 200, executable: `${bundlePath}/PlugIns/Foo.appex/Foo` },
+          { processIdentifier: 100, executable: `${bundlePath}/MyApp` }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBe(100);
+  });
+
+  test("does not match when only a nested .appex extension is running (no main process)", () => {
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 200, executable: `${bundlePath}/PlugIns/Foo.appex/Foo` }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBeNull();
+  });
+
+  test("falls back to executable basename when the process path root differs from the bundle URL", () => {
+    // Real-device risk: info-processes reports a /var container root while
+    // info-apps reported /private/var — strict prefix misses, basename catches.
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 321, executable: "/var/containers/Bundle/Application/XYZ/MyApp.app/MyApp" }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBe(321);
+  });
+
+  test("basename fallback still excludes an extension binary with a different basename", () => {
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 9, executable: "/var/containers/Bundle/Application/XYZ/MyApp.app/PlugIns/Foo.appex/Foo" }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBeNull();
+  });
+
+  test("returns null when no executable is inside the bundle path", () => {
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 1, executable: "/usr/libexec/other" },
+          { processIdentifier: 2, executable: "/private/var/containers/Bundle/Application/XYZ/Another.app/Another" }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBeNull();
+  });
+
+  test("does not match a different app whose path merely shares a prefix string", () => {
+    // MyApp.app vs MyApp.app.extension — must not be treated as inside MyApp.app.
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 9, executable: `${bundlePath}.extension/Plugin` }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBeNull();
+  });
+
+  test("returns null for empty/invalid payloads", () => {
+    expect(findRunningProcessPid({}, bundlePath)).toBeNull();
+    expect(findRunningProcessPid({ result: { runningProcesses: [] } }, bundlePath)).toBeNull();
+    expect(findRunningProcessPid(null, bundlePath)).toBeNull();
+  });
+});
+
+describe("DeviceAppInspector terminate (devicectl)", () => {
+  const bundlePath = "/private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app";
+  const makeExecResult = (stdout = "") => ({
+    stdout,
+    stderr: "",
+    toString() { return this.stdout; },
+    trim() { return this.stdout.trim(); },
+    includes(searchString: string) { return this.stdout.includes(searchString); }
+  });
+
+  const createInspector = (opts: {
+    platform?: NodeJS.Platform;
+    exec: (command: string) => Promise<ReturnType<typeof makeExecResult>>;
+    hostControl?: FakeHostControlDeviceAppInspector;
+  }) => new DeviceAppInspector({
+    platform: () => opts.platform ?? "darwin",
+    exec: opts.exec,
+    readFile: async path => fs.readFile(path, "utf-8"),
+    mkdtemp: async prefix => fs.mkdtemp(prefix),
+    rm: async path => fs.rm(path, { recursive: true, force: true }),
+    readdir: async path => fs.readdir(path),
+    stat: async path => fs.stat(path),
+    tmpdir,
+    logger: createFakeLogger(),
+    hostControl: opts.hostControl ?? new FakeHostControlDeviceAppInspector()
+  });
+
+  const writeAppsJson = async (command: string, installed: boolean) => {
+    const jsonPath = parseDevicectlJsonOutputPath(command);
+    if (jsonPath) {
+      const payload = installed
+        ? { apps: [{ bundleIdentifier: bundleId, bundleURL: `file://${bundlePath}` }] }
+        : { apps: [] };
+      await fs.writeFile(jsonPath, JSON.stringify(payload), "utf-8");
+    }
+  };
+
+  test("signals SIGKILL for a running app and reports {wasInstalled:true, wasRunning:true}", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => {
+      commands.push(command);
+      if (command.includes("device info apps")) {
+        await writeAppsJson(command, true);
+      }
+      if (command.includes("device info processes")) {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(jsonPath, JSON.stringify({
+            result: { runningProcesses: [{ processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` }] }
+          }), "utf-8");
+        }
+      }
+      return makeExecResult();
+    };
+
+    const inspector = createInspector({ exec });
+    const result = await inspector.terminateApp("device-udid", bundleId);
+
+    expect(result).toEqual({ wasInstalled: true, wasRunning: true });
+    const signalCommand = commands.find(c => c.includes("device process signal"));
+    expect(signalCommand).toBeDefined();
+    expect(signalCommand).toContain("xcrun devicectl device process signal");
+    expect(signalCommand).toContain("--device device-udid");
+    expect(signalCommand).toContain("--pid 4321");
+    expect(signalCommand).toContain("--signal SIGKILL");
+    // Simulator tool must never be invoked for a physical terminate.
+    expect(commands.every(c => !c.includes("simctl"))).toBe(true);
+  });
+
+  test("reports {wasInstalled:true, wasRunning:false} and issues no signal when not running", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => {
+      commands.push(command);
+      if (command.includes("device info apps")) {
+        await writeAppsJson(command, true);
+      }
+      if (command.includes("device info processes")) {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(jsonPath, JSON.stringify({ result: { runningProcesses: [] } }), "utf-8");
+        }
+      }
+      return makeExecResult();
+    };
+
+    const inspector = createInspector({ exec });
+    const result = await inspector.terminateApp("device-udid", bundleId);
+
+    expect(result).toEqual({ wasInstalled: true, wasRunning: false });
+    expect(commands.some(c => c.includes("device process signal"))).toBe(false);
+  });
+
+  test("reports {wasInstalled:false, wasRunning:false} and never queries processes when not installed", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => {
+      commands.push(command);
+      if (command.includes("device info apps")) {
+        await writeAppsJson(command, false);
+      }
+      return makeExecResult();
+    };
+
+    const inspector = createInspector({ exec });
+    const result = await inspector.terminateApp("device-udid", bundleId);
+
+    expect(result).toEqual({ wasInstalled: false, wasRunning: false });
+    expect(commands.some(c => c.includes("device info processes"))).toBe(false);
+    expect(commands.some(c => c.includes("device process signal"))).toBe(false);
+  });
+
+  test("throws a clear macOS error on non-darwin without shelling out", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
+
+    const inspector = createInspector({ platform: "linux", exec });
+
+    await expect(inspector.terminateApp("device-udid", bundleId)).rejects.toThrow(/macOS/);
+    expect(commands).toEqual([]);
+  });
+
+  test("throws an explicit host-control error without shelling out", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
+    const hostControl = new FakeHostControlDeviceAppInspector();
+    hostControl.setUseHostControl(true);
+    hostControl.setRunningInDocker(true);
+    hostControl.setAvailable(true);
+
+    const inspector = createInspector({ platform: "linux", exec, hostControl });
+
+    await expect(inspector.terminateApp("device-udid", bundleId)).rejects.toThrow(/host control/i);
+    expect(commands.every(c => !c.includes("devicectl"))).toBe(true);
   });
 });

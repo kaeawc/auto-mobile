@@ -488,6 +488,91 @@ describe("sanitizeObserveResult", () => {
     });
   });
 
+  describe("compact flattens EVERY bounds site, not just nodes (#2978)", () => {
+    /** Observe result seeded with a bounds object at every distinct site. */
+    function makeMultiSiteObserve(): ObserveResult {
+      return {
+        updatedAt: 0,
+        screenSize: { width: 1, height: 1 },
+        systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
+        focusedElement: { bounds: { left: 1, top: 2, right: 3, bottom: 4 } } as any,
+        accessibilityFocusedElement: { bounds: { left: 9, top: 10, right: 11, bottom: 12 } } as any,
+        awaitedElement: { bounds: { left: 13, top: 14, right: 15, bottom: 16 } } as any,
+        elements: {
+          clickable: [{ bounds: { left: 20, top: 21, right: 22, bottom: 23 }, text: "btn" } as any],
+          scrollable: [{ bounds: { left: 30, top: 31, right: 32, bottom: 33 } } as any],
+          text: [{ bounds: { left: 40, top: 41, right: 42, bottom: 43 } } as any],
+          media: [{ bounds: { left: 50, top: 51, right: 52, bottom: 53 } } as any],
+        },
+        viewHierarchy: {
+          systemInsets: { top: 1, bottom: 2, left: 3, right: 4 },
+          hierarchy: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } as any,
+            node: { "resource-id": "root", "bounds": { left: 60, top: 61, right: 62, bottom: 63 } } as any,
+          },
+          windows: [
+            { bounds: { left: 70, top: 71, right: 72, bottom: 73 } } as any,
+          ],
+          contentHiddenRegions: [
+            { bounds: { left: 80, top: 81, right: 82, bottom: 83 }, reason: "x", areaPercent: 1 },
+          ],
+        },
+      } as ObserveResult;
+    }
+
+    test("flattens elements[].bounds across all four element buckets", () => {
+      const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
+      const e = out.elements!;
+      expect((e.clickable[0] as any).bounds).toEqual([20, 21, 22, 23]);
+      expect((e.scrollable[0] as any).bounds).toEqual([30, 31, 32, 33]);
+      expect((e.text[0] as any).bounds).toEqual([40, 41, 42, 43]);
+      expect((e.media[0] as any).bounds).toEqual([50, 51, 52, 53]);
+    });
+
+    test("flattens the Hierarchy root, window, and content-hidden-region bounds", () => {
+      const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
+      const vh = out.viewHierarchy!;
+      expect((vh.hierarchy as any).bounds).toEqual([0, 0, 1080, 2400]);
+      expect((vh.windows![0] as any).bounds).toEqual([70, 71, 72, 73]);
+      expect((vh.contentHiddenRegions![0] as any).bounds).toEqual([80, 81, 82, 83]);
+    });
+
+    test("flattens focused / accessibility-focused / awaited element bounds", () => {
+      const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
+      expect((out.focusedElement as any).bounds).toEqual([1, 2, 3, 4]);
+      expect((out.accessibilityFocusedElement as any).bounds).toEqual([9, 10, 11, 12]);
+      expect((out.awaitedElement as any).bounds).toEqual([13, 14, 15, 16]);
+    });
+
+    test("NEVER compacts systemInsets (a {top,bottom,left,right} object, not bounds)", () => {
+      const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
+      // Top-level and viewHierarchy insets stay object-shaped and untouched.
+      expect(out.systemInsets).toEqual({ top: 5, bottom: 6, left: 7, right: 8 });
+      expect(out.viewHierarchy!.systemInsets).toEqual({ top: 1, bottom: 2, left: 3, right: 4 });
+    });
+
+    test("leaves rawViewHierarchy untouched (raw stays raw)", () => {
+      const obs = makeMultiSiteObserve();
+      obs.rawViewHierarchy = {
+        hierarchy: { node: { "resource-id": "raw", "bounds": { left: 90, top: 91, right: 92, bottom: 93 } } },
+      } as any;
+      const rawBefore = JSON.stringify(obs.rawViewHierarchy);
+
+      const out = sanitizeObserveResult(obs, COMPACT);
+
+      expect(JSON.stringify(out.rawViewHierarchy)).toBe(rawBefore);
+      // ...while the processed hierarchy WAS compacted (proves the skip is targeted).
+      expect((out.viewHierarchy!.hierarchy.node as any).bounds).toEqual([60, 61, 62, 63]);
+    });
+
+    test("is output-only across every site (input object never mutated)", () => {
+      const obs = makeMultiSiteObserve();
+      const before = JSON.stringify(obs);
+      sanitizeObserveResult(obs, COMPACT);
+      expect(JSON.stringify(obs)).toBe(before);
+    });
+  });
+
   describe("combined reduction", () => {
     test("all three steps together substantially shrink the baseline", () => {
       const { observe } = loadAndroidHomeObserve();

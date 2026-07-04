@@ -62,12 +62,17 @@ export interface SanitizeObserveConfig {
   /**
    * Gate for compact-form output. Maps to the `observeResultCompact` output-
    * reduction flag (`--observe-result-compact`); the wiring layer supplies it
-   * from `ServerConfig.isObserveResultCompactEnabled()` (issue #2951). When true
-   * every view-hierarchy node's `bounds` object is flattened from
+   * from `ServerConfig.isObserveResultCompactEnabled()` (issues #2951, #2978).
+   * When true, EVERY `bounds` object in the served payload is flattened from
    * `{left, top, right, bottom}` to the positional tuple `[left, top, right,
-   * bottom]` — the four key strings repeat on every node, so dropping them is
-   * the largest remaining redundancy after `trimNodes`. The order is fixed and
-   * documented so the tuple round-trips losslessly.
+   * bottom]` — view-hierarchy nodes, the `elements` arrays, window/root/region
+   * bounds, and the focused/awaited element fields. The four key strings repeat
+   * on every occurrence, so dropping them is the largest remaining redundancy
+   * after `trimNodes`. The order is fixed and documented so the tuple
+   * round-trips losslessly. The one exception is `rawViewHierarchy`, which is
+   * left untouched (raw stays raw). Flattening only fields literally named
+   * `bounds` means insets (`systemInsets`, a `{top,bottom,left,right}` object)
+   * and other shapes are never mis-compacted.
    */
   compact?: boolean;
 }
@@ -97,9 +102,7 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
   }
 
   if (cfg.compact) {
-    for (const root of toNodeArray(out.viewHierarchy?.hierarchy?.node)) {
-      compactHierarchyBounds(root);
-    }
+    compactObserveBounds(out);
   }
 
   if (cfg.dropElements) {
@@ -190,26 +193,50 @@ function trimHierarchyNodes(node: ViewHierarchyNode | undefined): void {
   }
 }
 
+/** Flatten a single `{left, top, right, bottom}` bounds object to its tuple. */
+function compactBounds(bounds: {
+  left?: number;
+  top?: number;
+  right?: number;
+  bottom?: number;
+}): CompactBounds {
+  return [bounds.left, bounds.top, bounds.right, bounds.bottom] as CompactBounds;
+}
+
 /**
- * Recursively flatten each node's `bounds` object to the positional tuple
- * `[left, top, right, bottom]` (on the already-cloned tree). The four key
- * strings (`left`/`top`/`right`/`bottom`) repeat on every node that has bounds,
- * so replacing the object with a fixed-order 4-tuple is the largest remaining
- * lossless reduction after `trimHierarchyNodes`. A non-object `bounds` (already
- * a tuple, or absent) is left untouched, so the transform is idempotent.
+ * Compact every `bounds` object in the served observe payload to the positional
+ * tuple `[left, top, right, bottom]` (on the already-cloned tree). A single walk
+ * covers all bounds sites — hierarchy nodes, the `elements` arrays, window/root/
+ * region bounds, and focused/awaited elements — so the wire never carries a
+ * mix of object- and tuple-shaped bounds (#2978).
+ *
+ * `rawViewHierarchy` is deliberately skipped so `raw: true` still returns the
+ * unshaped hierarchy. Only fields literally named `bounds` are flattened, so
+ * insets (`systemInsets`, a `{top,bottom,left,right}` object) and other shapes
+ * are never mis-compacted. A non-object `bounds` (already a tuple, or a string)
+ * is left untouched, so the transform is idempotent.
  */
-function compactHierarchyBounds(node: ViewHierarchyNode | undefined): void {
-  if (!node) {
+function compactObserveBounds(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      compactObserveBounds(item);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
     return;
   }
 
-  const bounds = node.bounds as unknown;
-  if (bounds && typeof bounds === "object" && !Array.isArray(bounds)) {
-    const b = bounds as { left: number; top: number; right: number; bottom: number };
-    (node as { bounds?: unknown }).bounds = [b.left, b.top, b.right, b.bottom] as CompactBounds;
-  }
-
-  for (const child of toNodeArray(node.node)) {
-    compactHierarchyBounds(child);
+  const obj = value as Record<string, unknown>;
+  for (const [key, v] of Object.entries(obj)) {
+    if (key === "rawViewHierarchy") {
+      // Raw stays raw: a `raw: true` consumer wants the unshaped hierarchy.
+      continue;
+    }
+    if (key === "bounds" && v && typeof v === "object" && !Array.isArray(v)) {
+      obj[key] = compactBounds(v as { left?: number; top?: number; right?: number; bottom?: number });
+      continue;
+    }
+    compactObserveBounds(v);
   }
 }

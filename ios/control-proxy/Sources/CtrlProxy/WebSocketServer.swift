@@ -333,8 +333,7 @@ public class WebSocketServer: WebSocketServing {
         let underlyingDetail = (context.underlyingError as NSError?)?
             .userInfo[NSDebugDescriptionErrorKey] as? String
 
-        if let detail = underlyingDetail, detail.localizedCaseInsensitiveContains("not representable") {
-            // e.g. underlying "Number 1e309 is not representable in Swift."
+        if let detail = underlyingDetail, isNumberOutOfRangeDetail(detail) {
             return "Malformed request: a numeric value is out of range or not representable."
         }
         if let detail = underlyingDetail, !detail.isEmpty {
@@ -344,6 +343,18 @@ public class WebSocketServer: WebSocketServing {
         // No underlying detail available — the decoder's own context description is
         // still more specific than the opaque `localizedDescription`.
         return "Malformed request: \(context.debugDescription)"
+    }
+
+    /// Whether a Cocoa 3840 `NSDebugDescription` denotes an out-of-range / non-
+    /// representable numeric literal (rather than a JSON syntax error). The exact
+    /// phrasing differs by the `JSONDecoder` backend the runner is running on:
+    /// - swift-foundation (iOS 18+, macOS 15+): "Number 1e309 is not representable in Swift."
+    /// - classic Foundation (iOS 15–17, `JSONSerialization`-backed): "Number wound up as NaN around line 1, column 5."
+    /// `Package.swift` deploys to `.iOS(.v15)`, so both must be recognized — matching
+    /// only "not representable" would silently miss the overflow case on iOS 15–17.
+    private static func isNumberOutOfRangeDetail(_ detail: String) -> Bool {
+        detail.localizedCaseInsensitiveContains("not representable")
+            || detail.localizedCaseInsensitiveContains("wound up as nan")
     }
 
     /// Best-effort extraction of requestId from raw JSON data for error correlation.

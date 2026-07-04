@@ -889,10 +889,25 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
 
     // MARK: - Decode-boundary wire-message legibility (#2965)
 
-    /// The generic decode-failure message `JSONDecoder` produces for a
-    /// `dataCorrupted` error via `localizedDescription`. Rewriting this opaque
-    /// string into something actionable is the whole point of #2965.
-    private static let opaqueDecodeMessage = "isn't in the correct format"
+    /// Build a synthetic `DecodingError.dataCorrupted` whose underlying Cocoa 3840
+    /// error carries `debugDescription` in `NSDebugDescription` — mirroring exactly
+    /// what `JSONDecoder` attaches. This lets a test pin the rewrite of a *specific*
+    /// backend phrasing (e.g. the classic iOS 15–17 "wound up as NaN" overflow text)
+    /// deterministically on any host, independent of which `JSONDecoder` backend the
+    /// test machine happens to run.
+    private func syntheticDataCorrupted(underlyingDebugDescription: String) -> DecodingError {
+        let underlying = NSError(
+            domain: NSCocoaErrorDomain,
+            code: 3840,
+            userInfo: [NSDebugDescriptionErrorKey: underlyingDebugDescription]
+        )
+        let context = DecodingError.Context(
+            codingPath: [],
+            debugDescription: "The given data was not valid JSON.",
+            underlyingError: underlying
+        )
+        return DecodingError.dataCorrupted(context)
+    }
 
     /// Feed a caught error through the real `WebSocketServer.buildErrorResponseData`
     /// wire encoder (the same path `handleMessage`'s catch block uses) and return
@@ -949,9 +964,13 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
     func testOverflowLiteralWireMessageIsActionable() {
         let error = decodeError(#"{"type":"request_tap_coordinates","requestId":"ovf-1","x":1e309,"y":2}"#)
         let message = wireErrorMessage(for: error, requestId: "ovf-1")
-        XCTAssertFalse(
-            message.contains(Self.opaqueDecodeMessage),
-            "overflow message must not stay opaque, got: \(message)"
+        // The rewrite must change the surfaced string from the decoder's opaque
+        // default. Compared against the *actual* `localizedDescription` (whose exact
+        // wording/apostrophe is Foundation-controlled), not a hand-typed literal.
+        XCTAssertNotEqual(
+            message,
+            error.localizedDescription,
+            "overflow message must not stay the opaque decoder default, got: \(message)"
         )
         let lowered = message.lowercased()
         XCTAssertTrue(
@@ -966,11 +985,45 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
     func testLargerOverflowLiteralWireMessageIsActionable() {
         let error = decodeError(#"{"type":"request_swipe","requestId":"ovf-2","x1":1,"y1":2,"x2":1e400,"y2":4}"#)
         let message = wireErrorMessage(for: error, requestId: "ovf-2")
-        XCTAssertFalse(message.contains(Self.opaqueDecodeMessage), "got: \(message)")
+        XCTAssertNotEqual(message, error.localizedDescription, "got: \(message)")
         let lowered = message.lowercased()
         XCTAssertTrue(
             lowered.contains("out of range") || lowered.contains("not representable"),
             "got: \(message)"
+        )
+    }
+
+    /// The runner deploys to `.iOS(.v15)` (`Package.swift`), where `JSONDecoder` is
+    /// backed by classic `JSONSerialization`, which phrases an overflow literal as
+    /// "Number wound up as NaN around line 1, column 5." — NOT "not representable"
+    /// (the swift-foundation phrasing on iOS 18+/macOS 15+). Both must map to the
+    /// same actionable out-of-range message; matching only "not representable" would
+    /// silently miss the overflow case on iOS 15–17. This test pins the classic
+    /// phrasing deterministically regardless of the CI host's decoder backend.
+    func testClassicFoundationOverflowPhrasingIsActionable() {
+        let classic = syntheticDataCorrupted(
+            underlyingDebugDescription: "Number wound up as NaN around line 1, column 5."
+        )
+        let message = wireErrorMessage(for: classic, requestId: "ovf-classic")
+        let lowered = message.lowercased()
+        XCTAssertTrue(
+            lowered.contains("out of range") || lowered.contains("not representable"),
+            "classic-Foundation overflow phrasing must map to the out-of-range message, got: \(message)"
+        )
+    }
+
+    /// The swift-foundation (iOS 18+/macOS 15+) overflow phrasing maps to the same
+    /// actionable message — pinned deterministically alongside the classic one so a
+    /// change to either backend's handling is caught regardless of the test host.
+    func testModernFoundationOverflowPhrasingIsActionable() {
+        let modern = syntheticDataCorrupted(
+            underlyingDebugDescription: "Number 1e309 is not representable in Swift."
+        )
+        let message = wireErrorMessage(for: modern, requestId: "ovf-modern")
+        let lowered = message.lowercased()
+        XCTAssertTrue(
+            lowered.contains("out of range") || lowered.contains("not representable"),
+            "swift-foundation overflow phrasing must map to the out-of-range message, got: \(message)"
         )
     }
 
@@ -1006,7 +1059,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
     func testMalformedJsonWireMessageIsActionable() {
         let error = decodeError(#"{"type":"request_tap_coordinates","x":,}"#)
         let message = wireErrorMessage(for: error, requestId: nil)
-        XCTAssertFalse(message.contains(Self.opaqueDecodeMessage), "got: \(message)")
+        XCTAssertNotEqual(message, error.localizedDescription, "got: \(message)")
         XCTAssertTrue(
             message.lowercased().contains("not valid json") || message.lowercased().contains("malformed"),
             "malformed JSON should surface an actionable cause, got: \(message)"

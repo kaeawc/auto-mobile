@@ -609,8 +609,14 @@ class WebSocketServerIntegrationTest {
     // handleMessage has already returned null — must still yield a correlated type:"error" frame,
     // not leave the daemon awaiter hanging to timeout. This is the async analog of the synchronous
     // handler-throw case covered by `handler exception returns structured error response` (#2985).
-    // The fake action routes its fire-and-forget work through a real AsyncActionRunner, exactly as
-    // CtrlProxy does in production.
+    //
+    // Scope note: this exercises a *real* AsyncActionRunner end-to-end over a live WebSocket (the
+    // fake action routes its fire-and-forget work through it, the same helper CtrlProxy uses). It
+    // proves the runner's correlated-error-on-throw contract on the wire; it does NOT instantiate
+    // the production CtrlProxy AccessibilityService, so it cannot by itself catch a regression that
+    // unwires a specific CtrlProxy launch site from the runner. That production-wiring guard is
+    // tracked as a follow-up (a full CtrlProxy service is impractical to drive in a fast unit
+    // test).
     lateinit var asyncServer: WebSocketServer
     val runnerHolder = arrayOfNulls<AsyncActionRunner>(1)
     asyncServer =

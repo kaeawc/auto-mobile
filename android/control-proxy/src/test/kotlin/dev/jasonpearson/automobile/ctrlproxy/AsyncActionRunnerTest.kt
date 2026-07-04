@@ -121,9 +121,12 @@ class AsyncActionRunnerTest {
     }
     advanceUntilIdle()
 
-    assertTrue(
-      "both the original failure and the broadcast failure should be logged",
-      logged.size >= 2,
+    // Exactly two: the original action failure, then the failure raised while broadcasting it.
+    // Neither escapes the coroutine (which would crash the launch and defeat the fix).
+    assertEquals(
+      "both the original failure and the broadcast failure should be logged: $logged",
+      2,
+      logged.size,
     )
   }
 }

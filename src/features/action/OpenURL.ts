@@ -213,10 +213,14 @@ export class OpenURL extends BaseVisualChange {
     }
 
     try {
-      // http(s) → Safari resolves universal links; custom schemes → owning/target app, else Safari.
+      // http(s) → Safari resolves universal links and hands off to the owning
+      // app. Non-http (custom scheme, and best-effort mailto:/tel:) → the app
+      // targeted by a prior launchApp, else Safari. We read the target with the
+      // non-constructing getExistingTargetBundleId so a bare openLink can't
+      // spin up a CtrlProxy manager (and reserve a service port) just to read it.
       const bundleId = /^https?:\/\//i.test(url.trim())
         ? SAFARI_BUNDLE_ID
-        : (IOSCtrlProxyManager.getInstance(this.device).getTargetBundleId() ?? SAFARI_BUNDLE_ID);
+        : (IOSCtrlProxyManager.getExistingTargetBundleId(this.device) ?? SAFARI_BUNDLE_ID);
       await devicectl.launchWithPayloadUrl(this.device.deviceId, bundleId, url);
       return {
         success: true,

@@ -61,10 +61,10 @@ describe("OpenURL iOS routing", () => {
   });
 
   test("(c) physical UDID + custom scheme launches the resolved target bundle id", async () => {
-    const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-      getTargetBundleId: () => "com.example.MyApp",
-    } as unknown as IOSCtrlProxyManager);
-    restores.push(() => managerSpy.mockRestore());
+    // The physical custom-scheme branch reads the target with the
+    // non-constructing static, so it never spins up a CtrlProxy manager.
+    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue("com.example.MyApp");
+    restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
     const devicectl = new FakeDeviceCtlClient();
@@ -78,10 +78,8 @@ describe("OpenURL iOS routing", () => {
   });
 
   test("(c2) physical UDID + custom scheme with no target bundle falls back to Safari", async () => {
-    const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-      getTargetBundleId: () => undefined,
-    } as unknown as IOSCtrlProxyManager);
-    restores.push(() => managerSpy.mockRestore());
+    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue(undefined);
+    restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
     const devicectl = new FakeDeviceCtlClient();
@@ -89,6 +87,23 @@ describe("OpenURL iOS routing", () => {
     await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "myapp://order/123");
 
     expect(devicectl.launchCalls[0].bundleId).toBe("com.apple.mobilesafari");
+  });
+
+  test("(c3) physical UDID + mailto: with no target routes to Safari (best-effort, pinned behavior)", async () => {
+    const targetSpy = spyOn(IOSCtrlProxyManager, "getExistingTargetBundleId").mockReturnValue(undefined);
+    restores.push(() => targetSpy.mockRestore());
+
+    const simctl = new FakeSimCtlClient();
+    const devicectl = new FakeDeviceCtlClient();
+
+    const result = await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "mailto:a@b.com");
+
+    // mailto:/tel: are not http(s), so they take the non-http branch. With no
+    // target app they fall back to Safari — pinned so a routing change is caught.
+    expect(result.success).toBe(true);
+    expect(devicectl.launchCalls).toEqual([
+      { deviceUdid: PHYSICAL_UDID, bundleId: "com.apple.mobilesafari", url: "mailto:a@b.com" },
+    ]);
   });
 
   test("(d) unavailable devicectl returns an explicit iOS 17+/Xcode 15+ error (no throw, no simctl)", async () => {
@@ -153,5 +168,47 @@ describe("OpenURL package: delegation is unchanged", () => {
     expect(launchSpy.mock.calls[0][0]).toBe("com.example.MyApp");
     expect(devicectl.launchCalls).toHaveLength(0);
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+  });
+});
+
+describe("OpenURL Android parity (regression guard)", () => {
+  test("executeAndroidOpenURL issues the exact VIEW-intent am start command", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const openURL = new OpenURL(
+      { name: "pixel", platform: "android", deviceId: "emulator-5554" },
+      fakeAdb as unknown as any
+    );
+
+    const result = await (openURL as any).executeAndroidOpenURL("https://example.com/x") as { success: boolean; url: string };
+
+    expect(result).toEqual({ success: true, url: "https://example.com/x" });
+    expect(fakeAdb.getExecutedCommands()).toContain(
+      'shell am start -a android.intent.action.VIEW -d "https://example.com/x"'
+    );
+  });
+});
+
+describe("OpenURL input validation", () => {
+  const openAndroid = (url: string) =>
+    new OpenURL(
+      { name: "pixel", platform: "android", deviceId: "emulator-5554" },
+      new FakeAdbExecutor() as unknown as any
+    ).execute(url);
+
+  test("empty URL returns an explicit error without dispatching", async () => {
+    const result = await openAndroid("");
+    expect(result).toEqual({ success: false, url: "", error: "Invalid URL provided" });
+  });
+
+  test("whitespace-only URL returns an explicit error", async () => {
+    const result = await openAndroid("   ");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Invalid URL provided");
+  });
+
+  test("bare package: URL (no package name) returns an explicit error", async () => {
+    const result = await openAndroid("package:");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Invalid package URL - no package name specified");
   });
 });

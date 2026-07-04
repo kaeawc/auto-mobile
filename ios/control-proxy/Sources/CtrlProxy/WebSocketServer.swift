@@ -355,13 +355,32 @@ public class WebSocketServer: WebSocketServing {
         }
     }
 
-    /// The deepest `codingPath` key's `stringValue` — the offending field — or `nil`
-    /// when the path is empty (nothing to attribute).
+    /// A human-readable name for the offending field, derived from the deepest
+    /// `codingPath` key, or `nil` when the path is empty (nothing to attribute).
+    ///
+    /// A named leaf key (the common case — a wrong-typed *field* like `x`) is used
+    /// verbatim. When the leaf is an **array index** (a wrong-typed array *element*,
+    /// e.g. `rules[0]`), the synthetic "Index 0" key `stringValue` would be a poor
+    /// label, so it is attributed to the nearest named ancestor with the index
+    /// appended (`rules[0]`), or just `[0]` if there is no named ancestor.
     private static func fieldName(_ context: DecodingError.Context) -> String? {
-        guard let field = context.codingPath.last?.stringValue, !field.isEmpty else {
+        let path = context.codingPath
+        guard let last = path.last else {
             return nil
         }
-        return field
+        // Named leaf key — the common case (a wrong-typed field).
+        if last.intValue == nil {
+            return last.stringValue.isEmpty ? nil : last.stringValue
+        }
+        // The leaf is an array index — attribute to the nearest named ancestor.
+        guard let index = last.intValue else {
+            return nil
+        }
+        let parent = path.dropLast().last(where: { $0.intValue == nil })?.stringValue
+        if let parent = parent, !parent.isEmpty {
+            return "\(parent)[\(index)]"
+        }
+        return "[\(index)]"
     }
 
     /// Actionable message for a `DecodingError.dataCorrupted`. The overflow / malformed

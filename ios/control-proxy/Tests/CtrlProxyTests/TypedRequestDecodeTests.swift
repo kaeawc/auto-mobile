@@ -23,6 +23,17 @@ struct TestCodingKey: CodingKey {
         self.intValue = intValue
         stringValue = String(intValue)
     }
+
+    /// Non-failable convenience for building a synthetic array-index coding key
+    /// without a force-unwrap in tests.
+    static func index(_ value: Int) -> TestCodingKey {
+        TestCodingKey(stringValue: "Index \(value)", intValue: value)
+    }
+
+    private init(stringValue: String, intValue: Int?) {
+        self.stringValue = stringValue
+        self.intValue = intValue
+    }
 }
 
 /// Round-trip coverage for issue #2846: every inbound command decodes from its
@@ -1224,6 +1235,60 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         let error = decodeError(#"{"type":"unknown_command","requestId":"uc-2"}"#)
         let message = wireErrorMessage(for: error, requestId: "uc-2")
         XCTAssertEqual(message, "Unknown command type: unknown_command")
+    }
+
+    /// A wrong-typed *array element* (e.g. a bare string in `rules`, whose elements
+    /// are objects) yields a `codingPath` whose deepest key is a synthetic array
+    /// *index*, not a named field. The message attributes it to the nearest named
+    /// ancestor with the index appended (`rules[0]`) rather than the useless
+    /// "Index 0" key label. Uses the real `request_set_network_mock_rules` decode
+    /// path (`rules: [NetworkMockRuleDTO]`).
+    func testTypeMismatchOnArrayElementNamesParentWithIndex() {
+        let error = decodeError(#"{"type":"set_network_mock_rules","requestId":"arr-1","rules":["hi"]}"#)
+        guard case DecodingError.typeMismatch = error else {
+            return XCTFail("expected typeMismatch on the array element, got \(error)")
+        }
+        let message = wireErrorMessage(for: error, requestId: "arr-1")
+        XCTAssertTrue(
+            message.contains("rules[0]"),
+            "array-element typeMismatch should name the parent field with the index, got: \(message)"
+        )
+        XCTAssertFalse(
+            message.contains("Index 0"),
+            "message should not surface the synthetic 'Index 0' key label, got: \(message)"
+        )
+    }
+
+    /// A synthetic `typeMismatch` whose leaf `codingPath` key is a bare array index
+    /// (no named ancestor) falls back to `[<index>]` — pinned deterministically.
+    func testTypeMismatchOnTopLevelArrayElementUsesBracketIndex() {
+        let context = DecodingError.Context(
+            codingPath: [TestCodingKey.index(2)],
+            debugDescription: "Expected to decode Double but found a string instead."
+        )
+        let error = DecodingError.typeMismatch(Double.self, context)
+        let message = wireErrorMessage(for: error, requestId: "arr-top")
+        XCTAssertTrue(message.contains("[2]"), "got: \(message)")
+        XCTAssertFalse(message.contains("Index"), "got: \(message)")
+    }
+
+    /// Coverage for the `dataCorrupted` **field-attribution fallback** (#2986): a
+    /// *nested* `dataCorrupted` (non-empty `codingPath`, no underlying Cocoa detail)
+    /// — unlike the empty-path top-level overflow case — names the field it occurred
+    /// on instead of dropping it. Synthetic so it is host-independent and reaches the
+    /// no-underlying-detail branch the overflow/malformed-JSON tests never hit.
+    func testNestedDataCorruptedAttributesField() {
+        let context = DecodingError.Context(
+            codingPath: [TestCodingKey(stringValue: "y2")],
+            debugDescription: "Date string does not match format expected by formatter."
+        )
+        let error = DecodingError.dataCorrupted(context)
+        let message = wireErrorMessage(for: error, requestId: "dc-nested")
+        XCTAssertTrue(
+            message.contains("'y2'"),
+            "nested dataCorrupted should attribute the field, got: \(message)"
+        )
+        XCTAssertNotEqual(message, error.localizedDescription, "got: \(message)")
     }
 
     // MARK: - Finite fractional / negative coordinates unaffected (#2909 happy path)

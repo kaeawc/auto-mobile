@@ -1045,6 +1045,9 @@ describe("isDevicectlProcessGoneError", () => {
     expect(isDevicectlProcessGoneError("The process is not running")).toBe(true);
     expect(isDevicectlProcessGoneError("The process is no longer running")).toBe(true);
     expect(isDevicectlProcessGoneError("found nothing to terminate")).toBe(true);
+    // Bare POSIX ESRCH code without the "No such process" strerror gloss —
+    // some devicectl/OS builds emit only this.
+    expect(isDevicectlProcessGoneError("Terminate failed: NSPOSIXErrorDomain error 3")).toBe(true);
   });
 
   test("does not match unrelated devicectl failures", () => {
@@ -1052,5 +1055,9 @@ describe("isDevicectlProcessGoneError", () => {
     expect(isDevicectlProcessGoneError("Could not connect to the device.")).toBe(false);
     expect(isDevicectlProcessGoneError("Unable to terminate: permission denied")).toBe(false);
     expect(isDevicectlProcessGoneError("")).toBe(false);
+    // The "not running" family is scoped to the *process* — a device/CoreDevice
+    // "not running" must NOT be swallowed as an already-exited PID.
+    expect(isDevicectlProcessGoneError("The device is not running.")).toBe(false);
+    expect(isDevicectlProcessGoneError("CoreDevice tunnel is not running")).toBe(false);
   });
 });

@@ -301,6 +301,10 @@ export class TerminateApp extends BaseVisualChange {
     }
   }
 
+  // Simulator-path sibling of DeviceAppInspector.isDevicectlProcessGoneError:
+  // both treat an "already gone" terminate failure as an effectively-terminated
+  // app. Kept separate because simctl and devicectl surface distinct, Apple-
+  // undocumented error text that may diverge (see #3054).
   private isSimctlNotRunningError(message: string): boolean {
     const normalized = message.toLowerCase();
     return normalized.includes("no such process")

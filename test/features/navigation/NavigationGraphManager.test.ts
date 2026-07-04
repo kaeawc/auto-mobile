@@ -1186,6 +1186,130 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     expect(await countNodes(navDb)).toBe(1);
     expect(manager.getCurrentScreen()).toBe("Screen1");
   });
+
+  // ---- recordHierarchyNavigation Case 1 (#2980) ----
+  // #2968/PR #2987 transactionalized recordHierarchyNavigation Case 1 and added the
+  // assertSharedConnection() call, but the rollback tests seed with a shared
+  // connection so the guard never fires — deleting it kept the suite green. These
+  // tests pin the guard in the sibling path: a foreign-bound coverage repo must fail
+  // loudly here exactly as it does for recordNavigationEvent.
+
+  async function homeVisitCount(db: Kysely<Database>): Promise<number> {
+    const row = await db
+      .selectFrom("navigation_nodes")
+      .select(["visit_count"])
+      .where("app_id", "=", APP_ID)
+      .where("screen_name", "=", "Home")
+      .executeTakeFirst();
+    return Number(row?.visit_count ?? 0);
+  }
+
+  // Seed a named node "Home" + a correlated fingerprint "fp_home" on the navigation
+  // connection so a later hierarchy event carrying "fp_home" resolves via
+  // getNodeByFingerprint into Case 1 (the existing-node branch), where the guard is
+  // asserted before the transaction opens.
+  async function seedCorrelatedHome(): Promise<NavigationRepository> {
+    const navRepo = new NavigationRepository(navDb);
+    await navRepo.getOrCreateApp(APP_ID);
+    const home = await navRepo.getOrCreateNode(APP_ID, "Home", 1000);
+    await navRepo.getOrCreateFingerprint(
+      APP_ID,
+      home.id,
+      "fp_home",
+      JSON.stringify({ layout: "home" }),
+      1000
+    );
+    return navRepo;
+  }
+
+  test("recordHierarchyNavigation Case 1 throws ActionableError on a foreign-bound coverage repo", async () => {
+    const navRepo = await seedCorrelatedHome();
+    // Coverage repo bound to a DIFFERENT connection — the foreign bind the guard exists to catch.
+    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+
+    let notifyCount = 0;
+    manager.setGraphUpdateListener(() => {
+      notifyCount++;
+    });
+
+    const visitsBefore = await homeVisitCount(navDb);
+
+    // The event's fingerprint already resolves to a named node, so this takes Case 1
+    // (the existing-node branch, checked before the active-navigation window). The
+    // guard must fire there BEFORE the transaction opens, mirroring recordNavigationEvent.
+    await expect(
+      manager.recordHierarchyNavigation({
+        fromFingerprint: null,
+        toFingerprint: "fp_home",
+        timestamp: 900000,
+        packageName: APP_ID,
+      })
+    ).rejects.toBeInstanceOf(ActionableError);
+
+    // The node-visit increment never applied (the transaction never opened); no
+    // coverage row leaked onto the navigation connection; the post-commit side
+    // effects (currentScreen assignment, notifyGraphUpdated) never ran.
+    expect(await homeVisitCount(navDb)).toBe(visitsBefore);
+    expect(await countNodeCoverage(navDb)).toBe(0);
+    expect(manager.getCurrentScreen()).toBeNull();
+    expect(notifyCount).toBe(0);
+  });
+
+  test("recordHierarchyNavigation Case 1 guard names the connection-identity invariant", async () => {
+    const navRepo = await seedCorrelatedHome();
+    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+
+    await expect(
+      manager.recordHierarchyNavigation({
+        fromFingerprint: null,
+        toFingerprint: "fp_home",
+        timestamp: 900000,
+        packageName: APP_ID,
+      })
+    ).rejects.toThrow(/different database connections/i);
+  });
+
+  test("recordHierarchyNavigation Case 1 with an active test session fails with ActionableError, not a downstream split-write error", async () => {
+    // With a session active the coverage-enlistment write (recordNodeVisit) becomes
+    // reachable inside the transaction. Without the guard, withExecutor would rebind
+    // the coverage repo onto the navigation trx and recordNodeVisit would write a
+    // test_node_coverage row referencing a session that lives only on coverageDb — an
+    // FK violation surfacing as an opaque SqliteError. The guard turns that into a
+    // clear, pre-transaction ActionableError instead. This makes the coverage-row
+    // assertion discriminating (the split path is genuinely reachable here) and mirrors
+    // the recordNavigationEvent twin above.
+    const navRepo = await seedCorrelatedHome();
+    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+    // startTestSession writes the session on the coverage connection, whose
+    // test_coverage_sessions.app_id FKs navigation_apps — seed the app there.
+    await coverageDb
+      .insertInto("navigation_apps")
+      .values({ app_id: APP_ID, updated_at: "2024-01-01T00:00:00.000Z" })
+      .execute();
+    await manager.startTestSession("session-hier-guard");
+
+    const visitsBefore = await homeVisitCount(navDb);
+
+    await expect(
+      manager.recordHierarchyNavigation({
+        fromFingerprint: null,
+        toFingerprint: "fp_home",
+        timestamp: 900000,
+        packageName: APP_ID,
+      })
+    ).rejects.toBeInstanceOf(ActionableError);
+
+    // No coverage row leaked onto the navigation connection and the visit increment
+    // never applied — the guard stopped the transaction before it opened.
+    expect(await countNodeCoverage(navDb)).toBe(0);
+    expect(await homeVisitCount(navDb)).toBe(visitsBefore);
+  });
 });
 
 /**

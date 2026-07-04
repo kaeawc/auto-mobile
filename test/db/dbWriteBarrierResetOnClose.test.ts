@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { removeTempDbDir } from "./tempDbDir";
+import { importFreshDatabaseModule, restoreEnv, snapshotEnv } from "./freshDatabaseModule";
 
 /**
  * Regression tests for issue #2896 (follow-up to #2796).
@@ -36,21 +37,11 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
   // (best-effort, ~200ms/dir).
   const FILE_BACKED_TEST_TIMEOUT_MS = 30000;
 
-  const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
-  const originalDbDir = process.env.AUTOMOBILE_DB_DIR;
-  const originalDbPath = process.env.AUTOMOBILE_DB_PATH;
-
   const tempDirs: string[] = [];
-
-  function restore(key: string, value: string | undefined): void {
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
+  let envSnapshot: NodeJS.ProcessEnv;
 
   beforeEach(() => {
+    envSnapshot = snapshotEnv();
     // Start every test from a fresh, non-draining shared barrier so a latched
     // barrier leaked by another test cannot mask the reset under test.
     resetDbWriteBarrier();
@@ -58,22 +49,11 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
 
   afterEach(async () => {
     resetDbWriteBarrier();
-    restore(DAEMON_LAUNCH_CWD_ENV, originalLaunchCwd);
-    restore("AUTOMOBILE_DB_DIR", originalDbDir);
-    restore("AUTOMOBILE_DB_PATH", originalDbPath);
+    restoreEnv(envSnapshot);
     for (const dir of tempDirs.splice(0)) {
       await removeTempDbDir(dir);
     }
   });
-
-  // Fresh `database.ts` instance per test so its lazy migration globals are not
-  // shared with other tests. The fresh module still imports the same shared
-  // `dbWriteBarrier` singleton this test reads (relative imports resolve without
-  // the cache-busting query string), so `closeDatabase()` and
-  // `getDbWriteBarrier()` operate on one barrier instance.
-  async function importFreshDatabaseModule() {
-    return import(`../../src/db/database.ts?barrier-reset-test=${Date.now()}-${Math.random()}`);
-  }
 
   async function makeTempDbDir(prefix: string): Promise<string> {
     const dir = await mkdtemp(path.join(tmpdir(), prefix));

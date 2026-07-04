@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { removeTempDbDir } from "./tempDbDir";
+import { importFreshDatabaseModule, restoreEnv, snapshotEnv } from "./freshDatabaseModule";
 
 /**
  * Regression tests for issue #2796.
@@ -33,37 +34,21 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
   // hook timeout.
   const FILE_BACKED_TEST_TIMEOUT_MS = 30000;
 
-  const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
-  const originalDbDir = process.env.AUTOMOBILE_DB_DIR;
-  const originalDbPath = process.env.AUTOMOBILE_DB_PATH;
-  const originalMigrationsDir = process.env.AUTOMOBILE_MIGRATIONS_DIR;
-  const originalLegacyMigrationsDir = process.env.AUTO_MOBILE_MIGRATIONS_DIR;
-
-  function restore(key: string, value: string | undefined): void {
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
-
   const tempDirs: string[] = [];
+  let envSnapshot: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    // Snapshot the full env so every mutated key is restored regardless of which
+    // ones a given test touches (avoids a hand-maintained key list going stale).
+    envSnapshot = snapshotEnv();
+  });
 
   afterEach(async () => {
-    restore(DAEMON_LAUNCH_CWD_ENV, originalLaunchCwd);
-    restore("AUTOMOBILE_DB_DIR", originalDbDir);
-    restore("AUTOMOBILE_DB_PATH", originalDbPath);
-    restore("AUTOMOBILE_MIGRATIONS_DIR", originalMigrationsDir);
-    restore("AUTO_MOBILE_MIGRATIONS_DIR", originalLegacyMigrationsDir);
+    restoreEnv(envSnapshot);
     for (const dir of tempDirs.splice(0)) {
       await removeTempDbDir(dir);
     }
   });
-
-  async function importFreshDatabaseModule() {
-    // Fresh module instance so its lazy globals are not shared with other tests.
-    return import(`../../src/db/database.ts?reset-test=${Date.now()}-${Math.random()}`);
-  }
 
   async function makeTempDbDir(prefix: string): Promise<string> {
     const dir = await mkdtemp(path.join(tmpdir(), prefix));

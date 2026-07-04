@@ -34,9 +34,18 @@ For `launchApp` specifically:
 
 - **Simulator** — `xcrun simctl launch` / `terminate` (unchanged). On cold boot the app is terminated first because `simctl launch` does not terminate an already-running instance.
 - **Physical device** — `xcrun devicectl device process launch --device <udid> --terminate-existing --json-output <file> --quiet <bundle-id>`; the launched PID is read from `result.process.processIdentifier` in the JSON output. `--terminate-existing` is the **authoritative cold-boot relaunch**: it terminates any already-running instance and starts a fresh process (which foregrounds). `devicectl` has no foreground-if-running verb, so a warm launch also relaunches this way. The device path therefore issues **no separate pre-terminate** — that would be a redundant round-trip.
-- **No standalone devicectl terminate here (deferred).** `devicectl` has no terminate-by-bundle-id verb, and its `device info processes` listing exposes only `executable` + `processIdentifier` — no stable bundle-id field to resolve a PID by bundle (only `install` / `info apps` carry `bundleIdentifier`). A reliable terminate-by-bundle needs the follow-up device app-listing work, so `launchApp` relies on `--terminate-existing` instead.
 - **`clearAppData` on a device** — wipes the sandbox via `devicectl` uninstall+reinstall (`clearAppDataViaReinstall`) before relaunching; a failed clear aborts the launch rather than launching with stale data.
 - **Docker / host control** — no `devicectl` launch bridge exists, so `launchApp` returns an explicit, actionable error instead of a confusing simctl failure.
+
+For `terminateApp` specifically:
+
+- **Simulator** — `xcrun simctl terminate <udid> <bundle-id>`; a "found nothing to terminate" error is treated as `wasRunning: false` rather than a failure.
+- **Physical device** — `devicectl` has no terminate-by-bundle-id verb, so termination is a **two-step** operation (`DeviceAppInspector.terminateApp`):
+  1. Resolve the on-device bundle path via `xcrun devicectl device info apps --device <udid> --bundle-id <id> --json-output <file> --quiet`. No matching bundle → `{ wasInstalled: false, wasRunning: false }` (no signal issued).
+  2. Enumerate running processes via `xcrun devicectl device info processes --device <udid> --json-output <file> --quiet` and match the process whose executable path lives **inside** the resolved bundle directory. No match → `{ wasInstalled: true, wasRunning: false }`.
+  3. Force-kill the matched PID: `xcrun devicectl device process signal --device <udid> --pid <pid> --signal SIGKILL` → `{ wasInstalled: true, wasRunning: true }`. This matches Android `am force-stop` semantics for `wasRunning` reporting.
+  - **JSON field-name caveat.** The `device info processes` envelope is **not formally documented by Apple**; `findRunningProcessPid` deep-walks it and accepts several spellings (executable as a string or `{ url | path }`; PID as `processIdentifier` / `pid` / `processID`). Pin the real field names against captured device output when possible.
+  - **iOS ≤16 / non-macOS / Docker (host control)** — `devicectl` process management requires iOS 17+ on a macOS host; unsupported combinations surface as a clear, non-crashing `success: false` error (thrown by `DeviceAppInspector.terminateApp`, mapped to a result by `TerminateApp`) rather than a silent failure.
 
 ## Live locale changes
 

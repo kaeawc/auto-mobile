@@ -3,27 +3,45 @@ import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
+
+/**
+ * Physical-device app terminator. `DeviceAppInspector` satisfies this
+ * structurally (via `xcrun devicectl device process signal`); tests inject a
+ * fake so the physical path is exercised without a real device. Mirrors the
+ * `DeviceAppUninstaller`/`DeviceAppLauncher` injection in the sibling tools.
+ */
+export interface DeviceAppTerminator {
+  terminateApp(deviceUdid: string, bundleId: string): Promise<{ wasInstalled: boolean; wasRunning: boolean }>;
+}
 
 export class TerminateApp extends BaseVisualChange {
   private simctl: SimCtlClient;
+  private deviceTerminator: DeviceAppTerminator;
 
   /**
    * Create an TerminateApp instance
    * @param device - Optional device
    * @param adb - Optional AdbClient instance for testing
    * @param simctl - Optional SimCtlClient instance for testing
+   * @param timer - Optional Timer instance for testing
+   * @param deviceTerminator - Optional physical-device terminator for testing
    */
   constructor(
     device: BootedDevice,
     adb: AdbClient | null = null,
     simctl: SimCtlClient | null = null,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    deviceTerminator: DeviceAppTerminator | null = null
   ) {
     super(device, adb, timer);
     this.device = device;
     this.simctl = simctl || new SimCtlClient(device);
+    this.deviceTerminator = deviceTerminator || new DeviceAppInspector();
   }
 
   /**
@@ -170,45 +188,11 @@ export class TerminateApp extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("terminateApp");
 
-    const terminateLogic = async (): Promise<TerminateAppResult> => {
-      const installedApps = await perf.track("checkInstalled", () => this.simctl.listApps(this.device.deviceId));
-      const wasInstalled = installedApps.some(app => this.getBundleId(app) === bundleId);
-
-      if (!wasInstalled) {
-        perf.end();
-        return {
-          success: true,
-          packageName: bundleId,
-          wasInstalled: false,
-          wasRunning: false,
-          wasForeground: false
-        };
-      }
-
-      let wasRunning = true;
-      let errorMessage: string | undefined;
-
-      try {
-        await perf.track("terminateApp", () => this.simctl.terminateApp(bundleId, this.device.deviceId));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (this.isSimctlNotRunningError(message)) {
-          wasRunning = false;
-        } else {
-          errorMessage = message;
-        }
-      }
-
-      perf.end();
-      return {
-        success: !errorMessage,
-        packageName: bundleId,
-        wasInstalled: true,
-        wasRunning,
-        wasForeground: false,
-        ...(errorMessage ? { error: errorMessage } : {})
-      };
-    };
+    // Physical iOS devices (00008XXX / 40-char UDID) can't be driven by simctl;
+    // route them through devicectl instead. Simulators keep the simctl path.
+    const terminateLogic = isIosSimulatorUdid(this.device.deviceId)
+      ? () => this.terminateSimulator(bundleId, perf)
+      : () => this.terminatePhysicalDevice(bundleId, perf);
 
     if (options?.skipObservation) {
       return terminateLogic();
@@ -223,6 +207,96 @@ export class TerminateApp extends BaseVisualChange {
         perf
       }
     );
+  }
+
+  /**
+   * Simulator terminate via simctl (unchanged from the original iOS path):
+   * check install via `simctl listapps`, then `simctl terminate`, treating a
+   * "nothing to terminate" error as wasRunning=false.
+   */
+  private async terminateSimulator(
+    bundleId: string,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>
+  ): Promise<TerminateAppResult> {
+    const installedApps = await perf.track("checkInstalled", () => this.simctl.listApps(this.device.deviceId));
+    const wasInstalled = installedApps.some(app => this.getBundleId(app) === bundleId);
+
+    if (!wasInstalled) {
+      perf.end();
+      return {
+        success: true,
+        packageName: bundleId,
+        wasInstalled: false,
+        wasRunning: false,
+        wasForeground: false
+      };
+    }
+
+    let wasRunning = true;
+    let errorMessage: string | undefined;
+
+    try {
+      await perf.track("terminateApp", () => this.simctl.terminateApp(bundleId, this.device.deviceId));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.isSimctlNotRunningError(message)) {
+        wasRunning = false;
+      } else {
+        errorMessage = message;
+      }
+    }
+
+    perf.end();
+    return {
+      success: !errorMessage,
+      packageName: bundleId,
+      wasInstalled: true,
+      wasRunning,
+      wasForeground: false,
+      ...(errorMessage ? { error: errorMessage } : {})
+    };
+  }
+
+  /**
+   * Physical iOS device terminate via devicectl (iOS 17+). The injected
+   * terminator resolves the bundle id to a PID and force-kills it (SIGKILL),
+   * reporting install/running status. Matches Android `am force-stop` semantics
+   * for `wasRunning`. A devicectl / macOS-guard / iOS<=16 failure surfaces as a
+   * clear, non-crashing `success:false` result rather than throwing.
+   */
+  private async terminatePhysicalDevice(
+    bundleId: string,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>
+  ): Promise<TerminateAppResult> {
+    try {
+      const { wasInstalled, wasRunning } = await perf.track(
+        "terminateApp",
+        () => this.deviceTerminator.terminateApp(this.device.deviceId, bundleId)
+      );
+      perf.end();
+      return {
+        success: true,
+        packageName: bundleId,
+        wasInstalled,
+        wasRunning,
+        wasForeground: false
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Return a typed failure (matching the simulator path) instead of throwing,
+      // but log first so the trace survives even when the client only sees the
+      // summarized error (CLAUDE.md error-handling convention #2).
+      logger.warn(`[TerminateApp] Physical iOS terminate failed for ${bundleId}: ${message}`, error);
+      perf.end();
+      return {
+        success: false,
+        packageName: bundleId,
+        wasInstalled: false,
+        wasRunning: false,
+        wasForeground: false,
+        error: message
+      };
+    }
   }
 
   private isSimctlNotRunningError(message: string): boolean {

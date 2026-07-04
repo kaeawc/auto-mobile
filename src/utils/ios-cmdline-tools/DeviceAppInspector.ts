@@ -194,6 +194,75 @@ export const findProcessIdentifier = (data: unknown): number | undefined => {
   return walk(data);
 };
 
+const extractExecutablePath = (record: Record<string, unknown>): string | null => {
+  const raw = record.executable ?? record.executablePath ?? record.executableURL ?? record.path;
+  if (typeof raw === "string") {
+    return normalizeDevicePath(raw);
+  }
+  if (raw && typeof raw === "object") {
+    const inner = (raw as Record<string, unknown>).url ?? (raw as Record<string, unknown>).path;
+    if (typeof inner === "string") {
+      return normalizeDevicePath(inner);
+    }
+  }
+  return null;
+};
+
+const extractProcessPid = (record: Record<string, unknown>): number | undefined => {
+  const raw = record.processIdentifier ?? record.pid ?? record.processID;
+  return typeof raw === "number" ? raw : undefined;
+};
+
+/**
+ * Find the PID of a running process whose executable lives inside `bundlePath`,
+ * from a devicectl `device info processes --json-output` payload.
+ *
+ * The exact envelope is not formally documented by Apple (see simctl.md caveat),
+ * so we deep-walk and accept several field-name spellings: the executable may be
+ * a string or an object carrying `url`/`path`, and the PID may be spelled
+ * `processIdentifier`, `pid`, or `processID`. A match requires the normalized
+ * executable path to be strictly *inside* the bundle directory — comparing
+ * against `"<bundle>/"` guards against a sibling like `MyApp.app.extension`
+ * that merely shares a string prefix with `MyApp.app`.
+ */
+export const findRunningProcessPid = (data: unknown, bundlePath: string): number | null => {
+  const normalizedBundle = normalizeDevicePath(bundlePath).replace(/\/+$/, "");
+  if (!normalizedBundle) {
+    return null;
+  }
+  const insidePrefix = `${normalizedBundle}/`;
+
+  const walk = (node: unknown): number | null => {
+    if (!node || typeof node !== "object") {
+      return null;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = walk(item);
+        if (found !== null) {
+          return found;
+        }
+      }
+      return null;
+    }
+    const record = node as Record<string, unknown>;
+    const exe = extractExecutablePath(record);
+    const pid = extractProcessPid(record);
+    if (exe !== null && pid !== undefined && exe.startsWith(insidePrefix)) {
+      return pid;
+    }
+    for (const value of Object.values(record)) {
+      const found = walk(value);
+      if (found !== null) {
+        return found;
+      }
+    }
+    return null;
+  };
+
+  return walk(data);
+};
+
 const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: string): boolean =>
   bundleId.endsWith(".XCTestServiceApp") &&
   (errorMessage.includes("No such file or directory") ||
@@ -478,6 +547,128 @@ export class DeviceAppInspector {
       return { success: true, pid };
     } catch (error) {
       return { success: false, error: getErrorMessage(error) };
+    } finally {
+      await this.deps.rm(tempDir);
+    }
+  }
+
+  /**
+   * Force-terminate a running app on a physical iOS device (iOS 17+) via
+   * devicectl. There is no `terminate-by-bundle-id` verb, so this is a two-step
+   * operation: resolve the bundle id to a PID (by matching the on-device bundle
+   * path against `device info processes` executables) then `device process
+   * signal --signal SIGKILL` that PID.
+   *
+   * Returns:
+   * - `{ wasInstalled: false, wasRunning: false }` when the bundle isn't installed
+   *   (no process query, no signal),
+   * - `{ wasInstalled: true, wasRunning: false }` when installed but no matching
+   *   process is running (no signal),
+   * - `{ wasInstalled: true, wasRunning: true }` after SIGKILL of a running process.
+   *
+   * Throws on an underlying devicectl failure. Gated to macOS + local devicectl:
+   * host control (Docker) exposes no process-management bridge, and non-darwin
+   * hosts have no devicectl, so both throw an explicit, actionable error rather
+   * than a confusing simctl-style failure (iOS ≤16 devices reject the devicectl
+   * signal at the tool level and surface as a thrown devicectl error).
+   */
+  public async terminateApp(deviceUdid: string, bundleId: string): Promise<{ wasInstalled: boolean; wasRunning: boolean }> {
+    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
+    if (useHostControl) {
+      throw new Error(
+        `Terminating an app on a physical device is not supported under host control for ${bundleId}: ` +
+        "the host-control bridge exposes install/uninstall but no devicectl process-management primitive."
+      );
+    }
+
+    if (this.deps.platform() !== "darwin") {
+      throw new Error("Physical iOS device app termination requires macOS");
+    }
+
+    const bundlePath = await this.resolveInstalledBundlePathOnDevice(deviceUdid, bundleId);
+    if (!bundlePath) {
+      return { wasInstalled: false, wasRunning: false };
+    }
+
+    const pid = await this.resolveRunningPid(deviceUdid, bundlePath);
+    if (pid === null) {
+      return { wasInstalled: true, wasRunning: false };
+    }
+
+    const signalCommand = [
+      "xcrun",
+      "devicectl",
+      "device",
+      "process",
+      "signal",
+      "--device", deviceUdid,
+      "--pid", String(pid),
+      "--signal", "SIGKILL"
+    ].join(" ");
+    await this.deps.exec(signalCommand);
+    return { wasInstalled: true, wasRunning: true };
+  }
+
+  /**
+   * Resolve the on-device installed bundle path for `bundleId` via
+   * `devicectl device info apps --bundle-id`. Returns null when the app isn't
+   * installed (no matching bundle entry / no resolvable path); devicectl exec or
+   * JSON-read failures propagate so a broken devicectl surfaces rather than
+   * masquerading as "not installed". macOS-only (callers guard the platform).
+   */
+  private async resolveInstalledBundlePathOnDevice(deviceUdid: string, bundleId: string): Promise<string | null> {
+    const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
+    const jsonPath = join(tempDir, "apps.json");
+    try {
+      const infoCommand = [
+        "xcrun",
+        "devicectl",
+        "device",
+        "info",
+        "apps",
+        "--device", deviceUdid,
+        "--bundle-id", bundleId,
+        "--json-output", quoteShell(jsonPath),
+        "--quiet"
+      ].join(" ");
+      await this.deps.exec(infoCommand);
+
+      const raw = await this.deps.readFile(jsonPath);
+      const data = JSON.parse(raw) as unknown;
+      const entry = findBundleEntry(data, bundleId);
+      if (!entry) {
+        return null;
+      }
+      return extractBundlePath(entry);
+    } finally {
+      await this.deps.rm(tempDir);
+    }
+  }
+
+  /**
+   * Map an on-device bundle path to a running PID via
+   * `devicectl device info processes`, matching the process whose executable
+   * lives inside `bundlePath`. Returns null when nothing is running for that
+   * bundle. devicectl exec / JSON-read failures propagate. macOS-only.
+   */
+  private async resolveRunningPid(deviceUdid: string, bundlePath: string): Promise<number | null> {
+    const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
+    const jsonPath = join(tempDir, "processes.json");
+    try {
+      const command = [
+        "xcrun",
+        "devicectl",
+        "device",
+        "info",
+        "processes",
+        "--device", deviceUdid,
+        "--json-output", quoteShell(jsonPath),
+        "--quiet"
+      ].join(" ");
+      await this.deps.exec(command);
+
+      const raw = await this.deps.readFile(jsonPath);
+      return findRunningProcessPid(JSON.parse(raw), bundlePath);
     } finally {
       await this.deps.rm(tempDir);
     }

@@ -11,9 +11,9 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 
 /**
  * Physical-device app terminator. `DeviceAppInspector` satisfies this
- * structurally (via `xcrun devicectl device process signal`); tests inject a
- * fake so the physical path is exercised without a real device. Mirrors the
- * `DeviceAppUninstaller`/`DeviceAppLauncher` injection in the sibling tools.
+ * structurally (via `xcrun devicectl device process terminate --kill`); tests
+ * inject a fake so the physical path is exercised without a real device. Mirrors
+ * the `DeviceAppUninstaller`/`DeviceAppLauncher` injection in the sibling tools.
  */
 export interface DeviceAppTerminator {
   terminateApp(deviceUdid: string, bundleId: string): Promise<{ wasInstalled: boolean; wasRunning: boolean }>;
@@ -259,9 +259,10 @@ export class TerminateApp extends BaseVisualChange {
 
   /**
    * Physical iOS device terminate via devicectl (iOS 17+). The injected
-   * terminator resolves the bundle id to a PID and force-kills it (SIGKILL),
-   * reporting install/running status. Matches Android `am force-stop` semantics
-   * for `wasRunning`. A devicectl / macOS-guard / iOS<=16 failure surfaces as a
+   * terminator resolves the bundle id to a PID and force-kills it via the
+   * dedicated `devicectl device process terminate --kill` verb, reporting
+   * install/running status. Matches Android `am force-stop` semantics for
+   * `wasRunning`. A devicectl / macOS-guard / iOS<=16 failure surfaces as a
    * clear, non-crashing `success:false` result rather than throwing.
    */
   private async terminatePhysicalDevice(

@@ -871,7 +871,7 @@ describe("DeviceAppInspector terminate (devicectl)", () => {
     }
   };
 
-  test("signals SIGKILL for a running app and reports {wasInstalled:true, wasRunning:true}", async () => {
+  test("terminates a running app with `process terminate --kill --quiet` and reports {wasInstalled:true, wasRunning:true}", async () => {
     const commands: string[] = [];
     const exec = async (command: string) => {
       commands.push(command);
@@ -893,17 +893,21 @@ describe("DeviceAppInspector terminate (devicectl)", () => {
     const result = await inspector.terminateApp("device-udid", bundleId);
 
     expect(result).toEqual({ wasInstalled: true, wasRunning: true });
-    const signalCommand = commands.find(c => c.includes("device process signal"));
-    expect(signalCommand).toBeDefined();
-    expect(signalCommand).toContain("xcrun devicectl device process signal");
-    expect(signalCommand).toContain("--device device-udid");
-    expect(signalCommand).toContain("--pid 4321");
-    expect(signalCommand).toContain("--signal SIGKILL");
+    // 2882's dedicated terminate verb, not raw `process signal --signal SIGKILL`.
+    const terminateCommand = commands.find(c => c.includes("device process terminate"));
+    expect(terminateCommand).toBeDefined();
+    expect(terminateCommand).toContain("xcrun devicectl device process terminate");
+    expect(terminateCommand).toContain("--device device-udid");
+    expect(terminateCommand).toContain("--pid 4321");
+    expect(terminateCommand).toContain("--kill");
+    expect(terminateCommand).toContain("--quiet");
     // Simulator tool must never be invoked for a physical terminate.
     expect(commands.every(c => !c.includes("simctl"))).toBe(true);
+    // Must not shell out to the raw signal verb.
+    expect(commands.every(c => !c.includes("device process signal"))).toBe(true);
   });
 
-  test("reports {wasInstalled:true, wasRunning:false} and issues no signal when not running", async () => {
+  test("reports {wasInstalled:true, wasRunning:false} and issues no terminate when not running", async () => {
     const commands: string[] = [];
     const exec = async (command: string) => {
       commands.push(command);
@@ -923,7 +927,7 @@ describe("DeviceAppInspector terminate (devicectl)", () => {
     const result = await inspector.terminateApp("device-udid", bundleId);
 
     expect(result).toEqual({ wasInstalled: true, wasRunning: false });
-    expect(commands.some(c => c.includes("device process signal"))).toBe(false);
+    expect(commands.some(c => c.includes("device process terminate"))).toBe(false);
   });
 
   test("reports {wasInstalled:false, wasRunning:false} and never queries processes when not installed", async () => {
@@ -941,7 +945,7 @@ describe("DeviceAppInspector terminate (devicectl)", () => {
 
     expect(result).toEqual({ wasInstalled: false, wasRunning: false });
     expect(commands.some(c => c.includes("device info processes"))).toBe(false);
-    expect(commands.some(c => c.includes("device process signal"))).toBe(false);
+    expect(commands.some(c => c.includes("device process terminate"))).toBe(false);
   });
 
   test("throws a clear macOS error on non-darwin without shelling out", async () => {

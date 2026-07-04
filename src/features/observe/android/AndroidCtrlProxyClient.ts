@@ -650,7 +650,8 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
+    diagnostics?: HierarchySyncDiagnostics
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null>;
 
   requestHierarchySyncWithoutObservationStreamPush(

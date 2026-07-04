@@ -343,8 +343,8 @@ describe("finalizeToolResponse", () => {
   //      compares object-shaped `bounds.left`-style fields always sees objects, never
   //      tuples — the two transforms never collide on the same representation.
   // NOTE: with the diff flag dormant, EC-D2 currently passes with the flag off too;
-  // both cases become load-bearing once the diff behavior is implemented (tracked as a
-  // #2990 follow-up). They exist now to fence that future work, not to test today's diff.
+  // both cases become load-bearing once the diff behavior is implemented (tracked in
+  // #3026). They exist now to fence that future work, not to test today's diff.
   describe("compact × actions-diff-observe composition (#2990)", () => {
     let originalDiff: boolean;
 

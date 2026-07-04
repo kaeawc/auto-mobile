@@ -460,9 +460,31 @@ function valuesEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
+ * A copy of an Element mirror value stripped of its `node` child subtree
+ * (#3052). The subtree is the only unbounded part of an `Element` (see
+ * `parseNodeBounds`, which shallow-copies the source node and so retains its
+ * children) and is fully redundant with the hierarchy node diff — re-embedding
+ * it in a `{from,to}` would re-inflate the very diff `--actions-diff-observe`
+ * exists to shrink. Stripping it bounds the emitted element to its own
+ * attributes while still answering "which element is focused/awaited". Returns
+ * non-object values (notably `undefined`, for a gained/lost mirror) untouched.
+ * Shallow copy — never mutates the caller's object.
+ */
+function leanElementForDiff(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const copy = { ...(value as Record<string, unknown>) };
+  delete copy.node;
+  return copy;
+}
+
+/**
  * Structural equality for an Element mirror field (#3052), tolerant of the two
  * bounds shapes. `JSON.stringify(undefined)` is `undefined`, so an absent field
- * (focus lost/gained) only equals another absent field.
+ * (focus lost/gained) only equals another absent field. Callers pass the
+ * `leanElementForDiff` form, so a child-only change (already in the node diff)
+ * does not spuriously flag the mirror as changed.
  */
 function elementValuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) {
@@ -575,11 +597,15 @@ export function diffObserveResult(
       fields[field] = { from: baseRecord[field], to: nextRecord[field] };
     }
   }
-  // Element mirror fields (#3052): bounds-tolerant compare so a compaction
-  // toggle is not a spurious change. Emitted into the same `fields` map.
+  // Element mirror fields (#3052): compare/emit the `node`-subtree-stripped form
+  // (the subtree is redundant with the node diff and unbounded in size), with a
+  // bounds-tolerant compare so a `--observe-result-compact` toggle is not a
+  // spurious change. Emitted into the same `fields` map.
   for (const field of elementFields) {
-    if (!elementValuesEqual(baseRecord[field], nextRecord[field])) {
-      fields[field] = { from: baseRecord[field], to: nextRecord[field] };
+    const from = leanElementForDiff(baseRecord[field]);
+    const to = leanElementForDiff(nextRecord[field]);
+    if (!elementValuesEqual(from, to)) {
+      fields[field] = { from, to };
     }
   }
   if (Object.keys(fields).length > 0) {

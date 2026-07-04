@@ -36,6 +36,29 @@ command_exists() {
 
 # Note: installed_ktfmt_version() is provided by the sourced ktfmt_version.sh.
 
+# Install the pinned fat JAR and make it the ktfmt that resolves. Used by every
+# package-manager path (brew, scoop) when the manager installs a version that
+# drifts from the pin -- package managers have no `ktfmt@<version>` formula, so
+# the pinned JAR is the authoritative install (issue #2966). Returns
+# install_manual's status.
+fallback_to_pinned_jar() {
+    echo -e "${YELLOW}Falling back to the pinned JAR so the pin is honored...${NC}"
+    install_manual
+    local manual_status=$?
+
+    # install_manual writes the pinned wrapper to ~/.local/bin. Two things must
+    # happen before verify_installation (or any later ktfmt call) or the pinned
+    # install won't actually resolve:
+    #  1. Ensure ~/.local/bin is on PATH for this process -- it is NOT on the
+    #     default macOS/MSYS PATH, so otherwise the wrapper is invisible.
+    #  2. Clear bash's command hash: the version probe above already ran (and
+    #     hashed) the package manager's ktfmt, which may have just been unlinked,
+    #     so a stale hash entry would keep resolving the old/removed binary.
+    export PATH="$HOME/.local/bin:$PATH"
+    hash -r 2>/dev/null || true
+    return "$manual_status"
+}
+
 # Install ktfmt on macOS
 install_macos() {
     echo -e "${YELLOW}Installing ktfmt on macOS...${NC}"
@@ -47,8 +70,7 @@ install_macos() {
         # Homebrew has no ktfmt@<version> formula, so `brew install ktfmt`
         # installs whatever the current formula ships -- which may drift from the
         # pin (issue #2966). Verify it; if it differs, unlink brew's copy so it
-        # can't shadow ~/.local/bin on PATH, then install the pinned fat JAR so
-        # the pin is actually honored on macOS.
+        # can't shadow ~/.local/bin on PATH, then install the pinned fat JAR.
         local installed
         installed="$(installed_ktfmt_version)"
         if [[ "$installed" == "$KTFMT_VERSION" ]]; then
@@ -56,22 +78,9 @@ install_macos() {
         fi
 
         echo -e "${YELLOW}brew installed ktfmt '${installed:-unknown}', but this repo pins '${KTFMT_VERSION}'.${NC}"
-        echo -e "${YELLOW}Falling back to the pinned JAR so the pin is honored...${NC}"
         brew unlink ktfmt >/dev/null 2>&1 || true
-        install_manual
-        local manual_status=$?
-
-        # install_manual writes the pinned wrapper to ~/.local/bin. Two things
-        # must happen before verify_installation (or any later ktfmt call) or the
-        # pinned install won't actually resolve:
-        #  1. Ensure ~/.local/bin is on PATH for this process -- it is NOT on the
-        #     default macOS PATH, so otherwise the wrapper is invisible.
-        #  2. Clear bash's command hash: the version probe above already ran (and
-        #     hashed) brew's ktfmt, which `brew unlink` just removed, so a stale
-        #     hash entry would keep resolving the deleted binary.
-        export PATH="$HOME/.local/bin:$PATH"
-        hash -r 2>/dev/null || true
-        return "$manual_status"
+        fallback_to_pinned_jar
+        return $?
     else
         echo -e "${YELLOW}Homebrew not found. Install Homebrew first or use manual installation.${NC}"
         echo "To install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
@@ -118,6 +127,19 @@ install_windows() {
     if command_exists scoop; then
         echo -e "${GREEN}Using Scoop to install ktfmt${NC}"
         scoop install ktfmt
+
+        # Like brew, scoop installs whatever version its manifest ships, which may
+        # drift from the pin (issue #2966). Verify and fall back to the pinned JAR
+        # on drift instead of leaving a mismatched formatter that verify_installation
+        # would then hard-fail with no recourse.
+        local installed
+        installed="$(installed_ktfmt_version)"
+        if [[ "$installed" == "$KTFMT_VERSION" ]]; then
+            return 0
+        fi
+
+        echo -e "${YELLOW}scoop installed ktfmt '${installed:-unknown}', but this repo pins '${KTFMT_VERSION}'.${NC}"
+        fallback_to_pinned_jar
         return $?
     elif command_exists choco; then
         echo -e "${YELLOW}Chocolatey detected, but ktfmt may not be available. Falling back to manual installation...${NC}"

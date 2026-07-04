@@ -7,7 +7,18 @@ import {
   createFileBackedDbHarness,
   WINDOWS_FILE_DB_TEST_TIMEOUT_MS as HARNESS_TIMEOUT_REEXPORT,
 } from "./withFileBackedDb";
-import type { LifecycleDatabaseModule } from "./withFileBackedDb";
+import type { FreshDatabaseModule, LifecycleDatabaseModule } from "./withFileBackedDb";
+
+/**
+ * The harness's `importDatabaseModule` dep is typed as the full
+ * {@link FreshDatabaseModule} (the only real module). The fakes here implement
+ * just the narrow {@link LifecycleDatabaseModule} contract the harness actually
+ * drives, so they cast at this ONE injection helper — the deliberate trade
+ * (issue #3081, item 2) for dropping the `<M>` generic that previously threaded
+ * through four interfaces.
+ */
+const asFreshModule = (module: LifecycleDatabaseModule): FreshDatabaseModule =>
+  module as unknown as FreshDatabaseModule;
 
 /**
  * Unit tests for the shared file-backed DB-lifecycle harness (issue #3046).
@@ -123,7 +134,7 @@ describe("createFileBackedDbHarness (issue #3046)", () => {
       mkdtemp,
       removeTempDir,
       env,
-      importDatabaseModule: async () => fake,
+      importDatabaseModule: async () => asFreshModule(fake),
     });
 
     const opened = await harness.openLifecycleTestDb("am-life-");
@@ -149,7 +160,7 @@ describe("createFileBackedDbHarness (issue #3046)", () => {
       mkdtemp,
       removeTempDir,
       env: {},
-      importDatabaseModule: async () => fake,
+      importDatabaseModule: async () => asFreshModule(fake),
     });
 
     await harness.openLifecycleTestDb("am-life-");
@@ -171,7 +182,7 @@ describe("createFileBackedDbHarness (issue #3046)", () => {
       mkdtemp,
       removeTempDir,
       env: {},
-      importDatabaseModule: async () => fake,
+      importDatabaseModule: async () => asFreshModule(fake),
     });
 
     const opened = await harness.openLifecycleTestDb("am-life-");
@@ -196,7 +207,7 @@ describe("createFileBackedDbHarness (issue #3046)", () => {
       env: {},
       importDatabaseModule: async () => {
         importCount += 1;
-        return fake;
+        return asFreshModule(fake);
       },
     });
 

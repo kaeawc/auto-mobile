@@ -63,9 +63,9 @@ export interface LifecycleDatabaseModule {
 export type FreshDatabaseModule = Awaited<ReturnType<typeof importFreshDatabaseModule>>;
 
 /** A single open+migrated file-backed DB, with a self-cleaning `close()`. */
-export interface OpenLifecycleTestDb<M extends LifecycleDatabaseModule = FreshDatabaseModule> {
+export interface OpenLifecycleTestDb {
   /** The fresh `database.ts` module instance backing this DB. */
-  module: M;
+  module: FreshDatabaseModule;
   /** The tracked temp dir holding the `.db` file. */
   dir: string;
   /** The resolved `auto-mobile.db` path inside {@link dir}. */
@@ -74,22 +74,22 @@ export interface OpenLifecycleTestDb<M extends LifecycleDatabaseModule = FreshDa
   close(): Promise<void>;
 }
 
-export interface FileBackedDbHarness<M extends LifecycleDatabaseModule = FreshDatabaseModule> {
+export interface FileBackedDbHarness {
   /** `mkdtemp` a tracked temp dir under the OS temp dir for the given prefix. */
   makeTempDbDir(prefix: string): Promise<string>;
   /** Import a fresh, isolated `database.ts` module instance. */
-  importFreshDatabaseModule(): Promise<M>;
+  importFreshDatabaseModule(): Promise<FreshDatabaseModule>;
   /**
    * Open a file-backed DB the correct way: fresh module + tracked temp dir +
    * `AUTOMOBILE_DB_DIR` pointed at it (path/migration overrides cleared) +
    * `getDatabase()` then `await ensureMigrations()`.
    */
-  openLifecycleTestDb(prefix: string): Promise<OpenLifecycleTestDb<M>>;
+  openLifecycleTestDb(prefix: string): Promise<OpenLifecycleTestDb>;
   /** Remove every still-tracked temp dir (bounded) and restore the env snapshot. */
   cleanup(): Promise<void>;
 }
 
-export interface FileBackedDbHarnessDeps<M extends LifecycleDatabaseModule = FreshDatabaseModule> {
+export interface FileBackedDbHarnessDeps {
   /**
    * Create a temp dir at an absolute path. Defaults to `fs.mkdtemp`; the harness
    * always passes an absolute `tmpdir()`-joined prefix, so the injected fake
@@ -98,8 +98,13 @@ export interface FileBackedDbHarnessDeps<M extends LifecycleDatabaseModule = Fre
   mkdtemp?: (fullPrefix: string) => Promise<string>;
   /** Remove a temp dir. Defaults to the BOUNDED {@link removeTempDbDir} (#2916). */
   removeTempDir?: (dir: string) => Promise<void>;
-  /** Import a fresh `database.ts` module. Defaults to {@link importFreshDatabaseModule}. */
-  importDatabaseModule?: () => Promise<M>;
+  /**
+   * Import a fresh `database.ts` module. Defaults to {@link importFreshDatabaseModule}.
+   * Typed as the full {@link FreshDatabaseModule} (the only real module); a fake
+   * that implements just the narrow {@link LifecycleDatabaseModule} contract casts
+   * at this single injection site (see `withFileBackedDb.test.ts`).
+   */
+  importDatabaseModule?: () => Promise<FreshDatabaseModule>;
   /** The environment object to snapshot/restore. Defaults to `process.env`. */
   env?: NodeJS.ProcessEnv;
 }
@@ -118,14 +123,14 @@ const LIFECYCLE_OVERRIDE_ENV_KEYS = [
   DAEMON_LAUNCH_CWD_ENV,
 ] as const;
 
-export function createFileBackedDbHarness<M extends LifecycleDatabaseModule = FreshDatabaseModule>(
-  deps: FileBackedDbHarnessDeps<M> = {}
-): FileBackedDbHarness<M> {
+export function createFileBackedDbHarness(
+  deps: FileBackedDbHarnessDeps = {}
+): FileBackedDbHarness {
   const mkdtemp = deps.mkdtemp ?? (fullPrefix => fsMkdtemp(fullPrefix));
   const removeTempDir = deps.removeTempDir ?? (dir => removeTempDbDir(dir));
-  const importModule =
-    deps.importDatabaseModule ??
-    (importFreshDatabaseModule as unknown as () => Promise<M>);
+  // `importFreshDatabaseModule` already returns `Promise<FreshDatabaseModule>`, so
+  // no cast is needed now that the surface is non-generic.
+  const importModule = deps.importDatabaseModule ?? importFreshDatabaseModule;
   const env = deps.env ?? process.env;
 
   // Full-env snapshot taken at creation so every mutated key is restored
@@ -162,7 +167,7 @@ export function createFileBackedDbHarness<M extends LifecycleDatabaseModule = Fr
     await removeTempDir(dir);
   }
 
-  async function openLifecycleTestDb(prefix: string): Promise<OpenLifecycleTestDb<M>> {
+  async function openLifecycleTestDb(prefix: string): Promise<OpenLifecycleTestDb> {
     const dir = await makeTempDbDir(prefix);
 
     // Bind the fresh temp dir and clear every override that could redirect the

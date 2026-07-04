@@ -357,6 +357,38 @@ describe("TelemetryRecorder", () => {
     expect(repo.storageEvents[0].key).toBe("theme");
   });
 
+  it("recordStorageEvent threads an explicit previousValue through to the repository", async () => {
+    await recorder.recordStorageEvent({
+      timestamp: 6000,
+      applicationId: null,
+      fileName: "prefs.xml",
+      key: "theme",
+      value: "dark",
+      valueType: "string",
+      changeType: "put",
+      previousValue: "light",
+    });
+
+    expect(repo.storageEvents).toHaveLength(1);
+    expect(repo.storageEvents[0].previousValue).toBe("light");
+  });
+
+  it("recordStorageEvent leaves previousValue undefined when the caller omits it", async () => {
+    await recorder.recordStorageEvent({
+      timestamp: 6000,
+      applicationId: null,
+      fileName: "prefs.xml",
+      key: "theme",
+      value: "dark",
+      valueType: "string",
+      changeType: "put",
+    });
+
+    expect(repo.storageEvents).toHaveLength(1);
+    // Absent field → repository falls back to its auto-lookup path.
+    expect(repo.storageEvents[0].previousValue).toBeUndefined();
+  });
+
   it("recordStorageEvent pushes category storage to socket", async () => {
     await recorder.recordStorageEvent({
       timestamp: 6000,

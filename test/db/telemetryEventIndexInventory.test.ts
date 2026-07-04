@@ -73,6 +73,10 @@ const CANONICAL_INDEXES: Record<string, Record<string, string[]>> = {
   storage_events: {
     idx_storage_events_timestamp: ["timestamp"],
     idx_storage_events_device_timestamp: ["device_id", "timestamp"],
+    // #2798: three-column equality prefix + trailing timestamp for the
+    // per-insert previous-value lookup
+    // (WHERE device_id=? AND file_name=? AND key=? ORDER BY timestamp DESC LIMIT 1).
+    idx_storage_events_key_lookup: ["device_id", "file_name", "key", "timestamp"],
   },
   layout_events: {
     idx_layout_events_timestamp: ["timestamp"],

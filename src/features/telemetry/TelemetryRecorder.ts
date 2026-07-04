@@ -241,6 +241,9 @@ export class TelemetryRecorder {
     value: string | null;
     valueType: string | null;
     changeType: string;
+    // When the source already knows the prior value, thread it through to skip
+    // the repository's per-insert previous-value lookup (#2798).
+    previousValue?: string | null;
   }): Promise<void> {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordStorageEventInput = { deviceId, sessionId, ...event };

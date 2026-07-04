@@ -1212,6 +1212,213 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
+  describe("hierarchy stale-nudge error frame correlation (issue #3061)", function() {
+    // Sibling of #3032 for the request_hierarchy_if_stale nudge. That nudge is minted with a
+    // `stale_` requestId from INSIDE waitForFreshData's interval callback (the "no push after 2s"
+    // path). Before #3061 that id was never registered in pendingHierarchyRejectors, so a runner
+    // type:"error" frame for the stale id no-op'd and the wait hung to timeout. These tests assert
+    // the stale error frame now unblocks the enclosing hierarchy wait fast, while an uncorrelated
+    // id during the stale window remains a safe no-op.
+
+    const findSentMessageOfType = (socket: CapturingWebSocket, type: string): any | undefined => {
+      const raw = socket.sentMessages.find(m => {
+        try { return JSON.parse(m).type === type; } catch { return false; }
+      });
+      return raw ? JSON.parse(raw) : undefined;
+    };
+
+    // Drive the wait past the 2s stale-check window until the request_hierarchy_if_stale nudge is
+    // actually sent. The nudge fires from inside waitForFreshData's interval callback, so it depends
+    // on that interval being registered — which happens a few microtask turns after the sync's
+    // request_hierarchy send. Rather than assume a fixed number of flushes (a microtask-ordering
+    // flake vector), retry advancing time until the nudge appears. Total advance stays well under
+    // the 10s sync timeout so a later "no timeout occurred" assertion remains valid.
+    const driveUntilStaleNudge = async (socket: CapturingWebSocket, timer: FakeTimer): Promise<any> => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await flushPromises();
+        timer.advanceTime(2100);
+        await flushPromises();
+        const staleMsg = findSentMessageOfType(socket, "request_hierarchy_if_stale");
+        if (staleMsg) {
+          return staleMsg;
+        }
+      }
+      return undefined;
+    };
+
+    test("a type:error frame for an in-flight request_hierarchy_if_stale nudge fails the sync fast", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        // 10s hierarchy sync timeout — the whole point is to NOT wait for it.
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const hierarchyMsg = findSentMessageOfType(socket, "request_hierarchy");
+        expect(hierarchyMsg).toBeDefined();
+
+        // Drive the wait past the 2s stale-check window so the request_hierarchy_if_stale nudge is
+        // sent from inside the interval callback (total advance < the 10s timeout).
+        const staleMsg = await driveUntilStaleNudge(socket, errorTimer);
+        expect(staleMsg).toBeDefined();
+        expect(staleMsg.requestId).toBeDefined();
+        expect(String(staleMsg.requestId).startsWith("stale_")).toBe(true);
+
+        // Runner reports a structured handler failure correlated to the stale nudge's requestId.
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: staleMsg.requestId,
+          success: false,
+          error: "request_hierarchy_if_stale handler failed: view hierarchy extraction threw",
+          timestamp: errorTimer.now()
+        }));
+
+        // Fail fast: only flush microtasks/setImmediate, no advance toward the 10s timeout.
+        await flushPromises();
+        const result = await syncPromise;
+
+        expect(result).toBeNull();
+        // Prove we did not sit through the timeout: fake time stayed near the stale window.
+        expect(errorTimer.getCurrentTime()).toBeLessThan(10000);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("a type:error frame with an unknown requestId does not disturb the stale-nudge wait", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        // Advance past the stale window so the stale nudge is minted and registered.
+        const staleMsg = await driveUntilStaleNudge(socket, errorTimer);
+        expect(staleMsg).toBeDefined();
+
+        // Error frame for an uncorrelated id — must be a safe no-op for the stale-nudge wait.
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: "some-unrelated-id",
+          success: false,
+          error: "Malformed request: the payload is not valid JSON",
+          timestamp: errorTimer.now()
+        }));
+
+        // The real hierarchy push for our request still arrives and resolves the sync normally.
+        socket.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: errorTimer.now(),
+          data: {
+            updatedAt: errorTimer.now(),
+            packageName: "com.example.app",
+            hierarchy: { text: "Recovered after uncorrelated stale error" }
+          }
+        }));
+
+        const result = await errorTimer.resolvePromise(syncPromise);
+
+        expect(result).not.toBeNull();
+        expect(result!.hierarchy.hierarchy.text).toBe("Recovered after uncorrelated stale error");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("a stale-nudge error frame does NOT discard stale cache on the getLatestHierarchy path", async function() {
+      // getLatestHierarchy (unlike requestHierarchySync) enters waitForFreshData with NO primary
+      // requestId — its timeout is meant to gracefully fall through to the stale cache. The stale
+      // nudge is therefore left uncorrelated there (gated on `requestId` in waitForFreshData). This
+      // locks in that decision: an error frame for the stale id must be a safe no-op that preserves
+      // the stale-cache return, NOT a rejection that propagates to null. Removing the `&& requestId`
+      // gate would flip this assertion (the wait would reject and getLatestHierarchy would return
+      // hierarchy:null).
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        // Prime the connection + cache via a sync that a push resolves quickly.
+        const primePromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+        socket.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: errorTimer.now(),
+          data: {
+            updatedAt: errorTimer.now(),
+            packageName: "com.example.app",
+            hierarchy: { text: "Stale cache preserved" }
+          }
+        }));
+        await errorTimer.resolvePromise(primePromise);
+
+        // Let time pass so the cached data is stale relative to the next wait's start; this forces
+        // getLatestHierarchy(waitForFresh=true) into waitForFreshData and, on timeout, into the
+        // stale-cache return path.
+        errorTimer.advanceTime(500);
+
+        const latestPromise = testClient.getLatestHierarchy(true, 3000);
+
+        // Drive to the 2s stale window so the (uncorrelated) stale nudge is minted.
+        await flushPromises();
+        errorTimer.advanceTime(2100);
+        await flushPromises();
+        const staleMsg = findSentMessageOfType(socket, "request_hierarchy_if_stale");
+        expect(staleMsg).toBeDefined();
+        expect(String(staleMsg.requestId).startsWith("stale_")).toBe(true);
+
+        // Error frame for the stale id — must be a safe no-op on this path.
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: staleMsg.requestId,
+          success: false,
+          error: "request_hierarchy_if_stale handler failed: view hierarchy extraction threw",
+          timestamp: errorTimer.now()
+        }));
+
+        // The wait falls through to its timeout and returns the STALE CACHE (not null).
+        const result = await errorTimer.resolvePromise(latestPromise);
+        expect(result.hierarchy).not.toBeNull();
+        expect(result.hierarchy!.hierarchy.text).toBe("Stale cache preserved");
+        expect(result.fresh).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("bindSession", function() {
     afterEach(function() {
       NavigationGraphManager.resetInstance();

@@ -573,6 +573,9 @@ export class CtrlProxyHierarchy {
     return new Promise<CachedHierarchy | null>((resolve, reject) => {
       let settled = false;
       let intervalId: NodeJS.Timeout | null = null;
+      // The request_hierarchy_if_stale nudge (below) is minted mid-wait, so its id is not known
+      // until the interval fires. Track it here so cleanup can unregister it too (issue #3061).
+      let staleRequestId: string | null = null;
 
       const cleanup = (): void => {
         if (intervalId !== null) {
@@ -580,6 +583,9 @@ export class CtrlProxyHierarchy {
         }
         if (requestId) {
           this.pendingHierarchyRejectors.delete(requestId);
+        }
+        if (staleRequestId) {
+          this.pendingHierarchyRejectors.delete(staleRequestId);
         }
       };
       const settleResolve = (value: CachedHierarchy | null): void => {
@@ -599,15 +605,25 @@ export class CtrlProxyHierarchy {
         reject(error);
       };
 
-      // Route a runner type:"error" frame (delivered via AndroidCtrlProxyClient) for this hierarchy
-      // request into a fast rejection instead of hanging to the timeout below (issue #3032).
-      if (requestId) {
-        this.pendingHierarchyRejectors.set(requestId, {
+      // Register a fast-fail rejector for a hierarchy requestId so a runner type:"error" frame
+      // (fanned in via AndroidCtrlProxyClient.rejectPendingHierarchy) rejects THIS wait instead of
+      // hanging to the timeout below. The hook is wrapped in a fixed `.reject` property so a
+      // runner-controlled id can never drive a dynamic method-name dispatch
+      // (CodeQL js/unvalidated-dynamic-method-call). Shared by the primary request_hierarchy path
+      // (issue #3032) and the request_hierarchy_if_stale nudge (issue #3061).
+      const registerRejector = (id: string, label: string): void => {
+        this.pendingHierarchyRejectors.set(id, {
           reject: (error: string) => {
-            logger.warn(`[CTRL_PROXY] Hierarchy request ${requestId} failed via runner error: ${error}`);
+            logger.warn(`[CTRL_PROXY] ${label} ${id} failed via runner error: ${error}`);
             settleReject(new Error(error));
           }
         });
+      };
+
+      // Route a runner type:"error" frame (delivered via AndroidCtrlProxyClient) for this hierarchy
+      // request into a fast rejection instead of hanging to the timeout below (issue #3032).
+      if (requestId) {
+        registerRejector(requestId, "Hierarchy request");
       }
 
       intervalId = this.context.timer.setInterval(() => {
@@ -633,7 +649,22 @@ export class CtrlProxyHierarchy {
         if (!staleCheckSent && elapsed >= staleCheckDelay) {
           staleCheckSent = true;
           logger.debug(`[CTRL_PROXY] No push received after ${staleCheckDelay}ms, sending stale check request (sinceTimestamp: ${minTimestamp})`);
-          this.sendHierarchyIfStaleRequest(minTimestamp);
+          const staleId = this.sendHierarchyIfStaleRequest(minTimestamp);
+          // Correlate a runner type:"error" frame for this stale nudge into THIS wait, mirroring the
+          // primary request_hierarchy path (issue #3032). A decode/handler failure on
+          // request_hierarchy_if_stale should fail the enclosing wait fast rather than hang to the
+          // timeout below (issue #3061).
+          //
+          // Gate on `requestId`: only correlate the stale nudge when the enclosing wait is itself a
+          // fast-fail wait (i.e. a primary WebSocket request_hierarchy is outstanding, as in
+          // requestHierarchySync). The getLatestHierarchy path and the sync ADB-broadcast fallback
+          // pass no requestId — their timeout is intended to gracefully degrade to the stale cache,
+          // so a rejected stale nudge there would discard that cache and return null. Leaving those
+          // best-effort nudges uncorrelated preserves their documented timeout behavior.
+          if (staleId && requestId) {
+            staleRequestId = staleId;
+            registerRejector(staleId, "Hierarchy stale nudge");
+          }
         }
 
         // Check screen state periodically
@@ -696,12 +727,16 @@ export class CtrlProxyHierarchy {
 
   /**
    * Send a message via WebSocket to request hierarchy extraction IF stale.
+   * @returns The correlating `stale_` requestId when sent, or null when the WebSocket is
+   *   unavailable or the send fails. Callers use the returned id to correlate a runner
+   *   type:"error" frame back to the enclosing hierarchy wait (issue #3061), mirroring
+   *   sendHierarchyRequest's contract for the primary path (issue #3032).
    */
-  private sendHierarchyIfStaleRequest(sinceTimestamp: number): boolean {
+  private sendHierarchyIfStaleRequest(sinceTimestamp: number): string | null {
     const ws = this.context.getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       logger.warn("[CTRL_PROXY] Cannot send stale check request - WebSocket not connected");
-      return false;
+      return null;
     }
 
     try {
@@ -711,10 +746,10 @@ export class CtrlProxyHierarchy {
       );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent hierarchy_if_stale request (requestId: ${requestId}, sinceTimestamp: ${sinceTimestamp})`);
-      return true;
+      return requestId;
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to send stale check request: ${error}`);
-      return false;
+      return null;
     }
   }
 

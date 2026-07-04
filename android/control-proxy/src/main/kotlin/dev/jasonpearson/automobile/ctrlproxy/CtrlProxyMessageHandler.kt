@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscription
 import dev.jasonpearson.automobile.protocol.AddHighlight
 import dev.jasonpearson.automobile.protocol.ClearPreferences
+import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.GetCurrentFocus
 import dev.jasonpearson.automobile.protocol.GetDeviceOwnerStatus
 import dev.jasonpearson.automobile.protocol.GetPermission
@@ -13,6 +14,7 @@ import dev.jasonpearson.automobile.protocol.InstallCaCert
 import dev.jasonpearson.automobile.protocol.InstallCaCertFromPath
 import dev.jasonpearson.automobile.protocol.ListPreferenceFiles
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
+import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.RemoveCaCert
 import dev.jasonpearson.automobile.protocol.RemovePreference
 import dev.jasonpearson.automobile.protocol.RequestAction
@@ -45,6 +47,8 @@ import dev.jasonpearson.automobile.protocol.SetRecompositionTracking
 import dev.jasonpearson.automobile.protocol.StartRecording
 import dev.jasonpearson.automobile.protocol.StopRecording
 import dev.jasonpearson.automobile.protocol.SubscribeStorage
+import dev.jasonpearson.automobile.protocol.SwipeResult
+import dev.jasonpearson.automobile.protocol.TapCoordinatesResult
 import dev.jasonpearson.automobile.protocol.UnsubscribeStorage
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
@@ -59,18 +63,24 @@ import kotlinx.serialization.json.Json
  * hierarchy, so the compiler fails the build if a new request type is added without a branch here.
  *
  * The handler performs no Android I/O — it only decodes fields and calls [actions] — so it can be
- * unit-tested without Robolectric. Every current command is fire-and-forget (the action broadcasts
- * its own response asynchronously), so [handleMessage] always returns `null`.
+ * unit-tested without Robolectric. Almost every command is fire-and-forget (the action broadcasts
+ * its own response asynchronously), so [handleMessage] returns `null`. The one exception is the
+ * non-finite gesture-coordinate guard (see [firstNonFinite]), which returns a synchronous
+ * per-command error response that [WebSocketServer] broadcasts to the client — the Android analog
+ * of iOS `CommandHandler.requireFinite` (#2964, mirror of #2928 / PR #2957).
  *
  * @param actions the device actions to dispatch to (the [CtrlProxy] service in production, a fake
  *   in tests).
  * @param log diagnostic sink for the few requests with no wired action (an ahead-of-need request
  *   type, or a malformed storage message the device can't resolve). Defaults to a no-op so tests
  *   stay Android-free; production wires it to `Log`.
+ * @param now clock for the `timestamp` of the synchronous guard error responses; injectable so
+ *   those responses are deterministic in tests. Defaults to the wall clock.
  */
 class CtrlProxyMessageHandler(
   private val actions: CtrlProxyActions,
   private val log: (String) -> Unit = {},
+  private val now: () -> Long = { System.currentTimeMillis() },
 ) : WebSocketMessageHandler {
 
   /** JSON used to re-encode the typed network mock rules into the string the SDK store expects. */
@@ -83,7 +93,16 @@ class CtrlProxyMessageHandler(
       is RequestHierarchy -> actions.requestHierarchy(request.disableAllFiltering)
       is RequestHierarchyIfStale -> actions.requestHierarchyIfStale(request.sinceTimestamp)
       is RequestScreenshot -> actions.requestScreenshot(request.requestId)
-      is RequestSwipe ->
+      is RequestSwipe -> {
+        firstNonFinite(
+            "x1" to request.x1,
+            "y1" to request.y1,
+            "x2" to request.x2,
+            "y2" to request.y2,
+          )
+          ?.let { (field, value) ->
+            return swipeError(request.requestId, field, value)
+          }
         actions.requestSwipe(
           request.requestId,
           request.x1,
@@ -92,9 +111,31 @@ class CtrlProxyMessageHandler(
           request.y2,
           request.duration,
         )
-      is RequestTapCoordinates ->
+      }
+      is RequestTapCoordinates -> {
+        firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
+          return TapCoordinatesResult(
+            timestamp = now(),
+            requestId = request.requestId,
+            success = false,
+            totalTimeMs = 0L,
+            error = nonFiniteError(field, value),
+          )
+        }
         actions.requestTapCoordinates(request.requestId, request.x, request.y, request.duration)
-      is RequestTwoFingerSwipe ->
+      }
+      is RequestTwoFingerSwipe -> {
+        // Two-finger swipe shares the swipe_result response type. `offset` is an Int (a pixel gap),
+        // so it cannot be non-finite and is not guarded.
+        firstNonFinite(
+            "x1" to request.x1,
+            "y1" to request.y1,
+            "x2" to request.x2,
+            "y2" to request.y2,
+          )
+          ?.let { (field, value) ->
+            return swipeError(request.requestId, field, value)
+          }
         actions.requestTwoFingerSwipe(
           request.requestId,
           request.x1,
@@ -104,7 +145,23 @@ class CtrlProxyMessageHandler(
           request.duration,
           request.offset,
         )
-      is RequestDrag ->
+      }
+      is RequestDrag -> {
+        firstNonFinite(
+            "x1" to request.x1,
+            "y1" to request.y1,
+            "x2" to request.x2,
+            "y2" to request.y2,
+          )
+          ?.let { (field, value) ->
+            return DragResult(
+              timestamp = now(),
+              requestId = request.requestId,
+              success = false,
+              totalTimeMs = 0L,
+              error = nonFiniteError(field, value),
+            )
+          }
         actions.requestDrag(
           request.requestId,
           request.x1,
@@ -115,7 +172,26 @@ class CtrlProxyMessageHandler(
           request.resolvedDragDurationMs,
           request.holdDurationMs,
         )
-      is RequestPinch ->
+      }
+      is RequestPinch -> {
+        // `rotationDegrees` is a Float (not a coordinate) but still flows into the gesture-path
+        // math, so a computed non-finite value is guarded too (AC #4 of #2964).
+        firstNonFinite(
+            "centerX" to request.centerX,
+            "centerY" to request.centerY,
+            "distanceStart" to request.distanceStart,
+            "distanceEnd" to request.distanceEnd,
+            "rotationDegrees" to request.rotationDegrees.toDouble(),
+          )
+          ?.let { (field, value) ->
+            return PinchResult(
+              timestamp = now(),
+              requestId = request.requestId,
+              success = false,
+              totalTimeMs = 0L,
+              error = nonFiniteError(field, value),
+            )
+          }
         actions.requestPinch(
           request.requestId,
           request.centerX,
@@ -125,6 +201,7 @@ class CtrlProxyMessageHandler(
           request.rotationDegrees,
           request.duration,
         )
+      }
       is RequestSetText ->
         actions.requestSetText(
           request.requestId,
@@ -271,8 +348,42 @@ class CtrlProxyMessageHandler(
       is RequestLaunchIntent -> actions.requestLaunchIntent(request.requestId, request.packageName)
     }
 
-    // Every command above is fire-and-forget: the action broadcasts its own response
+    // Every non-guarded command above is fire-and-forget: the action broadcasts its own response
     // asynchronously, so there is no synchronous response to return here.
     return null
   }
+
+  /**
+   * Reject a non-finite gesture coordinate (`NaN` / `±Infinity`) at the handler boundary before it
+   * flows into the accessibility [android.accessibilityservice.GestureDescription] engine — the
+   * Android analog of iOS `CommandHandler.requireFinite` (#2964, mirror of #2928 / PR #2957).
+   *
+   * A non-finite value cannot arrive over the wire: kotlinx.serialization's default config
+   * (`allowSpecialFloatingPointValues = false`, used by [WebSocketServer.protocolJson]) rejects a
+   * JSON overflow literal like `1e309` at decode ("Unexpected special floating-point value
+   * Infinity") rather than coercing it into the widened `Double` field, and standard JSON has no
+   * `NaN`/`Infinity` literal. So this is defense-in-depth for the non-wire construction path — an
+   * in-process caller building a request from a computed `Double` (division, `hypot`, a normalized
+   * offset) that yields a non-finite value — where it prevents a silent no-op / bogus gesture.
+   *
+   * @return the first non-finite `(field name, value)` among [fields], or null when all are finite.
+   */
+  private fun firstNonFinite(vararg fields: Pair<String, Double>): Pair<String, Double>? =
+    fields.firstOrNull {
+      !it.second.isFinite()
+    }
+
+  /** Actionable message for a rejected non-finite coordinate, naming the offending [field]. */
+  private fun nonFiniteError(field: String, value: Double): String =
+    "Non-finite gesture coordinate: $field=$value. Coordinates must be finite (not NaN or Infinity)."
+
+  /** Build a `swipe_result` failure — shared by [RequestSwipe] and [RequestTwoFingerSwipe]. */
+  private fun swipeError(requestId: String?, field: String, value: Double): SwipeResult =
+    SwipeResult(
+      timestamp = now(),
+      requestId = requestId,
+      success = false,
+      totalTimeMs = 0L,
+      error = nonFiniteError(field, value),
+    )
 }

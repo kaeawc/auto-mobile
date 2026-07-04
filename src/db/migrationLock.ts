@@ -200,7 +200,9 @@ export function migrationLockPathFor(dbPath: string): string {
  * open/close/reopen contract without querying migrated schema — not a production
  * DB configuration. (Sharing one connection across the app and the migrator would
  * break the migration failure-isolation the separate `migrationDb` provides, so
- * it is deliberately out of scope.)
+ * it is deliberately out of scope.) A production `AUTOMOBILE_DB_PATH=:memory:` is
+ * now rejected at path-resolution time unless {@link IN_MEMORY_DB_OPT_IN_ENV} is
+ * set, so this footgun fails fast instead of silently (issue #3065).
  */
 export const IN_MEMORY_DATABASE_PATH = ":memory:";
 
@@ -210,13 +212,38 @@ export function isInMemoryDatabasePath(dbPath: string): boolean {
 }
 
 /**
+ * Explicit opt-in that permits the test-only `:memory:` sentinel DB path.
+ *
+ * `:memory:` is private per connection, so a real daemon that set it would get a
+ * migrated-but-empty app connection (see {@link IN_MEMORY_DATABASE_PATH}). The
+ * runtime guard in `database.ts#resolveDatabasePathFromEnvironment` rejects
+ * `:memory:` unless this flag is truthy, so production misuse fails fast and
+ * legibly while lifecycle tests keep the fast, file-free seam (issue #3065).
+ */
+export const IN_MEMORY_DB_OPT_IN_ENV = "AUTOMOBILE_ALLOW_IN_MEMORY_DB";
+
+/**
+ * True when {@link IN_MEMORY_DB_OPT_IN_ENV} is set to a truthy value
+ * (`1`/`true`/`yes`, case- and whitespace-insensitive). Anything else — absent,
+ * empty, `0`/`false`/`no` — is treated as disabled so the guard fails safe: a
+ * typo'd or empty flag never silently opts a production daemon into the
+ * migrated-but-empty `:memory:` footgun (issue #3065).
+ */
+export function isInMemoryDatabaseOptInEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const normalized = env[IN_MEMORY_DB_OPT_IN_ENV]?.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+/**
  * Select the migration lock for a resolved DB path: a {@link NoOpMigrationLock}
  * for the `:memory:` sentinel (private per-connection, no file to guard, and
  * `:memory:.migrate.lock` would be a bogus file), a {@link FileMigrationLock}
  * keyed to the file otherwise. This is the single decision point so every opener
  * (currently `database.ts#startMigrations`) can stay DB-path-agnostic (#3047).
+ * Named for its role as the chooser — it dispatches to
+ * {@link createFileMigrationLock} for the file branch (issue #3065 nit).
  */
-export function createMigrationLock(dbPath: string): MigrationLock {
+export function selectMigrationLock(dbPath: string): MigrationLock {
   return isInMemoryDatabasePath(dbPath)
     ? new NoOpMigrationLock()
     : createFileMigrationLock(dbPath);

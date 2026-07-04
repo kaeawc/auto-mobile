@@ -53,8 +53,31 @@ export class CtrlProxyHierarchy {
   private recompositionTrackingConfigured: boolean = false;
   private recompositionTrackingEnabled: boolean = false;
 
+  // Outstanding hierarchy request IDs mapped to their error-rejection hook. request_hierarchy does
+  // NOT await through RequestManager (it blocks in waitForFreshData for a hierarchy_update push), so
+  // a runner type:"error" frame must be fanned into this map to unblock the correct waiter fast
+  // instead of hanging to timeout. See issue #3032.
+  private readonly pendingHierarchyRejectors = new Map<string, (error: string) => void>();
+
   constructor(context: HierarchyDelegateContext) {
     this.context = context;
+  }
+
+  /**
+   * Reject an in-flight hierarchy wait whose requestId matches a runner type:"error" frame,
+   * surfacing the runner's error text so the caller fails fast instead of hanging to the
+   * waitForFreshData timeout (issue #3032).
+   *
+   * Returns false (safe no-op) when the id is not an outstanding hierarchy request — e.g. a
+   * null/unknown requestId the runner could not correlate — preserving existing behavior.
+   */
+  rejectPendingHierarchy(requestId: string, error: string): boolean {
+    const rejector = this.pendingHierarchyRejectors.get(requestId);
+    if (!rejector) {
+      return false;
+    }
+    rejector(error);
+    return true;
   }
 
   /**
@@ -339,13 +362,14 @@ export class CtrlProxyHierarchy {
       // Ensure WebSocket connection is established
       await this.context.ensureConnected(perf);
 
-      // Try WebSocket request first (faster path)
-      const sentViaWebSocket = await perf.track("sendWsRequest", async () => {
+      // Try WebSocket request first (faster path). Returns the correlating requestId when sent so a
+      // runner type:"error" frame for this hierarchy request can reject the wait fast (issue #3032).
+      const hierarchyRequestId = await perf.track("sendWsRequest", async () => {
         return this.sendHierarchyRequest(disableAllFiltering);
       });
 
       // Fall back to ADB broadcast if WebSocket failed
-      if (!sentViaWebSocket) {
+      if (hierarchyRequestId === null) {
         logger.debug("[CTRL_PROXY] Falling back to ADB broadcast");
         const uuid = `sync_${this.context.timer.now()}_${generateSecureId()}`;
         await perf.track("sendBroadcast", async () => {
@@ -359,9 +383,12 @@ export class CtrlProxyHierarchy {
         });
       }
 
-      // Wait for WebSocket push
+      // Wait for WebSocket push. When we sent over WebSocket, correlate the wait with the request id
+      // so a runner error frame unblocks it fast instead of hanging to timeout (issue #3032). The
+      // ADB-broadcast fallback has no WebSocket requestId to correlate, so it retains timeout-only
+      // behavior.
       const freshData = await perf.track("waitForPush", () =>
-        this.waitForFreshData(effectiveTimeoutMs, startTime, false, signal)
+        this.waitForFreshData(effectiveTimeoutMs, startTime, false, signal, hierarchyRequestId ?? undefined)
       );
 
       if (freshData) {
@@ -528,7 +555,8 @@ export class CtrlProxyHierarchy {
     timeout: number,
     minTimestamp: number,
     useDeviceTimestamp: boolean,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    requestId?: string
   ): Promise<CachedHierarchy | null> {
     const startTime = this.context.timer.now();
     const checkInterval = 50;
@@ -538,11 +566,47 @@ export class CtrlProxyHierarchy {
     let screenCheckInProgress = false;
     let staleCheckSent = false;
 
-    return new Promise(resolve => {
-      const intervalId = this.context.timer.setInterval(() => {
-        if (signal?.aborted) {
+    return new Promise<CachedHierarchy | null>((resolve, reject) => {
+      let settled = false;
+      let intervalId: NodeJS.Timeout | null = null;
+
+      const cleanup = (): void => {
+        if (intervalId !== null) {
           this.context.timer.clearInterval(intervalId);
-          resolve(null);
+        }
+        if (requestId) {
+          this.pendingHierarchyRejectors.delete(requestId);
+        }
+      };
+      const settleResolve = (value: CachedHierarchy | null): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(value);
+      };
+      const settleReject = (error: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+
+      // Route a runner type:"error" frame (delivered via AndroidCtrlProxyClient) for this hierarchy
+      // request into a fast rejection instead of hanging to the timeout below (issue #3032).
+      if (requestId) {
+        this.pendingHierarchyRejectors.set(requestId, (error: string) => {
+          logger.warn(`[CTRL_PROXY] Hierarchy request ${requestId} failed via runner error: ${error}`);
+          settleReject(new Error(error));
+        });
+      }
+
+      intervalId = this.context.timer.setInterval(() => {
+        if (signal?.aborted) {
+          settleResolve(null);
           return;
         }
         const elapsed = this.context.timer.now() - startTime;
@@ -553,9 +617,8 @@ export class CtrlProxyHierarchy {
           const freshness = this.evaluateMinTimestamp(cachedHierarchy, minTimestamp, useDeviceTimestamp);
 
           if (freshness.isFresh) {
-            this.context.timer.clearInterval(intervalId);
             logger.debug(`[CTRL_PROXY] Fresh data received: receivedAt=${cachedHierarchy.receivedAt}, updatedAt=${cachedHierarchy.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, elapsed=${elapsed}ms`);
-            resolve(cachedHierarchy);
+            settleResolve(cachedHierarchy);
             return;
           }
         }
@@ -576,9 +639,8 @@ export class CtrlProxyHierarchy {
           this.context.adb.isScreenOn(signal).then(isOn => {
             screenCheckInProgress = false;
             if (!isOn) {
-              this.context.timer.clearInterval(intervalId);
               logger.warn("[CTRL_PROXY] Screen is off - failing fast instead of waiting for timeout");
-              resolve(null);
+              settleResolve(null);
             }
           }).catch(() => {
             screenCheckInProgress = false;
@@ -587,14 +649,13 @@ export class CtrlProxyHierarchy {
 
         // Check if timeout exceeded
         if (elapsed >= timeout) {
-          this.context.timer.clearInterval(intervalId);
           const cached = this.context.getCachedHierarchy();
           if (cached) {
             logger.debug(`[CTRL_PROXY] waitForFreshData TIMEOUT after ${elapsed}ms: cached receivedAt=${cached.receivedAt}, updatedAt=${cached.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, useDeviceTimestamp=${useDeviceTimestamp}`);
           } else {
             logger.debug(`[CTRL_PROXY] waitForFreshData TIMEOUT after ${elapsed}ms: no cached data, minTimestamp=${minTimestamp}`);
           }
-          resolve(null);
+          settleResolve(null);
         }
       }, checkInterval);
     });
@@ -602,12 +663,15 @@ export class CtrlProxyHierarchy {
 
   /**
    * Send a message via WebSocket to request hierarchy extraction.
+   * @returns The correlating requestId when sent, or null when the WebSocket is unavailable or the
+   *   send fails. Callers use the returned id to correlate a runner type:"error" frame back to this
+   *   request's wait (issue #3032).
    */
-  private sendHierarchyRequest(disableAllFiltering: boolean = false): boolean {
+  private sendHierarchyRequest(disableAllFiltering: boolean = false): string | null {
     const ws = this.context.getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       logger.warn("[CTRL_PROXY] Cannot send request - WebSocket not connected");
-      return false;
+      return null;
     }
 
     try {
@@ -617,10 +681,10 @@ export class CtrlProxyHierarchy {
       );
       ws.send(message);
       logger.debug(`[CTRL_PROXY] Sent hierarchy request via WebSocket (requestId: ${requestId}, disableAllFiltering: ${disableAllFiltering})`);
-      return true;
+      return requestId;
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to send WebSocket request: ${error}`);
-      return false;
+      return null;
     }
   }
 

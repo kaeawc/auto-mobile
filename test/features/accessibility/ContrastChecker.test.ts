@@ -7,6 +7,21 @@ import { expect, describe, it, beforeEach } from "bun:test";
 import * as path from "path";
 import { ContrastChecker } from "../../../src/features/accessibility/ContrastChecker";
 import type { Element } from "../../../src/models/Element";
+import { FakeImageBackend } from "../../fakes/FakeImageBackend";
+
+/** Build a uniform RGBA raw image for backend-seam tests. */
+function uniformRaw(width: number, height: number, r: number, g: number, b: number): {
+  width: number; height: number; data: Buffer;
+} {
+  const data = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    data[i * 4] = r;
+    data[i * 4 + 1] = g;
+    data[i * 4 + 2] = b;
+    data[i * 4 + 3] = 255;
+  }
+  return { width, height, data };
+}
 
 describe("ContrastChecker", function() {
   let checker: ContrastChecker;
@@ -377,6 +392,44 @@ describe("ContrastChecker", function() {
       expect(result).not.toBeNull();
       expect(result!.shadowDetected).toBe(true);
       expect(result!.requiredRatio).toBeLessThan(result!.baseRequiredRatio);
+    });
+  });
+
+  describe("Backend seam", function() {
+    it("decodes screenshots through the injected ImageBackend.rawPixels", async function() {
+      const backend = new FakeImageBackend();
+      backend.setRawPixelsResult(uniformRaw(100, 50, 255, 255, 255));
+      const seamChecker = new ContrastChecker({}, undefined, backend);
+      // A real file must exist for fs.readFile; its bytes are ignored because the
+      // fake backend returns canned pixels regardless of buffer content.
+      const screenshotPath = path.join(fixturesDir, "black-on-white.png");
+      const element: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        text: "Sample",
+      };
+
+      const result = await seamChecker.checkContrast(screenshotPath, element, "AA");
+
+      expect(result).not.toBeNull();
+      // Decoded exactly once via the seam (screenshot cache holds the RawImage).
+      expect(backend.rawPixelsCalls).toHaveLength(1);
+    });
+
+    it("tolerates element bounds beyond the image via edge clamping", async function() {
+      const backend = new FakeImageBackend();
+      backend.setRawPixelsResult(uniformRaw(20, 20, 0, 0, 0));
+      const seamChecker = new ContrastChecker({}, undefined, backend);
+      const screenshotPath = path.join(fixturesDir, "black-on-white.png");
+      // Bounds extend past the 20x20 image; jimp getPixelColor edge-extends, so
+      // sampling must not throw and should resolve to the (uniform black) edge.
+      const element: Element = {
+        bounds: { left: 10, top: 10, right: 40, bottom: 40 },
+        text: "Sample",
+      };
+
+      const result = await seamChecker.checkContrast(screenshotPath, element, "AA");
+
+      expect(result).not.toBeNull();
     });
   });
 });

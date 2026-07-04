@@ -23,7 +23,21 @@ export interface ImageMetadata {
  * receiving pre-bound closures, so the same pipeline can run on any backend.
  */
 export type ImageOperation =
-  | { type: "resize"; width: number; height?: number; maintainAspectRatio: boolean }
+  | {
+      type: "resize";
+      width: number;
+      height?: number;
+      maintainAspectRatio: boolean;
+      /**
+       * Resampling kernel. `"nearest"` maps every destination pixel to a single
+       * source pixel (no interpolation) — required by consumers that must not
+       * introduce averaged colors (pHash 8×8 downscale, comparator resize).
+       * Omitted keeps the backend default (jimp: bilinear), matching historical
+       * behavior for general-purpose resizes. (Only the non-default kernel needs
+       * a name; a second mode can be added when a consumer needs it.)
+       */
+      mode?: "nearest";
+    }
   | { type: "crop"; x: number; y: number; width: number; height: number };
 
 /**

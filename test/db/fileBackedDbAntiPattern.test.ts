@@ -88,6 +88,36 @@ describe("findFileBackedDbAntiPatterns detector (issue #3081)", () => {
       expect(rules(source)).toContain("hand-rolled-temp-dir-retry");
     });
 
+    test("flags a `while (attempt < n)` retry-shaped loop that removes a dir and gates on a lock code", () => {
+      const source = [
+        "let attempt = 0;",
+        "while (attempt < 100) {",
+        "  attempt += 1;",
+        "  try {",
+        "    await rm(dir, { recursive: true });",
+        "    break;",
+        "  } catch (error) {",
+        '    if (error.code !== "ENOTEMPTY") throw error;',
+        "  }",
+        "}",
+      ].join("\n");
+      expect(rules(source)).toContain("hand-rolled-temp-dir-retry");
+    });
+
+    test("does NOT flag a generic `while (cond)` poll even with a lock code and rm nearby", () => {
+      // A generic poll condition is not retry/attempt/backoff-shaped, so the
+      // structural conjunction must not fire — this guards tempDbDir.test.ts (the
+      // bounded remover's own test, which holds the quoted lock codes) from a
+      // false positive if it ever grows a real-fs poll + cleanup case.
+      const source = [
+        "while (!ready) {",
+        "  await rmSync(dir);",
+        '  if (lastCode === "EBUSY") ready = check();',
+        "}",
+      ].join("\n");
+      expect(rules(source)).not.toContain("hand-rolled-temp-dir-retry");
+    });
+
     test("does NOT flag a long POLL loop that never removes a dir or gates on a lock code", () => {
       const source = [
         "for (let attempt = 0; attempt < 500; attempt += 1) {",
@@ -163,6 +193,49 @@ describe("findFileBackedDbAntiPatterns detector (issue #3081)", () => {
     });
   });
 
+  describe("sanctioned primitive homes are exempted (they ARE the primitive)", () => {
+    test("freshDatabaseModule.ts may hold the raw cache-busted import", () => {
+      const source = "return import(`../../src/db/database.ts?fresh-db-module=${moduleCounter}`);";
+      const found = findFileBackedDbAntiPatterns("test/db/freshDatabaseModule.ts", source);
+      expect(found).toEqual([]);
+    });
+
+    test("tempDbDir.ts may hold the bounded attempt-loop + lock codes", () => {
+      const source = [
+        'const codes = new Set(["EBUSY", "EPERM", "ENOTEMPTY"]);',
+        "for (let attempt = 0; attempt < maxAttempts; attempt += 1) {",
+        "  try { await rm(dir); return; } catch (e) { if (!codes.has(e.code)) throw e; }",
+        "}",
+      ].join("\n");
+      const found = findFileBackedDbAntiPatterns("test/db/tempDbDir.ts", source);
+      expect(found).toEqual([]);
+    });
+
+    test("withFileBackedDb.ts may call mkdtemp for its tracked makeTempDbDir", () => {
+      const source = [
+        'import { importFreshDatabaseModule } from "./freshDatabaseModule";',
+        "const dir = await mkdtemp(path.join(tmpdir(), prefix));",
+      ].join("\n");
+      const found = findFileBackedDbAntiPatterns("test/db/withFileBackedDb.ts", source);
+      expect(found).toEqual([]);
+    });
+
+    test("the exemption is per-rule: freshDatabaseModule.ts still flags an UNfunneled mkdtemp", () => {
+      // It's exempt only for the cache-busted import it owns — a different
+      // anti-pattern in the same file must still be caught.
+      const source = [
+        "return import(`../../src/db/database.ts?fresh=${n}`);",
+        "await importFreshDatabaseModule();",
+        'const dir = await mkdtemp("am-");',
+      ].join("\n");
+      const rulesFound = findFileBackedDbAntiPatterns("test/db/freshDatabaseModule.ts", source).map(
+        v => v.rule
+      );
+      expect(rulesFound).not.toContain("raw-cache-busted-import");
+      expect(rulesFound).toContain("unfunneled-mkdtemp");
+    });
+  });
+
   test("a clean lifecycle suite that uses the harness produces zero violations", () => {
     const source = [
       'import { createFileBackedDbHarness } from "./withFileBackedDb";',
@@ -176,28 +249,37 @@ describe("findFileBackedDbAntiPatterns detector (issue #3081)", () => {
 });
 
 /**
- * Meta-test: the real `test/db/*.test.ts` tree must be free of every deleted
- * anti-pattern. This is the enforcement teeth issue #3081 asked for — it fails
- * the moment a new suite hand-rolls what the harness centralizes.
+ * Meta-test: the real `test/db` tree must be free of every deleted anti-pattern.
+ * This is the enforcement teeth issue #3081 asked for — it fails the moment a new
+ * suite hand-rolls what the harness centralizes.
+ *
+ * It scans EVERY `test/db/*.ts` (the `*.test.ts` suites AND the non-test `.ts`
+ * helpers), not just the suites, so extracting a hand-rolled loop into a sibling
+ * helper — the refactor this harness promotes — is covered too. The sanctioned
+ * primitive homes (freshDatabaseModule.ts, tempDbDir.ts, withFileBackedDb.ts) are
+ * exempted per-rule inside the detector.
  */
-describe("test/db suites are free of file-backed DB anti-patterns (issue #3081)", () => {
+describe("test/db is free of file-backed DB anti-patterns (issue #3081)", () => {
   const dbDir = import.meta.dir;
-  // This detector's OWN test file embeds each anti-pattern as a string fixture to
-  // prove the detector fires; it is not a lifecycle suite, so exclude it from the
-  // real-tree scan (otherwise the fixtures self-flag).
-  const SELF = "fileBackedDbAntiPattern.test.ts";
-  const testFiles = readdirSync(dbDir).filter(
-    name => name.endsWith(".test.ts") && name !== SELF
+  // The guard does not guard itself: this detector and its fixture test embed
+  // every anti-pattern as data (regexes / string fixtures) inherent to their
+  // purpose, so both are excluded from the real-tree scan.
+  const GUARD_OWN_FILES = new Set(["fileBackedDbAntiPattern.ts", "fileBackedDbAntiPattern.test.ts"]);
+  const scanned = readdirSync(dbDir).filter(
+    name => name.endsWith(".ts") && !GUARD_OWN_FILES.has(name)
   );
 
-  test("the guard actually scans the DB test suite (non-empty)", () => {
+  test("the guard actually scans the DB tree (suites + helpers, non-empty)", () => {
     // A guard that scans nothing is a false sense of security.
-    expect(testFiles.length).toBeGreaterThan(10);
-    expect(testFiles).toContain("withFileBackedDb.test.ts");
+    expect(scanned.length).toBeGreaterThan(10);
+    expect(scanned).toContain("withFileBackedDb.test.ts");
+    // Non-test helpers are in scope too — the sibling-helper blind spot is closed.
+    expect(scanned).toContain("tempDbDir.ts");
+    expect(scanned).toContain("freshDatabaseModule.ts");
   });
 
-  test("no test/db suite reintroduces a hand-rolled flake-avoidance anti-pattern", () => {
-    const violations = testFiles.flatMap(name =>
+  test("no test/db file reintroduces a hand-rolled flake-avoidance anti-pattern", () => {
+    const violations = scanned.flatMap(name =>
       findFileBackedDbAntiPatterns(name, readFileSync(join(dbDir, name), "utf8"))
     );
     const rendered = violations

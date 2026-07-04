@@ -41,15 +41,20 @@
  *      bounded cleanup, reopening the same flake surface.
  *
  * Scope of the guard: it is a fast *textual* backstop for the exact three
- * signatures #3046 deleted, not a full parser. It deliberately matches only
- * inline literals: an `import()` whose specifier is assembled from a variable, a
- * removal via `unlink`/`rimraf` rather than `rm`, or a fresh module reached
- * transitively through an un-named helper can slip through. That is an accepted
- * trade — the recurring anti-pattern has always been an inline copy of the
- * deleted code, and a stricter AST guard is not warranted until a variant
- * actually recurs (CLAUDE.md YAGNI). The primitives it points at
- * (`importFreshDatabaseModule`, `removeTempDbDir`, the harness) remain the real
- * enforcement; this just makes the common reintroduction fail fast.
+ * signatures #3046 deleted, not a full parser. The meta-test scans every
+ * `test/db/*.ts` — both the `*.test.ts` suites AND the non-test helpers — so a
+ * hand-rolled loop *extracted into a sibling helper* (the very refactor this
+ * harness promotes) is covered too, not just an inline copy in a suite; the
+ * sanctioned primitive homes are named in {@link RULE_EXEMPTIONS}. It still
+ * matches only inline literals, so a few textual escapes remain by design: an
+ * `import()` whose specifier is assembled from a variable, a removal via
+ * `unlink`/`rmdir`/`rimraf` rather than `rm`, or lock codes gated through an
+ * imported constant rather than an inline literal. That is an accepted trade —
+ * the recurring anti-pattern has always been an inline copy of the deleted code,
+ * and a stricter AST guard is not warranted until a variant actually recurs
+ * (CLAUDE.md YAGNI). The primitives it points at (`importFreshDatabaseModule`,
+ * `removeTempDbDir`, the harness) remain the real enforcement; this just makes
+ * the common reintroduction fail fast.
  */
 
 export type FileBackedDbAntiPatternRule =
@@ -71,10 +76,23 @@ export interface FileBackedDbAntiPatternViolation {
 /**
  * Per-file, per-rule exemptions. Keyed by BASENAME so the allowlist is stable
  * regardless of how the caller spells the path. Kept intentionally tiny — every
- * entry is a file that legitimately embodies the sanctioned primitive itself, not
- * a suite that re-hand-rolls the pattern.
+ * entry is a file that legitimately IS the sanctioned primitive for that rule (so
+ * it necessarily contains the pattern the rule flags), not a suite that
+ * re-hand-rolls it. Scanning the non-test `.ts` helpers too (not just
+ * `*.test.ts`) closes the "extract the hand-rolled loop into a sibling helper"
+ * blind spot — the exact refactor this harness promotes — so these homes must be
+ * named here or they would flag themselves.
  */
 const RULE_EXEMPTIONS: Readonly<Record<string, ReadonlySet<FileBackedDbAntiPatternRule>>> = {
+  // The canonical fresh-module importer — the ONE sanctioned home for the raw
+  // cache-busted `database.ts?…` import (with the collision-proof counter).
+  "freshDatabaseModule.ts": new Set(["raw-cache-busted-import"]),
+  // The ONE bounded temp-dir remover (#2916); it necessarily contains the
+  // attempt-loop + transient-lock-code handling every suite must route THROUGH it
+  // instead of re-implementing.
+  "tempDbDir.ts": new Set(["hand-rolled-temp-dir-retry"]),
+  // The harness itself owns the tracked `mkdtemp` that `makeTempDbDir` wraps.
+  "withFileBackedDb.ts": new Set(["unfunneled-mkdtemp"]),
   // The harness's OWN unit test injects fake `mkdtemp`s and drives the real
   // `openLifecycleTestDb` — it is the reference consumer, not an unfunneled suite.
   "withFileBackedDb.test.ts": new Set(["unfunneled-mkdtemp"]),
@@ -95,8 +113,13 @@ const HAND_ROLLED_RETRY_NAME = /removeTempDir\w*Retry/;
 // from the retry-loop conjunction below.
 const QUOTED_TRANSIENT_LOCK_CODE = /["'](?:EBUSY|EPERM|ENOTEMPTY)["']/;
 
-// A manual retry loop.
-const MANUAL_RETRY_LOOP = /\bfor\s*\(\s*let\s+attempt\b|\bwhile\s*\(/;
+// A manual *retry* loop specifically — a `for (let attempt …)` header, or a
+// `while (…)` whose condition is retry/attempt/backoff-shaped. A generic
+// `while (cond)` poll does NOT count: keying the structural rule on any `while`
+// would leave it one edit away from false-positiving on `tempDbDir.test.ts` (the
+// bounded remover's own test), which already holds the quoted lock codes and
+// could grow a real `rm` + poll case.
+const MANUAL_RETRY_LOOP = /\bfor\s*\(\s*let\s+attempt\b|\bwhile\s*\([^)]*\b(?:attempt|retr|backoff)/i;
 
 // An actual filesystem removal call (not the canonical `removeTempDbDir`).
 const FS_REMOVAL_CALL = /\brm(?:Sync)?\s*\(/;

@@ -1,0 +1,65 @@
+/**
+ * Backend seam for image processing.
+ *
+ * `ImageTransformer` records the caller's resize/crop/encode requests into a
+ * declarative `ImagePipeline`, then hands the source buffer + pipeline to an
+ * `ImageBackend` for execution. This decouples the fluent transform API from
+ * the concrete decoder/encoder (jimp today; sharp + cwebp later — see the
+ * "Sharp + CWebP" milestone), so later issues can swap backends without
+ * touching call sites. Behavior-preserving: the jimp backend reproduces the
+ * exact operations the transformer used to run inline.
+ */
+
+/** Basic image metadata surfaced by every backend. */
+export interface ImageMetadata {
+  width: number;
+  height: number;
+  format: string;
+  size: number;
+}
+
+/**
+ * A single declarative transform step. Backends interpret these rather than
+ * receiving pre-bound closures, so the same pipeline can run on any backend.
+ */
+export type ImageOperation =
+  | { type: "resize"; width: number; height?: number; maintainAspectRatio: boolean }
+  | { type: "crop"; x: number; y: number; width: number; height: number };
+
+/**
+ * The requested output encoding. `null` (on the pipeline) means "re-encode in
+ * the decoded input format", matching the transformer's historical fallback.
+ * `options` carries backend-agnostic encoder flags (e.g. the libwebp-style
+ * numeric flags the jimp wasm-webp encoder expects).
+ */
+export interface ImageEncoding {
+  mime: "image/png" | "image/webp";
+  options?: Record<string, unknown>;
+}
+
+/** Declarative description of a transform: ordered operations + output encoding. */
+export interface ImagePipeline {
+  operations: ImageOperation[];
+  encoding: ImageEncoding | null;
+}
+
+/** Decoded raw pixels (RGBA, row-major) for pixel-level consumers. */
+export interface RawImage {
+  width: number;
+  height: number;
+  /** RGBA bytes, length === width * height * 4. */
+  data: Buffer;
+}
+
+/**
+ * Executes declarative image pipelines and exposes metadata / raw pixels.
+ * Implemented by `JimpBackend` (production) and `FakeImageBackend` (tests).
+ */
+export interface ImageBackend {
+  /** Decode `source`, apply `pipeline.operations`, encode per `pipeline.encoding`. */
+  execute(source: Buffer, pipeline: ImagePipeline): Promise<Buffer>;
+  /** Decode `source` and report dimensions/format/size without re-encoding. */
+  metadata(source: Buffer): Promise<ImageMetadata>;
+  /** Decode `source` to raw RGBA pixels. */
+  rawPixels(source: Buffer): Promise<RawImage>;
+}

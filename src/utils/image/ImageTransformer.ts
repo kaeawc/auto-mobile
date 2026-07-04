@@ -2,57 +2,35 @@ import { logger } from "../logger";
 import { NodeCryptoService } from "../crypto";
 import { ImageCache } from "./ImageCache";
 import { defaultTimer, type Timer } from "../SystemTimer";
-import { loadJimp, type JimpImage } from "./loadJimp";
+import type { ImageBackend, ImageMetadata, ImagePipeline } from "./backend/ImageBackend";
+import { resolveImageBackend } from "./backend/resolveImageBackend";
 
 const DEFAULT_JPEG_QUALITY = 75;
 
-interface ImageOptions {
-  format?: "png" | "webp";
-  quality?: number; // 1-100, for webp
-  lossless?: boolean;
-  nearLossless?: boolean;
-  resize?: {
-    width?: number;
-    height?: number;
-    maintainAspectRatio?: boolean;
-  };
-  crop?: {
-    width: number;
-    height: number;
-    x: number;
-    y: number;
-  };
-}
+// Re-exported from the backend seam so existing importers keep the same path.
+export type { ImageMetadata };
 
-export interface ImageMetadata {
-  width: number;
-  height: number;
-  format: string;
-  size: number;
-}
-
-type OutputFormat = {
-  mime: "image/png" | "image/webp";
-  opts?: Record<string, unknown>;
-};
-
+/**
+ * Fluent builder that records resize/crop/encode requests into a declarative
+ * `ImagePipeline` and delegates execution to an injected `ImageBackend`. The
+ * backend owns all decode/encode; this class only validates inputs, records the
+ * pipeline, and manages the (backend-agnostic) result cache.
+ */
 class JimpImageTransformer {
-  private options: ImageOptions = {};
+  private pipeline: ImagePipeline = { operations: [], encoding: null };
   private cacheKey: string | null = null;
   private useCache: boolean = true;
   private timer: Timer;
-  private operations: Array<(image: JimpImage) => JimpImage> = [];
-  private outputFormat: OutputFormat | null = null;
 
-  constructor(private buffer: Buffer, timer: Timer = defaultTimer) {
+  constructor(private buffer: Buffer, private backend: ImageBackend, timer: Timer = defaultTimer) {
     this.timer = timer;
   }
 
   private generateCacheKey(): string {
-    // Create a unique key based on buffer content hash and options
-    const optionsStr = JSON.stringify(this.options);
+    // Create a unique key based on buffer content hash and the recorded pipeline.
+    const pipelineStr = JSON.stringify(this.pipeline);
     const bufferHash = NodeCryptoService.generateCacheKey(this.buffer);
-    return `${bufferHash}_${optionsStr}`;
+    return `${bufferHash}_${pipelineStr}`;
   }
 
   public disableCache(): JimpImageTransformer {
@@ -69,24 +47,7 @@ class JimpImageTransformer {
       throw new Error("Height must be a positive number");
     }
 
-    this.options.resize = {
-      width,
-      height,
-      maintainAspectRatio
-    };
-
-    this.operations.push(image => {
-      if (height === undefined) {
-        // Width only: scale preserving aspect ratio
-        return image.resize({ w: width });
-      }
-      if (maintainAspectRatio) {
-        // Match sharp's default fit "cover": exact WxH, center-cropped
-        return image.cover({ w: width, h: height });
-      }
-      // fit "fill": stretch to exact WxH
-      return image.resize({ w: width, h: height });
-    });
+    this.pipeline.operations.push({ type: "resize", width, height, maintainAspectRatio });
     return this;
   }
 
@@ -95,14 +56,12 @@ class JimpImageTransformer {
       throw new Error("Crop dimensions must be positive numbers");
     }
 
-    this.options.crop = { width, height, x, y };
-    this.operations.push(image => image.crop({ x, y, w: width, h: height }));
+    this.pipeline.operations.push({ type: "crop", x, y, width, height });
     return this;
   }
 
   public png(): JimpImageTransformer {
-    this.options.format = "png";
-    this.outputFormat = { mime: "image/png" };
+    this.pipeline.encoding = { mime: "image/png" };
     return this;
   }
 
@@ -120,11 +79,6 @@ class JimpImageTransformer {
       throw new Error("WebP quality must be between 1 and 100");
     }
 
-    this.options.format = "webp";
-    this.options.quality = quality;
-    this.options.lossless = options?.lossless;
-    this.options.nearLossless = options?.nearLossless;
-
     // The wasm-webp encoder takes libwebp-style numeric flags. Keys are
     // camelCase (validated by the plugin's zod schema — an unknown key is
     // silently dropped, and `quality` defaults to 100). In lossless mode
@@ -137,13 +91,13 @@ class JimpImageTransformer {
         ? { lossless: 1, nearLossless: quality }
         : { quality };
 
-    this.outputFormat = { mime: "image/webp", opts: webpOptions };
+    this.pipeline.encoding = { mime: "image/webp", options: webpOptions };
     return this;
   }
 
   public async toBuffer(): Promise<Buffer> {
     const startTime = this.timer.now();
-    const formatInfo = this.options.format || "unknown";
+    const formatInfo = this.pipeline.encoding?.mime.replace("image/", "") ?? "unknown";
     logger.debug(`[IMAGE] Starting image processing (format: ${formatInfo})`);
 
     // Check cache first if cache is enabled
@@ -164,17 +118,7 @@ class JimpImageTransformer {
 
     try {
       const processStartTime = this.timer.now();
-      const Jimp = await loadJimp();
-      let image = await Jimp.fromBuffer(this.buffer) as JimpImage;
-      for (const operation of this.operations) {
-        image = operation(image);
-      }
-      // Fall back to the decoded input format when no output format was requested
-      const mime = this.outputFormat?.mime ?? image.mime ?? "image/png";
-      const resultBuffer = await (image.getBuffer as (m: string, o?: Record<string, unknown>) => Promise<Buffer>)(
-        mime,
-        this.outputFormat?.opts
-      );
+      const resultBuffer = await this.backend.execute(this.buffer, this.pipeline);
       const processDuration = this.timer.now() - processStartTime;
 
       // Store result in cache if caching is enabled
@@ -198,16 +142,18 @@ class JimpImageTransformer {
 
 export class Image {
   private timer: Timer;
+  private backend: ImageBackend;
 
-  constructor(private buffer: Buffer, timer: Timer = defaultTimer) {
+  constructor(private buffer: Buffer, timer: Timer = defaultTimer, backend: ImageBackend = resolveImageBackend()) {
     this.timer = timer;
+    this.backend = backend;
   }
 
-  public static fromBuffer(buffer: Buffer, timer: Timer = defaultTimer): Image {
+  public static fromBuffer(buffer: Buffer, timer: Timer = defaultTimer, backend: ImageBackend = resolveImageBackend()): Image {
     if (!Buffer.isBuffer(buffer)) {
       throw new Error("Input must be a Buffer");
     }
-    return new Image(buffer, timer);
+    return new Image(buffer, timer, backend);
   }
 
   public getOriginalBuffer(): Buffer {
@@ -215,26 +161,26 @@ export class Image {
   }
 
   public resize(width: number, height?: number, maintainAspectRatio = true): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.timer).resize(width, height, maintainAspectRatio);
+    return new JimpImageTransformer(this.buffer, this.backend, this.timer).resize(width, height, maintainAspectRatio);
   }
 
   public crop(width: number, height: number, x = 0, y = 0): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.timer).crop(width, height, x, y);
+    return new JimpImageTransformer(this.buffer, this.backend, this.timer).crop(width, height, x, y);
   }
 
   public png(): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.timer).png();
+    return new JimpImageTransformer(this.buffer, this.backend, this.timer).png();
   }
 
   /**
    * Convert the image to WebP format
    */
   public webp(options?: { quality?: number; lossless?: boolean; nearLossless?: boolean }): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.timer).webp(options);
+    return new JimpImageTransformer(this.buffer, this.backend, this.timer).webp(options);
   }
 
   public transform(): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.timer);
+    return new JimpImageTransformer(this.buffer, this.backend, this.timer);
   }
 
   /**
@@ -242,17 +188,12 @@ export class Image {
    */
   public async getMetadata(): Promise<ImageMetadata> {
     try {
-      const Jimp = await loadJimp();
-      const image = await Jimp.fromBuffer(this.buffer);
-
-      return {
-        width: image.bitmap.width,
-        height: image.bitmap.height,
-        format: image.mime ? image.mime.replace("image/", "") : "",
-        size: this.buffer.length
-      };
+      return await this.backend.metadata(this.buffer);
     } catch (e: unknown) {
       const errorMessage = e instanceof Error ? e.message : String(e);
+      // Log before rethrowing so the underlying decode error leaves a trace,
+      // mirroring toBuffer's catch (the summarized message loses the original).
+      logger.warn(`[IMAGE] Metadata read failed: ${errorMessage}`, e);
       throw new Error(`Failed to get image metadata: ${errorMessage}`);
     }
   }

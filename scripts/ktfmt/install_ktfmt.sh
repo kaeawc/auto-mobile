@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
-KTFMT_VERSION="0.64" # Change this to the desired version
+# Pinned ktfmt version -- single source of truth shared with validate_ktfmt.sh.
+# Bump the version in scripts/ktfmt/ktfmt_version.sh (one line) to change it.
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh
+source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,6 +34,14 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Parse the numeric version from `ktfmt --version` (e.g. "ktfmt version 0.64").
+# Filter to ktfmt's own version line first so a JVM warning on stderr (the
+# manual install runs `java -jar`) can't have its version grabbed instead.
+# Empty string if ktfmt is absent or emits nothing parseable.
+installed_ktfmt_version() {
+    ktfmt --version 2>&1 | grep -i 'ktfmt version' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1
+}
+
 # Install ktfmt on macOS
 install_macos() {
     echo -e "${YELLOW}Installing ktfmt on macOS...${NC}"
@@ -38,6 +49,22 @@ install_macos() {
     if command_exists brew; then
         echo -e "${GREEN}Using Homebrew to install ktfmt${NC}"
         brew install ktfmt
+
+        # Homebrew has no ktfmt@<version> formula, so `brew install ktfmt`
+        # installs whatever the current formula ships -- which may drift from the
+        # pin (issue #2966). Verify it; if it differs, unlink brew's copy so it
+        # can't shadow ~/.local/bin on PATH, then install the pinned fat JAR so
+        # the pin is actually honored on macOS.
+        local installed
+        installed="$(installed_ktfmt_version)"
+        if [[ "$installed" == "$KTFMT_VERSION" ]]; then
+            return 0
+        fi
+
+        echo -e "${YELLOW}brew installed ktfmt '${installed:-unknown}', but this repo pins '${KTFMT_VERSION}'.${NC}"
+        echo -e "${YELLOW}Falling back to the pinned JAR so the pin is honored...${NC}"
+        brew unlink ktfmt >/dev/null 2>&1 || true
+        install_manual
         return $?
     else
         echo -e "${YELLOW}Homebrew not found. Install Homebrew first or use manual installation.${NC}"

@@ -4,6 +4,11 @@ INSTALL_KTFMT_WHEN_MISSING=${INSTALL_KTFMT_WHEN_MISSING:-false}
 ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-false}
 ONLY_CHANGED_SINCE_SHA=${ONLY_CHANGED_SINCE_SHA:-""}
 
+# Pinned ktfmt version -- single source of truth shared with install_ktfmt.sh so
+# the installer and this validator's fingerprint gate can never drift apart.
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh
+source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -56,14 +61,23 @@ for cmd in find xargs git; do
     fi
 done
 
-# Ensure the ktfmt on PATH runs and accepts --google-style before doing any
-# per-file work. If an older/broken ktfmt is already on PATH,
-# INSTALL_KTFMT_WHEN_MISSING won't replace it; probe once here so a bad
-# formatter fails fast with a clear message instead of per-file (where a
-# swallowed exit status could leave files unformatted and silently "pass").
-if ! printf 'fun probe() {}\n' | ktfmt --google-style - >/dev/null 2>&1; then
-    echo -e "${RED}The ktfmt on PATH does not run with --google-style (this repo pins 0.64).${NC}"
-    echo -e "${RED}Update ktfmt ('brew upgrade ktfmt' or re-run scripts/ktfmt/install_ktfmt.sh) and retry.${NC}"
+# Fingerprint gate (issue #2966): the scoped PR check only inspects a PR's
+# changed files, so a ktfmt whose version differs from the pin would reformat
+# *untouched* files this check never sees -- the PR passes, then main reddens
+# post-merge when merge.yml reformats the whole tree. Assert the ktfmt on PATH
+# is EXACTLY the pinned version before doing any per-file work, so version /
+# style-config drift fails loudly here instead of silently scoped-passing.
+# INSTALL_KTFMT_WHEN_MISSING only installs when ktfmt is *absent*, so an
+# already-installed newer ktfmt would otherwise sail through. A matching version
+# also implies --google-style support, so this subsumes the old flag probe.
+# Filter to ktfmt's own "ktfmt version X.Y" line first, then extract the number.
+# The CI ktfmt is a `java -jar` wrapper, and 2>&1 merges stderr, so a JVM warning
+# carrying its own version (e.g. "11.0.2") could otherwise be grabbed by head -1.
+installed_ktfmt_version="$(ktfmt --version 2>&1 | grep -i 'ktfmt version' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+if [[ "$installed_ktfmt_version" != "$KTFMT_VERSION" ]]; then
+    echo -e "${RED}ktfmt version mismatch: found '${installed_ktfmt_version:-unknown}', this repo pins '${KTFMT_VERSION}'.${NC}"
+    echo -e "${RED}A different formatter version reformats untouched files the scoped PR check never inspects (issue #2966), so this fails loudly instead of a silent scoped pass.${NC}"
+    echo -e "${RED}Install the pinned version: re-run scripts/ktfmt/install_ktfmt.sh, or install ktfmt ${KTFMT_VERSION} manually.${NC}"
     exit 1
 fi
 

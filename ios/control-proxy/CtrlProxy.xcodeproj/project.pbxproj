@@ -41,6 +41,7 @@
 		6733CA6A1FABC8D7C34F9327 /* ObjCExceptionBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */; };
 		6798190F766D01F963F6DFD0 /* SdkDatabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EDA90BC9E26458BCE47381F /* SdkDatabaseClient.swift */; };
 		714A3E41ACE47ACF314E0FC2 /* ClipboardResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30D131E590A0CF8F9674B0E /* ClipboardResolutionTests.swift */; };
+		74B1E8F78E9FF807417ABC2D /* PinchGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EE070E3D058AF5F67D2E1F3 /* PinchGeometryTests.swift */; };
 		74CA22BFA1779993CDCF59AE /* CtrlProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE277596991C059142C485B /* CtrlProxy.swift */; };
 		7F0A1FBC49EE6CFD37F53294 /* CtrlProxyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */; };
 		818C27D4C9349EE5D7B46AC4 /* ObjCExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = F9D3D13C3FE12BA2CD012082 /* ObjCExceptionCatcher.m */; };
@@ -168,6 +169,7 @@
 		3BF23F10C24C9F40E5CEC303 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 		3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncerTests.swift; sourceTree = "<group>"; };
 		42C53A4D56EE97B5BD11EC63 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		4EE070E3D058AF5F67D2E1F3 /* PinchGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinchGeometryTests.swift; sourceTree = "<group>"; };
 		5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyCacheTests.swift; sourceTree = "<group>"; };
 		637A2A05C90AA6E64D224651 /* CtrlProxyTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CtrlProxyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjCExceptionBridgeTests.swift; sourceTree = "<group>"; };
@@ -257,6 +259,7 @@
 				649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */,
 				DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */,
 				6FC3D01763F51CE349F7E923 /* PinchFallbackTests.swift */,
+				4EE070E3D058AF5F67D2E1F3 /* PinchGeometryTests.swift */,
 				5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */,
 				EA84FDE08DAFEAD66F399887 /* TypedRequestDecodeTests.swift */,
 			);
@@ -584,6 +587,7 @@
 				6733CA6A1FABC8D7C34F9327 /* ObjCExceptionBridgeTests.swift in Sources */,
 				0E8A9A62BEF9C4E672D09764 /* PerfProviderTests.swift in Sources */,
 				F428A1892AAF5D4F83AD4C1B /* PinchFallbackTests.swift in Sources */,
+				74B1E8F78E9FF807417ABC2D /* PinchGeometryTests.swift in Sources */,
 				2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */,
 				0F29D59ABFB52692F62B434F /* TypedRequestDecodeTests.swift in Sources */,
 			);

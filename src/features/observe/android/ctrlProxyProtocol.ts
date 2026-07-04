@@ -16,9 +16,9 @@
  * a possible follow-up (it would need to unify the delegates' differing not-connected semantics).
  *
  * SCOPE — Android control-proxy only.
- * - The gesture/text commands (`request_tap_coordinates`, `request_swipe`, `request_drag`,
- *   `request_pinch`, `request_set_text`, `request_ime_action`, `request_select_all`) are emitted
- *   through the cross-platform shared `sendCommand()` / `createMessage()` path in
+ * - The gesture/text commands (`request_tap_coordinates`, `request_swipe`, `request_two_finger_swipe`,
+ *   `request_drag`, `request_pinch`, `request_set_text`, `request_ime_action`, `request_select_all`)
+ *   are emitted through the cross-platform shared `sendCommand()` / `createMessage()` path in
  *   `src/features/observe/DeviceServiceUtils.ts`. They are typed here for contract completeness
  *   (drift cross-check) but intentionally NOT re-routed, to avoid coupling the shared iOS client
  *   to the Android contract. Unifying that path is a possible follow-up.
@@ -635,27 +635,6 @@ export const ctrlProxyRequests = {
 
   requestScreenshot(args: { requestId: string }): RequestScreenshotMessage {
     return { type: "request_screenshot", requestId: args.requestId };
-  },
-
-  requestTwoFingerSwipe(args: {
-    requestId: string;
-    x1: number;
-    y1: number;
-    x2: number;
-    y2: number;
-    duration: number;
-    offset: number;
-  }): RequestTwoFingerSwipeMessage {
-    return {
-      type: "request_two_finger_swipe",
-      requestId: args.requestId,
-      x1: args.x1,
-      y1: args.y1,
-      x2: args.x2,
-      y2: args.y2,
-      duration: args.duration,
-      offset: args.offset,
-    };
   },
 
   requestAction(args: { requestId: string; action: string; resourceId?: string }): RequestActionMessage {

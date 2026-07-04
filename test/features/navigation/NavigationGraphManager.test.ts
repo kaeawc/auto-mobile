@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, beforeAll, it, spyOn } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, beforeAll, afterAll, it, spyOn } from "bun:test";
 import type { Kysely } from "kysely";
 import {
   NavigationGraphManager,
@@ -12,6 +12,24 @@ import { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryReco
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
 import type { Database } from "../../../src/db/types";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { useTempFileDatabase, type TempFileDatabaseHandle } from "../../helpers/tempFileDatabase";
+
+// The older suites below drive the REAL getDatabase() singleton via getInstance()
+// and getInstanceForSession() (session instances have no in-memory injection seam),
+// so back it with a temp-dir file DB for the whole file. The tests await their
+// writes, so the #3063 real-DB race does not apply; this just keeps them off the
+// user's ~/.auto-mobile DB and satisfies the unit-test guard (issue #3067). The
+// newer createForTesting-based suites inject their own in-memory DBs and never
+// touch getDatabase(), so this is inert for them.
+let tempFileDb: TempFileDatabaseHandle;
+
+beforeAll(async () => {
+  tempFileDb = await useTempFileDatabase();
+});
+
+afterAll(async () => {
+  await tempFileDb.cleanup();
+});
 
 describe("NavigationGraphManager", () => {
   let manager: NavigationGraphManager;

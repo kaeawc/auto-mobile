@@ -105,6 +105,66 @@ export function resolveDatabasePathFromEnvironment(
 }
 
 /**
+ * Env var, set only by the bun test preload (`test/setup/unitTestDbGuard.ts`),
+ * that arms {@link assertUnitTestDbAccessAllowed}. It is never set in production,
+ * so the guard is inert outside `bun test`.
+ */
+export const UNIT_TEST_DB_GUARD_ENV = "AUTOMOBILE_UNIT_TEST_DB_GUARD";
+
+// The four env vars that redirect the database off the default `~/.auto-mobile`
+// location. A test that sets any of these has explicitly opted into a real
+// file-backed (or `:memory:`) DB it controls, so the guard leaves it alone.
+const DB_PATH_OVERRIDE_ENV_KEYS = [
+  "AUTOMOBILE_DB_PATH",
+  "AUTO_MOBILE_DB_PATH",
+  "AUTOMOBILE_DB_DIR",
+  "AUTO_MOBILE_DB_DIR",
+] as const;
+
+function hasExplicitDbPathOverride(env: NodeJS.ProcessEnv): boolean {
+  return DB_PATH_OVERRIDE_ENV_KEYS.some(key => {
+    const value = env[key];
+    return value !== undefined && value !== "";
+  });
+}
+
+/**
+ * Fail loudly when a unit test resolves the DEFAULT, file-backed `getDatabase()`
+ * — i.e. the user's real `~/.auto-mobile/auto-mobile.db` — instead of injecting
+ * an in-memory DB (`createTestDatabase`) or explicitly redirecting to a temp/
+ * `:memory:` path.
+ *
+ * `getDatabase()`'s first-use path runs migrations + file IO on real wall-clock
+ * time, so any test that asserts on the *result* of an async DB write races that
+ * write and flakes (issue #3063). It also silently mutates the developer's real
+ * DB. This guard turns both failure modes into a loud, actionable throw at the
+ * exact call site that reached for the real DB, forcing the test to inject an
+ * in-memory DB instead — the durable fix for the whole class (issue #3067).
+ *
+ * The guard is armed only under the bun test preload ({@link UNIT_TEST_DB_GUARD_ENV})
+ * and deliberately fires ONLY on the default path: a test that sets
+ * AUTOMOBILE_DB_PATH / AUTOMOBILE_DB_DIR (the DB-lifecycle tests that must
+ * exercise real file behavior) or `:memory:` has explicitly opted in and passes.
+ */
+function assertUnitTestDbAccessAllowed(env: NodeJS.ProcessEnv, resolvedPath: string): void {
+  if (env[UNIT_TEST_DB_GUARD_ENV] !== "1") {
+    return;
+  }
+  if (isInMemoryDatabasePath(resolvedPath) || hasExplicitDbPathOverride(env)) {
+    return;
+  }
+  throw new ActionableError(
+    `Unit test resolved the real file-backed database at ${resolvedPath}. ` +
+      "Unit tests must not touch the user's real ~/.auto-mobile DB: its first-use " +
+      "migrations + file IO run on real wall-clock time and race async-write " +
+      "assertions (issue #3063). Inject an in-memory DB via createTestDatabase() " +
+      "(and NavigationGraphManager.setInstanceForTesting / TelemetryRecorder spies " +
+      "for singletons), or, if the test must exercise real file behavior, set " +
+      "AUTOMOBILE_DB_DIR to a temp dir or AUTOMOBILE_DB_PATH=':memory:' explicitly."
+  );
+}
+
+/**
  * The migration/path lifecycle state that outlives a single DB connection.
  *
  * These were five bare module globals (`resolvedDbPath` plus the
@@ -193,7 +253,9 @@ const lifecycle = new MigrationLifecycleState();
  */
 function resolveDbPath(): string {
   if (lifecycle.resolvedDbPath === null) {
-    lifecycle.resolvedDbPath = resolveDatabasePathFromEnvironment();
+    const resolvedPath = resolveDatabasePathFromEnvironment();
+    assertUnitTestDbAccessAllowed(process.env, resolvedPath);
+    lifecycle.resolvedDbPath = resolvedPath;
   }
   return lifecycle.resolvedDbPath;
 }

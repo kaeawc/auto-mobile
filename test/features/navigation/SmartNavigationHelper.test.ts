@@ -1,23 +1,27 @@
-import { expect, describe, test, beforeEach, afterEach, beforeAll } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { SmartNavigationHelper } from "../../../src/features/navigation/SmartNavigationHelper";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
-import { runMigrations } from "../../helpers/database";
+import {
+  installInMemoryNavManager,
+  type InMemoryNavManagerHarness,
+} from "../../helpers/navigationTestHarness";
 
 describe("SmartNavigationHelper", function() {
   let navGraph: NavigationGraphManager;
-
-  beforeAll(async function() {
-    await runMigrations();
-  });
+  let navHarness: InMemoryNavManagerHarness;
 
   beforeEach(async function() {
-    navGraph = NavigationGraphManager.getInstance();
+    // Back the singleton with an in-memory, already-migrated DB (and silence the
+    // fire-and-forget telemetry write) so navigation writes are deterministic and
+    // never touch the real ~/.auto-mobile DB (issues #3063/#3067).
+    navHarness = await installInMemoryNavManager();
+    navGraph = navHarness.manager;
     await navGraph.setCurrentApp("com.example.app");
     await navGraph.clearCurrentGraph();
   });
 
   afterEach(async function() {
-    NavigationGraphManager.resetInstance();
+    await navHarness.dispose();
     SmartNavigationHelper.resetOptimizer();
   });
 

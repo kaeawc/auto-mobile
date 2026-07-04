@@ -15,11 +15,7 @@ import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsReposi
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { DeviceConnectionLostNotifier } from "../../../src/features/observe/DeviceConnectionLostNotifier";
 import { PortManager } from "../../../src/utils/PortManager";
-import { NavigationRepository } from "../../../src/db/navigationRepository";
-import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
-import { createTestDatabase } from "../../db/testDbHelper";
-import type { Kysely } from "kysely";
-import type { Database } from "../../../src/db/types";
+import { installInMemoryNavManager } from "../../helpers/navigationTestHarness";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -137,31 +133,6 @@ describe("AndroidCtrlProxyClient", function() {
     for (let i = 0; i < iterations; i += 1) {
       await new Promise(resolve => setImmediate(resolve));
     }
-  };
-
-  // Back the NavigationGraphManager singleton with an in-memory, already-migrated
-  // database. AndroidCtrlProxyClient records navigation into the singleton via
-  // getInstance(); the default getDatabase() singleton runs migrations + file IO on
-  // real wall-clock time, so its async writes never settle within these tests'
-  // microtask-only drains and race the assertions (issue #3063). An in-memory DB has
-  // no migration gate and no file IO, so recordNavigationEvent's *graph* writes — the
-  // ones that assign currentScreen, which the assertions read — commit within a
-  // deterministic number of setImmediate/microtask turns. (recordNavigationEvent's
-  // post-commit fire-and-forget TelemetryRecorder write still targets the real DB, but
-  // it runs after currentScreen is assigned and is never awaited, so it cannot affect
-  // determinism here.) Both repositories share the one connection to satisfy
-  // NavigationGraphManager's shared-connection precondition. Callers must destroy the
-  // returned db and resetInstance() in cleanup.
-  const installInMemoryNavManager = async (): Promise<{
-    navManager: NavigationGraphManager;
-    navDb: Kysely<Database>;
-  }> => {
-    const navDb = await createTestDatabase();
-    const navRepo = new NavigationRepository(navDb);
-    const coverageRepo = new TestCoverageRepository(undefined, navDb);
-    const navManager = NavigationGraphManager.createForTesting(navRepo, coverageRepo);
-    NavigationGraphManager.setInstanceForTesting(navManager);
-    return { navManager, navDb };
   };
 
   test("setupPortForwarding reallocates when the current local port becomes busy before adb forward", async function() {
@@ -503,7 +474,8 @@ describe("AndroidCtrlProxyClient", function() {
 
     test("should seed navigation graph from hierarchy updates", async function() {
       NavigationGraphManager.resetInstance();
-      const { navManager, navDb } = await installInMemoryNavManager();
+      const navHarness = await installInMemoryNavManager();
+      const navManager = navHarness.manager;
 
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
@@ -555,14 +527,14 @@ describe("AndroidCtrlProxyClient", function() {
         expect(navManager.getCurrentScreen()).toBeNull();
       } finally {
         await testClient.close();
-        NavigationGraphManager.resetInstance();
-        await navDb.destroy();
+        await navHarness.dispose();
       }
     });
 
     test("should preserve SDK screen names when hierarchy updates follow navigation events", async function() {
       NavigationGraphManager.resetInstance();
-      const { navManager, navDb } = await installInMemoryNavManager();
+      const navHarness = await installInMemoryNavManager();
+      const navManager = navHarness.manager;
 
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
@@ -619,8 +591,7 @@ describe("AndroidCtrlProxyClient", function() {
         expect(navManager.getCurrentScreen()).toBe("SdkHome");
       } finally {
         await testClient.close();
-        NavigationGraphManager.resetInstance();
-        await navDb.destroy();
+        await navHarness.dispose();
       }
     });
   });
@@ -1246,13 +1217,13 @@ describe("AndroidCtrlProxyClient", function() {
       NavigationGraphManager.resetInstance();
     });
 
-    test("should use session-scoped NavigationGraphManager after binding", async function() {
-      // Set different state on the global vs session-scoped instances
+    test("should use session-scoped NavigationGraphManager after binding", function() {
+      // This test asserts only on instance ROUTING/identity, not on per-instance
+      // navigation state, so it deliberately does not call setCurrentApp: that
+      // would resolve the real getDatabase() (session instances have no in-memory
+      // injection seam) and trip the unit-test DB guard (issue #3067).
       const globalNav = NavigationGraphManager.getInstance();
-      await globalNav.setCurrentApp("com.global.app");
-
       const sessionNav = NavigationGraphManager.getInstanceForSession("test-session-123");
-      await sessionNav.setCurrentApp("com.session.app");
 
       // Before binding: client uses global instance
       // After binding: client should use session instance

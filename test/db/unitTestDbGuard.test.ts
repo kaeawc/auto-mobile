@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import path from "path";
 import os from "os";
 import { UNIT_TEST_DB_GUARD_ENV } from "../../src/db/database";
+import { IN_MEMORY_DB_OPT_IN_ENV } from "../../src/db/migrationLock";
 import { ActionableError } from "../../src/models/ActionableError";
 
 /**
@@ -17,6 +18,7 @@ import { ActionableError } from "../../src/models/ActionableError";
 describe("unit-test real-DB guard (issue #3067)", () => {
   const trackedKeys = [
     UNIT_TEST_DB_GUARD_ENV,
+    IN_MEMORY_DB_OPT_IN_ENV,
     "AUTOMOBILE_DB_PATH",
     "AUTO_MOBILE_DB_PATH",
     "AUTOMOBILE_DB_DIR",
@@ -39,6 +41,7 @@ describe("unit-test real-DB guard (issue #3067)", () => {
     setEnv("AUTO_MOBILE_DB_PATH", undefined);
     setEnv("AUTOMOBILE_DB_DIR", undefined);
     setEnv("AUTO_MOBILE_DB_DIR", undefined);
+    setEnv(IN_MEMORY_DB_OPT_IN_ENV, undefined);
   }
 
   afterEach(() => {
@@ -76,6 +79,9 @@ describe("unit-test real-DB guard (issue #3067)", () => {
     setEnv(UNIT_TEST_DB_GUARD_ENV, "1");
     clearOverrides();
     setEnv("AUTOMOBILE_DB_PATH", ":memory:");
+    // `:memory:` via the real singleton also needs the #3065 production opt-in,
+    // which the guard's own `:memory:` opt-out branch relies on being present.
+    setEnv(IN_MEMORY_DB_OPT_IN_ENV, "1");
     const db = await importFreshDatabaseModule();
 
     expect(db.getDatabasePath()).toBe(":memory:");
@@ -89,6 +95,25 @@ describe("unit-test real-DB guard (issue #3067)", () => {
     const db = await importFreshDatabaseModule();
 
     expect(db.getDatabasePath()).toBe(path.join(tempDir, "auto-mobile.db"));
+  });
+
+  test("allows the legacy AUTO_MOBILE_DB_DIR alias override without throwing", async () => {
+    setEnv(UNIT_TEST_DB_GUARD_ENV, "1");
+    clearOverrides();
+    const tempDir = path.join(os.tmpdir(), "auto-mobile-guard-test-legacy");
+    setEnv("AUTO_MOBILE_DB_DIR", tempDir);
+    const db = await importFreshDatabaseModule();
+
+    expect(db.getDatabasePath()).toBe(path.join(tempDir, "auto-mobile.db"));
+  });
+
+  test("an empty-string override is NOT an override — still throws on the default path", async () => {
+    setEnv(UNIT_TEST_DB_GUARD_ENV, "1");
+    clearOverrides();
+    setEnv("AUTOMOBILE_DB_DIR", "");
+    const db = await importFreshDatabaseModule();
+
+    expect(() => db.getDatabasePath()).toThrow(ActionableError);
   });
 
   test("allows an explicit AUTOMOBILE_DB_PATH override without throwing", async () => {

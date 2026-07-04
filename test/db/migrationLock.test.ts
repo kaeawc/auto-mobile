@@ -140,6 +140,15 @@ describe("FileMigrationLock", () => {
     expect(timer.getPendingSleepCount()).toBe(1);
     expect(lockPid(lockPath)).toBe("4242");
 
+    // It must STAY parked across further poll cycles while the same-token holder is
+    // still live — never reclaim after N polls.
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      timer.advanceTime(100);
+      await flush();
+      expect(acquired).toBe(false);
+      expect(lockPid(lockPath)).toBe("4242");
+    }
+
     // Gen-0 releases; gen-1 then acquires cleanly on the next poll.
     rmSync(lockPath);
     timer.advanceTime(100);

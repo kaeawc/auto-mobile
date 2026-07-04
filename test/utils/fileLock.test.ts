@@ -135,6 +135,23 @@ describe("fileLock primitive", () => {
       ).toBe(true);
     });
 
+    test("a same-PID lock whose owner is DEAD is reclaimed even when the token matches", () => {
+      // A matching token normally means a live in-flight sibling to wait for, but a
+      // dead owner has no live run — the liveness check wins, so it is reclaimed.
+      // (Unreachable in production, where our own live PID is always alive and a
+      // dead incarnation had a different token; pins the predicate branch anyway.)
+      writeFileSync(lockPath, "100\ntok-A");
+      expect(
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          isProcessRunning: () => false,
+          reclaimOwnPid: true,
+          ownerToken: "tok-A",
+        })
+      ).toBe(true);
+      expect(readFileSync(lockPath, "utf-8").split("\n")[0]).toBe("100");
+    });
+
     test("without reclaimOwnPid, our token on a live same-PID lock still reads as held (daemon default)", () => {
       writeFileSync(lockPath, "100\ntok-A");
       expect(

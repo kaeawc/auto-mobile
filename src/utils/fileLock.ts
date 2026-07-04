@@ -53,6 +53,12 @@ export interface ExclusiveLockOptions {
    * behaves exactly as it did before this token existed (any same-PID lock is a
    * reclaimable leak). The PID stays on the first line so daemon liveness reads and
    * {@link releaseExclusiveLock}'s `parseInt` are unaffected.
+   *
+   * Must be a NON-EMPTY, single-line, whitespace-free token (a UUID satisfies
+   * this). The lock body is `trim()`-ed on read to tolerate a trailing newline, so
+   * a token with surrounding whitespace — or an empty string — would be mangled or
+   * dropped and read back as "no token". The only caller passes a `randomUUID()`
+   * from `IdGenerator`; a future caller must uphold the same shape.
    */
   ownerToken?: string;
 }

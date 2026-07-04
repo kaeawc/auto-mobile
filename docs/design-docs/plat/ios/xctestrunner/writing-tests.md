@@ -306,9 +306,9 @@ Opens a URL or deep link.
   `http(s)://` URLs launch Safari (which resolves universal links and hands off
   to the owning app); custom-scheme deep links (`yourapp://…`) launch the target
   app previously selected by `launchApp`, falling back to Safari when no target
-  is known. `mailto:`/`tel:`/`sms:` are opened best-effort via the same fallback.
-  On an older device / missing `devicectl`, `openLink` returns an explicit error
-  rather than silently failing.
+  is known. System schemes (`mailto:`/`tel:`/`sms:`/…) always go through
+  Safari/the system resolver, never the target app. On an older device / missing
+  `devicectl`, `openLink` returns an explicit error rather than silently failing.
 
 ```yaml
 - tool: openLink

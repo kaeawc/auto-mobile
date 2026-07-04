@@ -39,6 +39,7 @@ export const INTERNAL_PARAMS = new Set([
   "devices",
   "keepScreenAwake",
   "__mcpSessionId",
+  "__internalNoDiff",
 ]);
 
 export function stripInternalParams(args: Record<string, unknown>): Record<string, unknown> {

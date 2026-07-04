@@ -452,6 +452,13 @@ export class DefaultPlanExecutor implements PlanExecutor {
           // Parse and validate the parameters
           const parsedParams = tool.schema.parse(enhancedParams);
 
+          // Mark this as an internal tool-to-tool call (#3053) so finalize emits
+          // the full observation on the step envelope — never a diff or a stripped
+          // payload — regardless of `--actions-diff-observe`/`--actions-no-observe`.
+          // Set AFTER schema.parse (which strips unknown keys) so it reaches the
+          // wrapped handler; mirrors the `__mcpSessionId` internal-param convention.
+          (parsedParams as Record<string, unknown>).__internalNoDiff = true;
+
           if (deviceId) {
             ScreenshotJobTracker.cancelJob(deviceId);
           }

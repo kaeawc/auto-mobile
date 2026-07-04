@@ -96,14 +96,33 @@ describe("diffObserveResult", () => {
     expect(diff.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
   });
 
-  test("a node whose bounds change reads as remove+add, not changed (bounds is a key field)", () => {
+  test("with content identity off, a bounds change reads as remove+add (positional-only)", () => {
+    // Legacy positional behavior: bounds is part of the positional key, so a
+    // bounds shift is a remove+add. `contentIdentity: false` restores this.
+    const baseline = obs({ "resource-id": "m", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "X" });
+    const next = obs({ "resource-id": "m", "bounds": { left: 5, top: 5, right: 15, bottom: 15 }, "text": "X" });
+
+    const diff = diffObserveResult(baseline, next, { contentIdentity: false });
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+  });
+
+  test("with content identity on (default), a uniquely-identified node's bounds change reads as `changed`", () => {
+    // Part 1 (#3053): a node with a unique stable identity (resource-id/text)
+    // that only shifts position collapses to a `changed` bounds delta instead of
+    // the remove+add churn a scroll would otherwise produce.
     const baseline = obs({ "resource-id": "m", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "X" });
     const next = obs({ "resource-id": "m", "bounds": { left: 5, top: 5, right: 15, bottom: 15 }, "text": "X" });
 
     const diff = diffObserveResult(baseline, next);
-    expect(diff.changed).toEqual([]);
-    expect(diff.added).toHaveLength(1);
-    expect(diff.removed).toHaveLength(1);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.bounds).toEqual({
+      from: { left: 0, top: 0, right: 10, bottom: 10 },
+      to: { left: 5, top: 5, right: 15, bottom: 15 },
+    });
   });
 
   test("changed top-level scalar fields are captured in `fields`", () => {
@@ -457,6 +476,186 @@ describe("diffObserveResult", () => {
     const diff = diffObserveResult(baseline, next);
     const removedRids = diff.removed.map(n => n.attributes["resource-id"]).sort();
     expect(removedRids).toEqual(["c1", "c2", "parent"]);
+  });
+
+  // --- Content-hash node identity (issue #3053 part 1) --------------------
+  //
+  // The positional path key is sensitive to reindexing: a scroll or a mid-list
+  // insert shifts every following node's bounds/sibling-index, so whole rows
+  // surface as remove+add. Content identity re-pairs a leftover added with a
+  // leftover removed node when they share a STABLE content key (resource-id /
+  // view-id / content-desc / text — no bounds, no sibling index) that is UNIQUE
+  // among the leftovers on both sides. Uniqueness-on-both-sides means exactly one
+  // candidate each side, so distinct content never false-merges. It is additive:
+  // it only re-pairs nodes positional matching already left unpaired.
+
+  /** A vertical list of `count` rows each with a distinct resource-id, offset by `dy`. */
+  function list(count: number, dy: number, extra: (i: number) => Record<string, unknown> = () => ({})): Record<string, unknown> {
+    const rows = Array.from({ length: count }, (_, i) => ({
+      "resource-id": `row-${i}`,
+      "text": `Item ${i}`,
+      "bounds": { left: 0, top: i * 10 + dy, right: 100, bottom: i * 10 + dy + 10 },
+      ...extra(i),
+    }));
+    return { "resource-id": "list", "bounds": { left: 0, top: 0, right: 100, bottom: 1000 }, "node": rows };
+  }
+
+  test("EC1.1: a pure scroll of uniquely-identified rows reads as `changed` bounds, not remove+add", () => {
+    const baseline = obs(list(5, 0));
+    const next = obs(list(5, -30)); // every row shifted up by 30px
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    // Each shifted row is a bounds-only change.
+    expect(diff.changed).toHaveLength(5);
+    for (const c of diff.changed) {
+      expect(Object.keys(c.changes)).toEqual(["bounds"]);
+    }
+  });
+
+  test("EC1.1: the content-identity diff is materially smaller than the positional-only diff on a scroll", () => {
+    const baseline = obs(list(20, 0));
+    const next = obs(list(20, -40));
+
+    const withIdentity = diffObserveResult(baseline, next);
+    const positional = diffObserveResult(baseline, next, { contentIdentity: false });
+
+    const churn = (d: typeof positional) => d.added.length + d.removed.length + d.changed.length;
+    // Positional churns 40 (20 removed + 20 added); identity collapses to 20 changed.
+    expect(churn(positional)).toBe(40);
+    expect(churn(withIdentity)).toBe(20);
+    expect(measureValue(withIdentity).bytes).toBeLessThan(measureValue(positional).bytes);
+  });
+
+  test("EC1.2: a mid-list insert reports one `added` row plus `changed` bounds for shifted rows", () => {
+    // Baseline rows 0..3; insert a brand-new row that pushes rows 1..3 down.
+    const baseline = obs(list(4, 0));
+    const shifted = list(4, 0);
+    (shifted.node as Record<string, unknown>[]).splice(1, 0, {
+      "resource-id": "row-new",
+      "text": "Inserted",
+      "bounds": { left: 0, top: 5, right: 100, bottom: 15 },
+    });
+    // Re-flow the following rows' bounds (as a real insert would).
+    (shifted.node as Record<string, unknown>[]).forEach((n, i) => {
+      (n as any).bounds = { left: 0, top: i * 10, right: 100, bottom: i * 10 + 10 };
+    });
+    const next = obs(shifted);
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.added[0].attributes["resource-id"]).toBe("row-new");
+    // rows 1,2,3 shifted down → bounds changes (not remove+add).
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed.length).toBeGreaterThanOrEqual(3);
+    expect(diff.changed.every(c => Object.keys(c.changes).length === 1 && "bounds" in c.changes)).toBe(true);
+  });
+
+  test("EC1.3: duplicate/ambiguous content does NOT false-merge — stays remove+add", () => {
+    // Two rows share an identical content key (same resource-id/text, empty desc).
+    // Removing one and shifting the other must NOT be mis-paired as a single move,
+    // because the content key is ambiguous (>1 candidate) on the baseline side.
+    const dup = (top: number) => ({ "resource-id": "dup", "text": "same", "bounds": { left: 0, top, right: 10, bottom: top + 10 } });
+    const baseline = obs({ "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 }, "node": [dup(0), dup(20)] });
+    const next = obs({ "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 }, "node": [dup(40)] });
+
+    const diff = diffObserveResult(baseline, next);
+    // No unique content key ⇒ no re-pair ⇒ positional remove+add is preserved.
+    expect(diff.changed).toEqual([]);
+    expect(diff.removed.length).toBeGreaterThan(0);
+  });
+
+  test("EC1.4: nodes with an empty content key never re-pair (too ambiguous)", () => {
+    // Neither node carries any stable identity (no id/text/desc); only bounds
+    // differ. They must not be merged, because an empty content key is not identity.
+    const blank = (top: number) => ({ "bounds": { left: 0, top, right: 10, bottom: top + 10 } });
+    const baseline = obs({ "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 }, "node": [blank(0)] });
+    const next = obs({ "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 }, "node": [blank(50)] });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+  });
+
+  test("EC1.4: content-desc alone is enough stable identity to re-pair", () => {
+    const node = (top: number) => ({ "content-desc": "Submit", "bounds": { left: 0, top, right: 10, bottom: top + 10 } });
+    const baseline = obs({ "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 }, "node": [node(0)] });
+    const next = obs({ "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 }, "node": [node(30)] });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.bounds).toBeDefined();
+  });
+
+  test("EC1.5: cross-subtree collision still does not produce a phantom toggle under content identity", () => {
+    // Same scenario as the ancestry-path-key test, but re-run under the default
+    // (content identity on): P's removed cell must not merge with anything.
+    const cell = (checked: string) => ({ "resource-id": "cell", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "", checked });
+    const baseline = obs({
+      "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 },
+      "node": [
+        { "resource-id": "P", "bounds": { left: 0, top: 0, right: 10, bottom: 50 }, "node": [cell("false")] },
+        { "resource-id": "Q", "bounds": { left: 0, top: 50, right: 10, bottom: 100 }, "node": [cell("true")] },
+      ],
+    });
+    const next = obs({
+      "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 },
+      "node": [{ "resource-id": "Q", "bounds": { left: 0, top: 50, right: 10, bottom: 100 }, "node": [cell("true")] }],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.removed.some(n => n.attributes.checked === "false")).toBe(true);
+  });
+
+  test("EC1.6: content-identity re-pairing does not mutate either input", () => {
+    const baseline = obs(list(4, 0));
+    const next = obs(list(4, -20));
+    const beforeBaseline = JSON.stringify(baseline);
+    const beforeNext = JSON.stringify(next);
+
+    diffObserveResult(baseline, next);
+
+    expect(JSON.stringify(baseline)).toBe(beforeBaseline);
+    expect(JSON.stringify(next)).toBe(beforeNext);
+  });
+
+  test("EC1.6: a large scroll still completes well under the 100ms budget", () => {
+    const baseline = obs(list(300, 0));
+    const next = obs(list(300, -50));
+    const start = performance.now();
+    diffObserveResult(baseline, next);
+    expect(performance.now() - start).toBeLessThan(100);
+  });
+
+  test("EC1.7: contentIdentity:false reproduces positional-only churn exactly", () => {
+    const baseline = obs(list(6, 0));
+    const next = obs(list(6, -25));
+
+    const diff = diffObserveResult(baseline, next, { contentIdentity: false });
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(6);
+    expect(diff.removed).toHaveLength(6);
+  });
+
+  test("a genuinely new unique row and a genuinely removed unique row are not merged", () => {
+    // Different content keys ⇒ no re-pair; a true add stays added, a true remove
+    // stays removed even when both are leftover on the same round.
+    const baseline = obs({ "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 }, "node": [
+      { "resource-id": "gone", "text": "Old", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } },
+    ] });
+    const next = obs({ "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 }, "node": [
+      { "resource-id": "fresh", "text": "New", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } },
+    ] });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added.map(n => n.attributes["resource-id"])).toEqual(["fresh"]);
+    expect(diff.removed.map(n => n.attributes["resource-id"])).toEqual(["gone"]);
   });
 });
 

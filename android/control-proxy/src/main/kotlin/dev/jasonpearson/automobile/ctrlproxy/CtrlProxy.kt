@@ -2604,31 +2604,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       perfProvider.startOperation("buildPath")
-      val startRadius = distanceStart / 2.0
-      val endRadius = distanceEnd / 2.0
-      val startAngle = 0.0
-      val endAngle = Math.toRadians(rotationDegrees.toDouble())
-
-      fun pointAt(radius: Double, angleRad: Double): Pair<Float, Float> {
-        val x = (centerX + radius * kotlin.math.cos(angleRad)).toFloat()
-        val y = (centerY + radius * kotlin.math.sin(angleRad)).toFloat()
-        return x to y
-      }
-
-      val (startX1, startY1) = pointAt(startRadius, startAngle)
-      val (startX2, startY2) = pointAt(startRadius, Math.PI + startAngle)
-      val (endX1, endY1) = pointAt(endRadius, endAngle)
-      val (endX2, endY2) = pointAt(endRadius, Math.PI + endAngle)
+      // Geometry is extracted into computePinchPoints so it stays unit testable (see
+      // PinchGeometryTest) and stays in sync with the iOS runner. rotationDegrees rotates the
+      // finger axis *during* the pinch (start horizontal, end rotated); see issue #2911.
+      val points = computePinchPoints(centerX, centerY, distanceStart, distanceEnd, rotationDegrees)
 
       val path1 =
         Path().apply {
-          moveTo(startX1, startY1)
-          lineTo(endX1, endY1)
+          moveTo(points.startX1, points.startY1)
+          lineTo(points.endX1, points.endY1)
         }
       val path2 =
         Path().apply {
-          moveTo(startX2, startY2)
-          lineTo(endX2, endY2)
+          moveTo(points.startX2, points.startY2)
+          lineTo(points.endX2, points.endY2)
         }
 
       val gesture =

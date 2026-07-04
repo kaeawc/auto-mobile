@@ -3382,7 +3382,7 @@
           "type": "number"
         },
         "rotationDegrees": {
-          "description": "Rotation during pinch (degrees)",
+          "description": "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS.",
           "type": "number"
         },
         "includeSystemInsets": {

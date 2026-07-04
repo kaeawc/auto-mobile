@@ -115,6 +115,11 @@ data class RequestPinch(
   val centerY: Double,
   val distanceStart: Double,
   val distanceEnd: Double,
+  /**
+   * Degrees the two-finger axis rotates *during* the pinch (default 0): the axis starts horizontal
+   * and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated
+   * axis. Shared convention with the iOS runner. See issue #2911.
+   */
   val rotationDegrees: Float = 0f,
   val duration: Long = 300L,
 ) : WebSocketRequest()

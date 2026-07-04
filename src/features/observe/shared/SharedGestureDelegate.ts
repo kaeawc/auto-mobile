@@ -101,6 +101,11 @@ export class SharedGestureDelegate {
     });
   }
 
+  /**
+   * Sends a two-finger pinch to the runner. `rotationDegrees` rotates the finger axis *during* the
+   * pinch (start horizontal, end rotated) — a combined pinch+rotate, not a pinch along a fixed
+   * rotated axis. `0` is a plain zoom. Same convention on Android and iOS. See issue #2911.
+   */
   async requestPinch(
     centerX: number,
     centerY: number,

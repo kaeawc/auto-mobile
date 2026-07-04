@@ -280,7 +280,11 @@ export interface ObserveDiff {
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
   changed: ObserveDiffNodeChange[];
-  /** Changed top-level scalar fields (`rotation`, `wakefulness`, …). */
+  /**
+   * Changed top-level fields: scalars (`rotation`, `wakefulness`, …) and the
+   * Element mirror fields (`focusedElement`, `accessibilityFocusedElement`,
+   * `awaitedElement` — #3052), each as `{from, to}`.
+   */
   fields?: Record<string, { from?: unknown; to?: unknown }>;
 }
 
@@ -291,12 +295,22 @@ export interface DiffObserveConfig {
    * — it changes on every capture and would be pure noise.
    */
   scalarFields?: readonly string[];
+  /**
+   * Top-level Element mirror fields to diff (bounds-tolerant). Defaults to
+   * `DIFF_ELEMENT_FIELDS`. Emitted into the same `fields` map as scalars.
+   */
+  elementFields?: readonly string[];
 }
 
 /**
  * Top-level scalar ObserveResult fields worth diffing. Intentionally excludes
  * `updatedAt` (churns every capture) and object/array fields (`viewHierarchy`
  * is covered by the node diff; `elements` mirrors the hierarchy).
+ *
+ * `awaitDuration` (#3052) is a scalar with no hierarchy equivalent — it is the
+ * wait outcome for an `observe waitFor` surfaced through a non-observe action —
+ * so it is diffed here. It is not churn like `updatedAt`: it is present only on
+ * wait results, so an unchanged action carries `undefined` on both sides.
  */
 export const DIFF_SCALAR_FIELDS: readonly string[] = [
   "rotation",
@@ -305,7 +319,25 @@ export const DIFF_SCALAR_FIELDS: readonly string[] = [
   "intentChooserDetected",
   "notificationPermissionDetected",
   "awaitTimeout",
+  "awaitDuration",
   "error",
+];
+
+/**
+ * Top-level Element *mirror* fields on ObserveResult (#3052). Each holds an
+ * `Element` (or is absent). A focus/await change is reflected in the hierarchy
+ * nodes (a node's `focused` / `accessibility-focused` attribute flips), but a
+ * consumer that reads the top-level mirror off an action's diff would not see
+ * it — the diff replaces the whole `.observation`. So these are diffed into the
+ * same `fields` map, emitting `{from,to}` when they change (a focus gain reads
+ * as `{from: undefined, to: element}`, a loss as `{from: element, to:
+ * undefined}`). `awaitedElement` in particular has no wait-outcome equivalent
+ * in the hierarchy, which is the primary motivation for the issue.
+ */
+export const DIFF_ELEMENT_FIELDS: readonly string[] = [
+  "focusedElement",
+  "accessibilityFocusedElement",
+  "awaitedElement",
 ];
 
 /** A flattened node used for keyed positional diffing. */
@@ -397,10 +429,17 @@ function flattenForDiff(obs: ObserveResult): FlatObserveNode[] {
 /**
  * JSON with object keys sorted recursively, so two structurally-equal objects
  * built with different key insertion order compare equal (avoids phantom
- * `changed` entries from a differently-ordered attribute object).
+ * `changed` entries from a differently-ordered attribute object). When
+ * `boundsTolerant` is set, every `bounds` value (object or compacted tuple) is
+ * also canonicalized to its `boundsKey` string at any depth, so a
+ * `--observe-result-compact` toggle between captures is not a spurious change
+ * (mirrors `diffAttributes`' bounds handling for hierarchy nodes).
  */
-function stableStringify(value: unknown): string {
-  return JSON.stringify(value, (_key, v) => {
+function stableStringify(value: unknown, boundsTolerant = false): string {
+  return JSON.stringify(value, (key, v) => {
+    if (boundsTolerant && key === "bounds") {
+      return boundsKey(v);
+    }
     if (v && typeof v === "object" && !Array.isArray(v)) {
       const sorted: Record<string, unknown> = {};
       for (const k of Object.keys(v as Record<string, unknown>).sort()) {
@@ -418,6 +457,40 @@ function valuesEqual(a: unknown, b: unknown): boolean {
     return true;
   }
   return stableStringify(a) === stableStringify(b);
+}
+
+/**
+ * A copy of an Element mirror value stripped of its `node` child subtree
+ * (#3052). The subtree is the only unbounded part of an `Element` (see
+ * `parseNodeBounds`, which shallow-copies the source node and so retains its
+ * children) and is fully redundant with the hierarchy node diff — re-embedding
+ * it in a `{from,to}` would re-inflate the very diff `--actions-diff-observe`
+ * exists to shrink. Stripping it bounds the emitted element to its own
+ * attributes while still answering "which element is focused/awaited". Returns
+ * non-object values (notably `undefined`, for a gained/lost mirror) untouched.
+ * Shallow copy — never mutates the caller's object.
+ */
+function leanElementForDiff(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const copy = { ...(value as Record<string, unknown>) };
+  delete copy.node;
+  return copy;
+}
+
+/**
+ * Structural equality for an Element mirror field (#3052), tolerant of the two
+ * bounds shapes. `JSON.stringify(undefined)` is `undefined`, so an absent field
+ * (focus lost/gained) only equals another absent field. Callers pass the
+ * `leanElementForDiff` form, so a child-only change (already in the node diff)
+ * does not spuriously flag the mirror as changed.
+ */
+function elementValuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  return stableStringify(a, true) === stableStringify(b, true);
 }
 
 /** Per-attribute diff of two attribute maps (union of keys). */
@@ -515,12 +588,24 @@ export function diffObserveResult(
   const diff: ObserveDiff = { isDiff: true, added, removed, changed };
 
   const scalarFields = cfg?.scalarFields ?? DIFF_SCALAR_FIELDS;
+  const elementFields = cfg?.elementFields ?? DIFF_ELEMENT_FIELDS;
   const fields: Record<string, { from?: unknown; to?: unknown }> = {};
   const baseRecord = baseline as unknown as Record<string, unknown>;
   const nextRecord = next as unknown as Record<string, unknown>;
   for (const field of scalarFields) {
     if (!valuesEqual(baseRecord[field], nextRecord[field])) {
       fields[field] = { from: baseRecord[field], to: nextRecord[field] };
+    }
+  }
+  // Element mirror fields (#3052): compare/emit the `node`-subtree-stripped form
+  // (the subtree is redundant with the node diff and unbounded in size), with a
+  // bounds-tolerant compare so a `--observe-result-compact` toggle is not a
+  // spurious change. Emitted into the same `fields` map.
+  for (const field of elementFields) {
+    const from = leanElementForDiff(baseRecord[field]);
+    const to = leanElementForDiff(nextRecord[field]);
+    if (!elementValuesEqual(from, to)) {
+      fields[field] = { from, to };
     }
   }
   if (Object.keys(fields).length > 0) {

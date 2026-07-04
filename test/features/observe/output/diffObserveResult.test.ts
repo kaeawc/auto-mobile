@@ -5,6 +5,7 @@ import {
   isSameObservationScreen,
   sanitizeObserveResult,
   DIFF_SCALAR_FIELDS,
+  DIFF_ELEMENT_FIELDS,
 } from "../../../../src/features/observe/output/ObserveResultOutput";
 import {
   loadAndroidHomeObserve,
@@ -258,6 +259,185 @@ describe("diffObserveResult", () => {
     const diff = diffObserveResult(baseline, next);
     expect(diff.changed).toHaveLength(1);
     expect(diff.changed[0].changes.selected).toEqual({ from: undefined, to: "true" });
+  });
+
+  // --- Top-level Element mirror fields (#3052) ---------------------------
+  //
+  // `focusedElement` / `accessibilityFocusedElement` / `awaitedElement` are
+  // convenience mirrors on ObserveResult. A focus/await change is reflected in
+  // the hierarchy nodes, but a consumer reading the top-level mirror off an
+  // action's diff would not see it — so the diff must surface these in `fields`.
+
+  /** A minimal Element with object-shaped bounds. */
+  const elem = (extra: Record<string, unknown> = {}) => ({
+    bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+    ...extra,
+  });
+
+  test("a changed focusedElement is captured in `fields`", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, { focusedElement: elem({ "resource-id": "field1", "text": "" }) as any });
+    const next = obs({ ...node }, { focusedElement: elem({ "resource-id": "field2", "text": "hi" }) as any });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields).toBeDefined();
+    expect(diff.fields!.focusedElement).toBeDefined();
+    expect((diff.fields!.focusedElement.from as any)["resource-id"]).toBe("field1");
+    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("field2");
+  });
+
+  test("focus gained (undefined → element) surfaces as a change", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node });
+    const next = obs({ ...node }, { focusedElement: elem({ "resource-id": "f" }) as any });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields!.focusedElement).toEqual({ from: undefined, to: elem({ "resource-id": "f" }) as any });
+  });
+
+  test("focus lost (element → undefined) surfaces as a change", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, { focusedElement: elem({ "resource-id": "f" }) as any });
+    const next = obs({ ...node });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields!.focusedElement).toEqual({ from: elem({ "resource-id": "f" }) as any, to: undefined });
+  });
+
+  test("an unchanged focusedElement is not reported", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const same = elem({ "resource-id": "f", "text": "same" });
+    const baseline = obs({ ...node }, { focusedElement: { ...same } as any });
+    const next = obs({ ...node }, { focusedElement: { ...same } as any });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields).toBeUndefined();
+  });
+
+  test("a focusedElement differing only in bounds shape (object vs tuple) is not a change", () => {
+    // When --observe-result-compact toggles between captures, the mirror's
+    // bounds shape flips object → tuple. Geometry is identical, so the compare
+    // must be bounds-tolerant (mirrors the node boundsKey handling).
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, { focusedElement: { "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "resource-id": "f" } as any });
+    const next = obs({ ...node }, { focusedElement: { "bounds": [0, 0, 10, 10], "resource-id": "f" } as any });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields).toBeUndefined();
+  });
+
+  test("accessibilityFocusedElement and awaitedElement changes are captured", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, {
+      accessibilityFocusedElement: elem({ "resource-id": "ax1" }) as any,
+      awaitedElement: undefined,
+    });
+    const next = obs({ ...node }, {
+      accessibilityFocusedElement: elem({ "resource-id": "ax2" }) as any,
+      awaitedElement: elem({ "resource-id": "await" }) as any,
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect((diff.fields!.accessibilityFocusedElement.to as any)["resource-id"]).toBe("ax2");
+    expect((diff.fields!.awaitedElement.to as any)["resource-id"]).toBe("await");
+  });
+
+  test("awaitDuration change is captured as a scalar field", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, { awaitDuration: undefined });
+    const next = obs({ ...node }, { awaitDuration: 250 });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields!.awaitDuration).toEqual({ from: undefined, to: 250 });
+    expect(DIFF_SCALAR_FIELDS).toContain("awaitDuration");
+  });
+
+  test("the emitted focusedElement is stripped of its `node` child subtree", () => {
+    // parseNodeBounds shallow-copies the source node, so a mirror element can
+    // carry a full child subtree — the only unbounded part of an Element.
+    // Re-embedding it would re-inflate the diff, so it is stripped from {from,to}.
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const heavy = (rid: string) => ({
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+      "resource-id": rid,
+      "node": [{ "resource-id": "child", "bounds": { left: 1, top: 1, right: 2, bottom: 2 }, "text": "deep" }],
+    });
+    const baseline = obs({ ...node }, { focusedElement: heavy("f1") as any });
+    const next = obs({ ...node }, { focusedElement: heavy("f2") as any });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields!.focusedElement).toBeDefined();
+    expect((diff.fields!.focusedElement.from as any).node).toBeUndefined();
+    expect((diff.fields!.focusedElement.to as any).node).toBeUndefined();
+    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("f2");
+  });
+
+  test("a mirror element whose only change is inside its `node` subtree is not reported", () => {
+    // The child-only change already shows in the node diff; the mirror's own
+    // attributes are unchanged, so it must not double-report as a field change.
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const withChild = (childText: string) => ({
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+      "resource-id": "f",
+      "node": [{ "resource-id": "child", "bounds": { left: 1, top: 1, right: 2, bottom: 2 }, "text": childText }],
+    });
+    const baseline = obs({ ...node }, { focusedElement: withChild("before") as any });
+    const next = obs({ ...node }, { focusedElement: withChild("after") as any });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields).toBeUndefined();
+  });
+
+  test("scalar, element, and node changes all coexist in one diff", () => {
+    const baseChild = { "resource-id": "child", "bounds": { left: 1, top: 1, right: 2, bottom: 2 }, "text": "x" };
+    const baseline = obs(
+      { "resource-id": "root", "bounds": { left: 0, top: 0, right: 100, bottom: 100 }, "node": [baseChild] },
+      { rotation: 0, focusedElement: elem({ "resource-id": "f1" }) as any }
+    );
+    const next = obs(
+      { "resource-id": "root", "bounds": { left: 0, top: 0, right: 100, bottom: 100 }, "node": [{ ...baseChild, selected: "true" }] },
+      { rotation: 1, focusedElement: elem({ "resource-id": "f2" }) as any }
+    );
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1); // node child toggled selected
+    expect(diff.fields!.rotation).toEqual({ from: 0, to: 1 });
+    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("f2");
+  });
+
+  test("elementFields config override restricts which mirror fields are diffed", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, {
+      focusedElement: elem({ "resource-id": "f1" }) as any,
+      awaitedElement: elem({ "resource-id": "w1" }) as any,
+    });
+    const next = obs({ ...node }, {
+      focusedElement: elem({ "resource-id": "f2" }) as any,
+      awaitedElement: elem({ "resource-id": "w2" }) as any,
+    });
+
+    const diff = diffObserveResult(baseline, next, { elementFields: ["awaitedElement"] });
+    expect(diff.fields!.focusedElement).toBeUndefined(); // not in the override set
+    expect((diff.fields!.awaitedElement.to as any)["resource-id"]).toBe("w2");
+  });
+
+  test("DIFF_ELEMENT_FIELDS covers exactly the three mirror fields", () => {
+    expect([...DIFF_ELEMENT_FIELDS].sort()).toEqual(
+      ["accessibilityFocusedElement", "awaitedElement", "focusedElement"]
+    );
+  });
+
+  test("element-field diffing does not mutate either input", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, { focusedElement: elem({ "resource-id": "f1" }) as any });
+    const next = obs({ ...node }, { focusedElement: elem({ "resource-id": "f2" }) as any });
+    const beforeBaseline = JSON.stringify(baseline);
+    const beforeNext = JSON.stringify(next);
+
+    diffObserveResult(baseline, next);
+
+    expect(JSON.stringify(baseline)).toBe(beforeBaseline);
+    expect(JSON.stringify(next)).toBe(beforeNext);
   });
 
   test("a removed parent lists every descendant as removed", () => {

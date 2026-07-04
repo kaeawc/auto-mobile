@@ -125,7 +125,9 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
   {
     key: "observe-result-compact",
     label: "Observe result: compact",
-    description: "Emit observe results in a compact form to reduce output size.",
+    description:
+      "Emit the observe result text block in a compact form (no-indent JSON tree + TOON " +
+      "element tables) to reduce output size. structuredContent stays valid JSON.",
     defaultValue: false,
   },
   {

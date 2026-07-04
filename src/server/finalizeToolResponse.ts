@@ -1,5 +1,9 @@
 import type { ObserveResult } from "../models/ObserveResult";
-import { sanitizeObserveResult, type SanitizeObserveConfig } from "../features/observe/output/ObserveResultOutput";
+import {
+  sanitizeObserveResult,
+  encodeObserveCompact,
+  type SanitizeObserveConfig,
+} from "../features/observe/output/ObserveResultOutput";
 import { serverConfig } from "../utils/ServerConfig";
 import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
 
@@ -73,26 +77,35 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   };
 
   // Locate the ObserveResult: the payload itself for `observe`, else `.observation`.
+  // `observePath` records WHERE it lives so the compact text encoder can detach
+  // the right `elements` block ("" = top-level, else the containing key).
   let sanitizedPayload: Record<string, unknown> | undefined;
+  let observePath: string | undefined;
   if (ctx.name === "observe" && isObserveResult(payload)) {
     sanitizedPayload = sanitizeObserveResult(payload as unknown as ObserveResult, cfg) as unknown as Record<string, unknown>;
+    observePath = "";
   } else if (isObserveResult(payload.observation)) {
     sanitizedPayload = {
       ...payload,
       observation: sanitizeObserveResult(payload.observation as ObserveResult, cfg),
     };
+    observePath = "observation";
   }
 
-  if (!sanitizedPayload) {
+  if (!sanitizedPayload || observePath === undefined) {
     return response;
   }
 
-  // Rewrite both representations from the same object so they cannot diverge.
+  // structuredContent MUST stay valid JSON (it is the schema-shaped duplicate),
+  // so the compact/TOON encoding only ever replaces the text block. When the
+  // compact flag is off, both representations are the same pretty JSON.
   if (hasStructured) {
     envelope.structuredContent = sanitizedPayload;
   }
   if (textPart) {
-    textPart.text = stringifyToolResponse(sanitizedPayload);
+    textPart.text = serverConfig.isObserveResultCompactEnabled()
+      ? encodeObserveCompact(sanitizedPayload, observePath)
+      : stringifyToolResponse(sanitizedPayload);
   }
 
   return response;

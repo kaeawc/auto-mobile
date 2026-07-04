@@ -4,6 +4,7 @@ import { createStructuredToolResponse, stringifyToolResponse } from "../../src/u
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { GFXINFO_DUMP_MARKER } from "../../src/features/observe/output/ObserveResultOutput";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 
 /**
  * Build a minimal ObserveResult whose hierarchy carries trimmable attributes:
@@ -44,14 +45,19 @@ function makeObserveResult(): ObserveResult {
 
 describe("finalizeToolResponse", () => {
   let originalDropElements: boolean;
+  let originalCompact: boolean;
 
   beforeEach(() => {
     originalDropElements = serverConfig.isObserveResultDropElementsEnabled();
+    originalCompact = serverConfig.isObserveResultCompactEnabled();
     serverConfig.setObserveResultDropElementsEnabled(false);
+    // Compact defaults off; the JSON-mirror assertions below rely on it being off.
+    serverConfig.setObserveResultCompactEnabled(false);
   });
 
   afterEach(() => {
     serverConfig.setObserveResultDropElementsEnabled(originalDropElements);
+    serverConfig.setObserveResultCompactEnabled(originalCompact);
   });
 
   test("EC1: observe response is sanitized in both structuredContent and text", () => {
@@ -135,6 +141,76 @@ describe("finalizeToolResponse", () => {
     const finalized = finalizeToolResponse(imageResponse, { name: "observe" });
     expect(finalized).toBe(imageResponse);
     expect(finalized.content[0].type).toBe("image");
+  });
+
+  describe("--observe-result-compact", () => {
+    test("compact flag rewrites only the text block; structuredContent stays valid JSON", () => {
+      serverConfig.setObserveResultCompactEnabled(true);
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(makeObserveResult()),
+        { name: "observe" }
+      );
+
+      // structuredContent remains the sanitized JSON object (with elements intact).
+      const sc = finalized.structuredContent as ObserveResult;
+      expect(sc.viewHierarchy).toBeDefined();
+      expect(sc.elements).toBeDefined();
+
+      // The text block is the compact/TOON form — NOT the pretty JSON mirror.
+      const text = finalized.content[0].text;
+      expect(text).not.toBe(stringifyToolResponse(sc));
+      expect(text.split("\n")[0]).toContain("observe-compact");
+      // Line 2 is compact JSON with elements moved out to TOON blocks below.
+      expect(JSON.parse(text.split("\n")[1]).elements).toBeUndefined();
+      expect(text).toContain("clickable[");
+    });
+
+    test("compact flag shrinks the text block versus pretty JSON on the real fixture", () => {
+      // Measured on the #2755 baseline (not the trivial synthetic result): the
+      // fixed legend line only amortizes on a real-sized payload.
+      const pretty = finalizeToolResponse(
+        createStructuredToolResponse(loadAndroidHomeObserve().observe),
+        { name: "observe" }
+      ).content[0].text;
+
+      serverConfig.setObserveResultCompactEnabled(true);
+      const compact = finalizeToolResponse(
+        createStructuredToolResponse(loadAndroidHomeObserve().observe),
+        { name: "observe" }
+      ).content[0].text;
+
+      expect(Buffer.byteLength(compact, "utf8")).toBeLessThan(
+        Buffer.byteLength(pretty, "utf8")
+      );
+    });
+
+    test("compact flag applies to a nested .observation payload too", () => {
+      serverConfig.setObserveResultCompactEnabled(true);
+      const actionPayload = { success: true, observation: makeObserveResult() };
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(actionPayload),
+        { name: "tapOn" }
+      );
+
+      const text = finalized.content[0].text;
+      expect(text.split("\n")[0]).toContain("observe-compact");
+      const tree = JSON.parse(text.split("\n")[1]);
+      expect(tree.success).toBe(true);
+      expect(tree.observation.elements).toBeUndefined();
+      expect(tree.observation.viewHierarchy).toBeDefined();
+      // structuredContent is untouched valid JSON.
+      expect((finalized.structuredContent as any).observation.elements).toBeDefined();
+    });
+
+    test("compact flag leaves non-observe responses unchanged", () => {
+      serverConfig.setObserveResultCompactEnabled(true);
+      const payload = { success: true, message: "done" };
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(payload),
+        { name: "pressButton" }
+      );
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(payload));
+    });
   });
 
   test("EC5: non-JSON text-only responses pass through unchanged", () => {

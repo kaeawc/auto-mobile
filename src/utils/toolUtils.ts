@@ -15,6 +15,16 @@ export const stringifyToolResponse = (content: unknown): string => {
 };
 
 /**
+ * No-indent variant of {@link stringifyToolResponse}. Same `extras` stripping so
+ * the two agree on content, but omits the 2-space pretty-printing — used by the
+ * `--observe-result-compact` text encoder (issue #2760) where indentation is
+ * pure token overhead.
+ */
+export const compactStringifyToolResponse = (content: unknown): string => {
+  return JSON.stringify(content, stripAccessibilityExtras);
+};
+
+/**
  * Interface for tool response formatter
  */
 export interface ToolResponseFormatter {

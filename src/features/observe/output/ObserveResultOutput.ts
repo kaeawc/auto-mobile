@@ -1,5 +1,7 @@
 import type { ObserveResult } from "../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
+import { encodeToonTable, type ToonScalar } from "../../../utils/toon";
+import { compactStringifyToolResponse } from "../../../utils/toolUtils";
 
 /**
  * Output-only shrinking of a single `ObserveResult` for serialization
@@ -167,4 +169,121 @@ function trimHierarchyNodes(node: ViewHierarchyNode | undefined): void {
   for (const child of toNodeArray(node.node)) {
     trimHierarchyNodes(child);
   }
+}
+
+/**
+ * Order the `elements` sub-arrays are emitted as TOON blocks. Fixed so the
+ * compact output is deterministic regardless of key order on the source object.
+ */
+const ELEMENT_ARRAY_NAMES = ["clickable", "scrollable", "text", "media"] as const;
+
+/**
+ * One-line, self-describing legend prepended to every compact observe payload so
+ * the model can parse the hybrid JSON+TOON format without out-of-band docs.
+ */
+export const OBSERVE_COMPACT_LEGEND =
+  "# observe-compact (--observe-result-compact): line 2 = compact JSON of the result " +
+  "(viewHierarchy tree inline) with `elements` moved below as TOON. Each block: " +
+  "`name[count]{columns}:` header then one 2-space-indented CSV row per element; " +
+  "bounds flattened to bounds.left/top/right/bottom, nested node/objects kept as JSON " +
+  "cells; a cell is quoted when it holds a comma, double-quote, or newline (\"\" = a " +
+  "literal quote), and an empty cell means the field is absent.";
+
+/**
+ * True when `value` is a plain object whose own values are all scalar — the
+ * shape (`bounds`) that flattens cleanly to dotted columns. Nested objects
+ * (`node` subtrees) return false so they are preserved as a single JSON cell.
+ */
+function isFlatScalarObject(value: unknown): value is Record<string, ToonScalar> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  return Object.values(value as Record<string, unknown>).every(
+    v => v === null || (typeof v !== "object" && typeof v !== "function")
+  );
+}
+
+/**
+ * Project one element to a flat TOON record. Scalars pass through; a flat-scalar
+ * object (`bounds`) is expanded to `key.subkey` columns; anything else (arrays,
+ * nested `node` subtrees) is preserved losslessly as a compact-JSON cell. The
+ * accessibility `extras` bag is dropped to match the production formatter.
+ */
+function flattenElementRecord(element: Record<string, unknown>): Record<string, ToonScalar> {
+  const row: Record<string, ToonScalar> = {};
+  for (const [key, value] of Object.entries(element)) {
+    if (key === "extras" || value === undefined || value === null) {
+      continue;
+    }
+    if (isFlatScalarObject(value)) {
+      for (const [subKey, subValue] of Object.entries(value)) {
+        row[`${key}.${subKey}`] = subValue as ToonScalar;
+      }
+    } else if (typeof value === "object") {
+      // A nested `node` subtree (or other array/object) is kept losslessly as a
+      // compact-JSON cell. Route through the shared formatter — not raw
+      // JSON.stringify — so the accessibility `extras` bag is stripped here too,
+      // matching the JSON tree and the production formatter.
+      row[key] = compactStringifyToolResponse(value);
+    } else {
+      row[key] = value as ToonScalar;
+    }
+  }
+  return row;
+}
+
+/**
+ * Encode an observe payload in the experimental compact/TOON text form
+ * (issue #2760), gated by `--observe-result-compact` at the call site.
+ *
+ * Output-only and PURE: the input payload is never mutated. `observePath` locates
+ * the `ObserveResult` — `""` when the payload itself is the result (the `observe`
+ * tool), or a key (e.g. `"observation"`) when it is nested under an action
+ * result. The result:
+ *  1. legend line,
+ *  2. compact JSON of the payload with the located result's `elements` detached
+ *     (the ragged `viewHierarchy` tree stays inline — least TOON benefit, highest
+ *     escaping risk),
+ *  3. one TOON block per `elements.*` array (uniform tabular data — TOON's win).
+ *
+ * `structuredContent` is intentionally NOT produced here; the caller keeps that
+ * representation as valid JSON so the two never have to agree on format.
+ */
+export function encodeObserveCompact(
+  payload: Record<string, unknown>,
+  observePath: string
+): string {
+  const observe = (observePath === "" ? payload : payload[observePath]) as
+    | (ObserveResult & Record<string, unknown>)
+    | undefined;
+
+  // Detach `elements` without mutating the input: shallow-copy the result object
+  // (and, for the nested case, its container) omitting the `elements` key.
+  const elements = observe?.elements;
+  let treeContainer: unknown;
+  if (observePath === "") {
+    const rest = { ...(payload as Record<string, unknown>) };
+    delete rest.elements;
+    treeContainer = rest;
+  } else if (observe) {
+    const restObserve = { ...(observe as Record<string, unknown>) };
+    delete restObserve.elements;
+    treeContainer = { ...payload, [observePath]: restObserve };
+  } else {
+    treeContainer = payload;
+  }
+
+  const blocks: string[] = [OBSERVE_COMPACT_LEGEND, compactStringifyToolResponse(treeContainer)];
+
+  if (elements) {
+    for (const name of ELEMENT_ARRAY_NAMES) {
+      const arr = (elements as Record<string, unknown>)[name];
+      const records = Array.isArray(arr)
+        ? arr.map(el => flattenElementRecord(el as Record<string, unknown>))
+        : [];
+      blocks.push(encodeToonTable(name, records));
+    }
+  }
+
+  return blocks.join("\n");
 }

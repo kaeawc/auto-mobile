@@ -119,11 +119,10 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       .toBe('{"type":"request_screenshot","requestId":"s-1"}');
   });
 
-  test("request_two_finger_swipe", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestTwoFingerSwipe({
-      requestId: "tf-1", x1: 1, y1: 2, x2: 3, y2: 4, duration: 300, offset: 100,
-    }))).toBe('{"type":"request_two_finger_swipe","requestId":"tf-1","x1":1,"y1":2,"x2":3,"y2":4,"duration":300,"offset":100}');
-  });
+  // `request_two_finger_swipe` has no builder here: like the other gesture commands
+  // (request_swipe/tap/drag/pinch), it is emitted through the shared sendCommand()/createMessage()
+  // path (#2988), and its field-level wire shape is asserted in CtrlProxyGestures.test.ts. The type
+  // stays in the union + KOTLIN_SERIAL_NAMES drift check above.
 
   test("request_action — resourceId included when present, omitted when undefined", () => {
     expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestAction({ requestId: "a-1", action: "long_click", resourceId: "res" })))

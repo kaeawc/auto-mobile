@@ -8,15 +8,10 @@
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SharedGestureDelegate } from "../shared/SharedGestureDelegate";
+import { sendCommand } from "../DeviceServiceUtils";
 import type { DelegateContext, A11ySwipeResult } from "./types";
-import { generateSecureId } from "./types";
-import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
-  // Legacy pending request state for two-finger swipe (uses manual promise pattern)
-  private pendingSwipeRequestId: string | null = null;
-  private pendingSwipeResolve: ((result: A11ySwipeResult) => void) | null = null;
-
   constructor(context: DelegateContext) {
     // `roundCoordinates: true` centralizes coordinate rounding for Android at the delegate layer
     // (SharedGestureDelegate.coord()), so integer coordinates reach the runner wire. This is
@@ -28,8 +23,12 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
   }
 
   /**
-   * Request a two-finger swipe gesture for TalkBack mode.
-   * This is Android-only and uses a legacy manual promise pattern.
+   * Request a two-finger swipe gesture for TalkBack mode. Android-only.
+   *
+   * Routed through `sendCommand`/`RequestManager` like every other gesture (#2988): the runner's
+   * `swipe_result` frame is correlated by requestId and resolves this promise as soon as it
+   * arrives, instead of the promise only ever settling via its timeout. The requestId keeps the
+   * `two_finger_swipe_` prefix so callers/loggers that key on it are unaffected.
    */
   async requestTwoFingerSwipe(
     x1: number,
@@ -39,65 +38,27 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     duration: number = 300,
     offset: number = 100,
     timeoutMs: number = 5000,
-    _perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<A11ySwipeResult> {
-    this.context.cancelScreenshotBackoff();
-
-    if (!await this.context.ensureConnected()) {
-      return { success: false, totalTimeMs: 0, error: "Not connected" };
-    }
-
-    const requestId = `two_finger_swipe_${this.context.timer.now()}_${generateSecureId()}`;
-    this.pendingSwipeRequestId = requestId;
-
-    const swipePromise = new Promise<A11ySwipeResult>(resolve => {
-      this.pendingSwipeResolve = resolve;
-
-      this.context.timer.setTimeout(() => {
-        if (this.pendingSwipeResolve === resolve) {
-          this.pendingSwipeResolve = null;
-          this.pendingSwipeRequestId = null;
-          resolve({
-            success: false,
-            totalTimeMs: timeoutMs,
-            error: `Two-finger swipe timeout after ${timeoutMs}ms`
-          });
-        }
-      }, timeoutMs);
-    });
-
-    // The two-finger path hard-rounds coordinates here (in addition to the delegate's
-    // roundCoordinates rounding) so TalkBack two-finger swipes land on whole pixels. Intentional
-    // and not to be regressed — the runner accepts fractional coordinates (#2927), but this path
-    // deliberately sends integers. See the constructor note.
-    const message = serializeCtrlProxyRequest(
-      ctrlProxyRequests.requestTwoFingerSwipe({
-        requestId,
+    // The two-finger path hard-rounds coordinates here (matching the delegate's roundCoordinates
+    // rounding) so TalkBack two-finger swipes land on whole pixels. Intentional and not to be
+    // regressed — the runner accepts fractional coordinates (#2927), but this path deliberately
+    // sends integers. See the constructor note.
+    return sendCommand<A11ySwipeResult>(this.context, {
+      idPrefix: "two_finger_swipe",
+      responseType: "swipe",
+      messageType: "request_two_finger_swipe",
+      params: {
         x1: Math.round(x1),
         y1: Math.round(y1),
         x2: Math.round(x2),
         y2: Math.round(y2),
         duration,
-        offset
-      })
-    );
-    this.context.getWebSocket()?.send(message);
-
-    return swipePromise;
-  }
-
-  /**
-   * Handle two-finger swipe result from WebSocket message.
-   * Called by the main client when a two_finger_swipe result is received.
-   */
-  handleTwoFingerSwipeResult(requestId: string, result: A11ySwipeResult): boolean {
-    if (this.pendingSwipeRequestId === requestId && this.pendingSwipeResolve) {
-      const resolve = this.pendingSwipeResolve;
-      this.pendingSwipeResolve = null;
-      this.pendingSwipeRequestId = null;
-      resolve(result);
-      return true;
-    }
-    return false;
+        offset,
+      },
+      timeoutMs,
+      perf,
+      errorLabel: "Two-finger swipe",
+    });
   }
 }

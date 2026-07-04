@@ -214,6 +214,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
         enhancedParams.sessionUuid = sessionUuid;
       }
       const parsedParams = observeTool.schema.parse(enhancedParams);
+      // Internal failure-recovery observe (#3053): mark internal so it does not
+      // overwrite the agent-facing diff baseline (`observe` always resets it).
+      // This capture is for the plan's failure summary, not shown to the agent.
+      (parsedParams as Record<string, unknown>).__internalNoDiff = true;
 
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const response = await Promise.race([
@@ -946,6 +950,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
           // Parse and validate parameters
           const parsedParams = tool.schema.parse(enhancedParams);
+
+          // Internal tool-to-tool call (#3053): same guard as the sequential path
+          // — a plan step's finalized envelope is never diffed/stripped, so a
+          // future internal `.observation` reader stays correct under the flags.
+          (parsedParams as Record<string, unknown>).__internalNoDiff = true;
 
           if (deviceId) {
             ScreenshotJobTracker.cancelJob(deviceId);

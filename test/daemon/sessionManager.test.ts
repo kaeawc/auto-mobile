@@ -508,6 +508,30 @@ describe("SessionManager", () => {
       }
     });
 
+    test("EC3.2: a full baseline-store cycle (read + write) records activity exactly once", async () => {
+      // The #3053 defect: the diff baseline did get (→recordActivity) +
+      // set (→recordActivity) = TWO activity UPDATEs per diffed action. With the
+      // side-effect-free reader, one non-observe action's baseline read + update
+      // must record activity exactly once (the write), proving the halving.
+      const { repo, activity } = makeRepo();
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      try {
+        await mgr.createSession("s1", "emulator-5554", "android");
+        await Promise.resolve();
+        const before = activity.length;
+
+        // Model one diffed action: read the baseline, then update it.
+        mgr.getLastRenderedObservation("s1");
+        mgr.setLastRenderedObservation("s1", makeObservation("root"));
+        await Promise.resolve();
+
+        expect(activity.length).toBe(before + 1);
+      } finally {
+        mgr.stopCleanupTimer();
+      }
+    });
+
     test("EC3.3: returns undefined for an unknown session without throwing", () => {
       expect(sessionManager.getLastRenderedObservation("missing")).toBeUndefined();
     });

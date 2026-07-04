@@ -642,6 +642,89 @@ describe("diffObserveResult", () => {
     expect(diff.removed).toHaveLength(6);
   });
 
+  test("a content-key field change (text edited in place) reads as remove+add, not `changed`", () => {
+    // `text` is part of the stable content key, so a row whose label changes in
+    // place (same bounds) has a *different* content key on each side — no re-pair.
+    // Documented limitation: identity is content, so a content edit is a new node.
+    const baseline = obs({ "resource-id": "row", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "Was here" });
+    const next = obs({ "resource-id": "row", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "Now this" });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+  });
+
+  test("a uniquely-identified node that moves between subtrees re-pairs as one `changed`", () => {
+    // rowX (unique content key) moves from parent P to parent Q, changing bounds.
+    // Positional keys differ (ancestry + bounds), so it is removed under P and
+    // added under Q; content identity re-pairs it into a single bounds `changed`.
+    // Safe because the content key is unique among leftovers on both sides.
+    const rowX = (top: number) => ({ "resource-id": "rowX", "text": "Only one", "bounds": { left: 0, top, right: 10, bottom: top + 10 } });
+    const baseline = obs({
+      "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 },
+      "node": [
+        { "resource-id": "P", "bounds": { left: 0, top: 0, right: 10, bottom: 50 }, "node": [rowX(0)] },
+        { "resource-id": "Q", "bounds": { left: 0, top: 50, right: 10, bottom: 100 } },
+      ],
+    });
+    const next = obs({
+      "resource-id": "list", "bounds": { left: 0, top: 0, right: 10, bottom: 100 },
+      "node": [
+        { "resource-id": "P", "bounds": { left: 0, top: 0, right: 10, bottom: 50 } },
+        { "resource-id": "Q", "bounds": { left: 0, top: 50, right: 10, bottom: 100 }, "node": [rowX(60)] },
+      ],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.bounds).toBeDefined();
+  });
+
+  test("a re-paired node surfaces ALL its changed attributes, not just bounds", () => {
+    const baseline = obs({ "resource-id": "m", "text": "T", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "checked": "false", "enabled": "true" });
+    const next = obs({ "resource-id": "m", "text": "T", "bounds": { left: 5, top: 5, right: 15, bottom: 15 }, "checked": "true", "selected": "true" });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    const keys = Object.keys(diff.changed[0].changes).sort();
+    expect(keys).toEqual(["bounds", "checked", "enabled", "selected"]);
+  });
+
+  test("a re-paired change under mixed bounds shapes emits the next-side (tuple) bounds", () => {
+    // --observe-result-compact toggled on between captures: baseline object bounds,
+    // next tuple bounds with different geometry. The node re-pairs (content key
+    // ignores bounds) and the change carries the tuple `to` (Kotlin parseBounds
+    // handles it), with the object `from`.
+    const baseline = obs({ "resource-id": "m", "text": "T", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } });
+    const next = obs({ "resource-id": "m", "text": "T", "bounds": [5, 5, 15, 15] as any });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.bounds).toEqual({
+      from: { left: 0, top: 0, right: 10, bottom: 10 },
+      to: [5, 5, 15, 15] as any,
+    });
+  });
+
+  test("on a real observation with no scroll, content identity is a no-op vs positional-only", () => {
+    // A same-screen state toggle produces no leftovers, so re-pairing changes
+    // nothing — content identity must not alter non-scroll diffs of real data.
+    const { observe } = loadAndroidHomeObserve();
+    const baseline = sanitizeObserveResult(observe, { dropElements: false });
+    const next = JSON.parse(JSON.stringify(baseline)) as ObserveResult;
+    const roots = Array.isArray(next.viewHierarchy?.hierarchy?.node)
+      ? (next.viewHierarchy!.hierarchy.node as any[])
+      : [next.viewHierarchy!.hierarchy.node];
+    (roots[0] as any).selected = "true";
+
+    const withIdentity = diffObserveResult(baseline, next);
+    const positional = diffObserveResult(baseline, next, { contentIdentity: false });
+    expect(withIdentity).toEqual(positional);
+  });
+
   test("a genuinely new unique row and a genuinely removed unique row are not merged", () => {
     // Different content keys ⇒ no re-pair; a true add stays added, a true remove
     // stays removed even when both are leftover on the same round.

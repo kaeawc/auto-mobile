@@ -542,7 +542,10 @@ function contentIdentityKey(attrs: Record<string, unknown>): string | null {
   if (resourceId === "" && viewId === "" && contentDesc === "" && text === "") {
     return null;
   }
-  return [resourceId, viewId, contentDesc, text].join(" ");
+  // NUL-joined: `text`/`content-desc` can contain spaces, so a space separator
+  // could let a value straddle a field boundary and collide; NUL cannot appear
+  // in these attribute strings.
+  return [resourceId, viewId, contentDesc, text].join(" ");
 }
 
 /** Index leftover diff nodes by their content-identity key, dropping keyless nodes. */

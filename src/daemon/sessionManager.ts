@@ -365,10 +365,11 @@ export class SessionManager {
    * baseline on every non-observe action; routing that read through
    * `getSessionCache` would fire a second `recordActivity` UPDATE on top of the
    * `set` that follows (get + set = two fire-and-forget writes per diffed action).
-   * This reader goes straight through `getSession` (which only lazily expires,
-   * never records activity), so a diffed action records activity once — from the
-   * baseline `set` — not twice. Returns `undefined` for an unknown/expired session
-   * or when no observation has been rendered yet.
+   * This reader goes straight through `getSession`, which does not record activity
+   * (its only mutation is lazy expiry — the same GC any session lookup triggers),
+   * so a diffed action records activity once — from the baseline `set` — not twice.
+   * Returns `undefined` for an unknown/expired session or when no observation has
+   * been rendered yet.
    */
   getLastRenderedObservation(sessionId: string): ObserveResult | undefined {
     return this.getSession(sessionId)?.cacheData.lastRenderedObservation;

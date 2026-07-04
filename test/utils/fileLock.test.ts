@@ -77,6 +77,78 @@ describe("fileLock primitive", () => {
     expect(readFileSync(lockPath, "utf-8").trim()).toBe("100");
   });
 
+  describe("ownerToken distinguishes a live in-flight run from a stale recycled-PID leak (#2947)", () => {
+    test("writes the owner token beneath the pid when provided", () => {
+      expect(
+        tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true, ownerToken: "tok-A" })
+      ).toBe(true);
+      // PID stays parseable as the first line so the daemon liveness reader and
+      // releaseExclusiveLock (parseInt) keep working; the token trails on line 2.
+      const content = readFileSync(lockPath, "utf-8");
+      expect(content.split("\n")[0]).toBe("100");
+      expect(content).toContain("tok-A");
+      expect(Number.parseInt(content, 10)).toBe(100);
+    });
+
+    test("a same-PID lock bearing OUR token is a live in-flight run → held, not stolen", () => {
+      // Gen-0 (this same process instance) holds the lock. An in-process same-path
+      // reopen (gen-1) must NOT reclaim it under reclaimOwnPid — that would let two
+      // migrators run migrateToLatest() on the same DB file (#2947).
+      writeFileSync(lockPath, "100\ntok-A");
+      expect(
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          isProcessRunning: () => true,
+          reclaimOwnPid: true,
+          ownerToken: "tok-A",
+        })
+      ).toBe(false);
+      expect(readFileSync(lockPath, "utf-8")).toBe("100\ntok-A");
+    });
+
+    test("a same-PID lock bearing a DIFFERENT token is a crashed-incarnation leak → reclaimed (#2794 preserved)", () => {
+      // A prior incarnation crashed holding the lock and the OS recycled its PID;
+      // its token differs from ours, so reclaim it immediately instead of hanging.
+      writeFileSync(lockPath, "100\ntok-OLD");
+      expect(
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          isProcessRunning: () => true,
+          reclaimOwnPid: true,
+          ownerToken: "tok-A",
+        })
+      ).toBe(true);
+      expect(readFileSync(lockPath, "utf-8").split("\n")[0]).toBe("100");
+    });
+
+    test("a same-PID lock with NO token (legacy incarnation) is reclaimed under reclaimOwnPid", () => {
+      // A lock left by a pre-token incarnation carries only the pid; treat it as a
+      // recycled-PID leak so the #2794 stale-reclaim behavior is unchanged.
+      writeFileSync(lockPath, "100");
+      expect(
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          isProcessRunning: () => true,
+          reclaimOwnPid: true,
+          ownerToken: "tok-A",
+        })
+      ).toBe(true);
+    });
+
+    test("without reclaimOwnPid, our token on a live same-PID lock still reads as held (daemon default)", () => {
+      writeFileSync(lockPath, "100\ntok-A");
+      expect(
+        tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true, ownerToken: "tok-A" })
+      ).toBe(false);
+    });
+
+    test("release honors a pid+token lock (parseInt reads the pid line)", () => {
+      writeFileSync(lockPath, "100\ntok-A");
+      releaseExclusiveLock(lockPath, 100);
+      expect(existsSync(lockPath)).toBe(false);
+    });
+  });
+
   describe("releaseExclusiveLock (compare-and-delete)", () => {
     test("removes the file when it holds our pid", () => {
       writeFileSync(lockPath, "100");

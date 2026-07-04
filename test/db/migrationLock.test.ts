@@ -11,6 +11,11 @@ async function flush(): Promise<void> {
   await new Promise<void>(resolve => setImmediate(resolve));
 }
 
+/** The pid line of a lock file — the token (if any) trails on line 2 (#2947). */
+function lockPid(path: string): string {
+  return readFileSync(path, "utf-8").split("\n")[0];
+}
+
 describe("FileMigrationLock", () => {
   let dir: string;
   let lockPath: string;
@@ -35,7 +40,7 @@ describe("FileMigrationLock", () => {
     await lock.acquire();
 
     expect(existsSync(lockPath)).toBe(true);
-    expect(readFileSync(lockPath, "utf-8").trim()).toBe("4242");
+    expect(lockPid(lockPath)).toBe("4242");
 
     await lock.release();
     expect(existsSync(lockPath)).toBe(false);
@@ -84,7 +89,7 @@ describe("FileMigrationLock", () => {
     await pending;
 
     expect(acquired).toBe(true);
-    expect(readFileSync(lockPath, "utf-8").trim()).toBe("4242");
+    expect(lockPid(lockPath)).toBe("4242");
     await lock.release();
   });
 
@@ -103,9 +108,66 @@ describe("FileMigrationLock", () => {
     await lock.acquire();
 
     expect(timer.getSleepCallCount()).toBe(0);
-    expect(readFileSync(lockPath, "utf-8").trim()).toBe("4242");
+    expect(lockPid(lockPath)).toBe("4242");
     await lock.release();
     expect(existsSync(lockPath)).toBe(false);
+  });
+
+  test("does NOT steal a same-PID lock still held by a live in-flight run of THIS process (#2947)", async () => {
+    // Gen-0 of this process instance holds the lock (its own PID + our process
+    // token). An in-process same-path reopen (gen-1) must WAIT for gen-0 to
+    // release rather than reclaim under reclaimOwnPid — otherwise two migrators
+    // enter migrateToLatest() on one DB file (the #2794 collision this lock exists
+    // to prevent).
+    const timer = new FakeTimer();
+    writeFileSync(lockPath, "4242\nprocess-token-A");
+    const lock = new FileMigrationLock(lockPath, {
+      timer,
+      pid: 4242,
+      pollIntervalMs: 100,
+      isProcessRunning: () => true, // gen-0 (our process) is alive
+      ownerToken: "process-token-A", // same instance token as the held lock
+    });
+
+    let acquired = false;
+    const pending = lock.acquire().then(() => {
+      acquired = true;
+    });
+
+    // First attempt sees a live same-token holder -> parks on sleep, does NOT steal.
+    await flush();
+    expect(acquired).toBe(false);
+    expect(timer.getPendingSleepCount()).toBe(1);
+    expect(lockPid(lockPath)).toBe("4242");
+
+    // Gen-0 releases; gen-1 then acquires cleanly on the next poll.
+    rmSync(lockPath);
+    timer.advanceTime(100);
+    await flush();
+    await pending;
+    expect(acquired).toBe(true);
+    expect(lockPid(lockPath)).toBe("4242");
+    await lock.release();
+  });
+
+  test("reclaims a same-PID lock from a crashed prior incarnation (different token) without waiting (#2947/#2794)", async () => {
+    // A crashed prior incarnation held the lock and the OS recycled its PID; its
+    // process token differs from ours, so this is a genuine stale leak — reclaim it
+    // immediately instead of hanging for the full timeout.
+    const timer = new FakeTimer();
+    writeFileSync(lockPath, "4242\nprocess-token-OLD");
+    const lock = new FileMigrationLock(lockPath, {
+      timer,
+      pid: 4242,
+      isProcessRunning: () => true,
+      ownerToken: "process-token-A",
+    });
+
+    await lock.acquire();
+
+    expect(timer.getSleepCallCount()).toBe(0);
+    expect(lockPid(lockPath)).toBe("4242");
+    await lock.release();
   });
 
   test("release does not delete a lock owned by a different opener", async () => {
@@ -144,7 +206,7 @@ describe("FileMigrationLock", () => {
     await lock.acquire();
 
     expect(timer.getSleepCallCount()).toBe(0);
-    expect(readFileSync(lockPath, "utf-8").trim()).toBe("4242");
+    expect(lockPid(lockPath)).toBe("4242");
     await lock.release();
   });
 
@@ -202,8 +264,7 @@ describe("FileMigrationLock", () => {
 
     // A reclaims the stale lock first.
     await lockA.acquire();
-    const owner = readFileSync(lockPath, "utf-8").trim();
-    expect(owner).toBe("100");
+    expect(lockPid(lockPath)).toBe("100");
 
     // B must NOT be able to steal it while A (pid 100) is alive.
     let bAcquired = false;
@@ -214,7 +275,7 @@ describe("FileMigrationLock", () => {
     timer.advanceTime(50);
     await flush();
     expect(bAcquired).toBe(false);
-    expect(readFileSync(lockPath, "utf-8").trim()).toBe("100");
+    expect(lockPid(lockPath)).toBe("100");
 
     // Once A releases, B acquires cleanly.
     await lockA.release();
@@ -222,7 +283,7 @@ describe("FileMigrationLock", () => {
     await flush();
     await bPending;
     expect(bAcquired).toBe(true);
-    expect(readFileSync(lockPath, "utf-8").trim()).toBe("200");
+    expect(lockPid(lockPath)).toBe("200");
     await lockB.release();
   });
 });

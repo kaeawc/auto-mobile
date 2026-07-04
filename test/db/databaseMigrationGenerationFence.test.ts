@@ -297,15 +297,15 @@ export async function down(db) {
     // and gen-1 use the same `AUTOMOBILE_DB_DIR` (identical DB path), only the
     // migrations dir differs, so the fence is proven on the same-file axis.
     //
-    // NOTE — this also exercises the lock-stealing hazard tracked separately in
-    // issue #2947: while gen-0 is blocked mid-migration it still holds
-    // `${path}.migrate.lock` (owner = our PID), and gen-1 reclaims that lock via
-    // `FileMigrationLock`'s `reclaimOwnPid: true`. The generation fence only
-    // protects the module globals; it does NOT serialize the two migration runs.
-    // This case is benign — gen-0's fail migration throws WITHOUT writing, so the
-    // stolen-lock concurrent access touches no schema — which is exactly why it is
-    // a clean fence proof rather than a lock-safety proof. #2947 covers the
-    // writes-during-reopen concurrency.
+    // NOTE — with issue #2947 fixed, gen-1 no longer STEALS gen-0's still-held
+    // own-PID migrate lock: the per-process owner token marks it as a live
+    // in-flight run, so gen-1 WAITS for gen-0 to release before migrating. This
+    // test therefore kicks gen-1's migrations off without awaiting, releases gen-0
+    // (which throws and frees the lock), and only then awaits gen-1 — otherwise
+    // awaiting gen-1 first would deadlock on the lock gen-0 still holds. The fence
+    // proof is unchanged: gen-0's stale FAILURE completion must not corrupt gen-1's
+    // globals. The dedicated lock-safety proof (a gen-0 migration that WRITES) lives
+    // in databaseMigrationLockReopen.test.ts.
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown): void => {
       unhandled.push(reason);
@@ -339,20 +339,23 @@ export async function down(db) {
       await db.closeDatabase();
 
       // Generation 1: reopen at the SAME DB path (env unchanged except a healthy
-      // migrations dir). It reclaims gen-0's still-held own-PID lock and migrates
-      // cleanly, so migrationsError must be null.
+      // migrations dir). gen-0 still holds the migrate lock, so gen-1 must WAIT for
+      // it (#2947) — kick migrations off WITHOUT awaiting.
       setEnv("AUTOMOBILE_MIGRATIONS_DIR", await makeHealthyMigrationsDir());
 
       db.getDatabase();
       expect(db.getDatabasePath()).toBe(gen0DbPath); // same file across generations
-      await db.ensureMigrations();
+      const gen1 = db.ensureMigrations() as Promise<void>;
+
+      // Release the stale gen-0 migration so it throws and frees the lock; gen-1
+      // then acquires it and migrates cleanly, so migrationsError must be null.
+      await writeFile(markers.release, "1");
+      await gen1;
       expect(db.getMigrationsError()).toBeNull();
 
-      // Release the stale gen-0 migration so it throws, then await its detached
-      // chain deterministically. The fence must keep gen-1's clean state.
-      await writeFile(markers.release, "1");
+      // Await gen-0's detached (superseded) chain deterministically. Its stale
+      // FAILURE handler must no-op under the fence and leave gen-1's clean state.
       await staleCompletion;
-
       expect(db.getMigrationsError()).toBeNull();
 
       await db.closeDatabase();

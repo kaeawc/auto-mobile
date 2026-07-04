@@ -1,0 +1,229 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import path from "path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
+import { defaultTimer } from "../../src/utils/SystemTimer";
+
+/**
+ * Regression test for issue #2947 (sibling of the #2898 generation fence).
+ *
+ * `FileMigrationLock` reclaims a lock file bearing our OWN pid immediately
+ * (`reclaimOwnPid: true`) on the assumption that "the migration run is a
+ * per-process singleton", so a same-pid lock can only be a stale leak from a
+ * crashed prior incarnation. An in-process SAME-PATH reopen while the previous
+ * generation's migration is still IN FLIGHT breaks that assumption: gen-0 still
+ * holds `${dbPath}.migrate.lock` (owner = our pid) and gen-1 would steal it, so
+ * two migrators could enter `migrateToLatest()` on the same DB file — the exact
+ * `kysely_migration` PRIMARY KEY collision the lock exists to prevent (#2794).
+ *
+ * The generation fence (#2898) only protects the module globals; it does NOT
+ * serialize the on-disk migration runs. The fix tags the lock with a
+ * per-process-instance token: a same-pid lock bearing OUR token is a live
+ * in-flight run to WAIT for, while a different (or absent) token is the genuine
+ * recycled-pid leak to reclaim.
+ *
+ * Unlike `databaseMigrationGenerationFence.test.ts` (whose gen-0 migration throws
+ * WITHOUT writing, so a stolen-lock concurrent run is benign), this gen-0
+ * migration WRITES to the shared DB file, so a stolen lock would corrupt it.
+ * A fresh module instance per case isolates the lazy globals.
+ */
+describe("in-process same-path reopen cannot steal an in-flight migration's lock (issue #2947)", () => {
+  const savedEnv = new Map<string, string | undefined>();
+  const trackedEnvKeys = [
+    DAEMON_LAUNCH_CWD_ENV,
+    "AUTOMOBILE_DB_DIR",
+    "AUTOMOBILE_DB_PATH",
+    "AUTO_MOBILE_DB_PATH",
+    "AUTOMOBILE_MIGRATIONS_DIR",
+    "AUTO_MOBILE_MIGRATIONS_DIR",
+  ];
+  const tempDirs: string[] = [];
+
+  for (const key of trackedEnvKeys) {
+    savedEnv.set(key, process.env[key]);
+  }
+
+  function setEnv(key: string, value: string | undefined): void {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  afterEach(async () => {
+    for (const key of trackedEnvKeys) {
+      setEnv(key, savedEnv.get(key));
+    }
+    for (const dir of tempDirs.splice(0)) {
+      await removeTempDirWithRetry(dir);
+    }
+  });
+
+  async function importFreshDatabaseModule() {
+    return import(`../../src/db/database.ts?lock-reopen-test=${Date.now()}-${Math.random()}`);
+  }
+
+  async function makeTempDir(prefix: string): Promise<string> {
+    const dir = await mkdtemp(path.join(tmpdir(), prefix));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  async function removeTempDirWithRetry(dir: string): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        await rm(dir, { recursive: true, force: true });
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
+          throw error;
+        }
+        await defaultTimer.sleep(50);
+      }
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
+
+  /**
+   * A migrations dir with one migration that WRITES to the DB (creates `probe`
+   * and inserts row id=1) BEFORE blocking on a `release` marker, holding the
+   * migration — and its `${dbPath}.migrate.lock` — in flight across a
+   * `closeDatabase()`. `probe`'s single-row PRIMARY KEY makes a concurrent second
+   * migrator's re-insert collide, so a stolen lock corrupts observably.
+   */
+  async function makeSlowWritingMigrationsDir(markers: {
+    started: string;
+    release: string;
+  }): Promise<string> {
+    const dir = await makeTempDir("auto-mobile-lock-reopen-mig-");
+    const content = `import { promises as fsp } from "fs";
+import { existsSync } from "fs";
+
+export async function up(db) {
+  await db.schema
+    .createTable("probe")
+    .ifNotExists()
+    .addColumn("id", "integer", col => col.primaryKey())
+    .execute();
+  await db.insertInto("probe").values({ id: 1 }).execute();
+  await fsp.writeFile(${JSON.stringify(markers.started)}, "1");
+  for (let i = 0; i < 5000; i += 1) {
+    if (existsSync(${JSON.stringify(markers.release)})) break;
+    await new Promise(resolve => setTimeout(resolve, 2));
+  }
+}
+
+export async function down(db) {
+  await db.schema.dropTable("probe").ifExists().execute();
+}
+`;
+    await writeFile(path.join(dir, "0001_slow_writing_migration.ts"), content, "utf8");
+    return dir;
+  }
+
+  async function waitForMarker(marker: string, label: string): Promise<void> {
+    for (let attempt = 0; attempt < 2000; attempt += 1) {
+      if (existsSync(marker)) {
+        return;
+      }
+      await defaultTimer.sleep(2);
+    }
+    throw new Error(`Timed out waiting for ${label} marker: ${marker}`);
+  }
+
+  test("gen-1 waits for the in-flight gen-0 migration instead of stealing its lock; no corruption", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const markerRoot = await makeTempDir("auto-mobile-lock-reopen-markers-");
+      const markers = {
+        started: path.join(markerRoot, "started"),
+        release: path.join(markerRoot, "release"),
+      };
+      const migrationsDir = await makeSlowWritingMigrationsDir(markers);
+      // One DB dir shared by BOTH generations -> the same DB file path on reopen.
+      const sharedDbDir = await makeTempDir("auto-mobile-lock-reopen-db-");
+
+      setEnv(DAEMON_LAUNCH_CWD_ENV, undefined);
+      setEnv("AUTOMOBILE_DB_PATH", undefined);
+      setEnv("AUTO_MOBILE_DB_PATH", undefined);
+      setEnv("AUTO_MOBILE_MIGRATIONS_DIR", undefined);
+      setEnv("AUTOMOBILE_DB_DIR", sharedDbDir);
+      // Both generations use the SAME migrations dir + SAME DB path, the truest
+      // concurrent-migration collision scenario.
+      setEnv("AUTOMOBILE_MIGRATIONS_DIR", migrationsDir);
+
+      const db = await importFreshDatabaseModule();
+
+      // Generation 0: start the slow, WRITING migration and hold it in flight
+      // (mid-run, still holding the migrate lock).
+      db.getDatabase();
+      const gen0DbPath = db.getDatabasePath();
+      await waitForMarker(markers.started, "generation-0 started");
+
+      const staleCompletion = db.getMigrationsPromiseForTest() as Promise<void> | null;
+      expect(staleCompletion).not.toBeNull();
+
+      // Close mid-flight: nulls globals + bumps the generation. The detached gen-0
+      // migration is still blocked on `release` and STILL HOLDS the migrate lock.
+      await db.closeDatabase();
+
+      // Generation 1: reopen at the SAME DB path, kick off migrations but do NOT
+      // await yet.
+      db.getDatabase();
+      expect(db.getDatabasePath()).toBe(gen0DbPath);
+
+      let gen1Settled = false;
+      const gen1 = (db.ensureMigrations() as Promise<void>).then(
+        () => {
+          gen1Settled = true;
+        },
+        () => {
+          gen1Settled = true;
+        }
+      );
+
+      // Give a would-be lock thief ample time to steal the lock and run
+      // migrateToLatest() concurrently. With the fix gen-1 is parked on the still-
+      // held same-token lock, so it CANNOT settle until gen-0 releases; without
+      // the fix it steals the lock and settles here.
+      await defaultTimer.sleep(400);
+      expect(gen1Settled).toBe(false);
+
+      // Release gen-0: its migration finishes, records `0001`, and releases the
+      // lock. gen-1 then acquires, sees `0001` already applied, and no-ops.
+      await writeFile(markers.release, "1");
+      await staleCompletion;
+      await gen1;
+
+      expect(gen1Settled).toBe(true);
+      expect(db.getMigrationsError()).toBeNull();
+
+      // No corruption: the write ran exactly once (single `probe` row, single
+      // `0001` history row) — a stolen concurrent run would have collided.
+      const database = db.getDatabase();
+      const probeRows = await database.selectFrom("probe").selectAll().execute();
+      expect(probeRows).toHaveLength(1);
+      const historyRows = await database
+        .selectFrom("kysely_migration")
+        .select("name")
+        .execute();
+      expect(historyRows.map((row: { name: string }) => row.name)).toEqual([
+        "0001_slow_writing_migration",
+      ]);
+
+      await db.closeDatabase();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+});

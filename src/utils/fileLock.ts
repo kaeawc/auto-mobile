@@ -29,8 +29,32 @@ export interface ExclusiveLockOptions {
    * occur when a supervisor restarts a crashed process and the OS recycles the
    * same PID. The daemon coordinator leaves this `false` so a same-PID probe from
    * another manager instance still reads as held.
+   *
+   * See {@link ownerToken}: pairing this with a per-process-instance token narrows
+   * the reclaim to a *genuine* recycled-PID leak, so an in-process reopen while
+   * this process still holds the lock waits instead of stealing it (#2947).
    */
   reclaimOwnPid?: boolean;
+
+  /**
+   * A per-process-instance token written on the second line of the lock file
+   * (below the PID). It disambiguates the two ways a same-PID lock can arise under
+   * {@link reclaimOwnPid}:
+   *
+   * - token matches ours → a *live in-flight* acquire by THIS same process
+   *   instance (e.g. an in-process same-path reopen while the prior generation's
+   *   migration still holds the lock). Read as held so the reopen WAITS rather
+   *   than stealing it and running two migrators on one DB file (#2947).
+   * - token differs (or is absent, a pre-token incarnation) → a genuine stale leak
+   *   from a crashed prior incarnation whose PID the OS recycled. Reclaimed, exactly
+   *   as before (#2794 behavior preserved).
+   *
+   * Only consulted for the same-PID reclaim decision. When omitted, `reclaimOwnPid`
+   * behaves exactly as it did before this token existed (any same-PID lock is a
+   * reclaimable leak). The PID stays on the first line so daemon liveness reads and
+   * {@link releaseExclusiveLock}'s `parseInt` are unaffected.
+   */
+  ownerToken?: string;
 }
 
 /**
@@ -44,8 +68,9 @@ export function tryAcquireExclusiveLock(
   const pid = options.pid ?? process.pid;
   const isProcessRunning = options.isProcessRunning ?? defaultIsProcessRunning;
   const reclaimOwnPid = options.reclaimOwnPid ?? false;
+  const ownerToken = options.ownerToken;
 
-  if (writeExclusiveLockFile(lockFilePath, pid)) {
+  if (writeExclusiveLockFile(lockFilePath, pid, ownerToken)) {
     return true;
   }
 
@@ -69,13 +94,24 @@ export function tryAcquireExclusiveLock(
     return false;
   }
 
-  const ownerPid = Number.parseInt(content, 10);
+  // The PID is the first line; a per-process-instance token (if any) is the
+  // second (see `writeExclusiveLockFile`). `parseInt` reads only the PID.
+  const [pidLine, tokenLine] = content.split("\n", 2);
+  const ownerPid = Number.parseInt(pidLine, 10);
   if (Number.isNaN(ownerPid)) {
     // Unreadable PID — a writer may still be filling it in; treat as held.
     return false;
   }
 
-  const isOwnStaleLeak = reclaimOwnPid && ownerPid === pid;
+  // A same-PID lock is a reclaimable stale leak ONLY when its owner token differs
+  // from ours (a crashed prior incarnation whose PID the OS recycled) or is absent
+  // (a pre-token incarnation). A MATCHING token means this same process instance
+  // still holds it live — an in-process reopen must wait, not steal it (#2947).
+  // With no token supplied the pre-token semantics stand: any same-PID lock leaks.
+  const isOwnStaleLeak =
+    reclaimOwnPid &&
+    ownerPid === pid &&
+    (ownerToken === undefined || (tokenLine ?? "") !== ownerToken);
   if (isProcessRunning(ownerPid) && !isOwnStaleLeak) {
     return false;
   }
@@ -104,7 +140,7 @@ export function tryAcquireExclusiveLock(
   } catch {
     // Best-effort: the consumed stale marker is ours to remove.
   }
-  return writeExclusiveLockFile(lockFilePath, pid);
+  return writeExclusiveLockFile(lockFilePath, pid, ownerToken);
 }
 
 /**
@@ -135,13 +171,16 @@ export function releaseExclusiveLock(lockFilePath: string, pid: number = process
 
 /**
  * Atomically create the lock file with `pid` via `O_CREAT | O_EXCL` (`wx`).
- * Returns true on success, false if the file already exists.
+ * Returns true on success, false if the file already exists. When `ownerToken` is
+ * given it is written on a second line below the PID so a same-PID reader can tell
+ * this process instance's live lock from a recycled-PID leak (#2947); the PID
+ * stays on the first line so `parseInt`-based readers are unaffected.
  */
-function writeExclusiveLockFile(lockFilePath: string, pid: number): boolean {
+function writeExclusiveLockFile(lockFilePath: string, pid: number, ownerToken?: string): boolean {
   try {
     mkdirSync(dirname(lockFilePath), { recursive: true });
     const fd = openSync(lockFilePath, "wx", 0o600);
-    writeFileSync(fd, String(pid));
+    writeFileSync(fd, ownerToken === undefined ? String(pid) : `${pid}\n${ownerToken}`);
     closeSync(fd);
     return true;
   } catch {

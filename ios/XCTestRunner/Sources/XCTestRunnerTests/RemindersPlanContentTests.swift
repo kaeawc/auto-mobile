@@ -117,12 +117,14 @@ final class RemindersPlanContentTests: XCTestCase {
         XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 1)
     }
 
-    /// An explicit retry override wins for the launch flow too — including 0 to disable retries so a
-    /// CI/local repro run can force a single attempt and surface the transient timeout deterministically.
-    func testLaunchRemindersPlanExplicitZeroRetryOverrideIsHonored() {
+    /// An explicit retry override wins for the launch flow too — 0 disables retries so a CI/local
+    /// repro run can force a single attempt and surface the transient timeout deterministically, and a
+    /// non-default value is passed through verbatim. The non-`0` case is load-bearing: it diverges from
+    /// both the base default (`0`) and this class's default (`1`), so it fails if the override is ever
+    /// reverted to the base implementation — whereas a `0`-only assertion would pass either way.
+    func testLaunchRemindersPlanExplicitRetryOverrideIsHonored() {
         let key = "AUTOMOBILE_TEST_RETRY_COUNT"
         let original = ProcessInfo.processInfo.environment[key]
-        setenv(key, "0", 1)
         defer {
             if let original = original {
                 setenv(key, original, 1)
@@ -131,7 +133,15 @@ final class RemindersPlanContentTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 0)
+        setenv(key, "0", 1)
+        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 0, "Explicit 0 must disable retries")
+
+        setenv(key, "3", 1)
+        XCTAssertEqual(
+            RemindersLaunchPlanTests().retryCount,
+            3,
+            "A non-default explicit override must be honored verbatim, proving the override reads env"
+        )
     }
 
     /// Regression guard preserving acceptance criterion 2 (#2998): the retry only masks a *transient*

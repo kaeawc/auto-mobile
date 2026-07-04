@@ -1466,6 +1466,12 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
     const nodesBefore = await countNodes();
     const fingerprintsBefore = await countFingerprints();
 
+    // notifyGraphUpdated must fire only after commit — never on rollback (#2981 AC).
+    let notifyCount = 0;
+    manager.setGraphUpdateListener(() => {
+      notifyCount++;
+    });
+
     // A non-existent suggestion id: getOrCreateNode creates the "OrphanScreen"
     // node first, then repository.promoteSuggestion throws "Suggestion not found"
     // during the multi-write promotion. Without a transaction the node would be
@@ -1478,6 +1484,9 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
     expect(await countNodes("OrphanScreen")).toBe(0);
     expect(await countNodes()).toBe(nodesBefore);
     expect(await countFingerprints()).toBe(fingerprintsBefore);
+
+    // The post-commit side effect never fired because the transaction threw.
+    expect(notifyCount).toBe(0);
   });
 
   test("rolls back BOTH the node and the fingerprint when the link fails after the fingerprint is created", async () => {
@@ -1488,6 +1497,12 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
 
+    // notifyGraphUpdated must not fire when the fingerprint-then-link write throws.
+    let notifyCount = 0;
+    manager.setGraphUpdateListener(() => {
+      notifyCount++;
+    });
+
     await expect(
       manager.promoteSuggestion(42, "OrphanScreen")
     ).rejects.toThrow(/injected suggestion-link failure/);
@@ -1495,6 +1510,37 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
     // Both writes rolled back together — no orphan node, no orphan fingerprint.
     expect(await countNodes("OrphanScreen")).toBe(0);
     expect(await countFingerprints()).toBe(0);
+
+    // No post-commit notification on the rolled-back promotion.
+    expect(notifyCount).toBe(0);
+  });
+
+  test("notifies graph listeners exactly once, only after the transaction commits", async () => {
+    const manager = makeManager();
+    await manager.setCurrentApp(APP_ID);
+    const suggestionId = await seedSuggestion(manager);
+
+    // repository.promoteSuggestion is the LAST write inside the transaction. Record
+    // its call count at every notify fire (not just the last) so a notification
+    // firing BEFORE the transaction completes — when the count is still 0 — is
+    // caught rather than masked by a later post-commit fire. spyOn calls through,
+    // and withExecutor rebinds onto a new NavigationRepository sharing this
+    // prototype, so the trx-bound write is counted too.
+    const promoteSpy = spyOn(NavigationRepository.prototype, "promoteSuggestion");
+
+    const notifyPromoteCounts: number[] = [];
+    manager.setGraphUpdateListener(() => {
+      notifyPromoteCounts.push(promoteSpy.mock.calls.length);
+    });
+
+    await manager.promoteSuggestion(suggestionId, "SettingsScreen");
+
+    // promoteSuggestion ran exactly once, and notify fired exactly once, AFTER that
+    // final in-transaction write completed — never inside or before the transaction.
+    expect(promoteSpy).toHaveBeenCalledTimes(1);
+    expect(notifyPromoteCounts).toEqual([1]);
+
+    promoteSpy.mockRestore();
   });
 });
 

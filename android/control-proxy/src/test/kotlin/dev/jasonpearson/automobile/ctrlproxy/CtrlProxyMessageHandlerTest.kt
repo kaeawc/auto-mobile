@@ -14,9 +14,9 @@ import dev.jasonpearson.automobile.protocol.TapCoordinatesResult
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonDecodingException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -329,20 +329,19 @@ class CtrlProxyMessageHandlerTest {
   // kotlinx/config change that flips this to coercion trips this test and re-arms the guard's role.
   @Test
   fun `overflow coordinate literal is rejected at decode not coerced to infinity`() {
-    // Match production's protocolJson posture (allowSpecialFloatingPointValues defaults to false).
-    val protocolJson = Json {
-      classDiscriminator = "type"
-      ignoreUnknownKeys = true
-    }
+    // The class-level [json] matches production's protocolJson posture
+    // (allowSpecialFloatingPointValues defaults to false), so this is the production decode path.
+    // SerializationException is the stable supertype of the (experimental) JsonDecodingException
+    // kotlinx throws here; the message assertion below pins the exact special-float rejection.
     val ex =
-      assertThrows(JsonDecodingException::class.java) {
-        protocolJson.decodeFromString<WebSocketRequest>(
+      assertThrows(SerializationException::class.java) {
+        json.decodeFromString<WebSocketRequest>(
           """{"type":"request_tap_coordinates","requestId":"t","x":1e309,"y":200}"""
         )
       }
     assertTrue(
       "decode must reject the overflow literal as a special float: ${ex.message}",
-      ex.message!!.contains("special floating-point", ignoreCase = true),
+      ex.message.orEmpty().contains("special floating-point", ignoreCase = true),
     )
   }
 

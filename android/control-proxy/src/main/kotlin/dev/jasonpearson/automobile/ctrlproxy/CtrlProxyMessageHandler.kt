@@ -74,13 +74,10 @@ import kotlinx.serialization.json.Json
  * @param log diagnostic sink for the few requests with no wired action (an ahead-of-need request
  *   type, or a malformed storage message the device can't resolve). Defaults to a no-op so tests
  *   stay Android-free; production wires it to `Log`.
- * @param now clock for the `timestamp` of the synchronous guard error responses; injectable so
- *   those responses are deterministic in tests. Defaults to the wall clock.
  */
 class CtrlProxyMessageHandler(
   private val actions: CtrlProxyActions,
   private val log: (String) -> Unit = {},
-  private val now: () -> Long = { System.currentTimeMillis() },
 ) : WebSocketMessageHandler {
 
   /** JSON used to re-encode the typed network mock rules into the string the SDK store expects. */
@@ -115,7 +112,7 @@ class CtrlProxyMessageHandler(
       is RequestTapCoordinates -> {
         firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
           return TapCoordinatesResult(
-            timestamp = now(),
+            timestamp = System.currentTimeMillis(),
             requestId = request.requestId,
             success = false,
             totalTimeMs = 0L,
@@ -155,7 +152,7 @@ class CtrlProxyMessageHandler(
           )
           ?.let { (field, value) ->
             return DragResult(
-              timestamp = now(),
+              timestamp = System.currentTimeMillis(),
               requestId = request.requestId,
               success = false,
               totalTimeMs = 0L,
@@ -185,7 +182,7 @@ class CtrlProxyMessageHandler(
           )
           ?.let { (field, value) ->
             return PinchResult(
-              timestamp = now(),
+              timestamp = System.currentTimeMillis(),
               requestId = request.requestId,
               success = false,
               totalTimeMs = 0L,
@@ -380,7 +377,7 @@ class CtrlProxyMessageHandler(
   /** Build a `swipe_result` failure — shared by [RequestSwipe] and [RequestTwoFingerSwipe]. */
   private fun swipeError(requestId: String?, field: String, value: Double): SwipeResult =
     SwipeResult(
-      timestamp = now(),
+      timestamp = System.currentTimeMillis(),
       requestId = requestId,
       success = false,
       totalTimeMs = 0L,

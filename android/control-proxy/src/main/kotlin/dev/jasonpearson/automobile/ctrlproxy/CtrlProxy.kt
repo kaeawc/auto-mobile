@@ -129,6 +129,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
       logError = { message, error -> Log.e(TAG, message, error) },
     )
+
+  /**
+   * Guards every `broadcast*Result` / `broadcast*Error` / `broadcast*Response` helper so a throw
+   * while *sending* a result (a socket write or serialization failure) emits a correlated
+   * `type:"error"` frame instead of being logged and swallowed — closing the one-layer-down
+   * silent-hang gap from issue #3045. The `broadcastError` sink resolves [webSocketServer] lazily
+   * because it is `lateinit` (assigned in [onServiceConnected]), and no-ops when the server is not
+   * running (there is then no socket to send the fallback on either). See [ResultBroadcaster].
+   */
+  private val resultBroadcaster =
+    ResultBroadcaster(
+      broadcastError = { response ->
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          webSocketServer.broadcast(response)
+        }
+      },
+      logError = { message, error -> Log.e(TAG, message, error) },
+    )
   private val recompositionStore = RecompositionStore()
   private val viewHierarchyExtractor = ViewHierarchyExtractor(recompositionStore)
   private val json = Json {
@@ -4265,7 +4283,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "set text result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"set_text_result","timestamp":${System.currentTimeMillis()}""")
@@ -4284,8 +4302,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted set text result to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting set text result", e)
     }
   }
 
@@ -4302,7 +4318,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "IME action result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"ime_action_result","timestamp":${System.currentTimeMillis()}""")
@@ -4322,8 +4338,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted IME action result to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting IME action result", e)
     }
   }
 
@@ -4339,7 +4353,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "select all result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"select_all_result","timestamp":${System.currentTimeMillis()}""")
@@ -4358,8 +4372,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted select all result to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting select all result", e)
     }
   }
 
@@ -4376,7 +4388,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "action result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"action_result","timestamp":${System.currentTimeMillis()}""")
@@ -4396,8 +4408,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted action result to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting action result", e)
     }
   }
 
@@ -4415,7 +4425,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "clipboard result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"clipboard_result","timestamp":${System.currentTimeMillis()}""")
@@ -4454,8 +4464,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted clipboard result to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting clipboard result", e)
     }
   }
 
@@ -4470,7 +4478,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     totalTimeMs: Long,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
-    try {
+    resultBroadcaster.guard(requestId, "settings_get_result") {
       webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.SettingsGetResult(
           timestamp = System.currentTimeMillis(),
@@ -4484,8 +4492,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           error = error,
         )
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting settings_get_result", e)
     }
   }
 
@@ -4498,7 +4504,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     totalTimeMs: Long,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
-    try {
+    resultBroadcaster.guard(requestId, "settings_put_result") {
       webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.SettingsPutResult(
           timestamp = System.currentTimeMillis(),
@@ -4510,8 +4516,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           error = error,
         )
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting settings_put_result", e)
     }
   }
 
@@ -4524,7 +4528,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     totalTimeMs: Long,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
-    try {
+    resultBroadcaster.guard(requestId, "settings_list_result") {
       webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.SettingsListResult(
           timestamp = System.currentTimeMillis(),
@@ -4536,8 +4540,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           error = error,
         )
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting settings_list_result", e)
     }
   }
 
@@ -4559,7 +4561,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     totalTimeMs: Long,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
-    try {
+    resultBroadcaster.guard(requestId, "installed_packages_result") {
       webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.InstalledPackagesResult(
           timestamp = System.currentTimeMillis(),
@@ -4571,8 +4573,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           error = error,
         )
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting installed_packages_result", e)
     }
   }
 
@@ -4595,7 +4595,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     totalTimeMs: Long,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
-    try {
+    resultBroadcaster.guard(requestId, "package_info_result") {
       webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.PackageInfoResult(
           timestamp = System.currentTimeMillis(),
@@ -4617,8 +4617,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           error = error,
         )
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting package_info_result", e)
     }
   }
 
@@ -4631,7 +4629,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     totalTimeMs: Long,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
-    try {
+    resultBroadcaster.guard(requestId, "launch_intent_result") {
       webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.LaunchIntentResult(
           timestamp = System.currentTimeMillis(),
@@ -4643,8 +4641,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           error = error,
         )
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting launch_intent_result", e)
     }
   }
 
@@ -4662,7 +4658,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "ca_cert_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"ca_cert_result","timestamp":${System.currentTimeMillis()}""")
@@ -4685,8 +4681,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted ca_cert_result to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting ca_cert_result", e)
     }
   }
 
@@ -4703,7 +4697,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "device owner status result") {
       val success = error == null
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
@@ -4731,8 +4725,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted device_owner_status_result to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting device owner status result", e)
     }
   }
 
@@ -4747,7 +4739,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "permission result") {
       val success = result.error == null
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
@@ -4778,8 +4770,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted permission result to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting permission result", e)
     }
   }
 
@@ -4796,7 +4786,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "swipe result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"swipe_result","timestamp":${System.currentTimeMillis()}""")
@@ -4818,8 +4808,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted swipe result to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting swipe result", e)
     }
   }
 
@@ -4836,7 +4824,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "drag result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"drag_result","timestamp":${System.currentTimeMillis()}""")
@@ -4858,8 +4846,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted drag result to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting drag result", e)
     }
   }
 
@@ -4875,7 +4861,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "tap coordinates result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"tap_coordinates_result","timestamp":${System.currentTimeMillis()}""")
@@ -4897,8 +4883,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted tap coordinates result to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting tap coordinates result", e)
     }
   }
 
@@ -4915,7 +4899,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "pinch result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"pinch_result","timestamp":${System.currentTimeMillis()}""")
@@ -4937,8 +4921,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted pinch result to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting pinch result", e)
     }
   }
 
@@ -5402,7 +5384,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "highlight response") {
       val errorJson = jsonCompact.encodeToString<String?>(error)
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
@@ -5422,8 +5404,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted highlight response to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting highlight response", e)
     }
   }
 
@@ -5438,7 +5418,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "current focus result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"current_focus_result","timestamp":${System.currentTimeMillis()}""")
@@ -5462,8 +5442,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted current focus result to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting current focus result", e)
     }
   }
 
@@ -5478,7 +5456,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "current focus error") {
       webSocketServer.broadcast(
         buildString {
           append("""{"type":"current_focus_result","timestamp":${System.currentTimeMillis()}""")
@@ -5494,8 +5472,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted current focus error to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting current focus error", e)
     }
   }
 
@@ -5510,7 +5486,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "traversal order result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"traversal_order_result","timestamp":${System.currentTimeMillis()}""")
@@ -5534,8 +5510,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted traversal order result to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting traversal order result", e)
     }
   }
 
@@ -5550,7 +5524,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "traversal order error") {
       webSocketServer.broadcast(
         buildString {
           append("""{"type":"traversal_order_result","timestamp":${System.currentTimeMillis()}""")
@@ -5566,8 +5540,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted traversal order error to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting traversal order error", e)
     }
   }
 
@@ -5717,7 +5689,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "preference files") {
       val message = buildString {
         append("""{"type":"preference_files","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5735,8 +5707,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
       webSocketServer.broadcast(message)
       Log.d(TAG, "Broadcasted preference files to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting preference files", e)
     }
   }
 
@@ -5752,7 +5722,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "preferences") {
       val message = buildString {
         append("""{"type":"preferences","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5771,8 +5741,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
       webSocketServer.broadcast(message)
       Log.d(TAG, "Broadcasted preferences to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting preferences", e)
     }
   }
 
@@ -5788,7 +5756,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "subscribe storage result") {
       val message = buildString {
         append("""{"type":"subscribe_storage_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5812,8 +5780,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted subscribe storage result to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting subscribe storage result", e)
     }
   }
 
@@ -5828,7 +5794,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "unsubscribe storage result") {
       val message = buildString {
         append("""{"type":"unsubscribe_storage_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5844,8 +5810,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted unsubscribe storage result to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting unsubscribe storage result", e)
     }
   }
 
@@ -5862,7 +5826,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "get preference result") {
       val message = buildString {
         append("""{"type":"get_preference_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5893,8 +5857,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted get preference result to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting get preference result", e)
     }
   }
 
@@ -5910,7 +5872,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "set preference result") {
       val message = buildString {
         append("""{"type":"set_preference_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5931,8 +5893,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted set preference result to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting set preference result", e)
     }
   }
 
@@ -5948,7 +5908,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "remove preference result") {
       val message = buildString {
         append("""{"type":"remove_preference_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5969,8 +5929,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted remove preference result to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting remove preference result", e)
     }
   }
 
@@ -5985,7 +5943,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    try {
+    resultBroadcaster.guard(requestId, "clear preferences result") {
       val message = buildString {
         append("""{"type":"clear_preferences_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -6005,8 +5963,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted clear preferences result to ${webSocketServer.getConnectionCount()} clients",
       )
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting clear preferences result", e)
     }
   }
 

@@ -5,6 +5,18 @@ import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
+import { defaultIdGenerator } from "../utils/IdGenerator";
+
+/**
+ * A per-process-instance nonce written into every migration lock this process
+ * takes. Generated ONCE at module load (so every generation within one process
+ * shares it), unique per process start (a crashed prior incarnation, even after
+ * PID recycling, had a different one). This lets {@link FileMigrationLock}
+ * distinguish a lock still held by a LIVE in-flight run of this process — which an
+ * in-process same-path reopen must wait for — from a genuine stale leak to reclaim
+ * (issue #2947). See `ownerToken` in `src/utils/fileLock.ts`.
+ */
+const PROCESS_MIGRATION_TOKEN = defaultIdGenerator.next();
 
 /**
  * Cross-process lock guarding {@link runMigrations}.
@@ -58,6 +70,13 @@ export interface FileMigrationLockOptions {
   isProcessRunning?: (pid: number) => boolean;
   /** Owner pid written into the lock file (injectable for tests). */
   pid?: number;
+  /**
+   * Per-process-instance token distinguishing a lock held by a live in-flight run
+   * of THIS process from a recycled-PID leak (issue #2947). Defaults to the shared
+   * {@link PROCESS_MIGRATION_TOKEN} so every generation in one process agrees;
+   * injectable for tests.
+   */
+  ownerToken?: string;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 100;
@@ -78,6 +97,7 @@ export class FileMigrationLock implements MigrationLock {
   private readonly timeoutMs: number;
   private readonly isProcessRunning: ((pid: number) => boolean) | undefined;
   private readonly pid: number;
+  private readonly ownerToken: string;
 
   constructor(
     private readonly lockFilePath: string,
@@ -90,6 +110,7 @@ export class FileMigrationLock implements MigrationLock {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_MIGRATION_LOCK_TIMEOUT_MS;
     this.isProcessRunning = options.isProcessRunning;
     this.pid = options.pid ?? process.pid;
+    this.ownerToken = options.ownerToken ?? PROCESS_MIGRATION_TOKEN;
   }
 
   async acquire(): Promise<void> {
@@ -123,11 +144,14 @@ export class FileMigrationLock implements MigrationLock {
     return tryAcquireExclusiveLock(this.lockFilePath, {
       pid: this.pid,
       isProcessRunning: this.isProcessRunning,
-      // The migration run is a per-process singleton (`migrationsPromise` in
-      // database.ts), so a lock file bearing our own PID can only be a stale leak
-      // from a crashed prior incarnation whose PID the OS recycled — reclaim it
-      // rather than hang for the full timeout.
+      // A lock file bearing our own PID is normally a stale leak from a crashed
+      // prior incarnation whose PID the OS recycled — reclaim it rather than hang
+      // for the full timeout. But an in-process same-path reopen while a prior
+      // generation's migration is still in flight would ALSO see our own PID; the
+      // owner token below tells the two apart so we wait for a live sibling run
+      // instead of stealing its lock and running two migrators on one DB (#2947).
       reclaimOwnPid: true,
+      ownerToken: this.ownerToken,
     });
   }
 }

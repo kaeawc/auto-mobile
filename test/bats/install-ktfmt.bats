@@ -38,10 +38,23 @@ STUB
 exit 0
 STUB
 
-  # java present and new enough for install_manual's Java >= 11 gate.
+  # java stub models BOTH uses:
+  #  * `java -version`  -> JDK banner on stderr (install_manual's Java >= 11 gate)
+  #  * `java -jar <ktfmt.jar> --version` -> the pinned wrapper's output. After the
+  #    fallback the real ~/.local/bin/ktfmt wrapper (which shells out to `java
+  #    -jar`) is what resolves, so this is what verify_installation sees. Defaults
+  #    to the pin; WRAPPER_VERSION overrides it to model a wrong/corrupt JAR.
   cat > "$STUB_BIN/java" <<'STUB'
 #!/usr/bin/env bash
-echo 'openjdk version "21.0.2" 2024-01-16' >&2
+if [[ " $* " == *" --version "* ]]; then
+  echo "ktfmt version ${WRAPPER_VERSION:-0.64}"
+  exit 0
+fi
+if [[ " $* " == *" -version "* ]]; then
+  echo 'openjdk version "21.0.2" 2024-01-16' >&2
+  exit 0
+fi
+exit 0
 STUB
 
   # curl: log the URL, write a non-empty file to the -o target, succeed.
@@ -58,19 +71,13 @@ echo "$*" >> "${CURL_LOG:-/dev/null}"
 exit 0
 STUB
 
-  # ktfmt --version reports the version brew "installed" (default 0.64 = matches).
-  # Once install_manual has written the pinned wrapper (~/.local/bin/ktfmt), model
-  # that the pinned 0.64 now resolves on PATH -- unless KTFMT_STUB_SHADOW is set,
-  # which models a drifted brew binary still shadowing ~/.local/bin (so verify
-  # must catch the mismatch).
+  # brew's ktfmt (on PATH via Homebrew) reports BREW_KTFMT_VERSION. This is what
+  # resolves BEFORE the fallback; after the fallback the installer prepends
+  # ~/.local/bin so the real pinned wrapper (-> java stub) resolves instead.
   cat > "$STUB_BIN/ktfmt" <<'STUB'
 #!/usr/bin/env bash
 if [[ " $* " == *" --version "* ]]; then
-  if [[ -f "$HOME/.local/bin/ktfmt" && -z "${KTFMT_STUB_SHADOW:-}" ]]; then
-    echo "ktfmt version 0.64"
-  else
-    echo "ktfmt version ${BREW_KTFMT_VERSION:-0.64}"
-  fi
+  echo "ktfmt version ${BREW_KTFMT_VERSION:-0.64}"
   exit 0
 fi
 exit 0
@@ -91,7 +98,11 @@ teardown() {
   [ ! -s "$CURL_LOG" ]
 }
 
-@test "macOS: brew version != pin falls back to the pinned manual JAR (honors pin)" {
+@test "macOS: brew version != pin falls back to the pinned JAR and makes it resolve (honors pin)" {
+  # brew ships 0.66; ~/.local/bin is NOT pre-seeded on PATH (STUB_BIN, where
+  # brew's ktfmt lives, is). If the installer didn't prepend ~/.local/bin +
+  # clear the command hash, verify would still resolve brew's 0.66 and fail --
+  # so a passing exit here proves the PATH/hash fix works.
   run env BREW_KTFMT_VERSION="0.66" bash "$SCRIPT"
   [ "$status" -eq 0 ]
   # Fallback fetched the pinned fat JAR from the v0.64 GitHub release.
@@ -103,14 +114,15 @@ teardown() {
   [[ "$output" == *"ktfmt 0.64 is installed"* ]]
 }
 
-@test "macOS: install FAILS loudly if a drifted brew ktfmt still shadows the pin on PATH" {
-  # Fallback installs the pinned JAR, but a drifted brew binary still resolves
-  # first on PATH -- verify_installation must catch it, not print success.
-  run env BREW_KTFMT_VERSION="0.66" KTFMT_STUB_SHADOW="1" bash "$SCRIPT"
+@test "macOS: install FAILS loudly if the resolved ktfmt still isn't the pin (verify guard)" {
+  # Defense in depth: even after the fallback, if the ktfmt that resolves reports
+  # a non-pin version (e.g. a wrong/corrupt JAR), verify_installation must fail
+  # loudly rather than print success. Model it by making the wrapper report 0.66.
+  run env BREW_KTFMT_VERSION="0.66" WRAPPER_VERSION="0.66" bash "$SCRIPT"
   [ "$status" -ne 0 ]
-  # Fallback still ran (pinned JAR fetched), but verification failed on the mismatch.
+  # Fallback still ran (pinned JAR fetched), but verification caught the mismatch.
   [ -s "$CURL_LOG" ]
   [[ "$output" == *"0.66"* ]]
-  [[ "$output" == *"shadowing"* ]]
+  [[ "$output" == *"0.64"* ]]
   [[ "$output" != *"Installation completed successfully"* ]]
 }

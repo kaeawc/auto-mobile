@@ -59,7 +59,19 @@ install_macos() {
         echo -e "${YELLOW}Falling back to the pinned JAR so the pin is honored...${NC}"
         brew unlink ktfmt >/dev/null 2>&1 || true
         install_manual
-        return $?
+        local manual_status=$?
+
+        # install_manual writes the pinned wrapper to ~/.local/bin. Two things
+        # must happen before verify_installation (or any later ktfmt call) or the
+        # pinned install won't actually resolve:
+        #  1. Ensure ~/.local/bin is on PATH for this process -- it is NOT on the
+        #     default macOS PATH, so otherwise the wrapper is invisible.
+        #  2. Clear bash's command hash: the version probe above already ran (and
+        #     hashed) brew's ktfmt, which `brew unlink` just removed, so a stale
+        #     hash entry would keep resolving the deleted binary.
+        export PATH="$HOME/.local/bin:$PATH"
+        hash -r 2>/dev/null || true
+        return "$manual_status"
     else
         echo -e "${YELLOW}Homebrew not found. Install Homebrew first or use manual installation.${NC}"
         echo "To install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
@@ -221,7 +233,7 @@ verify_installation() {
     resolved="$(installed_ktfmt_version)"
     if [[ "$resolved" != "$KTFMT_VERSION" ]]; then
         echo -e "${RED}ktfmt on PATH is '${resolved:-unknown}', but this repo pins '${KTFMT_VERSION}'.${NC}"
-        echo -e "${RED}A drifted ktfmt is shadowing the pinned install. Ensure the pinned ktfmt (\$HOME/.local/bin) precedes it on PATH, or remove the drifted one, then retry.${NC}"
+        echo -e "${RED}The pinned install isn't the one resolving -- a drifted ktfmt is shadowing it on PATH, or the download is wrong. Ensure the pinned ktfmt (\$HOME/.local/bin) precedes any other on PATH, or remove the drifted one, then retry.${NC}"
         return 1
     fi
 

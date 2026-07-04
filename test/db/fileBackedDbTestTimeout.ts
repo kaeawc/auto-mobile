@@ -11,7 +11,8 @@
  * yet far below the point where a genuinely hung run would mask a real bug.
  *
  * One canonical constant (rather than an inline literal per suite) keeps the
- * "why 30s" rationale in a single place and guarantees both suites move
- * together if the bound ever needs revisiting.
+ * "why 30s" rationale in a single place so every file-backed DB lifecycle suite
+ * that opts in (`databaseLazyPath`, `dbWriteBarrierResetOnClose`,
+ * `databaseReset`) moves together if the bound ever needs revisiting.
  */
 export const WINDOWS_FILE_DB_TEST_TIMEOUT_MS = 30_000;

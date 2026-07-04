@@ -105,14 +105,21 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
     expect(reopenedBarrier.isDraining()).toBe(false);
 
     // The core contract: a tracked best-effort write actually runs against the
-    // reopened DB instead of being silently skipped by a latched barrier.
+    // reopened DB instead of being silently skipped by a latched barrier. The
+    // closure issues a REAL query against the reopened connection so this also
+    // proves the awaited reopen migrations left a healthy, queryable schema —
+    // not merely that the migration promise settled (#2896/#2992).
     let ran = false;
-    const result = await reopenedBarrier.track(async () => {
+    const rows = await reopenedBarrier.track(async () => {
       ran = true;
-      return "written";
+      return databaseModule
+        .getDatabase()
+        .selectFrom("tool_calls" as any)
+        .selectAll()
+        .execute();
     });
     expect(ran).toBe(true);
-    expect(result).toBe("written");
+    expect(rows).toEqual([]);
 
     await databaseModule.closeDatabase();
   }, FILE_BACKED_TEST_TIMEOUT_MS);

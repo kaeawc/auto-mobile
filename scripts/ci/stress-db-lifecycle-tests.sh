@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 #
-# Reliability gate for the file-backed DB lifecycle suites that flake on
+# LOCAL ordering-soak for the file-backed DB lifecycle suites that flaked on
 # windows-latest (issue #2992): they open a real temp DB, run migrations on a
 # separate connection, then close/reopen. On Windows the app-connection WAL
-# checkpoint contends with the still-running detached migration connection,
-# producing timeout-shaped failures that rotate between suites run-to-run.
+# checkpoint contended with the still-running detached migration connection,
+# producing timeout-shaped failures that rotated between suites run-to-run.
 #
-# This script runs the two suites repeatedly and fails on the FIRST failing
-# iteration, so a flake that only shows up occasionally is far likelier to be
-# caught locally (and in CI) than a single `bun test` pass. It is the
-# reproducible stand-in for "pass reliably across repeated runs" from the
-# issue's acceptance criteria; it cannot literally reproduce Windows handle
-# semantics on macOS/Linux, but it does exercise the exact open/migrate/
-# close/reopen ordering the fix stabilizes.
+# This runs the two suites repeatedly and fails on the FIRST failing iteration.
+# It is NOT wired into any CI workflow and it CANNOT reproduce the Windows
+# handle/WAL semantics on macOS/Linux — so a green run here is not proof the
+# Windows flake is gone. What it DOES give you locally is repeated exercise of
+# the exact open/migrate/close/reopen ordering the fix stabilizes, catching an
+# ordering regression that a single `bun test` pass could miss. Treat it as a
+# developer aid, not a gate.
 #
 # Usage: scripts/ci/stress-db-lifecycle-tests.sh [iterations]
 #   iterations defaults to 20; override for a longer soak.

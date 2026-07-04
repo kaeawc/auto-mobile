@@ -13,11 +13,14 @@
  * side was changed.
  */
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
 import {
   diffGoldenTables,
+  KOTLIN_TEST_PATH,
   loadCanonicalVectors,
   parseKotlinGoldenTable,
   parseSwiftGoldenTable,
+  SWIFT_TEST_PATH,
   type GoldenVector,
 } from "./pinchGoldenVectors";
 
@@ -84,6 +87,21 @@ describe("pinch golden vector parity (issue #2997)", function() {
 
     const diffs = diffGoldenTables(tampered, canonical);
     expect(diffs.some(d => d.includes("rotationDegrees"))).toBe(true);
+  });
+
+  test("the per-platform math<->literals runtime golden loops still exist", function() {
+    // This guard only proves literals <-> JSON. The other half of the parity chain — that each
+    // platform's endpoint MATH is asserted against those literals — lives in the runtime golden
+    // loops of the platform test files (`computePinchPoints`/`ObjCExceptionCatcher_computePinchPoints`
+    // driving `assertEquals`/`XCTAssertEqual`). If someone deleted those loops but kept the literal
+    // tables, this guard would still pass and the math could silently drift. Assert the
+    // assertion-driving symbols are present so the math<->literals half cannot be quietly neutered.
+    const swiftSource = readFileSync(SWIFT_TEST_PATH, "utf8");
+    const kotlinSource = readFileSync(KOTLIN_TEST_PATH, "utf8");
+    expect(swiftSource).toContain("ObjCExceptionCatcher_computePinchPoints(");
+    expect(swiftSource).toContain("XCTAssertEqual");
+    expect(kotlinSource).toContain("computePinchPoints(");
+    expect(kotlinSource).toContain("assertEquals");
   });
 
   test("the guard ignores finger-label ordering differences (no false drift)", function() {

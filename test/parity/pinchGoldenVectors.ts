@@ -94,8 +94,12 @@ function extractBalanced(
   throw new Error(`unbalanced '${open}${close}' starting at index ${start}`);
 }
 
-/** Every numeric literal in `source`, in order. Handles negatives and decimals; ignores `f`/`.0`
- *  type suffixes because it captures only the numeric core (`0f` -> `0`, `433.9f` -> `433.9`). */
+/** Every numeric literal in `source`, in order. Handles plain integers and decimals, negatives,
+ *  and trailing type suffixes (`0f` -> `0`, `433.9f` -> `433.9`), which is every form the golden
+ *  tables use. Exotic forms the tables never contain (exponent `2e2`, underscore `6_0`, hex
+ *  `0x10`) are deliberately NOT parsed specially: they split into extra tokens and trip the
+ *  `NUMBERS_PER_ROW` alignment check in `rowsFromNumbers`, which fails closed rather than silently
+ *  mis-parsing. */
 function extractNumbers(source: string): number[] {
   const matches = source.match(/-?\d+(?:\.\d+)?/g) ?? [];
   return matches.map(Number);
@@ -139,7 +143,9 @@ export function parseGoldenTable(
   open: string,
   close: string,
 ): GoldenVector[] {
-  const source = readFileSync(filePath, "utf8");
+  // Strip comments BEFORE the balanced-delimiter scan so a stray `[`/`]`/`(`/`)` inside a comment
+  // between the marker and the literal (or within it) can never mis-terminate the walk.
+  const source = stripComments(readFileSync(filePath, "utf8"));
   const markerIndex = source.indexOf(assignmentMarker);
   if (markerIndex < 0) {
     throw new Error(`marker '${assignmentMarker}' not found in ${filePath}`);
@@ -152,7 +158,7 @@ export function parseGoldenTable(
     open,
     close,
   );
-  const numbers = extractNumbers(stripComments(region));
+  const numbers = extractNumbers(region);
   return rowsFromNumbers(numbers, filePath);
 }
 

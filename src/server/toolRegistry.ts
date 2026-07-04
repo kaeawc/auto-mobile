@@ -181,6 +181,10 @@ class ToolRegistryClass {
       const deviceLabel = typeof args.device === "string" ? args.device : undefined;
       const declaredDeviceLabels = Array.isArray(args.devices) ? args.devices : undefined;
       const mcpSessionId = typeof args.__mcpSessionId === "string" ? args.__mcpSessionId : undefined;
+      // Internal tool-to-tool marker (#3053): PlanExecutor sets this on the parsed
+      // params so a plan step's finalized envelope is never diffed/stripped (a
+      // future internal `.observation.viewHierarchy` reader stays correct).
+      const internalCall = args.__internalNoDiff === true;
       let sessionUuid = baseSessionUuid;
       const keepScreenAwake = typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined;
 
@@ -489,11 +493,13 @@ class ToolRegistryClass {
           const baselineStore: ObservationBaselineStore | undefined =
             sessionUuid && DaemonState.getInstance().isInitialized()
               ? {
-                get: uuid => DaemonState.getInstance().getSessionManager().getSessionCache(uuid)?.lastRenderedObservation,
+                // Read via the side-effect-free reader so a diffed action records
+                // session activity once (from the baseline `set`), not twice (#3053).
+                get: uuid => DaemonState.getInstance().getSessionManager().getLastRenderedObservation(uuid),
                 set: (uuid, observation) => DaemonState.getInstance().getSessionManager().setLastRenderedObservation(uuid, observation),
               }
               : undefined;
-          return finalizeToolResponse(response, { name, sessionUuid, baselineStore });
+          return finalizeToolResponse(response, { name, sessionUuid, baselineStore, internal: internalCall });
         } catch (error) {
           if (error instanceof ActionableError) {
             throw error;

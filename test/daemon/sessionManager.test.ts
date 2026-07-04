@@ -448,4 +448,97 @@ describe("SessionManager", () => {
       expect(barrier.trackCalls).toBe(0);
     });
   });
+
+  // Side-effect-free diff-baseline reader (issue #3053 part 3). The
+  // `--actions-diff-observe` baseline store did get (getSessionCache →
+  // recordSessionActivity) + set (updateSessionCache → recordSessionActivity)
+  // = two fire-and-forget activity UPDATEs per diffed action. A dedicated
+  // read-only reader halves that: the read must NOT record activity.
+  describe("getLastRenderedObservation (issue #3053)", () => {
+    function makeObservation(id: string): any {
+      return {
+        updatedAt: 1,
+        screenSize: { width: 1, height: 1 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { packageName: "com.example", hierarchy: { node: { "resource-id": id } } },
+      };
+    }
+
+    // Minimal repo double capturing the fire-and-forget activity writes.
+    function makeRepo(): { repo: any; activity: string[] } {
+      const activity: string[] = [];
+      const repo = {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(sessionId: string): Promise<void> { activity.push(sessionId); },
+        async markReleased(): Promise<void> {},
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      };
+      return { repo, activity };
+    }
+
+    test("EC3.1: returns the observation stored via setLastRenderedObservation", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android");
+      const obs = makeObservation("root");
+      sessionManager.setLastRenderedObservation("s1", obs);
+
+      expect(sessionManager.getLastRenderedObservation("s1")).toEqual(obs);
+    });
+
+    test("EC3.2: the read records NO session activity, unlike getSessionCache", async () => {
+      const { repo, activity } = makeRepo();
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      try {
+        await mgr.createSession("s1", "emulator-5554", "android");
+        mgr.setLastRenderedObservation("s1", makeObservation("root"));
+        await Promise.resolve();
+        const activityAfterSet = activity.length;
+
+        // The side-effect-free reader must not append any activity write.
+        mgr.getLastRenderedObservation("s1");
+        await Promise.resolve();
+        expect(activity.length).toBe(activityAfterSet);
+
+        // Contrast: getSessionCache DOES record activity (the behavior we avoid).
+        mgr.getSessionCache("s1");
+        await Promise.resolve();
+        expect(activity.length).toBe(activityAfterSet + 1);
+      } finally {
+        mgr.stopCleanupTimer();
+      }
+    });
+
+    test("EC3.2: a full baseline-store cycle (read + write) records activity exactly once", async () => {
+      // The #3053 defect: the diff baseline did get (→recordActivity) +
+      // set (→recordActivity) = TWO activity UPDATEs per diffed action. With the
+      // side-effect-free reader, one non-observe action's baseline read + update
+      // must record activity exactly once (the write), proving the halving.
+      const { repo, activity } = makeRepo();
+      const barrier = new FakeDbWriteBarrier();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      try {
+        await mgr.createSession("s1", "emulator-5554", "android");
+        await Promise.resolve();
+        const before = activity.length;
+
+        // Model one diffed action: read the baseline, then update it.
+        mgr.getLastRenderedObservation("s1");
+        mgr.setLastRenderedObservation("s1", makeObservation("root"));
+        await Promise.resolve();
+
+        expect(activity.length).toBe(before + 1);
+      } finally {
+        mgr.stopCleanupTimer();
+      }
+    });
+
+    test("EC3.3: returns undefined for an unknown session without throwing", () => {
+      expect(sessionManager.getLastRenderedObservation("missing")).toBeUndefined();
+    });
+
+    test("EC3.3: returns undefined when no observation was ever stored", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android");
+      expect(sessionManager.getLastRenderedObservation("s1")).toBeUndefined();
+    });
+  });
 });

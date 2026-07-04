@@ -32,6 +32,18 @@ export interface FinalizeToolResponseContext {
   name: string;
   sessionUuid?: string;
   baselineStore?: ObservationBaselineStore;
+  /**
+   * Internal tool-to-tool invocation guard (issue #3053). PlanExecutor calls the
+   * wrapped `tool.handler` (so this hook runs) with an injected `sessionUuid`, so a
+   * plan step's envelope would otherwise be diffed (`--actions-diff-observe`) or
+   * stripped (`--actions-no-observe`). A current or future internal consumer that
+   * reads `.observation.viewHierarchy` off that finalized envelope must always find
+   * the full observation. When `true`, finalize emits the full sanitized
+   * observation regardless of the action-output flags — never a diff, never
+   * stripped — and never touches the agent-facing diff baseline. Sanitization
+   * (#2758) still applies; only the agent-facing diff/strip is suppressed.
+   */
+  internal?: boolean;
 }
 
 /**
@@ -93,10 +105,14 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     compact: serverConfig.isObserveResultCompactEnabled(),
   };
 
-  const noObserveEnabled = serverConfig.isActionsNoObserveEnabled();
+  // Internal tool-to-tool calls (#3053) always get the full sanitized observation:
+  // the diff/strip transforms are for the agent-facing wire only, so an internal
+  // consumer reading `.observation.viewHierarchy` off a finalized step envelope is
+  // never handed a diff or a stripped payload.
+  const noObserveEnabled = serverConfig.isActionsNoObserveEnabled() && !ctx.internal;
   // Precedence (#3026 / #2762): `--actions-no-observe` strips the embedded
   // observation entirely, so `--actions-diff-observe` is moot when both are on.
-  const diffActive = serverConfig.isActionsDiffObserveEnabled() && !noObserveEnabled;
+  const diffActive = serverConfig.isActionsDiffObserveEnabled() && !noObserveEnabled && !ctx.internal;
   const canDiff = diffActive && !!ctx.sessionUuid && !!ctx.baselineStore;
   const isObserveTool = ctx.name === "observe";
 

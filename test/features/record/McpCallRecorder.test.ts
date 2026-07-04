@@ -166,6 +166,14 @@ describe("stripInternalParams", () => {
     const result = stripInternalParams(args);
     expect(result).toEqual(args);
   });
+
+  // Issue #3053: PlanExecutor marks internal tool-to-tool calls with
+  // `__internalNoDiff` so their finalized envelope is never diffed/stripped. It is
+  // an injected internal param and must not leak into recorded plan steps.
+  test("strips the __internalNoDiff plan-step marker (#3053)", () => {
+    const result = stripInternalParams({ text: "Go", __internalNoDiff: true });
+    expect(result).toEqual({ text: "Go" });
+  });
 });
 
 describe("PLAN_RELEVANT_TOOLS", () => {

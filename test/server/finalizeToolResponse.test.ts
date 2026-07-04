@@ -667,4 +667,121 @@ describe("finalizeToolResponse", () => {
       expect(finalized.structuredContent).toEqual(payload);
     });
   });
+
+  // Internal tool-to-tool no-diff guard (issue #3053 part 2). PlanExecutor calls
+  // the wrapped tool.handler (so finalize runs) with an injected sessionUuid, so a
+  // plan step's envelope would get diffed / stripped when the flags are on. Reading
+  // `.observation.viewHierarchy` off a diffed or stripped envelope would silently
+  // break. `ctx.internal` forces the full sanitized observation regardless of flag.
+  describe("internal no-diff guard (#3053)", () => {
+    let originalDiff: boolean;
+    let originalNoObserve: boolean;
+
+    function sameScreenObserve(): ObserveResult {
+      return {
+        ...makeObserveResult(),
+        activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+        viewHierarchy: {
+          packageName: "com.example",
+          hierarchy: {
+            node: {
+              "resource-id": "com.example:id/root",
+              "content-desc": "keep-me",
+              "node": [{ "resource-id": "com.example:id/child", "text": "Hello" } as any],
+            } as any,
+          },
+        },
+      } as ObserveResult;
+    }
+
+    function makeStore(): { store: { get: (u: string) => ObserveResult | undefined; set: (u: string, o: ObserveResult) => void }; map: Map<string, ObserveResult> } {
+      const map = new Map<string, ObserveResult>();
+      return { map, store: { get: (u: string) => map.get(u), set: (u: string, o: ObserveResult) => { map.set(u, o); } } };
+    }
+
+    beforeEach(() => {
+      originalDiff = serverConfig.isActionsDiffObserveEnabled();
+      originalNoObserve = serverConfig.isActionsNoObserveEnabled();
+    });
+
+    afterEach(() => {
+      serverConfig.setActionsDiffObserveEnabled(originalDiff);
+      serverConfig.setActionsNoObserveEnabled(originalNoObserve);
+    });
+
+    test("EC2.1: internal call emits the full observation (no diff) even with a same-screen baseline", () => {
+      serverConfig.setActionsDiffObserveEnabled(true);
+      serverConfig.setActionsNoObserveEnabled(false);
+      const { store, map } = makeStore();
+      // Seed a same-screen baseline so a non-internal call WOULD diff.
+      map.set("s1", sameScreenObserve());
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: true }
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined(); // full observation, not a diff
+      expect(obsSc.viewHierarchy).toBeDefined();
+      // A future internal consumer can still read the hierarchy off the envelope.
+      expect(obsSc.viewHierarchy.hierarchy.node["resource-id"]).toBe("com.example:id/root");
+    });
+
+    test("EC2.1: internal call leaves the diff baseline untouched", () => {
+      serverConfig.setActionsDiffObserveEnabled(true);
+      serverConfig.setActionsNoObserveEnabled(false);
+      const { store, map } = makeStore();
+      map.set("s1", sameScreenObserve());
+      const before = map.get("s1");
+
+      finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: true }
+      );
+
+      // Internal calls neither read a diff nor advance the agent-facing baseline.
+      expect(map.get("s1")).toBe(before);
+    });
+
+    test("EC2.2: internal call preserves the observation even with --actions-no-observe on", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      serverConfig.setActionsDiffObserveEnabled(false);
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1", internal: true }
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc).toBeDefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+    });
+
+    test("EC2.2: internal call still sanitizes the observation (view-id dedup applies)", () => {
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
+        { name: "tapOn", sessionUuid: "s1", internal: true }
+      );
+      const node = (finalized.structuredContent as any).observation.viewHierarchy.hierarchy.node;
+      // Sanitization (issue #2758) is independent of the diff guard.
+      expect(node["view-id"]).toBeUndefined();
+      expect(node.clickable).toBeUndefined();
+    });
+
+    test("non-internal same-screen call still diffs (guard is opt-in)", () => {
+      serverConfig.setActionsDiffObserveEnabled(true);
+      serverConfig.setActionsNoObserveEnabled(false);
+      const { store, map } = makeStore();
+      map.set("s1", sameScreenObserve());
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: false }
+      );
+
+      expect((finalized.structuredContent as any).observation.isDiff).toBe(true);
+    });
+  });
 });

@@ -300,6 +300,21 @@ export interface DiffObserveConfig {
    * `DIFF_ELEMENT_FIELDS`. Emitted into the same `fields` map as scalars.
    */
   elementFields?: readonly string[];
+  /**
+   * Content-hash node identity (issue #3053). Default **on**. The positional
+   * `pathKey` is sensitive to reindexing: a scroll or a mid-list insert shifts
+   * every following node's bounds/sibling index, so whole rows surface as
+   * remove+add. When on, after positional matching, a leftover *removed* node and
+   * a leftover *added* node are re-paired as a single `changed` entry when they
+   * share a stable content key (`resource-id / view-id / content-desc / text` —
+   * NO bounds, NO sibling index) that is **unique among the leftovers on both
+   * sides**. Uniqueness-on-both-sides guarantees exactly one candidate each side,
+   * so distinct content can never false-merge; an empty content key (no stable
+   * identity) never re-pairs. Purely additive — it only re-pairs nodes positional
+   * matching already left unpaired, so cross-subtree collisions stay disambiguated
+   * by the path key. Set `false` for exact positional-only behavior.
+   */
+  contentIdentity?: boolean;
 }
 
 /**
@@ -512,6 +527,92 @@ function diffAttributes(
   return changes;
 }
 
+/**
+ * A node's *stable content* identity key (issue #3053): `resource-id / view-id /
+ * content-desc / text`, NUL-joined. Deliberately excludes `bounds` and sibling
+ * index (the fields a scroll/insert perturbs) so a node keeps this key when it
+ * only moves. Returns `null` when the node carries no stable identity at all (all
+ * four empty) — an empty key is not identity and must never be used to re-pair.
+ */
+function contentIdentityKey(attrs: Record<string, unknown>): string | null {
+  const resourceId = String(attrs["resource-id"] ?? "");
+  const viewId = String(attrs["view-id"] ?? "");
+  const contentDesc = String(attrs["content-desc"] ?? "");
+  const text = String(attrs["text"] ?? "");
+  if (resourceId === "" && viewId === "" && contentDesc === "" && text === "") {
+    return null;
+  }
+  // NUL-joined: `text`/`content-desc` can contain spaces, so a space separator
+  // could let a value straddle a field boundary and collide; NUL cannot appear
+  // in these attribute strings.
+  return [resourceId, viewId, contentDesc, text].join(" ");
+}
+
+/** Index leftover diff nodes by their content-identity key, dropping keyless nodes. */
+function indexByContentKey(nodes: ObserveDiffNode[]): Map<string, number[]> {
+  const byKey = new Map<string, number[]>();
+  nodes.forEach((node, index) => {
+    const key = contentIdentityKey(node.attributes);
+    if (key === null) {
+      return;
+    }
+    const bucket = byKey.get(key);
+    if (bucket) {
+      bucket.push(index);
+    } else {
+      byKey.set(key, [index]);
+    }
+  });
+  return byKey;
+}
+
+/**
+ * Re-pair leftover remove+add nodes that share a stable content key (issue #3053).
+ * A leftover *removed* and *added* node are collapsed into one `changed` entry when
+ * their content key is unique among the leftovers on BOTH sides — exactly one
+ * candidate each side, so distinct content can never false-merge. This turns a
+ * scroll/insert (position shifted, identity intact) into a small bounds delta
+ * instead of remove+add churn. Purely additive: only nodes positional matching
+ * already left unpaired are considered. `changed` is appended in place; the pruned
+ * `added`/`removed` are returned. A re-paired pair with identical attributes emits
+ * no `changed` entry (a pure sibling-index move with no visible change).
+ */
+function repairByContentIdentity(
+  added: ObserveDiffNode[],
+  removed: ObserveDiffNode[],
+  changed: ObserveDiffNodeChange[]
+): { added: ObserveDiffNode[]; removed: ObserveDiffNode[] } {
+  const addedByKey = indexByContentKey(added);
+  const removedByKey = indexByContentKey(removed);
+  const consumedAdded = new Set<number>();
+  const consumedRemoved = new Set<number>();
+
+  for (const [key, addedIndices] of addedByKey) {
+    const removedIndices = removedByKey.get(key);
+    // Require a unique candidate on both sides; ambiguous (duplicate) content
+    // keys stay as positional remove+add so interchangeable cells never mis-pair.
+    if (!removedIndices || addedIndices.length !== 1 || removedIndices.length !== 1) {
+      continue;
+    }
+    const addedNode = added[addedIndices[0]];
+    const removedNode = removed[removedIndices[0]];
+    consumedAdded.add(addedIndices[0]);
+    consumedRemoved.add(removedIndices[0]);
+    const attrChanges = diffAttributes(removedNode.attributes, addedNode.attributes);
+    if (Object.keys(attrChanges).length > 0) {
+      changed.push({ key: addedNode.key, changes: attrChanges });
+    }
+  }
+
+  if (consumedAdded.size === 0 && consumedRemoved.size === 0) {
+    return { added, removed };
+  }
+  return {
+    added: added.filter((_, index) => !consumedAdded.has(index)),
+    removed: removed.filter((_, index) => !consumedRemoved.has(index)),
+  };
+}
+
 /** Group flattened nodes by their positional `pathKey`, preserving encounter order. */
 function groupByKey(nodes: FlatObserveNode[]): Map<string, FlatObserveNode[]> {
   const map = new Map<string, FlatObserveNode[]>();
@@ -585,7 +686,19 @@ export function diffObserveResult(
     }
   }
 
-  const diff: ObserveDiff = { isDiff: true, added, removed, changed };
+  // Content-hash node identity (issue #3053, default on): re-pair leftover
+  // remove+add nodes that share a unique stable content key into a `changed`
+  // delta, collapsing scroll/insert churn. Positional matching above already
+  // disambiguated cross-subtree collisions, so this only touches true leftovers.
+  let finalAdded = added;
+  let finalRemoved = removed;
+  if (cfg?.contentIdentity !== false) {
+    const repaired = repairByContentIdentity(added, removed, changed);
+    finalAdded = repaired.added;
+    finalRemoved = repaired.removed;
+  }
+
+  const diff: ObserveDiff = { isDiff: true, added: finalAdded, removed: finalRemoved, changed };
 
   const scalarFields = cfg?.scalarFields ?? DIFF_SCALAR_FIELDS;
   const elementFields = cfg?.elementFields ?? DIFF_ELEMENT_FIELDS;

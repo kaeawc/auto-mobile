@@ -144,10 +144,14 @@ describe("AndroidCtrlProxyClient", function() {
   // getInstance(); the default getDatabase() singleton runs migrations + file IO on
   // real wall-clock time, so its async writes never settle within these tests'
   // microtask-only drains and race the assertions (issue #3063). An in-memory DB has
-  // no migration gate and no file IO, so recordNavigationEvent's writes commit within
-  // a deterministic number of setImmediate/microtask turns. Both repositories share
-  // the one connection to satisfy NavigationGraphManager's shared-connection
-  // precondition. Callers must destroy the returned db and resetInstance() in cleanup.
+  // no migration gate and no file IO, so recordNavigationEvent's *graph* writes — the
+  // ones that assign currentScreen, which the assertions read — commit within a
+  // deterministic number of setImmediate/microtask turns. (recordNavigationEvent's
+  // post-commit fire-and-forget TelemetryRecorder write still targets the real DB, but
+  // it runs after currentScreen is assigned and is never awaited, so it cannot affect
+  // determinism here.) Both repositories share the one connection to satisfy
+  // NavigationGraphManager's shared-connection precondition. Callers must destroy the
+  // returned db and resetInstance() in cleanup.
   const installInMemoryNavManager = async (): Promise<{
     navManager: NavigationGraphManager;
     navDb: Kysely<Database>;

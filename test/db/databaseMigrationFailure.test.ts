@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { removeTempDbDir } from "./tempDbDir";
+import { importFreshDatabaseModule, restoreEnv, snapshotEnv } from "./freshDatabaseModule";
 
 /**
  * Verifies the cached-error migration contract that issue #2784 depends on and
@@ -20,28 +21,20 @@ import { removeTempDbDir } from "./tempDbDir";
  * instance so the module globals are isolated from other tests.
  */
 describe("database startup migration failure contract", () => {
-  const originalDbPath = process.env.AUTOMOBILE_DB_PATH;
   let tempDir: string | undefined;
+  let envSnapshot: NodeJS.ProcessEnv;
 
-  function restore(key: string, value: string | undefined): void {
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
+  beforeEach(() => {
+    envSnapshot = snapshotEnv();
+  });
 
   afterEach(async () => {
-    restore("AUTOMOBILE_DB_PATH", originalDbPath);
+    restoreEnv(envSnapshot);
     if (tempDir) {
       await removeTempDbDir(tempDir);
       tempDir = undefined;
     }
   });
-
-  async function importFreshDatabaseModule() {
-    return import(`../../src/db/database.ts?migration-failure-test=${Date.now()}-${Math.random()}`);
-  }
 
   test("ensureMigrations rethrows the cached startup error without floating a rejection", async () => {
     // Point the DB path at a directory so opening the sqlite file fails.

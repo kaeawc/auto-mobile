@@ -490,6 +490,35 @@ class BroadcastGuardAdoptionTest {
   }
 
   @Test
+  fun `flags a swallow whose catch only re-broadcasts an uncorrelated push event`() {
+    // A catch that broadcasts a push event (`broadcast*Event/Update/Change`, no requestId) does not
+    // surface a correlated error — the awaiting request still hangs, so it must be flagged (Codex).
+    val src =
+      """
+      class Fake {
+        private suspend fun broadcastFooResult(requestId: String?) {
+          resultBroadcaster.guard(requestId, "foo_result") {
+            try {
+              webSocketServer.broadcast("payload")
+            } catch (e: Exception) {
+              broadcastNavigationEvent(currentEvent())
+              Log.e(TAG, "swallowed", e)
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertEquals(
+      listOf(BroadcastGuardScanner.Kind.SWALLOW_IN_BROADCAST to "broadcastFooResult"),
+      result.violations.map { it.kind to it.symbol },
+    )
+  }
+
+  @Test
   fun `handles string interpolation nesting a string that contains a brace without desyncing`() {
     // `"a ${f("}")}"` is valid, brace-balanced Kotlin, but a masker that ignores ${...} would let
     // the inner quote close the outer string and expose a stray brace, mis-slicing bodies. The
@@ -597,11 +626,17 @@ object BroadcastGuardScanner {
   // block — proving the guard is merely *mentioned* is not enough (a token guard call with the real
   // broadcast outside it would still hang; issue #3085 regression form).
   private val BROADCAST_CALL = Regex("""webSocketServer\.broadcast""")
-  // `throw` is word-bounded so a `throwable` local doesn't read as a rethrow. Surfacing requires an
-  // actual `broadcast*(` call (an error frame), not a bare `broadcast` substring — an unrelated
-  // `broadcastCounter.foo()` identifier must not launder a swallow.
+  // `throw` is word-bounded so a `throwable` local doesn't read as a rethrow.
   private val RETHROW = Regex("""\bthrow\b""")
-  private val SURFACING_BROADCAST = Regex("""broadcast\w*\s*\(""")
+  // Surfacing requires an actual `broadcast*(` call, not a bare `broadcast` substring — an
+  // unrelated
+  // `broadcastCounter.foo()` identifier must not launder a swallow …
+  private val BROADCAST_CALL_TOKEN = Regex("""broadcast\w*\s*\(""")
+  // … and the call must be a *correlated* result/error broadcast, not a push-event broadcaster
+  // (`broadcast*Event/Update/Change`, which carries no requestId). A catch that only re-broadcasts
+  // an uncorrelated event still leaves the awaiting request to hang, so it must not count as
+  // surfaced. `webSocketServer.broadcast(` (token `broadcast(`) is correlated in this context.
+  private val EVENT_BROADCAST_TOKEN = Regex("""broadcast\w*(?:Event|Update|Change)\s*\(""")
 
   fun scan(source: String): ScanResult {
     // `code` masks all string/char literal contents and comments with spaces (newlines preserved)
@@ -699,8 +734,9 @@ object BroadcastGuardScanner {
       if (blockOpen < 0) continue
       val blockClose = matchBrace(region, blockOpen)
       val catchBody = region.substring(blockOpen, blockClose)
-      val surfaces =
-        RETHROW.containsMatchIn(catchBody) || SURFACING_BROADCAST.containsMatchIn(catchBody)
+      val surfacesViaBroadcast =
+        BROADCAST_CALL_TOKEN.findAll(catchBody).any { !EVENT_BROADCAST_TOKEN.matches(it.value) }
+      val surfaces = RETHROW.containsMatchIn(catchBody) || surfacesViaBroadcast
       if (!surfaces) offsets.add(c.range.first)
     }
     return offsets

@@ -70,6 +70,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
 
   const cfg: SanitizeObserveConfig = {
     dropElements: serverConfig.isObserveResultDropElementsEnabled(),
+    compact: serverConfig.isObserveResultCompactEnabled(),
   };
 
   // Locate the ObserveResult: the payload itself for `observe`, else `.observation`.

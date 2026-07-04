@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.desktop.core.layout.UIElementInfo
 import java.util.Base64
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -132,6 +133,17 @@ class RealLayoutDataSource(
         )
       is JsonPrimitive ->
         boundsElement.contentOrNull?.let { parseBoundsString(it) } ?: ElementBounds(0, 0, 0, 0)
+      // Compact form emitted by the MCP server's --observe-result-compact flag:
+      // bounds is the positional tuple [left, top, right, bottom].
+      is JsonArray ->
+        if (boundsElement.size == 4)
+          ElementBounds(
+            left = (boundsElement[0] as? JsonPrimitive)?.intOrNull ?: 0,
+            top = (boundsElement[1] as? JsonPrimitive)?.intOrNull ?: 0,
+            right = (boundsElement[2] as? JsonPrimitive)?.intOrNull ?: 0,
+            bottom = (boundsElement[3] as? JsonPrimitive)?.intOrNull ?: 0,
+          )
+        else ElementBounds(0, 0, 0, 0)
       else -> ElementBounds(0, 0, 0, 0)
     }
   }

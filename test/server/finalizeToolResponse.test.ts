@@ -257,6 +257,22 @@ describe("finalizeToolResponse", () => {
     expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
   });
 
+  test("EC-C: compact flattens bounds on an action's nested .observation (tapOn path)", () => {
+    serverConfig.setObserveResultCompactEnabled(true);
+    const response = createStructuredToolResponse({ success: true, observation: makeObserveResultWithBounds() });
+    const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
+
+    const obsSc = (finalized.structuredContent as any).observation;
+    expect(obsSc.viewHierarchy.hierarchy.node.bounds).toEqual([0, 0, 1080, 1920]);
+    expect(obsSc.viewHierarchy.hierarchy.node.node[0].bounds).toEqual([10, 20, 30, 40]);
+    expect((finalized.structuredContent as any).success).toBe(true);
+
+    // Text mirrors the sanitized structuredContent exactly on the .observation branch too.
+    const parsed = JSON.parse(finalized.content[0].text);
+    expect(parsed.observation.viewHierarchy.hierarchy.node.bounds).toEqual([0, 0, 1080, 1920]);
+    expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+  });
+
   test("EC-C: compact gate off keeps object-shaped bounds (today's shape)", () => {
     serverConfig.setObserveResultCompactEnabled(false);
     const finalized = finalizeToolResponse(

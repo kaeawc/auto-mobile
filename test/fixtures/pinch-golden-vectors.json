@@ -1,0 +1,70 @@
+{
+  "description": "Single source of truth for the cross-platform two-finger pinch endpoint geometry (issues #2911 / #2979 / #2997). Each row is an input tuple (centerX, centerY, distanceStart, distanceEnd, rotationDegrees) and the expected UNORDERED set of four endpoints [x, y]: start finger 1, start finger 2, end finger 1, end finger 2. rotationDegrees describes how far the finger axis rotates DURING the pinch (starts horizontal, ends rotated). The iOS runner's PinchGeometryTests.swift and Android runner's PinchGeometryTest.kt inline golden tables are verified byte-for-value against this file by test/parity/pinchGoldenVectorParity.test.ts — edit all three together or CI fails.",
+  "vectors": [
+    {
+      "centerX": 100,
+      "centerY": 200,
+      "distanceStart": 80,
+      "distanceEnd": 300,
+      "rotationDegrees": 0,
+      "expected": [
+        [60, 200],
+        [140, 200],
+        [-50, 200],
+        [250, 200]
+      ]
+    },
+    {
+      "centerX": 540,
+      "centerY": 960,
+      "distanceStart": 100,
+      "distanceEnd": 300,
+      "rotationDegrees": 45,
+      "expected": [
+        [490, 960],
+        [590, 960],
+        [433.933983, 853.933983],
+        [646.066017, 1066.066017]
+      ]
+    },
+    {
+      "centerX": 200,
+      "centerY": 400,
+      "distanceStart": 100,
+      "distanceEnd": 100,
+      "rotationDegrees": -30,
+      "expected": [
+        [150, 400],
+        [250, 400],
+        [156.698730, 425],
+        [243.301270, 375]
+      ]
+    },
+    {
+      "centerX": 300,
+      "centerY": 500,
+      "distanceStart": 200,
+      "distanceEnd": 80,
+      "rotationDegrees": -60,
+      "expected": [
+        [200, 500],
+        [400, 500],
+        [280, 534.641016],
+        [320, 465.358984]
+      ]
+    },
+    {
+      "centerX": 0,
+      "centerY": 0,
+      "distanceStart": 200,
+      "distanceEnd": 200,
+      "rotationDegrees": 0,
+      "expected": [
+        [-100, 0],
+        [100, 0],
+        [-100, 0],
+        [100, 0]
+      ]
+    }
+  ]
+}

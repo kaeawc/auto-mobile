@@ -115,13 +115,16 @@ class PinchGeometryTest {
   }
 
   /**
-   * SHARED GOLDEN TABLE — keep byte-identical with the iOS runner's `PinchGeometryTests.swift`
-   * (`testGoldenVectorsMatchAndroidParity`). Each row is an input tuple and its expected
-   * *unordered* set of four endpoints. The comparison is order-independent because the two runners
-   * label which finger is "first" oppositely (Android builds center±offset, iOS center∓offset
-   * first) while producing the same two touch points. If either platform's endpoint math changes,
-   * its golden assertion fails loudly here or in the Swift mirror — closing the silent-divergence
-   * gap from issues #2911 / #2979.
+   * SHARED GOLDEN TABLE — the single source of truth is `test/fixtures/pinch-golden-vectors.json`;
+   * `test/parity/pinchGoldenVectorParity.test.ts` verifies this table and the iOS mirror
+   * (`PinchGeometryTests.swift`'s `testGoldenVectorsMatchAndroidParity`) against it. Each row is an
+   * input tuple and its expected *unordered* set of four endpoints. The comparison is
+   * order-independent because the two runners label which finger is "first" oppositely (Android
+   * builds center±offset, iOS center∓offset first) while producing the same two touch points. If
+   * either platform's endpoint math changes, its golden assertion fails loudly here or in the Swift
+   * mirror. If the two tables silently diverge — including a coordinated one-sided convention edit
+   * (change math + golden on one platform only) — the parity guard fails. Edit the JSON and both
+   * platform tables together. See issues #2911 / #2979 / #2997.
    */
   @Test
   fun `golden vectors match iOS parity`() {

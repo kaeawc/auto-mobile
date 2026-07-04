@@ -98,12 +98,23 @@ describe("in-process same-path reopen cannot steal an in-flight migration's lock
   async function makeSlowWritingMigrationsDir(markers: {
     started: string;
     release: string;
+    active: string;
+    violation: string;
   }): Promise<string> {
     const dir = await makeTempDir("auto-mobile-lock-reopen-mig-");
     const content = `import { promises as fsp } from "fs";
-import { existsSync } from "fs";
+import { existsSync, openSync, closeSync, unlinkSync } from "fs";
 
 export async function up(db) {
+  // Timing-INDEPENDENT concurrency probe: hold an exclusive "migration active"
+  // marker for the whole run via an O_EXCL ('wx') create. A second migrator that
+  // stole the lock (#2947) and entered up() concurrently fails this create and
+  // records a violation — detectable regardless of scheduling.
+  try {
+    closeSync(openSync(${JSON.stringify(markers.active)}, "wx"));
+  } catch {
+    await fsp.writeFile(${JSON.stringify(markers.violation)}, "1");
+  }
   await db.schema
     .createTable("probe")
     .ifNotExists()
@@ -115,6 +126,7 @@ export async function up(db) {
     if (existsSync(${JSON.stringify(markers.release)})) break;
     await new Promise(resolve => setTimeout(resolve, 2));
   }
+  try { unlinkSync(${JSON.stringify(markers.active)}); } catch {}
 }
 
 export async function down(db) {
@@ -147,6 +159,8 @@ export async function down(db) {
       const markers = {
         started: path.join(markerRoot, "started"),
         release: path.join(markerRoot, "release"),
+        active: path.join(markerRoot, "active"),
+        violation: path.join(markerRoot, "violation"),
       };
       const migrationsDir = await makeSlowWritingMigrationsDir(markers);
       // One DB dir shared by BOTH generations -> the same DB file path on reopen.
@@ -191,11 +205,18 @@ export async function down(db) {
         }
       );
 
-      // Give a would-be lock thief ample time to steal the lock and run
-      // migrateToLatest() concurrently. With the fix gen-1 is parked on the still-
-      // held same-token lock, so it CANNOT settle until gen-0 releases; without
-      // the fix it steals the lock and settles here.
-      await defaultTimer.sleep(400);
+      // No fixed wall-clock wait: this bounded loop early-exits the moment a
+      // would-be lock thief manifests. On the pre-fix (stealing) code gen-1 enters
+      // migrateToLatest() concurrently, so it settles and/or trips the exclusive
+      // in-flight `active` marker (recording a `violation`) within a poll or two.
+      // On the fixed code gen-1 stays parked on gen-0's still-held same-token lock
+      // and produces NEITHER signal (gen-1 cannot settle until gen-0 releases,
+      // which the test controls), so the loop runs its short bounded budget.
+      for (let i = 0; i < 40 && !gen1Settled && !existsSync(markers.violation); i += 1) {
+        await defaultTimer.sleep(5);
+      }
+      // Serialization proof: gen-1 has not run migrateToLatest() concurrently.
+      expect(existsSync(markers.violation)).toBe(false);
       expect(gen1Settled).toBe(false);
 
       // Release gen-0: its migration finishes, records `0001`, and releases the
@@ -205,6 +226,7 @@ export async function down(db) {
       await gen1;
 
       expect(gen1Settled).toBe(true);
+      expect(existsSync(markers.violation)).toBe(false);
       expect(db.getMigrationsError()).toBeNull();
 
       // No corruption: the write ran exactly once (single `probe` row, single

@@ -11,6 +11,7 @@ import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
 import { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
 import type { Database } from "../../../src/db/types";
+import { ActionableError } from "../../../src/models/ActionableError";
 
 describe("NavigationGraphManager", () => {
   let manager: NavigationGraphManager;
@@ -1062,5 +1063,89 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     expect(await countEdges()).toBe(1);
     const otherNode = await otherRepo.getNode("com.test.other", "OtherScreen");
     expect(otherNode).toBeDefined();
+  });
+});
+
+describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
+  const APP_ID = "com.test.guard";
+
+  let navDb: Kysely<Database>;
+  let coverageDb: Kysely<Database>;
+  let telemetrySpy: ReturnType<typeof spyOn>;
+
+  beforeEach(async () => {
+    navDb = await createTestDatabase({ foreignKeys: true });
+    coverageDb = await createTestDatabase({ foreignKeys: true });
+    TelemetryRecorder.resetInstance();
+    telemetrySpy = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordNavigationEvent"
+    ).mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    telemetrySpy.mockRestore();
+    TelemetryRecorder.resetInstance();
+    await navDb.destroy();
+    await coverageDb.destroy();
+  });
+
+  async function countNodes(db: Kysely<Database>): Promise<number> {
+    const row = await db
+      .selectFrom("navigation_nodes")
+      .select(eb => eb.fn.countAll<number>().as("count"))
+      .where("app_id", "=", APP_ID)
+      .executeTakeFirst();
+    return Number(row?.count ?? 0);
+  }
+
+  test("throws a clear error when the coverage repo is bound to a different connection", async () => {
+    const navRepo = new NavigationRepository(navDb);
+    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+
+    await expect(
+      manager.recordNavigationEvent(createEvent("Screen1", 1000))
+    ).rejects.toBeInstanceOf(ActionableError);
+  });
+
+  test("mentions the connection-identity invariant in the error message", async () => {
+    const navRepo = new NavigationRepository(navDb);
+    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+
+    await expect(
+      manager.recordNavigationEvent(createEvent("Screen1", 1000))
+    ).rejects.toThrow(/connection/i);
+  });
+
+  test("guard fires before the transaction opens — no rows are written on either connection", async () => {
+    const navRepo = new NavigationRepository(navDb);
+    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+
+    await manager.recordNavigationEvent(createEvent("Screen1", 1000)).catch(() => undefined);
+
+    expect(await countNodes(navDb)).toBe(0);
+    expect(await countNodes(coverageDb)).toBe(0);
+    // currentScreen stays null — the post-commit field assignment never runs.
+    expect(manager.getCurrentScreen()).toBeNull();
+    // Telemetry side effect never fires on a guard failure.
+    expect(telemetrySpy).not.toHaveBeenCalled();
+  });
+
+  test("allows the write when both repos share the same connection", async () => {
+    const navRepo = new NavigationRepository(navDb);
+    const coverage = new TestCoverageRepository(defaultTimer, navDb);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+
+    await manager.recordNavigationEvent(createEvent("Screen1", 1000));
+
+    expect(await countNodes(navDb)).toBe(1);
+    expect(manager.getCurrentScreen()).toBe("Screen1");
   });
 });

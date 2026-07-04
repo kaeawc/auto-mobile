@@ -411,4 +411,24 @@ describe("NavigationRepository", () => {
       expect(app).toBeDefined();
     });
   });
+
+  describe("resolveConnection", () => {
+    test("returns the bound executor for a repo constructed with a db", () => {
+      const bound = new NavigationRepository(db);
+      expect(bound.resolveConnection()).toBe(db);
+    });
+
+    test("returns the shared singleton for an unbound repo", () => {
+      // Two independently-constructed unbound repos must resolve to the SAME
+      // getDatabase() singleton so a connection-identity check between them holds.
+      const a = new NavigationRepository();
+      const b = new NavigationRepository();
+      expect(a.resolveConnection()).toBe(b.resolveConnection());
+    });
+
+    test("withExecutor rebinds the resolved connection", () => {
+      const bound = repo.withExecutor(db);
+      expect(bound.resolveConnection()).toBe(db);
+    });
+  });
 });

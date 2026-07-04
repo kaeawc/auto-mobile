@@ -4,6 +4,7 @@ import { BackStackInfo } from "../../models";
 import { NavigationRepository } from "../../db/navigationRepository";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 import { TestCoverageRepository } from "../../db/testCoverageRepository";
+import { ActionableError } from "../../models/ActionableError";
 import type { NavigationEdge as DBNavigationEdge, NavigationNode as DBNavigationNode, TestCoverageSession } from "../../db/types";
 import {
   NavigationGraph,
@@ -211,6 +212,10 @@ export class NavigationGraphManager implements NavigationGraphService {
    * repo bound to a DIFFERENT Kysely handle would split writes across
    * connections and silently defeat the rollback guarantee. Tests that inject a
    * db must pass the SAME instance to both repositories.
+   *
+   * This precondition is now enforced at runtime: recordNavigationEvent calls
+   * assertSharedConnection() before opening the transaction, so a foreign-bound
+   * coverage repo throws an ActionableError instead of silently splitting writes.
    */
   public static createForTesting(
     repository?: NavigationRepository,
@@ -348,6 +353,14 @@ export class NavigationGraphManager implements NavigationGraphService {
     // coverage repo is enlisted onto that same `trx`; a coverage repo bound to a
     // different connection would split writes and defeat the rollback. See
     // createForTesting.
+    // Fail loudly BEFORE reserving the connection if the atomicity precondition
+    // is violated: the transaction is opened on the navigation connection and the
+    // coverage repo is enlisted onto that same `trx`, so a coverage repo bound to a
+    // DIFFERENT connection would split writes and silently defeat the rollback. In
+    // production both default to the getDatabase() singleton, so this holds by
+    // construction; the guard catches a mistakenly foreign-bound injected repo.
+    this.assertSharedConnection();
+
     const node = await this.repository.runInTransaction(async trx => {
       const repository = this.repository.withExecutor(trx);
       const testCoverageRepository = this.testCoverageRepository.withExecutor(trx);
@@ -464,6 +477,28 @@ export class NavigationGraphManager implements NavigationGraphService {
       triggeringInteraction: event.triggeringInteraction ?? null,
       screenshotUri: `automobile:navigation/nodes/${node.id}/screenshot`,
     });
+  }
+
+  /**
+   * Assert that the navigation and test-coverage repositories resolve to the same
+   * underlying connection — the precondition for recordNavigationEvent's single
+   * transaction to cover both repos' writes atomically.
+   *
+   * Both default to the getDatabase() singleton, so this holds by construction in
+   * production; the guard exists so a mistakenly foreign-bound coverage repo
+   * (e.g. injected in a test or a future refactor) fails loudly here instead of
+   * silently splitting writes across connections and defeating the rollback.
+   */
+  private assertSharedConnection(): void {
+    if (this.repository.resolveConnection() !== this.testCoverageRepository.resolveConnection()) {
+      throw new ActionableError(
+        "NavigationGraphManager: the navigation and test-coverage repositories resolve to " +
+        "different database connections. recordNavigationEvent opens one transaction on the " +
+        "navigation connection and enlists coverage writes onto it; a foreign-bound coverage " +
+        "repo would split writes across connections and silently defeat the rollback guarantee. " +
+        "Both repositories must share the same connection (both default to the getDatabase() singleton)."
+      );
+    }
   }
 
   /**

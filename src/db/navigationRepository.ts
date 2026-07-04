@@ -40,6 +40,17 @@ export class NavigationRepository {
   }
 
   /**
+   * The Kysely connection this repository resolves to: the executor bound via
+   * `withExecutor`/the constructor, or the shared `getDatabase()` singleton when
+   * unbound. Exposed so a caller enlisting a second repository in one transaction
+   * can assert both resolve to the SAME connection before opening it — two unbound
+   * repositories share the singleton, so identity (`===`) holds by construction.
+   */
+  resolveConnection(): Kysely<Database> {
+    return this.getDb();
+  }
+
+  /**
    * Return a repository instance whose every read and write runs on the supplied
    * executor (a Kysely transaction handle) instead of the shared singleton
    * connection.

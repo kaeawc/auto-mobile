@@ -1528,19 +1528,24 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
     // prototype, so the trx-bound write is counted too.
     const promoteSpy = spyOn(NavigationRepository.prototype, "promoteSuggestion");
 
-    const notifyPromoteCounts: number[] = [];
-    manager.setGraphUpdateListener(() => {
-      notifyPromoteCounts.push(promoteSpy.mock.calls.length);
-    });
+    // try/finally so a failing assertion can never leave this prototype spy armed
+    // for sibling suites in the same process (spyOn calls through, but restore is
+    // still the hygienic contract).
+    try {
+      const notifyPromoteCounts: number[] = [];
+      manager.setGraphUpdateListener(() => {
+        notifyPromoteCounts.push(promoteSpy.mock.calls.length);
+      });
 
-    await manager.promoteSuggestion(suggestionId, "SettingsScreen");
+      await manager.promoteSuggestion(suggestionId, "SettingsScreen");
 
-    // promoteSuggestion ran exactly once, and notify fired exactly once, AFTER that
-    // final in-transaction write completed — never inside or before the transaction.
-    expect(promoteSpy).toHaveBeenCalledTimes(1);
-    expect(notifyPromoteCounts).toEqual([1]);
-
-    promoteSpy.mockRestore();
+      // promoteSuggestion ran exactly once, and notify fired exactly once, AFTER that
+      // final in-transaction write completed — never inside or before the transaction.
+      expect(promoteSpy).toHaveBeenCalledTimes(1);
+      expect(notifyPromoteCounts).toEqual([1]);
+    } finally {
+      promoteSpy.mockRestore();
+    }
   });
 });
 

@@ -57,7 +57,11 @@ export class CtrlProxyHierarchy {
   // NOT await through RequestManager (it blocks in waitForFreshData for a hierarchy_update push), so
   // a runner type:"error" frame must be fanned into this map to unblock the correct waiter fast
   // instead of hanging to timeout. See issue #3032.
-  private readonly pendingHierarchyRejectors = new Map<string, (error: string) => void>();
+  //
+  // The hook is wrapped in an object and invoked via the fixed `.reject` property (mirroring
+  // RequestManager's `request.reject(...)`) rather than calling the map value directly — a
+  // user-controlled requestId must never drive a dynamic method-name dispatch.
+  private readonly pendingHierarchyRejectors = new Map<string, { reject: (error: string) => void }>();
 
   constructor(context: HierarchyDelegateContext) {
     this.context = context;
@@ -76,7 +80,7 @@ export class CtrlProxyHierarchy {
     if (!rejector) {
       return false;
     }
-    rejector(error);
+    rejector.reject(error);
     return true;
   }
 
@@ -598,9 +602,11 @@ export class CtrlProxyHierarchy {
       // Route a runner type:"error" frame (delivered via AndroidCtrlProxyClient) for this hierarchy
       // request into a fast rejection instead of hanging to the timeout below (issue #3032).
       if (requestId) {
-        this.pendingHierarchyRejectors.set(requestId, (error: string) => {
-          logger.warn(`[CTRL_PROXY] Hierarchy request ${requestId} failed via runner error: ${error}`);
-          settleReject(new Error(error));
+        this.pendingHierarchyRejectors.set(requestId, {
+          reject: (error: string) => {
+            logger.warn(`[CTRL_PROXY] Hierarchy request ${requestId} failed via runner error: ${error}`);
+            settleReject(new Error(error));
+          }
         });
       }
 

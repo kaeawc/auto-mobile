@@ -56,6 +56,45 @@ describe("TerminateApp (iOS)", () => {
     expect(result.wasRunning).toBe(false);
   });
 
+  test("marks app as not running when simctl reports a process-scoped 'not running' (shared matcher)", async () => {
+    class NotRunningSimctl extends FakeSimctl {
+      override async terminateApp(bundleId: string, deviceId?: string): Promise<void> {
+        await super.terminateApp(bundleId, deviceId);
+        throw new Error("The process is not running.");
+      }
+    }
+
+    const notRunningSimctl = new NotRunningSimctl();
+    notRunningSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+
+    const terminateApp = new TerminateApp(iosDevice, null, notRunningSimctl, fakeTimer);
+    const result = await terminateApp.execute("com.example.app", { skipObservation: true });
+
+    expect(result.success).toBe(true);
+    expect(result.wasInstalled).toBe(true);
+    expect(result.wasRunning).toBe(false);
+  });
+
+  test("still surfaces an unrelated simctl terminate failure (device-level 'not running' is not swallowed)", async () => {
+    class DeviceDownSimctl extends FakeSimctl {
+      override async terminateApp(bundleId: string, deviceId?: string): Promise<void> {
+        await super.terminateApp(bundleId, deviceId);
+        throw new Error("The device is not running.");
+      }
+    }
+
+    const deviceDownSimctl = new DeviceDownSimctl();
+    deviceDownSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+
+    const terminateApp = new TerminateApp(iosDevice, null, deviceDownSimctl, fakeTimer);
+    const result = await terminateApp.execute("com.example.app", { skipObservation: true });
+
+    // A device-level failure is a real error, not an already-terminated app.
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/device is not running/i);
+    expect(result.wasRunning).toBe(true);
+  });
+
   test("returns not installed when bundle id is missing", async () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.other" }]);
 

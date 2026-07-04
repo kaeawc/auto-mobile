@@ -390,6 +390,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
+   * Resolve the currently-targeted app bundle ID (explicit
+   * {@link setTargetBundleId} value > `CTRL_PROXY_IOS_BUNDLE_ID` env var >
+   * undefined). Public read-only companion to {@link setTargetBundleId}; used by
+   * OpenURL to route a custom-scheme deep link into the owning/target app on a
+   * physical device. Does not mutate state.
+   */
+  public getTargetBundleId(): string | undefined {
+    return this.resolveTargetBundleId();
+  }
+
+  /**
    * Resolve the target bundle ID: explicit property > env var > undefined.
    */
   private resolveTargetBundleId(): string | undefined {

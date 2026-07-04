@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
 import { DefaultUIStateSetup } from "../../../src/features/navigation/DefaultUIStateSetup";

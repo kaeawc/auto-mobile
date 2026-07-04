@@ -1099,6 +1099,14 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     return Number(row?.count ?? 0);
   }
 
+  async function countNodeCoverage(db: Kysely<Database>): Promise<number> {
+    const row = await db
+      .selectFrom("test_node_coverage")
+      .select(eb => eb.fn.countAll<number>().as("count"))
+      .executeTakeFirst();
+    return Number(row?.count ?? 0);
+  }
+
   test("throws a clear error when the coverage repo is bound to a different connection", async () => {
     const navRepo = new NavigationRepository(navDb);
     const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
@@ -1110,7 +1118,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     ).rejects.toBeInstanceOf(ActionableError);
   });
 
-  test("mentions the connection-identity invariant in the error message", async () => {
+  test("names the connection-identity invariant in the error message", async () => {
     const navRepo = new NavigationRepository(navDb);
     const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
@@ -1118,10 +1126,10 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
 
     await expect(
       manager.recordNavigationEvent(createEvent("Screen1", 1000))
-    ).rejects.toThrow(/connection/i);
+    ).rejects.toThrow(/different database connections/i);
   });
 
-  test("guard fires before the transaction opens — no rows are written on either connection", async () => {
+  test("guard fires before the transaction opens — the navigation write is not applied", async () => {
     const navRepo = new NavigationRepository(navDb);
     const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
@@ -1129,12 +1137,42 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
 
     await manager.recordNavigationEvent(createEvent("Screen1", 1000)).catch(() => undefined);
 
+    // Without the guard, getOrCreateNode would commit a node on the navigation
+    // connection; the guard prevents the transaction from ever opening.
     expect(await countNodes(navDb)).toBe(0);
-    expect(await countNodes(coverageDb)).toBe(0);
     // currentScreen stays null — the post-commit field assignment never runs.
     expect(manager.getCurrentScreen()).toBeNull();
     // Telemetry side effect never fires on a guard failure.
     expect(telemetrySpy).not.toHaveBeenCalled();
+  });
+
+  test("with an active test session, fails with ActionableError rather than a downstream split-write error", async () => {
+    // With a session active, the coverage enlistment path (recordNodeVisit) is
+    // reachable inside the transaction. If the guard were absent, withExecutor would
+    // rebind the coverage repo to the navigation trx and recordNodeVisit would write a
+    // test_node_coverage row referencing a session that lives only on coverageDb — a
+    // FK violation surfacing as an opaque SqliteError. The guard turns that into a
+    // clear, pre-transaction ActionableError instead.
+    const navRepo = new NavigationRepository(navDb);
+    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+    // startTestSession writes the session on the coverage connection, whose
+    // test_coverage_sessions.app_id FKs navigation_apps — seed the app there.
+    await coverageDb
+      .insertInto("navigation_apps")
+      .values({ app_id: APP_ID, updated_at: "2024-01-01T00:00:00.000Z" })
+      .execute();
+    await manager.startTestSession("session-guard");
+
+    await expect(
+      manager.recordNavigationEvent(createEvent("Screen1", 1000))
+    ).rejects.toBeInstanceOf(ActionableError);
+
+    // No coverage row leaked onto the navigation connection; the session row stays
+    // on its own connection.
+    expect(await countNodeCoverage(navDb)).toBe(0);
+    expect(await countNodes(navDb)).toBe(0);
   });
 
   test("allows the write when both repos share the same connection", async () => {

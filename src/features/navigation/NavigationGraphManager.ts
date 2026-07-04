@@ -340,27 +340,19 @@ export class NavigationGraphManager implements NavigationGraphService {
     const recentToolCall = this.findCorrelatedToolCall(timestamp);
     const currentModalStack = recentToolCall?.uiState?.modalStack;
 
+    // Enforce the shared-connection precondition BEFORE reserving the connection:
+    // the transaction below is opened on the navigation connection and the coverage
+    // repo is enlisted onto that same `trx`, so a coverage repo bound to a DIFFERENT
+    // connection would split writes and defeat the rollback. Holds by construction in
+    // production (both default to the getDatabase() singleton); see assertSharedConnection.
+    this.assertSharedConnection();
+
     // Persist the whole graph write atomically. Every read and write inside the
     // callback runs on `trx` (via withExecutor) — a stray singleton query here
     // would deadlock the daemon's only connection (bunSqliteDialect). Keep the body
     // to DB statements only: telemetry push, notifications, screenshot capture and
     // in-memory field assignments stay OUTSIDE so the exclusive connection is not
     // held across non-DB IO, and so they never run when the transaction rolls back.
-    //
-    // Atomicity precondition: this.repository and this.testCoverageRepository must
-    // share the same underlying connection (both default to the getDatabase()
-    // singleton). The transaction is opened on the navigation connection and the
-    // coverage repo is enlisted onto that same `trx`; a coverage repo bound to a
-    // different connection would split writes and defeat the rollback. See
-    // createForTesting.
-    // Fail loudly BEFORE reserving the connection if the atomicity precondition
-    // is violated: the transaction is opened on the navigation connection and the
-    // coverage repo is enlisted onto that same `trx`, so a coverage repo bound to a
-    // DIFFERENT connection would split writes and silently defeat the rollback. In
-    // production both default to the getDatabase() singleton, so this holds by
-    // construction; the guard catches a mistakenly foreign-bound injected repo.
-    this.assertSharedConnection();
-
     const node = await this.repository.runInTransaction(async trx => {
       const repository = this.repository.withExecutor(trx);
       const testCoverageRepository = this.testCoverageRepository.withExecutor(trx);

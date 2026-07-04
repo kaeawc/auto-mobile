@@ -112,6 +112,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+  /**
+   * Wraps fire-and-forget action launches so a throw inside the launched coroutine broadcasts a
+   * correlated `type:"error"` frame instead of dying silently and hanging the daemon awaiter. See
+   * [AsyncActionRunner] and issue #3023. The broadcast lambda resolves [webSocketServer] lazily
+   * because it is `lateinit` (assigned in [onServiceConnected]).
+   */
+  private val asyncActionRunner =
+    AsyncActionRunner(
+      scope = serviceScope,
+      broadcastResponse = { response ->
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          webSocketServer.broadcast(response)
+        }
+      },
+      logError = { message, error -> Log.e(TAG, message, error) },
+    )
   private val recompositionStore = RecompositionStore()
   private val viewHierarchyExtractor = ViewHierarchyExtractor(recompositionStore)
   private val json = Json {
@@ -1686,7 +1703,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val startTime = System.currentTimeMillis()
     val success = executeGlobalAction(action)
     val totalTimeMs = System.currentTimeMillis() - startTime
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "request_global_action") {
       webSocketServer?.broadcast(
         dev.jasonpearson.automobile.protocol.GlobalActionResult(
           timestamp = System.currentTimeMillis(),
@@ -1706,7 +1723,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val screenDimensions = getScreenDimensions()
     val foreground = getForegroundActivity()
     val totalTimeMs = System.currentTimeMillis() - startTime
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "request_device_info") {
       webSocketServer?.broadcast(
         dev.jasonpearson.automobile.protocol.DeviceInfoResult(
           timestamp = System.currentTimeMillis(),
@@ -4932,31 +4949,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    serviceScope.launch {
-      try {
-        val base64Image = takeScreenshotAsync()
-        if (base64Image != null) {
-          val message = buildString {
-            append("""{"type":"screenshot","timestamp":${System.currentTimeMillis()}""")
-            if (requestId != null) {
-              append(""","requestId":"$requestId"""")
-            }
-            append(""","format":"jpeg","data":"$base64Image"}""")
+    // Routed through asyncActionRunner: a throw in takeScreenshotAsync() (or the broadcast) would
+    // otherwise be logged-and-swallowed here, emitting neither `screenshot` nor `screenshot_error`
+    // and hanging the awaiting client until timeout (issue #3023).
+    asyncActionRunner.launch(requestId, "screenshot") {
+      val base64Image = takeScreenshotAsync()
+      if (base64Image != null) {
+        val message = buildString {
+          append("""{"type":"screenshot","timestamp":${System.currentTimeMillis()}""")
+          if (requestId != null) {
+            append(""","requestId":"$requestId"""")
           }
-          webSocketServer.broadcast(message)
-          Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
-        } else {
-          val errorMessage = buildString {
-            append("""{"type":"screenshot_error","timestamp":${System.currentTimeMillis()}""")
-            if (requestId != null) {
-              append(""","requestId":"$requestId"""")
-            }
-            append(""","error":"Failed to capture screenshot"}""")
-          }
-          webSocketServer.broadcast(errorMessage)
+          append(""","format":"jpeg","data":"$base64Image"}""")
         }
-      } catch (e: Exception) {
-        Log.e(TAG, "Error broadcasting screenshot", e)
+        webSocketServer.broadcast(message)
+        Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
+      } else {
+        val errorMessage = buildString {
+          append("""{"type":"screenshot_error","timestamp":${System.currentTimeMillis()}""")
+          if (requestId != null) {
+            append(""","requestId":"$requestId"""")
+          }
+          append(""","error":"Failed to capture screenshot"}""")
+        }
+        webSocketServer.broadcast(errorMessage)
       }
     }
   }
@@ -5246,7 +5262,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       "handleGetPermission (requestId: $requestId, permission: $permission, requestPermission: $requestPermission)",
     )
 
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "get_permission") {
       val result = permissionManager.getPermissionState(permission, requestPermission ?: true)
       val totalTime = System.currentTimeMillis() - startTime
       broadcastPermissionResult(requestId, result, totalTime)
@@ -5559,7 +5575,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun handleListPreferenceFiles(requestId: String?, packageName: String) {
     Log.d(TAG, "handleListPreferenceFiles: requestId=$requestId, packageName=$packageName")
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "list_preference_files") {
       Log.d(TAG, "handleListPreferenceFiles: coroutine started, calling listPreferenceFiles")
       val result = storageSubscriptionManager.listPreferenceFiles(packageName)
       Log.d(TAG, "handleListPreferenceFiles: result=$result")
@@ -5577,7 +5593,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private fun handleGetPreferences(requestId: String?, packageName: String, fileName: String) {
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "get_preferences") {
       val result = storageSubscriptionManager.getPreferences(packageName, fileName)
       result.fold(
         onSuccess = { entries ->
@@ -5591,7 +5607,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private fun handleSubscribeStorage(requestId: String?, packageName: String, fileName: String) {
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "subscribe_storage") {
       val result = storageSubscriptionManager.subscribe(packageName, fileName)
       result.fold(
         onSuccess = { subscription ->
@@ -5611,7 +5627,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private fun handleUnsubscribeStorage(requestId: String?, packageName: String, fileName: String) {
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "unsubscribe_storage") {
       val success = storageSubscriptionManager.unsubscribe(packageName, fileName)
       broadcastUnsubscribeStorageResult(requestId, packageName, fileName, success)
     }
@@ -5623,7 +5639,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     fileName: String,
     key: String,
   ) {
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "get_preference") {
       val result = storageSubscriptionManager.getPreference(packageName, fileName, key)
       result.fold(
         onSuccess = { entry ->
@@ -5644,7 +5660,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     value: String?,
     type: String,
   ) {
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "set_preference") {
       val result = storageSubscriptionManager.setPreference(packageName, fileName, key, value, type)
       result.fold(
         onSuccess = { broadcastSetPreferenceResult(requestId, packageName, fileName, key, null) },
@@ -5661,7 +5677,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     fileName: String,
     key: String,
   ) {
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "remove_preference") {
       val result = storageSubscriptionManager.removePreference(packageName, fileName, key)
       result.fold(
         onSuccess = {
@@ -5679,7 +5695,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     packageName: String,
     fileName: String,
   ) {
-    serviceScope.launch {
+    asyncActionRunner.launch(requestId, "clear_preferences") {
       val result = storageSubscriptionManager.clearPreferences(packageName, fileName)
       result.fold(
         onSuccess = { broadcastClearPreferencesResult(requestId, packageName, fileName, null) },

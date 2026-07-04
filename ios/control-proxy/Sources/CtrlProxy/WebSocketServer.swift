@@ -282,7 +282,7 @@ public class WebSocketServer: WebSocketServing {
         let errorResponse = WebSocketResponse.error(
             type: "error",
             requestId: requestId,
-            error: error.localizedDescription
+            error: wireErrorMessage(for: error)
         )
 
         do {
@@ -309,6 +309,52 @@ public class WebSocketServer: WebSocketServing {
             print("[WebSocketServer] Error response encoding failed, using fallback")
             return fallbackJSON.data(using: .utf8) ?? Data()
         }
+    }
+
+    /// Maps a caught error into the message surfaced on the wire.
+    ///
+    /// Most errors pass through `localizedDescription` unchanged — deliberately so:
+    /// this preserves `CommandError.unknownCommand`'s "Unknown command type: <type>"
+    /// contract (a `LocalizedError`, matched by the TS `rewriteUnknownCommandError`)
+    /// and `DecodingError.keyNotFound`'s required-field rejection messages.
+    ///
+    /// The single rewrite is for `DecodingError.dataCorrupted`, whose
+    /// `localizedDescription` collapses to the opaque "The data couldn't be read
+    /// because it isn't in the correct format." Apple's `JSONDecoder` reports this
+    /// class of failure at top-level pre-parse with an *empty* `codingPath` — most
+    /// notably for an out-of-range numeric literal (e.g. `1e309`) — so a per-field
+    /// message is infeasible, but the real cause survives in the underlying Cocoa
+    /// error's `NSDebugDescription`. Surfacing it turns an opaque decode failure
+    /// into an actionable one. See issue #2965.
+    static func wireErrorMessage(for error: Error) -> String {
+        guard case let DecodingError.dataCorrupted(context) = error else {
+            return error.localizedDescription
+        }
+        let underlyingDetail = (context.underlyingError as NSError?)?
+            .userInfo[NSDebugDescriptionErrorKey] as? String
+
+        if let detail = underlyingDetail, isNumberOutOfRangeDetail(detail) {
+            return "Malformed request: a numeric value is out of range or not representable."
+        }
+        if let detail = underlyingDetail, !detail.isEmpty {
+            // e.g. underlying "Unexpected character ',' around line 1, column 6."
+            return "Malformed request: the payload is not valid JSON (\(detail))"
+        }
+        // No underlying detail available — the decoder's own context description is
+        // still more specific than the opaque `localizedDescription`.
+        return "Malformed request: \(context.debugDescription)"
+    }
+
+    /// Whether a Cocoa 3840 `NSDebugDescription` denotes an out-of-range / non-
+    /// representable numeric literal (rather than a JSON syntax error). The exact
+    /// phrasing differs by the `JSONDecoder` backend the runner is running on:
+    /// - swift-foundation (iOS 18+, macOS 15+): "Number 1e309 is not representable in Swift."
+    /// - classic Foundation (iOS 15–17, `JSONSerialization`-backed): "Number wound up as NaN around line 1, column 5."
+    /// `Package.swift` deploys to `.iOS(.v15)`, so both must be recognized — matching
+    /// only "not representable" would silently miss the overflow case on iOS 15–17.
+    private static func isNumberOutOfRangeDetail(_ detail: String) -> Bool {
+        detail.localizedCaseInsensitiveContains("not representable")
+            || detail.localizedCaseInsensitiveContains("wound up as nan")
     }
 
     /// Best-effort extraction of requestId from raw JSON data for error correlation.

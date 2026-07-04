@@ -887,6 +887,185 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         }
     }
 
+    // MARK: - Decode-boundary wire-message legibility (#2965)
+
+    /// Build a synthetic `DecodingError.dataCorrupted` whose underlying Cocoa 3840
+    /// error carries `debugDescription` in `NSDebugDescription` — mirroring exactly
+    /// what `JSONDecoder` attaches. This lets a test pin the rewrite of a *specific*
+    /// backend phrasing (e.g. the classic iOS 15–17 "wound up as NaN" overflow text)
+    /// deterministically on any host, independent of which `JSONDecoder` backend the
+    /// test machine happens to run.
+    private func syntheticDataCorrupted(underlyingDebugDescription: String) -> DecodingError {
+        let underlying = NSError(
+            domain: NSCocoaErrorDomain,
+            code: 3840,
+            userInfo: [NSDebugDescriptionErrorKey: underlyingDebugDescription]
+        )
+        let context = DecodingError.Context(
+            codingPath: [],
+            debugDescription: "The given data was not valid JSON.",
+            underlyingError: underlying
+        )
+        return DecodingError.dataCorrupted(context)
+    }
+
+    /// Feed a caught error through the real `WebSocketServer.buildErrorResponseData`
+    /// wire encoder (the same path `handleMessage`'s catch block uses) and return
+    /// the surfaced `error` string, asserting the envelope is a well-formed
+    /// structured error along the way.
+    private func wireErrorMessage(
+        for error: Error,
+        requestId: String?,
+        file: StaticString = #file,
+        line: UInt = #line
+    )
+        -> String
+    {
+        let data = WebSocketServer.buildErrorResponseData(requestId: requestId, error: error)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            XCTFail("error response was not valid JSON", file: file, line: line)
+            return ""
+        }
+        XCTAssertEqual(json["type"] as? String, "error", "wrong envelope type", file: file, line: line)
+        XCTAssertEqual(json["success"] as? Bool, false, "error envelope must be success=false", file: file, line: line)
+        if let requestId = requestId {
+            XCTAssertEqual(json["requestId"] as? String, requestId, "requestId preserved", file: file, line: line)
+        }
+        guard let message = json["error"] as? String else {
+            XCTFail("error envelope missing 'error' string", file: file, line: line)
+            return ""
+        }
+        return message
+    }
+
+    /// Capture the error `JSONDecoder` throws for a raw command string. Fails the
+    /// test if decoding unexpectedly succeeds.
+    private func decodeError(
+        _ json: String,
+        file: StaticString = #file,
+        line: UInt = #line
+    )
+        -> Error
+    {
+        do {
+            _ = try decodeWebSocketRequest(json)
+            XCTFail("expected \(json) to fail decoding", file: file, line: line)
+            return NSError(domain: "test", code: 0)
+        } catch {
+            return error
+        }
+    }
+
+    /// AC1: an out-of-range numeric literal (`1e309`) — rejected by `JSONDecoder`
+    /// at pre-parse with an empty `codingPath` — surfaces an *actionable* wire
+    /// message ("out of range" / "not representable"), not the opaque
+    /// "…isn't in the correct format." The value is still rejected (this is
+    /// diagnostic legibility only), and the requestId is preserved for correlation.
+    func testOverflowLiteralWireMessageIsActionable() {
+        let error = decodeError(#"{"type":"request_tap_coordinates","requestId":"ovf-1","x":1e309,"y":2}"#)
+        let message = wireErrorMessage(for: error, requestId: "ovf-1")
+        // The rewrite must change the surfaced string from the decoder's opaque
+        // default. Compared against the *actual* `localizedDescription` (whose exact
+        // wording/apostrophe is Foundation-controlled), not a hand-typed literal.
+        XCTAssertNotEqual(
+            message,
+            error.localizedDescription,
+            "overflow message must not stay the opaque decoder default, got: \(message)"
+        )
+        let lowered = message.lowercased()
+        XCTAssertTrue(
+            lowered.contains("out of range") || lowered.contains("not representable"),
+            "overflow message should name the out-of-range/non-representable cause, got: \(message)"
+        )
+    }
+
+    /// A larger overflow literal decodes to the same class of failure and is
+    /// rewritten the same way — proves the detection keys off the underlying Cocoa
+    /// error, not a hard-coded `1e309` string.
+    func testLargerOverflowLiteralWireMessageIsActionable() {
+        let error = decodeError(#"{"type":"request_swipe","requestId":"ovf-2","x1":1,"y1":2,"x2":1e400,"y2":4}"#)
+        let message = wireErrorMessage(for: error, requestId: "ovf-2")
+        XCTAssertNotEqual(message, error.localizedDescription, "got: \(message)")
+        let lowered = message.lowercased()
+        XCTAssertTrue(
+            lowered.contains("out of range") || lowered.contains("not representable"),
+            "got: \(message)"
+        )
+    }
+
+    /// The runner deploys to `.iOS(.v15)` (`Package.swift`), where `JSONDecoder` is
+    /// backed by classic `JSONSerialization`, which phrases an overflow literal as
+    /// "Number wound up as NaN around line 1, column 5." — NOT "not representable"
+    /// (the swift-foundation phrasing on iOS 18+/macOS 15+). Both must map to the
+    /// same actionable out-of-range message; matching only "not representable" would
+    /// silently miss the overflow case on iOS 15–17. This test pins the classic
+    /// phrasing deterministically regardless of the CI host's decoder backend.
+    func testClassicFoundationOverflowPhrasingIsActionable() {
+        let classic = syntheticDataCorrupted(
+            underlyingDebugDescription: "Number wound up as NaN around line 1, column 5."
+        )
+        let message = wireErrorMessage(for: classic, requestId: "ovf-classic")
+        let lowered = message.lowercased()
+        XCTAssertTrue(
+            lowered.contains("out of range") || lowered.contains("not representable"),
+            "classic-Foundation overflow phrasing must map to the out-of-range message, got: \(message)"
+        )
+    }
+
+    /// The swift-foundation (iOS 18+/macOS 15+) overflow phrasing maps to the same
+    /// actionable message — pinned deterministically alongside the classic one so a
+    /// change to either backend's handling is caught regardless of the test host.
+    func testModernFoundationOverflowPhrasingIsActionable() {
+        let modern = syntheticDataCorrupted(
+            underlyingDebugDescription: "Number 1e309 is not representable in Swift."
+        )
+        let message = wireErrorMessage(for: modern, requestId: "ovf-modern")
+        let lowered = message.lowercased()
+        XCTAssertTrue(
+            lowered.contains("out of range") || lowered.contains("not representable"),
+            "swift-foundation overflow phrasing must map to the out-of-range message, got: \(message)"
+        )
+    }
+
+    /// AC2: a missing-required-field rejection (`keyNotFound`) is NOT a
+    /// `dataCorrupted` error, so the rewrite must leave its wire message exactly
+    /// equal to `error.localizedDescription` — the `keyNotFound` contract that
+    /// `TypedRequestDecodeTests` relies on stays byte-for-byte unchanged.
+    func testKeyNotFoundWireMessageUnchanged() {
+        let error = decodeError(#"{"type":"request_tap_coordinates","requestId":"kn-1","y":2}"#)
+        guard case DecodingError.keyNotFound = error else {
+            return XCTFail("expected keyNotFound, got \(error)")
+        }
+        let message = wireErrorMessage(for: error, requestId: "kn-1")
+        XCTAssertEqual(
+            message,
+            error.localizedDescription,
+            "keyNotFound wire message must be untouched by the dataCorrupted rewrite"
+        )
+    }
+
+    /// AC3: an unknown command type throws `CommandError.unknownCommand` (a
+    /// `LocalizedError`, not a `DecodingError`) at decode; its wire text must stay
+    /// exactly "Unknown command type: <type>" so the TS client's
+    /// `rewriteUnknownCommandError` regex still matches it.
+    func testUnknownCommandWireMessageUntouched() {
+        let error = decodeError(#"{"type":"unknown_command","requestId":"uc-1"}"#)
+        let message = wireErrorMessage(for: error, requestId: "uc-1")
+        XCTAssertEqual(message, "Unknown command type: unknown_command")
+    }
+
+    /// Generic malformed JSON (also `dataCorrupted`) becomes actionable too — it
+    /// names "not valid JSON" instead of the opaque decoder default.
+    func testMalformedJsonWireMessageIsActionable() {
+        let error = decodeError(#"{"type":"request_tap_coordinates","x":,}"#)
+        let message = wireErrorMessage(for: error, requestId: nil)
+        XCTAssertNotEqual(message, error.localizedDescription, "got: \(message)")
+        XCTAssertTrue(
+            message.lowercased().contains("not valid json") || message.lowercased().contains("malformed"),
+            "malformed JSON should surface an actionable cause, got: \(message)"
+        )
+    }
+
     // MARK: - Finite fractional / negative coordinates unaffected (#2909 happy path)
 
     /// Fractional coordinates decode and reach the engine with the fraction

@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.protocol
 
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
@@ -250,6 +252,48 @@ class WebSocketResponseTest {
     assertTrue(encoded.contains(""""mainActivity":"com.example.app/.MainActivity""""))
     assertTrue(encoded.contains(""""android.permission.CAMERA":true"""))
     assertTrue(encoded.contains(""""android.permission.INTERNET":false"""))
+  }
+
+  @Test
+  fun `serialize error response with requestId`() {
+    val response: WebSocketResponse =
+      ErrorResponse(
+        timestamp = 1234567890L,
+        requestId = "req-err",
+        error = "Malformed request: the payload is not valid JSON",
+      )
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue(encoded.contains(""""type":"error""""))
+    assertTrue(encoded.contains(""""requestId":"req-err""""))
+    assertTrue(encoded.contains(""""success":false"""))
+    assertTrue(encoded.contains(""""error":"Malformed request: the payload is not valid JSON""""))
+  }
+
+  @Test
+  fun `serialize error response without requestId emits null`() {
+    val response: WebSocketResponse = ErrorResponse(timestamp = 1234567890L, error = "boom")
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue(encoded.contains(""""type":"error""""))
+    assertTrue(encoded.contains(""""requestId":null"""))
+    assertTrue(encoded.contains(""""success":false"""))
+    assertTrue(encoded.contains(""""error":"boom""""))
+  }
+
+  @Test
+  fun `error response round-trips through sealed serializer`() {
+    val original: WebSocketResponse =
+      ErrorResponse(timestamp = 42L, requestId = "r1", error = "nope")
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), original)
+    val decoded = json.decodeFromString(WebSocketResponse.serializer(), encoded)
+    assertTrue(decoded is ErrorResponse, "expected ErrorResponse, was ${decoded::class.simpleName}")
+    val error = decoded as ErrorResponse
+    assertEquals("r1", error.requestId)
+    assertFalse(error.success)
+    assertEquals("nope", error.error)
   }
 
   @Test

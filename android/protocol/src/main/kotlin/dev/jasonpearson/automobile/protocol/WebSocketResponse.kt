@@ -27,6 +27,25 @@ data class ConnectedResponse(
 ) : WebSocketResponse()
 
 // =============================================================================
+// Protocol Error
+// =============================================================================
+
+/**
+ * Structured protocol-boundary error, emitted when an inbound command fails to decode or a handler
+ * throws while processing it. Correlated by [requestId] (best-effort extracted from the raw payload
+ * when decode fails, so a client awaiting that id gets a fast, actionable failure instead of
+ * hanging until timeout). Mirrors the iOS runner's `type:"error"` envelope. See issue #2985.
+ */
+@Serializable
+@SerialName("error")
+data class ErrorResponse(
+  override val timestamp: Long = System.currentTimeMillis(),
+  val requestId: String? = null,
+  val success: Boolean = false,
+  val error: String,
+) : WebSocketResponse()
+
+// =============================================================================
 // Push Events (unsolicited messages)
 // =============================================================================
 

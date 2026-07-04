@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -85,6 +86,58 @@ class WebSocketServerTest {
 
     // Then
     assertEquals("Connection count should start at 0", 0, server.getConnectionCount())
+  }
+
+  // ---------------------------------------------------------------------------
+  // Error-envelope helpers (issue #2985) — pure, no network I/O.
+  // ---------------------------------------------------------------------------
+
+  @Test
+  fun `extractRequestId returns id when present in raw json`() {
+    assertEquals(
+      "abc-123",
+      WebSocketServer.extractRequestId("""{"type":"request_screenshot","requestId":"abc-123"}"""),
+    )
+  }
+
+  @Test
+  fun `extractRequestId returns null when absent`() {
+    assertNull(WebSocketServer.extractRequestId("""{"type":"request_screenshot"}"""))
+  }
+
+  @Test
+  fun `extractRequestId returns null for non-string requestId`() {
+    assertNull(WebSocketServer.extractRequestId("""{"type":"x","requestId":42}"""))
+  }
+
+  @Test
+  fun `extractRequestId returns null for unparseable payload`() {
+    assertNull(WebSocketServer.extractRequestId("""{not valid json"""))
+  }
+
+  @Test
+  fun `describeDecodeFailure surfaces unknown command type`() {
+    val message =
+      WebSocketServer.describeDecodeFailure(
+        """{"type":"totally_unknown_command","requestId":"r1"}""",
+        kotlinx.serialization.SerializationException(
+          "Serializer for subclass 'totally_unknown_command' is not found in the polymorphic scope of 'WebSocketRequest'."
+        ),
+      )
+    assertTrue(
+      "expected message to name the unknown type, was: $message",
+      message.contains("totally_unknown_command"),
+    )
+  }
+
+  @Test
+  fun `describeDecodeFailure returns non-empty message for malformed json`() {
+    val message =
+      WebSocketServer.describeDecodeFailure(
+        """{"type":"request_screenshot",""",
+        kotlinx.serialization.SerializationException("Unexpected end of input"),
+      )
+    assertTrue("expected non-empty message", message.isNotEmpty())
   }
 
   @Test

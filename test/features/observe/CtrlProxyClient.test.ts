@@ -980,6 +980,117 @@ describe("AndroidCtrlProxyClient", function() {
 
   });
 
+  describe("error frame handling (issue #2985)", function() {
+    test("a type:error frame correlated by requestId fails the awaiting request fast", async function() {
+      // The Android runner now emits a structured `type:"error"` envelope on decode/handler
+      // failures (issue #2985). Without a consumer branch the awaiter would hang to timeout; this
+      // asserts the pending request resolves immediately with a failed result carrying the message.
+      const errorTimer = new FakeTimer();
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      const shape: HighlightShape = {
+        type: "box",
+        bounds: { x: 10, y: 20, width: 100, height: 80 },
+        style: { strokeColor: "#FF0000", strokeWidth: 4 }
+      };
+
+      try {
+        const requestPromise = testClient.requestAddHighlight("highlight-err", shape, 2000);
+
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket as CapturingWebSocket, 2);
+
+        const highlightMsg = (socket as CapturingWebSocket).sentMessages.find(m => {
+          try { return JSON.parse(m).type === "add_highlight"; } catch { return false; }
+        });
+        expect(highlightMsg).toBeDefined();
+        const payload = JSON.parse(highlightMsg!);
+
+        // Runner reports a structured error correlated by the request's id.
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: payload.requestId,
+          success: false,
+          error: "Malformed request: a numeric value is out of range or not representable.",
+          timestamp: errorTimer.now()
+        }));
+
+        const result = await errorTimer.resolvePromise(requestPromise);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("out of range");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("a type:error frame with a non-matching requestId does not disturb other requests", async function() {
+      // A null/unknown requestId (e.g. an unparseable payload the runner couldn't correlate) must
+      // be a safe no-op: it must not crash, and must not wrongly resolve an unrelated pending
+      // request. Here an in-flight highlight request must survive a mismatched error frame and
+      // still resolve normally from its own response.
+      const errorTimer = new FakeTimer();
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      const shape: HighlightShape = {
+        type: "box",
+        bounds: { x: 10, y: 20, width: 100, height: 80 },
+        style: { strokeColor: "#FF0000", strokeWidth: 4 }
+      };
+
+      try {
+        const requestPromise = testClient.requestAddHighlight("highlight-keep", shape, 2000);
+
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket as CapturingWebSocket, 2);
+
+        const highlightMsg = (socket as CapturingWebSocket).sentMessages.find(m => {
+          try { return JSON.parse(m).type === "add_highlight"; } catch { return false; }
+        });
+        const payload = JSON.parse(highlightMsg!);
+
+        // Error frame for an unrelated / uncorrelated request — must be ignored.
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: "some-other-id",
+          success: false,
+          error: "Malformed request: the payload is not valid JSON",
+          timestamp: errorTimer.now()
+        }));
+
+        // The real response for our request still arrives and resolves it.
+        socket!.simulateMessage(JSON.stringify({
+          type: "highlight_response",
+          requestId: payload.requestId,
+          success: true,
+          error: null
+        }));
+
+        const result = await errorTimer.resolvePromise(requestPromise);
+        expect(result.success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("bindSession", function() {
     afterEach(function() {
       NavigationGraphManager.resetInstance();

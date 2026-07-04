@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
+import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
@@ -23,6 +24,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * WebSocket server that streams view hierarchy updates to connected clients and dispatches inbound
@@ -41,6 +44,56 @@ class WebSocketServer(
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
+
+    /** Lenient parser for best-effort field extraction from a raw (possibly malformed) payload. */
+    private val lenientJson = Json {
+      ignoreUnknownKeys = true
+      isLenient = true
+    }
+
+    /**
+     * Best-effort extraction of a top-level string [field] from a raw JSON payload. Returns null
+     * when the payload is unparseable, the field is absent, or the field is not a JSON string.
+     */
+    private fun extractStringField(raw: String, field: String): String? =
+      try {
+        (lenientJson.parseToJsonElement(raw) as? JsonObject)?.get(field)?.let { element ->
+          (element as? JsonPrimitive)?.takeIf { it.isString }?.content
+        }
+      } catch (e: Exception) {
+        // Expected for genuinely malformed payloads; correlation is best-effort by design.
+        null
+      }
+
+    /**
+     * Best-effort extraction of `requestId` from a raw JSON payload for error correlation,
+     * mirroring the iOS runner's `extractRequestId`. Returns null when it can't be determined.
+     * See #2985.
+     */
+    internal fun extractRequestId(raw: String): String? = extractStringField(raw, "requestId")
+
+    /**
+     * Maps an inbound-decode failure into an actionable, legible wire message. An unknown/
+     * unregistered command type surfaces "Unknown command type: <type>" (symmetric to the iOS
+     * `CommandError.unknownCommand` contract); everything else surfaces "Malformed request:
+     * <cause>" so an out-of-range numeric literal or a JSON syntax error is actionable rather than
+     * opaque. See #2985 (parallels the iOS #2965 legibility mapping).
+     */
+    internal fun describeDecodeFailure(raw: String, throwable: Throwable): String {
+      val cause =
+        throwable.message?.takeIf { it.isNotBlank() }
+          ?: throwable::class.simpleName
+          ?: "unknown error"
+      val looksLikeUnknownType =
+        cause.contains("polymorphic", ignoreCase = true) ||
+          cause.contains("class discriminator", ignoreCase = true)
+      if (looksLikeUnknownType) {
+        extractStringField(raw, "type")?.let { type ->
+          return "Unknown command type: $type"
+        }
+      }
+      return "Malformed request: $cause"
+    }
   }
 
   private var server: EmbeddedServer<*, *>? = null
@@ -302,7 +355,16 @@ class WebSocketServer(
       try {
         protocolJson.decodeFromString<ProtocolRequest>(message)
       } catch (e: Exception) {
+        // Surface a structured error (correlated by best-effort requestId) rather than swallowing
+        // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
+        // #2985.
         Log.w(TAG, "Failed to parse client message: $message", e)
+        broadcast(
+          ErrorResponse(
+            requestId = extractRequestId(message),
+            error = describeDecodeFailure(message, e),
+          )
+        )
         return
       }
 
@@ -317,8 +379,20 @@ class WebSocketServer(
       if (response != null) {
         broadcast(response)
       }
+    } catch (e: CancellationException) {
+      // Never convert cooperative cancellation into an error frame — it means the read loop /
+      // server scope is shutting down. Let it propagate so the coroutine unwinds cleanly.
+      throw e
     } catch (e: Exception) {
+      // Surface a structured error correlated by the decoded requestId instead of only logging, so
+      // the awaiting client fails fast rather than timing out. See #2985.
       Log.e(TAG, "Error handling message via handler", e)
+      broadcast(
+        ErrorResponse(
+          requestId = request.requestId,
+          error = "Handler error: ${e.message ?: e::class.simpleName ?: "unknown error"}",
+        )
+      )
     }
   }
 }

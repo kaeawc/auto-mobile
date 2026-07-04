@@ -222,6 +222,17 @@ interface WsScreenshotErrorMessage extends WsMessageBase {
   requestId: string;
 }
 
+/**
+ * Structured protocol-boundary error emitted by the runner when an inbound command fails to decode
+ * or a handler throws (issue #2985). `requestId` is best-effort: null when the runner could not
+ * correlate the failure (e.g. an unparseable payload).
+ */
+interface WsErrorMessage extends WsMessageBase {
+  type: "error";
+  requestId: string | null;
+  success: false;
+}
+
 interface WsSwipeResultMessage extends WsRequestBase {
   type: "swipe_result";
   gestureTimeMs?: number;
@@ -572,6 +583,7 @@ type WebSocketMessage =
   | WsHierarchyUpdateMessage
   | WsScreenshotMessage
   | WsScreenshotErrorMessage
+  | WsErrorMessage
   | WsSwipeResultMessage
   | WsTapCoordinatesResultMessage
   | WsDragResultMessage
@@ -1946,6 +1958,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       if (message.type === "connected") {
         logger.debug(`[CTRL_PROXY] Received connection confirmation`);
+        return;
+      }
+
+      // Structured protocol-boundary error from the runner (issue #2985): a command failed to
+      // decode or its handler threw. Fail the correlated request fast instead of letting the
+      // awaiter hang to timeout. requestId is best-effort — when null the runner could not
+      // correlate it, so there is no pending request to resolve (resolveError no-ops on unknown
+      // ids anyway).
+      if (message.type === "error") {
+        const errorText = message.error || "Runner reported an unstructured protocol error";
+        logger.warn(`[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`);
+        if (message.requestId) {
+          this.requestManager.resolveError(message.requestId, errorText);
+        }
         return;
       }
 

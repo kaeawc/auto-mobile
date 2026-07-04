@@ -456,4 +456,22 @@ describe("TestCoverageRepository", () => {
       expect(rows).toHaveLength(0);
     });
   });
+
+  describe("resolveConnection", () => {
+    test("returns the bound executor for a repo constructed with a db", () => {
+      const bound = new TestCoverageRepository(timer, db);
+      expect(bound.resolveConnection()).toBe(db);
+    });
+
+    test("returns the shared singleton for an unbound repo", () => {
+      const a = new TestCoverageRepository(timer);
+      const b = new TestCoverageRepository(timer);
+      expect(a.resolveConnection()).toBe(b.resolveConnection());
+    });
+
+    test("withExecutor rebinds the resolved connection", () => {
+      const bound = repo.withExecutor(db);
+      expect(bound.resolveConnection()).toBe(db);
+    });
+  });
 });

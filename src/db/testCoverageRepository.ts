@@ -37,6 +37,18 @@ export class TestCoverageRepository {
   }
 
   /**
+   * The Kysely connection this repository resolves to: the executor bound via
+   * `withExecutor`/the constructor, or the shared `getDatabase()` singleton when
+   * unbound. Exposed so a transaction owner (NavigationGraphManager) can assert
+   * this coverage repo shares the navigation repo's connection before enlisting
+   * both in one transaction — a foreign-bound coverage repo would otherwise split
+   * writes and silently defeat the rollback guarantee.
+   */
+  resolveConnection(): Kysely<Database> {
+    return this.getDb();
+  }
+
+  /**
    * Return a repository instance whose every read and write runs on the supplied
    * executor (a Kysely transaction handle) instead of the shared singleton
    * connection, so coverage writes can enlist in a caller-owned transaction

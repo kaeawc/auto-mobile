@@ -327,24 +327,19 @@ describe("finalizeToolResponse", () => {
     }
   });
 
-  // Composition of --observe-result-compact with --actions-diff-observe (issue #2990,
-  // task 1). `actionsDiffObserve` ("return only the diff of the post-action
-  // observation") is a *dormant* output-reduction flag today: it is fully plumbed
-  // (CLI/env → outputReductionFlags → ServerConfig → daemon startup) but no
-  // production code reads `serverConfig.isActionsDiffObserveEnabled()`, so a
-  // post-action observation is currently returned in full. When the diff behavior
-  // is implemented it will reshape the `.observation` payload inside the handler,
-  // *before* `finalizeToolResponse` — which is where bounds compaction runs
-  // (output-only, at the serialization chokepoint). These tests pin two invariants
-  // so the eventual diff implementation cannot silently break composition:
+  // Composition of --observe-result-compact with --actions-diff-observe (issue #2990).
+  // The diff behavior itself shipped in #2761 (see the "actions-diff-observe diff
+  // emit" block below): the diff runs *inside* `finalizeToolResponse`, *after*
+  // `sanitizeObserveResult`/compaction, and only when a `baselineStore` is injected.
+  // These two cases pin the compaction invariants that must survive that — note they
+  // pass a `sessionUuid` but NO `baselineStore`, so no diff is produced and the full
+  // (compacted) observation is emitted, exactly today's behavior:
   //   1. Enabling the diff flag never disables (or is a precondition for) compaction —
   //      compaction is gated solely by `isObserveResultCompactEnabled()`.
-  //   2. Because compaction runs *after* any handler-side diff, a future differ that
-  //      compares object-shaped `bounds.left`-style fields always sees objects, never
-  //      tuples — the two transforms never collide on the same representation.
-  // NOTE: with the diff flag dormant, EC-D2 currently passes with the flag off too;
-  // both cases become load-bearing once the diff behavior is implemented (tracked in
-  // #3026). They exist now to fence that future work, not to test today's diff.
+  //   2. When compaction is off, a post-action observation keeps object-shaped bounds,
+  //      so a field-by-field `bounds.left` reader is never handed a tuple.
+  // The diff-and-compact interaction (a served diff carrying tuple bounds) is covered
+  // by "compact on: the emitted diff carries tuple-shaped bounds" in the diff-emit block.
   describe("compact × actions-diff-observe composition (#2990)", () => {
     let originalDiff: boolean;
 
@@ -387,6 +382,289 @@ describe("finalizeToolResponse", () => {
       // A differ reading `bounds.left`/`bounds.top` field-by-field sees numbers, not undefined.
       expect(node.bounds.left).toBe(0);
       expect(node.bounds.bottom).toBe(1920);
+    });
+  });
+
+  // Diff emit (issue #2761): with `--actions-diff-observe` on AND a baseline
+  // store injected, a non-observe action emits a *diff* of its post-action
+  // observation instead of the full observation. `observe` always emits full and
+  // resets the baseline. Falls back to full when the screen changed, the baseline
+  // is missing, or there is no sessionUuid (legacy single-agent path).
+  describe("actions-diff-observe diff emit (#2761)", () => {
+    let originalDiff: boolean;
+
+    /** Same-screen ObserveResult (app/activity/package all match makeObserveResult). */
+    function sameScreenObserve(): ObserveResult {
+      return {
+        ...makeObserveResult(),
+        activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+        viewHierarchy: {
+          packageName: "com.example",
+          hierarchy: {
+            node: {
+              "resource-id": "com.example:id/root",
+              "content-desc": "keep-me",
+              "node": [{ "resource-id": "com.example:id/child", "text": "Hello" } as any],
+            } as any,
+          },
+        },
+      } as ObserveResult;
+    }
+
+    /** In-memory baseline store standing in for the sessionManager cache slot. */
+    function makeStore(): { store: { get: (u: string) => ObserveResult | undefined; set: (u: string, o: ObserveResult) => void }; map: Map<string, ObserveResult> } {
+      const map = new Map<string, ObserveResult>();
+      return {
+        map,
+        store: {
+          get: (u: string) => map.get(u),
+          set: (u: string, o: ObserveResult) => { map.set(u, o); },
+        },
+      };
+    }
+
+    beforeEach(() => {
+      originalDiff = serverConfig.isActionsDiffObserveEnabled();
+      serverConfig.setActionsDiffObserveEnabled(true);
+    });
+
+    afterEach(() => {
+      serverConfig.setActionsDiffObserveEnabled(originalDiff);
+    });
+
+    test("flag off leaves the action observation full and never touches the store", () => {
+      serverConfig.setActionsDiffObserveEnabled(false);
+      const { store, map } = makeStore();
+      const response = createStructuredToolResponse({ success: true, observation: sameScreenObserve() });
+      const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expect(map.size).toBe(0);
+    });
+
+    test("observe emits the full observation and resets the baseline", () => {
+      const { store, map } = makeStore();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      // Full observation emitted (not a diff).
+      expect((finalized.structuredContent as any).isDiff).toBeUndefined();
+      expect((finalized.structuredContent as any).viewHierarchy).toBeDefined();
+      // Baseline reset to the sanitized observation.
+      expect(map.get("s1")).toBeDefined();
+      expect(map.get("s1")!.viewHierarchy).toBeDefined();
+    });
+
+    test("a non-observe action emits a diff vs the baseline in both representations", () => {
+      const { store } = makeStore();
+      // Seed the baseline via an observe.
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      // Next action toggles a child's `checked` on the same screen.
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.viewHierarchy).toBeUndefined();
+      expect(obsSc.changed).toHaveLength(1);
+      expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
+      expect((finalized.structuredContent as any).success).toBe(true);
+
+      // Text mirrors the diffed structuredContent exactly.
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation.isDiff).toBe(true);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("a non-observe action updates the baseline to its own observation (next diff is against current state)", () => {
+      const { store, map } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+
+      // Baseline now reflects the post-action observation (checked=true present).
+      const baseline = map.get("s1")!;
+      expect((baseline.viewHierarchy!.hierarchy.node as any).node[0].checked).toBe("true");
+    });
+
+    test("falls back to the full observation when the baseline is missing", () => {
+      const { store, map } = makeStore();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      // Baseline is now seeded for the next action.
+      expect(map.get("s1")).toBeDefined();
+    });
+
+    test("falls back to full when the screen (app/activity/package) changed", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      const otherScreen = {
+        ...sameScreenObserve(),
+        activeWindow: { appId: "com.other", activityName: ".Other", layoutSeqSum: 2 },
+      } as ObserveResult;
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: otherScreen }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+    });
+
+    test("falls back to full when there is no sessionUuid (legacy single-agent path)", () => {
+      const { store, map } = makeStore();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", baselineStore: store }
+      );
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expect(map.size).toBe(0);
+    });
+
+    test("observe resets the baseline after a diff-producing action", () => {
+      const { store, map } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      const first = map.get("s1");
+      // An observe with a different hierarchy overwrites the baseline wholesale.
+      const reset = sameScreenObserve();
+      (reset.viewHierarchy!.hierarchy.node as any)["content-desc"] = "changed-root";
+      finalizeToolResponse(createStructuredToolResponse(reset), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      const second = map.get("s1")!;
+      expect(second).not.toBe(first);
+      expect((second.viewHierarchy!.hierarchy.node as any)["content-desc"]).toBe("changed-root");
+    });
+
+    test("diff path is output-only — the caller's in-memory observation is untouched", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const before = JSON.stringify(next);
+      finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+      expect(JSON.stringify(next)).toBe(before);
+    });
+
+    test("compact on: the emitted diff carries tuple-shaped bounds in its node attributes", () => {
+      // The diff runs on the sanitized (already-compacted) observation, so a node
+      // surfaced in the diff carries the tuple bounds, not the object shape.
+      serverConfig.setObserveResultCompactEnabled(true);
+      const { store } = makeStore();
+      const withBounds = (): ObserveResult => ({
+        ...makeObserveResult(),
+        activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+        viewHierarchy: {
+          packageName: "com.example",
+          hierarchy: { node: { "resource-id": "com.example:id/root", "bounds": { left: 0, top: 0, right: 100, bottom: 100 } } as any },
+        },
+      } as ObserveResult);
+
+      finalizeToolResponse(createStructuredToolResponse(withBounds()), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      const next = withBounds();
+      (next.viewHierarchy!.hierarchy.node as any).node = [
+        { "resource-id": "com.example:id/added", "bounds": { left: 5, top: 6, right: 7, bottom: 8 } },
+      ];
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.added).toHaveLength(1);
+      expect(obsSc.added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
+    });
+  });
+
+  // --actions-no-observe (#2762, folded into #3026): strip the embedded
+  // observation from non-observe tool results entirely. Precedence over
+  // --actions-diff-observe — nothing to diff once stripped.
+  describe("actions-no-observe strip + precedence (#2762/#3026)", () => {
+    let originalNoObserve: boolean;
+    let originalDiff: boolean;
+
+    beforeEach(() => {
+      originalNoObserve = serverConfig.isActionsNoObserveEnabled();
+      originalDiff = serverConfig.isActionsDiffObserveEnabled();
+      serverConfig.setActionsNoObserveEnabled(false);
+      serverConfig.setActionsDiffObserveEnabled(false);
+    });
+
+    afterEach(() => {
+      serverConfig.setActionsNoObserveEnabled(originalNoObserve);
+      serverConfig.setActionsDiffObserveEnabled(originalDiff);
+    });
+
+    test("strips the embedded observation from a non-observe action in both representations", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      const response = createStructuredToolResponse({ success: true, observation: makeObserveResult() });
+      const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
+
+      expect((finalized.structuredContent as any).observation).toBeUndefined();
+      expect((finalized.structuredContent as any).success).toBe(true);
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation).toBeUndefined();
+      expect(parsed.success).toBe(true);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("does not strip the observe tool's own observation", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      const finalized = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe", sessionUuid: "s1" });
+      // observe still returns the full (sanitized) observation.
+      expect((finalized.structuredContent as any).viewHierarchy).toBeDefined();
+    });
+
+    test("flag off leaves the observation in place (today's behavior)", () => {
+      serverConfig.setActionsNoObserveEnabled(false);
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
+        { name: "tapOn" }
+      );
+      expect((finalized.structuredContent as any).observation).toBeDefined();
+    });
+
+    test("precedence: with both no-observe and diff on, the observation is stripped (no diff)", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const map = new Map<string, ObserveResult>();
+      const store = { get: (u: string) => map.get(u), set: (u: string, o: ObserveResult) => { map.set(u, o); } };
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc).toBeUndefined(); // stripped, not a diff
+      // Diff moot → baseline never touched.
+      expect(map.size).toBe(0);
+    });
+
+    test("non-observe tool without an observation passes through unchanged", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      const payload = { success: true, message: "done" };
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), { name: "pressButton" });
+      expect(finalized.structuredContent).toEqual(payload);
     });
   });
 });

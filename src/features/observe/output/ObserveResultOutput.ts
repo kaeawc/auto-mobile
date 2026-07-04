@@ -240,3 +240,292 @@ function compactObserveBounds(value: unknown): void {
     compactObserveBounds(v);
   }
 }
+
+/* --------------------------------------------------------------------------
+ * Observation diff (issue #2761 — `--actions-diff-observe`)
+ *
+ * With the flag on, a non-observe action emits only the *diff* of its
+ * post-action observation against the previous one, instead of the full
+ * embedded observation. Both sides are the already-sanitized ObserveResult
+ * (the finalize hook stores the sanitized observation as the baseline), so the
+ * diff compares like-for-like node shapes.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * A single node in an observation diff. `attributes` are the node's own
+ * (non-child) attributes — for `added`/`removed` the full attribute set, so the
+ * consumer can reconstruct the node without the baseline.
+ */
+export interface ObserveDiffNode {
+  /** Synthetic identity key: `resource-id \0 bounds \0 text \0 sibling-index`. */
+  key: string;
+  attributes: Record<string, unknown>;
+}
+
+/** A node matched by key whose non-key attributes changed. */
+export interface ObserveDiffNodeChange {
+  key: string;
+  /** Per-attribute `{ from, to }`; a missing side is `undefined`. */
+  changes: Record<string, { from?: unknown; to?: unknown }>;
+}
+
+/**
+ * Compact diff of one observation against a baseline. `isDiff` is a discriminant
+ * so a consumer can tell a diff apart from a full `ObserveResult` (which has no
+ * such marker). Empty `added`/`removed`/`changed` and absent `fields` means the
+ * screen is unchanged.
+ */
+export interface ObserveDiff {
+  isDiff: true;
+  added: ObserveDiffNode[];
+  removed: ObserveDiffNode[];
+  changed: ObserveDiffNodeChange[];
+  /** Changed top-level scalar fields (`rotation`, `wakefulness`, …). */
+  fields?: Record<string, { from?: unknown; to?: unknown }>;
+}
+
+export interface DiffObserveConfig {
+  /**
+   * Top-level scalar ObserveResult fields to diff. Defaults to
+   * `DIFF_SCALAR_FIELDS`. `updatedAt` is deliberately excluded from the default
+   * — it changes on every capture and would be pure noise.
+   */
+  scalarFields?: readonly string[];
+}
+
+/**
+ * Top-level scalar ObserveResult fields worth diffing. Intentionally excludes
+ * `updatedAt` (churns every capture) and object/array fields (`viewHierarchy`
+ * is covered by the node diff; `elements` mirrors the hierarchy).
+ */
+export const DIFF_SCALAR_FIELDS: readonly string[] = [
+  "rotation",
+  "wakefulness",
+  "userId",
+  "intentChooserDetected",
+  "notificationPermissionDetected",
+  "awaitTimeout",
+  "error",
+];
+
+/** A flattened node used for keyed positional diffing. */
+interface FlatObserveNode {
+  /**
+   * Globally-positional match key: the chain of every ancestor's local key plus
+   * this node's own (depth-joined). Two nodes in *different* subtrees that share
+   * a local key — same resource-id/bounds/text/sibling index, common for
+   * repeated list cells — get distinct path keys, so they never collide and
+   * mis-pair. Used for matching, never emitted.
+   */
+  pathKey: string;
+  /** This node's own local key (resource-id + bounds + text + sibling index), for display. */
+  key: string;
+  attributes: Record<string, unknown>;
+}
+
+/**
+ * Canonical string for a bounds value, tolerant of both the object shape
+ * (`{left, top, right, bottom}`) and the compacted tuple (`[l, t, r, b]`), so a
+ * compacted stream diffs identically to an object-shaped one.
+ */
+function boundsKey(bounds: unknown): string {
+  if (Array.isArray(bounds)) {
+    return bounds.join(",");
+  }
+  if (bounds && typeof bounds === "object") {
+    const b = bounds as { left?: number; top?: number; right?: number; bottom?: number };
+    return [b.left, b.top, b.right, b.bottom].join(",");
+  }
+  return "";
+}
+
+/**
+ * A node's *local* identity key: `resource-id + bounds + text + sibling index`,
+ * NUL-joined so the parts can never run together. Nodes carry no stable id, so
+ * this coarse key pins geometry + text + local position; state-only changes
+ * (e.g. `checked`) keep the same key and surface as `changed`. On its own it is
+ * not globally unique — `FlatObserveNode.pathKey` prefixes the ancestor chain to
+ * disambiguate identical cells living in different subtrees.
+ */
+function nodeKey(node: Record<string, unknown>, siblingIndex: number): string {
+  const resourceId = node["resource-id"] ?? "";
+  const text = node["text"] ?? "";
+  return [resourceId, boundsKey(node["bounds"]), text, siblingIndex].join(" ");
+}
+
+/**
+ * Depth separator joining ancestor local keys into a positional `pathKey`. A
+ * distinct control char (U+0001) from the intra-key NUL (U+0000) so the two
+ * levels of joining can never be confused.
+ */
+const PATH_KEY_SEP = "";
+
+/** A node's own attributes, excluding the `node` child array (diffed separately). */
+function nodeAttributes(node: Record<string, unknown>): Record<string, unknown> {
+  const attrs: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "node") {
+      continue;
+    }
+    attrs[key] = value;
+  }
+  return attrs;
+}
+
+/**
+ * Pre-order flatten of an observation's hierarchy into positionally-keyed nodes.
+ * Each node's `pathKey` is its ancestor chain of local keys plus its own, so the
+ * key is globally unique by position and identical cells in sibling subtrees do
+ * not collide.
+ */
+function flattenForDiff(obs: ObserveResult): FlatObserveNode[] {
+  const out: FlatObserveNode[] = [];
+  const walk = (node: ViewHierarchyNode | undefined, siblingIndex: number, parentPath: string): void => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const rec = node as unknown as Record<string, unknown>;
+    const localKey = nodeKey(rec, siblingIndex);
+    const pathKey = parentPath === "" ? localKey : `${parentPath}${PATH_KEY_SEP}${localKey}`;
+    out.push({ pathKey, key: localKey, attributes: nodeAttributes(rec) });
+    toNodeArray(node.node).forEach((child, index) => walk(child, index, pathKey));
+  };
+  toNodeArray(obs.viewHierarchy?.hierarchy?.node).forEach((root, index) => walk(root, index, ""));
+  return out;
+}
+
+/**
+ * JSON with object keys sorted recursively, so two structurally-equal objects
+ * built with different key insertion order compare equal (avoids phantom
+ * `changed` entries from a differently-ordered attribute object).
+ */
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+        sorted[k] = (v as Record<string, unknown>)[k];
+      }
+      return sorted;
+    }
+    return v;
+  });
+}
+
+/** Structural equality via key-order-insensitive JSON (attributes are plain data). */
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  return stableStringify(a) === stableStringify(b);
+}
+
+/** Per-attribute diff of two attribute maps (union of keys). */
+function diffAttributes(
+  from: Record<string, unknown>,
+  to: Record<string, unknown>
+): Record<string, { from?: unknown; to?: unknown }> {
+  const changes: Record<string, { from?: unknown; to?: unknown }> = {};
+  for (const key of new Set([...Object.keys(from), ...Object.keys(to)])) {
+    // `bounds` is compared through `boundsKey` so an object-shaped baseline and a
+    // compacted tuple next (identical geometry) are not a spurious change.
+    const equal = key === "bounds"
+      ? boundsKey(from[key]) === boundsKey(to[key])
+      : valuesEqual(from[key], to[key]);
+    if (!equal) {
+      changes[key] = { from: from[key], to: to[key] };
+    }
+  }
+  return changes;
+}
+
+/** Group flattened nodes by their positional `pathKey`, preserving encounter order. */
+function groupByKey(nodes: FlatObserveNode[]): Map<string, FlatObserveNode[]> {
+  const map = new Map<string, FlatObserveNode[]>();
+  for (const node of nodes) {
+    const bucket = map.get(node.pathKey);
+    if (bucket) {
+      bucket.push(node);
+    } else {
+      map.set(node.pathKey, [node]);
+    }
+  }
+  return map;
+}
+
+/**
+ * Whether two observations describe the same screen. Cross-screen diffs are
+ * meaningless (issue #2761), so the finalize hook falls back to a full emit when
+ * this is false. Compares the active window app/activity and the hierarchy
+ * package name.
+ */
+export function isSameObservationScreen(baseline: ObserveResult, next: ObserveResult): boolean {
+  if ((baseline.activeWindow?.appId ?? "") !== (next.activeWindow?.appId ?? "")) {
+    return false;
+  }
+  if ((baseline.activeWindow?.activityName ?? "") !== (next.activeWindow?.activityName ?? "")) {
+    return false;
+  }
+  if ((baseline.viewHierarchy?.packageName ?? "") !== (next.viewHierarchy?.packageName ?? "")) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Diff `next` against `baseline` into a compact {added, removed, changed, fields}
+ * shape. Pure — neither input is mutated. Node identity is the positional
+ * `pathKey` (ancestor chain + local `nodeKey`), so a node keeps its identity
+ * across state-only changes but a same-key cell in a different subtree never
+ * collides. Any residual same-path duplicates (truly identical siblings) are
+ * paired positionally in encounter order — a best-effort heuristic, since with
+ * no stable ids interchangeable rows cannot be told apart. The emitted `key` is
+ * the node's readable local key. Callers gate on `isSameObservationScreen` first.
+ */
+export function diffObserveResult(
+  baseline: ObserveResult,
+  next: ObserveResult,
+  cfg?: DiffObserveConfig
+): ObserveDiff {
+  const baseByKey = groupByKey(flattenForDiff(baseline));
+  const nextByKey = groupByKey(flattenForDiff(next));
+
+  const added: ObserveDiffNode[] = [];
+  const removed: ObserveDiffNode[] = [];
+  const changed: ObserveDiffNodeChange[] = [];
+
+  for (const pathKey of new Set([...baseByKey.keys(), ...nextByKey.keys()])) {
+    const baseNodes = baseByKey.get(pathKey) ?? [];
+    const nextNodes = nextByKey.get(pathKey) ?? [];
+    const paired = Math.min(baseNodes.length, nextNodes.length);
+    for (let i = 0; i < paired; i++) {
+      const attrChanges = diffAttributes(baseNodes[i].attributes, nextNodes[i].attributes);
+      if (Object.keys(attrChanges).length > 0) {
+        changed.push({ key: nextNodes[i].key, changes: attrChanges });
+      }
+    }
+    for (let i = paired; i < nextNodes.length; i++) {
+      added.push({ key: nextNodes[i].key, attributes: nextNodes[i].attributes });
+    }
+    for (let i = paired; i < baseNodes.length; i++) {
+      removed.push({ key: baseNodes[i].key, attributes: baseNodes[i].attributes });
+    }
+  }
+
+  const diff: ObserveDiff = { isDiff: true, added, removed, changed };
+
+  const scalarFields = cfg?.scalarFields ?? DIFF_SCALAR_FIELDS;
+  const fields: Record<string, { from?: unknown; to?: unknown }> = {};
+  const baseRecord = baseline as unknown as Record<string, unknown>;
+  const nextRecord = next as unknown as Record<string, unknown>;
+  for (const field of scalarFields) {
+    if (!valuesEqual(baseRecord[field], nextRecord[field])) {
+      fields[field] = { from: baseRecord[field], to: nextRecord[field] };
+    }
+  }
+  if (Object.keys(fields).length > 0) {
+    diff.fields = fields;
+  }
+
+  return diff;
+}

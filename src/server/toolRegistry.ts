@@ -26,7 +26,7 @@ import { getMcpRecorder } from "./mcpRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
-import { finalizeToolResponse } from "./finalizeToolResponse";
+import { finalizeToolResponse, type ObservationBaselineStore } from "./finalizeToolResponse";
 import { getStructuredField } from "../utils/toolUtils";
 
 // Re-exported for backward compatibility; the implementation now lives in
@@ -481,7 +481,19 @@ class ToolRegistryClass {
             }
           }
 
-          return finalizeToolResponse(response, { name, sessionUuid });
+          // Back the #2761 diff baseline with the session cache when a session
+          // and daemon are present (legacy single-agent path stays diff-free and
+          // emits the full observation). The closures read/write the typed
+          // `lastRenderedObservation` slot; finalize only invokes them when
+          // `--actions-diff-observe` is on, so this is inert by default.
+          const baselineStore: ObservationBaselineStore | undefined =
+            sessionUuid && DaemonState.getInstance().isInitialized()
+              ? {
+                get: uuid => DaemonState.getInstance().getSessionManager().getSessionCache(uuid)?.lastRenderedObservation,
+                set: (uuid, observation) => DaemonState.getInstance().getSessionManager().setLastRenderedObservation(uuid, observation),
+              }
+              : undefined;
+          return finalizeToolResponse(response, { name, sessionUuid, baselineStore });
         } catch (error) {
           if (error instanceof ActionableError) {
             throw error;

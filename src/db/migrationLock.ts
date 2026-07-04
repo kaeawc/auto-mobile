@@ -190,6 +190,17 @@ export function migrationLockPathFor(dbPath: string): string {
  * flake-free (issue #3047). `file::memory:?cache=shared` was considered and
  * rejected — it reintroduces the cross-process lock concern and carries bun
  * URI-filename risk for no benefit here.
+ *
+ * TEST-ONLY. Because `:memory:` is private per connection, the app connection
+ * (`getDatabase()`) and the migration connection (`startMigrations()`'s separate
+ * `migrationDb`) get DIFFERENT empty databases: `ensureMigrations()` reports
+ * success, yet the app connection has NONE of the migrated tables, so a real
+ * schema-dependent read/write (e.g. `tool_calls`) fails with `no such table`.
+ * This sentinel is therefore only for lifecycle tests that exercise the
+ * open/close/reopen contract without querying migrated schema — not a production
+ * DB configuration. (Sharing one connection across the app and the migrator would
+ * break the migration failure-isolation the separate `migrationDb` provides, so
+ * it is deliberately out of scope.)
  */
 export const IN_MEMORY_DATABASE_PATH = ":memory:";
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { DeviceAppInspector, findProcessIdentifier, findRunningProcessPid, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppInspector, findProcessIdentifier, findRunningProcessPid, isDevicectlProcessGoneError, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppInspector";
 import { hashAppBundle } from "../../../src/utils/ios-cmdline-tools/AppBundleHasher";
 import { FakeHostControlDeviceAppInspector } from "../../fakes/FakeHostControlDeviceAppInspector";
 
@@ -970,5 +970,87 @@ describe("DeviceAppInspector terminate (devicectl)", () => {
 
     await expect(inspector.terminateApp("device-udid", bundleId)).rejects.toThrow(/host control/i);
     expect(commands.every(c => !c.includes("devicectl"))).toBe(true);
+  });
+
+  // Issue #3054: the PID can exit between `info processes` resolution and the
+  // kill (a real on-device race). devicectl then exits non-zero and promisified
+  // exec rejects; the app is nonetheless effectively terminated, so we must not
+  // surface a false success:false — mirroring the simulator path's
+  // isSimctlNotRunningError tolerance.
+  const runningProcessesExec = (
+    commands: string[],
+    onTerminate: (command: string) => void
+  ) => async (command: string) => {
+    commands.push(command);
+    if (command.includes("device info apps")) {
+      await writeAppsJson(command, true);
+    }
+    if (command.includes("device info processes")) {
+      const jsonPath = parseDevicectlJsonOutputPath(command);
+      if (jsonPath) {
+        await fs.writeFile(jsonPath, JSON.stringify({
+          result: { runningProcesses: [{ processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` }] }
+        }), "utf-8");
+      }
+    }
+    if (command.includes("device process terminate")) {
+      onTerminate(command);
+    }
+    return makeExecResult();
+  };
+
+  test("tolerates an already-exited PID: a devicectl 'no such process' terminate failure reports {wasInstalled:true, wasRunning:true} instead of throwing", async () => {
+    const commands: string[] = [];
+    // Real devicectl ESRCH text lives on stderr, not in the promisified message.
+    const exec = runningProcessesExec(commands, () => {
+      throw Object.assign(
+        new Error("Command failed: xcrun devicectl device process terminate --pid 4321 --kill --quiet"),
+        { stderr: "ERROR: The operation couldn’t be completed. No such process (NSPOSIXErrorDomain error 3.)" }
+      );
+    });
+
+    const inspector = createInspector({ exec });
+    const result = await inspector.terminateApp("device-udid", bundleId);
+
+    expect(result).toEqual({ wasInstalled: true, wasRunning: true });
+    // The dedicated terminate verb was still attempted before the race surfaced.
+    expect(commands.some(c => c.includes("device process terminate"))).toBe(true);
+  });
+
+  test("still throws when the terminate fails for an unrelated reason (device locked)", async () => {
+    const commands: string[] = [];
+    const exec = runningProcessesExec(commands, () => {
+      throw Object.assign(
+        new Error("Command failed: xcrun devicectl device process terminate --pid 4321 --kill --quiet"),
+        { stderr: "ERROR: The device is locked. Unlock it and try again." }
+      );
+    });
+
+    const inspector = createInspector({ exec });
+    // The original devicectl error propagates unchanged (its diagnostic lives on
+    // stderr); we only assert it is not swallowed, then confirm the stderr text.
+    const thrown = await inspector.terminateApp("device-udid", bundleId).then(
+      () => { throw new Error("expected terminateApp to reject"); },
+      (error: unknown) => error
+    );
+    expect((thrown as { stderr?: string }).stderr).toMatch(/locked/i);
+    expect(commands.some(c => c.includes("device process terminate"))).toBe(true);
+  });
+});
+
+describe("isDevicectlProcessGoneError", () => {
+  test("matches ESRCH / already-exited devicectl phrasings (case-insensitive)", () => {
+    expect(isDevicectlProcessGoneError("The operation couldn’t be completed. No such process (NSPOSIXErrorDomain error 3.)")).toBe(true);
+    expect(isDevicectlProcessGoneError("No such process")).toBe(true);
+    expect(isDevicectlProcessGoneError("The process is not running")).toBe(true);
+    expect(isDevicectlProcessGoneError("The process is no longer running")).toBe(true);
+    expect(isDevicectlProcessGoneError("found nothing to terminate")).toBe(true);
+  });
+
+  test("does not match unrelated devicectl failures", () => {
+    expect(isDevicectlProcessGoneError("The device is locked.")).toBe(false);
+    expect(isDevicectlProcessGoneError("Could not connect to the device.")).toBe(false);
+    expect(isDevicectlProcessGoneError("Unable to terminate: permission denied")).toBe(false);
+    expect(isDevicectlProcessGoneError("")).toBe(false);
   });
 });

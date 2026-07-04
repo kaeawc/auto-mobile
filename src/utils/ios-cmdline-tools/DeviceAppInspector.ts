@@ -154,6 +154,43 @@ const getErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
+ * Full text of a failed `exec` rejection. Promisified `child_process.exec`
+ * rejects with an Error whose `message` is "Command failed: <cmd>" and whose
+ * `stderr` carries the tool's actual diagnostic — devicectl writes its ESRCH
+ * "No such process" text to stderr, so we must inspect stderr, not just message.
+ */
+const getExecErrorText = (error: unknown): string => {
+  const base = getErrorMessage(error);
+  if (error && typeof error === "object") {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    if (typeof stderr === "string" && stderr.length > 0) {
+      return `${base}\n${stderr}`;
+    }
+  }
+  return base;
+};
+
+/**
+ * True when a devicectl `process terminate` failure means the target PID was
+ * already gone — it exited between our `info processes` resolution and the kill
+ * (a real on-device race, issue #3054). devicectl surfaces ESRCH as the
+ * localized "No such process" strerror text; we also tolerate a couple of
+ * "not running" phrasings for robustness. This mirrors
+ * `TerminateApp.isSimctlNotRunningError` on the simulator path, so a raced exit
+ * reports an effectively-terminated app instead of a false `success:false`.
+ *
+ * Deliberately narrow: unrelated failures (device locked, not connected,
+ * permission denied) must still propagate as hard errors.
+ */
+export const isDevicectlProcessGoneError = (message: string): boolean => {
+  const normalized = message.toLowerCase();
+  return normalized.includes("no such process")
+    || normalized.includes("no longer running")
+    || normalized.includes("not running")
+    || normalized.includes("found nothing to terminate");
+};
+
+/**
  * Recursively find the launched process's `processIdentifier` in a devicectl
  * `process launch --json-output` payload. The stable location is
  * `result.process.processIdentifier`; we prefer it and fall back to a deep
@@ -611,9 +648,14 @@ export class DeviceAppInspector {
    *   (no process query, no terminate),
    * - `{ wasInstalled: true, wasRunning: false }` when installed but no matching
    *   process is running (no terminate),
-   * - `{ wasInstalled: true, wasRunning: true }` after terminating a running process.
+   * - `{ wasInstalled: true, wasRunning: true }` after terminating a running
+   *   process — including the race where the resolved PID exits on its own
+   *   between resolution and the kill (devicectl returns ESRCH / "No such
+   *   process"; see {@link isDevicectlProcessGoneError}). The app is gone either
+   *   way, so we report success rather than a false failure.
    *
-   * Throws on an underlying devicectl failure. Gated to macOS + local devicectl:
+   * Throws on an underlying devicectl failure that is *not* the already-exited
+   * race (e.g. device locked / not connected). Gated to macOS + local devicectl:
    * host control (Docker) exposes no process-management bridge, and non-darwin
    * hosts have no devicectl, so both throw an explicit, actionable error rather
    * than a confusing simctl-style failure (iOS ≤16 devices reject the devicectl
@@ -653,7 +695,27 @@ export class DeviceAppInspector {
       "--kill",
       "--quiet"
     ].join(" ");
-    await this.deps.exec(terminateCommand);
+    try {
+      await this.deps.exec(terminateCommand);
+    } catch (error) {
+      const message = getExecErrorText(error);
+      // Race (#3054): the PID resolved from `info processes` exited before the
+      // kill landed, so devicectl returns non-zero (ESRCH / "No such process")
+      // and promisified exec rejects. The app is nonetheless gone, so report
+      // success rather than surfacing a false `success:false`. Swallow only the
+      // already-exited case; any other failure (device locked, not connected)
+      // still propagates. Log at debug since this is an expected non-error.
+      if (!isDevicectlProcessGoneError(message)) {
+        throw error;
+      }
+      this.deps.logger.debug(
+        `[DeviceAppInspector] terminate PID ${pid} for ${bundleId} raced an exit; treating as terminated: ${message}`
+      );
+    }
+    // wasRunning:true in both the killed and raced-exit cases: we positively
+    // resolved a live PID above, so the app *was* running and is now gone. This
+    // is more honest than false and distinguishes the race from the
+    // installed-but-not-running case handled earlier.
     return { wasInstalled: true, wasRunning: true };
   }
 

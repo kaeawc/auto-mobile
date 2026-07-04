@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { sql } from "kysely";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
-import { IN_MEMORY_DATABASE_PATH } from "../../src/db/migrationLock";
+import { IN_MEMORY_DATABASE_PATH, migrationLockPathFor } from "../../src/db/migrationLock";
 import { importFreshDatabaseModule, restoreEnv, snapshotEnv } from "./freshDatabaseModule";
 
 /**
@@ -64,8 +64,13 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
 
     const databaseModule = await importFreshDatabaseModule();
 
-    // Cold start on the first in-memory DB.
+    // Cold start on the first in-memory DB. Await migrations so the detached
+    // `:memory:` migration run is fully owned by the test rather than left in
+    // flight past teardown — cheap on an in-memory DB (no file/WAL/lock) and
+    // deterministic. The barrier assertions below need neither a real file nor a
+    // completed migration (issue #3047); this is purely lifecycle hygiene.
     databaseModule.getDatabase();
+    await databaseModule.ensureMigrations();
 
     // Model the daemon shutdown ordering: drain in-flight best-effort writes,
     // then close the connection (issue #2792).
@@ -79,6 +84,7 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
     // path switch / restart-without-exit). Each `new Database(":memory:")` is a
     // brand-new private DB, so this naturally models a distinct reopened DB.
     databaseModule.getDatabase();
+    await databaseModule.ensureMigrations();
 
     // The barrier must have cold-started: a distinct, non-draining instance.
     const reopenedBarrier = getDbWriteBarrier();
@@ -118,9 +124,10 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
     // The blocker this migration fixes: a `:memory:` opener must use a
     // NoOpMigrationLock, never `createFileMigrationLock`, so it must not create a
     // bogus `:memory:.migrate.lock` file (nor a `:memory:` DB file) in the cwd.
-    expect(existsSync(path.join(process.cwd(), `${IN_MEMORY_DATABASE_PATH}.migrate.lock`))).toBe(
-      false
-    );
+    // Assert against the EXACT path the production lock would derive
+    // (`migrationLockPathFor`) rather than a hand-rolled cwd join, so the guard
+    // can't drift from the code under a symlinked / non-canonical cwd.
+    expect(existsSync(migrationLockPathFor(IN_MEMORY_DATABASE_PATH))).toBe(false);
     expect(existsSync(path.join(process.cwd(), IN_MEMORY_DATABASE_PATH))).toBe(false);
 
     await databaseModule.closeDatabase();

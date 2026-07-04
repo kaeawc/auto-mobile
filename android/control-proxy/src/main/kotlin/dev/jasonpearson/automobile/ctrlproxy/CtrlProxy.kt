@@ -136,7 +136,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * `type:"error"` frame instead of being logged and swallowed — closing the one-layer-down
    * silent-hang gap from issue #3045. The `broadcastError` sink resolves [webSocketServer] lazily
    * because it is `lateinit` (assigned in [onServiceConnected]), and no-ops when the server is not
-   * running (there is then no socket to send the fallback on either). See [ResultBroadcaster].
+   * running — there is then no socket to send the fallback on, so the awaiter falls back to its
+   * timeout, the same as the double-failure tail. See [ResultBroadcaster].
    */
   private val resultBroadcaster =
     ResultBroadcaster(
@@ -4283,7 +4284,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "set text result") {
+    resultBroadcaster.guard(requestId, "set_text_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"set_text_result","timestamp":${System.currentTimeMillis()}""")
@@ -4318,7 +4319,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "IME action result") {
+    resultBroadcaster.guard(requestId, "ime_action_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"ime_action_result","timestamp":${System.currentTimeMillis()}""")
@@ -4353,7 +4354,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "select all result") {
+    resultBroadcaster.guard(requestId, "select_all_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"select_all_result","timestamp":${System.currentTimeMillis()}""")
@@ -4388,7 +4389,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "action result") {
+    resultBroadcaster.guard(requestId, "action_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"action_result","timestamp":${System.currentTimeMillis()}""")
@@ -4425,7 +4426,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "clipboard result") {
+    resultBroadcaster.guard(requestId, "clipboard_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"clipboard_result","timestamp":${System.currentTimeMillis()}""")
@@ -4697,7 +4698,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "device owner status result") {
+    resultBroadcaster.guard(requestId, "device_owner_status_result") {
       val success = error == null
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
@@ -4739,7 +4740,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "permission result") {
+    resultBroadcaster.guard(requestId, "permission_result") {
       val success = result.error == null
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
@@ -4786,7 +4787,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "swipe result") {
+    resultBroadcaster.guard(requestId, "swipe_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"swipe_result","timestamp":${System.currentTimeMillis()}""")
@@ -4824,7 +4825,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "drag result") {
+    resultBroadcaster.guard(requestId, "drag_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"drag_result","timestamp":${System.currentTimeMillis()}""")
@@ -4861,7 +4862,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "tap coordinates result") {
+    resultBroadcaster.guard(requestId, "tap_coordinates_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"tap_coordinates_result","timestamp":${System.currentTimeMillis()}""")
@@ -4899,7 +4900,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "pinch result") {
+    resultBroadcaster.guard(requestId, "pinch_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"pinch_result","timestamp":${System.currentTimeMillis()}""")
@@ -5384,7 +5385,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "highlight response") {
+    resultBroadcaster.guard(requestId, "highlight_response") {
       val errorJson = jsonCompact.encodeToString<String?>(error)
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
@@ -5418,7 +5419,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "current focus result") {
+    resultBroadcaster.guard(requestId, "current_focus_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"current_focus_result","timestamp":${System.currentTimeMillis()}""")
@@ -5456,7 +5457,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "current focus error") {
+    resultBroadcaster.guard(requestId, "current_focus_error") {
       webSocketServer.broadcast(
         buildString {
           append("""{"type":"current_focus_result","timestamp":${System.currentTimeMillis()}""")
@@ -5486,7 +5487,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "traversal order result") {
+    resultBroadcaster.guard(requestId, "traversal_order_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         buildString {
           append("""{"type":"traversal_order_result","timestamp":${System.currentTimeMillis()}""")
@@ -5524,7 +5525,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "traversal order error") {
+    resultBroadcaster.guard(requestId, "traversal_order_error") {
       webSocketServer.broadcast(
         buildString {
           append("""{"type":"traversal_order_result","timestamp":${System.currentTimeMillis()}""")
@@ -5689,7 +5690,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "preference files") {
+    resultBroadcaster.guard(requestId, "preference_files") {
       val message = buildString {
         append("""{"type":"preference_files","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5756,7 +5757,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "subscribe storage result") {
+    resultBroadcaster.guard(requestId, "subscribe_storage_result") {
       val message = buildString {
         append("""{"type":"subscribe_storage_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5794,7 +5795,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "unsubscribe storage result") {
+    resultBroadcaster.guard(requestId, "unsubscribe_storage_result") {
       val message = buildString {
         append("""{"type":"unsubscribe_storage_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5826,7 +5827,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "get preference result") {
+    resultBroadcaster.guard(requestId, "get_preference_result") {
       val message = buildString {
         append("""{"type":"get_preference_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5872,7 +5873,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "set preference result") {
+    resultBroadcaster.guard(requestId, "set_preference_result") {
       val message = buildString {
         append("""{"type":"set_preference_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5908,7 +5909,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "remove preference result") {
+    resultBroadcaster.guard(requestId, "remove_preference_result") {
       val message = buildString {
         append("""{"type":"remove_preference_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {
@@ -5943,7 +5944,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    resultBroadcaster.guard(requestId, "clear preferences result") {
+    resultBroadcaster.guard(requestId, "clear_preferences_result") {
       val message = buildString {
         append("""{"type":"clear_preferences_result","timestamp":${System.currentTimeMillis()}""")
         if (requestId != null) {

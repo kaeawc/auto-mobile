@@ -34,6 +34,12 @@ const compactBoundsTupleSchema = z
  * (elements, focused/selected elements, …) routes through this union so the
  * advertised `outputSchema` describes — and a strict MCP client validates —
  * whichever shape the server is actually emitting (issue #2990).
+ *
+ * The tuple arm is advertised in `tools/list` only when the flag is on: at
+ * generation time `advertiseBoundsForCompact` (`compactBoundsAdvertisement.ts`)
+ * collapses this union to its object arm when compaction is off, so the advertised
+ * shape stays honest-by-default. The `.describe()` prefix below is the stable
+ * marker that helper keys off — keep them in sync.
  */
 export const elementBoundsSchema = z
   .union([boundsObjectSchema, compactBoundsTupleSchema])

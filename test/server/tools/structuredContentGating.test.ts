@@ -178,4 +178,38 @@ describe("structuredContent gating (issue #2759)", () => {
     const direct = await tool!.handler({}, undefined, undefined as unknown as AbortSignal);
     expect((direct as { structuredContent?: unknown }).structuredContent).toEqual({ success: true, value: "hello" });
   });
+
+  // #2990: the advertised `tapOn` outputSchema bounds shape tracks --observe-result-compact,
+  // so a `tools/list` client is only told to expect the tuple when the server will emit it.
+  test("EC-C1: tapOn outputSchema advertises the bounds tuple arm only when compact is on", async () => {
+    const boundsHasTupleArm = async (): Promise<boolean> => {
+      const result = await list();
+      const tapOn = result.tools.find(t => t.name === "tapOn");
+      // Depth-first scan for a JSON-Schema tuple (prefixItems) under tapOn's outputSchema.
+      const stack: unknown[] = [tapOn?.outputSchema];
+      while (stack.length) {
+        const node = stack.pop();
+        if (Array.isArray(node)) {
+          stack.push(...node);
+        } else if (node && typeof node === "object") {
+          if ("prefixItems" in (node as Record<string, unknown>)) {
+            return true;
+          }
+          stack.push(...Object.values(node as Record<string, unknown>));
+        }
+      }
+      return false;
+    };
+
+    const originalCompact = serverConfig.isObserveResultCompactEnabled();
+    try {
+      serverConfig.setObserveResultCompactEnabled(false);
+      expect(await boundsHasTupleArm()).toBe(false);
+
+      serverConfig.setObserveResultCompactEnabled(true);
+      expect(await boundsHasTupleArm()).toBe(true);
+    } finally {
+      serverConfig.setObserveResultCompactEnabled(originalCompact);
+    }
+  });
 });

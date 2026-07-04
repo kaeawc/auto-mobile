@@ -444,6 +444,117 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
+  fun `malformed command returns structured error response`() = runBlocking {
+    // Issue #2985: an inbound command that fails to decode (here, an unknown command type) must
+    // produce a structured `type:"error"` frame correlated by requestId, not a silent return that
+    // leaves the daemon awaiter hanging until timeout.
+    server.start()
+
+    val client = HttpClient(CIO) { install(WebSockets) }
+    client.use { client ->
+      client.webSocket(
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
+      ) {
+        incoming.receive() // Connection message
+
+        send(Frame.Text("""{"type":"totally_unknown_command","requestId":"req-bad"}"""))
+
+        val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+        val responseJson = json.parseToJsonElement(responseFrame.readText()).jsonObject
+
+        assertEquals("error", responseJson["type"]?.jsonPrimitive?.content)
+        assertEquals("req-bad", responseJson["requestId"]?.jsonPrimitive?.content)
+        assertEquals("false", responseJson["success"]?.jsonPrimitive?.content)
+        val error = responseJson["error"]?.jsonPrimitive?.content ?: ""
+        assertTrue("error message should be non-empty", error.isNotEmpty())
+        // Proves the legibility mapping fires on the *real* kotlinx decode exception (not just a
+        // synthetic one): an unknown command type names the offending type on the wire.
+        assertTrue(
+          "expected the unknown type to be named, was: $error",
+          error.contains("totally_unknown_command"),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `unparseable payload returns error response with null requestId`() = runBlocking {
+    // Best-effort requestId extraction (#2985): when the payload can't be parsed at all, the error
+    // frame is still emitted with a null requestId rather than swallowed.
+    server.start()
+
+    val client = HttpClient(CIO) { install(WebSockets) }
+    client.use { client ->
+      client.webSocket(
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
+      ) {
+        incoming.receive() // Connection message
+
+        send(Frame.Text("""{"type":"request_screenshot", this is not json"""))
+
+        val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+        val responseJson = json.parseToJsonElement(responseFrame.readText()).jsonObject
+
+        assertEquals("error", responseJson["type"]?.jsonPrimitive?.content)
+        assertEquals(kotlinx.serialization.json.JsonNull, responseJson["requestId"])
+        assertEquals("false", responseJson["success"]?.jsonPrimitive?.content)
+      }
+    }
+  }
+
+  @Test
+  fun `handler exception returns structured error response`() = runBlocking {
+    // Issue #2985: a handler that throws while processing a well-formed command must still yield a
+    // structured error frame correlated by requestId, not just a server-side log line.
+    val throwingServer =
+      WebSocketServer(
+        port = 0,
+        scope = testScope,
+        messageHandler =
+          CtrlProxyMessageHandler(
+            object : NoOpCtrlProxyActions() {
+              override fun requestScreenshot(requestId: String?) {
+                throw RuntimeException("kaboom")
+              }
+            }
+          ),
+      )
+    throwingServer.start()
+    try {
+      val client = HttpClient(CIO) { install(WebSockets) }
+      client.use { client ->
+        client.webSocket(
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = throwingServer.getActualPort() ?: error("Server not running"),
+          path = "/ws",
+        ) {
+          incoming.receive() // Connection message
+
+          send(Frame.Text("""{"type":"request_screenshot","requestId":"req-throw"}"""))
+
+          val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+          val responseJson = json.parseToJsonElement(responseFrame.readText()).jsonObject
+
+          assertEquals("error", responseJson["type"]?.jsonPrimitive?.content)
+          assertEquals("req-throw", responseJson["requestId"]?.jsonPrimitive?.content)
+          assertEquals("false", responseJson["success"]?.jsonPrimitive?.content)
+          val error = responseJson["error"]?.jsonPrimitive?.content ?: ""
+          assertTrue("error message should be non-empty", error.isNotEmpty())
+        }
+      }
+    } finally {
+      throwingServer.stop()
+    }
+  }
+
+  @Test
   fun `commands dispatch in wire order`() = runBlocking {
     // Regression guard for message ordering: two synchronous commands sent back-to-back must run
     // in the order they arrive on the wire. This holds only because the server dispatches inline on

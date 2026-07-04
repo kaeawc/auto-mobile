@@ -24,6 +24,36 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 #endif
 
+/// The four touch endpoints of a two-finger pinch: two start points and two end points.
+/// `start1`/`end1` are the center∓offset finger, `start2`/`end2` the center±offset finger.
+typedef struct ObjCPinchPoints {
+    CGPoint start1;
+    CGPoint end1;
+    CGPoint start2;
+    CGPoint end2;
+} ObjCPinchPoints;
+
+/// Computes the two-finger pinch endpoints around (centerX, centerY).
+///
+/// Pure trig with no XCTest/UIKit dependency (available on all platforms, not just iOS) so it is
+/// unit-testable off-device — see `PinchGeometryTests`. `synthesizePinch` calls this to build the
+/// event paths, so the test guards the real synthesis math rather than a mirror of it.
+///
+/// `rotationDegrees` rotates the finger axis *during* the pinch, NOT the orientation of a fixed
+/// pinch axis: the fingers start on the horizontal axis (start*.y == centerY) and move to an axis
+/// rotated by `rotationDegrees`. A non-zero value therefore produces a combined pinch+rotate;
+/// `rotationDegrees == 0` (the common zoom case) keeps both axes horizontal. Radii are
+/// distance/2. This convention is shared with the Android runner's `computePinchPoints` so
+/// cross-platform pinch results agree — see issues #2911 / #2979. This function does NOT clamp
+/// degenerate distances; `synthesizePinch` applies its own minimum-distance floor before calling.
+FOUNDATION_EXPORT ObjCPinchPoints ObjCExceptionCatcher_computePinchPoints(
+    CGFloat centerX,
+    CGFloat centerY,
+    CGFloat distanceStart,
+    CGFloat distanceEnd,
+    CGFloat rotationDegrees
+);
+
 /// Executes the given block, catching any NSException thrown.
 /// Returns the caught NSException, or nil if no exception was raised.
 FOUNDATION_EXPORT NSException * _Nullable ObjCExceptionCatcher_tryBlock(void (NS_NOESCAPE ^block)(void));

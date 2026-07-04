@@ -113,4 +113,88 @@ class PinchGeometryTest {
     assertEquals(100f, p.endX1, delta)
     assertEquals(-100f, p.endX2, delta)
   }
+
+  /**
+   * SHARED GOLDEN TABLE — keep byte-identical with the iOS runner's `PinchGeometryTests.swift`
+   * (`testGoldenVectorsMatchAndroidParity`). Each row is an input tuple and its expected
+   * *unordered* set of four endpoints. The comparison is order-independent because the two runners
+   * label which finger is "first" oppositely (Android builds center±offset, iOS center∓offset
+   * first) while producing the same two touch points. If either platform's endpoint math changes,
+   * its golden assertion fails loudly here or in the Swift mirror — closing the silent-divergence
+   * gap from issues #2911 / #2979.
+   */
+  @Test
+  fun `golden vectors match iOS parity`() {
+    data class Vector(
+      val centerX: Double,
+      val centerY: Double,
+      val distanceStart: Double,
+      val distanceEnd: Double,
+      val rotationDegrees: Float,
+      val expected: List<Pair<Float, Float>>,
+    )
+    val vectors =
+      listOf(
+        Vector(
+          100.0,
+          200.0,
+          80.0,
+          300.0,
+          0f,
+          listOf(60f to 200f, 140f to 200f, -50f to 200f, 250f to 200f),
+        ),
+        Vector(
+          540.0,
+          960.0,
+          100.0,
+          300.0,
+          45f,
+          listOf(
+            490f to 960f,
+            590f to 960f,
+            433.933983f to 853.933983f,
+            646.066017f to 1066.066017f,
+          ),
+        ),
+        Vector(
+          200.0,
+          400.0,
+          100.0,
+          100.0,
+          -30f,
+          listOf(150f to 400f, 250f to 400f, 156.698730f to 425f, 243.301270f to 375f),
+        ),
+        Vector(
+          0.0,
+          0.0,
+          200.0,
+          200.0,
+          0f,
+          listOf(-100f to 0f, 100f to 0f, -100f to 0f, 100f to 0f),
+        ),
+      )
+
+    for (v in vectors) {
+      val p =
+        computePinchPoints(v.centerX, v.centerY, v.distanceStart, v.distanceEnd, v.rotationDegrees)
+      val actual =
+        sortedPoints(
+          listOf(
+            p.startX1 to p.startY1,
+            p.startX2 to p.startY2,
+            p.endX1 to p.endY1,
+            p.endX2 to p.endY2,
+          )
+        )
+      val expected = sortedPoints(v.expected)
+      actual.zip(expected).forEach { (a, e) ->
+        assertEquals("x mismatch for $v", e.first, a.first, delta)
+        assertEquals("y mismatch for $v", e.second, a.second, delta)
+      }
+    }
+  }
+
+  /** Deterministic order-independent sort so the golden comparison ignores finger labeling. */
+  private fun sortedPoints(points: List<Pair<Float, Float>>): List<Pair<Float, Float>> =
+    points.sortedWith(compareBy({ it.first }, { it.second }))
 }

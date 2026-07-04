@@ -1,6 +1,34 @@
 #import "ObjCExceptionCatcher.h"
 #import <math.h>
 
+ObjCPinchPoints ObjCExceptionCatcher_computePinchPoints(
+    CGFloat centerX,
+    CGFloat centerY,
+    CGFloat distanceStart,
+    CGFloat distanceEnd,
+    CGFloat rotationDegrees
+) {
+    CGFloat startRadius = distanceStart / 2.0;
+    CGFloat endRadius = distanceEnd / 2.0;
+    // rotationDegrees rotates the finger axis *during* the pinch, NOT the orientation of a fixed
+    // pinch axis: the fingers start on the horizontal axis (dyStart == 0) and move to an axis
+    // rotated by rotationDegrees. A non-zero value therefore produces a combined pinch+rotate;
+    // rotationDegrees == 0 (the common zoom case) keeps both axes horizontal. This matches the
+    // Android runner's computePinchPoints so cross-platform results agree. See issues #2911/#2979.
+    CGFloat endRadians = rotationDegrees * (CGFloat)M_PI / 180.0;
+    CGFloat dxStart = startRadius;
+    CGFloat dyStart = 0;
+    CGFloat dxEnd = cos(endRadians) * endRadius;
+    CGFloat dyEnd = sin(endRadians) * endRadius;
+
+    ObjCPinchPoints points;
+    points.start1 = CGPointMake(centerX - dxStart, centerY - dyStart);
+    points.end1 = CGPointMake(centerX - dxEnd, centerY - dyEnd);
+    points.start2 = CGPointMake(centerX + dxStart, centerY + dyStart);
+    points.end2 = CGPointMake(centerX + dxEnd, centerY + dyEnd);
+    return points;
+}
+
 NSException * _Nullable ObjCExceptionCatcher_tryBlock(void (NS_NOESCAPE ^block)(void)) {
     @try {
         block();
@@ -137,22 +165,13 @@ BOOL ObjCExceptionCatcher_synthesizePinch(
             return;
         }
 
-        // Avoid the MAX() macro: it expands to a GNU statement expression, which
-        // Xcode 26.3's clang flags under -Wgnu-statement-expression-from-macro-expansion
-        // and the target builds with -pedantic -Werror.
-        CGFloat startRadius = (distanceStart > 1 ? distanceStart : 1) / 2.0;
-        CGFloat endRadius = (distanceEnd > 1 ? distanceEnd : 1) / 2.0;
-        // rotationDegrees rotates the finger axis *during* the pinch, NOT the orientation of a
-        // fixed pinch axis: the fingers start on the horizontal axis (dyStart == 0) and move to an
-        // axis rotated by rotationDegrees. A non-zero value therefore produces a combined
-        // pinch+rotate; rotationDegrees == 0 (the common zoom case) keeps both axes horizontal.
-        // This matches the Android runner's computePinchPoints so cross-platform results agree.
-        // See issue #2911.
-        CGFloat endRadians = rotationDegrees * (CGFloat)M_PI / 180.0;
-        CGFloat dxStart = startRadius;
-        CGFloat dyStart = 0;
-        CGFloat dxEnd = cos(endRadians) * endRadius;
-        CGFloat dyEnd = sin(endRadians) * endRadius;
+        // Floor degenerate distances so a tiny/zero pinch still produces a non-collapsed radius.
+        // The endpoint trig itself lives in the pure, unit-tested ObjCExceptionCatcher_computePinchPoints
+        // (see PinchGeometryTests / issue #2979), which the Android computePinchPoints mirrors.
+        CGFloat safeDistanceStart = distanceStart > 1 ? distanceStart : 1;
+        CGFloat safeDistanceEnd = distanceEnd > 1 ? distanceEnd : 1;
+        ObjCPinchPoints points = ObjCExceptionCatcher_computePinchPoints(
+            centerX, centerY, safeDistanceStart, safeDistanceEnd, rotationDegrees);
 
         XCSynthesizedEventRecord *record = [[recordClass alloc]
             initWithName:@"AutoMobile pinch"
@@ -161,18 +180,18 @@ BOOL ObjCExceptionCatcher_synthesizePinch(
         NSTimeInterval liftOffset = duration > 0.05 ? duration : 0.05;
 
         XCPointerEventPath *firstPath = [[pathClass alloc]
-            initForTouchAtPoint:CGPointMake(centerX - dxStart, centerY - dyStart)
+            initForTouchAtPoint:points.start1
             offset:0
         ];
-        [firstPath moveToPoint:CGPointMake(centerX - dxEnd, centerY - dyEnd) atOffset:duration];
+        [firstPath moveToPoint:points.end1 atOffset:duration];
         [firstPath liftUpAtOffset:liftOffset];
         [record addPointerEventPath:firstPath];
 
         XCPointerEventPath *secondPath = [[pathClass alloc]
-            initForTouchAtPoint:CGPointMake(centerX + dxStart, centerY + dyStart)
+            initForTouchAtPoint:points.start2
             offset:0
         ];
-        [secondPath moveToPoint:CGPointMake(centerX + dxEnd, centerY + dyEnd) atOffset:duration];
+        [secondPath moveToPoint:points.end2 atOffset:duration];
         [secondPath liftUpAtOffset:liftOffset];
         [record addPointerEventPath:secondPath];
 

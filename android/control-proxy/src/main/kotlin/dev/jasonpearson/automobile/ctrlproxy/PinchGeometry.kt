@@ -23,10 +23,11 @@ internal data class PinchPoints(
  * move to an axis rotated by [rotationDegrees]. A non-zero value therefore produces a combined
  * pinch+rotate. For the common `rotationDegrees == 0` zoom case the start and end axes coincide.
  *
- * This convention is shared with the iOS runner
- * (`ios/control-proxy/Sources/ObjCExceptionCatcher/ObjCExceptionCatcher.m`) so cross-platform pinch
- * results match. See issue #2911. Pure trig with no Android dependencies so it stays unit testable
- * — see `PinchGeometryTest`.
+ * This convention is shared with the iOS runner's `ObjCExceptionCatcher_computePinchPoints`
+ * (`ios/control-proxy/Sources/ObjCExceptionCatcher/`) so cross-platform pinch results match. Both
+ * sides are now pinned by executable tests — `PinchGeometryTest` here and `PinchGeometryTests` on
+ * iOS — which share a golden-vector table so a silent divergence in either fails loudly. See
+ * issues #2911 / #2979. Pure trig with no Android dependencies so it stays unit testable.
  */
 internal fun computePinchPoints(
   centerX: Double,

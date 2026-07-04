@@ -40,4 +40,24 @@ describe("database path resolution", () => {
       AUTOMOBILE_DB_PATH: dbPath,
     })).toBe(dbPath);
   });
+
+  test("passes the `:memory:` sentinel through un-resolved (issue #3047)", () => {
+    // A `:memory:` DB is not a filesystem path: routing it through the
+    // daemon-launch-cwd resolver would `path.resolve(":memory:")` into a bogus
+    // absolute path (and later create a `:memory:.migrate.lock` file). It must be
+    // returned verbatim even with a daemon launch cwd set.
+    process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/project/auto-mobile");
+
+    expect(resolveDatabasePathFromEnvironment({
+      AUTOMOBILE_DB_PATH: ":memory:",
+    })).toBe(":memory:");
+  });
+
+  test("passes the `:memory:` sentinel through the legacy AUTO_MOBILE_DB_PATH alias", () => {
+    process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/project/auto-mobile");
+
+    expect(resolveDatabasePathFromEnvironment({
+      AUTO_MOBILE_DB_PATH: ":memory:",
+    })).toBe(":memory:");
+  });
 });

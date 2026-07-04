@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
+import { sql } from "kysely";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
-import { removeTempDbDir } from "./tempDbDir";
+import { IN_MEMORY_DATABASE_PATH, migrationLockPathFor } from "../../src/db/migrationLock";
 import { importFreshDatabaseModule, restoreEnv, snapshotEnv } from "./freshDatabaseModule";
-import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
 
 /**
- * Regression tests for issue #2896 (follow-up to #2796).
+ * Regression tests for issue #2896 (follow-up to #2796), on a `:memory:`
+ * sentinel DB (issue #3047).
  *
  * #2796 made `closeDatabase()` reset the migration/path module globals so a
  * same-process reopen behaves like a cold start. The one shutdown-state global
@@ -26,19 +26,18 @@ import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
  * clears the barrier via `resetDbWriteBarrier()` so the cold-start contract is
  * fully true.
  *
+ * These assertions are about `getDbWriteBarrier()` **identity** and
+ * `isDraining()` across the `getDatabase()`/`closeDatabase()` lifecycle — they
+ * need neither a real on-disk file nor cross-connection migration visibility, so
+ * a `:memory:` sentinel eliminates the temp-file / WAL-sidecar / EBUSY-cleanup
+ * flake class this test formerly carried (issues #3047, #2992, #2916). The
+ * sibling file-backed suites (`databaseReset`, `databaseLazyPath`) stay on real
+ * files because they genuinely assert a migrated schema across connections.
+ *
  * The shared barrier is a process-global singleton; `resetDbWriteBarrier()` in
  * `beforeEach`/`afterEach` isolates these tests from the rest of the suite.
  */
 describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)", () => {
-  // Opens a real file-backed DB (needs a shared on-disk file across the
-  // migration and app connections). This timeout only covers the test BODY
-  // (migrations + queries on slow Windows disk I/O). The cleanup stall from
-  // issue #2916 is bounded separately by `removeTempDbDir` (best-effort,
-  // ~200ms/dir); the `afterEach` hook is given the same generous ceiling below
-  // so a slow Windows temp-dir release cannot read as a hook timeout (#2992).
-  const FILE_BACKED_TEST_TIMEOUT_MS = WINDOWS_FILE_DB_TEST_TIMEOUT_MS;
-
-  const tempDirs: string[] = [];
   let envSnapshot: NodeJS.ProcessEnv;
 
   beforeEach(() => {
@@ -48,37 +47,28 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
     resetDbWriteBarrier();
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     resetDbWriteBarrier();
     restoreEnv(envSnapshot);
-    for (const dir of tempDirs.splice(0)) {
-      await removeTempDbDir(dir);
-    }
-    // Give the hook the same generous ceiling as the body: on windows-latest a
-    // just-released bun:sqlite handle can keep the temp dir locked long enough
-    // for the bounded `removeTempDbDir` retries to run, and the default 5s hook
-    // timeout would read that as a failure even though the body passed (#2992).
-  }, WINDOWS_FILE_DB_TEST_TIMEOUT_MS);
+  });
 
-  async function makeTempDbDir(prefix: string): Promise<string> {
-    const dir = await mkdtemp(path.join(tmpdir(), prefix));
-    tempDirs.push(dir);
-    return dir;
+  /** Point the fresh database module at a private in-memory sentinel DB. */
+  function useInMemoryDatabase(): void {
+    process.env.AUTOMOBILE_DB_PATH = IN_MEMORY_DATABASE_PATH;
+    delete process.env.AUTOMOBILE_DB_DIR;
+    delete process.env[DAEMON_LAUNCH_CWD_ENV];
   }
 
   test("a tracked best-effort write after drain -> close -> reopen is NOT skipped", async () => {
-    const firstDir = await makeTempDbDir("auto-mobile-barrier-reset-first-");
-    process.env.AUTOMOBILE_DB_DIR = firstDir;
-    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+    useInMemoryDatabase();
 
     const databaseModule = await importFreshDatabaseModule();
 
-    // Cold start on the first DB, then let startup migrations fully settle. The
-    // detached migration run opens its OWN connection to the same file and
-    // destroys it only when done; awaiting settle here means the later
-    // closeDatabase() checkpoint has no concurrent writer to contend with. On
-    // windows-latest that concurrency is exactly what produced the compounding
-    // busy_timeout stall that blew this test's body/hook timeouts (#2992).
+    // Cold start on the first in-memory DB. Await migrations so the detached
+    // `:memory:` migration run is fully owned by the test rather than left in
+    // flight past teardown — cheap on an in-memory DB (no file/WAL/lock) and
+    // deterministic. The barrier assertions below need neither a real file nor a
+    // completed migration (issue #3047); this is purely lifecycle hygiene.
     databaseModule.getDatabase();
     await databaseModule.ensureMigrations();
 
@@ -90,13 +80,10 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
 
     await databaseModule.closeDatabase();
 
-    // Reopen in the same process against a brand-new DB dir (config reload / DB
-    // path switch / restart-without-exit).
-    const secondDir = await makeTempDbDir("auto-mobile-barrier-reset-second-");
-    process.env.AUTOMOBILE_DB_DIR = secondDir;
+    // Reopen in the same process against a fresh in-memory DB (config reload / DB
+    // path switch / restart-without-exit). Each `new Database(":memory:")` is a
+    // brand-new private DB, so this naturally models a distinct reopened DB.
     databaseModule.getDatabase();
-    // Settle the reopened DB's migrations too, so the final closeDatabase() in
-    // this test closes cleanly instead of racing a detached migration (#2992).
     await databaseModule.ensureMigrations();
 
     // The barrier must have cold-started: a distinct, non-draining instance.
@@ -105,29 +92,49 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
     expect(reopenedBarrier.isDraining()).toBe(false);
 
     // The core contract: a tracked best-effort write actually runs against the
-    // reopened DB instead of being silently skipped by a latched barrier. The
-    // closure issues a REAL query against the reopened connection so this also
-    // proves the awaited reopen migrations left a healthy, queryable schema —
-    // not merely that the migration promise settled (#2896/#2992).
+    // reopened barrier instead of being silently skipped by a latched barrier.
     let ran = false;
-    const rows = await reopenedBarrier.track(async () => {
+    const result = await reopenedBarrier.track(async () => {
       ran = true;
-      return databaseModule
-        .getDatabase()
-        .selectFrom("tool_calls" as any)
-        .selectAll()
-        .execute();
+      return "ok";
     });
     expect(ran).toBe(true);
-    expect(rows).toEqual([]);
+    expect(result).toBe("ok");
 
     await databaseModule.closeDatabase();
-  }, FILE_BACKED_TEST_TIMEOUT_MS);
+  });
+
+  test("reopens an in-memory DB with a live queryable connection and no bogus lock file", async () => {
+    useInMemoryDatabase();
+
+    const databaseModule = await importFreshDatabaseModule();
+
+    // Drive the full open + migration lifecycle on `:memory:`. This reconciles the
+    // reopen-query assertion added in #3040 for the file-backed test: with a
+    // private in-memory DB the app connection never sees the migration
+    // connection's schema, so instead of querying a migrated table we prove the
+    // reopened connection is live with a schema-independent `select 1` that still
+    // routes through `waitForMigrationsBeforeQuery` (proving migrations settle).
+    databaseModule.getDatabase();
+    await databaseModule.ensureMigrations();
+
+    const rows = await sql`select 1 as one`.execute(databaseModule.getDatabase());
+    expect(rows.rows).toEqual([{ one: 1 }]);
+
+    // The blocker this migration fixes: a `:memory:` opener must use a
+    // NoOpMigrationLock, never `createFileMigrationLock`, so it must not create a
+    // bogus `:memory:.migrate.lock` file (nor a `:memory:` DB file) in the cwd.
+    // Assert against the EXACT path the production lock would derive
+    // (`migrationLockPathFor`) rather than a hand-rolled cwd join, so the guard
+    // can't drift from the code under a symlinked / non-canonical cwd.
+    expect(existsSync(migrationLockPathFor(IN_MEMORY_DATABASE_PATH))).toBe(false);
+    expect(existsSync(path.join(process.cwd(), IN_MEMORY_DATABASE_PATH))).toBe(false);
+
+    await databaseModule.closeDatabase();
+  });
 
   test("closeDatabase clears a drain latch even with no open connection", async () => {
-    const dir = await makeTempDbDir("auto-mobile-barrier-reset-noconn-");
-    process.env.AUTOMOBILE_DB_DIR = dir;
-    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+    useInMemoryDatabase();
 
     const databaseModule = await importFreshDatabaseModule();
 

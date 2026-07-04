@@ -1,6 +1,16 @@
-import { ResizeStrategy } from "jimp";
 import { loadJimp, type JimpImage } from "../loadJimp";
+import type { ResizeStrategy } from "jimp";
 import type { ImageBackend, ImageMetadata, ImageOperation, ImagePipeline, RawImage } from "./ImageBackend";
+
+/**
+ * jimp's `ResizeStrategy.NEAREST_NEIGHBOR` value, inlined as a literal. Importing
+ * the enum *value* from `jimp` would pull the full package in at module-evaluation
+ * time — any module that wires the default backend via `resolveImageBackend()`
+ * would then load jimp eagerly, defeating `loadJimp.ts`'s contract that keeps jimp
+ * off the MCP startup path. The `import type` above is erased at build time, so the
+ * cast stays a pure type reference and adds no runtime dependency.
+ */
+const NEAREST_NEIGHBOR = "nearestNeighbor" as ResizeStrategy;
 
 /**
  * Jimp-backed `ImageBackend`. Reproduces exactly what `ImageTransformer` used
@@ -14,7 +24,7 @@ export class JimpBackend implements ImageBackend {
       case "resize": {
         // `"nearest"` forces the nearest-neighbor kernel (no interpolation);
         // omitting `mode` leaves it undefined so jimp uses its default kernel.
-        const mode = op.mode === "nearest" ? ResizeStrategy.NEAREST_NEIGHBOR : undefined;
+        const mode = op.mode === "nearest" ? NEAREST_NEIGHBOR : undefined;
         if (op.height === undefined) {
           // Width only: scale preserving aspect ratio.
           return image.resize({ w: op.width, mode });

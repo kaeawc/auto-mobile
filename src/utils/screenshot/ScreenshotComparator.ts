@@ -1,8 +1,8 @@
 import { PNG } from "pngjs";
-import { ResizeStrategy } from "jimp";
 import { logger } from "../logger";
 import { Timer, defaultTimer } from "../SystemTimer";
-import { loadJimp } from "../image/loadJimp";
+import type { ImageBackend } from "../image/backend/ImageBackend";
+import { resolveImageBackend } from "../image/backend/resolveImageBackend";
 
 // Add dynamic import function for pixelmatch
 async function getPixelmatch() {
@@ -35,13 +35,15 @@ export class ScreenshotComparator {
   /**
    * Convert image buffer to PNG format
    * @param buffer Input image buffer
+   * @param backend Image backend (injectable for tests)
    * @returns Promise with PNG buffer
    */
-  static async convertToPng(buffer: Buffer): Promise<Buffer> {
+  static async convertToPng(
+    buffer: Buffer,
+    backend: ImageBackend = resolveImageBackend()
+  ): Promise<Buffer> {
     try {
-      const Jimp = await loadJimp();
-      const image = await Jimp.fromBuffer(buffer);
-      return await image.getBuffer("image/png");
+      return await backend.execute(buffer, { operations: [], encoding: { mime: "image/png" } });
     } catch (error) {
       throw new Error(`Failed to convert image to PNG: ${(error as Error).message}`);
     }
@@ -50,10 +52,16 @@ export class ScreenshotComparator {
   /**
    * Get image dimensions from buffer
    * @param buffer Image buffer
+   * @param backend Image backend (injectable for tests)
    * @returns Promise with width and height
    */
-  static async getImageDimensions(buffer: Buffer): Promise<{ width: number; height: number }> {
-    // Fast path: PNG stores dimensions in the IHDR chunk, no full decode needed
+  static async getImageDimensions(
+    buffer: Buffer,
+    backend: ImageBackend = resolveImageBackend()
+  ): Promise<{ width: number; height: number }> {
+    // Fast path: PNG stores dimensions in the IHDR chunk, no full decode needed.
+    // Kept ahead of backend.metadata() (which does a full decode) so the hot PNG
+    // path never pays for a decode it doesn't need.
     if (ScreenshotComparator.isPngBuffer(buffer) && buffer.length >= 24) {
       return {
         width: buffer.readUInt32BE(16),
@@ -62,12 +70,8 @@ export class ScreenshotComparator {
     }
 
     try {
-      const Jimp = await loadJimp();
-      const image = await Jimp.fromBuffer(buffer);
-      return {
-        width: image.bitmap.width,
-        height: image.bitmap.height
-      };
+      const { width, height } = await backend.metadata(buffer);
+      return { width, height };
     } catch (error) {
       throw new Error(`Failed to get image dimensions: ${(error as Error).message}`);
     }
@@ -78,14 +82,16 @@ export class ScreenshotComparator {
    * @param buffer Image buffer to resize
    * @param targetWidth Target width
    * @param targetHeight Target height
+   * @param backend Image backend (injectable for tests)
    * @returns Promise with resized buffer
    */
   static async resizeImageIfNeeded(
     buffer: Buffer,
     targetWidth: number,
-    targetHeight: number
+    targetHeight: number,
+    backend: ImageBackend = resolveImageBackend()
   ): Promise<Buffer> {
-    const { width, height } = await ScreenshotComparator.getImageDimensions(buffer);
+    const { width, height } = await ScreenshotComparator.getImageDimensions(buffer, backend);
 
     if (width === targetWidth && height === targetHeight) {
       return buffer;
@@ -94,11 +100,15 @@ export class ScreenshotComparator {
     logger.debug(`Resizing image from ${width}x${height} to ${targetWidth}x${targetHeight}`);
 
     try {
-      const Jimp = await loadJimp();
-      const image = await Jimp.fromBuffer(buffer);
-      // Nearest-neighbor stretch to exact target size — fast resize for comparison purposes
-      image.resize({ w: targetWidth, h: targetHeight, mode: ResizeStrategy.NEAREST_NEIGHBOR });
-      return await image.getBuffer("image/png");
+      // Nearest-neighbor stretch to exact target size — fast resize for comparison
+      // purposes. `mode: "nearest"` is required: a bilinear resize here would blend
+      // neighboring pixels and quietly shift the pixelmatch diff.
+      return await backend.execute(buffer, {
+        operations: [
+          { type: "resize", width: targetWidth, height: targetHeight, maintainAspectRatio: false, mode: "nearest" }
+        ],
+        encoding: { mime: "image/png" }
+      });
     } catch (error) {
       throw new Error(`Failed to resize image: ${(error as Error).message}`);
     }
@@ -117,19 +127,20 @@ export class ScreenshotComparator {
     buffer2: Buffer,
     threshold: number = 0.1,
     fastMode: boolean = false,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    backend: ImageBackend = resolveImageBackend()
   ): Promise<ScreenshotComparisonResult> {
     const comparisonStart = timer.now();
     logger.debug(`Starting image comparison with threshold ${threshold}${fastMode ? " (fast mode)" : ""}`);
 
     try {
       // Ensure both images are PNG format
-      let png1Buffer = ScreenshotComparator.isPngBuffer(buffer1) ? buffer1 : await ScreenshotComparator.convertToPng(buffer1);
-      let png2Buffer = ScreenshotComparator.isPngBuffer(buffer2) ? buffer2 : await ScreenshotComparator.convertToPng(buffer2);
+      let png1Buffer = ScreenshotComparator.isPngBuffer(buffer1) ? buffer1 : await ScreenshotComparator.convertToPng(buffer1, backend);
+      let png2Buffer = ScreenshotComparator.isPngBuffer(buffer2) ? buffer2 : await ScreenshotComparator.convertToPng(buffer2, backend);
 
       // Get dimensions
-      const dims1 = await ScreenshotComparator.getImageDimensions(png1Buffer);
-      const dims2 = await ScreenshotComparator.getImageDimensions(png2Buffer);
+      const dims1 = await ScreenshotComparator.getImageDimensions(png1Buffer, backend);
+      const dims2 = await ScreenshotComparator.getImageDimensions(png2Buffer, backend);
 
       logger.debug(`Image 1 dimensions: ${dims1.width}x${dims1.height}`);
       logger.debug(`Image 2 dimensions: ${dims2.width}x${dims2.height}`);
@@ -144,10 +155,10 @@ export class ScreenshotComparator {
 
       // Resize images to match if needed (use the smaller dimensions for performance)
       if (dims1.width !== targetWidth || dims1.height !== targetHeight) {
-        png1Buffer = await ScreenshotComparator.resizeImageIfNeeded(png1Buffer, targetWidth, targetHeight);
+        png1Buffer = await ScreenshotComparator.resizeImageIfNeeded(png1Buffer, targetWidth, targetHeight, backend);
       }
       if (dims2.width !== targetWidth || dims2.height !== targetHeight) {
-        png2Buffer = await ScreenshotComparator.resizeImageIfNeeded(png2Buffer, targetWidth, targetHeight);
+        png2Buffer = await ScreenshotComparator.resizeImageIfNeeded(png2Buffer, targetWidth, targetHeight, backend);
       }
 
       // Parse PNG data

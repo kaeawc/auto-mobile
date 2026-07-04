@@ -141,6 +141,48 @@ describe("JimpBackend", () => {
       expect(nearLossless.length).not.toBe(lossless.length);
     });
 
+    test("resize mode:nearest picks source pixels (distinct from default kernel)", async () => {
+      const backend = new JimpBackend();
+      // A 4x4 checkerboard-ish gradient downscaled 4x4 -> 2x2. Nearest samples
+      // exact source pixels (floor((i*4)/2)=0/2), while the default (bilinear)
+      // kernel averages neighbors, so the two must differ on at least one channel.
+      const source = await makeSourcePng(4, 4);
+
+      const nearest = await backend.rawPixels(await backend.execute(source, {
+        operations: [{ type: "resize", width: 2, height: 2, maintainAspectRatio: false, mode: "nearest" }],
+        encoding: { mime: "image/png" }
+      }));
+      const dflt = await backend.rawPixels(await backend.execute(source, {
+        operations: [{ type: "resize", width: 2, height: 2, maintainAspectRatio: false }],
+        encoding: { mime: "image/png" }
+      }));
+
+      // Nearest top-left must equal the exact source top-left pixel (16-color
+      // gradient at (0,0) = rgba(0,0,0,255)); the source's (1,1) is rgba(16,16,1)
+      // so a 2x1-block bilinear average differs from the pure source sample.
+      const src = await backend.rawPixels(source);
+      expect([nearest.data[0], nearest.data[1], nearest.data[2], nearest.data[3]])
+        .toEqual([src.data[0], src.data[1], src.data[2], src.data[3]]);
+      const sameAsDefault =
+        nearest.data[0] === dflt.data[0] &&
+        nearest.data[1] === dflt.data[1] &&
+        nearest.data[2] === dflt.data[2];
+      expect(sameAsDefault).toBe(false);
+    });
+
+    test("cover honors mode:nearest", async () => {
+      const backend = new JimpBackend();
+      const source = await makeSourcePng(8, 8);
+      // maintainAspectRatio:true routes through jimp cover(); assert mode flows
+      // through by producing exact target dims without throwing.
+      const meta = await backend.metadata(await backend.execute(source, {
+        operations: [{ type: "resize", width: 4, height: 4, maintainAspectRatio: true, mode: "nearest" }],
+        encoding: { mime: "image/png" }
+      }));
+      expect(meta.width).toBe(4);
+      expect(meta.height).toBe(4);
+    });
+
     test("null encoding falls back to the decoded input format", async () => {
       const backend = new JimpBackend();
       const source = await makeSourcePng();

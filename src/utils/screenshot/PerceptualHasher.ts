@@ -1,32 +1,54 @@
-import { ResizeStrategy } from "jimp";
 import { logger } from "../logger";
-import { loadJimp } from "../image/loadJimp";
+import type { ImageBackend } from "../image/backend/ImageBackend";
+import { resolveImageBackend } from "../image/backend/resolveImageBackend";
+
+/** Side length of the downscaled grid used for the perceptual hash (8×8 = 64 bits). */
+const HASH_SIZE = 8;
 
 export class PerceptualHasher {
   /**
    * Generate a perceptual hash from image buffer for fast similarity checking
    * @param buffer Image buffer
+   * @param backend Image backend used to decode raw pixels (injectable for tests)
    * @returns Promise with perceptual hash string
    */
-  static async generatePerceptualHash(buffer: Buffer): Promise<string> {
+  static async generatePerceptualHash(
+    buffer: Buffer,
+    backend: ImageBackend = resolveImageBackend()
+  ): Promise<string> {
     try {
-      const Jimp = await loadJimp();
-      // Resize to small standard size for consistent hashing
-      const image = await Jimp.fromBuffer(buffer);
-      image.resize({ w: 8, h: 8, mode: ResizeStrategy.NEAREST_NEIGHBOR }).greyscale();
-
-      // bitmap.data is RGBA; after greyscale r=g=b, so sample the red channel
-      const data = image.bitmap.data;
-      const totalPixels = 64; // 8x8
+      // Decode once to raw RGBA, then reproduce the former jimp pipeline in place:
+      // an 8×8 nearest-neighbor downscale followed by an ITU-R greyscale, so the
+      // hash is byte-identical to the pre-seam jimp path (no cache-invalidating drift).
+      const raw = await backend.rawPixels(buffer);
+      const totalPixels = HASH_SIZE * HASH_SIZE;
+      const greys = new Array<number>(totalPixels);
       let sum = 0;
-      for (let i = 0; i < totalPixels; i++) {
-        sum += data[i * 4];
+
+      for (let row = 0; row < HASH_SIZE; row++) {
+        // Nearest-neighbor source index, matching jimp's resize2.nearestNeighbor:
+        // src = floor(dst * srcDim / dstDim).
+        const srcY = Math.floor((row * raw.height) / HASH_SIZE);
+        for (let col = 0; col < HASH_SIZE; col++) {
+          const srcX = Math.floor((col * raw.width) / HASH_SIZE);
+          const idx = (srcY * raw.width + srcX) * 4;
+          // ITU Rec 709 luminance, truncated exactly as jimp's greyscale does when
+          // it writes the float back into a Uint8 buffer (trunc-toward-zero).
+          const grey = Math.trunc(
+            0.2126 * raw.data[idx] +
+            0.7152 * raw.data[idx + 1] +
+            0.0722 * raw.data[idx + 2]
+          );
+          greys[row * HASH_SIZE + col] = grey;
+          sum += grey;
+        }
       }
+
       const averageValue = sum / totalPixels;
 
       let hash = "";
       for (let i = 0; i < totalPixels; i++) {
-        hash += data[i * 4] > averageValue ? "1" : "0";
+        hash += greys[i] > averageValue ? "1" : "0";
       }
 
       return hash;

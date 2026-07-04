@@ -4,13 +4,14 @@
  * Optimized with multi-level caching for performance
  */
 
-import { Jimp, intToRGBA } from "jimp";
 import fs from "fs/promises";
 import { Element } from "../../models/Element";
 import { WcagLevel } from "../../models/AccessibilityAudit";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { clamp } from "../../utils/bounds";
+import type { ImageBackend, RawImage } from "../../utils/image/backend/ImageBackend";
+import { resolveImageBackend } from "../../utils/image/backend/resolveImageBackend";
 
 interface RGB {
   r: number;
@@ -128,7 +129,7 @@ interface CacheStats {
  * Screenshot cache entry
  */
 interface ScreenshotCacheEntry {
-  image: Jimp;
+  image: RawImage;
   timestamp: number;
   fingerprint: string;
 }
@@ -145,6 +146,7 @@ interface ElementCacheEntry {
 export class ContrastChecker {
   private config: Required<ContrastCheckConfig>;
   private timer: Timer;
+  private backend: ImageBackend;
 
   // Phase 1: Screenshot cache
   private screenshotCache = new Map<string, ScreenshotCacheEntry>();
@@ -166,8 +168,13 @@ export class ContrastChecker {
   private bgColorHits = 0;
   private bgColorMisses = 0;
 
-  constructor(config: ContrastCheckConfig = {}, timer: Timer = defaultTimer) {
+  constructor(
+    config: ContrastCheckConfig = {},
+    timer: Timer = defaultTimer,
+    backend: ImageBackend = resolveImageBackend()
+  ) {
     this.timer = timer;
+    this.backend = backend;
     this.config = {
       useMultiPointSampling: config.useMultiPointSampling ?? true,
       detectGradients: config.detectGradients ?? true,
@@ -323,7 +330,7 @@ export class ContrastChecker {
    * Calculate contrast with a pre-loaded Jimp image
    */
   private async checkContrastWithImage(
-    image: Jimp,
+    image: RawImage,
     element: Element,
     wcagLevel: WcagLevel
   ): Promise<ContrastResult | null> {
@@ -439,9 +446,9 @@ export class ContrastChecker {
   /**
    * Phase 1: Get or load screenshot from cache
    */
-  private async getOrLoadScreenshot(path: string): Promise<Jimp> {
+  private async getOrLoadScreenshot(path: string): Promise<RawImage> {
     if (!this.config.enableScreenshotCache) {
-      return await Jimp.read(path);
+      return await this.decodeScreenshot(path);
     }
 
     const cached = this.screenshotCache.get(path);
@@ -459,7 +466,7 @@ export class ContrastChecker {
 
     // Cache miss or expired - load fresh image
     this.screenshotMisses++;
-    const image = await Jimp.read(path);
+    const image = await this.decodeScreenshot(path);
     const fingerprint = await this.getScreenshotFingerprint(path);
 
     this.screenshotCache.set(path, {
@@ -472,6 +479,44 @@ export class ContrastChecker {
     this.cleanupCache(this.screenshotCache, this.config.maxCacheSize.screenshots);
 
     return image;
+  }
+
+  /**
+   * Decode a screenshot file to raw RGBA pixels via the image backend.
+   * Replaces the former `Jimp.read(path)`; pixel values are identical (both
+   * decode the same PNG), so contrast sampling is byte-for-byte unchanged.
+   */
+  private async decodeScreenshot(path: string): Promise<RawImage> {
+    const buffer = await fs.readFile(path);
+    return this.backend.rawPixels(buffer);
+  }
+
+  /**
+   * Read a pixel as RGBA from a decoded raw image, reproducing jimp's
+   * `getPixelColor` semantics: coordinates are rounded and edge-extended
+   * (clamped to the image bounds) so out-of-range samples return the nearest
+   * edge pixel rather than throwing.
+   */
+  private pixelRGBA(image: RawImage, x: number, y: number): RGBA {
+    let xi = Math.round(x);
+    let yi = Math.round(y);
+    if (xi < 0) {
+      xi = 0;
+    } else if (xi >= image.width) {
+      xi = image.width - 1;
+    }
+    if (yi < 0) {
+      yi = 0;
+    } else if (yi >= image.height) {
+      yi = image.height - 1;
+    }
+    const idx = (image.width * yi + xi) * 4;
+    return {
+      r: image.data[idx],
+      g: image.data[idx + 1],
+      b: image.data[idx + 2],
+      a: image.data[idx + 3],
+    };
   }
 
   /**
@@ -611,7 +656,7 @@ export class ContrastChecker {
   /**
    * Sample the text color from the center of the element
    */
-  private async sampleTextColor(image: Jimp, bounds: Element["bounds"]): Promise<RGB> {
+  private async sampleTextColor(image: RawImage, bounds: Element["bounds"]): Promise<RGB> {
     const { left, top, right, bottom } = bounds;
     const centerX = Math.floor((left + right) / 2);
     const centerY = Math.floor((top + bottom) / 2);
@@ -641,7 +686,7 @@ export class ContrastChecker {
    * Sample background colors for a set of points
    */
   private async sampleBackgroundColors(
-    image: Jimp,
+    image: RawImage,
     bounds: Element["bounds"],
     textColor: RGB,
     points: Array<{ x: number; y: number }>
@@ -660,7 +705,7 @@ export class ContrastChecker {
   }
 
   private async sampleBackgroundAtPoint(
-    image: Jimp,
+    image: RawImage,
     bounds: Element["bounds"],
     textColor: RGB,
     x: number,
@@ -694,7 +739,7 @@ export class ContrastChecker {
     return await this.sampleBackgroundEdgeColor(image, bounds);
   }
 
-  private async sampleBackgroundEdgeColor(image: Jimp, bounds: Element["bounds"]): Promise<RGB> {
+  private async sampleBackgroundEdgeColor(image: RawImage, bounds: Element["bounds"]): Promise<RGB> {
     const cached = this.config.enableBackgroundCache ? this.getBackgroundCache(bounds) : null;
     if (cached) {
       return cached;
@@ -781,8 +826,8 @@ export class ContrastChecker {
     }
   }
 
-  private resolvePixelColor(image: Jimp, x: number, y: number): RGB {
-    const pixel = intToRGBA(image.getPixelColor(x, y)) as RGBA;
+  private resolvePixelColor(image: RawImage, x: number, y: number): RGB {
+    const pixel = this.pixelRGBA(image, x, y);
     if (!this.config.compositeOverlays || pixel.a === 255) {
       return { r: pixel.r, g: pixel.g, b: pixel.b };
     }
@@ -794,13 +839,13 @@ export class ContrastChecker {
     return this.compositeColors(baseColor, pixel);
   }
 
-  private findUnderlyingColor(image: Jimp, x: number, y: number): RGB | null {
+  private findUnderlyingColor(image: RawImage, x: number, y: number): RGB | null {
     for (let radius = 1; radius <= 12; radius++) {
       for (let dx = -radius; dx <= radius; dx++) {
         for (let dy = -radius; dy <= radius; dy++) {
-          const sampleX = clamp(x + dx, 0, image.bitmap.width - 1);
-          const sampleY = clamp(y + dy, 0, image.bitmap.height - 1);
-          const pixel = intToRGBA(image.getPixelColor(sampleX, sampleY)) as RGBA;
+          const sampleX = clamp(x + dx, 0, image.width - 1);
+          const sampleY = clamp(y + dy, 0, image.height - 1);
+          const pixel = this.pixelRGBA(image, sampleX, sampleY);
           if (pixel.a === 255) {
             return { r: pixel.r, g: pixel.g, b: pixel.b };
           }
@@ -1014,7 +1059,7 @@ export class ContrastChecker {
   }
 
   private detectTextShadow(
-    image: Jimp,
+    image: RawImage,
     bounds: Element["bounds"],
     textColor: RGB,
     backgroundColor: RGB

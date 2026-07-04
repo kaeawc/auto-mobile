@@ -1,3 +1,4 @@
+import { ResizeStrategy } from "jimp";
 import { loadJimp, type JimpImage } from "../loadJimp";
 import type { ImageBackend, ImageMetadata, ImageOperation, ImagePipeline, RawImage } from "./ImageBackend";
 
@@ -10,17 +11,21 @@ import type { ImageBackend, ImageMetadata, ImageOperation, ImagePipeline, RawIma
 export class JimpBackend implements ImageBackend {
   private applyOperation(image: JimpImage, op: ImageOperation): JimpImage {
     switch (op.type) {
-      case "resize":
+      case "resize": {
+        // `"nearest"` forces the nearest-neighbor kernel (no interpolation);
+        // omitted/`"auto"` leaves `mode` undefined so jimp uses its default.
+        const mode = op.mode === "nearest" ? ResizeStrategy.NEAREST_NEIGHBOR : undefined;
         if (op.height === undefined) {
           // Width only: scale preserving aspect ratio.
-          return image.resize({ w: op.width });
+          return image.resize({ w: op.width, mode });
         }
         if (op.maintainAspectRatio) {
           // Match sharp's default fit "cover": exact WxH, center-cropped.
-          return image.cover({ w: op.width, h: op.height });
+          return image.cover({ w: op.width, h: op.height, mode });
         }
         // fit "fill": stretch to exact WxH.
-        return image.resize({ w: op.width, h: op.height });
+        return image.resize({ w: op.width, h: op.height, mode });
+      }
       case "crop":
         return image.crop({ x: op.x, y: op.y, w: op.width, h: op.height });
     }

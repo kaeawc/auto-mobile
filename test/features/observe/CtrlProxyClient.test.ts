@@ -1091,6 +1091,117 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
+  describe("hierarchy error frame correlation (issue #3032)", function() {
+    // request_hierarchy does NOT await through RequestManager — it blocks in
+    // CtrlProxyHierarchy.waitForFreshData for a hierarchy_update push. Before #3032 a runner
+    // type:"error" frame for a hierarchy requestId no-op'd in resolveError and the caller hung to
+    // the waitForFreshData timeout. These tests assert the error frame now unblocks the hierarchy
+    // wait fast, while remaining a safe no-op for uncorrelated ids.
+
+    const findSentMessageOfType = (socket: CapturingWebSocket, type: string): any | undefined => {
+      const raw = socket.sentMessages.find(m => {
+        try { return JSON.parse(m).type === type; } catch { return false; }
+      });
+      return raw ? JSON.parse(raw) : undefined;
+    };
+
+    test("a type:error frame for an in-flight hierarchy requestId fails requestHierarchySync fast", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        // 10s hierarchy sync timeout — the whole point is to NOT wait for it.
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const hierarchyMsg = findSentMessageOfType(socket, "request_hierarchy");
+        expect(hierarchyMsg).toBeDefined();
+        expect(hierarchyMsg.requestId).toBeDefined();
+
+        // Runner reports a structured handler failure correlated to the hierarchy requestId.
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: hierarchyMsg.requestId,
+          success: false,
+          error: "request_hierarchy handler failed: view hierarchy extraction threw",
+          timestamp: errorTimer.now()
+        }));
+
+        // Fail fast: no timer advance toward the 10s timeout. Only flush microtasks/setImmediate.
+        await flushPromises();
+        const result = await syncPromise;
+
+        expect(result).toBeNull();
+        // Prove we did not sit through the timeout: virtually no fake time elapsed.
+        expect(errorTimer.getCurrentTime()).toBeLessThan(10000);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("a type:error frame with an unknown requestId does not disturb an in-flight hierarchy sync", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const hierarchyMsg = findSentMessageOfType(socket, "request_hierarchy");
+        expect(hierarchyMsg).toBeDefined();
+
+        // Error frame for an uncorrelated id — must be a safe no-op for the hierarchy wait.
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: "some-unrelated-id",
+          success: false,
+          error: "Malformed request: the payload is not valid JSON",
+          timestamp: errorTimer.now()
+        }));
+
+        // The real hierarchy push for our request still arrives and resolves the sync normally.
+        socket.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: errorTimer.now(),
+          data: {
+            updatedAt: errorTimer.now(),
+            packageName: "com.example.app",
+            hierarchy: { text: "Recovered after uncorrelated error" }
+          }
+        }));
+
+        const result = await errorTimer.resolvePromise(syncPromise);
+
+        expect(result).not.toBeNull();
+        expect(result!.hierarchy.hierarchy.text).toBe("Recovered after uncorrelated error");
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("bindSession", function() {
     afterEach(function() {
       NavigationGraphManager.resetInstance();

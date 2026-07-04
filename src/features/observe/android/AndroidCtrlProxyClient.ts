@@ -1966,11 +1966,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // awaiter hang to timeout. requestId is best-effort — when null the runner could not
       // correlate it, so there is no pending request to resolve (resolveError no-ops on unknown
       // ids anyway).
+      //
+      // Fan the error out to ALL wait mechanisms, not just RequestManager: request_hierarchy does
+      // not await through RequestManager, so an error frame for a hierarchy requestId must also be
+      // routed into CtrlProxyHierarchy's bespoke wait or the hierarchy caller hangs to timeout
+      // (issue #3032). Both calls are safe no-ops on unknown ids.
       if (message.type === "error") {
         const errorText = message.error || "Runner reported an unstructured protocol error";
         logger.warn(`[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`);
         if (message.requestId) {
           this.requestManager.resolveError(message.requestId, errorText);
+          this._hierarchy?.rejectPendingHierarchy(message.requestId, errorText);
         }
         return;
       }

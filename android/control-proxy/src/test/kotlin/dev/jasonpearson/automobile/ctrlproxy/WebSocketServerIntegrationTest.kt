@@ -602,4 +602,65 @@ class WebSocketServerIntegrationTest {
       orderedServer.stop()
     }
   }
+
+  @Test
+  fun `async action failure yields correlated error frame`() = runBlocking {
+    // Issue #3023: an action that throws INSIDE its launched coroutine — after the synchronous
+    // handleMessage has already returned null — must still yield a correlated type:"error" frame,
+    // not leave the daemon awaiter hanging to timeout. This is the async analog of the synchronous
+    // handler-throw case covered by `handler exception returns structured error response` (#2985).
+    // The fake action routes its fire-and-forget work through a real AsyncActionRunner, exactly as
+    // CtrlProxy does in production.
+    lateinit var asyncServer: WebSocketServer
+    val runnerHolder = arrayOfNulls<AsyncActionRunner>(1)
+    asyncServer =
+      WebSocketServer(
+        port = 0,
+        scope = testScope,
+        messageHandler =
+          CtrlProxyMessageHandler(
+            object : NoOpCtrlProxyActions() {
+              override fun requestScreenshot(requestId: String?) {
+                // Fire-and-forget: the real work runs in a launched coroutine that throws after
+                // this method (and handleMessage) has already returned.
+                runnerHolder[0]!!.launch(requestId, "screenshot") {
+                  throw RuntimeException("async boom")
+                }
+              }
+            }
+          ),
+      )
+    runnerHolder[0] =
+      AsyncActionRunner(scope = testScope, broadcastResponse = { asyncServer.broadcast(it) })
+    asyncServer.start()
+    try {
+      val client = HttpClient(CIO) { install(WebSockets) }
+      client.use { c ->
+        c.webSocket(
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = asyncServer.getActualPort() ?: error("Server not running"),
+          path = "/ws",
+        ) {
+          incoming.receive() // Connection message
+
+          send(Frame.Text("""{"type":"request_screenshot","requestId":"req-async"}"""))
+
+          val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+          val responseJson = json.parseToJsonElement(responseFrame.readText()).jsonObject
+
+          assertEquals("error", responseJson["type"]?.jsonPrimitive?.content)
+          assertEquals("req-async", responseJson["requestId"]?.jsonPrimitive?.content)
+          assertEquals("false", responseJson["success"]?.jsonPrimitive?.content)
+          val error = responseJson["error"]?.jsonPrimitive?.content ?: ""
+          assertTrue(
+            "error should name the failing action, was: $error",
+            error.contains("screenshot"),
+          )
+        }
+      }
+    } finally {
+      asyncServer.stop()
+    }
+  }
 }

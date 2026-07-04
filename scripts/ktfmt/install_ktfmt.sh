@@ -34,13 +34,7 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Parse the numeric version from `ktfmt --version` (e.g. "ktfmt version 0.64").
-# Filter to ktfmt's own version line first so a JVM warning on stderr (the
-# manual install runs `java -jar`) can't have its version grabbed instead.
-# Empty string if ktfmt is absent or emits nothing parseable.
-installed_ktfmt_version() {
-    ktfmt --version 2>&1 | grep -i 'ktfmt version' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1
-}
+# Note: installed_ktfmt_version() is provided by the sourced ktfmt_version.sh.
 
 # Install ktfmt on macOS
 install_macos() {
@@ -214,14 +208,25 @@ EOF
 verify_installation() {
     echo -e "${YELLOW}Verifying ktfmt installation...${NC}"
 
-    if command_exists ktfmt; then
-        echo -e "${GREEN}ktfmt is installed and available in PATH${NC}"
-        ktfmt --version 2>/dev/null || echo -e "${GREEN}ktfmt is ready to use${NC}"
-        return 0
-    else
+    if ! command_exists ktfmt; then
         echo -e "${RED}ktfmt is not available in PATH${NC}"
         return 1
     fi
+
+    # Presence isn't enough (issue #2966): if a drifted brew ktfmt still shadows
+    # ~/.local/bin on PATH, the pinned JAR we just installed isn't the one that
+    # resolves. Assert the ktfmt that actually resolves is the pin, so the
+    # installer can't print "success" while leaving a mismatched formatter live.
+    local resolved
+    resolved="$(installed_ktfmt_version)"
+    if [[ "$resolved" != "$KTFMT_VERSION" ]]; then
+        echo -e "${RED}ktfmt on PATH is '${resolved:-unknown}', but this repo pins '${KTFMT_VERSION}'.${NC}"
+        echo -e "${RED}A drifted ktfmt is shadowing the pinned install. Ensure the pinned ktfmt (\$HOME/.local/bin) precedes it on PATH, or remove the drifted one, then retry.${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}ktfmt ${KTFMT_VERSION} is installed and available in PATH${NC}"
+    return 0
 }
 
 # Main installation function
@@ -251,13 +256,21 @@ main() {
 
     install_result=$?
 
-    if [[ $install_result -eq 0 ]]; then
-        echo -e "${GREEN}Installation completed successfully!${NC}"
-        verify_installation
-    else
+    if [[ $install_result -ne 0 ]]; then
         echo -e "${RED}Installation failed!${NC}"
         exit 1
     fi
+
+    # Gate "success" on verification: the install step can return 0 while a
+    # drifted ktfmt still shadows the pinned one on PATH (issue #2966), so only
+    # declare success once verify_installation confirms the resolved version is
+    # the pin -- otherwise fail loudly instead of a misleading green.
+    if ! verify_installation; then
+        echo -e "${RED}Installation failed verification!${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}Installation completed successfully!${NC}"
 }
 
 # Run main function

@@ -68,18 +68,10 @@ done
 # is EXACTLY the pinned version before doing any per-file work, so version /
 # style-config drift fails loudly here instead of silently scoped-passing.
 # INSTALL_KTFMT_WHEN_MISSING only installs when ktfmt is *absent*, so an
-# already-installed newer ktfmt would otherwise sail through. A matching version
-# also implies --google-style support, so this subsumes the old flag probe.
-# Filter to ktfmt's own "ktfmt version X.Y" line first, then extract the number.
-# The CI ktfmt is a `java -jar` wrapper, and 2>&1 merges stderr, so a JVM warning
-# carrying its own version (e.g. "11.0.2") could otherwise be grabbed by head -1.
-installed_ktfmt_version="$(ktfmt --version 2>&1 | grep -i 'ktfmt version' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
-if [[ "$installed_ktfmt_version" != "$KTFMT_VERSION" ]]; then
-    echo -e "${RED}ktfmt version mismatch: found '${installed_ktfmt_version:-unknown}', this repo pins '${KTFMT_VERSION}'.${NC}"
-    echo -e "${RED}A different formatter version reformats untouched files the scoped PR check never inspects (issue #2966), so this fails loudly instead of a silent scoped pass.${NC}"
-    echo -e "${RED}Install the pinned version: re-run scripts/ktfmt/install_ktfmt.sh, or install ktfmt ${KTFMT_VERSION} manually.${NC}"
-    exit 1
-fi
+# already-installed newer ktfmt would otherwise sail through. The shared gate
+# (require_pinned_ktfmt_version, from ktfmt_version.sh) also subsumes the old
+# --google-style probe: a matching version implies --google-style support.
+require_pinned_ktfmt_version
 
 # Start the timer
 if [[ -f "$PROJECT_ROOT/scripts/utils/get_timestamp.sh" ]]; then

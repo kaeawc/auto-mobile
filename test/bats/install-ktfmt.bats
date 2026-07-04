@@ -59,10 +59,18 @@ exit 0
 STUB
 
   # ktfmt --version reports the version brew "installed" (default 0.64 = matches).
+  # Once install_manual has written the pinned wrapper (~/.local/bin/ktfmt), model
+  # that the pinned 0.64 now resolves on PATH -- unless KTFMT_STUB_SHADOW is set,
+  # which models a drifted brew binary still shadowing ~/.local/bin (so verify
+  # must catch the mismatch).
   cat > "$STUB_BIN/ktfmt" <<'STUB'
 #!/usr/bin/env bash
 if [[ " $* " == *" --version "* ]]; then
-  echo "ktfmt version ${BREW_KTFMT_VERSION:-0.64}"
+  if [[ -f "$HOME/.local/bin/ktfmt" && -z "${KTFMT_STUB_SHADOW:-}" ]]; then
+    echo "ktfmt version 0.64"
+  else
+    echo "ktfmt version ${BREW_KTFMT_VERSION:-0.64}"
+  fi
   exit 0
 fi
 exit 0
@@ -91,4 +99,18 @@ teardown() {
   grep -q "v0.64/ktfmt-0.64-with-dependencies.jar" "$CURL_LOG"
   # The pinned wrapper was installed into the sandboxed ~/.local/bin.
   [ -x "$HOME/.local/bin/ktfmt" ]
+  # verify_installation confirmed the resolved ktfmt is now the pin, not brew's.
+  [[ "$output" == *"ktfmt 0.64 is installed"* ]]
+}
+
+@test "macOS: install FAILS loudly if a drifted brew ktfmt still shadows the pin on PATH" {
+  # Fallback installs the pinned JAR, but a drifted brew binary still resolves
+  # first on PATH -- verify_installation must catch it, not print success.
+  run env BREW_KTFMT_VERSION="0.66" KTFMT_STUB_SHADOW="1" bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  # Fallback still ran (pinned JAR fetched), but verification failed on the mismatch.
+  [ -s "$CURL_LOG" ]
+  [[ "$output" == *"0.66"* ]]
+  [[ "$output" == *"shadowing"* ]]
+  [[ "$output" != *"Installation completed successfully"* ]]
 }

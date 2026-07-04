@@ -208,7 +208,9 @@ clean_kt() { printf 'fun a() {}\n' > "$1"; }
   mkdir -p "$copy_dir"
   cp "$REPO_ROOT/scripts/ktfmt/validate_ktfmt.sh" "$copy_dir/"
   cp "$REPO_ROOT/scripts/ktfmt/ktfmt_version.sh" "$copy_dir/"
-  printf 'KTFMT_VERSION="0.99"\n' > "$copy_dir/ktfmt_version.sh"
+  # Bump ONLY the pin line in the copy, preserving the shared helper functions.
+  sed -i.bak 's/^KTFMT_VERSION=.*/KTFMT_VERSION="0.99"/' "$copy_dir/ktfmt_version.sh"
+  rm -f "$copy_dir/ktfmt_version.sh.bak"
 
   clean_kt app/src/Base.kt
   git add -A && git commit -qm base

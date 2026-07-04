@@ -74,6 +74,18 @@ export interface RegisteredTool {
   outputSchema?: any;
 }
 
+/**
+ * Whether a tool declares an `outputSchema`. The single source of truth for the
+ * `structuredContent` gate (issues #2899 + #2759): both the wire-boundary strip
+ * (`stripToolResultStructuredContent` in `index.ts`) and the `tools/list`
+ * advertisement (`getToolDefinitions`) key off this so the wire result and the
+ * advertised schema can never disagree. `outputSchema` is always either a Zod
+ * schema object or `undefined`.
+ */
+export function toolHasOutputSchema(tool: Pick<RegisteredTool, "outputSchema">): boolean {
+  return tool.outputSchema !== undefined && tool.outputSchema !== null;
+}
+
 // The registry that holds all tools
 class ToolRegistryClass {
   private tools: Map<string, RegisteredTool> = new Map();
@@ -740,7 +752,7 @@ class ToolRegistryClass {
     // both consistent avoids advertising output the finalize step will strip.
     const suppressOutputSchema = serverConfig.isToolResultsNoStructuredContentEnabled();
     return this.getAllTools(options).map(tool => {
-      const outputSchema = tool.outputSchema && !suppressOutputSchema
+      const outputSchema = toolHasOutputSchema(tool) && !suppressOutputSchema
         ? flattenTopLevelUnion(toJSONSchema(tool.outputSchema))
         : undefined;
 

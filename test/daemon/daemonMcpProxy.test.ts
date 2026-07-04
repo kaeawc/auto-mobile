@@ -430,7 +430,7 @@ describe("DaemonMcpProxy", () => {
     });
 
     describe("startup option mismatch handling", () => {
-      function runningStatus(options: { embeddedSdk?: boolean }) {
+      function runningStatus(options: { embeddedSdk?: boolean; toolResultsNoStructuredContent?: boolean }) {
         return {
           running: true,
           pid: 1234,
@@ -464,6 +464,60 @@ describe("DaemonMcpProxy", () => {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
           expect(fakeManager.restartOptions).toEqual({ embeddedSdk: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restarts daemon when toolResultsNoStructuredContent differs (issue #2759)", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ toolResultsNoStructuredContent: false }), // ensureVersionMatches
+          runningStatus({ toolResultsNoStructuredContent: false }), // ensureBuildMatches
+          runningStatus({ toolResultsNoStructuredContent: false }), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ toolResultsNoStructuredContent: true }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { toolResultsNoStructuredContent: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({ toolResultsNoStructuredContent: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("does not restart daemon when output-reduction flags match", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ toolResultsNoStructuredContent: true }), // ensureVersionMatches
+          runningStatus({ toolResultsNoStructuredContent: true }), // ensureBuildMatches
+          runningStatus({ toolResultsNoStructuredContent: true }), // ensureStartupOptionsMatch
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { toolResultsNoStructuredContent: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

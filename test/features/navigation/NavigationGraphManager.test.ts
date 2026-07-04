@@ -1187,3 +1187,246 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     expect(manager.getCurrentScreen()).toBe("Screen1");
   });
 });
+
+/**
+ * A TestCoverageRepository that throws on recordNodeVisit to simulate a
+ * mid-sequence write failure inside recordHierarchyNavigation's Case-1
+ * transaction. Overrides withExecutor so the throw survives the manager
+ * rebinding the repo onto the transaction executor.
+ */
+class ThrowingNodeVisitCoverageRepo extends TestCoverageRepository {
+  constructor(
+    private readonly injectedTimer: Timer,
+    db?: Kysely<Database>
+  ) {
+    super(injectedTimer, db);
+  }
+
+  override withExecutor(executor: Kysely<Database>): TestCoverageRepository {
+    return new ThrowingNodeVisitCoverageRepo(this.injectedTimer, executor);
+  }
+
+  override async recordNodeVisit(): Promise<void> {
+    throw new Error("injected recordNodeVisit failure");
+  }
+}
+
+describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () => {
+  const APP_ID = "com.test.promo";
+
+  let db: Kysely<Database>;
+
+  async function countNodes(screenName?: string): Promise<number> {
+    let q = db
+      .selectFrom("navigation_nodes")
+      .select(eb => eb.fn.countAll<number>().as("count"))
+      .where("app_id", "=", APP_ID);
+    if (screenName !== undefined) {
+      q = q.where("screen_name", "=", screenName);
+    }
+    const row = await q.executeTakeFirst();
+    return Number(row?.count ?? 0);
+  }
+
+  async function countFingerprints(): Promise<number> {
+    const row = await db
+      .selectFrom("navigation_node_fingerprints")
+      .select(eb => eb.fn.countAll<number>().as("count"))
+      .where("app_id", "=", APP_ID)
+      .executeTakeFirst();
+    return Number(row?.count ?? 0);
+  }
+
+  beforeEach(async () => {
+    db = await createTestDatabase({ foreignKeys: true });
+    TelemetryRecorder.resetInstance();
+  });
+
+  afterEach(async () => {
+    TelemetryRecorder.resetInstance();
+    await db.destroy();
+  });
+
+  function makeManager(): NavigationGraphManager {
+    const navRepo = new NavigationRepository(db);
+    const coverage = new TestCoverageRepository(defaultTimer, db);
+    return NavigationGraphManager.createForTesting(navRepo, coverage);
+  }
+
+  // Seed a promotable suggestion: one named node (so the app "has named nodes")
+  // plus an uncorrelated fingerprint suggestion.
+  async function seedSuggestion(manager: NavigationGraphManager): Promise<number> {
+    await manager.recordNavigationEvent(createEvent("HomeScreen", 1000));
+    await manager.recordHierarchyNavigation({
+      fromFingerprint: null,
+      toFingerprint: "fp_settings",
+      fingerprintData: JSON.stringify({ layout: "settings" }),
+      timestamp: 5000, // outside the active-navigation window → becomes a suggestion
+      packageName: APP_ID,
+    });
+    const suggestions = await manager.getSuggestions();
+    const suggestion = suggestions.find(s => s.fingerprintHash === "fp_settings");
+    expect(suggestion).toBeDefined();
+    return suggestion!.id;
+  }
+
+  test("happy path persists the named node, fingerprint, and suggestion link", async () => {
+    const manager = makeManager();
+    await manager.setCurrentApp(APP_ID);
+    const suggestionId = await seedSuggestion(manager);
+
+    await manager.promoteSuggestion(suggestionId, "SettingsScreen");
+
+    expect(await countNodes("SettingsScreen")).toBe(1);
+    // The promoted fingerprint now points at a named node; the suggestion is gone
+    // from the unpromoted list.
+    const remaining = await manager.getSuggestions();
+    expect(remaining.find(s => s.fingerprintHash === "fp_settings")).toBeUndefined();
+  });
+
+  test("rolls back the created node when the suggestion link fails mid-sequence", async () => {
+    const manager = makeManager();
+    await manager.setCurrentApp(APP_ID);
+    await seedSuggestion(manager);
+
+    const nodesBefore = await countNodes();
+    const fingerprintsBefore = await countFingerprints();
+
+    // A non-existent suggestion id: getOrCreateNode creates the "OrphanScreen"
+    // node first, then repository.promoteSuggestion throws "Suggestion not found"
+    // during the multi-write promotion. Without a transaction the node would be
+    // left orphaned; the transaction must roll it back.
+    await expect(
+      manager.promoteSuggestion(999999, "OrphanScreen")
+    ).rejects.toThrow(/Suggestion not found/i);
+
+    // Zero new nodes/fingerprints persisted for the failed promotion.
+    expect(await countNodes("OrphanScreen")).toBe(0);
+    expect(await countNodes()).toBe(nodesBefore);
+    expect(await countFingerprints()).toBe(fingerprintsBefore);
+  });
+});
+
+describe("NavigationGraphManager - recordHierarchyNavigation Case-1 transaction (#2968)", () => {
+  const APP_ID = "com.test.hiernav";
+
+  let db: Kysely<Database>;
+
+  async function nodeVisitCount(screenName: string): Promise<number> {
+    const row = await db
+      .selectFrom("navigation_nodes")
+      .select(["visit_count"])
+      .where("app_id", "=", APP_ID)
+      .where("screen_name", "=", screenName)
+      .executeTakeFirst();
+    return Number(row?.visit_count ?? 0);
+  }
+
+  async function countNodeCoverageRows(): Promise<number> {
+    const row = await db
+      .selectFrom("test_node_coverage")
+      .select(eb => eb.fn.countAll<number>().as("count"))
+      .executeTakeFirst();
+    return Number(row?.count ?? 0);
+  }
+
+  async function sessionNodeTotal(sessionId: number): Promise<number> {
+    const row = await db
+      .selectFrom("test_coverage_sessions")
+      .select(["total_nodes_visited"])
+      .where("id", "=", sessionId)
+      .executeTakeFirstOrThrow();
+    return Number(row.total_nodes_visited);
+  }
+
+  beforeEach(async () => {
+    db = await createTestDatabase({ foreignKeys: true });
+    TelemetryRecorder.resetInstance();
+    spyOn(TelemetryRecorder.getInstance(), "recordNavigationEvent").mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    TelemetryRecorder.resetInstance();
+    await db.destroy();
+  });
+
+  // Seed a named node ("Home") with a correlated fingerprint ("fp_home") WITHOUT
+  // an active test session (so the throwing coverage repo is never touched during
+  // setup), then navigate away so currentScreen != "Home". A later hierarchy event
+  // carrying "fp_home" takes Case 1 (existing-node branch).
+  async function seedCorrelatedNode(manager: NavigationGraphManager): Promise<void> {
+    await manager.recordNavigationEvent(createEvent("Home", 1000));
+    await manager.recordHierarchyNavigation({
+      fromFingerprint: null,
+      toFingerprint: "fp_home",
+      fingerprintData: JSON.stringify({ layout: "home" }),
+      timestamp: 1200, // within ACTIVE_NAVIGATION_WINDOW_MS → correlates fp_home → Home
+      packageName: APP_ID,
+    });
+    await manager.recordNavigationEvent(createEvent("Other", 3000)); // currentScreen → "Other"
+  }
+
+  test("happy path records the visit + coverage and updates currentScreen", async () => {
+    const navRepo = new NavigationRepository(db);
+    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+    await seedCorrelatedNode(manager);
+    await manager.startTestSession("session-hier-happy");
+    const sessionId = manager.getActiveTestSession()!.id;
+
+    const visitsBefore = await nodeVisitCount("Home");
+
+    await manager.recordHierarchyNavigation({
+      fromFingerprint: null,
+      toFingerprint: "fp_home",
+      timestamp: 8000, // well outside the window → Case 1 (existing-node match)
+      packageName: APP_ID,
+    });
+
+    expect(await nodeVisitCount("Home")).toBe(visitsBefore + 1);
+    expect(await countNodeCoverageRows()).toBe(1);
+    expect(await sessionNodeTotal(sessionId)).toBe(1);
+    expect(manager.getCurrentScreen()).toBe("Home");
+  });
+
+  test("rolls back the node-visit + coverage counters when recordNodeVisit throws", async () => {
+    const navRepo = new NavigationRepository(db);
+    const coverage = new ThrowingNodeVisitCoverageRepo(defaultTimer, db);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+    await seedCorrelatedNode(manager);
+    await manager.startTestSession("session-hier-rollback");
+    const sessionId = manager.getActiveTestSession()!.id;
+
+    const visitsBefore = await nodeVisitCount("Home");
+    const coverageBefore = await countNodeCoverageRows();
+    const sessionTotalBefore = await sessionNodeTotal(sessionId);
+
+    let notifyCount = 0;
+    manager.setGraphUpdateListener(() => {
+      notifyCount++;
+    });
+
+    // Case 1: updateNodeVisit succeeds inside the transaction, then the coverage
+    // recordNodeVisit throws → the whole thing must roll back.
+    await expect(
+      manager.recordHierarchyNavigation({
+        fromFingerprint: null,
+        toFingerprint: "fp_home",
+        timestamp: 8000,
+        packageName: APP_ID,
+      })
+    ).rejects.toThrow(/injected recordNodeVisit failure/);
+
+    // updateNodeVisit's increment is rolled back; coverage rows/counters unchanged.
+    expect(await nodeVisitCount("Home")).toBe(visitsBefore);
+    expect(await countNodeCoverageRows()).toBe(coverageBefore);
+    expect(await sessionNodeTotal(sessionId)).toBe(sessionTotalBefore);
+
+    // In-memory field rollback invariant: currentScreen stays "Other" (the
+    // post-commit assignment to "Home" never runs), and no notify fires.
+    expect(manager.getCurrentScreen()).toBe("Other");
+    expect(notifyCount).toBe(0);
+  });
+});

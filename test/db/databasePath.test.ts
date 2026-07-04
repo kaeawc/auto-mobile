@@ -43,19 +43,25 @@ describe("database path resolution", () => {
     })).toBe(dbPath);
   });
 
-  test("passes the `:memory:` sentinel through un-resolved when opted in (issue #3047)", () => {
-    // A `:memory:` DB is not a filesystem path: routing it through the
-    // daemon-launch-cwd resolver would `path.resolve(":memory:")` into a bogus
-    // absolute path (and later create a `:memory:.migrate.lock` file). With the
-    // explicit test opt-in set, it must be returned verbatim even with a daemon
-    // launch cwd set.
-    process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/project/auto-mobile");
+  // Exercise the resolver end-to-end for every truthy opt-in spelling, not just
+  // `"1"`, so the guard's integration with `isInMemoryDatabaseOptInEnabled`
+  // (whitespace/case-insensitive `1`/`true`/`yes`) is proven through the real
+  // path, not only at the pure-function level.
+  for (const optIn of ["1", "true", "yes", "  Yes  "]) {
+    test(`passes the \`:memory:\` sentinel through un-resolved when opted in with "${optIn}" (issue #3047)`, () => {
+      // A `:memory:` DB is not a filesystem path: routing it through the
+      // daemon-launch-cwd resolver would `path.resolve(":memory:")` into a bogus
+      // absolute path (and later create a `:memory:.migrate.lock` file). With the
+      // explicit test opt-in set, it must be returned verbatim even with a daemon
+      // launch cwd set.
+      process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/project/auto-mobile");
 
-    expect(resolveDatabasePathFromEnvironment({
-      AUTOMOBILE_DB_PATH: ":memory:",
-      [IN_MEMORY_DB_OPT_IN_ENV]: "1",
-    })).toBe(":memory:");
-  });
+      expect(resolveDatabasePathFromEnvironment({
+        AUTOMOBILE_DB_PATH: ":memory:",
+        [IN_MEMORY_DB_OPT_IN_ENV]: optIn,
+      })).toBe(":memory:");
+    });
+  }
 
   test("passes the `:memory:` sentinel through the legacy AUTO_MOBILE_DB_PATH alias when opted in", () => {
     process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/project/auto-mobile");

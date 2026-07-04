@@ -4,6 +4,7 @@ import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { ToolRegistry } from "../../server/toolRegistry";
+import { markInternalToolCall } from "../../server/internalToolCall";
 import { NavigationEdge, UIState } from "./NavigationGraphManager";
 import { ModalState, ScrollPosition } from "../../utils/interfaces/NavigationGraph";
 import { UIStateExtractor } from "./UIStateExtractor";
@@ -157,8 +158,11 @@ export class DefaultUIStateSetup implements UIStateSetup {
         swipeOnArgs.speed = scrollPosition.speed;
       }
 
-      // Execute swipeOn with lookFor
-      const result = await swipeOnTool.handler(swipeOnArgs);
+      // Execute swipeOn with lookFor. Marked internal (#3087) so that under
+      // `--actions-diff-observe` this setup scroll neither diffs its observation
+      // nor advances the agent-facing diff baseline — the `found` read below still
+      // sees the full (unstripped) result.
+      const result = await swipeOnTool.handler(markInternalToolCall(swipeOnArgs));
 
       // `swipeOn` pre-serializes into an MCP envelope via createStructuredToolResponse,
       // which hoists only `success`/`error` to the top level — `found` lives under
@@ -269,7 +273,8 @@ export class DefaultUIStateSetup implements UIStateSetup {
         args.elementId = element.resourceId;
       }
 
-      await tapTool.handler(args);
+      // Internal setup tap (#3087): no diff/strip, no baseline advance.
+      await tapTool.handler(markInternalToolCall(args));
 
       // Small delay for UI to update
       await this.sleep(100);
@@ -352,12 +357,13 @@ export class DefaultUIStateSetup implements UIStateSetup {
       try {
         const swipeTool = ToolRegistry.getTool("swipe");
         if (swipeTool) {
-          // Swipe down from middle of screen to dismiss bottom sheet
-          await swipeTool.handler({
+          // Swipe down from middle of screen to dismiss bottom sheet.
+          // Internal setup swipe (#3087): no diff/strip, no baseline advance.
+          await swipeTool.handler(markInternalToolCall({
             action: "swipe",
             direction: "down",
             platform
-          });
+          }));
           await this.sleep(200);
 
           // Verify dismissal
@@ -456,11 +462,12 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
     for (const text of closeTexts) {
       try {
-        await tapTool.handler({
+        // Internal close-button tap (#3087): no diff/strip, no baseline advance.
+        await tapTool.handler(markInternalToolCall({
           action: "tap",
           text,
           platform
-        });
+        }));
         logger.debug(`[UI_STATE_SETUP] Tapped close button: "${text}"`);
         return true;
       } catch (error) {

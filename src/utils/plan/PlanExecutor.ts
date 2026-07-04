@@ -8,6 +8,7 @@ import {
 } from "../../models/Plan";
 import { logger } from "../logger";
 import { ToolRegistry } from "../../server/toolRegistry";
+import { markInternalToolCall } from "../../server/internalToolCall";
 import { ActionableError } from "../../models";
 import { isDebugModeEnabled } from "../debug";
 import {
@@ -213,11 +214,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (sessionUuid) {
         enhancedParams.sessionUuid = sessionUuid;
       }
-      const parsedParams = observeTool.schema.parse(enhancedParams);
       // Internal failure-recovery observe (#3053): mark internal so it does not
       // overwrite the agent-facing diff baseline (`observe` always resets it).
       // This capture is for the plan's failure summary, not shown to the agent.
-      (parsedParams as Record<string, unknown>).__internalNoDiff = true;
+      const parsedParams = markInternalToolCall(
+        observeTool.schema.parse(enhancedParams) as Record<string, unknown>
+      );
 
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const response = await Promise.race([
@@ -453,15 +455,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
             }
           }
 
-          // Parse and validate the parameters
-          const parsedParams = tool.schema.parse(enhancedParams);
-
-          // Mark this as an internal tool-to-tool call (#3053) so finalize emits
-          // the full observation on the step envelope — never a diff or a stripped
-          // payload — regardless of `--actions-diff-observe`/`--actions-no-observe`.
-          // Set AFTER schema.parse (which strips unknown keys) so it reaches the
-          // wrapped handler; mirrors the `__mcpSessionId` internal-param convention.
-          (parsedParams as Record<string, unknown>).__internalNoDiff = true;
+          // Parse and validate the parameters, then mark this as an internal
+          // tool-to-tool call (#3053) so finalize emits the full observation on the
+          // step envelope — never a diff or a stripped payload — regardless of
+          // `--actions-diff-observe`/`--actions-no-observe`. Marked AFTER schema.parse
+          // (which strips unknown keys) so it reaches the wrapped handler; mirrors
+          // the `__mcpSessionId` internal-param convention.
+          const parsedParams = markInternalToolCall(
+            tool.schema.parse(enhancedParams) as Record<string, unknown>
+          );
 
           if (deviceId) {
             ScreenshotJobTracker.cancelJob(deviceId);
@@ -948,13 +950,13 @@ export class DefaultPlanExecutor implements PlanExecutor {
             }
           }
 
-          // Parse and validate parameters
-          const parsedParams = tool.schema.parse(enhancedParams);
-
-          // Internal tool-to-tool call (#3053): same guard as the sequential path
-          // — a plan step's finalized envelope is never diffed/stripped, so a
-          // future internal `.observation` reader stays correct under the flags.
-          (parsedParams as Record<string, unknown>).__internalNoDiff = true;
+          // Parse and validate parameters, then mark internal (#3053): same guard
+          // as the sequential path — a plan step's finalized envelope is never
+          // diffed/stripped, so a future internal `.observation` reader stays
+          // correct under the flags.
+          const parsedParams = markInternalToolCall(
+            tool.schema.parse(enhancedParams) as Record<string, unknown>
+          );
 
           if (deviceId) {
             ScreenshotJobTracker.cancelJob(deviceId);

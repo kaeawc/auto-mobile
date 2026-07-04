@@ -5,6 +5,7 @@ import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { ToolRegistry } from "../../server/toolRegistry";
+import { markInternalToolCall } from "../../server/internalToolCall";
 import {
   NavigationGraphManager,
   ToolCallInteraction,
@@ -313,8 +314,11 @@ export class NavigateTo {
 
     logger.info(`[NAVIGATE_TO] Replaying tool call: ${interaction.toolName}`);
 
-    // Call the tool handler with the original args
-    await tool.handler(interaction.args);
+    // Call the tool handler with the original args, marked internal (#3087):
+    // `markInternalToolCall` returns a copy, so the stored edge `interaction.args`
+    // is never mutated. Under `--actions-diff-observe` this replay neither diffs
+    // its observation nor advances the agent-facing diff baseline.
+    await tool.handler(markInternalToolCall(interaction.args as Record<string, unknown>));
   }
 
   /**

@@ -148,6 +148,10 @@ describe("TerminateApp (iOS physical device)", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("macOS");
+    // Install/running state is unknown on failure — must be omitted, not a
+    // fabricated `false` that a caller could misread as "not installed".
+    expect(result.wasInstalled).toBeUndefined();
+    expect(result.wasRunning).toBeUndefined();
     // A failure must not crash and must not fall back to simctl.
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
   });

@@ -750,6 +750,59 @@ describe("findRunningProcessPid", () => {
     expect(findRunningProcessPid(data, bundlePath)).toBe(88);
   });
 
+  test("tolerates a stringified integer PID", () => {
+    const data = { runningProcesses: [{ processIdentifier: "88", executable: `${bundlePath}/MyApp` }] };
+    expect(findRunningProcessPid(data, bundlePath)).toBe(88);
+  });
+
+  test("matches the main app binary, never a nested .appex extension inside the bundle", () => {
+    // Extension listed FIRST — a naive prefix match would wrongly kill it.
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 200, executable: `${bundlePath}/PlugIns/Foo.appex/Foo` },
+          { processIdentifier: 100, executable: `${bundlePath}/MyApp` }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBe(100);
+  });
+
+  test("does not match when only a nested .appex extension is running (no main process)", () => {
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 200, executable: `${bundlePath}/PlugIns/Foo.appex/Foo` }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBeNull();
+  });
+
+  test("falls back to executable basename when the process path root differs from the bundle URL", () => {
+    // Real-device risk: info-processes reports a /var container root while
+    // info-apps reported /private/var — strict prefix misses, basename catches.
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 321, executable: "/var/containers/Bundle/Application/XYZ/MyApp.app/MyApp" }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBe(321);
+  });
+
+  test("basename fallback still excludes an extension binary with a different basename", () => {
+    const data = {
+      result: {
+        runningProcesses: [
+          { processIdentifier: 9, executable: "/var/containers/Bundle/Application/XYZ/MyApp.app/PlugIns/Foo.appex/Foo" }
+        ]
+      }
+    };
+    expect(findRunningProcessPid(data, bundlePath)).toBeNull();
+  });
+
   test("returns null when no executable is inside the bundle path", () => {
     const data = {
       result: {

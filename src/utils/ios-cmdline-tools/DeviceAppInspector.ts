@@ -210,20 +210,50 @@ const extractExecutablePath = (record: Record<string, unknown>): string | null =
 
 const extractProcessPid = (record: Record<string, unknown>): number | undefined => {
   const raw = record.processIdentifier ?? record.pid ?? record.processID;
-  return typeof raw === "number" ? raw : undefined;
+  if (typeof raw === "number" && Number.isInteger(raw)) {
+    return raw;
+  }
+  // devicectl JSON is unverified; tolerate a stringified integer PID too.
+  if (typeof raw === "string" && /^\d+$/.test(raw.trim())) {
+    return Number(raw.trim());
+  }
+  return undefined;
+};
+
+/** Basename of a path (last `/`-separated segment), ignoring any trailing slash. */
+const pathBasename = (path: string): string => {
+  const trimmed = path.replace(/\/+$/, "");
+  const idx = trimmed.lastIndexOf("/");
+  return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
 };
 
 /**
- * Find the PID of a running process whose executable lives inside `bundlePath`,
- * from a devicectl `device info processes --json-output` payload.
+ * Find the PID of the app's **own** main process from a devicectl
+ * `device info processes --json-output` payload, given its installed
+ * `bundlePath`.
  *
  * The exact envelope is not formally documented by Apple (see simctl.md caveat),
  * so we deep-walk and accept several field-name spellings: the executable may be
  * a string or an object carrying `url`/`path`, and the PID may be spelled
- * `processIdentifier`, `pid`, or `processID`. A match requires the normalized
- * executable path to be strictly *inside* the bundle directory — comparing
- * against `"<bundle>/"` guards against a sibling like `MyApp.app.extension`
- * that merely shares a string prefix with `MyApp.app`.
+ * `processIdentifier`, `pid`, or `processID`.
+ *
+ * Matching is deliberately scoped to the **main app binary**, which is a *direct
+ * child* of the `.app` directory (`MyApp.app/MyApp` — CFBundleExecutable, whose
+ * name may differ from the bundle name, but always one level down). App
+ * extensions live *inside* the same bundle at `MyApp.app/PlugIns/Foo.appex/Foo`
+ * and their executables also start with `"<bundle>/"`, so a naive prefix match
+ * would SIGKILL an extension and falsely report the app terminated. We therefore
+ * require the path segment after `"<bundle>/"` to contain no further `/`. This
+ * also excludes a sibling like `MyApp.app.extension/...` (different prefix).
+ *
+ * Two-pass, per issue #2488: the strict inside-bundle match is preferred, but if
+ * it finds nothing we fall back to matching a process whose executable
+ * **basename** equals the bundle name (minus `.app`). The fallback guards the
+ * real-device risk that `info processes` executable paths don't nest under the
+ * `info apps` bundle URL (e.g. `/private` vs `/var` symlink, differing container
+ * roots) — without it a mismatch would silently report the app as not running.
+ * The basename fallback naturally still excludes extensions (a `Foo.appex`
+ * binary's basename won't equal the app name).
  */
 export const findRunningProcessPid = (data: unknown, bundlePath: string): number | null => {
   const normalizedBundle = normalizeDevicePath(bundlePath).replace(/\/+$/, "");
@@ -231,14 +261,24 @@ export const findRunningProcessPid = (data: unknown, bundlePath: string): number
     return null;
   }
   const insidePrefix = `${normalizedBundle}/`;
+  const appName = pathBasename(normalizedBundle).replace(/\.app$/i, "");
 
-  const walk = (node: unknown): number | null => {
+  const isMainBinaryOfBundle = (exe: string): boolean => {
+    if (!exe.startsWith(insidePrefix)) {
+      return false;
+    }
+    // Direct child only: no further path separator → the app's own binary,
+    // not a nested PlugIns/*.appex/* extension executable.
+    return !exe.slice(insidePrefix.length).includes("/");
+  };
+
+  const walk = (node: unknown, matches: (exe: string) => boolean): number | null => {
     if (!node || typeof node !== "object") {
       return null;
     }
     if (Array.isArray(node)) {
       for (const item of node) {
-        const found = walk(item);
+        const found = walk(item, matches);
         if (found !== null) {
           return found;
         }
@@ -248,11 +288,11 @@ export const findRunningProcessPid = (data: unknown, bundlePath: string): number
     const record = node as Record<string, unknown>;
     const exe = extractExecutablePath(record);
     const pid = extractProcessPid(record);
-    if (exe !== null && pid !== undefined && exe.startsWith(insidePrefix)) {
+    if (exe !== null && pid !== undefined && matches(exe)) {
       return pid;
     }
     for (const value of Object.values(record)) {
-      const found = walk(value);
+      const found = walk(value, matches);
       if (found !== null) {
         return found;
       }
@@ -260,7 +300,14 @@ export const findRunningProcessPid = (data: unknown, bundlePath: string): number
     return null;
   };
 
-  return walk(data);
+  const primary = walk(data, isMainBinaryOfBundle);
+  if (primary !== null) {
+    return primary;
+  }
+  if (!appName) {
+    return null;
+  }
+  return walk(data, exe => pathBasename(exe) === appName);
 };
 
 const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: string): boolean =>

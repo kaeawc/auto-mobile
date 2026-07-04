@@ -288,11 +288,12 @@ export class TerminateApp extends BaseVisualChange {
       // summarized error (CLAUDE.md error-handling convention #2).
       logger.warn(`[TerminateApp] Physical iOS terminate failed for ${bundleId}: ${message}`, error);
       perf.end();
+      // Omit wasInstalled/wasRunning: install state is unknown at throw time (a
+      // devicectl failure can occur after the app was confirmed installed), so
+      // reporting them as `false` would assert a fact we never established.
       return {
         success: false,
         packageName: bundleId,
-        wasInstalled: false,
-        wasRunning: false,
         wasForeground: false,
         error: message
       };

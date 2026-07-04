@@ -1,0 +1,208 @@
+# Image backend: sharp primary + native cwebp on Windows
+
+Status: proposed
+Related: #2974 (Windows WebP daemon crash), #2920 (sharp→jimp migration), #2939 (screenshot cache format), #2424 (original sharp-under-Bun pin)
+
+## Problem
+
+The `@jimp/wasm-webp` WebP codec (adopted in #2920) runs on an Emscripten WASM
+module that intermittently **segfaults the Bun process on Windows** via a
+JSC Wasm JIT bug ([oven-sh/bun#26366](https://github.com/oven-sh/bun/issues/26366)).
+A native segfault is uncatchable and kills the daemon mid-operation. The
+navigation/plan features (`navigateTo`, `getNavigationGraph`, `executePlan`,
+exploration) force WebP encode/decode and are the real runtime crash surface;
+default PNG `observe`/screenshots are safe.
+
+We want fast, reliable image processing with **WebP preserved on every
+platform** and no WASM crash surface.
+
+## Root-cause context (corrected)
+
+Primary-source research (sharp/libvips/Bun trackers, 2026-07) overturned the
+premise carried in #2424/#2920:
+
+- The "**jp2k/OpenJPEG init aborts Bun**" attribution is **unsupported**. The
+  prebuilt `@img/sharp-libvips` binaries for both the working sharp 0.34.5 and
+  the crashing 0.35.x are compiled with `-Dopenjpeg=disabled` (verified in
+  `lovell/sharp-libvips` `build/lin.sh` + `build/mac.sh`, `libvips/meson_options.txt`).
+  jp2k is not in the binary; no upstream issue attributes a Bun abort to it.
+- The real cause is architectural and **Bun-side**: sharp deliberately ships
+  libvips as a *separate dynamically-linked shared library* (kept separate for
+  Apache-vs-LGPL licensing, [sharp#4023](https://github.com/lovell/sharp/issues/4023));
+  Bun's N-API/native interop with that separately-loaded lib has an open,
+  untriaged class of crashes ([bun#20372](https://github.com/oven-sh/bun/issues/20372),
+  [bun#29352](https://github.com/oven-sh/bun/issues/29352)). No released sharp
+  (0.34→0.35.3) or Bun version fixes it.
+- **sharp 0.34.5** (libvips 8.17.3 / `@img` 1.2.4) demonstrably runs under Bun;
+  **0.35.x** (libvips 8.18.3 / `@img` 1.3.x) reintroduces the crash.
+- sharp **cannot** be made reliable on **Windows** under Bun: global-libvips
+  build-from-source is unsupported on Windows, and there is a distinct open
+  Windows-only Bun+sharp crash ([bun#29352](https://github.com/oven-sh/bun/issues/29352)).
+- `sharp-wasm32` is **not** a Windows option — it is a WASM build and would hit
+  the same JSC-WASM-JIT crash class as `@jimp/wasm-webp`.
+
+Conclusion: "fundamentally fix for all platforms" is not in our control (it
+needs an upstream Bun fix, unbounded timeline). We instead pin sharp to the
+known-good 0.34.5 on macOS/Linux and give Windows a non-sharp, non-WASM path.
+
+## Decision
+
+- **macOS/Linux**: sharp **0.34.5**, pinned and frozen.
+- **Windows**: pure-JS **jimp** (resize/crop/PNG/pixels) + bundled native
+  **cwebp/dwebp** for the WebP codec.
+- **WebP is invariant across all platforms** — never downgraded to PNG.
+- **Drop `@jimp/wasm-webp` entirely** — no code path uses jimp for WebP anymore,
+  so the WASM crash surface (and the #2974 runtime crash + the CI flake) is
+  removed from the whole project.
+
+## Architecture: one backend interface, three implementations
+
+The public `Image` API stays stable (as in #2920); the backend is swapped
+behind it per platform. `ImageTransformer` records a declarative pipeline that
+the active backend executes.
+
+```ts
+// src/utils/image/backend/ImageBackend.ts
+export interface ImagePipeline {
+  resize?: { w: number; h?: number; mode: "cover" | "fill" | "width" };
+  crop?:   { x: number; y: number; w: number; h: number };
+  output:  { format: "png" | "webp"; quality?: number; lossless?: boolean; nearLossless?: boolean };
+}
+export interface RawImage { width: number; height: number; data: Buffer; } // RGBA
+
+export interface ImageBackend {
+  execute(source: Buffer, pipeline: ImagePipeline): Promise<Buffer>;
+  metadata(source: Buffer): Promise<ImageMetadata>;
+  rawPixels(source: Buffer): Promise<RawImage>; // PerceptualHasher + pixelmatch
+}
+```
+
+Implementations:
+
+- **`SharpBackend`** (macOS/Linux default) — native chaining
+  (`sharp(src).resize({fit})…webp({quality,lossless,nearLossless})/.png()`);
+  `rawPixels` via `.ensureAlpha().raw().toBuffer({resolveWithObject})`.
+- **`JimpCliBackend`** (Windows default) — jimp for decode/resize/crop/PNG/pixels;
+  `CliWebpCodec` for the WebP leg (encode: jimp→PNG buffer→`cwebp`; decode:
+  `dwebp`→PNG→jimp; magic-byte sniff to detect webp input).
+- **`JimpBackend`** — pure jimp, no WebP — catchable-failure fallback on
+  macOS/Linux if `import("sharp")` throws (module-discovery failure, which *is*
+  catchable, unlike the native abort).
+
+Selection (one injectable resolver, fake-able):
+
+```ts
+resolveImageBackend(platform, env, executor, provisioner): ImageBackend
+// win32 → JimpCliBackend
+// else  → SharpBackend, falling back to JimpBackend if sharp import throws
+// AUTOMOBILE_IMAGE_BACKEND=sharp|jimp|jimp-cli overrides (test any backend off-platform)
+```
+
+## Seam — existing code changes
+
+- `ImageTransformer.ts`: `resize()/crop()/png()/webp()` record into
+  `ImagePipeline`; `toBuffer()` → `backend.execute(buffer, pipeline)`;
+  `getMetadata()` → `backend.metadata()`. `ImageCache` unchanged (backend-agnostic).
+- `PerceptualHasher.ts` → `backend.rawPixels()` then existing 8×8 greyscale/red-channel.
+- `ScreenshotComparator.ts` → `backend.execute(buf, {output:"png"})` for
+  conversion, `backend.metadata()` for dims (keep PNG-IHDR fast path),
+  `backend.rawPixels()` ×2 for `pixelmatch`.
+- `ContrastChecker.ts` → `backend.rawPixels()`.
+- `image-utils.ts` → backend-agnostic `ImageUtils`.
+- Call sites in `NavigationScreenshotManager` / `TakeScreenshot` are untouched
+  (they use the stable `Image` API).
+
+## cwebp/dwebp: bundled, never absent
+
+WebP must never be absent on Windows, so binaries are **bundled**, not
+downloaded on demand (download has an offline gap that only PNG could fill —
+which we reject).
+
+- Ship Windows `cwebp.exe`/`dwebp.exe` (libwebp, ~1 MB) in the package under
+  `vendor/libwebp/win32-x64/`. Always present, offline or not (+~1 MB unpacked,
+  well under the 30 MB gate).
+- Resolution order: `AUTOMOBILE_CWEBP_PATH`/`AUTOMOBILE_DWEBP_PATH` → `PATH` →
+  bundled copy.
+- Invoke via `ProcessExecutor` with stdin/stdout piping (`cwebp -o - -- -`,
+  `dwebp - -o -`). Flag mapping: `{quality}`→`-q`, `{lossless}`→`-lossless -q`,
+  `{nearLossless}`→`-near_lossless <quality>` (cwebp's `-near_lossless` requires a
+  numeric preprocessing level; the current API models `nearLossless` as a boolean
+  and uses `quality` as that level — mirror it, do not emit a bare `-near_lossless`).
+- **Failure is a surfaced error, never PNG**: a cwebp/dwebp spawn/exit failure
+  throws `ActionableError` (CLAUDE.md strategy 1) pointing at
+  `AUTOMOBILE_CWEBP_PATH`. On-disk format stays uniformly `.webp` everywhere.
+- A macOS `cwebp` build for `AUTOMOBILE_IMAGE_BACKEND=jimp-cli` off-platform
+  testing stays download-on-demand (dev-only, no offline guarantee needed).
+
+## Dependency & build management — the anti-treadmill work
+
+Freezing sharp is part of the deliverable (this is what #2920 lacked):
+
+- `package.json`: add `sharp@0.34.5` + the 25 `@img/*` optionalDependencies
+  pinned exactly to `0.34.5`/`1.2.4`. Keep `jimp`/`@jimp/core`. Remove
+  `@jimp/wasm-webp`.
+- **Dependabot ignore** rules for `sharp` and every `@img/*` (comment linking
+  this doc + the crash), so the 0.35.x bump can't auto-land.
+- `build.ts` externals: add `sharp` + `@img/sharp-*` back (external + lazy, as
+  the old `loadSharp.ts` did); keep `jimp`/`@jimp/*` external.
+- Re-check the NPM-unpacked-size benchmark (30 MB threshold; ~14 MB today).
+
+## Biggest correctness risk — cross-backend pixel divergence
+
+`PerceptualHasher` and `pixelmatch` operate on decoded pixels, and sharp's
+resize kernel ≠ jimp's:
+
+- pHash values change again on macOS/Linux (jimp→sharp), and Windows (jimp)
+  produces different hashes than macOS/Linux (sharp) for the same screenshot →
+  **nav-screenshot caches are not portable across platforms**. Within one
+  machine it is self-consistent (one backend), matching still works, and nav
+  caches are local — tolerable, but document as the cache contract (ties to #2939).
+- WebP format is now uniform across platforms (bundled cwebp, no PNG downgrade),
+  so the only cross-platform difference is the resize-kernel pixel delta, not a
+  format mismatch.
+- Tests: migrate `PerceptualHasher`/comparator golden-string assertions to
+  backend-relative assertions (similarity of A vs A′, distinctness of A vs B) or
+  per-backend goldens via `FakeImageBackend`.
+
+## Testing (interface + fake, <100 ms, no real native/subprocess in unit tests)
+
+- `FakeImageBackend` (`test/fakes/`) — canned buffers + `rawPixels`; transformer/
+  hasher/comparator/contrast tests run with no sharp, no jimp, no subprocess.
+- Reuse `FakeProcessExecutor` + `FakeFileDownloader` for `CliWebpCodec` +
+  provisioner unit tests (argv, resolution order, magic-byte sniff, error path).
+- Real-lib coverage in the smoke harness, platform-gated: recover
+  `sharp-runtime-smoke.ts` for macOS/Linux CI; add a `jimp+cwebp` smoke for
+  Windows CI; keep the WebP roundtrip + 3-mode-distinctness checks.
+
+## doctor + observability
+
+Add a `doctor` check (log-then-return-typed-failure, CLAUDE.md strategy 2)
+reporting: active backend, sharp load status (macOS/Linux), cwebp/dwebp
+resolution (Windows).
+
+## Phasing
+
+1. **Backend seam + `FakeImageBackend`** — introduce `ImageBackend`, refactor
+   `ImageTransformer`/consumers, no behavior change (JimpBackend only). Green tests.
+2. **SharpBackend + deps** — pinned sharp/`@img`, dependabot ignores, build
+   externals, selection resolver (sharp on macOS/Linux), recover sharp smoke,
+   migrate hash tests. `@jimp/wasm-webp` is **kept** here — Windows/fallback still
+   needs it until cwebp lands.
+3. **JimpCliBackend + bundled cwebp** — libwebp bundling/spawn, Windows
+   selection, Windows smoke, surfaced-error path. **Only now** drop
+   `@jimp/wasm-webp`: with sharp covering macOS/Linux and cwebp covering Windows,
+   no code path uses jimp for WebP, so removing it can't leave any path without a
+   codec. (The wasm removal and cwebp introduction must land together — never
+   drop the plugin before cwebp exists.)
+4. **doctor check + docs** — cache-portability contract, backend override env,
+   close #2974.
+
+## Contribution track (non-blocking)
+
+The realistic upstream leverage is Bun-side, not sharp-side. As an independent
+task off the critical path: build a minimal reproducible repro of the
+0.35.x-under-Bun abort and attach it to
+[bun#20372](https://github.com/oven-sh/bun/issues/20372)/[bun#29352](https://github.com/oven-sh/bun/issues/29352)
+(reference the closed-for-no-repro
+[sharp#4042](https://github.com/lovell/sharp/issues/4042)). If Bun fixes the
+interop, sharp can later be unfrozen and Windows collapsed onto it.

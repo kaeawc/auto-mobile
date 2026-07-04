@@ -90,6 +90,7 @@ nav:
   - 'Design Docs':
       - 'Overview': design-docs/index.md
       - 'Status Glossary': design-docs/status-glossary.md
+      - 'Image Backend': design-docs/image-backend.md
       - 'API Surface':
           - 'Autocomplete Audit': design-docs/api-surface/autocomplete-audit.md
           - 'Cross-Platform Parity': design-docs/api-surface/cross-platform-parity.md

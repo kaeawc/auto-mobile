@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { FileMigrationLock, NoOpMigrationLock, migrationLockPathFor } from "../../src/db/migrationLock";
+import {
+  FileMigrationLock,
+  IN_MEMORY_DATABASE_PATH,
+  NoOpMigrationLock,
+  createMigrationLock,
+  isInMemoryDatabasePath,
+  migrationLockPathFor,
+} from "../../src/db/migrationLock";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -303,6 +310,36 @@ describe("NoOpMigrationLock", () => {
     await lock.acquire();
     await lock.release();
     expect(true).toBe(true);
+  });
+});
+
+describe("isInMemoryDatabasePath", () => {
+  test("recognizes the `:memory:` sentinel", () => {
+    expect(isInMemoryDatabasePath(IN_MEMORY_DATABASE_PATH)).toBe(true);
+    expect(isInMemoryDatabasePath(":memory:")).toBe(true);
+  });
+
+  test("rejects real file paths", () => {
+    expect(isInMemoryDatabasePath("/tmp/auto-mobile.db")).toBe(false);
+    expect(isInMemoryDatabasePath("auto-mobile.db")).toBe(false);
+    // A `file::memory:?cache=shared` URI is deliberately NOT treated as the
+    // sentinel: it was rejected in favor of plain `:memory:` (issue #3047), so
+    // it must fall through to the file-lock branch rather than silently no-op.
+    expect(isInMemoryDatabasePath("file::memory:?cache=shared")).toBe(false);
+  });
+});
+
+describe("createMigrationLock", () => {
+  test("selects a NoOpMigrationLock for the `:memory:` sentinel", () => {
+    // A `:memory:` DB is private per connection, has no file to guard, and
+    // `:memory:.migrate.lock` would be a bogus file — so it must NOT get a
+    // FileMigrationLock (issue #3047).
+    expect(createMigrationLock(IN_MEMORY_DATABASE_PATH)).toBeInstanceOf(NoOpMigrationLock);
+  });
+
+  test("selects a FileMigrationLock for a real DB path", () => {
+    const dbPath = join(tmpdir(), "auto-mobile-createlock", "auto-mobile.db");
+    expect(createMigrationLock(dbPath)).toBeInstanceOf(FileMigrationLock);
   });
 });
 

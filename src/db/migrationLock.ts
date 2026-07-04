@@ -181,6 +181,37 @@ export function migrationLockPathFor(dbPath: string): string {
 }
 
 /**
+ * SQLite in-memory sentinel path. A DB opened at this path is private to its
+ * connection and lives entirely in RAM — it has no file, no `-wal`/`-shm`
+ * sidecars, and no lock file. So it needs neither daemon-launch-cwd path
+ * resolution (which would `path.resolve(":memory:")` into a bogus absolute path)
+ * nor a cross-process migration lock (there is no shared file for a second
+ * process to reach). Used to make DB-lifecycle tests that don't need a real file
+ * flake-free (issue #3047). `file::memory:?cache=shared` was considered and
+ * rejected — it reintroduces the cross-process lock concern and carries bun
+ * URI-filename risk for no benefit here.
+ */
+export const IN_MEMORY_DATABASE_PATH = ":memory:";
+
+/** True for the plain `:memory:` sentinel (see {@link IN_MEMORY_DATABASE_PATH}). */
+export function isInMemoryDatabasePath(dbPath: string): boolean {
+  return dbPath === IN_MEMORY_DATABASE_PATH;
+}
+
+/**
+ * Select the migration lock for a resolved DB path: a {@link NoOpMigrationLock}
+ * for the `:memory:` sentinel (private per-connection, no file to guard, and
+ * `:memory:.migrate.lock` would be a bogus file), a {@link FileMigrationLock}
+ * keyed to the file otherwise. This is the single decision point so every opener
+ * (currently `database.ts#startMigrations`) can stay DB-path-agnostic (#3047).
+ */
+export function createMigrationLock(dbPath: string): MigrationLock {
+  return isInMemoryDatabasePath(dbPath)
+    ? new NoOpMigrationLock()
+    : createFileMigrationLock(dbPath);
+}
+
+/**
  * Default migration lock for a resolved DB file path. Keyed per-file (not
  * per-uid) because the trigger — two openers on one DB file — is per-file. The
  * busy-wait ceiling can be overridden via `AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS`

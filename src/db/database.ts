@@ -4,7 +4,7 @@ import * as os from "os";
 import * as fs from "fs";
 import type { Database as DatabaseSchema } from "./types";
 import { runMigrations } from "./migrator";
-import { createFileMigrationLock } from "./migrationLock";
+import { createMigrationLock, isInMemoryDatabasePath } from "./migrationLock";
 import { logger } from "../utils/logger";
 import { toActionableError } from "../models/ActionableError";
 import { BunSqliteDialect } from "./bunSqliteDialect";
@@ -65,7 +65,13 @@ export function resolveDatabasePathFromEnvironment(
 ): string {
   const envDbPath = env.AUTOMOBILE_DB_PATH ?? env.AUTO_MOBILE_DB_PATH;
   if (envDbPath) {
-    return resolvePathFromDaemonLaunchWorkingDirectory(envDbPath);
+    // The `:memory:` sentinel is not a filesystem path: routing it through the
+    // daemon-launch-cwd resolver would `path.resolve(":memory:")` into a bogus
+    // absolute path (and `createFileMigrationLock` would then try to create a
+    // `:memory:.migrate.lock` file). Pass it through un-resolved (issue #3047).
+    return isInMemoryDatabasePath(envDbPath)
+      ? envDbPath
+      : resolvePathFromDaemonLaunchWorkingDirectory(envDbPath);
   }
 
   const envDbDir = env.AUTOMOBILE_DB_DIR ?? env.AUTO_MOBILE_DB_DIR;
@@ -252,7 +258,8 @@ async function startMigrations(dbPath: string): Promise<void> {
       // Serialize the migration run across processes: two openers on the same DB
       // file (override env / --no-proxy alongside a daemon) must not both enter
       // migrateToLatest() and collide on the kysely_migration PRIMARY KEY (#2794).
-      lock: createFileMigrationLock(dbPath),
+      // A `:memory:` DB is private per connection, so it gets a no-op lock (#3047).
+      lock: createMigrationLock(dbPath),
       backup: () => backupDatabaseFile(migrationDb, dbPath),
     });
     // `migrationsRun` is NOT set here: it is a fenced global written only by the
@@ -293,6 +300,12 @@ function ensureMigrationsStarted(dbPath: string): void {
 }
 
 function ensureDatabaseDirectory(dbPath: string): void {
+  // The `:memory:` sentinel has no file or directory; `dirname(":memory:")` is a
+  // bogus `.` that must not be created (issue #3047).
+  if (isInMemoryDatabasePath(dbPath)) {
+    return;
+  }
+
   const dbDir = path.dirname(dbPath);
 
   if (!fs.existsSync(dbDir)) {

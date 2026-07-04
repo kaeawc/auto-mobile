@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
-KTFMT_VERSION="0.64" # Change this to the desired version
+# Pinned ktfmt version -- single source of truth shared with validate_ktfmt.sh.
+# Bump the version in scripts/ktfmt/ktfmt_version.sh (one line) to change it.
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,6 +34,8 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Note: installed_ktfmt_version() is provided by the sourced ktfmt_version.sh.
+
 # Install ktfmt on macOS
 install_macos() {
     echo -e "${YELLOW}Installing ktfmt on macOS...${NC}"
@@ -38,7 +43,35 @@ install_macos() {
     if command_exists brew; then
         echo -e "${GREEN}Using Homebrew to install ktfmt${NC}"
         brew install ktfmt
-        return $?
+
+        # Homebrew has no ktfmt@<version> formula, so `brew install ktfmt`
+        # installs whatever the current formula ships -- which may drift from the
+        # pin (issue #2966). Verify it; if it differs, unlink brew's copy so it
+        # can't shadow ~/.local/bin on PATH, then install the pinned fat JAR so
+        # the pin is actually honored on macOS.
+        local installed
+        installed="$(installed_ktfmt_version)"
+        if [[ "$installed" == "$KTFMT_VERSION" ]]; then
+            return 0
+        fi
+
+        echo -e "${YELLOW}brew installed ktfmt '${installed:-unknown}', but this repo pins '${KTFMT_VERSION}'.${NC}"
+        echo -e "${YELLOW}Falling back to the pinned JAR so the pin is honored...${NC}"
+        brew unlink ktfmt >/dev/null 2>&1 || true
+        install_manual
+        local manual_status=$?
+
+        # install_manual writes the pinned wrapper to ~/.local/bin. Two things
+        # must happen before verify_installation (or any later ktfmt call) or the
+        # pinned install won't actually resolve:
+        #  1. Ensure ~/.local/bin is on PATH for this process -- it is NOT on the
+        #     default macOS PATH, so otherwise the wrapper is invisible.
+        #  2. Clear bash's command hash: the version probe above already ran (and
+        #     hashed) brew's ktfmt, which `brew unlink` just removed, so a stale
+        #     hash entry would keep resolving the deleted binary.
+        export PATH="$HOME/.local/bin:$PATH"
+        hash -r 2>/dev/null || true
+        return "$manual_status"
     else
         echo -e "${YELLOW}Homebrew not found. Install Homebrew first or use manual installation.${NC}"
         echo "To install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
@@ -187,14 +220,25 @@ EOF
 verify_installation() {
     echo -e "${YELLOW}Verifying ktfmt installation...${NC}"
 
-    if command_exists ktfmt; then
-        echo -e "${GREEN}ktfmt is installed and available in PATH${NC}"
-        ktfmt --version 2>/dev/null || echo -e "${GREEN}ktfmt is ready to use${NC}"
-        return 0
-    else
+    if ! command_exists ktfmt; then
         echo -e "${RED}ktfmt is not available in PATH${NC}"
         return 1
     fi
+
+    # Presence isn't enough (issue #2966): if a drifted brew ktfmt still shadows
+    # ~/.local/bin on PATH, the pinned JAR we just installed isn't the one that
+    # resolves. Assert the ktfmt that actually resolves is the pin, so the
+    # installer can't print "success" while leaving a mismatched formatter live.
+    local resolved
+    resolved="$(installed_ktfmt_version)"
+    if [[ "$resolved" != "$KTFMT_VERSION" ]]; then
+        echo -e "${RED}ktfmt on PATH is '${resolved:-unknown}', but this repo pins '${KTFMT_VERSION}'.${NC}"
+        echo -e "${RED}The pinned install isn't the one resolving -- a drifted ktfmt is shadowing it on PATH, or the download is wrong. Ensure the pinned ktfmt (\$HOME/.local/bin) precedes any other on PATH, or remove the drifted one, then retry.${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}ktfmt ${KTFMT_VERSION} is installed and available in PATH${NC}"
+    return 0
 }
 
 # Main installation function
@@ -224,13 +268,21 @@ main() {
 
     install_result=$?
 
-    if [[ $install_result -eq 0 ]]; then
-        echo -e "${GREEN}Installation completed successfully!${NC}"
-        verify_installation
-    else
+    if [[ $install_result -ne 0 ]]; then
         echo -e "${RED}Installation failed!${NC}"
         exit 1
     fi
+
+    # Gate "success" on verification: the install step can return 0 while a
+    # drifted ktfmt still shadows the pinned one on PATH (issue #2966), so only
+    # declare success once verify_installation confirms the resolved version is
+    # the pin -- otherwise fail loudly instead of a misleading green.
+    if ! verify_installation; then
+        echo -e "${RED}Installation failed verification!${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}Installation completed successfully!${NC}"
 }
 
 # Run main function

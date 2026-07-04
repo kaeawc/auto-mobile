@@ -16,14 +16,32 @@ setup() {
 
   TEST_DIR="$(mktemp -d)"
 
-  # Stub ktfmt: exits 0 for the stdin probe (`--google-style -`) and dry-run.
-  # For an in-place `--google-style <file>` it "reformats" (mutating the copy the
-  # script made) only when the file contains the marker FORMAT_ME, letting a
-  # test simulate a misformatted file deterministically.
+  # Stub ktfmt:
+  #  * `--version` prints "ktfmt version <KTFMT_STUB_VERSION>" (default 0.64, the
+  #    pin). Tests override KTFMT_STUB_VERSION to simulate formatter-version drift,
+  #    or set KTFMT_STUB_VERSION="" to simulate an unparseable/failing --version.
+  #  * exits 0 for the stdin probe (`--google-style -`) and dry-run.
+  #  * for an in-place `--google-style <file>` it "reformats" (mutating the copy
+  #    the script made) only when the file contains the marker FORMAT_ME, letting
+  #    a test simulate a misformatted file deterministically.
   STUB_BIN="$TEST_DIR/bin"
   mkdir -p "$STUB_BIN"
   cat > "$STUB_BIN/ktfmt" <<'STUB'
 #!/usr/bin/env bash
+if [[ " $* " == *" --version "* ]]; then
+  # An empty override simulates a ktfmt whose --version emits no parseable
+  # version (or a broken binary); exit non-zero so the gate treats it as unknown.
+  if [[ -z "${KTFMT_STUB_VERSION-0.64}" ]]; then
+    exit 1
+  fi
+  # KTFMT_STUB_NOISE simulates a JVM warning printed to stderr *before* ktfmt's
+  # own line (the CI ktfmt runs `java -jar`); the gate must not parse its version.
+  if [[ -n "${KTFMT_STUB_NOISE:-}" ]]; then
+    echo "$KTFMT_STUB_NOISE" >&2
+  fi
+  echo "ktfmt version ${KTFMT_STUB_VERSION:-0.64}"
+  exit 0
+fi
 last="${@: -1}"
 if [[ "$last" == "-" || " $* " == *" --dry-run "* ]]; then
   cat >/dev/null 2>&1 || true
@@ -117,4 +135,87 @@ clean_kt() { printf 'fun a() {}\n' > "$1"; }
   [ "$status" -ne 0 ]
   [[ "$output" == *"Formatting issues found"* ]]
   [[ "$output" == *"Bad.kt"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Version fingerprint gate (issue #2966): the scoped PR check only looks at a
+# PR's changed files, so a formatter whose version differs from the pin would
+# reformat *untouched* files the scoped check never inspects -- passing the PR,
+# then reddening main when merge.yml reformats the whole tree. Enforce the pin
+# up front: a ktfmt whose version != KTFMT_VERSION must fail loudly, never
+# silently scoped-pass.
+# ---------------------------------------------------------------------------
+
+@test "version matching the pin passes the gate and processes files" {
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+
+  run env KTFMT_STUB_VERSION="0.64" ONLY_CHANGED_SINCE_SHA="" \
+    ONLY_TOUCHED_FILES=false bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Found 1 Kotlin file(s) to process"* ]]
+}
+
+@test "REGRESSION: a newer ktfmt (version != pin) fails loudly, does not scoped-pass" {
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+  local base; base="$(git rev-parse HEAD)"
+  clean_kt app/src/Feature.kt
+  git add -A && git commit -qm feature
+
+  run env KTFMT_STUB_VERSION="0.66" ONLY_CHANGED_SINCE_SHA="$base" \
+    ONLY_TOUCHED_FILES=false bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  # Names both the found and the pinned version so the failure is actionable.
+  [[ "$output" == *"0.66"* ]]
+  [[ "$output" == *"0.64"* ]]
+  # It must abort BEFORE doing any per-file work -- a scoped pass is the bug.
+  [[ "$output" != *"Kotlin file(s) to process"* ]]
+  [[ "$output" != *"properly formatted"* ]]
+}
+
+@test "an unparseable/failing --version fails loudly (treated as drift)" {
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+
+  run env KTFMT_STUB_VERSION="" ONLY_CHANGED_SINCE_SHA="" \
+    ONLY_TOUCHED_FILES=false bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"0.64"* ]]
+  [[ "$output" != *"Kotlin file(s) to process"* ]]
+}
+
+@test "a JVM warning before the version line is not mistaken for the ktfmt version" {
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+
+  # A stderr warning carrying its own version must not be grabbed by the parse;
+  # the gate should still read ktfmt's real 0.64 and pass.
+  run env KTFMT_STUB_VERSION="0.64" \
+    KTFMT_STUB_NOISE="OpenJDK 64-Bit Server VM warning: using JDK 11.0.2" \
+    ONLY_CHANGED_SINCE_SHA="" ONLY_TOUCHED_FILES=false bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Found 1 Kotlin file(s) to process"* ]]
+  [[ "$output" != *"version mismatch"* ]]
+}
+
+@test "the gate reads the pin from the shared ktfmt_version.sh (single source)" {
+  # Prove single-sourcing without mutating the tracked tree: copy the validator
+  # and its sibling pin file into a temp dir, bump the *copy's* pin to 0.99, and
+  # confirm a 0.64 ktfmt now fails against that copy. If the validator hardcoded
+  # the version instead of sourcing the sibling, editing the copy would be inert.
+  local copy_dir="$TEST_DIR/ktfmt_copy"
+  mkdir -p "$copy_dir"
+  cp "$REPO_ROOT/scripts/ktfmt/validate_ktfmt.sh" "$copy_dir/"
+  cp "$REPO_ROOT/scripts/ktfmt/ktfmt_version.sh" "$copy_dir/"
+  # Bump ONLY the pin line in the copy, preserving the shared helper functions.
+  sed -i.bak 's/^KTFMT_VERSION=.*/KTFMT_VERSION="0.99"/' "$copy_dir/ktfmt_version.sh"
+  rm -f "$copy_dir/ktfmt_version.sh.bak"
+
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+  run env KTFMT_STUB_VERSION="0.64" ONLY_CHANGED_SINCE_SHA="" \
+    ONLY_TOUCHED_FILES=false bash "$copy_dir/validate_ktfmt.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"0.99"* ]]
 }

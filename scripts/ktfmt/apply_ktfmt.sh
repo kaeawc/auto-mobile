@@ -3,6 +3,11 @@
 INSTALL_KTFMT_WHEN_MISSING=${INSTALL_KTFMT_WHEN_MISSING:-false}
 ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-true}
 
+# Pinned ktfmt version + shared enforcement helpers -- single source of truth
+# shared with install_ktfmt.sh and validate_ktfmt.sh.
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -57,14 +62,13 @@ for cmd in find xargs git; do
     fi
 done
 
-# Ensure the ktfmt on PATH runs and accepts --google-style before formatting.
-# If an older/broken ktfmt is already on PATH, fail fast with an actionable
-# message rather than staging files it never formatted.
-if ! printf 'fun probe() {}\n' | ktfmt --google-style - >/dev/null 2>&1; then
-    echo -e "${RED}The ktfmt on PATH does not run with --google-style (this repo pins 0.64).${NC}"
-    echo -e "${RED}Update ktfmt ('brew upgrade ktfmt' or re-run scripts/ktfmt/install_ktfmt.sh) and retry.${NC}"
-    exit 1
-fi
+# Fingerprint gate (issue #2966): this script *mutates* files, so a ktfmt whose
+# version differs from the pin would reformat the whole tree with the wrong
+# formatter and could get committed -- the exact drift #2966 guards against, on
+# the write path. Assert the pinned version before formatting anything. A
+# matching version implies --google-style support, so this subsumes the old
+# flag probe.
+require_pinned_ktfmt_version
 
 # Start the timer
 if [[ -f "$PROJECT_ROOT/scripts/utils/get_timestamp.sh" ]]; then

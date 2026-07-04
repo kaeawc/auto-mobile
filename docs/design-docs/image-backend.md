@@ -125,7 +125,9 @@ which we reject).
   bundled copy.
 - Invoke via `ProcessExecutor` with stdin/stdout piping (`cwebp -o - -- -`,
   `dwebp - -o -`). Flag mapping: `{quality}`→`-q`, `{lossless}`→`-lossless -q`,
-  `{nearLossless}`→`-near_lossless`.
+  `{nearLossless}`→`-near_lossless <quality>` (cwebp's `-near_lossless` requires a
+  numeric preprocessing level; the current API models `nearLossless` as a boolean
+  and uses `quality` as that level — mirror it, do not emit a bare `-near_lossless`).
 - **Failure is a surfaced error, never PNG**: a cwebp/dwebp spawn/exit failure
   throws `ActionableError` (CLAUDE.md strategy 1) pointing at
   `AUTOMOBILE_CWEBP_PATH`. On-disk format stays uniformly `.webp` everywhere.
@@ -184,9 +186,14 @@ resolution (Windows).
    `ImageTransformer`/consumers, no behavior change (JimpBackend only). Green tests.
 2. **SharpBackend + deps** — pinned sharp/`@img`, dependabot ignores, build
    externals, selection resolver (sharp on macOS/Linux), recover sharp smoke,
-   migrate hash tests. Drop `@jimp/wasm-webp`.
+   migrate hash tests. `@jimp/wasm-webp` is **kept** here — Windows/fallback still
+   needs it until cwebp lands.
 3. **JimpCliBackend + bundled cwebp** — libwebp bundling/spawn, Windows
-   selection, Windows smoke, surfaced-error path.
+   selection, Windows smoke, surfaced-error path. **Only now** drop
+   `@jimp/wasm-webp`: with sharp covering macOS/Linux and cwebp covering Windows,
+   no code path uses jimp for WebP, so removing it can't leave any path without a
+   codec. (The wasm removal and cwebp introduction must land together — never
+   drop the plugin before cwebp exists.)
 4. **doctor check + docs** — cache-portability contract, backend override env,
    close #2974.
 

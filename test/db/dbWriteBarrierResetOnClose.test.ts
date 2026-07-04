@@ -4,7 +4,11 @@ import { existsSync } from "node:fs";
 import { sql } from "kysely";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
-import { IN_MEMORY_DATABASE_PATH, migrationLockPathFor } from "../../src/db/migrationLock";
+import {
+  IN_MEMORY_DATABASE_PATH,
+  IN_MEMORY_DB_OPT_IN_ENV,
+  migrationLockPathFor,
+} from "../../src/db/migrationLock";
 import { importFreshDatabaseModule, restoreEnv, snapshotEnv } from "./freshDatabaseModule";
 
 /**
@@ -55,6 +59,9 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
   /** Point the fresh database module at a private in-memory sentinel DB. */
   function useInMemoryDatabase(): void {
     process.env.AUTOMOBILE_DB_PATH = IN_MEMORY_DATABASE_PATH;
+    // `:memory:` is test-only and now runtime-guarded (issue #3065): a real
+    // daemon that set it would fail fast. Lifecycle tests opt in explicitly.
+    process.env[IN_MEMORY_DB_OPT_IN_ENV] = "1";
     delete process.env.AUTOMOBILE_DB_DIR;
     delete process.env[DAEMON_LAUNCH_CWD_ENV];
   }
@@ -150,5 +157,20 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
     const fresh = getDbWriteBarrier();
     expect(fresh).not.toBe(latched);
     expect(fresh.isDraining()).toBe(false);
+  });
+
+  test("getDatabase() fails fast when `:memory:` is set without the opt-in (issue #3065)", async () => {
+    // A real daemon that set AUTOMOBILE_DB_PATH=:memory: without the test opt-in
+    // must fail legibly at open time, not silently run against a
+    // migrated-but-empty app connection. The guard lives at the single path-
+    // resolution choke point, so getDatabase() surfaces it.
+    process.env.AUTOMOBILE_DB_PATH = IN_MEMORY_DATABASE_PATH;
+    delete process.env[IN_MEMORY_DB_OPT_IN_ENV];
+    delete process.env.AUTOMOBILE_DB_DIR;
+    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+
+    const databaseModule = await importFreshDatabaseModule();
+
+    expect(() => databaseModule.getDatabase()).toThrow(/:memory:/);
   });
 });

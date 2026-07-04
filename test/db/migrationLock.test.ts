@@ -5,10 +5,12 @@ import { join } from "path";
 import {
   FileMigrationLock,
   IN_MEMORY_DATABASE_PATH,
+  IN_MEMORY_DB_OPT_IN_ENV,
   NoOpMigrationLock,
-  createMigrationLock,
+  isInMemoryDatabaseOptInEnabled,
   isInMemoryDatabasePath,
   migrationLockPathFor,
+  selectMigrationLock,
 } from "../../src/db/migrationLock";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -329,17 +331,35 @@ describe("isInMemoryDatabasePath", () => {
   });
 });
 
-describe("createMigrationLock", () => {
+describe("selectMigrationLock", () => {
   test("selects a NoOpMigrationLock for the `:memory:` sentinel", () => {
     // A `:memory:` DB is private per connection, has no file to guard, and
     // `:memory:.migrate.lock` would be a bogus file — so it must NOT get a
     // FileMigrationLock (issue #3047).
-    expect(createMigrationLock(IN_MEMORY_DATABASE_PATH)).toBeInstanceOf(NoOpMigrationLock);
+    expect(selectMigrationLock(IN_MEMORY_DATABASE_PATH)).toBeInstanceOf(NoOpMigrationLock);
   });
 
   test("selects a FileMigrationLock for a real DB path", () => {
     const dbPath = join(tmpdir(), "auto-mobile-createlock", "auto-mobile.db");
-    expect(createMigrationLock(dbPath)).toBeInstanceOf(FileMigrationLock);
+    expect(selectMigrationLock(dbPath)).toBeInstanceOf(FileMigrationLock);
+  });
+});
+
+describe("isInMemoryDatabaseOptInEnabled", () => {
+  test("is disabled when the opt-in env var is absent", () => {
+    expect(isInMemoryDatabaseOptInEnabled({})).toBe(false);
+  });
+
+  test("recognizes the truthy opt-in values (case/whitespace-insensitive)", () => {
+    for (const value of ["1", "true", "TRUE", "yes", "  Yes  "]) {
+      expect(isInMemoryDatabaseOptInEnabled({ [IN_MEMORY_DB_OPT_IN_ENV]: value })).toBe(true);
+    }
+  });
+
+  test("treats empty/false-ish values as disabled (fail-safe: no silent opt-in)", () => {
+    for (const value of ["", "0", "false", "no", "off", "nope"]) {
+      expect(isInMemoryDatabaseOptInEnabled({ [IN_MEMORY_DB_OPT_IN_ENV]: value })).toBe(false);
+    }
   });
 });
 

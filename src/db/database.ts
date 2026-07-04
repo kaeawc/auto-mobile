@@ -4,9 +4,14 @@ import * as os from "os";
 import * as fs from "fs";
 import type { Database as DatabaseSchema } from "./types";
 import { runMigrations } from "./migrator";
-import { createMigrationLock, isInMemoryDatabasePath } from "./migrationLock";
+import {
+  isInMemoryDatabaseOptInEnabled,
+  isInMemoryDatabasePath,
+  IN_MEMORY_DB_OPT_IN_ENV,
+  selectMigrationLock,
+} from "./migrationLock";
 import { logger } from "../utils/logger";
-import { toActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import { BunSqliteDialect } from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import {
@@ -67,11 +72,29 @@ export function resolveDatabasePathFromEnvironment(
   if (envDbPath) {
     // The `:memory:` sentinel is not a filesystem path: routing it through the
     // daemon-launch-cwd resolver would `path.resolve(":memory:")` into a bogus
-    // absolute path (and `createFileMigrationLock` would then try to create a
+    // absolute path (and `selectMigrationLock` would then try to create a
     // `:memory:.migrate.lock` file). Pass it through un-resolved (issue #3047).
-    return isInMemoryDatabasePath(envDbPath)
-      ? envDbPath
-      : resolvePathFromDaemonLaunchWorkingDirectory(envDbPath);
+    if (isInMemoryDatabasePath(envDbPath)) {
+      // `:memory:` is a test-only seam: it is private per connection, so the app
+      // connection never sees the migration connection's schema — migrations
+      // report success while the daemon queries a migrated-but-empty DB and the
+      // first schema-dependent read/write fails with `no such table`. Reject it
+      // outside an explicit opt-in so a production `AUTOMOBILE_DB_PATH=:memory:`
+      // fails fast and legibly instead of silently breaking (issue #3065).
+      if (!isInMemoryDatabaseOptInEnabled(env)) {
+        throw new ActionableError(
+          `AUTOMOBILE_DB_PATH=:memory: is not a valid production database. A ` +
+            `SQLite \`:memory:\` DB is private per connection, so startup migrations ` +
+            `run on a separate in-memory database and the daemon's connection is left ` +
+            `migrated-but-empty — the first query (e.g. \`tool_calls\`) would fail with ` +
+            `\`no such table\`. Point AUTOMOBILE_DB_PATH at a real file (or unset it to use ` +
+            `~/.auto-mobile/auto-mobile.db). The \`:memory:\` sentinel is for lifecycle ` +
+            `tests only; set ${IN_MEMORY_DB_OPT_IN_ENV}=1 to opt in from a test.`
+        );
+      }
+      return envDbPath;
+    }
+    return resolvePathFromDaemonLaunchWorkingDirectory(envDbPath);
   }
 
   const envDbDir = env.AUTOMOBILE_DB_DIR ?? env.AUTO_MOBILE_DB_DIR;
@@ -259,7 +282,7 @@ async function startMigrations(dbPath: string): Promise<void> {
       // file (override env / --no-proxy alongside a daemon) must not both enter
       // migrateToLatest() and collide on the kysely_migration PRIMARY KEY (#2794).
       // A `:memory:` DB is private per connection, so it gets a no-op lock (#3047).
-      lock: createMigrationLock(dbPath),
+      lock: selectMigrationLock(dbPath),
       backup: () => backupDatabaseFile(migrationDb, dbPath),
     });
     // `migrationsRun` is NOT set here: it is a fenced global written only by the

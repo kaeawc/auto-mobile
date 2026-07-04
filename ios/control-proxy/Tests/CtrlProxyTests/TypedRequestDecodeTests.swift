@@ -887,6 +887,132 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         }
     }
 
+    // MARK: - Decode-boundary wire-message legibility (#2965)
+
+    /// The generic decode-failure message `JSONDecoder` produces for a
+    /// `dataCorrupted` error via `localizedDescription`. Rewriting this opaque
+    /// string into something actionable is the whole point of #2965.
+    private static let opaqueDecodeMessage = "isn't in the correct format"
+
+    /// Feed a caught error through the real `WebSocketServer.buildErrorResponseData`
+    /// wire encoder (the same path `handleMessage`'s catch block uses) and return
+    /// the surfaced `error` string, asserting the envelope is a well-formed
+    /// structured error along the way.
+    private func wireErrorMessage(
+        for error: Error,
+        requestId: String?,
+        file: StaticString = #file,
+        line: UInt = #line
+    )
+        -> String
+    {
+        let data = WebSocketServer.buildErrorResponseData(requestId: requestId, error: error)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            XCTFail("error response was not valid JSON", file: file, line: line)
+            return ""
+        }
+        XCTAssertEqual(json["type"] as? String, "error", "wrong envelope type", file: file, line: line)
+        XCTAssertEqual(json["success"] as? Bool, false, "error envelope must be success=false", file: file, line: line)
+        if let requestId = requestId {
+            XCTAssertEqual(json["requestId"] as? String, requestId, "requestId preserved", file: file, line: line)
+        }
+        guard let message = json["error"] as? String else {
+            XCTFail("error envelope missing 'error' string", file: file, line: line)
+            return ""
+        }
+        return message
+    }
+
+    /// Capture the error `JSONDecoder` throws for a raw command string. Fails the
+    /// test if decoding unexpectedly succeeds.
+    private func decodeError(
+        _ json: String,
+        file: StaticString = #file,
+        line: UInt = #line
+    )
+        -> Error
+    {
+        do {
+            _ = try decodeWebSocketRequest(json)
+            XCTFail("expected \(json) to fail decoding", file: file, line: line)
+            return NSError(domain: "test", code: 0)
+        } catch {
+            return error
+        }
+    }
+
+    /// AC1: an out-of-range numeric literal (`1e309`) — rejected by `JSONDecoder`
+    /// at pre-parse with an empty `codingPath` — surfaces an *actionable* wire
+    /// message ("out of range" / "not representable"), not the opaque
+    /// "…isn't in the correct format." The value is still rejected (this is
+    /// diagnostic legibility only), and the requestId is preserved for correlation.
+    func testOverflowLiteralWireMessageIsActionable() {
+        let error = decodeError(#"{"type":"request_tap_coordinates","requestId":"ovf-1","x":1e309,"y":2}"#)
+        let message = wireErrorMessage(for: error, requestId: "ovf-1")
+        XCTAssertFalse(
+            message.contains(Self.opaqueDecodeMessage),
+            "overflow message must not stay opaque, got: \(message)"
+        )
+        let lowered = message.lowercased()
+        XCTAssertTrue(
+            lowered.contains("out of range") || lowered.contains("not representable"),
+            "overflow message should name the out-of-range/non-representable cause, got: \(message)"
+        )
+    }
+
+    /// A larger overflow literal decodes to the same class of failure and is
+    /// rewritten the same way — proves the detection keys off the underlying Cocoa
+    /// error, not a hard-coded `1e309` string.
+    func testLargerOverflowLiteralWireMessageIsActionable() {
+        let error = decodeError(#"{"type":"request_swipe","requestId":"ovf-2","x1":1,"y1":2,"x2":1e400,"y2":4}"#)
+        let message = wireErrorMessage(for: error, requestId: "ovf-2")
+        XCTAssertFalse(message.contains(Self.opaqueDecodeMessage), "got: \(message)")
+        let lowered = message.lowercased()
+        XCTAssertTrue(
+            lowered.contains("out of range") || lowered.contains("not representable"),
+            "got: \(message)"
+        )
+    }
+
+    /// AC2: a missing-required-field rejection (`keyNotFound`) is NOT a
+    /// `dataCorrupted` error, so the rewrite must leave its wire message exactly
+    /// equal to `error.localizedDescription` — the `keyNotFound` contract that
+    /// `TypedRequestDecodeTests` relies on stays byte-for-byte unchanged.
+    func testKeyNotFoundWireMessageUnchanged() {
+        let error = decodeError(#"{"type":"request_tap_coordinates","requestId":"kn-1","y":2}"#)
+        guard case DecodingError.keyNotFound = error else {
+            return XCTFail("expected keyNotFound, got \(error)")
+        }
+        let message = wireErrorMessage(for: error, requestId: "kn-1")
+        XCTAssertEqual(
+            message,
+            error.localizedDescription,
+            "keyNotFound wire message must be untouched by the dataCorrupted rewrite"
+        )
+    }
+
+    /// AC3: an unknown command type throws `CommandError.unknownCommand` (a
+    /// `LocalizedError`, not a `DecodingError`) at decode; its wire text must stay
+    /// exactly "Unknown command type: <type>" so the TS client's
+    /// `rewriteUnknownCommandError` regex still matches it.
+    func testUnknownCommandWireMessageUntouched() {
+        let error = decodeError(#"{"type":"unknown_command","requestId":"uc-1"}"#)
+        let message = wireErrorMessage(for: error, requestId: "uc-1")
+        XCTAssertEqual(message, "Unknown command type: unknown_command")
+    }
+
+    /// Generic malformed JSON (also `dataCorrupted`) becomes actionable too — it
+    /// names "not valid JSON" instead of the opaque decoder default.
+    func testMalformedJsonWireMessageIsActionable() {
+        let error = decodeError(#"{"type":"request_tap_coordinates","x":,}"#)
+        let message = wireErrorMessage(for: error, requestId: nil)
+        XCTAssertFalse(message.contains(Self.opaqueDecodeMessage), "got: \(message)")
+        XCTAssertTrue(
+            message.lowercased().contains("not valid json") || message.lowercased().contains("malformed"),
+            "malformed JSON should surface an actionable cause, got: \(message)"
+        )
+    }
+
     // MARK: - Finite fractional / negative coordinates unaffected (#2909 happy path)
 
     /// Fractional coordinates decode and reach the engine with the fraction

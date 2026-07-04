@@ -55,17 +55,15 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
   }
 
   test("reopen after close re-runs migrations against a fresh DB (migrationsRun reset)", async () => {
-    const firstDir = await makeTempDbDir("auto-mobile-reset-first-");
-    process.env.AUTOMOBILE_DB_DIR = firstDir;
-    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+    // Cold start on the first DB via the shared open helper — fresh module +
+    // tracked temp dir + `getDatabase()` then awaited migrations (the #2992/#3040
+    // ordering). Querying a migrated table proves migrations actually ran
+    // (migrationsRun became true).
+    const first = await harness.openLifecycleTestDb("auto-mobile-reset-first-");
+    const databaseModule = first.module;
+    expect(await queryToolCalls(databaseModule.getDatabase())).toEqual([]);
 
-    const databaseModule = await harness.importFreshDatabaseModule();
-
-    // Cold start on the first DB: migrations run, migrationsRun becomes true.
-    const firstDb = databaseModule.getDatabase();
-    expect(await queryToolCalls(firstDb)).toEqual([]);
-
-    await databaseModule.closeDatabase();
+    await first.close();
 
     // Point at a brand-new, empty DB dir and reopen in the same process.
     const secondDir = await makeTempDbDir("auto-mobile-reset-second-");

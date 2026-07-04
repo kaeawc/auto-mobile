@@ -17,6 +17,13 @@ async function makeSourcePng(width = 8, height = 8): Promise<Buffer> {
 
 const PNG_MAGIC = "89504e47";
 
+// Executing @jimp/wasm-webp encode/decode under `bun test` on Windows can
+// segfault via the JSC Wasm OSR/JIT path (bun#26366). CI keeps the invariant
+// "no bun-test unit executes WebP on Windows" (WebP is covered on ubuntu by the
+// image-runtime smoke), so gate the WebP-executing cases the same way. PNG
+// decode/encode does not hit the WebP WASM hot path and runs on all platforms.
+const skipWebpOnWindows = process.platform === "win32" ? test.skip : test;
+
 describe("JimpBackend", () => {
   describe("execute", () => {
     test("resize with fill (no aspect ratio) produces exact target dimensions", async () => {
@@ -63,7 +70,7 @@ describe("JimpBackend", () => {
       expect(meta.height).toBe(2);
     });
 
-    test("crop produces the requested region size", async () => {
+    test("crop produces the requested region at the requested offset", async () => {
       const backend = new JimpBackend();
       const source = await makeSourcePng(8, 8);
       const pipeline: ImagePipeline = {
@@ -71,13 +78,40 @@ describe("JimpBackend", () => {
         encoding: { mime: "image/png" }
       };
 
-      const meta = await backend.metadata(await backend.execute(source, pipeline));
+      const out = await backend.execute(source, pipeline);
+      const meta = await backend.metadata(out);
 
       expect(meta.width).toBe(3);
       expect(meta.height).toBe(2);
+
+      // Prove x/y are honored (not cropped from 0,0): the cropped output's top-left
+      // pixel must equal the source gradient at (1,1) = rgba(16, 16, 1, 255).
+      // (PNG is lossless and crop does no resampling, so bytes match exactly.)
+      const cropped = await backend.rawPixels(out);
+      expect([cropped.data[0], cropped.data[1], cropped.data[2], cropped.data[3]]).toEqual([16, 16, 1, 255]);
     });
 
-    test("webp encoding produces a RIFF/WEBP container", async () => {
+    test("applies operations in recorded order (crop then resize)", async () => {
+      const backend = new JimpBackend();
+      const source = await makeSourcePng(8, 4);
+      // crop 8x4 -> 4x4, then width-only resize -> aspect-preserving 2x2.
+      // Order/only-last-op regressions produce distinct dims: crop-only=4x4,
+      // resize-only=2x1, reversed=degenerate — only the correct order yields 2x2.
+      const pipeline: ImagePipeline = {
+        operations: [
+          { type: "crop", x: 0, y: 0, width: 4, height: 4 },
+          { type: "resize", width: 2, maintainAspectRatio: true }
+        ],
+        encoding: { mime: "image/png" }
+      };
+
+      const meta = await backend.metadata(await backend.execute(source, pipeline));
+
+      expect(meta.width).toBe(2);
+      expect(meta.height).toBe(2);
+    });
+
+    skipWebpOnWindows("webp encoding produces a RIFF/WEBP container", async () => {
       const backend = new JimpBackend();
       const source = await makeSourcePng();
       const pipeline: ImagePipeline = {
@@ -91,7 +125,7 @@ describe("JimpBackend", () => {
       expect(out.subarray(8, 12).toString()).toBe("WEBP");
     });
 
-    test("nearLossless webp is distinct from lossless (option not dropped)", async () => {
+    skipWebpOnWindows("nearLossless webp is distinct from lossless (option not dropped)", async () => {
       const backend = new JimpBackend();
       const source = await makeSourcePng();
 

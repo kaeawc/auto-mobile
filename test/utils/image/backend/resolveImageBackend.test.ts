@@ -6,7 +6,9 @@ describe("resolveImageBackend", () => {
   const originalPlatform = process.platform;
 
   afterEach(() => {
-    Object.defineProperty(process, "platform", { value: originalPlatform });
+    // Keep `configurable: true` explicit so a future runtime that defaults it to
+    // false on redefine can't wedge process.platform for the rest of the run.
+    Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
   });
 
   test("returns a JimpBackend on the current platform", () => {
@@ -15,7 +17,7 @@ describe("resolveImageBackend", () => {
 
   test("returns a JimpBackend on every platform (selection logic lands later)", () => {
     for (const platform of ["win32", "darwin", "linux"]) {
-      Object.defineProperty(process, "platform", { value: platform });
+      Object.defineProperty(process, "platform", { value: platform, configurable: true });
       expect(resolveImageBackend()).toBeInstanceOf(JimpBackend);
     }
   });

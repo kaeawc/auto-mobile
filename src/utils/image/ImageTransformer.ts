@@ -191,6 +191,9 @@ export class Image {
       return await this.backend.metadata(this.buffer);
     } catch (e: unknown) {
       const errorMessage = e instanceof Error ? e.message : String(e);
+      // Log before rethrowing so the underlying decode error leaves a trace,
+      // mirroring toBuffer's catch (the summarized message loses the original).
+      logger.warn(`[IMAGE] Metadata read failed: ${errorMessage}`, e);
       throw new Error(`Failed to get image metadata: ${errorMessage}`);
     }
   }

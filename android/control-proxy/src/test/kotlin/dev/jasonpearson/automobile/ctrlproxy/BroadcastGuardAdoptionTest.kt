@@ -379,6 +379,146 @@ class BroadcastGuardAdoptionTest {
     assertTrue(result.guardedHelpers.contains("broadcastFancyResult"))
   }
 
+  @Test
+  fun `flags a NON-suspend direct broadcaster that forgets the guard`() {
+    // A requestId-correlated result broadcaster declared `private fun` (not `suspend fun`) must not
+    // evade the scan — the existing `broadcastScreenshot` proves non-suspend broadcasters exist.
+    val src =
+      """
+      class Fake {
+        private fun broadcastQuickTapResult(requestId: String?, success: Boolean) {
+          try {
+            webSocketServer.broadcast(buildResult(requestId, success))
+          } catch (e: Exception) {
+            Log.e(TAG, "Error broadcasting quick tap result", e)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    // The unguarded broadcast is the primary regression; the log-and-swallow is also flagged.
+    assertTrue(
+      "non-suspend helper must be in scope and flagged unguarded: ${result.violations}",
+      result.violations.any {
+        it.kind == BroadcastGuardScanner.Kind.MISSING_GUARD &&
+          it.symbol == "broadcastQuickTapResult"
+      },
+    )
+    assertTrue(result.guardedHelpers.contains("broadcastQuickTapResult"))
+  }
+
+  @Test
+  fun `does not flag a NON-suspend broadcaster that delegates to asyncActionRunner launch`() {
+    // `broadcastScreenshot`'s real shape: non-suspend, requestId-correlated, delegates the actual
+    // broadcast into asyncActionRunner.launch (which is itself swallow-checked). Must pass.
+    val src =
+      """
+      class Fake {
+        private fun broadcastScreenshotResult(requestId: String?) {
+          asyncActionRunner.launch(requestId, "screenshot") {
+            webSocketServer.broadcast(buildScreenshot(requestId))
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertTrue(
+      "delegating broadcaster must not be flagged: ${result.violations}",
+      result.violations.isEmpty(),
+    )
+    assertTrue(result.guardedHelpers.contains("broadcastScreenshotResult"))
+  }
+
+  @Test
+  fun `flags a helper that calls guard but performs the broadcast OUTSIDE the guard block`() {
+    // A token guard call does not satisfy the guarantee — the throwing broadcast must be *inside*
+    // the guard span, or a throw escapes uncaught and the client hangs (issue #3085).
+    val src =
+      """
+      class Fake {
+        private suspend fun broadcastFooResult(requestId: String?, success: Boolean) {
+          val message = buildResult(requestId, success)
+          webSocketServer.broadcast(message)
+          resultBroadcaster.guard(requestId, "foo_ack") { logSomething() }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertEquals(
+      "the broadcast sits outside the guard span",
+      listOf(BroadcastGuardScanner.Kind.MISSING_GUARD to "broadcastFooResult"),
+      result.violations.map { it.kind to it.symbol },
+    )
+  }
+
+  @Test
+  fun `flags a swallow that only mentions an unrelated broadcast identifier without a call`() {
+    // The surface heuristic must require an actual `broadcast*(` call, not a bare `broadcast`
+    // substring — a `broadcastCounter` property read must not launder a log-and-swallow.
+    val src =
+      """
+      class Fake {
+        private suspend fun broadcastFooResult(requestId: String?) {
+          resultBroadcaster.guard(requestId, "foo_result") {
+            try {
+              webSocketServer.broadcast("payload")
+            } catch (e: Exception) {
+              val depth = webSocketServer.broadcastQueueDepth
+              Log.e(TAG, "swallowed, depth=", e)
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertEquals(
+      listOf(BroadcastGuardScanner.Kind.SWALLOW_IN_BROADCAST to "broadcastFooResult"),
+      result.violations.map { it.kind to it.symbol },
+    )
+  }
+
+  @Test
+  fun `handles string interpolation nesting a string that contains a brace without desyncing`() {
+    // `"a ${f("}")}"` is valid, brace-balanced Kotlin, but a masker that ignores ${...} would let
+    // the inner quote close the outer string and expose a stray brace, mis-slicing bodies. The
+    // following un-guarded helper must still be detected.
+    val src =
+      """
+      class Fake {
+        private suspend fun broadcastFooResult(requestId: String?) {
+          resultBroadcaster.guard(requestId, "foo_result") {
+            val label = "a ${'$'}{describe("}")}"
+            webSocketServer.broadcast(label)
+          }
+        }
+        private suspend fun broadcastNextResult(requestId: String?) {
+          webSocketServer.broadcast("oops")
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertEquals(
+      listOf(BroadcastGuardScanner.Kind.MISSING_GUARD to "broadcastNextResult"),
+      result.violations.map { it.kind to it.symbol },
+    )
+    assertTrue(result.guardedHelpers.contains("broadcastFooResult"))
+  }
+
   // ---------------------------------------------------------------------------
   // Source location
   // ---------------------------------------------------------------------------
@@ -444,12 +584,24 @@ object BroadcastGuardScanner {
     val violations: List<Violation>,
   )
 
-  private val HELPER = Regex("""suspend fun (broadcast\w*(?:Result|Error|Response))\(""")
+  // `suspend` is optional so a non-suspend `private fun broadcast*Result(requestId)` (the shape of
+  // the existing `broadcastScreenshot`) can't evade the scan by dropping `suspend`. The naming
+  // suffix (Result/Error/Response) + a `requestId` param is the load-bearing discriminator that
+  // separates requestId-correlated result broadcasters (must be guarded) from push-event
+  // broadcasters (`*Event`/`*Update`/`*Change`, no requestId) that legitimately log-and-swallow.
+  private val HELPER = Regex("""(?:suspend )?fun (broadcast\w*(?:Result|Error|Response))\(""")
   private val LAUNCH = Regex("""asyncActionRunner\.launch\(""")
+  private val GUARD_CALL = Regex("""resultBroadcaster\.guard\(""")
   private val CATCH = Regex("""catch\s*\(""")
-  // `throw` is word-bounded so a `throwable` local doesn't read as a rethrow; any `broadcast*` call
-  // (broadcast/broadcastError/broadcastResponse) surfaces the failure, so a bare substring is fine.
+  // The actual result emission. Every such call in a helper must sit *inside* a guard (or launch)
+  // block — proving the guard is merely *mentioned* is not enough (a token guard call with the real
+  // broadcast outside it would still hang; issue #3085 regression form).
+  private val BROADCAST_CALL = Regex("""webSocketServer\.broadcast""")
+  // `throw` is word-bounded so a `throwable` local doesn't read as a rethrow. Surfacing requires an
+  // actual `broadcast*(` call (an error frame), not a bare `broadcast` substring — an unrelated
+  // `broadcastCounter.foo()` identifier must not launder a swallow.
   private val RETHROW = Regex("""\bthrow\b""")
+  private val SURFACING_BROADCAST = Regex("""broadcast\w*\s*\(""")
 
   fun scan(source: String): ScanResult {
     // `code` masks all string/char literal contents and comments with spaces (newlines preserved)
@@ -472,8 +624,25 @@ object BroadcastGuardScanner {
       val bodyClose = matchBrace(code, bodyOpen)
       val body = code.substring(bodyOpen, bodyClose)
 
-      if (!body.contains("resultBroadcaster.guard(")) {
-        violations.add(Violation(Kind.MISSING_GUARD, name, lineOf(source, m.range.first)))
+      // The correlated-error-on-throw guarantee is provided by `resultBroadcaster.guard { … }` (the
+      // direct path) or by delegating the broadcast into `asyncActionRunner.launch { … }` (which is
+      // itself swallow-checked below). Collect the spans of both.
+      val guardedSpans = blockSpans(body, GUARD_CALL) + blockSpans(body, LAUNCH)
+      val broadcastCalls = BROADCAST_CALL.findAll(body).map { it.range.first }.toList()
+      when {
+        guardedSpans.isEmpty() && broadcastCalls.isNotEmpty() ->
+          // Broadcasts a result but wraps none of it — the exact "forgot the guard" regression.
+          violations.add(
+            Violation(Kind.MISSING_GUARD, name, lineOf(source, bodyOpen + broadcastCalls.first()))
+          )
+        else ->
+          // Guard/launch present: every result broadcast must sit *inside* one of those spans. A
+          // broadcast outside them is unguarded even though the guard call textually exists.
+          for (offset in broadcastCalls) {
+            if (guardedSpans.none { offset >= it.first && offset < it.second }) {
+              violations.add(Violation(Kind.MISSING_GUARD, name, lineOf(source, bodyOpen + offset)))
+            }
+          }
       }
       for (offset in swallowingCatchOffsets(body)) {
         violations.add(
@@ -504,9 +673,23 @@ object BroadcastGuardScanner {
   }
 
   /**
+   * Spans (`[open, close)` of the block `{ … }`) of each call matching [call] found in [region].
+   */
+  private fun blockSpans(region: String, call: Regex): List<Pair<Int, Int>> {
+    val spans = mutableListOf<Pair<Int, Int>>()
+    for (m in call.findAll(region)) {
+      val parenEnd = matchParen(region, m.range.first + m.value.indexOf('('))
+      val blockOpen = region.indexOf('{', parenEnd)
+      if (blockOpen < 0) continue
+      spans.add(blockOpen to matchBrace(region, blockOpen))
+    }
+    return spans
+  }
+
+  /**
    * Offsets (within [region]) of every `catch (…)` block that "swallows": its body neither rethrows
-   * (`throw`) nor surfaces an error frame (`broadcast`). [region] must already be literal-masked so
-   * the keyword checks don't match text inside a log message string.
+   * (`throw`) nor surfaces an error frame (an actual `broadcast*(` call). [region] must already be
+   * literal-masked so the keyword checks don't match text inside a log message string.
    */
   private fun swallowingCatchOffsets(region: String): List<Int> {
     val offsets = mutableListOf<Int>()
@@ -516,7 +699,8 @@ object BroadcastGuardScanner {
       if (blockOpen < 0) continue
       val blockClose = matchBrace(region, blockOpen)
       val catchBody = region.substring(blockOpen, blockClose)
-      val surfaces = RETHROW.containsMatchIn(catchBody) || catchBody.contains("broadcast")
+      val surfaces =
+        RETHROW.containsMatchIn(catchBody) || SURFACING_BROADCAST.containsMatchIn(catchBody)
       if (!surfaces) offsets.add(c.range.first)
     }
     return offsets
@@ -568,14 +752,23 @@ object BroadcastGuardScanner {
 
   /**
    * Replace the contents of every string/char literal and comment with spaces (newlines preserved,
-   * so line numbers and length are unchanged), leaving code structure — braces, parens, identifiers
-   * — intact. Kotlin raw strings (`"""…"""`) close on the *last* three quotes of a trailing run, so
-   * a run of N≥3 quotes contributes N−3 content quotes then closes.
+   * so line numbers and length are unchanged), leaving real code structure -- braces, parens,
+   * identifiers -- intact so structural matching is not fooled.
+   *
+   * A stack of lexer states handles the constructs that break a naive scan:
+   * - Kotlin raw strings ("\"\"\"...\"\"\"") close on the *last* three quotes of a trailing run.
+   * - String-template interpolation "${ ... }" is code, may nest strings that themselves contain
+   *   braces/quotes (e.g. `"a ${f("}")}"`), and must not let an inner quote close the outer string.
+   *   Interpolation contents are blanked but their braces are balanced (both blanked), so the
+   *   surrounding code's brace/paren matching stays correct.
    */
   private fun maskLiteralsAndComments(src: String): String {
     val out = StringBuilder(src.length)
-    var i = 0
     val n = src.length
+    var i = 0
+    // Parallel stacks: lexer state + (for INTERP) its running brace depth.
+    val states = ArrayDeque<Int>().apply { addLast(CODE) }
+    val interpDepth = ArrayDeque<Int>()
 
     fun blank(count: Int) {
       repeat(count) { out.append(' ') }
@@ -583,83 +776,147 @@ object BroadcastGuardScanner {
 
     while (i < n) {
       val c = src[i]
-      val next = if (i + 1 < n) src[i + 1] else ' '
-      when {
-        c == '/' && next == '/' -> {
-          while (i < n && src[i] != '\n') {
-            out.append(' ')
-            i++
+      val next = if (i + 1 < n) src[i + 1] else ' '
+      when (states.last()) {
+        CODE,
+        INTERP -> {
+          when {
+            c == '/' && next == '/' -> {
+              states.addLast(LINE_COMMENT)
+              blank(2)
+              i += 2
+            }
+            c == '/' && next == '*' -> {
+              states.addLast(BLOCK_COMMENT)
+              blank(2)
+              i += 2
+            }
+            c == '"' && next == '"' && i + 2 < n && src[i + 2] == '"' -> {
+              states.addLast(RAW)
+              blank(3)
+              i += 3
+            }
+            c == '"' -> {
+              states.addLast(STR)
+              blank(1)
+              i++
+            }
+            c == '\'' -> {
+              states.addLast(CHAR)
+              blank(1)
+              i++
+            }
+            states.last() == INTERP && c == '{' -> {
+              interpDepth.addLast(interpDepth.removeLast() + 1)
+              blank(1)
+              i++
+            }
+            states.last() == INTERP && c == '}' -> {
+              val d = interpDepth.removeLast() - 1
+              blank(1)
+              i++
+              if (d == 0) states.removeLast() else interpDepth.addLast(d)
+            }
+            states.last() == INTERP -> {
+              out.append(if (c == '\n') '\n' else ' ')
+              i++
+            }
+            else -> { // CODE: preserve real structure (braces, parens, identifiers).
+              out.append(c)
+              i++
+            }
           }
         }
-        c == '/' && next == '*' -> {
-          blank(2)
-          i += 2
-          while (i < n && !(src[i] == '*' && i + 1 < n && src[i + 1] == '/')) {
-            out.append(if (src[i] == '\n') '\n' else ' ')
-            i++
-          }
-          if (i < n) {
-            blank(2)
-            i += 2
+        STR -> {
+          when {
+            c == '\\' -> {
+              blank(2)
+              i += 2
+            }
+            c == '$' && next == '{' -> {
+              states.addLast(INTERP)
+              interpDepth.addLast(1)
+              blank(2)
+              i += 2
+            }
+            c == '"' -> {
+              states.removeLast()
+              blank(1)
+              i++
+            }
+            else -> {
+              out.append(if (c == '\n') '\n' else ' ')
+              i++
+            }
           }
         }
-        c == '"' && next == '"' && i + 2 < n && src[i + 2] == '"' -> {
-          // Raw string.
-          blank(3)
-          i += 3
-          while (i < n) {
-            if (src[i] == '"') {
+        RAW -> {
+          when {
+            c == '$' && next == '{' -> {
+              states.addLast(INTERP)
+              interpDepth.addLast(1)
+              blank(2)
+              i += 2
+            }
+            c == '"' -> {
               var run = 0
               while (i + run < n && src[i + run] == '"') run++
               blank(run)
               i += run
-              if (run >= 3) break // last three quotes closed the string
-            } else {
-              out.append(if (src[i] == '\n') '\n' else ' ')
+              if (run >= 3) states.removeLast() // last three quotes close the raw string
+            }
+            else -> {
+              out.append(if (c == '\n') '\n' else ' ')
               i++
             }
           }
         }
-        c == '"' -> {
-          out.append(' ')
-          i++
-          while (i < n && src[i] != '"') {
-            if (src[i] == '\\') {
+        CHAR -> {
+          when {
+            c == '\\' -> {
               blank(2)
               i += 2
-            } else {
-              out.append(if (src[i] == '\n') '\n' else ' ')
+            }
+            c == '\'' -> {
+              states.removeLast()
+              blank(1)
+              i++
+            }
+            else -> {
+              blank(1)
               i++
             }
           }
-          if (i < n) {
-            out.append(' ')
+        }
+        LINE_COMMENT -> {
+          if (c == '\n') {
+            states.removeLast()
+            out.append('\n')
+          } else {
+            blank(1)
+          }
+          i++
+        }
+        else -> { // BLOCK_COMMENT
+          if (c == '*' && next == '/') {
+            states.removeLast()
+            blank(2)
+            i += 2
+          } else {
+            out.append(if (c == '\n') '\n' else ' ')
             i++
           }
-        }
-        c == '\'' -> {
-          out.append(' ')
-          i++
-          while (i < n && src[i] != '\'') {
-            if (src[i] == '\\') {
-              blank(2)
-              i += 2
-            } else {
-              out.append(' ')
-              i++
-            }
-          }
-          if (i < n) {
-            out.append(' ')
-            i++
-          }
-        }
-        else -> {
-          out.append(c)
-          i++
         }
       }
     }
     return out.toString()
   }
+
+  private const val CODE = 0
+  private const val STR = 1 // regular string
+  private const val RAW = 2 // raw triple-quoted string
+  private const val CHAR = 3 // char literal
+  private const val LINE_COMMENT = 4
+  private const val BLOCK_COMMENT = 5
+  private const val INTERP = 6 // ${ ... } string-template interpolation (code; brace depth tracked)
 }

@@ -59,12 +59,27 @@ export interface SanitizeObserveConfig {
    * emit the untrimmed hierarchy.
    */
   trimNodes?: boolean;
+  /**
+   * Gate for compact-form output. Maps to the `observeResultCompact` output-
+   * reduction flag (`--observe-result-compact`); the wiring layer supplies it
+   * from `ServerConfig.isObserveResultCompactEnabled()` (issue #2951). When true
+   * every view-hierarchy node's `bounds` object is flattened from
+   * `{left, top, right, bottom}` to the positional tuple `[left, top, right,
+   * bottom]` — the four key strings repeat on every node, so dropping them is
+   * the largest remaining redundancy after `trimNodes`. The order is fixed and
+   * documented so the tuple round-trips losslessly.
+   */
+  compact?: boolean;
 }
+
+/** Positional order of a compacted bounds tuple: `[left, top, right, bottom]`. */
+export type CompactBounds = [number, number, number, number];
 
 /**
  * Return an output-only copy of `obs` shrunk for serialization. Applies, in
- * order: perf-audit strip (always), per-node trim (default on), and
- * elements-drop (gated by `cfg.dropElements`). The input is never mutated.
+ * order: perf-audit strip (always), per-node trim (default on), bounds compaction
+ * (gated by `cfg.compact`), and elements-drop (gated by `cfg.dropElements`). The
+ * input is never mutated.
  */
 export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveConfig): ObserveResult {
   // Deep-clone boundary: mutate only the copy that goes to the wire. The
@@ -78,6 +93,12 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
   if (cfg.trimNodes !== false) {
     for (const root of toNodeArray(out.viewHierarchy?.hierarchy?.node)) {
       trimHierarchyNodes(root);
+    }
+  }
+
+  if (cfg.compact) {
+    for (const root of toNodeArray(out.viewHierarchy?.hierarchy?.node)) {
+      compactHierarchyBounds(root);
     }
   }
 
@@ -166,5 +187,29 @@ function trimHierarchyNodes(node: ViewHierarchyNode | undefined): void {
 
   for (const child of toNodeArray(node.node)) {
     trimHierarchyNodes(child);
+  }
+}
+
+/**
+ * Recursively flatten each node's `bounds` object to the positional tuple
+ * `[left, top, right, bottom]` (on the already-cloned tree). The four key
+ * strings (`left`/`top`/`right`/`bottom`) repeat on every node that has bounds,
+ * so replacing the object with a fixed-order 4-tuple is the largest remaining
+ * lossless reduction after `trimHierarchyNodes`. A non-object `bounds` (already
+ * a tuple, or absent) is left untouched, so the transform is idempotent.
+ */
+function compactHierarchyBounds(node: ViewHierarchyNode | undefined): void {
+  if (!node) {
+    return;
+  }
+
+  const bounds = node.bounds as unknown;
+  if (bounds && typeof bounds === "object" && !Array.isArray(bounds)) {
+    const b = bounds as { left: number; top: number; right: number; bottom: number };
+    (node as { bounds?: unknown }).bounds = [b.left, b.top, b.right, b.bottom] as CompactBounds;
+  }
+
+  for (const child of toNodeArray(node.node)) {
+    compactHierarchyBounds(child);
   }
 }

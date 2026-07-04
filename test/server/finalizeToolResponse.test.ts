@@ -42,16 +42,40 @@ function makeObserveResult(): ObserveResult {
   } as ObserveResult;
 }
 
+/** ObserveResult whose root node carries an object-shaped `bounds`. */
+function makeObserveResultWithBounds(): ObserveResult {
+  return {
+    updatedAt: 123,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: {
+      hierarchy: {
+        node: {
+          "resource-id": "com.example:id/root",
+          "bounds": { left: 0, top: 0, right: 1080, bottom: 1920 },
+          "node": [
+            { "resource-id": "com.example:id/child", "bounds": { left: 10, top: 20, right: 30, bottom: 40 } } as any,
+          ],
+        } as any,
+      },
+    },
+  } as ObserveResult;
+}
+
 describe("finalizeToolResponse", () => {
   let originalDropElements: boolean;
+  let originalCompact: boolean;
 
   beforeEach(() => {
     originalDropElements = serverConfig.isObserveResultDropElementsEnabled();
+    originalCompact = serverConfig.isObserveResultCompactEnabled();
     serverConfig.setObserveResultDropElementsEnabled(false);
+    serverConfig.setObserveResultCompactEnabled(false);
   });
 
   afterEach(() => {
     serverConfig.setObserveResultDropElementsEnabled(originalDropElements);
+    serverConfig.setObserveResultCompactEnabled(originalCompact);
   });
 
   test("EC1: observe response is sanitized in both structuredContent and text", () => {
@@ -214,6 +238,60 @@ describe("finalizeToolResponse", () => {
     const root = JSON.parse(finalized.content[0].text).viewHierarchy.hierarchy.node;
     expect(root["view-id"]).toBeUndefined();
     expect(root.clickable).toBeUndefined();
+  });
+
+  test("EC-C: compact flag flattens node bounds in both structuredContent and text when the gate is on", () => {
+    serverConfig.setObserveResultCompactEnabled(true);
+    const finalized = finalizeToolResponse(
+      createStructuredToolResponse(makeObserveResultWithBounds()),
+      { name: "observe" }
+    );
+
+    const rootSc = (finalized.structuredContent as any).viewHierarchy.hierarchy.node;
+    expect(rootSc.bounds).toEqual([0, 0, 1080, 1920]);
+    expect(rootSc.node[0].bounds).toEqual([10, 20, 30, 40]);
+
+    const rootText = JSON.parse(finalized.content[0].text).viewHierarchy.hierarchy.node;
+    expect(rootText.bounds).toEqual([0, 0, 1080, 1920]);
+    // Text mirrors structuredContent exactly.
+    expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+  });
+
+  test("EC-C: compact gate off keeps object-shaped bounds (today's shape)", () => {
+    serverConfig.setObserveResultCompactEnabled(false);
+    const finalized = finalizeToolResponse(
+      createStructuredToolResponse(makeObserveResultWithBounds()),
+      { name: "observe" }
+    );
+    const rootSc = (finalized.structuredContent as any).viewHierarchy.hierarchy.node;
+    expect(Array.isArray(rootSc.bounds)).toBe(false);
+    expect(rootSc.bounds).toEqual({ left: 0, top: 0, right: 1080, bottom: 1920 });
+  });
+
+  test("EC-C: compact is output-only — the caller's in-memory bounds object is untouched", () => {
+    serverConfig.setObserveResultCompactEnabled(true);
+    const obs = makeObserveResultWithBounds();
+    finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
+    expect(obs.viewHierarchy!.hierarchy.node).not.toBeInstanceOf(Array);
+    expect((obs.viewHierarchy!.hierarchy.node as any).bounds).toEqual({ left: 0, top: 0, right: 1080, bottom: 1920 });
+  });
+
+  test("EC-C: compact composes with drop-elements and the wire-strip flag (all three on)", () => {
+    serverConfig.setObserveResultCompactEnabled(true);
+    serverConfig.setObserveResultDropElementsEnabled(true);
+    const originalStrip = serverConfig.isToolResultsNoStructuredContentEnabled();
+    serverConfig.setToolResultsNoStructuredContentEnabled(true);
+    try {
+      const obs = { ...makeObserveResultWithBounds(), elements: { clickable: [], scrollable: [], text: [], media: [] } };
+      const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
+      const sc = finalized.structuredContent as any;
+      // finalize keeps structuredContent (the strip is a later wire-boundary concern).
+      expect(sc).toBeDefined();
+      expect(sc.viewHierarchy.hierarchy.node.bounds).toEqual([0, 0, 1080, 1920]);
+      expect(sc.elements).toBeUndefined();
+    } finally {
+      serverConfig.setToolResultsNoStructuredContentEnabled(originalStrip);
+    }
   });
 
   test("EC-B: finalize never strips structuredContent (that is a wire-boundary concern)", () => {

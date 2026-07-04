@@ -470,6 +470,12 @@ class WebSocketServerIntegrationTest {
         assertEquals("false", responseJson["success"]?.jsonPrimitive?.content)
         val error = responseJson["error"]?.jsonPrimitive?.content ?: ""
         assertTrue("error message should be non-empty", error.isNotEmpty())
+        // Proves the legibility mapping fires on the *real* kotlinx decode exception (not just a
+        // synthetic one): an unknown command type names the offending type on the wire.
+        assertTrue(
+          "expected the unknown type to be named, was: $error",
+          error.contains("totally_unknown_command"),
+        )
       }
     }
   }

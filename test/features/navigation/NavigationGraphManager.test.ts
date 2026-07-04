@@ -1272,6 +1272,44 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
       })
     ).rejects.toThrow(/different database connections/i);
   });
+
+  test("recordHierarchyNavigation Case 1 with an active test session fails with ActionableError, not a downstream split-write error", async () => {
+    // With a session active the coverage-enlistment write (recordNodeVisit) becomes
+    // reachable inside the transaction. Without the guard, withExecutor would rebind
+    // the coverage repo onto the navigation trx and recordNodeVisit would write a
+    // test_node_coverage row referencing a session that lives only on coverageDb — an
+    // FK violation surfacing as an opaque SqliteError. The guard turns that into a
+    // clear, pre-transaction ActionableError instead. This makes the coverage-row
+    // assertion discriminating (the split path is genuinely reachable here) and mirrors
+    // the recordNavigationEvent twin above.
+    const navRepo = await seedCorrelatedHome();
+    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+    await manager.setCurrentApp(APP_ID);
+    // startTestSession writes the session on the coverage connection, whose
+    // test_coverage_sessions.app_id FKs navigation_apps — seed the app there.
+    await coverageDb
+      .insertInto("navigation_apps")
+      .values({ app_id: APP_ID, updated_at: "2024-01-01T00:00:00.000Z" })
+      .execute();
+    await manager.startTestSession("session-hier-guard");
+
+    const visitsBefore = await homeVisitCount(navDb);
+
+    await expect(
+      manager.recordHierarchyNavigation({
+        fromFingerprint: null,
+        toFingerprint: "fp_home",
+        timestamp: 900000,
+        packageName: APP_ID,
+      })
+    ).rejects.toBeInstanceOf(ActionableError);
+
+    // No coverage row leaked onto the navigation connection and the visit increment
+    // never applied — the guard stopped the transaction before it opened.
+    expect(await countNodeCoverage(navDb)).toBe(0);
+    expect(await homeVisitCount(navDb)).toBe(visitsBefore);
+  });
 });
 
 /**

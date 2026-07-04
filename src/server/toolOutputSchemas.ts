@@ -4,7 +4,8 @@ import { z } from "zod";
 // This schema accepts both for compatibility
 const booleanOrString = z.union([z.boolean(), z.literal("true"), z.literal("false")]).optional();
 
-const elementBoundsSchema = z.object({
+// Default (verbose) bounds shape: the four-key object plus optional centers.
+const boundsObjectSchema = z.object({
   left: z.number().int(),
   top: z.number().int(),
   right: z.number().int(),
@@ -12,6 +13,41 @@ const elementBoundsSchema = z.object({
   centerX: z.number().int().optional(),
   centerY: z.number().int().optional()
 });
+
+// Compact bounds shape emitted only when the `--observe-result-compact` output-
+// reduction flag (env `AUTOMOBILE_OBSERVE_RESULT_COMPACT`) is set: the object is
+// flattened to the positional tuple `[left, top, right, bottom]` (issue #2990).
+// The tuple carries no centers — a consumer derives them as (left+right)/2,
+// (top+bottom)/2. This is a fixed-length 4-tuple so it round-trips losslessly.
+const compactBoundsTupleSchema = z
+  .tuple([z.number().int(), z.number().int(), z.number().int(), z.number().int()])
+  .describe(
+    "Compact bounds tuple [left, top, right, bottom]; emitted in place of the " +
+      "{left, top, right, bottom} object only when the --observe-result-compact " +
+      "flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
+  );
+
+/**
+ * Bounds as advertised on the wire. The default is the `{left, top, right,
+ * bottom}` object; under `--observe-result-compact` it is the positional tuple
+ * `[left, top, right, bottom]`. Every output schema that carries a `bounds` field
+ * (elements, focused/selected elements, …) routes through this union so the
+ * advertised `outputSchema` describes — and a strict MCP client validates —
+ * whichever shape the server is actually emitting (issue #2990).
+ *
+ * The tuple arm is advertised in `tools/list` only when the flag is on: at
+ * generation time `advertiseBoundsForCompact` (`compactBoundsAdvertisement.ts`)
+ * collapses this union to its object arm when compaction is off, so the advertised
+ * shape stays honest-by-default. The `.describe()` prefix below is the stable
+ * marker that helper keys off — keep them in sync.
+ */
+export const elementBoundsSchema = z
+  .union([boundsObjectSchema, compactBoundsTupleSchema])
+  .describe(
+    "Element bounds. Default: object {left, top, right, bottom} (+ optional " +
+      "centerX/centerY). Under --observe-result-compact: positional tuple " +
+      "[left, top, right, bottom]."
+  );
 
 export const elementSchema = z.object({
   "bounds": elementBoundsSchema,

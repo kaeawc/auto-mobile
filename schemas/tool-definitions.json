@@ -168,7 +168,8 @@
                 "right",
                 "bottom"
               ],
-              "additionalProperties": false
+              "additionalProperties": false,
+              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
             },
             "text": {
               "type": "string"
@@ -5221,7 +5222,8 @@
                 "right",
                 "bottom"
               ],
-              "additionalProperties": false
+              "additionalProperties": false,
+              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
             },
             "text": {
               "type": "string"
@@ -5436,7 +5438,8 @@
                       "right",
                       "bottom"
                     ],
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
                   },
                   "indexInMatches": {
                     "type": "integer",
@@ -5521,7 +5524,8 @@
                     "right",
                     "bottom"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
                 },
                 "text": {
                   "type": "string"
@@ -5722,7 +5726,8 @@
                     "right",
                     "bottom"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
                 },
                 "text": {
                   "type": "string"
@@ -5955,7 +5960,8 @@
                 "right",
                 "bottom"
               ],
-              "additionalProperties": false
+              "additionalProperties": false,
+              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
             },
             "indexInMatches": {
               "type": "integer",
@@ -6050,7 +6056,8 @@
                   "right",
                   "bottom"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
               },
               "indexInMatches": {
                 "type": "integer",

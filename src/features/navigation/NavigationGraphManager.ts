@@ -202,6 +202,20 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
+   * Install a pre-built instance as the singleton (for testing only).
+   *
+   * Lets a test back the singleton with an in-memory database so consumers that
+   * resolve the manager via `getInstance()` (e.g. AndroidCtrlProxyClient) exercise
+   * deterministic, migration-gate-free DB writes instead of the real file DB. Using
+   * `getInstance()` alone would lazily build a manager on the shared `getDatabase()`
+   * singleton, whose first-use migration + file IO run on real wall-clock time and
+   * make async writes race the assertions. Pair with `resetInstance()` in teardown.
+   */
+  public static setInstanceForTesting(instance: NavigationGraphManager): void {
+    NavigationGraphManager.instance = instance;
+  }
+
+  /**
    * Create a new instance for testing with injected dependencies.
    *
    * Precondition for recordNavigationEvent's atomicity: `repository` and

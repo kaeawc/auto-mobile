@@ -46,6 +46,25 @@ final class RemindersLaunchPlanTests: RemindersIntegrationBase {
             ?? "launch-reminders-app.yaml"
     }
 
+    // #2998: cold Reminders bring-up on a CI simulator intermittently pushes the plan's
+    // `observe waitFor "Reminders"` past its 20s bound, timing out during app launch rather than in
+    // any code under test. The observe timeout surfaces as a retryable `.executionFailed`, so a single
+    // retry re-runs the whole launch→observe→terminate plan and absorbs the transient flake, while a
+    // genuine observe regression times out on every attempt and still fails (the launch plan keeps its
+    // bounded waitFor — see RemindersPlanContentTests). Mirrors the sibling add-flow retry (#2811). An
+    // explicit AUTOMOBILE_TEST_RETRY_COUNT always wins; the retry is tracked for removal once the
+    // iOS-observe bring-up flake is fixed (#2910/#2926/#2952).
+    override var retryCount: Int {
+        // Honor an explicit override — including 0 to disable retries — and default to 1 only when
+        // no override is set. (super.retryCount can't distinguish an explicit 0 from the unset
+        // default, so read the env directly.)
+        let environment = AutoMobileEnvironment()
+        if let explicit = environment.intValue(["AUTOMOBILE_TEST_RETRY_COUNT", "RETRY_COUNT"]) {
+            return explicit
+        }
+        return 1
+    }
+
     func testLaunchRemindersPlan() throws {
         PerfTimer.log("testLaunchRemindersPlan START - planPath: \(planPath)")
         let result = try executePlan()

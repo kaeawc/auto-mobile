@@ -16,6 +16,10 @@ final class RemindersPlanContentTests: XCTestCase {
         return try DefaultPlanLoader().loadPlan(at: "add-reminder.yaml", bundle: Bundle.module)
     }
 
+    private func loadLaunchRemindersPlan() throws -> String {
+        return try DefaultPlanLoader().loadPlan(at: "launch-reminders-app.yaml", bundle: Bundle.module)
+    }
+
     /// The save tap must be immediately preceded by an `observe`/`waitFor` guard on "Done", so the
     /// executor polls for the control (and its `awaitTimeout` path fails fast on genuine absence)
     /// instead of racing a bare tap.
@@ -99,6 +103,78 @@ final class RemindersPlanContentTests: XCTestCase {
         }
 
         XCTAssertEqual(RemindersAddPlanTests().retryCount, 0)
+    }
+
+    /// The launch-flow test retry-wraps itself (#2998) so a transient cold-bring-up `observe waitFor`
+    /// timeout on a CI simulator doesn't red-flag an otherwise-green PR, while a genuine observe
+    /// regression still fails on every attempt. Mirrors the sibling add-flow retry (#2811).
+    func testLaunchRemindersPlanDefaultsToOneRetry() {
+        // An explicit env override legitimately wins, so only assert the default when unset.
+        let env = ProcessInfo.processInfo.environment
+        if env["AUTOMOBILE_TEST_RETRY_COUNT"] != nil || env["RETRY_COUNT"] != nil {
+            return
+        }
+        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 1)
+    }
+
+    /// An explicit retry override wins for the launch flow too — 0 disables retries so a CI/local
+    /// repro run can force a single attempt and surface the transient timeout deterministically, and a
+    /// non-default value is passed through verbatim. The non-`0` case is load-bearing: it diverges from
+    /// both the base default (`0`) and this class's default (`1`), so it fails if the override is ever
+    /// reverted to the base implementation — whereas a `0`-only assertion would pass either way.
+    func testLaunchRemindersPlanExplicitRetryOverrideIsHonored() {
+        let key = "AUTOMOBILE_TEST_RETRY_COUNT"
+        let original = ProcessInfo.processInfo.environment[key]
+        defer {
+            if let original = original {
+                setenv(key, original, 1)
+            } else {
+                unsetenv(key)
+            }
+        }
+
+        setenv(key, "0", 1)
+        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 0, "Explicit 0 must disable retries")
+
+        setenv(key, "3", 1)
+        XCTAssertEqual(
+            RemindersLaunchPlanTests().retryCount,
+            3,
+            "A non-default explicit override must be honored verbatim, proving the override reads env"
+        )
+    }
+
+    /// Regression guard preserving acceptance criterion 2 (#2998): the retry only masks a *transient*
+    /// bring-up flake, so the launch plan must keep its bounded `observe`/`waitFor` guard — a genuinely
+    /// broken observe still times out on every attempt and fails, instead of hanging or silently
+    /// passing. The plan must launch Reminders first, gate the launch on a bounded wait, and terminate
+    /// last.
+    func testLaunchRemindersPlanIsGuardedAndBounded() throws {
+        let content = try loadLaunchRemindersPlan()
+        let steps = PlanStepSequence.parse(content)
+
+        XCTAssertTrue(content.contains("platform: ios"), "Plan must declare the ios platform")
+        XCTAssertEqual(steps.first?.tool, "launchApp", "Plan must launch Reminders first")
+        XCTAssertEqual(steps.last?.tool, "terminateApp", "Plan must terminate Reminders last")
+
+        guard let observeIndex = steps.firstIndex(where: { $0.tool == "observe" }) else {
+            XCTFail("Plan must gate bring-up on an observe step")
+            return
+        }
+        let observeStep = steps[observeIndex]
+        XCTAssertGreaterThan(observeIndex, 0, "The observe guard must follow the launch")
+        XCTAssertTrue(observeStep.hasWaitFor, "The observe guard must use waitFor")
+
+        guard let timeout = observeStep.waitForTimeoutMs else {
+            XCTFail("The observe waitFor guard must declare a timeout so a real regression fails fast")
+            return
+        }
+        XCTAssertGreaterThan(timeout, 0, "waitFor timeout must be positive")
+        XCTAssertLessThanOrEqual(
+            timeout,
+            30000,
+            "waitFor timeout should stay bounded so a genuinely-broken observe fails fast per attempt"
+        )
     }
 
     /// The intermittent "Enable iCloud Syncing?" alert must be dismissed best-effort before the

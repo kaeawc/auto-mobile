@@ -1,5 +1,6 @@
+import type { Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
-import { NewPerformanceThresholds, PerformanceThresholds } from "../../db/types";
+import { Database, NewPerformanceThresholds, PerformanceThresholds } from "../../db/types";
 import { logger } from "../../utils/logger";
 import { DeviceCapabilities, DeviceCapabilitiesDetector } from "../../utils/DeviceCapabilities";
 import { sql } from "kysely";
@@ -15,7 +16,22 @@ import {
  * Manages performance thresholds with TTL and weighted averaging
  */
 export class ThresholdManager {
-  private db = getDatabase();
+  private readonly injectedDb: Kysely<Database> | null;
+
+  /**
+   * @param db Optional Kysely handle, resolved LAZILY (per use, via {@link db})
+   * so constructing a manager does not open the real file-backed database at
+   * construction time. Inject an in-memory DB (`createTestDatabase`) for tests
+   * exercising the query paths (issue #3067).
+   */
+  constructor(db?: Kysely<Database>) {
+    this.injectedDb = db ?? null;
+  }
+
+  /** The injected DB, or the shared singleton resolved on first use. */
+  private get db(): Kysely<Database> {
+    return this.injectedDb ?? getDatabase();
+  }
 
   /**
    * Get the current session ID

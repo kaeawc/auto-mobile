@@ -3,6 +3,7 @@ import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { NavigationRepository } from "../../src/db/navigationRepository";
 import { createTestDatabase } from "./testDbHelper";
+import { withInMemorySingletonDatabase } from "./inMemorySingletonDatabase";
 
 describe("NavigationRepository", () => {
   let db: Kysely<Database>;
@@ -418,12 +419,17 @@ describe("NavigationRepository", () => {
       expect(bound.resolveConnection()).toBe(db);
     });
 
-    test("returns the shared singleton for an unbound repo", () => {
+    test("returns the shared singleton for an unbound repo", async () => {
       // Two independently-constructed unbound repos must resolve to the SAME
       // getDatabase() singleton so a connection-identity check between them holds.
-      const a = new NavigationRepository();
-      const b = new NavigationRepository();
-      expect(a.resolveConnection()).toBe(b.resolveConnection());
+      // Redirect the singleton to `:memory:` so the unit-test DB guard (issue
+      // #3067) permits resolving it here (the assertion is about singleton
+      // identity, not the on-disk file).
+      await withInMemorySingletonDatabase(() => {
+        const a = new NavigationRepository();
+        const b = new NavigationRepository();
+        expect(a.resolveConnection()).toBe(b.resolveConnection());
+      });
     });
 
     test("withExecutor rebinds the resolved connection", () => {

@@ -1,5 +1,6 @@
+import type { Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
-import { NewMemoryThresholds, MemoryThresholds } from "../../db/types";
+import { Database, NewMemoryThresholds, MemoryThresholds } from "../../db/types";
 import { logger } from "../../utils/logger";
 import { sql } from "kysely";
 import { MemoryBaseline } from "../../db/types";
@@ -44,7 +45,22 @@ const DEFAULT_THRESHOLDS = {
  * Manages memory thresholds with TTL, per-app profiles, and weighted averaging
  */
 export class MemoryThresholdManager {
-  private db = getDatabase();
+  private readonly injectedDb: Kysely<Database> | null;
+
+  /**
+   * @param db Optional Kysely handle, resolved LAZILY (per use, via {@link db})
+   * so constructing a manager does not open the real file-backed database.
+   * Inject an in-memory DB (`createTestDatabase`) for tests exercising the query
+   * paths (issue #3067).
+   */
+  constructor(db?: Kysely<Database>) {
+    this.injectedDb = db ?? null;
+  }
+
+  /** The injected DB, or the shared singleton resolved on first use. */
+  private get db(): Kysely<Database> {
+    return this.injectedDb ?? getDatabase();
+  }
 
   /**
    * Clean up expired thresholds based on TTL

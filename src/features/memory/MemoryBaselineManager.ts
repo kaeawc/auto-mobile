@@ -1,5 +1,6 @@
+import type { Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
-import { MemoryBaseline, NewMemoryBaseline, MemoryBaselineUpdate } from "../../db/types";
+import { Database, MemoryBaseline, NewMemoryBaseline, MemoryBaselineUpdate } from "../../db/types";
 import { logger } from "../../utils/logger";
 import { MemoryMetrics } from "./MemoryMetricsCollector";
 import {
@@ -14,7 +15,23 @@ import {
  * Manages adaptive memory baselines per app/device/tool combination
  */
 export class MemoryBaselineManager {
-  private db = getDatabase();
+  private readonly injectedDb: Kysely<Database> | null;
+
+  /**
+   * @param db Optional Kysely handle. Resolved LAZILY (per use, via {@link db})
+   * rather than in a field initializer so merely constructing a manager — e.g.
+   * for a pure-logic test of {@link calculateAnomalyMultiplier} — does not open
+   * the real file-backed database. Inject an in-memory DB (`createTestDatabase`)
+   * for tests that exercise the query paths (issue #3067).
+   */
+  constructor(db?: Kysely<Database>) {
+    this.injectedDb = db ?? null;
+  }
+
+  /** The injected DB, or the shared singleton resolved on first use. */
+  private get db(): Kysely<Database> {
+    return this.injectedDb ?? getDatabase();
+  }
 
   /**
    * Get baseline for a specific device/package/tool combination

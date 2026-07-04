@@ -6,8 +6,9 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/Performa
 import { MemoryMetricsCollector, MemoryMetrics } from "./MemoryMetricsCollector";
 import { MemoryThresholdManager } from "./MemoryThresholdManager";
 import { MemoryBaselineManager } from "./MemoryBaselineManager";
+import type { Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
-import { NewMemoryAuditResult } from "../../db/types";
+import { Database, NewMemoryAuditResult } from "../../db/types";
 
 /**
  * Represents a single memory threshold violation
@@ -40,14 +41,32 @@ export class MemoryAudit {
   private metricsCollector: MemoryMetricsCollector;
   private thresholdManager: MemoryThresholdManager;
   private baselineManager: MemoryBaselineManager;
-  private db = getDatabase();
+  private readonly injectedDb: Kysely<Database> | null;
 
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
+  /**
+   * @param db Optional Kysely handle, resolved LAZILY (per use, via {@link db})
+   * so constructing an audit for pure-logic tests (`validateMetrics`,
+   * `generateDiagnostics`) does not open the real file-backed database. Inject an
+   * in-memory DB (`createTestDatabase`) for tests exercising the persistence
+   * path (issue #3067); it is threaded to the baseline manager for a shared
+   * connection.
+   */
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    db?: Kysely<Database>
+  ) {
     this.device = device;
     this.adb = adbFactory.create(device);
     this.metricsCollector = new MemoryMetricsCollector(device, adbFactory);
-    this.thresholdManager = new MemoryThresholdManager();
-    this.baselineManager = new MemoryBaselineManager();
+    this.thresholdManager = new MemoryThresholdManager(db);
+    this.baselineManager = new MemoryBaselineManager(db);
+    this.injectedDb = db ?? null;
+  }
+
+  /** The injected DB, or the shared singleton resolved on first use. */
+  private get db(): Kysely<Database> {
+    return this.injectedDb ?? getDatabase();
   }
 
   /**

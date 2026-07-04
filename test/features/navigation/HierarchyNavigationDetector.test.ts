@@ -1,24 +1,27 @@
-import { expect, describe, test, beforeEach, afterEach, beforeAll } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import {
   HierarchyNavigationDetector,
 } from "../../../src/features/navigation/HierarchyNavigationDetector";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { AccessibilityHierarchy } from "../../../src/features/navigation/ScreenFingerprint";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { runMigrations } from "../../helpers/database";
+import {
+  installInMemoryNavManager,
+  type InMemoryNavManagerHarness,
+} from "../../helpers/navigationTestHarness";
 
 describe("HierarchyNavigationDetector", () => {
   let manager: NavigationGraphManager;
   let detector: HierarchyNavigationDetector;
   let fakeTimer: FakeTimer;
-
-  beforeAll(async () => {
-    await runMigrations();
-  });
+  let navHarness: InMemoryNavManagerHarness;
 
   beforeEach(async () => {
-    NavigationGraphManager.resetInstance();
-    manager = NavigationGraphManager.getInstance();
+    // Back the singleton with an in-memory, already-migrated DB (and silence the
+    // fire-and-forget telemetry write) so the detector's navigation writes are
+    // deterministic and never touch the real ~/.auto-mobile DB (issues #3063/#3067).
+    navHarness = await installInMemoryNavManager();
+    manager = navHarness.manager;
     await manager.setCurrentApp("com.test.app");
     await manager.clearCurrentGraph();
     await manager.setCurrentApp("com.test.app");
@@ -33,10 +36,10 @@ describe("HierarchyNavigationDetector", () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     detector.dispose();
     fakeTimer.reset();
-    NavigationGraphManager.resetInstance();
+    await navHarness.dispose();
   });
 
   describe("initial state", () => {

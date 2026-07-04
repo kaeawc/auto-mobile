@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "./testDbHelper";
+import { withInMemorySingletonDatabase } from "./inMemorySingletonDatabase";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
 
@@ -463,10 +464,15 @@ describe("TestCoverageRepository", () => {
       expect(bound.resolveConnection()).toBe(db);
     });
 
-    test("returns the shared singleton for an unbound repo", () => {
-      const a = new TestCoverageRepository(timer);
-      const b = new TestCoverageRepository(timer);
-      expect(a.resolveConnection()).toBe(b.resolveConnection());
+    test("returns the shared singleton for an unbound repo", async () => {
+      // Redirect the getDatabase() singleton to `:memory:` so the unit-test DB
+      // guard (issue #3067) permits resolving it — the assertion is about
+      // singleton identity, not the on-disk file.
+      await withInMemorySingletonDatabase(() => {
+        const a = new TestCoverageRepository(timer);
+        const b = new TestCoverageRepository(timer);
+        expect(a.resolveConnection()).toBe(b.resolveConnection());
+      });
     });
 
     test("withExecutor rebinds the resolved connection", () => {

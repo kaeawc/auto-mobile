@@ -605,15 +605,25 @@ export class CtrlProxyHierarchy {
         reject(error);
       };
 
-      // Route a runner type:"error" frame (delivered via AndroidCtrlProxyClient) for this hierarchy
-      // request into a fast rejection instead of hanging to the timeout below (issue #3032).
-      if (requestId) {
-        this.pendingHierarchyRejectors.set(requestId, {
+      // Register a fast-fail rejector for a hierarchy requestId so a runner type:"error" frame
+      // (fanned in via AndroidCtrlProxyClient.rejectPendingHierarchy) rejects THIS wait instead of
+      // hanging to the timeout below. The hook is wrapped in a fixed `.reject` property so a
+      // runner-controlled id can never drive a dynamic method-name dispatch
+      // (CodeQL js/unvalidated-dynamic-method-call). Shared by the primary request_hierarchy path
+      // (issue #3032) and the request_hierarchy_if_stale nudge (issue #3061).
+      const registerRejector = (id: string, label: string): void => {
+        this.pendingHierarchyRejectors.set(id, {
           reject: (error: string) => {
-            logger.warn(`[CTRL_PROXY] Hierarchy request ${requestId} failed via runner error: ${error}`);
+            logger.warn(`[CTRL_PROXY] ${label} ${id} failed via runner error: ${error}`);
             settleReject(new Error(error));
           }
         });
+      };
+
+      // Route a runner type:"error" frame (delivered via AndroidCtrlProxyClient) for this hierarchy
+      // request into a fast rejection instead of hanging to the timeout below (issue #3032).
+      if (requestId) {
+        registerRejector(requestId, "Hierarchy request");
       }
 
       intervalId = this.context.timer.setInterval(() => {
@@ -641,20 +651,19 @@ export class CtrlProxyHierarchy {
           logger.debug(`[CTRL_PROXY] No push received after ${staleCheckDelay}ms, sending stale check request (sinceTimestamp: ${minTimestamp})`);
           const staleId = this.sendHierarchyIfStaleRequest(minTimestamp);
           // Correlate a runner type:"error" frame for this stale nudge into THIS wait, mirroring the
-          // primary request_hierarchy path (issue #3032). The nudge is best-effort, but a decode /
-          // handler failure on request_hierarchy_if_stale should fail the enclosing wait fast rather
-          // than hang to the timeout below (issue #3061). Register against the same settleReject
-          // closure so an error frame rejects this exact waitForFreshData promise. The hook is
-          // wrapped in a fixed `.reject` property (as with requestId) so a runner-controlled id can
-          // never drive a dynamic method-name dispatch (CodeQL js/unvalidated-dynamic-method-call).
-          if (staleId) {
+          // primary request_hierarchy path (issue #3032). A decode/handler failure on
+          // request_hierarchy_if_stale should fail the enclosing wait fast rather than hang to the
+          // timeout below (issue #3061).
+          //
+          // Gate on `requestId`: only correlate the stale nudge when the enclosing wait is itself a
+          // fast-fail wait (i.e. a primary WebSocket request_hierarchy is outstanding, as in
+          // requestHierarchySync). The getLatestHierarchy path and the sync ADB-broadcast fallback
+          // pass no requestId — their timeout is intended to gracefully degrade to the stale cache,
+          // so a rejected stale nudge there would discard that cache and return null. Leaving those
+          // best-effort nudges uncorrelated preserves their documented timeout behavior.
+          if (staleId && requestId) {
             staleRequestId = staleId;
-            this.pendingHierarchyRejectors.set(staleId, {
-              reject: (error: string) => {
-                logger.warn(`[CTRL_PROXY] Hierarchy stale nudge ${staleId} failed via runner error: ${error}`);
-                settleReject(new Error(error));
-              }
-            });
+            registerRejector(staleId, "Hierarchy stale nudge");
           }
         }
 

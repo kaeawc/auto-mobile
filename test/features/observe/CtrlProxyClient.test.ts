@@ -17,6 +17,7 @@ import type { DeviceConnectionLostNotifier } from "../../../src/features/observe
 import { PortManager } from "../../../src/utils/PortManager";
 import { installInMemoryNavManager } from "../../helpers/navigationTestHarness";
 import type { HierarchySyncDiagnostics } from "../../../src/features/observe/android/types";
+import { logger } from "../../../src/utils/logger";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -1613,6 +1614,59 @@ describe("AndroidCtrlProxyClient", function() {
         expect(diagnostics.runnerError).toBe(runnerText);
         expect(errorTimer.getCurrentTime()).toBeLessThan(10000);
       } finally {
+        await testClient.close();
+      }
+    });
+
+    test("verifyServiceReady surfaces the runner error text in its terminal warn", async function() {
+      // Consumption test: prove the diagnostics text actually reaches an observable, default-level
+      // log line (not just the dropped per-attempt debug), attributing the deterministic handler
+      // failure instead of an anonymous "no hierarchy". Spy on the module logger's warn.
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      const warnMessages: string[] = [];
+      const originalWarn = logger.warn;
+      logger.warn = (message: string) => {
+        warnMessages.push(message);
+      };
+
+      try {
+        testClient.invalidateCache();
+        // Single attempt so one correlated error frame drives it straight to the terminal warn.
+        const verifyPromise = testClient.verifyServiceReady(1, 10, 10000);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const hierarchyMsg = findSentMessageOfType(socket, "request_hierarchy");
+        expect(hierarchyMsg).toBeDefined();
+
+        const runnerText = "request_hierarchy handler failed: view hierarchy extraction threw";
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: hierarchyMsg.requestId,
+          success: false,
+          error: runnerText,
+          timestamp: errorTimer.now()
+        }));
+
+        const ready = await errorTimer.resolvePromise(verifyPromise);
+
+        expect(ready).toBe(false);
+        const terminalWarn = warnMessages.find(m => m.includes("Service not ready"));
+        expect(terminalWarn).toBeDefined();
+        expect(terminalWarn).toContain(runnerText);
+      } finally {
+        logger.warn = originalWarn;
         await testClient.close();
       }
     });

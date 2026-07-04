@@ -1747,12 +1747,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   async verifyServiceReady(maxAttempts: number = 5, delayMs: number = 500, timeoutMs: number = 3000): Promise<boolean> {
+    // Remember the most recent runner error text across attempts (issue #3062) so the terminal
+    // warn — the one visible at the default log level — attributes the deterministic handler
+    // failure, rather than collapsing every attempt into an anonymous "no hierarchy" (a runner
+    // error and a plain timeout previously both surfaced identically here).
+    let lastRunnerError: string | undefined;
     const result = await this.retryExecutor.execute(
       async attempt => {
         logger.debug(`[CTRL_PROXY] Verifying service ready (attempt ${attempt}/${maxAttempts})`);
 
-        // Capture the runner's structured error text (issue #3062) so a deterministic handler
-        // failure is attributable in the retry log, not collapsed into an anonymous "no hierarchy".
         const diagnostics: HierarchySyncDiagnostics = {};
         const hierarchyResult = await this.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, timeoutMs, diagnostics);
 
@@ -1761,6 +1764,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           return true;
         }
 
+        if (diagnostics.runnerError) {
+          lastRunnerError = diagnostics.runnerError;
+        }
         const runnerErrorSuffix = diagnostics.runnerError
           ? `: runner error: ${diagnostics.runnerError}`
           : "";
@@ -1777,7 +1783,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
 
     if (!result.success) {
-      logger.warn(`[CTRL_PROXY] Service not ready after ${maxAttempts} verification attempts`);
+      const runnerErrorSuffix = lastRunnerError ? ` (last runner error: ${lastRunnerError})` : "";
+      logger.warn(`[CTRL_PROXY] Service not ready after ${maxAttempts} verification attempts${runnerErrorSuffix}`);
       return false;
     }
 

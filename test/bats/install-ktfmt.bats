@@ -25,15 +25,20 @@ setup() {
   # JAR (v0.64) was fetched on the fallback path.
   export CURL_LOG="$TEST_DIR/curl.log"
 
-  # Force detect_os -> macos regardless of the real host.
+  # detect_os reads `uname -s`; default macOS, override with UNAME_S (e.g.
+  # MINGW64_NT-10.0 to exercise the Windows path).
   cat > "$STUB_BIN/uname" <<'STUB'
 #!/usr/bin/env bash
-echo "Darwin"
+echo "${UNAME_S:-Darwin}"
 STUB
 
-  # brew: `install`/`unlink` succeed and do nothing. The version brew "installed"
-  # is whatever the ktfmt stub reports (see BREW_KTFMT_VERSION below).
+  # brew / scoop: `install`/`unlink` succeed and do nothing. The version the
+  # package manager "installed" is whatever the ktfmt stub reports (BREW_KTFMT_VERSION).
   cat > "$STUB_BIN/brew" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > "$STUB_BIN/scoop" <<'STUB'
 #!/usr/bin/env bash
 exit 0
 STUB
@@ -112,6 +117,23 @@ teardown() {
   [ -x "$HOME/.local/bin/ktfmt" ]
   # verify_installation confirmed the resolved ktfmt is now the pin, not brew's.
   [[ "$output" == *"ktfmt 0.64 is installed"* ]]
+}
+
+@test "Windows: scoop version != pin falls back to the pinned JAR (honors pin)" {
+  # Regression guard: before this, the scoop path installed with no version check
+  # or fallback, so the strict verify would hard-fail a drifted scoop install with
+  # no recourse. It must mirror the brew drift path.
+  run env UNAME_S="MINGW64_NT-10.0" BREW_KTFMT_VERSION="0.66" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -s "$CURL_LOG" ]
+  grep -q "v0.64/ktfmt-0.64-with-dependencies.jar" "$CURL_LOG"
+  [[ "$output" == *"ktfmt 0.64 is installed"* ]]
+}
+
+@test "Windows: scoop version matching the pin does NOT trigger a manual JAR download" {
+  run env UNAME_S="MINGW64_NT-10.0" BREW_KTFMT_VERSION="0.64" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ ! -s "$CURL_LOG" ]
 }
 
 @test "macOS: install FAILS loudly if the resolved ktfmt still isn't the pin (verify guard)" {

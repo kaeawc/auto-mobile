@@ -4,6 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { removeTempDbDir } from "./tempDbDir";
+import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
 
 /**
  * Regression test for the module-load-time-vs-runtime path hazard.
@@ -97,7 +98,11 @@ describe("database path lazy resolution", () => {
       await databaseModule.closeDatabase();
       await removeTempDbDir(dbDir);
     }
-  });
+    // Opens a real temp DB and runs the full startup migration set. A cold,
+    // loaded windows-latest runner legitimately needs more than bun's 5s
+    // default per-test timeout, so a slow-but-correct migration would otherwise
+    // read as a failure (#2992).
+  }, WINDOWS_FILE_DB_TEST_TIMEOUT_MS);
 
   test("queries fail clearly and consistently when startup migrations fail", async () => {
     const dbDir = await mkdtemp(path.join(tmpdir(), "auto-mobile-db-startup-fail-"));
@@ -125,5 +130,7 @@ describe("database path lazy resolution", () => {
       await databaseModule.closeDatabase();
       await removeTempDbDir(dbDir);
     }
-  });
+    // File-backed like the sibling above; the same generous ceiling covers a
+    // slow Windows startup-migration attempt before it fails clearly (#2992).
+  }, WINDOWS_FILE_DB_TEST_TIMEOUT_MS);
 });

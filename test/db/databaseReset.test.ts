@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { removeTempDbDir } from "./tempDbDir";
 import { importFreshDatabaseModule, restoreEnv, snapshotEnv } from "./freshDatabaseModule";
+import { WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./fileBackedDbTestTimeout";
 
 /**
  * Regression tests for issue #2796.
@@ -31,8 +32,8 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
   // NOT govern the `afterEach` hook, which uses bun's default hook timeout
   // independently. The cleanup stall from issue #2916 is bounded separately by
   // `removeTempDbDir` (best-effort, ~200ms/dir), keeping afterEach well under the
-  // hook timeout.
-  const FILE_BACKED_TEST_TIMEOUT_MS = 30000;
+  // hook timeout. Shares the one canonical file-backed ceiling (issue #2992).
+  const FILE_BACKED_TEST_TIMEOUT_MS = WINDOWS_FILE_DB_TEST_TIMEOUT_MS;
 
   const tempDirs: string[] = [];
   let envSnapshot: NodeJS.ProcessEnv;

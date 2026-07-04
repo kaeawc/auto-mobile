@@ -326,4 +326,64 @@ describe("finalizeToolResponse", () => {
       serverConfig.setToolResultsNoStructuredContentEnabled(originalStrip);
     }
   });
+
+  // Composition of --observe-result-compact with --actions-diff-observe (issue #2990,
+  // task 1). `actionsDiffObserve` ("return only the diff of the post-action
+  // observation") is a *dormant* output-reduction flag today: it is fully plumbed
+  // (CLI/env → outputReductionFlags → ServerConfig → daemon startup) but no
+  // production code reads `serverConfig.isActionsDiffObserveEnabled()`, so a
+  // post-action observation is currently returned in full. When the diff behavior
+  // is implemented it will reshape the `.observation` payload inside the handler,
+  // *before* `finalizeToolResponse` — which is where bounds compaction runs
+  // (output-only, at the serialization chokepoint). These tests pin two invariants
+  // so the eventual diff implementation cannot silently break composition:
+  //   1. Enabling the diff flag never disables (or is a precondition for) compaction —
+  //      compaction is gated solely by `isObserveResultCompactEnabled()`.
+  //   2. Because compaction runs *after* any handler-side diff, a future differ that
+  //      compares object-shaped `bounds.left`-style fields always sees objects, never
+  //      tuples — the two transforms never collide on the same representation.
+  describe("compact × actions-diff-observe composition (#2990)", () => {
+    let originalDiff: boolean;
+
+    beforeEach(() => {
+      originalDiff = serverConfig.isActionsDiffObserveEnabled();
+    });
+
+    afterEach(() => {
+      serverConfig.setActionsDiffObserveEnabled(originalDiff);
+    });
+
+    test("EC-D1: compact still flattens a post-action .observation when the diff flag is also on", () => {
+      serverConfig.setObserveResultCompactEnabled(true);
+      serverConfig.setActionsDiffObserveEnabled(true);
+
+      const response = createStructuredToolResponse({ success: true, observation: makeObserveResultWithBounds() });
+      const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.viewHierarchy.hierarchy.node.bounds).toEqual([0, 0, 1080, 1920]);
+      expect(obsSc.viewHierarchy.hierarchy.node.node[0].bounds).toEqual([10, 20, 30, 40]);
+      expect((finalized.structuredContent as any).success).toBe(true);
+
+      // Text mirrors the sanitized structuredContent exactly on the diffed .observation branch.
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation.viewHierarchy.hierarchy.node.bounds).toEqual([0, 0, 1080, 1920]);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("EC-D2: the diff flag alone (compact off) never compacts — bounds stay object-shaped for a field-by-field differ", () => {
+      serverConfig.setObserveResultCompactEnabled(false);
+      serverConfig.setActionsDiffObserveEnabled(true);
+
+      const response = createStructuredToolResponse({ success: true, observation: makeObserveResultWithBounds() });
+      const finalized = finalizeToolResponse(response, { name: "tapOn" });
+
+      const node = (finalized.structuredContent as any).observation.viewHierarchy.hierarchy.node;
+      expect(Array.isArray(node.bounds)).toBe(false);
+      expect(node.bounds).toEqual({ left: 0, top: 0, right: 1080, bottom: 1920 });
+      // A differ reading `bounds.left`/`bounds.top` field-by-field sees numbers, not undefined.
+      expect(node.bounds.left).toBe(0);
+      expect(node.bounds.bottom).toBe(1920);
+    });
+  });
 });

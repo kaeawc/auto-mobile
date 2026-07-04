@@ -129,46 +129,77 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "top": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "right": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "bottom": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "centerX": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "centerY": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "right": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "bottom": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerX": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerY": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom]; emitted in place of the {left, top, right, bottom} object only when the --observe-result-compact flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false
+              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
             },
             "text": {
               "type": "string"
@@ -5182,46 +5213,77 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "top": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "right": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "bottom": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "centerX": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "centerY": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "right": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "bottom": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerX": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerY": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom]; emitted in place of the {left, top, right, bottom} object only when the --observe-result-compact flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false
+              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
             },
             "text": {
               "type": "string"
@@ -5397,46 +5459,77 @@
                     "type": "string"
                   },
                   "bounds": {
-                    "type": "object",
-                    "properties": {
-                      "left": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "left": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "top": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "right": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "bottom": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "centerX": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "centerY": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "left",
+                          "top",
+                          "right",
+                          "bottom"
+                        ],
+                        "additionalProperties": false
                       },
-                      "top": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "right": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "bottom": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerX": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerY": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
+                      {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          }
+                        ],
+                        "description": "Compact bounds tuple [left, top, right, bottom]; emitted in place of the {left, top, right, bottom} object only when the --observe-result-compact flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
                       }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
                     ],
-                    "additionalProperties": false
+                    "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
                   },
                   "indexInMatches": {
                     "type": "integer",
@@ -5482,46 +5575,77 @@
               "type": "object",
               "properties": {
                 "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "left": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "left": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "top": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "right": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "bottom": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "centerX": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "centerY": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "left",
+                        "top",
+                        "right",
+                        "bottom"
+                      ],
+                      "additionalProperties": false
                     },
-                    "top": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "right": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "bottom": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerX": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerY": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      ],
+                      "description": "Compact bounds tuple [left, top, right, bottom]; emitted in place of the {left, top, right, bottom} object only when the --observe-result-compact flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
                     }
-                  },
-                  "required": [
-                    "left",
-                    "top",
-                    "right",
-                    "bottom"
                   ],
-                  "additionalProperties": false
+                  "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
                 },
                 "text": {
                   "type": "string"
@@ -5683,46 +5807,77 @@
               "type": "object",
               "properties": {
                 "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "left": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "left": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "top": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "right": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "bottom": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "centerX": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "centerY": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "left",
+                        "top",
+                        "right",
+                        "bottom"
+                      ],
+                      "additionalProperties": false
                     },
-                    "top": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "right": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "bottom": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerX": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerY": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      ],
+                      "description": "Compact bounds tuple [left, top, right, bottom]; emitted in place of the {left, top, right, bottom} object only when the --observe-result-compact flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
                     }
-                  },
-                  "required": [
-                    "left",
-                    "top",
-                    "right",
-                    "bottom"
                   ],
-                  "additionalProperties": false
+                  "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
                 },
                 "text": {
                   "type": "string"
@@ -5916,46 +6071,77 @@
               "type": "string"
             },
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "top": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "right": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "bottom": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "centerX": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "centerY": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "right": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "bottom": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerX": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerY": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom]; emitted in place of the {left, top, right, bottom} object only when the --observe-result-compact flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false
+              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
             },
             "indexInMatches": {
               "type": "integer",
@@ -6011,46 +6197,77 @@
                 "type": "string"
               },
               "bounds": {
-                "type": "object",
-                "properties": {
-                  "left": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "top": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "right": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "bottom": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "centerX": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "centerY": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
+                    "additionalProperties": false
                   },
-                  "top": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "right": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "bottom": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "centerX": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "centerY": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
+                  {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    ],
+                    "description": "Compact bounds tuple [left, top, right, bottom]; emitted in place of the {left, top, right, bottom} object only when the --observe-result-compact flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
                   }
-                },
-                "required": [
-                  "left",
-                  "top",
-                  "right",
-                  "bottom"
                 ],
-                "additionalProperties": false
+                "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
               },
               "indexInMatches": {
                 "type": "integer",

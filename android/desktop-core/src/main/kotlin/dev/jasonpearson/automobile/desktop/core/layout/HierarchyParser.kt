@@ -158,6 +158,18 @@ private fun parseBoundsElement(boundsElement: JsonElement?): ElementBounds? {
       )
     }
     is JsonPrimitive -> boundsElement.contentOrNull?.let { parseBoundsString(it) }
+    // Compact form emitted by the MCP server's --observe-result-compact flag:
+    // bounds is the positional tuple [left, top, right, bottom]. Mirrors the
+    // sibling RealLayoutDataSource.parseBounds so both hierarchy parsers agree.
+    is JsonArray ->
+      if (boundsElement.size == 4)
+        ElementBounds(
+          left = (boundsElement[0] as? JsonPrimitive)?.intOrNull ?: 0,
+          top = (boundsElement[1] as? JsonPrimitive)?.intOrNull ?: 0,
+          right = (boundsElement[2] as? JsonPrimitive)?.intOrNull ?: 0,
+          bottom = (boundsElement[3] as? JsonPrimitive)?.intOrNull ?: 0,
+        )
+      else ElementBounds(0, 0, 0, 0)
     else -> null
   }
 }

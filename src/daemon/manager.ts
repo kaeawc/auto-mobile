@@ -1038,6 +1038,8 @@ export function parseDaemonArgs(args: string[]): DaemonOptions {
       options.actionsDiffObserve = true;
     } else if (args[i] === "--actions-no-observe") {
       options.actionsNoObserve = true;
+    } else if (args[i] === "--tool-results-compact-json") {
+      options.toolResultsCompactJson = true;
     }
   }
   return options;

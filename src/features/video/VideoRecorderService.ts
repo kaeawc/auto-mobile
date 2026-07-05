@@ -151,11 +151,17 @@ export class VideoRecorderService {
     const config = parseVideoRecordingConfig(options.config);
     const recordingId = this.idGenerator.next();
     const startedAt = this.now().toISOString();
-    const recordingDir = this.getRecordingDir(recordingId);
+    // Prefer a human-readable name (e.g. a test-case id passed as `outputName`)
+    // for the on-disk folder + file, keeping the recordingId as a suffix so paths
+    // stay unique per recording — delete/evict rm's the per-recording directory,
+    // so folders must not be shared across recordings.
+    const label = sanitizeRecordingLabel(options.outputName);
+    const nameSlug = label ? `${label}-${recordingId}` : recordingId;
+    const recordingDir = this.getRecordingDir(nameSlug);
 
     await fsPromises.mkdir(recordingDir, { recursive: true });
 
-    const fileName = buildRecordingFileName(recordingId, startedAt, config.format);
+    const fileName = buildRecordingFileName(nameSlug, startedAt, config.format);
     const outputPath = path.join(recordingDir, fileName);
 
     const handle = await this.backend.start({
@@ -232,8 +238,8 @@ export class VideoRecorderService {
     return metadata;
   }
 
-  private getRecordingDir(recordingId: string): string {
-    return path.join(this.archiveRoot, recordingId);
+  private getRecordingDir(name: string): string {
+    return path.join(this.archiveRoot, name);
   }
 
   private async safeStat(filePath: string): Promise<Stats | null> {
@@ -320,12 +326,28 @@ function parsePositiveNumber(
 }
 
 function buildRecordingFileName(
-  recordingId: string,
+  name: string,
   startedAt: string,
   format: VideoFormat
 ): string {
   const timestamp = formatTimestampForFilename(startedAt);
-  return `${recordingId}-${timestamp}.${format}`;
+  return `${name}-${timestamp}.${format}`;
+}
+
+/**
+ * Filesystem-safe, readable label from a caller-supplied `outputName` (e.g. a
+ * test-case id). Collapses anything outside [A-Za-z0-9._-] to a dash, trims
+ * stray dashes, and caps length. Returns "" when there's no usable name, in
+ * which case the caller falls back to the recordingId.
+ */
+function sanitizeRecordingLabel(outputName?: string): string {
+  if (!outputName) {
+    return "";
+  }
+  return outputName
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .slice(0, 64)
+    .replace(/^-+|-+$/g, "");
 }
 
 function formatTimestampForFilename(isoTimestamp: string): string {

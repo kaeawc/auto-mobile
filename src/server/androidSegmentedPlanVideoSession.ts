@@ -31,10 +31,11 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
  * Chains multiple Android `screenrecord` sessions so plan runs can exceed the 180s tool limit.
  * One recording is active at a time; {@link onBeforePlanStep} rotates before the cap.
  *
- * TODO: Each segment currently lands in its own subdirectory (`archiveRoot/<recordingId>/`)
- * because `VideoRecorderService` creates a per-recording folder. Ideally all segments for a
- * single plan run would be siblings in one shared directory. See Option A (post-hoc move) or
- * Option B (outputDirectory override on StartVideoRecordingOptions) for approaches.
+ * TODO: Each segment currently lands in its own subdirectory
+ * (`archiveRoot/<outputName>-<recordingId>/`) because `VideoRecorderService` creates a
+ * per-recording folder. Ideally all segments for a single plan run would be siblings in one
+ * shared directory. See Option A (post-hoc move) or Option B (outputDirectory override on
+ * StartVideoRecordingOptions) for approaches.
  */
 export class AndroidSegmentedPlanVideoSession {
   private readonly device: BootedDevice;

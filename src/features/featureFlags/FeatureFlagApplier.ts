@@ -69,6 +69,9 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "actions-no-observe":
         serverConfig.setActionsNoObserveEnabled(enabled);
         break;
+      case "tool-results-compact-json":
+        serverConfig.setToolResultsCompactJsonEnabled(enabled);
+        break;
     }
   }
 }

@@ -2,6 +2,7 @@
  * Utility functions for tool handlers
  */
 import { OPERATION_CANCELLED_MESSAGE } from "./constants";
+import { serverConfig } from "./ServerConfig";
 
 const stripAccessibilityExtras = (key: string, value: unknown): unknown => {
   if (key === "extras") {
@@ -11,7 +12,11 @@ const stripAccessibilityExtras = (key: string, value: unknown): unknown => {
 };
 
 export const stringifyToolResponse = (content: unknown): string => {
-  return JSON.stringify(content, stripAccessibilityExtras, 2);
+  // Pretty-printing (indent=2) is ~35% of the serialized size on element-heavy
+  // observations and carries no meaning for the model — drop it when the compact
+  // flag is set. Same data, fewer tokens; no effect on tapOn/text matching.
+  const indent = serverConfig.isToolResultsCompactJsonEnabled() ? undefined : 2;
+  return JSON.stringify(content, stripAccessibilityExtras, indent);
 };
 
 /**

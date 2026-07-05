@@ -12,6 +12,7 @@ describe("ServerConfig output-reduction flags", () => {
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
     serverConfig.setActionsDiffObserveEnabled(false);
     serverConfig.setActionsNoObserveEnabled(false);
+    serverConfig.setToolResultsCompactJsonEnabled(false);
   });
 
   test("observe-result-drop-elements defaults off and toggles", () => {
@@ -42,5 +43,11 @@ describe("ServerConfig output-reduction flags", () => {
     expect(serverConfig.isActionsNoObserveEnabled()).toBe(false);
     serverConfig.setActionsNoObserveEnabled(true);
     expect(serverConfig.isActionsNoObserveEnabled()).toBe(true);
+  });
+
+  test("tool-results-compact-json defaults off and toggles", () => {
+    expect(serverConfig.isToolResultsCompactJsonEnabled()).toBe(false);
+    serverConfig.setToolResultsCompactJsonEnabled(true);
+    expect(serverConfig.isToolResultsCompactJsonEnabled()).toBe(true);
   });
 });

@@ -193,6 +193,8 @@ export interface DaemonOptions {
   actionsDiffObserve?: boolean;
   /** Output reduction: skip the post-action observation entirely (issue #2756) */
   actionsNoObserve?: boolean;
+  /** Output reduction: serialize tool results as compact (non-pretty) JSON (issue #2756) */
+  toolResultsCompactJson?: boolean;
 }
 
 /**

@@ -130,7 +130,12 @@ jobs:
       - name: Run Bun MCP startup smoke
         run: bun run test:startup:bun
 
+      # Disable the JSC Wasm OSR tier: it intermittently miscompiles the
+      # @jimp/wasm-webp Emscripten module on Linux x64 (oven-sh/bun#26366),
+      # failing the smoke with an embind null-reference error. See issue #3189.
       - name: Run Bun image runtime smoke
+        env:
+          BUN_JSC_useWasmOSR: "0"
         run: bun run test:image:bun
 
       - name: Create release notes

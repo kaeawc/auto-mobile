@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
+import type { CtrlProxyActionResult, IOSCtrlProxy } from "../../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../../src/models";
 import {
   FakeWebSocket,
@@ -248,6 +249,63 @@ describe("CtrlProxyVoiceOver", function() {
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
+      } finally {
+        await client.close();
+      }
+    });
+
+    // Regression guard for #2956: `requestVoiceOverActivate` and `requestAction`
+    // are filled from the same `action_result` decode path, so they must share a
+    // single return type. If someone re-introduces a divergent
+    // `CtrlProxyVoiceOverActionResult`, these mutual assignments stop compiling
+    // and the typecheck gate fails.
+    test("returns the same CtrlProxyActionResult type as requestAction (compile-time guard)", function() {
+      type ActivateResult = Awaited<ReturnType<IOSCtrlProxy["requestVoiceOverActivate"]>>;
+      type ActionResult = Awaited<ReturnType<IOSCtrlProxy["requestAction"]>>;
+
+      // Both directions must hold → the two shapes are identical.
+      const fromAction: ActivateResult = {} as ActionResult;
+      const fromActivate: ActionResult = {} as ActivateResult;
+      // And both are exactly CtrlProxyActionResult.
+      const canonical: CtrlProxyActionResult = fromActivate;
+      const _roundTrip: ActivateResult = canonical;
+
+      expect(fromAction).toBeDefined();
+      expect(_roundTrip).toBeDefined();
+    });
+
+    // Regression guard for #2956: when the connected device does not advertise
+    // `request_action`, `requestVoiceOverActivate` must resolve to a graceful
+    // failure (never send on the wire, never hang) rather than time out. Note
+    // this contract is satisfied by `sendCommand`'s default unsupported-command
+    // fallback too — the wrapper's own `unsupportedCommandError` handler (added
+    // here for parity with `requestVoiceOverState`) produces the byte-identical
+    // shape, so this test pins the observable behavior, not the handler's
+    // presence specifically.
+    test("resolves gracefully when the device does not support request_action", async function() {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+
+      try {
+        await client.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        // Device advertises a command set that excludes request_action.
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_recent_apps"],
+        }));
+
+        const result = await client.requestVoiceOverActivate("Submit", "activate");
+
+        expect(result.success).toBe(false);
+        expect(result.totalTimeMs).toBe(0);
+        expect(result.error).toContain("request_action");
+        // Unsupported commands short-circuit before hitting the wire.
+        expect(socket!.sentMessages).toHaveLength(0);
       } finally {
         await client.close();
       }

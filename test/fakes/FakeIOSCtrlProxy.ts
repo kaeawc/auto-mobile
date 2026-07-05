@@ -23,7 +23,6 @@ import {
 } from "../../src/features/observe/ios";
 import type {
   CtrlProxyVoiceOverResult,
-  CtrlProxyVoiceOverActionResult,
   CtrlProxyActionResult,
 } from "../../src/features/observe/ios/types";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
@@ -116,7 +115,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private swipeResult: CtrlProxySwipeResult | null = null;
   private recentAppsResult: CtrlProxyRecentAppsResult | null = null;
   private voiceOverState: boolean = false;
-  private voiceOverActivateResult: CtrlProxyVoiceOverActionResult | null = null;
+  private voiceOverActivateResult: CtrlProxyActionResult | null = null;
   private multiFingerSwipeResult: CtrlProxySwipeResult | null = null;
   private actionResult: CtrlProxyActionResult | null = null;
   private clipboardResult: CtrlProxyClipboardResult | null = null;
@@ -247,7 +246,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   /**
    * Configure VoiceOver activate result (null = default success)
    */
-  setVoiceOverActivateResult(result: CtrlProxyVoiceOverActionResult | null): void {
+  setVoiceOverActivateResult(result: CtrlProxyActionResult | null): void {
     this.voiceOverActivateResult = result;
   }
 
@@ -954,7 +953,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     action: "activate" | "long_press",
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
-  ): Promise<CtrlProxyVoiceOverActionResult> {
+  ): Promise<CtrlProxyActionResult> {
     await this.applyDelay("voiceOverActivate");
     this.checkFailure("voiceOverActivate");
 

@@ -141,7 +141,6 @@ import type {
   CtrlProxyPerformanceSnapshot,
   CtrlProxyCachedHierarchy,
   CtrlProxyVoiceOverResult,
-  CtrlProxyVoiceOverActionResult,
   CtrlProxyActionResult,
   CtrlProxyClipboardResult,
   CtrlProxyHighlightResult,
@@ -278,7 +277,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
 
   requestVoiceOverActivate(
     label: string, action: "activate" | "long_press", timeoutMs?: number, perf?: PerformanceTracker
-  ): Promise<CtrlProxyVoiceOverActionResult>;
+  ): Promise<CtrlProxyActionResult>;
 
   requestAction(
     action: string,
@@ -1329,7 +1328,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     action: "activate" | "long_press",
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
-  ): Promise<CtrlProxyVoiceOverActionResult> {
+  ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestVoiceOverActivate(label, action, timeoutMs, perf);
   }
 

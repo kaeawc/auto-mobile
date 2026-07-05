@@ -220,14 +220,6 @@ export interface CtrlProxyVoiceOverResult {
   error?: string;
 }
 
-/** VoiceOver action result from CtrlProxy iOS */
-export interface CtrlProxyVoiceOverActionResult {
-  success: boolean;
-  action?: string;
-  totalTimeMs?: number;
-  error?: string;
-}
-
 /** Highlight result from CtrlProxy iOS */
 export type CtrlProxyHighlightResult = HighlightOperationResult;
 

@@ -173,11 +173,38 @@ describe("finalizeToolResponse", () => {
     expect(finalizeToolResponse("plain", { name: "observe" })).toBe("plain");
   });
 
-  test("EC5: observe payload without a viewHierarchy is a safe no-op", () => {
-    const payload: any = { updatedAt: 1, screenSize: { width: 1, height: 1 }, systemInsets: {} };
+  test("observe payload without a viewHierarchy still strips perfTiming", () => {
+    const payload: any = {
+      updatedAt: 1,
+      screenSize: { width: 1, height: 1 },
+      systemInsets: {},
+      perfTiming: [{ name: "observe", durationMs: 12 }],
+      perfTimingTruncated: true,
+    };
     const response = createStructuredToolResponse(payload);
+
     const finalized = finalizeToolResponse(response, { name: "observe" });
-    expect(finalized.structuredContent).toEqual(payload);
+
+    expect((finalized.structuredContent as any).perfTiming).toBeUndefined();
+    expect((finalized.structuredContent as any).perfTimingTruncated).toBe(true);
+    expect(payload.perfTiming).toBeDefined();
+    expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+  });
+
+  test("action observation without a viewHierarchy still strips perfTiming", () => {
+    const observation: any = {
+      updatedAt: 1,
+      screenSize: { width: 1, height: 1 },
+      systemInsets: {},
+      perfTiming: [{ name: "tapOn", durationMs: 12 }],
+    };
+    const response = createStructuredToolResponse({ success: true, observation });
+
+    const finalized = finalizeToolResponse(response, { name: "tapOn" });
+
+    expect((finalized.structuredContent as any).observation.perfTiming).toBeUndefined();
+    expect(observation.perfTiming).toBeDefined();
+    expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
   });
 
   test("strips the performance-audit raw dumps and truncates diagnostics at the GFXINFO marker", () => {

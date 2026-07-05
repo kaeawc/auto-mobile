@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { DefaultUIStateSetup, type ObserveScreenLike } from "../../../src/features/navigation/DefaultUIStateSetup";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { BootedDevice } from "../../../src/models";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { NavigationEdge } from "../../../src/features/navigation/NavigationGraphManager";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
-import type { ScrollPosition } from "../../../src/utils/interfaces/NavigationGraph";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import type { ModalState, ScrollPosition } from "../../../src/utils/interfaces/NavigationGraph";
 
 const device: BootedDevice = {
   deviceId: "test-device",
@@ -19,7 +21,11 @@ function makeSetup(
   observeScreenProvider?: () => ObserveScreenLike
 ): DefaultUIStateSetup {
   const fakeAdb = new FakeAdbClient() as unknown as AdbClient;
-  return new DefaultUIStateSetup(device, fakeAdb, observeScreenProvider);
+  // Auto-advancing fake timer so the internal `sleep()` delays resolve
+  // immediately — keeps these unit tests fast (<100ms) and non-flaky.
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  return new DefaultUIStateSetup(device, fakeAdb, observeScreenProvider, timer);
 }
 
 describe("DefaultUIStateSetup", () => {
@@ -120,6 +126,81 @@ describe("DefaultUIStateSetup", () => {
       const action = await setup.setupScrollPosition(scrollPosition, "android");
 
       expect(action).toBeNull();
+    });
+  });
+
+  // Regression for issue #3106: the bottomsheet branch of `dismissTopModal`
+  // resolved `ToolRegistry.getTool("swipe")`, but no tool is registered under
+  // that name — the interaction tool is `swipeOn`. So the swipe-down dismissal
+  // was dead code that silently fell through to the back-button fallback. These
+  // tests pin that the branch resolves and invokes the registered `swipeOn`
+  // handler with the correct arg shape so a wrong tool name regresses loudly.
+  describe("dismissTopModal bottomsheet swipe-down (#3106)", () => {
+    afterEach(() => {
+      ToolRegistry.clearTools();
+    });
+
+    // A null hierarchy makes getCurrentUIState() return undefined, so the
+    // post-swipe dismissal check (`!currentState?.modalStack?.some(...)`) treats
+    // the sheet as gone — the swipe branch resolves as dismissed without ever
+    // reaching the back-button fallback.
+    const nullObserve = (): ObserveScreenLike => ({
+      execute: async () => ({ viewHierarchy: null } as unknown as ObserveResult),
+    });
+
+    const bottomSheet: ModalState = { type: "bottomsheet", layer: 1, windowId: 42 };
+
+    test("invokes the registered `swipeOn` handler (not `swipe`) with direction down", async () => {
+      let swipeOnCalls = 0;
+      let capturedArgs: Record<string, unknown> | undefined;
+      ToolRegistry.register("swipeOn", "swipeOn", {}, async (args: any) => {
+        swipeOnCalls++;
+        capturedArgs = args;
+        return createStructuredToolResponse({ success: true });
+      });
+
+      const setup = makeSetup(nullObserve);
+      const dismissed = await (
+        setup as unknown as {
+          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
+        }
+      ).dismissTopModal(bottomSheet, "android");
+
+      expect(dismissed).toBe(true);
+      expect(swipeOnCalls).toBe(1);
+      expect(capturedArgs).toBeDefined();
+      expect(capturedArgs!.direction).toBe("down");
+      expect(capturedArgs!.platform).toBe("android");
+      // Must force a full-screen swipe: with the default (autoTarget true) and no
+      // lookFor/container, swipeOn targets a scrollable child and would scroll the
+      // sheet's inner list instead of dragging the sheet down to dismiss it.
+      expect(capturedArgs!.autoTarget).toBe(false);
+      // The old dead-code path passed a bogus `action: "swipe"` shape that the
+      // `swipeOn` schema does not accept — the fixed call must not carry it.
+      expect(capturedArgs!.action).toBeUndefined();
+      // Marked internal (#3087) so navigation setup neither diffs/strips its
+      // observation nor advances the agent-facing diff baseline.
+      expect(capturedArgs![INTERNAL_NO_DIFF_PARAM]).toBe(true);
+    });
+
+    test("does not mistakenly resolve a tool registered under the old name `swipe`", async () => {
+      let legacySwipeCalls = 0;
+      // Register ONLY the wrong name. With the bug this would be the tool the
+      // branch resolves; after the fix it must be ignored (no swipeOn present →
+      // the branch skips straight to the back-button fallback).
+      ToolRegistry.register("swipe", "swipe", {}, async () => {
+        legacySwipeCalls++;
+        return createStructuredToolResponse({ success: true });
+      });
+
+      const setup = makeSetup(nullObserve);
+      await (
+        setup as unknown as {
+          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
+        }
+      ).dismissTopModal(bottomSheet, "android");
+
+      expect(legacySwipeCalls).toBe(0);
     });
   });
 });

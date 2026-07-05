@@ -1,6 +1,6 @@
 import { ActionableError, BootedDevice, ClearAppDataResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS, terminateAppIfRunning } from "../../utils/ios-cmdline-tools/iosAppContainer";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../../utils/logger";
@@ -42,7 +42,7 @@ export class ClearAppDataIos {
     }
     this.device = device;
     this.simctl = simctl || new SimCtlClient(device);
-    this.reinstaller = reinstaller || new DeviceAppInspector();
+    this.reinstaller = reinstaller || new DeviceAppManager();
     this.isSimulator = isSimulatorFn || (() => isIosSimulatorUdid(device.deviceId));
   }
 

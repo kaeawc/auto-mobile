@@ -4,7 +4,7 @@
  *
  * Both the simulator path (`simctl terminate`, see `TerminateApp`) and the
  * physical-device path (`devicectl device process terminate`, see
- * `DeviceAppInspector`) can fail because the target process exited on its own
+ * `DeviceAppManager`) can fail because the target process exited on its own
  * between the moment we resolved it and the moment we tried to kill it. That is
  * not a real failure — the app is gone either way — so the caller reports an
  * effectively-terminated app instead of a false `success:false`.

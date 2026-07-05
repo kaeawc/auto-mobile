@@ -7,7 +7,7 @@ import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../../util
 import { DefaultAndroidBuildToolsLocator, type AndroidBuildToolsLocator } from "../../utils/android-cmdline-tools/AndroidBuildToolsLocator";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
@@ -41,7 +41,7 @@ export class InstallApp {
     this.buildToolsLocator = buildToolsLocator || new DefaultAndroidBuildToolsLocator();
     this.createPerformanceTracker = performanceTrackerFactory;
     this.simctl = simctl || new SimCtlClient(device);
-    this.deviceAppInstaller = deviceAppInstaller || new DeviceAppInspector();
+    this.deviceAppInstaller = deviceAppInstaller || new DeviceAppManager();
   }
 
   private isSimulator(): boolean {

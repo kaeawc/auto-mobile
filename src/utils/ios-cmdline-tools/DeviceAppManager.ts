@@ -9,7 +9,7 @@ import { isRunningInDocker } from "../dockerEnv";
 import { getDeviceAppBundleHash, installDeviceApp, isHostControlAvailable, shouldUseHostControl, uninstallDeviceApp } from "../hostControlClient";
 import type { Logger } from "../logger";
 
-interface DeviceAppInspectorDependencies {
+interface DeviceAppManagerDependencies {
   platform: () => NodeJS.Platform;
   exec: (command: string) => Promise<ExecResult>;
   readFile: (path: string) => Promise<string>;
@@ -29,7 +29,7 @@ interface DeviceAppInspectorDependencies {
   };
 }
 
-const defaultDependencies: DeviceAppInspectorDependencies = {
+const defaultDependencies: DeviceAppManagerDependencies = {
   platform: () => process.platform,
   exec: async command => {
     const { exec } = await import("child_process");
@@ -132,7 +132,7 @@ const extractBundlePath = (entry: Record<string, unknown>): string | null => {
 
 const findAppBundleInDir = async (
   root: string,
-  deps: DeviceAppInspectorDependencies
+  deps: DeviceAppManagerDependencies
 ): Promise<string | null> => {
   const entries = await deps.readdir(root);
   for (const entry of entries) {
@@ -364,7 +364,7 @@ const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: str
 
 /**
  * Narrow seam OpenURL depends on to open a URL on a *physical* iOS device.
- * Implemented by {@link DeviceAppInspector} (the shared `devicectl` wrapper);
+ * Implemented by {@link DeviceAppManager} (the shared `devicectl` wrapper);
  * faked in tests so the URL path never shells out. Kept minimal (YAGNI): OpenURL
  * only needs to know whether the physical-device path is usable and how to launch
  * a bundle with a payload URL.
@@ -380,10 +380,10 @@ export interface DeviceUrlLauncher {
   launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void>;
 }
 
-export class DeviceAppInspector implements DeviceUrlLauncher {
-  private readonly deps: DeviceAppInspectorDependencies;
+export class DeviceAppManager implements DeviceUrlLauncher {
+  private readonly deps: DeviceAppManagerDependencies;
 
-  constructor(deps: DeviceAppInspectorDependencies = defaultDependencies) {
+  constructor(deps: DeviceAppManagerDependencies = defaultDependencies) {
     this.deps = deps;
   }
 
@@ -469,13 +469,13 @@ export class DeviceAppInspector implements DeviceUrlLauncher {
     if (this.isHostControlMode()) {
       const available = await this.deps.hostControl.isAvailable();
       if (!available) {
-        this.deps.logger.warn("[DeviceAppInspector] Host control not available for devicectl");
+        this.deps.logger.warn("[DeviceAppManager] Host control not available for devicectl");
         return null;
       }
 
       const result = await this.deps.hostControl.getAppBundleHash(deviceUdid, bundleId);
       if (!result.success) {
-        this.deps.logger.warn(`[DeviceAppInspector] Host control devicectl failed: ${result.error || "Unknown error"}`);
+        this.deps.logger.warn(`[DeviceAppManager] Host control devicectl failed: ${result.error || "Unknown error"}`);
         return null;
       }
       return result.data?.hash ?? null;
@@ -486,7 +486,7 @@ export class DeviceAppInspector implements DeviceUrlLauncher {
     try {
       return await this.withInstalledAppBundle(deviceUdid, bundleId, bundlePath => hashAppBundle(bundlePath));
     } catch (error) {
-      this.deps.logger.warn(`[DeviceAppInspector] Failed to hash installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+      this.deps.logger.warn(`[DeviceAppManager] Failed to hash installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
@@ -588,7 +588,7 @@ export class DeviceAppInspector implements DeviceUrlLauncher {
 
         bundleOnDisk = await findAppBundleInDir(copyDir, this.deps);
       } catch (error) {
-        this.deps.logger.warn(`[DeviceAppInspector] Failed to read installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+        this.deps.logger.warn(`[DeviceAppManager] Failed to read installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
         return null;
       }
 
@@ -613,7 +613,7 @@ export class DeviceAppInspector implements DeviceUrlLauncher {
     if (this.isHostControlMode()) {
       const available = await this.deps.hostControl.isAvailable();
       if (!available) {
-        this.deps.logger.warn("[DeviceAppInspector] Host control not available for devicectl uninstall");
+        this.deps.logger.warn("[DeviceAppManager] Host control not available for devicectl uninstall");
         return;
       }
 
@@ -644,7 +644,7 @@ export class DeviceAppInspector implements DeviceUrlLauncher {
     if (this.isHostControlMode()) {
       const available = await this.deps.hostControl.isAvailable();
       if (!available) {
-        this.deps.logger.warn("[DeviceAppInspector] Host control not available for devicectl install");
+        this.deps.logger.warn("[DeviceAppManager] Host control not available for devicectl install");
         throw new Error("Host control not available for physical device app installation");
       }
 
@@ -805,7 +805,7 @@ export class DeviceAppInspector implements DeviceUrlLauncher {
         throw error;
       }
       this.deps.logger.debug(
-        `[DeviceAppInspector] terminate PID ${pid} for ${bundleId} raced an exit; treating as terminated: ${message}`
+        `[DeviceAppManager] terminate PID ${pid} for ${bundleId} raced an exit; treating as terminated: ${message}`
       );
     }
     // wasRunning:true in both the killed and raced-exit cases: we positively
@@ -891,7 +891,7 @@ export class DeviceAppInspector implements DeviceUrlLauncher {
       appPath = result.trim();
     } catch (error) {
       const errorMessage = getErrorMessage(error);
-      const logMessage = `[DeviceAppInspector] Failed to read simulator app bundle for ${bundleId}: ${errorMessage}`;
+      const logMessage = `[DeviceAppManager] Failed to read simulator app bundle for ${bundleId}: ${errorMessage}`;
       if (isExpectedMissingLegacySimulatorApp(bundleId, errorMessage)) {
         this.deps.logger.debug(logMessage);
       } else {
@@ -907,7 +907,7 @@ export class DeviceAppInspector implements DeviceUrlLauncher {
     try {
       return await hashAppBundle(appPath);
     } catch (error) {
-      this.deps.logger.warn(`[DeviceAppInspector] Failed to hash simulator app bundle for ${bundleId}: ${getErrorMessage(error)}`);
+      this.deps.logger.warn(`[DeviceAppManager] Failed to hash simulator app bundle for ${bundleId}: ${getErrorMessage(error)}`);
       return null;
     }
   }

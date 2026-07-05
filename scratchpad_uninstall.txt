@@ -4,7 +4,7 @@ import { UninstallAppResult } from "../../models/UninstallAppResult";
 import { BootedDevice } from "../../models";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
@@ -30,7 +30,7 @@ export class UninstallApp {
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.simctl = simctl || new SimCtlClient(device);
-    this.deviceAppUninstaller = deviceAppUninstaller || new DeviceAppInspector();
+    this.deviceAppUninstaller = deviceAppUninstaller || new DeviceAppManager();
   }
 
   private isSimulator(): boolean {

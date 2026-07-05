@@ -1,4 +1,4 @@
-export class FakeHostControlDeviceAppInspector {
+export class FakeHostControlDeviceAppManager {
   private useHostControl = false;
   private runningInDocker = false;
   private available = false;

@@ -149,6 +149,143 @@ describe("sanitizeObserveResult", () => {
     });
   });
 
+  describe("top-level debug-perf telemetry reduction (always)", () => {
+    test("drops perfTiming from the output copy while leaving the input untouched", () => {
+      const { observe } = loadAndroidHomeObserve();
+      expect(observe.perfTiming).toBeDefined();
+      const before = JSON.stringify(observe.perfTiming);
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+
+      expect(out.perfTiming).toBeUndefined();
+      expect(JSON.stringify(observe.perfTiming)).toBe(before);
+    });
+
+    test("measurably shrinks bytes and tokens by dropping fixture perfTiming", () => {
+      const { observe } = loadAndroidHomeObserve();
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+      const withPerfTiming = { ...out, perfTiming: observe.perfTiming };
+
+      expect(measureValue(out).bytes).toBeLessThan(measureValue(withPerfTiming).bytes);
+      expect(measureValue(out).tokens).toBeLessThan(measureValue(withPerfTiming).tokens);
+    });
+
+    test("preserves action UI-stability gfxMetrics when no performanceAudit exists", () => {
+      const { observe } = loadAndroidHomeObserve();
+      delete observe.performanceAudit;
+      observe.gfxMetrics = {
+        packageName: "com.example.app",
+        percentile50thMs: 12,
+        percentile90thMs: 18,
+        percentile95thMs: 22,
+        percentile99thMs: 30,
+        missedVsyncCount: 1,
+        slowUiThreadCount: 1,
+        frameDeadlineMissedCount: 0,
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      };
+      const gfxMetricsBefore = JSON.stringify(observe.gfxMetrics);
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+
+      expect(out.gfxMetrics).toEqual(observe.gfxMetrics);
+      expect(JSON.stringify(observe.gfxMetrics)).toBe(gfxMetricsBefore);
+    });
+
+    test("trims redundant gfxMetrics frame fields when performanceAudit metrics are present", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.gfxMetrics = {
+        packageName: "com.example.app",
+        percentile50thMs: 12,
+        percentile90thMs: 18,
+        percentile95thMs: 22,
+        percentile99thMs: 30,
+        missedVsyncCount: 1,
+        slowUiThreadCount: 1,
+        frameDeadlineMissedCount: 0,
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      };
+      const auditMetricsBefore = JSON.stringify(observe.performanceAudit?.metrics);
+      const gfxMetricsBefore = JSON.stringify(observe.gfxMetrics);
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+
+      expect(out.gfxMetrics).toEqual({
+        packageName: "com.example.app",
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      });
+      expect(JSON.stringify(observe.gfxMetrics)).toBe(gfxMetricsBefore);
+      expect(JSON.stringify(observe.performanceAudit?.metrics)).toBe(auditMetricsBefore);
+    });
+
+    test("preserves gfxMetrics frame fields when audit replacements are null", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.performanceAudit!.metrics.p50Ms = null;
+      observe.performanceAudit!.metrics.p90Ms = null;
+      observe.performanceAudit!.metrics.p95Ms = null;
+      observe.performanceAudit!.metrics.p99Ms = null;
+      observe.performanceAudit!.metrics.missedVsyncCount = null;
+      observe.performanceAudit!.metrics.slowUiThreadCount = null;
+      observe.performanceAudit!.metrics.frameDeadlineMissedCount = null;
+      observe.gfxMetrics = {
+        packageName: "com.example.app",
+        percentile50thMs: 12,
+        percentile90thMs: 18,
+        percentile95thMs: 22,
+        percentile99thMs: 30,
+        missedVsyncCount: 1,
+        slowUiThreadCount: 1,
+        frameDeadlineMissedCount: 0,
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      };
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+
+      expect(out.gfxMetrics).toEqual(observe.gfxMetrics);
+    });
+
+    test("measurably shrinks bytes and tokens by trimming redundant gfxMetrics frame fields", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.gfxMetrics = {
+        packageName: "com.example.app",
+        percentile50thMs: 12,
+        percentile90thMs: 18,
+        percentile95thMs: 22,
+        percentile99thMs: 30,
+        missedVsyncCount: 1,
+        slowUiThreadCount: 1,
+        frameDeadlineMissedCount: 0,
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      };
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+      const withFullGfxMetrics = { ...out, gfxMetrics: observe.gfxMetrics };
+
+      expect(measureValue(out).bytes).toBeLessThan(measureValue(withFullGfxMetrics).bytes);
+      expect(measureValue(out).tokens).toBeLessThan(measureValue(withFullGfxMetrics).tokens);
+    });
+
+    test("preserves the perfTimingTruncated signal", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.perfTimingTruncated = true;
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+
+      expect(out.perfTiming).toBeUndefined();
+      expect(out.perfTimingTruncated).toBe(true);
+    });
+  });
+
   describe("per-node trim (default on)", () => {
     test("drops view-id when it equals resource-id", () => {
       const { observe } = loadAndroidHomeObserve();

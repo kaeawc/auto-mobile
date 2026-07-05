@@ -173,11 +173,38 @@ describe("finalizeToolResponse", () => {
     expect(finalizeToolResponse("plain", { name: "observe" })).toBe("plain");
   });
 
-  test("EC5: observe payload without a viewHierarchy is a safe no-op", () => {
-    const payload: any = { updatedAt: 1, screenSize: { width: 1, height: 1 }, systemInsets: {} };
+  test("observe payload without a viewHierarchy still strips perfTiming", () => {
+    const payload: any = {
+      updatedAt: 1,
+      screenSize: { width: 1, height: 1 },
+      systemInsets: {},
+      perfTiming: [{ name: "observe", durationMs: 12 }],
+      perfTimingTruncated: true,
+    };
     const response = createStructuredToolResponse(payload);
+
     const finalized = finalizeToolResponse(response, { name: "observe" });
-    expect(finalized.structuredContent).toEqual(payload);
+
+    expect((finalized.structuredContent as any).perfTiming).toBeUndefined();
+    expect((finalized.structuredContent as any).perfTimingTruncated).toBe(true);
+    expect(payload.perfTiming).toBeDefined();
+    expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+  });
+
+  test("action observation without a viewHierarchy still strips perfTiming", () => {
+    const observation: any = {
+      updatedAt: 1,
+      screenSize: { width: 1, height: 1 },
+      systemInsets: {},
+      perfTiming: [{ name: "tapOn", durationMs: 12 }],
+    };
+    const response = createStructuredToolResponse({ success: true, observation });
+
+    const finalized = finalizeToolResponse(response, { name: "tapOn" });
+
+    expect((finalized.structuredContent as any).observation.perfTiming).toBeUndefined();
+    expect(observation.perfTiming).toBeDefined();
+    expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
   });
 
   test("strips the performance-audit raw dumps and truncates diagnostics at the GFXINFO marker", () => {
@@ -484,6 +511,43 @@ describe("finalizeToolResponse", () => {
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.observation.isDiff).toBe(true);
       expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("hierarchy-less action observations emit full sanitized payloads, not empty diffs", () => {
+      const { store, map } = makeStore();
+      const baseline = sameScreenObserve();
+      finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      const hierarchyLess = (durationMs: number): ObserveResult => ({
+        updatedAt: durationMs,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        freshness: { isFresh: true },
+        errors: [{ phase: "viewHierarchy", message: "service unavailable" } as any],
+        perfTiming: [{ name: "observe", durationMs }],
+      });
+
+      const first = finalizeToolResponse(
+        createStructuredToolResponse({ success: false, observation: hierarchyLess(12) }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+      const second = finalizeToolResponse(
+        createStructuredToolResponse({ success: false, observation: hierarchyLess(13) }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const firstObs = (first.structuredContent as any).observation;
+      const secondObs = (second.structuredContent as any).observation;
+      expect(firstObs.isDiff).toBeUndefined();
+      expect(secondObs.isDiff).toBeUndefined();
+      expect(firstObs.errors[0].message).toBe("service unavailable");
+      expect(secondObs.errors[0].message).toBe("service unavailable");
+      expect(firstObs.perfTiming).toBeUndefined();
+      expect(secondObs.perfTiming).toBeUndefined();
+      expect(map.get("s1")).toBeDefined();
+      expect(map.get("s1")!.viewHierarchy).toBeDefined();
+      expect(first.content[0].text).toBe(stringifyToolResponse(first.structuredContent));
+      expect(second.content[0].text).toBe(stringifyToolResponse(second.structuredContent));
     });
 
     test("a non-observe action updates the baseline to its own observation (next diff is against current state)", () => {

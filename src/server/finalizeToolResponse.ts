@@ -137,14 +137,14 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     } else if (isObserveResult(payload.observation)) {
       const sanitized = sanitizeObserveResult(payload.observation as ObserveResult, cfg);
       let observationOut: unknown = sanitized;
-      if (canDiff) {
+      if (canDiff && hasRenderableHierarchy(sanitized)) {
         // Emit a diff vs the baseline when it exists and the screen is unchanged;
         // otherwise fall back to the full observation (cross-screen diffs are
         // meaningless, and there is nothing to diff on the first action). Either
         // way, update the baseline to this observation so the next action diffs
         // against current state.
         const baseline = ctx.baselineStore!.get(ctx.sessionUuid!);
-        if (baseline && isSameObservationScreen(baseline, sanitized)) {
+        if (baseline && hasRenderableHierarchy(baseline) && isSameObservationScreen(baseline, sanitized)) {
           observationOut = diffObserveResult(baseline, sanitized);
         }
         ctx.baselineStore!.set(ctx.sessionUuid!, sanitized);
@@ -173,14 +173,35 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
 
 /**
  * A value is treated as an `ObserveResult` for sanitization purposes when it is
- * an object carrying a `viewHierarchy`. This is intentionally lax: sanitize is a
- * safe no-op on a result with no hierarchy/elements/perf, but requiring the
- * marker field avoids cloning arbitrary success payloads for nothing.
+ * an object carrying observe-specific fields. Hierarchy collection can fail
+ * while the rest of observe still completes, so `viewHierarchy` is only one
+ * marker; debug-perf fields on hierarchy-less observations must still be
+ * stripped at the wire boundary.
  */
+const OBSERVE_RESULT_MARKERS: ReadonlyArray<string> = [
+  "updatedAt",
+  "screenSize",
+  "systemInsets",
+  "viewHierarchy",
+  "rawViewHierarchy",
+  "elements",
+  "perfTiming",
+  "perfTimingTruncated",
+  "gfxMetrics",
+  "performanceAudit",
+  "accessibilityAudit",
+  "freshness",
+];
+
 function isObserveResult(value: unknown): value is ObserveResult {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    "viewHierarchy" in (value as Record<string, unknown>)
-  );
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return OBSERVE_RESULT_MARKERS.some(key => key in record);
+}
+
+function hasRenderableHierarchy(observation: ObserveResult): boolean {
+  return !!observation.viewHierarchy?.hierarchy;
 }

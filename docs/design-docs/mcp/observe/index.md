@@ -20,7 +20,9 @@ All collected data is assembled into an object containing (fields may be omitted
 - `focusedElement`: currently focused UI element (if any)
 - `intentChooserDetected`: whether a system intent chooser is visible
 - `wakefulness` and `backStack`: Android-specific state
-- `perfTiming`, `displayedTimeMetrics` (Android launchApp "Displayed" startup timings), `performanceAudit`, and `accessibilityAudit`: present when the relevant modes are enabled
+- `displayedTimeMetrics` (Android launchApp "Displayed" startup timings), `performanceAudit`, and `accessibilityAudit`: present when the relevant modes are enabled
+- `perfTiming`: collected internally for debug/perf capture diagnostics but stripped from the sanitized MCP tool output to reduce payload size
+- `gfxMetrics`: emitted in sanitized output for action UI-stability summaries; frame timing fields may be trimmed when `performanceAudit.metrics` already carries non-null computed replacements
 - `error`: error messages encountered during observation
 
 The observation gracefully handles various error conditions:

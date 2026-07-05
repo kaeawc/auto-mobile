@@ -82,9 +82,10 @@ export type CompactBounds = [number, number, number, number];
 
 /**
  * Return an output-only copy of `obs` shrunk for serialization. Applies, in
- * order: perf-audit strip (always), per-node trim (default on), bounds compaction
- * (gated by `cfg.compact`), and elements-drop (gated by `cfg.dropElements`). The
- * input is never mutated.
+ * order: perf-audit strip (always), top-level debug-perf telemetry reduction
+ * (always), per-node trim (default on), bounds compaction (gated by
+ * `cfg.compact`), and elements-drop (gated by `cfg.dropElements`). The input is
+ * never mutated.
  */
 export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveConfig): ObserveResult {
   // Deep-clone boundary: mutate only the copy that goes to the wire. The
@@ -94,6 +95,7 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
   const out = JSON.parse(JSON.stringify(obs)) as ObserveResult;
 
   stripPerformanceAudit(out);
+  reduceTopLevelDebugPerfTelemetry(out);
 
   if (cfg.trimNodes !== false) {
     for (const root of toNodeArray(out.viewHierarchy?.hierarchy?.node)) {
@@ -110,6 +112,46 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
   }
 
   return out;
+}
+
+/**
+ * Reduce top-level debug-perf telemetry that is useful while measuring capture
+ * internals but mostly duplicates richer summaries. `perfTiming` is raw capture
+ * timing, so it is dropped. `gfxMetrics` also carries action UI-stability
+ * fields, so only frame timing fields with non-null replacements in
+ * `performanceAudit.metrics` are removed.
+ */
+function reduceTopLevelDebugPerfTelemetry(out: ObserveResult): void {
+  delete out.perfTiming;
+
+  const auditMetrics = out.performanceAudit?.metrics;
+  if (!auditMetrics || !out.gfxMetrics) {
+    return;
+  }
+
+  const gfxMetrics = out.gfxMetrics as Partial<NonNullable<ObserveResult["gfxMetrics"]>>;
+
+  if (auditMetrics.p50Ms !== null && auditMetrics.p50Ms !== undefined) {
+    delete gfxMetrics.percentile50thMs;
+  }
+  if (auditMetrics.p90Ms !== null && auditMetrics.p90Ms !== undefined) {
+    delete gfxMetrics.percentile90thMs;
+  }
+  if (auditMetrics.p95Ms !== null && auditMetrics.p95Ms !== undefined) {
+    delete gfxMetrics.percentile95thMs;
+  }
+  if (auditMetrics.p99Ms !== null && auditMetrics.p99Ms !== undefined) {
+    delete gfxMetrics.percentile99thMs;
+  }
+  if (auditMetrics.missedVsyncCount !== null && auditMetrics.missedVsyncCount !== undefined) {
+    delete gfxMetrics.missedVsyncCount;
+  }
+  if (auditMetrics.slowUiThreadCount !== null && auditMetrics.slowUiThreadCount !== undefined) {
+    delete gfxMetrics.slowUiThreadCount;
+  }
+  if (auditMetrics.frameDeadlineMissedCount !== null && auditMetrics.frameDeadlineMissedCount !== undefined) {
+    delete gfxMetrics.frameDeadlineMissedCount;
+  }
 }
 
 /**

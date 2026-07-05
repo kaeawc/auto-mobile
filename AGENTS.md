@@ -125,4 +125,5 @@ not visible even though they are present in the shade.
 - pr-analysis: Perform a deep read-only PR review covering code, tests, CI, and risk. Path: `skills/pr-analysis/SKILL.md`.
 - push-my-prs: Iterate over open authored PRs, address feedback, and keep them moving. Path: `skills/push-my-prs/SKILL.md`.
 - research: Conduct cited research with saved sources and synthesis summaries. Path: `skills/research/SKILL.md`.
+- ship-issue: Drive one issue to a merged PR via TDD, with a plan-approval STOP gate, a pre-PR local-validation STOP gate, triaged review, and conservative follow-up capture. Path: `skills/ship-issue/SKILL.md`.
 - auto-mobile-code-review: AutoMobile-specific code review of a PR or current diff — verify findings in code, reproduce before asserting, distinguish bugs from daemon-session/env artifacts, reuse repo helpers/conventions, and catch regressions/false-negatives. Path: `skills/auto-mobile-code-review/SKILL.md`.

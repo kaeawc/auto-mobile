@@ -1420,6 +1420,45 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertTrue(errorResponse.error?.contains("App not installed") ?? false)
     }
 
+    // MARK: - Reset Permissions Tests
+
+    func testResetPermissionsForwardsResourcesToGesturePerformer() {
+        let request = WebSocketRequest.resetPermissions(RequestResetPermissions(
+            requestId: "reset-1",
+            bundleId: "com.example.app",
+            permissions: ["camera", "photos"]
+        ))
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "reset_permissions_result")
+        XCTAssertEqual(response.requestId, "reset-1")
+        XCTAssertEqual(response.success, true)
+        let history = fakeGesturePerformer.getResetAuthorizationsHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history.first?.bundleId, "com.example.app")
+        XCTAssertEqual(history.first?.resources, ["camera", "photos"])
+    }
+
+    func testResetPermissionsSurfacesRunnerErrorAsStructuredFailure() {
+        fakeGesturePerformer.setFailure(
+            for: "resetAuthorizations",
+            error: CommandError.invalidParameter("permission", "siri")
+        )
+
+        let request = WebSocketRequest.resetPermissions(RequestResetPermissions(
+            requestId: "reset-err",
+            bundleId: "com.example.app",
+            permissions: ["siri"]
+        ))
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "reset_permissions_result")
+        XCTAssertEqual(response.success, false)
+        XCTAssertTrue(response.error?.contains("siri") ?? false, "error should name the unmapped resource")
+    }
+
     // MARK: - Unknown Command Tests
 
     /// An unrecognized command `type` is now rejected at the decode boundary

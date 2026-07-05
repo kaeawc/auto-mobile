@@ -52,6 +52,7 @@ describe("decodeCtrlProxyMessage", () => {
     "press_back_result",
     "recent_apps_result",
     "launch_app_result",
+    "reset_permissions_result",
     "multi_finger_swipe_result",
   ];
 

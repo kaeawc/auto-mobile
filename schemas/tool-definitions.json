@@ -3994,7 +3994,7 @@
   },
   {
     "name": "setAppPermissions",
-    "description": "Grant, revoke, reset, or configure app permissions",
+    "description": "Grant, revoke, reset, or configure app permissions on Android devices, iOS simulators (grant/revoke/reset), and iOS physical devices (reset only)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -4003,7 +4003,7 @@
           "type": "string"
         },
         "action": {
-          "description": "Permission action; defaults to grant",
+          "description": "Permission action; defaults to grant. Android supports grant; iOS simulators support grant/revoke/reset; iOS physical devices support reset only.",
           "type": "string",
           "enum": [
             "grant",

@@ -135,6 +135,10 @@ public class CommandHandler: CommandHandling {
             case let .launchApp(payload):
                 return try handleLaunchApp(payload, startTime: startTime)
 
+            // App privacy permissions
+            case let .resetPermissions(payload):
+                return try handleResetPermissions(payload, startTime: startTime)
+
             // Device control
             case let .rotate(payload):
                 return try handleRotate(payload, startTime: startTime)
@@ -851,6 +855,27 @@ public class CommandHandler: CommandHandling {
         )
     }
 
+    // MARK: - App Privacy Permissions
+
+    /// Reset privacy authorizations for an app to not-determined. `bundleId` and
+    /// `permissions` are decode-required, so both are present here; an empty
+    /// `permissions` array is still rejected so the client gets an actionable error
+    /// instead of a silent success. An unmapped resource throws from the gesture
+    /// performer and surfaces as a structured error via the `handle(_:)` catch. (#2491)
+    private func handleResetPermissions(_ request: RequestResetPermissions, startTime: Date) throws
+        -> WebSocketResponse
+    {
+        guard !request.permissions.isEmpty else {
+            throw CommandError.missingParameter("permissions")
+        }
+        try gesturePerformer.resetAuthorizations(bundleId: request.bundleId, resources: request.permissions)
+        return WebSocketResponse.success(
+            type: ResponseType.resetPermissionsResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
     // MARK: - Device Control
 
     private func handleRotate(_ request: RequestRotate, startTime: Date) throws -> RotateResponse {
@@ -1462,6 +1487,8 @@ public class CommandHandler: CommandHandling {
             return ResponseType.actionResult.rawValue
         case RequestType.requestLaunchApp.rawValue:
             return ResponseType.launchAppResult.rawValue
+        case RequestType.requestResetPermissions.rawValue:
+            return ResponseType.resetPermissionsResult.rawValue
         case RequestType.requestRotate.rawValue:
             return ResponseType.rotateResult.rawValue
         case RequestType.requestClipboard.rawValue:

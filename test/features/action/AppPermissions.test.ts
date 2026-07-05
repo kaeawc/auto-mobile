@@ -3,7 +3,11 @@ import { AppPermissions } from "../../../src/features/action/AppPermissions";
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
-import type { TccPermissionReader } from "../../../src/features/action/IosSimulatorPermissions";
+import type {
+  IosSimulatorPermissionCommandResult,
+  TccPermissionReader,
+} from "../../../src/features/action/IosSimulatorPermissions";
+import type { IosPhysicalPrivacyClient } from "../../../src/features/action/IosPhysicalPermissions";
 
 const androidDevice: BootedDevice = {
   name: "Pixel",
@@ -16,6 +20,24 @@ const iosSimulator: BootedDevice = {
   platform: "ios",
   deviceId: "12345678-1234-1234-1234-123456789ABC",
 };
+
+const iosPhysical: BootedDevice = {
+  name: "iPhone (physical)",
+  platform: "ios",
+  deviceId: "00008110-001234567890ABCD",
+};
+
+class RecordingPhysicalPrivacyClient implements IosPhysicalPrivacyClient {
+  public calls: Array<{ appId: string; permissions: string[] }> = [];
+
+  async resetAuthorizations(
+    appId: string,
+    permissions: string[]
+  ): Promise<IosSimulatorPermissionCommandResult[]> {
+    this.calls.push({ appId, permissions });
+    return permissions.map(permission => ({ permission, success: true }));
+  }
+}
 
 describe("AppPermissions", () => {
   test("sets Android runtime permissions and Android-specific options through one action", async () => {
@@ -125,5 +147,41 @@ describe("AppPermissions", () => {
         },
       },
     ]);
+  });
+
+  test("routes reset on a physical iOS device through the CtrlProxy runner", async () => {
+    const iosPhysicalClient = new RecordingPhysicalPrivacyClient();
+    const permissions = new AppPermissions(iosPhysical, { iosPhysicalClient });
+
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "reset",
+      permissions: ["camera", "photos"],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.platform).toBe("ios");
+    expect(result.changedCount).toBe(2);
+    expect(result.operations.map(operation => operation.operationId)).toEqual([
+      "ios_xcuitest_reset:reset:camera",
+      "ios_xcuitest_reset:reset:photos",
+    ]);
+    expect(iosPhysicalClient.calls).toEqual([
+      { appId: "com.example.app", permissions: ["camera", "photos"] },
+    ]);
+  });
+
+  test("rejects grant on a physical iOS device with a reset-only failure", async () => {
+    const iosPhysicalClient = new RecordingPhysicalPrivacyClient();
+    const permissions = new AppPermissions(iosPhysical, { iosPhysicalClient });
+
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "grant",
+      permissions: ["camera"],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.action).toBe("grant");
+    expect(result.error).toContain("reset");
+    expect(iosPhysicalClient.calls).toEqual([]);
   });
 });

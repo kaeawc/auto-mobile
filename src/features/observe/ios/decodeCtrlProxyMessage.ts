@@ -88,6 +88,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
     case "press_back_result":
     case "recent_apps_result":
     case "launch_app_result":
+    case "reset_permissions_result":
       result = {
         success: message.success ?? true,
         totalTimeMs: message.totalTimeMs ?? 0,

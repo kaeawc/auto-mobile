@@ -189,6 +189,9 @@ export interface CtrlProxyRotateResult extends BaseResult {
 /** Launch app result from CtrlProxy iOS */
 export type CtrlProxyLaunchAppResult = BaseResult;
 
+/** Reset-privacy-permissions result from CtrlProxy iOS (physical devices, issue #2491) */
+export type CtrlProxyResetPermissionsResult = BaseResult;
+
 /** Recent apps result from CtrlProxy iOS */
 export type CtrlProxyRecentAppsResult = BaseResult;
 

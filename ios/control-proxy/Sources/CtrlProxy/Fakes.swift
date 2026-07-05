@@ -186,6 +186,11 @@ public class FakeGesturePerformer: GesturePerforming {
         public let resourceId: String?
     }
 
+    public struct ResetAuthorizationsCall {
+        public let bundleId: String
+        public let resources: [String]
+    }
+
     private var tapHistory: [TapCall] = []
     private var doubleTapHistory: [(x: Double, y: Double)] = []
     private var longPressHistory: [(x: Double, y: Double, duration: TimeInterval)] = []
@@ -213,6 +218,7 @@ public class FakeGesturePerformer: GesturePerforming {
     private var appTerminateHistory: [String] = []
     private var clipboardHistory: [(action: String, text: String?)] = []
     private var clipboardContents: String?
+    private var resetAuthorizationsHistory: [ResetAuthorizationsCall] = []
 
     public init() {}
 
@@ -332,6 +338,10 @@ public class FakeGesturePerformer: GesturePerforming {
         clipboardContents = text
     }
 
+    public func getResetAuthorizationsHistory() -> [ResetAuthorizationsCall] {
+        resetAuthorizationsHistory
+    }
+
     public func clearHistory() {
         tapHistory.removeAll()
         doubleTapHistory.removeAll()
@@ -359,6 +369,7 @@ public class FakeGesturePerformer: GesturePerforming {
         appLaunchHistory.removeAll()
         appTerminateHistory.removeAll()
         clipboardHistory.removeAll()
+        resetAuthorizationsHistory.removeAll()
     }
 
     // MARK: - Private Helpers
@@ -594,6 +605,11 @@ public class FakeGesturePerformer: GesturePerforming {
 
     public func updateApplication(bundleId: String) {
         updateApplicationHistory.append(bundleId)
+    }
+
+    public func resetAuthorizations(bundleId: String, resources: [String]) throws {
+        try checkFailure("resetAuthorizations")
+        resetAuthorizationsHistory.append(ResetAuthorizationsCall(bundleId: bundleId, resources: resources))
     }
 }
 

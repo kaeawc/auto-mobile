@@ -64,9 +64,17 @@ describe("IosPhysicalPermissions", () => {
     const client = new FakePhysicalPrivacyClient();
     const permissions = new IosPhysicalPermissions(physicalDevice, client);
 
-    const result = await permissions.setPermissions("reset", "com.example.app", ["camera", "all", "photos"]);
+    const result = await permissions.setPermissions("reset", "com.example.app", [
+      "camera",
+      "all",
+      "photos",
+      "photos-add",
+      "contacts-limited",
+      "location-always",
+    ]);
 
     expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(8);
     expect(result.results.map(r => r.permission)).toEqual([
       "camera",
       "photos",
@@ -92,6 +100,18 @@ describe("IosPhysicalPermissions", () => {
         ],
       },
     ]);
+  });
+
+  test("reset preserves the first requested alias when deduplicating aliases", async () => {
+    const client = new FakePhysicalPrivacyClient();
+    const permissions = new IosPhysicalPermissions(physicalDevice, client);
+
+    const result = await permissions.setPermissions("reset", "com.example.app", ["photos-add", "photos"]);
+
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(1);
+    expect(result.results.map(r => r.permission)).toEqual(["photos-add"]);
+    expect(client.calls).toEqual([{ appId: "com.example.app", permissions: ["photos-add"] }]);
   });
 
   test("reset delegates to the client and reports per-permission success", async () => {

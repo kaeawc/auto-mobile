@@ -19,6 +19,7 @@ import { IOSCtrlProxyClient, IOS_RUNNER_FEATURE_COMMANDS } from "../../features/
 import { ObserveElementsBuilder } from "../../features/observe/ObserveElementsBuilder";
 import type { CtrlProxyHierarchy } from "../../features/observe/ios/types";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
+import { createExecResult } from "../../utils/execResult";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
 // set without reaching into the runner client module.
@@ -344,20 +345,6 @@ export function createIosObserveRoundTripInspector(
   };
 }
 
-const createExecResult = (stdout: string, stderr: string): ExecResult => ({
-  stdout,
-  stderr,
-  toString() {
-    return this.stdout;
-  },
-  trim() {
-    return this.stdout.trim();
-  },
-  includes(searchString: string) {
-    return this.stdout.includes(searchString);
-  }
-});
-
 const createIosDoctorDependencies = (): IosDoctorDependencies => ({
   platform: () => process.platform,
   execFile: async (file, args) => {
@@ -365,9 +352,7 @@ const createIosDoctorDependencies = (): IosDoctorDependencies => ({
       timeout: DOCTOR_EXEC_TIMEOUT_MS,
       killSignal: "SIGKILL",
     });
-    const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
-    const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();
-    return createExecResult(stdout, stderr);
+    return createExecResult(result.stdout, result.stderr);
   },
   fileExists: existsSync,
   readDir: async path => fs.readdir(path),

@@ -630,6 +630,7 @@ class DefaultPlanLifecycleManager implements PlanLifecycleManager {
 // The registry that holds all tools
 class ToolRegistryClass {
   private tools: Map<string, RegisteredTool> = new Map();
+  private server: McpServer | null = null;
   private deviceSessionManager: DeviceSessionManager;
   private cleanupService: AppCleanupService;
   private toolCallRepository: ToolCallRepository;
@@ -829,6 +830,11 @@ class ToolRegistryClass {
 
   // Register all tools with an MCP server
   registerWithServer(server: McpServer): void {
+    // Retained so runtime changes that alter tool definitions can emit
+    // notifications/tools/list_changed (issue #2963), mirroring how
+    // ResourceRegistry retains the server for resources/list_changed.
+    this.server = server;
+
     this.tools.forEach(tool => {
       if (!this.isToolAvailable(tool)) {
         return;
@@ -869,6 +875,33 @@ class ToolRegistryClass {
         })
       }, wrappedHandler);
     });
+  }
+
+  // Emit notifications/tools/list_changed so caching clients re-fetch tools/list
+  // after a runtime change that alters tool definitions — outputSchema
+  // advertisement (getToolDefinitions) or tool availability (isToolAvailable).
+  // Called from FeatureFlagService when a tool-definition-affecting flag toggles
+  // (issue #2963); mirrors ResourceRegistry.notifyResourceListChanged. The SDK's
+  // sendToolListChanged() is itself a guarded no-op until a client connects, so
+  // this is safe to call before any transport attaches.
+  //
+  // Last-writer-wins: registerWithServer runs per HTTP session in daemon mode, so
+  // this.server points at the most-recently-created session — only that session
+  // is notified. This matches ResourceRegistry's single `server` field; a
+  // cross-cutting multi-session broadcaster is tracked as a follow-up.
+  notifyToolListChanged(): void {
+    if (!this.server) {
+      return;
+    }
+
+    try {
+      this.server.sendToolListChanged();
+    } catch (error) {
+      // Best-effort: a failed notification must never break the flag toggle that
+      // triggered it. Unexpected for a connected client (transport mid-teardown
+      // is the only expected case), so warn — matching notifyResourceListChanged.
+      logger.warn(`[ToolRegistry] Failed to notify tool list change: ${error}`);
+    }
   }
 
   // Get tools in MCP format

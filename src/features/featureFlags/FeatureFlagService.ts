@@ -1,9 +1,11 @@
 import type { FeatureFlagConfig, FeatureFlagDefinition, FeatureFlagKey } from "./FeatureFlagDefinitions";
-import { FEATURE_FLAG_DEFINITIONS } from "./FeatureFlagDefinitions";
+import { FEATURE_FLAG_DEFINITIONS, TOOL_DEFINITION_AFFECTING_FLAGS } from "./FeatureFlagDefinitions";
 import type { FeatureFlagRepository } from "./FeatureFlagRepository";
 import { SqliteFeatureFlagRepository } from "./FeatureFlagRepository";
 import type { FeatureFlagApplier } from "./FeatureFlagApplier";
 import { DefaultFeatureFlagApplier } from "./FeatureFlagApplier";
+import type { ToolListChangedNotifier } from "./ToolListChangedNotifier";
+import { NoopToolListChangedNotifier } from "./ToolListChangedNotifier";
 
 interface FeatureFlagState {
   key: FeatureFlagKey;
@@ -33,11 +35,21 @@ export class FeatureFlagService {
   constructor(
     private readonly repository: FeatureFlagRepository,
     private readonly applier: FeatureFlagApplier,
-    private readonly definitions: FeatureFlagDefinition[] = FEATURE_FLAG_DEFINITIONS
+    private readonly definitions: FeatureFlagDefinition[] = FEATURE_FLAG_DEFINITIONS,
+    private notifier: ToolListChangedNotifier = new NoopToolListChangedNotifier()
   ) {
     this.definitionByKey = new Map(
       definitions.map(definition => [definition.key, definition])
     );
+  }
+
+  /**
+   * Wires the MCP-server-backed notifier into the singleton after the server is
+   * constructed (see `createMcpServer`). Kept as a setter because `getInstance()`
+   * builds the service before the server exists; unit tests inject via the ctor.
+   */
+  setToolListChangedNotifier(notifier: ToolListChangedNotifier): void {
+    this.notifier = notifier;
   }
 
   async initialize(): Promise<void> {
@@ -87,12 +99,27 @@ export class FeatureFlagService {
         ? config
         : this.configsByKey.get(key) ?? definition.defaultConfig ?? null;
 
+    // Capture the effective value BEFORE mutating so we only notify on an actual
+    // change — re-setting a flag to its current value must not emit (issue #2963,
+    // "no notification storm"). Reads the same fallback chain as `isEnabled`.
+    const previousEnabled = this.flagsByKey.get(key) ?? definition.defaultValue;
+
     await this.repository.upsertFlag(key, enabled, config);
     this.flagsByKey.set(key, enabled);
     if (config !== undefined) {
       this.configsByKey.set(key, nextConfig);
     }
     this.applier.apply(key, enabled, nextConfig);
+
+    // Runtime toggle of a flag that changes `tools/list` output (outputSchema
+    // advertisement or tool availability) must tell caching clients to re-fetch.
+    // Startup application happens in `initialize()`, which deliberately does not
+    // call this path, so no notification storm before the first `tools/list`.
+    // The notifier is best-effort and never throws (see ToolListChangedNotifier),
+    // so no guard is needed here — the flag is already committed above regardless.
+    if (enabled !== previousEnabled && TOOL_DEFINITION_AFFECTING_FLAGS.has(key)) {
+      this.notifier.notifyToolListChanged();
+    }
 
     return {
       key: definition.key,
@@ -114,6 +141,11 @@ export class FeatureFlagService {
     await this.repository.upsertFlag(key, enabled, config);
     this.configsByKey.set(key, config);
     this.applier.apply(key, enabled, config);
+
+    // No tools/list_changed emit here: `enabled` is unchanged, and no member of
+    // TOOL_DEFINITION_AFFECTING_FLAGS derives its tools/list output from `config`
+    // (all three are pure booleans). Extend this if a config-driven flag ever
+    // starts affecting tool definitions. See issue #2963.
 
     return {
       key: definition.key,

@@ -235,6 +235,22 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   startupBenchmark.startPhase("serverHandlerRegistration");
   ToolRegistry.registerWithServer(server);
 
+  // Emit notifications/tools/list_changed when a runtime feature-flag toggle
+  // changes tool definitions (outputSchema advertisement or tool availability),
+  // so caching clients re-fetch tools/list (issue #2963). The emit itself lives on
+  // ToolRegistry (which now holds the server), mirroring ResourceRegistry's
+  // resources/list_changed; this only routes the feature-flag singleton to it.
+  // Wired here because the singleton is constructed before the server exists.
+  //
+  // NOTE: in the default proxy topology (external client -> proxy -> daemon) this
+  // notification is not yet forwarded/honored by DaemonMcpProxy (it serves cached
+  // tools and does not invalidate on tools/list_changed) — a pre-existing,
+  // cross-cutting proxy limitation shared with resources/list_changed, tracked as
+  // a follow-up. Direct-mode clients receive and honor it.
+  FeatureFlagService.getInstance().setToolListChangedNotifier({
+    notifyToolListChanged: () => ToolRegistry.notifyToolListChanged(),
+  });
+
   // Register all resources with the server
   ResourceRegistry.registerWithServer(server);
 

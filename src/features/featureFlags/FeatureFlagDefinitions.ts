@@ -20,6 +20,24 @@ export type FeatureFlagKey =
 
 export type FeatureFlagConfig = Record<string, unknown>;
 
+/**
+ * Flags whose runtime toggle changes what `tools/list` returns — either the
+ * advertised `outputSchema` or which tools are available — and therefore must
+ * emit `notifications/tools/list_changed` so caching clients re-fetch. Kept as
+ * the single source of truth consulted by {@link FeatureFlagService}; add a key
+ * here (not per-flag logic) when a new flag starts influencing tool definitions.
+ * See issue #2963.
+ *
+ * - `debug` toggles `debugOnly` tool availability (toolRegistry `isToolAvailable`).
+ * - `tool-results-no-structured-content` suppresses `outputSchema` advertisement.
+ * - `observe-result-compact` changes the bounds tuple in the advertised `outputSchema`.
+ */
+export const TOOL_DEFINITION_AFFECTING_FLAGS: ReadonlySet<FeatureFlagKey> = new Set<FeatureFlagKey>([
+  "debug",
+  "tool-results-no-structured-content",
+  "observe-result-compact",
+]);
+
 export interface FeatureFlagDefinition {
   key: FeatureFlagKey;
   label: string;

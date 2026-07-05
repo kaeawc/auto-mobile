@@ -1,8 +1,20 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { SessionManager, type DeviceLabelMap } from "../../src/daemon/sessionManager";
+import { SessionManager, type DeviceLabelMap, type KeepScreenAwakeRestorer } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
+
+/**
+ * Capturing fake restorer: records every state handed to `restore`, so a test can
+ * assert the reader (`restoreKeepScreenAwake`) read the typed slot's FULL payload —
+ * not just its `.applied` flag — and passed it through on session release.
+ */
+class SpyKeepScreenAwakeRestorer implements KeepScreenAwakeRestorer {
+  readonly restored: KeepScreenAwakeState[] = [];
+  async restore(state: KeepScreenAwakeState): Promise<void> {
+    this.restored.push(state);
+  }
+}
 
 /**
  * Typed `SessionCacheData` slots for the well-known keys that used to live in the
@@ -94,18 +106,59 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
       }
     });
 
-    test("EC5: releaseSession reads the typed slot for keep-awake restore", async () => {
+    test("EC5: releaseSession passes the FULL typed-slot payload to restore (writer/reader round trip)", async () => {
+      // The #2917 bug class is writer/reader drift. This proves the reader
+      // (restoreKeepScreenAwake) reads the whole typed payload from the slot the
+      // setter wrote — not just `.applied` — and hands it to the restorer, with no
+      // real device. Injected restorer stands in for KeepScreenAwakeManager.
       const { repo } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      const spy = new SpyKeepScreenAwakeRestorer();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier, () => spy);
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
-        // applied:false → restore is a documented no-op, so it reads the slot,
-        // sees it, and returns without touching a real device.
-        mgr.setKeepScreenAwake("s1", { applied: false, skipReason: "disabled" });
+        const applied: KeepScreenAwakeState = {
+          applied: true,
+          method: "settings",
+          originalScreenOffTimeout: "60000",
+          appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: true },
+        };
+        mgr.setKeepScreenAwake("s1", applied);
 
         const deviceId = await mgr.releaseSession("s1");
         expect(deviceId).toBe("emulator-5554");
+        // Exact object read back from the slot and forwarded to restore.
+        expect(spy.restored).toEqual([applied]);
+      } finally {
+        mgr.stopCleanupTimer();
+      }
+    });
+
+    test("EC5: releaseSession does NOT restore when the slot's state is applied:false", async () => {
+      const { repo } = makeRepo();
+      const barrier = new FakeDbWriteBarrier();
+      const spy = new SpyKeepScreenAwakeRestorer();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier, () => spy);
+      try {
+        await mgr.createSession("s1", "emulator-5554", "android");
+        mgr.setKeepScreenAwake("s1", { applied: false, skipReason: "disabled" });
+
+        await mgr.releaseSession("s1");
+        expect(spy.restored).toEqual([]);
+      } finally {
+        mgr.stopCleanupTimer();
+      }
+    });
+
+    test("EC5: releaseSession does NOT restore when no keep-awake state was set", async () => {
+      const { repo } = makeRepo();
+      const barrier = new FakeDbWriteBarrier();
+      const spy = new SpyKeepScreenAwakeRestorer();
+      const mgr = new SessionManager(fakeTimer, repo, () => barrier, () => spy);
+      try {
+        await mgr.createSession("s1", "emulator-5554", "android");
+        await mgr.releaseSession("s1");
+        expect(spy.restored).toEqual([]);
       } finally {
         mgr.stopCleanupTimer();
       }

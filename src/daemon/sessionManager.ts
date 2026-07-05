@@ -15,6 +15,16 @@ import type { ObserveResult } from "../models/ObserveResult";
 export type DeviceLabelMap = Record<string, string>;
 
 /**
+ * Narrow seam for restoring keep-awake state on session release. Production uses
+ * `KeepScreenAwakeManager`; tests inject a fake to assert (without a real device)
+ * that `releaseSession` reads the typed `keepScreenAwake` slot and passes its full
+ * payload to `restore` — the behavioral half of the #2973 typed-slot round trip.
+ */
+export interface KeepScreenAwakeRestorer {
+  restore(state: KeepScreenAwakeState): Promise<void>;
+}
+
+/**
  * Session Cache Data
  *
  * Stores data that can be reused across multiple tool calls
@@ -93,6 +103,7 @@ export class SessionManager {
   private releaseCallbacks: SessionReleaseCallback[] = [];
   private deviceSessionRepository: DeviceSessionRepository;
   private readonly getBarrier: () => DbWriteBarrier;
+  private readonly keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer;
 
   // Session timeout: 30 minutes
   private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000;
@@ -109,10 +120,15 @@ export class SessionManager {
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912).
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
+    // Seam for keep-awake restore (issue #2973): defaults to the real manager;
+    // tests inject a fake to assert the typed slot's payload reaches `restore`.
+    keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer =
+    device => new KeepScreenAwakeManager(device),
   ) {
     this.timer = timer;
     this.deviceSessionRepository = deviceSessionRepository;
     this.getBarrier = getBarrier;
+    this.keepScreenAwakeRestorerFactory = keepScreenAwakeRestorerFactory;
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -542,7 +558,7 @@ export class SessionManager {
       platform: session.platform,
       deviceId: session.assignedDevice
     };
-    const manager = new KeepScreenAwakeManager(device);
+    const manager = this.keepScreenAwakeRestorerFactory(device);
     await manager.restore(state);
   }
 

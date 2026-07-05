@@ -28,10 +28,15 @@ describe("SessionCacheData has no untyped escape hatch (issue #2973)", () => {
     "src/daemon/socketServer.ts",
   ];
 
-  // Extract the `interface SessionCacheData { ... }` body from the source.
+  // Extract the `SessionCacheData` declaration body from the source. Matches both
+  // `interface SessionCacheData { … }` and a `type SessionCacheData = { … }` alias
+  // (so a future refactor doesn't silently disable the guard), and anchors the
+  // close on a column-0 `}` (`^\}` multiline) rather than any `\n}` — nested
+  // object slots keep their `}` indented, so the non-greedy body still ends at the
+  // real declaration close.
   function sessionCacheDataBody(): string {
     const source = read(SESSION_MANAGER);
-    const match = source.match(/interface SessionCacheData\s*\{([\s\S]*?)\n\}/);
+    const match = source.match(/(?:interface|type)\s+SessionCacheData\b[^{]*\{([\s\S]*?)^\}/m);
     expect(match).not.toBeNull();
     return match![1];
   }

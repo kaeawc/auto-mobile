@@ -396,10 +396,16 @@ export class CtrlProxyHierarchy {
         return this.sendHierarchyRequest(disableAllFiltering);
       });
 
-      // Fall back to ADB broadcast if WebSocket failed
+      // Fall back to ADB broadcast if WebSocket failed. The broadcast mints its own `sync_` uuid and
+      // passes it to the runner via `--es uuid`; we thread that SAME uuid into the wait below so a
+      // runner type:"error" frame echoing it fails fast, mirroring the `req_`/`stale_` WebSocket
+      // paths (issue #3089). Kept null when the WebSocket send succeeded (that path correlates on
+      // its own `req_` id).
+      let broadcastRequestId: string | null = null;
       if (hierarchyRequestId === null) {
         logger.debug("[CTRL_PROXY] Falling back to ADB broadcast");
         const uuid = `sync_${this.context.timer.now()}_${generateSecureId()}`;
+        broadcastRequestId = uuid;
         await perf.track("sendBroadcast", async () => {
           await this.context.adb.executeCommand(
             `shell "am broadcast -a dev.jasonpearson.automobile.EXTRACT_HIERARCHY --es uuid ${uuid} --ez disableAllFiltering ${disableAllFiltering}"`,
@@ -411,12 +417,14 @@ export class CtrlProxyHierarchy {
         });
       }
 
-      // Wait for WebSocket push. When we sent over WebSocket, correlate the wait with the request id
-      // so a runner error frame unblocks it fast instead of hanging to timeout (issue #3032). The
-      // ADB-broadcast fallback has no WebSocket requestId to correlate, so it retains timeout-only
-      // behavior.
+      // Wait for WebSocket push, correlated with whichever request id we actually sent: the `req_`
+      // id when the WebSocket send succeeded (issue #3032), or the ADB-broadcast `sync_` uuid when we
+      // fell back (issue #3089). Either way a runner type:"error" frame carrying that id unblocks the
+      // wait fast instead of hanging to timeout. A fast fail still returns null, so the caller keeps
+      // its stale-cache fallback (see getAccessibilityHierarchy) — nothing is discarded here.
+      const correlationRequestId = hierarchyRequestId ?? broadcastRequestId ?? undefined;
       const freshData = await perf.track("waitForPush", () =>
-        this.waitForFreshData(effectiveTimeoutMs, startTime, false, signal, hierarchyRequestId ?? undefined)
+        this.waitForFreshData(effectiveTimeoutMs, startTime, false, signal, correlationRequestId)
       );
 
       if (freshData) {

@@ -1672,6 +1672,266 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
+  describe("hierarchy ADB-broadcast fallback error frame correlation (issue #3089)", function() {
+    // Last member of the #3032/#3061 waitForFreshData hang class. When the WebSocket
+    // request_hierarchy send fails, requestHierarchySync falls back to an
+    // `am broadcast ... EXTRACT_HIERARCHY --es uuid sync_<ts>_<id>` and then waits for a push.
+    // Before #3089 that fallback wait registered NO rejector (it passed no requestId into
+    // waitForFreshData), so a runner type:"error" frame echoing the broadcast uuid no-op'd and the
+    // caller hung to the full timeout. These tests drive that fallback and assert the sync_ uuid now
+    // correlates a runner error into a fast fail, while staying a safe no-op for uncorrelated ids and
+    // for the getLatestHierarchy stale-cache path (which still registers no requestId).
+
+    // A capturing socket that stays OPEN but throws when asked to SEND a request_hierarchy (or the
+    // stale nudge) frame, forcing requestHierarchySync down its ADB-broadcast fallback branch. It
+    // stays OPEN so the test can still deliver a simulated type:"error" frame back over the same
+    // socket — modeling a WebSocket that momentarily could not accept a send but is still readable.
+    class HierarchySendFailingWebSocket extends CapturingWebSocket {
+      send(data: any): void {
+        const str = data.toString();
+        this.sentMessages.push(str);
+        let parsed: any = null;
+        try { parsed = JSON.parse(str); } catch { parsed = null; }
+        if (parsed && (parsed.type === "request_hierarchy" || parsed.type === "request_hierarchy_if_stale")) {
+          throw new Error("Simulated WebSocket send failure (forces ADB-broadcast fallback)");
+        }
+        // Any other frame: accept silently (base FakeWebSocket.send only checks OPEN and no-ops).
+      }
+    }
+
+    const createSendFailingFactory = (timer?: FakeTimer): {
+      factory: (url: string) => HierarchySendFailingWebSocket;
+      getSocket: () => HierarchySendFailingWebSocket | null;
+    } => {
+      let socket: HierarchySendFailingWebSocket | null = null;
+      return {
+        factory: (url: string) => {
+          socket = new HierarchySendFailingWebSocket(url, "none", 0, timer);
+          return socket;
+        },
+        getSocket: () => socket
+      };
+    };
+
+    // Poll the fake ADB command history until the EXTRACT_HIERARCHY broadcast fallback fires, then
+    // return its `sync_` uuid. The fallback runs a few microtask turns after the request_hierarchy
+    // send throws, so retry across setImmediate flushes rather than assuming a fixed ordering.
+    const waitForBroadcastUuid = async (adb: FakeAdbExecutor): Promise<string | undefined> => {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const cmd = adb.getExecutedCommands().find(c => c.includes("EXTRACT_HIERARCHY"));
+        if (cmd) {
+          const match = cmd.match(/--es uuid (sync_[^\s"]+)/);
+          if (match) {
+            return match[1];
+          }
+        }
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      return undefined;
+    };
+
+    test("a type:error frame echoing the broadcast sync_ uuid fails requestHierarchySync fast", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createSendFailingFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        // 10s hierarchy sync timeout — the whole point is to NOT wait for it.
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+
+        const socket = await waitForSocket(getSocket) as HierarchySendFailingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        // request_hierarchy send throws -> ADB-broadcast fallback mints and broadcasts the sync_ uuid.
+        const uuid = await waitForBroadcastUuid(fakeAdb);
+        expect(uuid).toBeDefined();
+        expect(String(uuid).startsWith("sync_")).toBe(true);
+        // Let waitForFreshData run so it registers the fast-fail rejector for the sync_ uuid.
+        await flushPromises();
+
+        // Runner reports a correlated handler failure echoing the broadcast uuid (issue #3089: the
+        // EXTRACT_HIERARCHY handler emits a type:"error" frame keyed by the broadcast uuid on failure).
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: uuid,
+          success: false,
+          error: "Failed to extract hierarchy",
+          timestamp: errorTimer.now()
+        }));
+
+        // Fail fast: no timer advance toward the 10s timeout. Only flush microtasks/setImmediate.
+        await flushPromises();
+        const result = await syncPromise;
+
+        expect(result).toBeNull();
+        // Prove we did not sit through the timeout: virtually no fake time elapsed.
+        expect(errorTimer.getCurrentTime()).toBeLessThan(10000);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("a broadcast-fallback runner error populates diagnostics.runnerError (parity with #3062)", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createSendFailingFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        const diagnostics: HierarchySyncDiagnostics = {};
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, diagnostics);
+
+        const socket = await waitForSocket(getSocket) as HierarchySendFailingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        const uuid = await waitForBroadcastUuid(fakeAdb);
+        expect(uuid).toBeDefined();
+        await flushPromises();
+
+        const runnerText = "Failed to extract hierarchy";
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: uuid,
+          success: false,
+          error: runnerText,
+          timestamp: errorTimer.now()
+        }));
+
+        await flushPromises();
+        const result = await syncPromise;
+
+        // Contract unchanged: still null so existing callers keep their stale-cache fallback.
+        expect(result).toBeNull();
+        // The runner text is surfaced to the caller, distinct from a plain timeout null.
+        expect(diagnostics.runnerError).toBe(runnerText);
+        expect(errorTimer.getCurrentTime()).toBeLessThan(10000);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("an uncorrelated error id during the broadcast fallback is a safe no-op; the push still resolves", async function() {
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createSendFailingFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        testClient.invalidateCache();
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+
+        const socket = await waitForSocket(getSocket) as HierarchySendFailingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        const uuid = await waitForBroadcastUuid(fakeAdb);
+        expect(uuid).toBeDefined();
+        await flushPromises();
+
+        // Error frame for an uncorrelated id — must be a safe no-op for the broadcast-fallback wait.
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: "some-unrelated-id",
+          success: false,
+          error: "Malformed request: the payload is not valid JSON",
+          timestamp: errorTimer.now()
+        }));
+
+        // The real hierarchy push for our request still arrives and resolves the sync normally.
+        socket.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: errorTimer.now(),
+          data: {
+            updatedAt: errorTimer.now(),
+            packageName: "com.example.app",
+            hierarchy: { text: "Recovered after uncorrelated broadcast error" }
+          }
+        }));
+
+        const result = await errorTimer.resolvePromise(syncPromise);
+
+        expect(result).not.toBeNull();
+        expect(result!.hierarchy.hierarchy.text).toBe("Recovered after uncorrelated broadcast error");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("a sync_-prefixed error frame does NOT disturb the getLatestHierarchy stale-cache path", async function() {
+      // getLatestHierarchy never mints a broadcast sync_ uuid and enters waitForFreshData with NO
+      // requestId — its timeout is meant to gracefully fall through to the stale cache. This locks in
+      // that the #3089 correlation is scoped to requestHierarchySync: a sync_-shaped error frame is an
+      // uncorrelated no-op here and must NOT reject the wait to null (which would discard the cache).
+      const errorTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      try {
+        // Prime the connection + cache via a sync that a push resolves quickly.
+        const primePromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+        socket.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: errorTimer.now(),
+          data: {
+            updatedAt: errorTimer.now(),
+            packageName: "com.example.app",
+            hierarchy: { text: "Stale cache preserved" }
+          }
+        }));
+        await errorTimer.resolvePromise(primePromise);
+
+        // Let time pass so the cached data is stale relative to the next wait's start.
+        errorTimer.advanceTime(500);
+
+        const latestPromise = testClient.getLatestHierarchy(true, 3000);
+
+        // Inject a sync_-shaped error frame — no rejector is registered for it on this path.
+        await flushPromises();
+        socket.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: `sync_${errorTimer.now()}_deadbeef`,
+          success: false,
+          error: "Failed to extract hierarchy",
+          timestamp: errorTimer.now()
+        }));
+
+        // The wait falls through to its timeout and returns the STALE CACHE (not null).
+        const result = await errorTimer.resolvePromise(latestPromise);
+        expect(result.hierarchy).not.toBeNull();
+        expect(result.hierarchy!.hierarchy.text).toBe("Stale cache preserved");
+        expect(result.fresh).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("bindSession", function() {
     afterEach(function() {
       NavigationGraphManager.resetInstance();

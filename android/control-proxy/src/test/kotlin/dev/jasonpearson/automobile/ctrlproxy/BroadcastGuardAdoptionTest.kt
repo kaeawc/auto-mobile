@@ -25,15 +25,13 @@ import org.junit.Test
  * then prove the live source complies.
  *
  * Scope: [ResultBroadcaster.guard] adoption is enforced fully (missing guard + reintroduced
- * swallow). [AsyncActionRunner] coverage is the swallow-regression check only — detecting that a
- * brand-new async action forgot `asyncActionRunner.launch` entirely is not structurally feasible
- * without false positives (raw `serviceScope.launch { … }` is used pervasively for legitimate
- * non-action work, e.g. wrapping already-guarded `broadcast*Result` calls). That residual half is
- * now closed *by construction* rather than by source-scanning: [ServiceScopeGuard]'s
- * [kotlinx.coroutines.CoroutineExceptionHandler] on `serviceScope` emits a correlated error frame
- * for any raw launch that throws uncaught (issue #3104). This class enforces that wiring can't
- * silently regress (the `serviceScope installs the ServiceScopeGuard CoroutineExceptionHandler`
- * test below).
+ * swallow). [AsyncActionRunner] coverage is the swallow-regression check only. For raw
+ * `serviceScope.launch { … }`, this scanner enforces the issue #3128 contract: a launch body that
+ * captures `requestId` must attach [RequestIdContext] at the launch site, while legitimate
+ * non-correlated launches (push events, subscriptions, logcat streaming) stay out of scope.
+ * [ServiceScopeGuard]'s [kotlinx.coroutines.CoroutineExceptionHandler] remains the scope-level
+ * backstop, and this class also enforces that its handler stays installed (the `serviceScope
+ * installs the ServiceScopeGuard CoroutineExceptionHandler` test below).
  */
 class BroadcastGuardAdoptionTest {
 
@@ -84,12 +82,47 @@ class BroadcastGuardAdoptionTest {
   }
 
   @Test
+  fun `no raw serviceScope launch captures requestId without RequestIdContext`() {
+    val result = BroadcastGuardScanner.scan(readCtrlProxySource())
+
+    val uncorrelatedLaunches =
+      result.violations.filter { it.kind == BroadcastGuardScanner.Kind.RAW_REQUEST_ID_LAUNCH }
+    assertTrue(
+      "A raw `serviceScope.launch { ... }` block that captures `requestId` must attach " +
+        "`RequestIdContext(requestId)` or route through `AsyncActionRunner`; otherwise " +
+        "ServiceScopeGuard can only emit a null-id error frame (issue #3128). Offenders:\n" +
+        uncorrelatedLaunches.joinToString("\n") { "  - ${it.symbol} (CtrlProxy.kt:${it.line})" },
+      uncorrelatedLaunches.isEmpty(),
+    )
+  }
+
+  @Test
+  fun `launchRequestScope attaches RequestIdContext requestId`() {
+    val source = readCtrlProxySource()
+    val helper = Regex("""fun\s+launchRequestScope\(""").find(source)
+    if (helper == null) {
+      fail("could not find the `launchRequestScope(...)` helper in CtrlProxy.kt")
+    }
+
+    val signatureEnd = BroadcastGuardScanner.matchParen(source, helper!!.range.last)
+    val bodyOrExpressionEnd =
+      source.indexOf("\n\n", signatureEnd).takeIf { it >= 0 } ?: source.length
+    val helperText = source.substring(helper.range.first, bodyOrExpressionEnd)
+    assertTrue(
+      "`launchRequestScope` must attach `RequestIdContext(requestId)` so all helper-routed raw " +
+        "launches stay correlated (issue #3128). Helper text was: $helperText",
+      Regex("""serviceScope\.launch\s*\([^)]*RequestIdContext\s*\(\s*requestId\s*\)""")
+        .containsMatchIn(helperText),
+    )
+  }
+
+  @Test
   fun `serviceScope installs the ServiceScopeGuard CoroutineExceptionHandler`() {
-    // Enforcement backstop for issue #3104: the raw-`serviceScope.launch` silent-hang gap is closed
-    // *by construction* only if the guard's handler is actually part of the scope's context. If the
-    // `serviceScope = CoroutineScope(...)` initializer ever drops `serviceScopeGuard.handler`, a
-    // throw in a raw launch would again escape to the bare SupervisorJob with no correlated error
-    // frame — so fail CI the moment the wiring regresses.
+    // Enforcement backstop for issue #3104/#3128: request-correlated raw launches only fail fast
+    // if the guard's handler is actually part of the scope's context. If the `serviceScope =
+    // CoroutineScope(...)` initializer ever drops `serviceScopeGuard.handler`, a throw in a
+    // context-tagged launch would again escape to the bare SupervisorJob with no error frame — so
+    // fail CI the moment the wiring regresses.
     val source = readCtrlProxySource()
 
     // Match the `val serviceScope[: Type] = CoroutineScope(` declaration, then take the initializer
@@ -136,6 +169,11 @@ class BroadcastGuardAdoptionTest {
     assertTrue(
       "expected the scanner to find asyncActionRunner.launch blocks, found ${result.launchBlocks}",
       result.launchBlocks >= 5,
+    )
+    assertTrue(
+      "expected the scanner to find raw serviceScope.launch blocks, found " +
+        result.rawLaunchBlocks,
+      result.rawLaunchBlocks >= 10,
     )
   }
 
@@ -577,6 +615,228 @@ class BroadcastGuardAdoptionTest {
     assertTrue(result.guardedHelpers.contains("broadcastFooResult"))
   }
 
+  @Test
+  fun `flags raw serviceScope launch that captures requestId without context`() {
+    val src =
+      """
+      class Fake {
+        private val serviceScope: CoroutineScope = TODO()
+
+        private fun dispatch(requestId: String?) {
+          serviceScope.launch {
+            val value = doRealWork()
+            broadcastFooResult(requestId, value)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertEquals(
+      listOf(BroadcastGuardScanner.Kind.RAW_REQUEST_ID_LAUNCH to "serviceScope.launch"),
+      result.violations.map { it.kind to it.symbol },
+    )
+  }
+
+  @Test
+  fun `does not flag serviceScope launch that attaches RequestIdContext`() {
+    val src =
+      """
+      class Fake {
+        private val serviceScope: CoroutineScope = TODO()
+
+        private fun dispatch(requestId: String?) {
+          serviceScope.launch(RequestIdContext(requestId)) {
+            val value = doRealWork()
+            broadcastFooResult(requestId, value)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertTrue(
+      "context-tagged launch must not be flagged: ${result.violations}",
+      result.violations.isEmpty(),
+    )
+  }
+
+  @Test
+  fun `does not flag serviceScope launch that attaches named-argument RequestIdContext`() {
+    val src =
+      """
+      class Fake {
+        private val serviceScope: CoroutineScope = TODO()
+
+        private fun dispatch(requestId: String?) {
+          serviceScope.launch(RequestIdContext(requestId = requestId)) {
+            val value = doRealWork()
+            broadcastFooResult(requestId, value)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertTrue(
+      "named-argument context-tagged launch must not be flagged: ${result.violations}",
+      result.violations.isEmpty(),
+    )
+  }
+
+  @Test
+  fun `flags serviceScope launch that attaches a non-correlated RequestIdContext`() {
+    val src =
+      """
+      class Fake {
+        private val serviceScope: CoroutineScope = TODO()
+
+        private fun dispatch(requestId: String?) {
+          serviceScope.launch(RequestIdContext(null)) {
+            val value = doRealWork()
+            broadcastFooResult(requestId, value)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertEquals(
+      listOf(BroadcastGuardScanner.Kind.RAW_REQUEST_ID_LAUNCH to "serviceScope.launch"),
+      result.violations.map { it.kind to it.symbol },
+    )
+  }
+
+  @Test
+  fun `does not flag helper-routed request-correlated launch`() {
+    val src =
+      """
+      class Fake {
+        private fun dispatch(requestId: String?) {
+          launchRequestScope(requestId) {
+            val value = doRealWork()
+            broadcastFooResult(requestId, value)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertTrue(
+      "helper-routed launch must not be flagged: ${result.violations}",
+      result.violations.isEmpty(),
+    )
+  }
+
+  @Test
+  fun `does not treat block-argument launch calls as trailing-lambda launch bodies`() {
+    val src =
+      """
+      class Fake {
+        private val serviceScope: CoroutineScope = TODO()
+
+        private fun launchRequestScope(
+          requestId: String?,
+          block: suspend CoroutineScope.() -> Unit,
+        ): Job = serviceScope.launch(context = RequestIdContext(requestId), block = block)
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertEquals(0, result.rawLaunchBlocks)
+    assertTrue(
+      "block-argument launch must not be flagged: ${result.violations}",
+      result.violations.isEmpty(),
+    )
+  }
+
+  @Test
+  fun `flags inline block-argument serviceScope launch that captures requestId without context`() {
+    val src =
+      """
+      class Fake {
+        private val serviceScope: CoroutineScope = TODO()
+
+        private fun dispatch(requestId: String?) {
+          serviceScope.launch(block = {
+            val value = doRealWork()
+            broadcastFooResult(requestId, value)
+          })
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertEquals(
+      listOf(BroadcastGuardScanner.Kind.RAW_REQUEST_ID_LAUNCH to "serviceScope.launch"),
+      result.violations.map { it.kind to it.symbol },
+    )
+  }
+
+  @Test
+  fun `flags raw serviceScope launch that captures a requestId alias without context`() {
+    val src =
+      """
+      class Fake {
+        private val serviceScope: CoroutineScope = TODO()
+
+        private fun dispatch(requestId: String?) {
+          val id = requestId
+          serviceScope.launch {
+            val value = doRealWork()
+            broadcastFooResult(id, value)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertEquals(
+      listOf(BroadcastGuardScanner.Kind.RAW_REQUEST_ID_LAUNCH to "serviceScope.launch"),
+      result.violations.map { it.kind to it.symbol },
+    )
+  }
+
+  @Test
+  fun `does not flag uncorrelated serviceScope launch`() {
+    val src =
+      """
+      class Fake {
+        private val serviceScope: CoroutineScope = TODO()
+
+        private fun subscribe() {
+          serviceScope.launch {
+            broadcastNavigationEvent(event)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = BroadcastGuardScanner.scan(src)
+
+    assertTrue(
+      "uncorrelated push work must not be flagged: ${result.violations}",
+      result.violations.isEmpty(),
+    )
+  }
+
   // ---------------------------------------------------------------------------
   // Source location
   // ---------------------------------------------------------------------------
@@ -628,6 +888,8 @@ object BroadcastGuardScanner {
     SWALLOW_IN_BROADCAST,
     /** An `asyncActionRunner.launch { … }` block with an inner catch that logs-and-swallows. */
     SWALLOW_IN_LAUNCH,
+    /** A raw `serviceScope.launch { … }` block captures requestId without RequestIdContext. */
+    RAW_REQUEST_ID_LAUNCH,
   }
 
   data class Violation(val kind: Kind, val symbol: String, val line: Int)
@@ -639,6 +901,8 @@ object BroadcastGuardScanner {
     val guardedHelpers: List<String>,
     /** Count of `asyncActionRunner.launch(...)` blocks that were matched. */
     val launchBlocks: Int,
+    /** Count of raw `serviceScope.launch` blocks that were matched. */
+    val rawLaunchBlocks: Int,
     val violations: List<Violation>,
   )
 
@@ -649,6 +913,11 @@ object BroadcastGuardScanner {
   // broadcasters (`*Event`/`*Update`/`*Change`, no requestId) that legitimately log-and-swallow.
   private val HELPER = Regex("""(?:suspend )?fun (broadcast\w*(?:Result|Error|Response))\(""")
   private val LAUNCH = Regex("""asyncActionRunner\.launch\(""")
+  private val SERVICE_SCOPE_LAUNCH = Regex("""serviceScope\.launch""")
+  private val REQUEST_ID_CONTEXT =
+    Regex("""RequestIdContext\s*\(\s*(?:requestId|requestId\s*=\s*requestId)\s*\)""")
+  private val REQUEST_ID_TOKEN = Regex("""\brequestId\b""")
+  private val REQUEST_ID_ALIAS = Regex("""\b(?:val|var)\s+([A-Za-z_]\w*)\s*=\s*requestId\b""")
   private val GUARD_CALL = Regex("""resultBroadcaster\.guard\(""")
   private val CATCH = Regex("""catch\s*\(""")
   // The actual result emission. Every such call in a helper must sit *inside* a guard (or launch)
@@ -733,7 +1002,70 @@ object BroadcastGuardScanner {
       }
     }
 
-    return ScanResult(guardedHelpers, launchBlocks, violations)
+    var rawLaunchBlocks = 0
+    for (m in SERVICE_SCOPE_LAUNCH.findAll(code)) {
+      val call = parseLaunchCall(code, m.range.last + 1) ?: continue
+      rawLaunchBlocks++
+      val block = code.substring(call.blockOpen, call.blockClose)
+      val enclosingPrefix = code.substring(0, m.range.first)
+      val requestIdTokens = requestIdTokens(enclosingPrefix)
+      if (
+        requestIdTokens.any { token ->
+          Regex("""\b${Regex.escape(token)}\b""").containsMatchIn(block)
+        } && !REQUEST_ID_CONTEXT.containsMatchIn(call.args)
+      ) {
+        violations.add(
+          Violation(
+            Kind.RAW_REQUEST_ID_LAUNCH,
+            "serviceScope.launch",
+            lineOf(source, call.blockOpen),
+          )
+        )
+      }
+    }
+
+    return ScanResult(guardedHelpers, launchBlocks, rawLaunchBlocks, violations)
+  }
+
+  private fun requestIdTokens(enclosingPrefix: String): Set<String> = buildSet {
+    add("requestId")
+    REQUEST_ID_ALIAS.findAll(enclosingPrefix).forEach { add(it.groupValues[1]) }
+  }
+
+  private data class LaunchCall(val args: String, val blockOpen: Int, val blockClose: Int)
+
+  private fun parseLaunchCall(code: String, afterName: Int): LaunchCall? {
+    var cursor = afterName
+    while (cursor < code.length && code[cursor].isWhitespace()) cursor++
+
+    val args: String
+    if (cursor < code.length && code[cursor] == '(') {
+      val argsStart = cursor + 1
+      val parenEnd = matchParen(code, cursor)
+      args = code.substring(argsStart, parenEnd - 1)
+      findInlineBlockArgument(code, argsStart, parenEnd - 1)?.let { blockOpen ->
+        return LaunchCall(args, blockOpen, matchBrace(code, blockOpen))
+      }
+      cursor = parenEnd
+    } else {
+      args = ""
+    }
+
+    while (cursor < code.length && code[cursor].isWhitespace()) cursor++
+    if (cursor >= code.length || code[cursor] != '{') return null
+
+    val blockOpen = code.indexOf('{', cursor)
+    return LaunchCall(args, blockOpen, matchBrace(code, blockOpen))
+  }
+
+  private fun findInlineBlockArgument(code: String, start: Int, endExclusive: Int): Int? {
+    val blockArg = Regex("""\bblock\s*=""")
+    for (m in blockArg.findAll(code.substring(start, endExclusive))) {
+      var cursor = start + m.range.last + 1
+      while (cursor < endExclusive && code[cursor].isWhitespace()) cursor++
+      if (cursor < endExclusive && code[cursor] == '{') return cursor
+    }
+    return null
   }
 
   /**
@@ -772,7 +1104,7 @@ object BroadcastGuardScanner {
   }
 
   /** [open] must index a '('; returns the index just past the matching ')'. */
-  private fun matchParen(s: String, open: Int): Int {
+  fun matchParen(s: String, open: Int): Int {
     var depth = 0
     var i = open
     while (i < s.length) {

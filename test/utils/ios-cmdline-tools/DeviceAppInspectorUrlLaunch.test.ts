@@ -58,16 +58,16 @@ const makeInspector = (overrides: Overrides = {}): Harness => {
   return { inspector, commands };
 };
 
-describe("DeviceAppInspector.isAvailable (URL launch)", () => {
+describe("DeviceAppInspector.isUrlLaunchAvailable", () => {
   test("returns false on a non-darwin host without probing", async () => {
     const { inspector, commands } = makeInspector({ platform: () => "linux" });
-    expect(await inspector.isAvailable()).toBe(false);
+    expect(await inspector.isUrlLaunchAvailable()).toBe(false);
     expect(commands).toHaveLength(0);
   });
 
   test("returns true on darwin when `devicectl --version` succeeds", async () => {
     const { inspector, commands } = makeInspector();
-    expect(await inspector.isAvailable()).toBe(true);
+    expect(await inspector.isUrlLaunchAvailable()).toBe(true);
     expect(commands[0]).toContain("devicectl");
     expect(commands[0]).toContain("--version");
   });
@@ -76,7 +76,7 @@ describe("DeviceAppInspector.isAvailable (URL launch)", () => {
     const { inspector } = makeInspector({
       exec: async () => { throw new Error("xcrun: devicectl not found"); },
     });
-    expect(await inspector.isAvailable()).toBe(false);
+    expect(await inspector.isUrlLaunchAvailable()).toBe(false);
   });
 
   test("reports available under host control so the caller reaches the explicit launch error", async () => {
@@ -84,7 +84,7 @@ describe("DeviceAppInspector.isAvailable (URL launch)", () => {
       platform: () => "linux",
       hostControl: { shouldUseHostControl: () => true, isRunningInDocker: () => true },
     });
-    expect(await inspector.isAvailable()).toBe(true);
+    expect(await inspector.isUrlLaunchAvailable()).toBe(true);
     expect(commands).toHaveLength(0);
   });
 });

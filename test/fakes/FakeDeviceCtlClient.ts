@@ -20,7 +20,7 @@ export class FakeDeviceCtlClient implements DeviceUrlLauncher {
     this.launchError = error;
   }
 
-  async isAvailable(): Promise<boolean> {
+  async isUrlLaunchAvailable(): Promise<boolean> {
     this.availabilityChecks++;
     return this.available;
   }

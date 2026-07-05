@@ -371,7 +371,7 @@ const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: str
  */
 export interface DeviceUrlLauncher {
   /** True when `devicectl` can service a physical-device open-URL request. */
-  isAvailable(): Promise<boolean>;
+  isUrlLaunchAvailable(): Promise<boolean>;
   /**
    * Open `url` on a physical iOS device by launching `bundleId` with the URL as
    * its launch payload. Throws with actionable context on failure (unsupported
@@ -411,8 +411,10 @@ export class DeviceAppInspector implements DeviceUrlLauncher {
    *
    * Part of the {@link DeviceUrlLauncher} seam OpenURL depends on; simulators are
    * handled by the `simctl openurl` path in OpenURL and never reach this method.
+   * Named distinctly from the host-control `isAvailable()` dependency so the
+   * multi-purpose class exposes an unambiguous URL-launch availability check.
    */
-  async isAvailable(): Promise<boolean> {
+  async isUrlLaunchAvailable(): Promise<boolean> {
     if (this.isHostControlMode()) {
       return true;
     }

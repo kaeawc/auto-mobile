@@ -226,7 +226,7 @@ export class OpenURL extends BaseVisualChange {
   private async executeiOSPhysicalOpenURL(url: string): Promise<OpenURLResult> {
     const devicectl = this.devicectl ?? new DeviceAppInspector();
 
-    if (!(await devicectl.isAvailable())) {
+    if (!(await devicectl.isUrlLaunchAvailable())) {
       return {
         success: false,
         url,

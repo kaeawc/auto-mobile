@@ -1,4 +1,15 @@
 import type { Kysely } from "kysely";
+import { EVENT_TABLES } from "../eventTables";
+
+async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
+  const result = await db
+    .selectFrom("sqlite_master" as never)
+    .select("name")
+    .where("type", "=", "table")
+    .where("name", "=", tableName)
+    .execute();
+  return result.length > 0;
+}
 
 /**
  * Drop the now-redundant single-column `idx_<table>_device` indexes on the six
@@ -33,17 +44,8 @@ import type { Kysely } from "kysely";
  * `2026_07_02_000_event_composite_indexes.ts`, so the composite that subsumes
  * each device index is guaranteed present when its device index is dropped.
  */
-const TABLES = [
-  "network_events",
-  "log_events",
-  "os_events",
-  "navigation_events",
-  "storage_events",
-  "layout_events",
-] as const;
-
 export async function up(db: Kysely<unknown>): Promise<void> {
-  for (const table of TABLES) {
+  for (const table of EVENT_TABLES) {
     // .ifExists() so replay on a DB that never had the standalone device index
     // (or a partial recovery order) does not throw.
     await db.schema.dropIndex(`idx_${table}_device`).ifExists().execute();
@@ -51,7 +53,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
-  for (const table of TABLES) {
+  for (const table of EVENT_TABLES) {
+    if (!(await tableExists(db, table))) {
+      continue;
+    }
     // Recreate the single-column device index exactly as the base migrations
     // defined it. .ifNotExists() so a down after a partial-up is idempotent.
     await db.schema

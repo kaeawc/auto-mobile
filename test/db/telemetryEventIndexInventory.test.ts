@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
+import { EVENT_TABLES } from "../../src/db/eventTables";
 import { runMigrations } from "../../src/db/migrator";
 
 /**
@@ -84,7 +85,11 @@ const CANONICAL_INDEXES: Record<string, Record<string, string[]>> = {
   },
 };
 
-const TABLES = Object.keys(CANONICAL_INDEXES);
+const TABLES = [...EVENT_TABLES];
+
+test("EVENT_TABLES is the canonical table list used by the telemetry index guard", () => {
+  expect([...TABLES].sort()).toEqual(Object.keys(CANONICAL_INDEXES).sort());
+});
 
 /**
  * Explicit-index inventory of a table: name → ordered columns, ignoring the

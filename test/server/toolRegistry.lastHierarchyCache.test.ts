@@ -95,10 +95,12 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     sessionUuid: z.string().optional(),
   });
 
-  test("populates lastHierarchy + lastScreenshot from structuredContent and sanitizes the returned response", async () => {
+  test("populates lastHierarchy from structuredContent and sanitizes the returned response", async () => {
     const sessionId = await setupAutolockedSession();
 
     const observeResult = makeObserveResult();
+    // Inject a rogue `screenshot` field: the dead lastScreenshot cache chain was
+    // removed (#3221), so even a payload that carries one must NOT be cached.
     (observeResult as any).screenshot = "base64-screenshot-data";
     ToolRegistry.registerDeviceAware(
       "observe",
@@ -122,8 +124,9 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     expect(cachedHierarchy.hierarchy.node.clickable).toBe("false");
     // Observe timestamp is stamped alongside the hierarchy.
     expect(typeof cacheData.lastObserveTime).toBe("number");
-    // Screenshot cache repair (symmetric structuredContent read).
-    expect(cacheData.lastScreenshot).toBe("base64-screenshot-data");
+    // The dead screenshot cache chain is removed (#3221): no lastScreenshot slot
+    // is written even when the payload carries a `screenshot` field.
+    expect((cacheData as Record<string, unknown>).lastScreenshot).toBeUndefined();
     // The dormant-decoy keys never leak into an untyped bag — the `customData`
     // escape hatch no longer exists at all (#2917/#2973).
     expect((cacheData as Record<string, unknown>).customData).toBeUndefined();

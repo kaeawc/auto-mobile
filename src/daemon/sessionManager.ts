@@ -32,8 +32,8 @@ export interface KeepScreenAwakeRestorer {
  *
  * Every field is a typed top-level slot — the canonical source of truth for its
  * concern (issue #2917). Write each through its dedicated setter
- * (`setLastHierarchy`, `setLastScreenshot`, `setKeepScreenAwake`,
- * `setDeviceLabels`, …) so a writer/reader type drift is caught at compile time.
+ * (`setLastHierarchy`, `setKeepScreenAwake`, `setDeviceLabels`, …) so a
+ * writer/reader type drift is caught at compile time.
  *
  * There is deliberately NO `customData?: Record<string, any>` escape hatch
  * (issue #2973): it previously held well-known, fixed-type keyed state
@@ -43,8 +43,7 @@ export interface KeepScreenAwakeRestorer {
  */
 export interface SessionCacheData {
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
-  lastScreenshot?: string;     // Base64 encoded last screenshot
-  lastObserveTime?: number;    // Timestamp of last hierarchy observation (hierarchy only, not screenshot)
+  lastObserveTime?: number;    // Timestamp of last hierarchy observation
   lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
   keepScreenAwake?: KeepScreenAwakeState; // Keep-awake state applied at session setup, restored on release
   deviceLabels?: DeviceLabelMap; // Device-label → session map for multi-device (`device:`-labelled) sessions
@@ -358,14 +357,6 @@ export class SessionManager {
       lastHierarchy: hierarchy,
       lastObserveTime: this.timer.now(),
     });
-  }
-
-  /**
-   * Cache the most recent base64-encoded screenshot for a session in the typed
-   * top-level `lastScreenshot` slot (canonical source of truth per #2917).
-   */
-  setLastScreenshot(sessionId: string, screenshot: string): void {
-    this.updateSessionCache(sessionId, { lastScreenshot: screenshot });
   }
 
   /**

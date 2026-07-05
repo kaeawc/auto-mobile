@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Socket } from "node:net";
-import { TelemetryPushSocketServer } from "../../src/daemon/telemetryPushSocketServer";
+import {
+  TelemetryPushSocketServer,
+  boundBackfillEventText,
+} from "../../src/daemon/telemetryPushSocketServer";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
@@ -58,6 +61,69 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
     (this as any).checkKeepalive();
   }
 }
+
+describe("boundBackfillEventText", () => {
+  it("caps a large log message at 10KB", () => {
+    const event: TelemetryEvent = {
+      category: "log",
+      timestamp: 1,
+      deviceId: null,
+      data: { level: 4, tag: "t", message: "m".repeat(50_000) },
+    };
+    const bounded = boundBackfillEventText(event);
+    expect((bounded.data as { message: string }).message.length).toBe(10_240);
+  });
+
+  it("caps large storage value and previousValue at 10KB", () => {
+    const event: TelemetryEvent = {
+      category: "storage",
+      timestamp: 1,
+      deviceId: null,
+      data: {
+        key: "k",
+        value: "v".repeat(30_000),
+        previousValue: "p".repeat(30_000),
+        valueType: "string",
+      },
+    };
+    const bounded = boundBackfillEventText(event);
+    const data = bounded.data as { value: string; previousValue: string };
+    expect(data.value.length).toBe(10_240);
+    expect(data.previousValue.length).toBe(10_240);
+  });
+
+  it("leaves small fields and unrelated categories untouched", () => {
+    const event: TelemetryEvent = {
+      category: "log",
+      timestamp: 1,
+      deviceId: null,
+      data: { level: 4, tag: "t", message: "small" },
+    };
+    const bounded = boundBackfillEventText(event);
+    expect((bounded.data as { message: string }).message).toBe("small");
+
+    const os: TelemetryEvent = {
+      category: "os",
+      timestamp: 1,
+      deviceId: null,
+      data: { category: "lifecycle", kind: "foreground", details: null },
+    };
+    expect(boundBackfillEventText(os)).toEqual(os);
+  });
+
+  it("does not split a surrogate pair in a bounded field", () => {
+    const event: TelemetryEvent = {
+      category: "log",
+      timestamp: 1,
+      deviceId: null,
+      data: { level: 4, tag: "t", message: "m".repeat(10_239) + "😀" + "n".repeat(50) },
+    };
+    const bounded = boundBackfillEventText(event);
+    const msg = (bounded.data as { message: string }).message;
+    expect(msg.length).toBe(10_239);
+    expect(msg.isWellFormed()).toBe(true);
+  });
+});
 
 describe("TelemetryPushSocketServer", () => {
   let server: TestableTelemetryPushSocketServer;

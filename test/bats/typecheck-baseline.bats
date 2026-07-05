@@ -135,7 +135,9 @@ teardown() {
 }
 
 @test "check mode errors when the baseline is missing" {
-  run bash "$SCRIPT"
+  # Stub tsc so the test never depends on a real compiler (the BATS CI job has no
+  # bun deps installed); TYPECHECK_BASELINE points at a not-yet-created path.
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" run bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"baseline missing"* ]]
 }

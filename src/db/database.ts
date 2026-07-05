@@ -56,6 +56,9 @@ export function configureSqliteDatabase(sqliteDb: SqlitePragmaDatabase): void {
   // Enable WAL mode for better concurrent read performance
   sqliteDb.exec("PRAGMA journal_mode = WAL;");
 
+  // WAL + NORMAL avoids an fsync per commit while remaining corruption-safe.
+  sqliteDb.exec("PRAGMA synchronous = NORMAL;");
+
   // Enable foreign key enforcement for cascade deletes
   sqliteDb.exec("PRAGMA foreign_keys = ON;");
 }

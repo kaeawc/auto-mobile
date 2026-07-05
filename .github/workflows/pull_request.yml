@@ -1206,6 +1206,12 @@ jobs:
     env:
       AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS: "240"
       AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
+      # Daemon readiness is gated on the PID file written LAST in Daemon.start(), so
+      # the startup budget must cover Bun cold start + DB migrations +
+      # initializeDevicePoolWithTimeout(5000) + initializeIosServices (5s/device). On a
+      # cold macOS runner that serial bring-up exceeds the 10s default and the daemon
+      # gives up ("Daemon failed to start within 10000ms"). Raise it to 60s (#3110).
+      AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "60000"
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

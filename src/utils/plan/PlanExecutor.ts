@@ -7,7 +7,7 @@ import {
   DEFAULT_ABORT_STRATEGY,
 } from "../../models/Plan";
 import { logger } from "../logger";
-import { ToolRegistry } from "../../server/toolRegistry";
+import { ToolRegistry, type RegisteredTool } from "../../server/toolRegistry";
 import { markInternalToolCall } from "../../server/internalToolCall";
 import { ActionableError } from "../../models";
 import { isDebugModeEnabled } from "../debug";
@@ -26,6 +26,25 @@ import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
 } from "./summarizeFailureObservation";
+
+type StepExecutionStatus = "completed" | "failed" | "skipped";
+
+interface StepExecutionContext {
+  platform?: string;
+  deviceId?: string;
+  sessionUuid?: string;
+  signal?: AbortSignal;
+  captureObserveSteps?: NonNullable<PlanExecutionOptions["captureObserveSteps"]>;
+  logPrefix: string;
+  debugLog?: boolean;
+}
+
+interface StepExecutionResult {
+  status: StepExecutionStatus;
+  error?: string;
+  details: Record<string, unknown>;
+  failureObservation?: FailureObservationSummary;
+}
 
 /**
  * Interface for plan execution
@@ -290,6 +309,217 @@ export class DefaultPlanExecutor implements PlanExecutor {
     }
   }
 
+  private buildEnhancedStepParams(
+    tool: RegisteredTool,
+    step: PlanStep,
+    platform: string | undefined,
+    deviceId: string | undefined,
+    sessionUuid: string | undefined,
+  ): Record<string, unknown> {
+    const enhancedParams: Record<string, unknown> = { ...step.params };
+
+    if (!tool.requiresDevice) {
+      return enhancedParams;
+    }
+
+    if (platform && !enhancedParams.platform) {
+      enhancedParams.platform = platform;
+    }
+
+    // Inject deviceId if provided and not already set - BUT only if session-based routing won't work.
+    // We suppress deviceId injection when BOTH conditions are met:
+    // 1. sessionUuid is present (for session-based routing)
+    // 2. daemon is initialized (so session routing will actually work in ToolRegistry)
+    // If daemon is not initialized, we still inject deviceId to preserve device targeting,
+    // preventing fallback to auto-selection which may target the wrong device.
+    const shouldSuppressDeviceId = sessionUuid && DaemonState.getInstance().isInitialized();
+    if (deviceId && !shouldSuppressDeviceId && !enhancedParams.deviceId && !enhancedParams.device) {
+      enhancedParams.deviceId = deviceId;
+      logger.info(`[PlanExecutor] Injecting deviceId ${deviceId} into ${step.tool}`);
+    }
+
+    if (sessionUuid && !enhancedParams.sessionUuid) {
+      enhancedParams.sessionUuid = sessionUuid;
+      logger.info(`[PlanExecutor] Injecting sessionUuid ${sessionUuid} into ${step.tool}`);
+    }
+
+    return enhancedParams;
+  }
+
+  private async executeStep(
+    step: PlanStep,
+    context: StepExecutionContext,
+  ): Promise<StepExecutionResult> {
+    const tool = ToolRegistry.getToolForPlan(step.tool);
+    if (!tool) {
+      const error = `Unknown tool: ${step.tool}`;
+      return {
+        status: "failed",
+        error,
+        details: { error },
+      };
+    }
+
+    try {
+      const enhancedParams = this.buildEnhancedStepParams(
+        tool,
+        step,
+        context.platform,
+        context.deviceId,
+        context.sessionUuid,
+      );
+
+      // Parse and validate the parameters, then mark this as an internal
+      // tool-to-tool call (#3053) so finalize emits the full observation on the
+      // step envelope - never a diff or a stripped payload - regardless of
+      // `--actions-diff-observe`/`--actions-no-observe`. Marked AFTER schema.parse
+      // (which strips unknown keys) so it reaches the wrapped handler; mirrors
+      // the `__mcpSessionId` internal-param convention.
+      const parsedParams = markInternalToolCall(
+        tool.schema.parse(enhancedParams) as Record<string, unknown>
+      );
+
+      if (context.deviceId) {
+        ScreenshotJobTracker.cancelJob(context.deviceId);
+      }
+
+      const paramsPreview = JSON.stringify(parsedParams).substring(0, 200);
+      if (context.debugLog) {
+        logger.debug(`${context.logPrefix} Executing ${step.tool} with params: ${paramsPreview}`);
+      } else {
+        logger.info(`${context.logPrefix} Calling ${step.tool} with params: ${paramsPreview}`);
+      }
+
+      const response = await tool.handler(parsedParams, undefined, context.signal);
+      throwIfAborted(context.signal);
+
+      const toolResult = this.extractToolResult(response);
+      logger.info(
+        `${context.logPrefix} ${step.tool} completed. Response success: ${toolResult?.success !== false ? "true" : "FALSE"}`
+      );
+
+      const checkResult = toolResult ?? response;
+      if (
+        checkResult &&
+        typeof checkResult === "object" &&
+        "success" in checkResult &&
+        checkResult.success === false
+      ) {
+        const error = "error" in checkResult ? String(checkResult.error) : "Tool execution failed";
+        if (step.optional) {
+          return {
+            status: "skipped",
+            error,
+            details: {
+              params: step.params,
+              error,
+              optional: true,
+            },
+          };
+        }
+
+        const failureObservation = await this.buildFailureObservationContext(
+          step.tool,
+          response,
+          context.platform,
+          context.deviceId,
+          context.sessionUuid,
+        );
+        const details: Record<string, unknown> = {
+          params: step.params,
+          error,
+          ...(toolResult && typeof toolResult === "object" && "debug" in toolResult
+            ? { toolDebug: toolResult.debug }
+            : {}),
+          ...(failureObservation ? { failureObservation } : {})
+        };
+        this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
+        return {
+          status: "failed",
+          error,
+          details,
+          failureObservation,
+        };
+      }
+
+      const observeTimedOut = step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
+      if (observeTimedOut) {
+        const error = `observe waitFor timed out after ${observeTimedOut.awaitDuration ?? "unknown"}ms`;
+        if (step.optional) {
+          return {
+            status: "skipped",
+            error,
+            details: {
+              params: step.params,
+              error,
+              optional: true,
+            },
+          };
+        }
+        return {
+          status: "failed",
+          error,
+          details: {
+            params: step.params,
+            error,
+          },
+        };
+      }
+
+      const details: Record<string, unknown> = {
+        params: step.params,
+      };
+      if (step.tool === "observe" && context.captureObserveSteps) {
+        const stepObservation = this.buildObserveStepCaptureFromResponse(
+          response,
+          context.captureObserveSteps
+        );
+        if (stepObservation) {
+          details.stepObservation = stepObservation;
+        }
+      }
+      this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
+
+      return {
+        status: "completed",
+        details,
+      };
+    } catch (error) {
+      const errorMessage = `${error}`;
+      if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
+        return {
+          status: "skipped",
+          error: errorMessage,
+          details: {
+            params: step.params,
+            error: errorMessage,
+            optional: true,
+          },
+        };
+      }
+
+      const failureObservation = context.signal?.aborted
+        ? undefined
+        : await this.buildFailureObservationContext(
+          step.tool,
+          undefined,
+          context.platform,
+          context.deviceId,
+          context.sessionUuid,
+        );
+      return {
+        status: "failed",
+        error: errorMessage,
+        details: {
+          params: step.params,
+          error: errorMessage,
+          ...(failureObservation ? { failureObservation } : {})
+        },
+        failureObservation,
+      };
+    }
+  }
+
   /**
    * Execute a plan step by step
    * @param plan Plan to execute
@@ -396,18 +626,33 @@ export class DefaultPlanExecutor implements PlanExecutor {
         const stepLabel = step.label || step.params?.label || JSON.stringify(step.params).substring(0, 50);
         logger.info(`[PLAN_STEP_${i + 1}/${plan.steps.length}] Tool: ${step.tool}, Label: ${stepLabel}`);
 
-        // Get the registered tool
-        const tool = ToolRegistry.getToolForPlan(step.tool);
-        if (!tool) {
-          logger.info(`Could not find tool: ${step.tool}`);
+        const stepResult = await this.executeStep(step, {
+          platform,
+          deviceId,
+          sessionUuid,
+          signal,
+          captureObserveSteps: executionOptions?.captureObserveSteps,
+          logPrefix: `[PLAN_STEP_${i + 1}]`,
+        });
 
+        if (stepResult.status === "skipped") {
+          this.recordSkippedOptionalStep(
+            debugSteps,
+            i + 1,
+            step,
+            this.timer.now() - stepStartTime,
+            stepResult.error ?? "Unknown error",
+          );
+          continue;
+        }
+
+        if (stepResult.status === "failed") {
+          logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${stepResult.error}`);
           debugSteps.push({
             step: `Execute step ${i + 1}: ${step.tool}`,
             status: "failed",
             durationMs: this.timer.now() - stepStartTime,
-            details: {
-              error: `Unknown tool: ${step.tool}`
-            }
+            details: stepResult.details,
           });
 
           return {
@@ -417,7 +662,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
             failedStep: {
               stepIndex: i,
               tool: step.tool,
-              error: `Unknown tool: ${step.tool}`
+              error: stepResult.error ?? "Unknown error",
+              ...(stepResult.failureObservation ? { failureObservation: stepResult.failureObservation } : {})
             },
             debug: {
               executionTimeMs: this.timer.now() - startTime,
@@ -426,212 +672,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
           };
         }
 
-        try {
-          // Inject platform, deviceId, and sessionUuid into tool call params for device-aware tools
-          const enhancedParams = { ...step.params };
+        debugSteps.push({
+          step: `Execute step ${i + 1}: ${step.tool}`,
+          status: "completed",
+          durationMs: this.timer.now() - stepStartTime,
+          details: stepResult.details,
+        });
 
-          if (tool.requiresDevice) {
-            // Inject platform if provided and not already set
-            if (platform && !enhancedParams.platform) {
-              enhancedParams.platform = platform;
-            }
-
-            // Inject deviceId if provided and not already set - BUT only if session-based routing won't work
-            // We suppress deviceId injection when BOTH conditions are met:
-            // 1. sessionUuid is present (for session-based routing)
-            // 2. daemon is initialized (so session routing will actually work in ToolRegistry)
-            // If daemon is not initialized, we still inject deviceId to preserve device targeting,
-            // preventing fallback to auto-selection which may target the wrong device.
-            const shouldSuppressDeviceId = sessionUuid && DaemonState.getInstance().isInitialized();
-            if (deviceId && !shouldSuppressDeviceId && !enhancedParams.deviceId && !enhancedParams.device) {
-              enhancedParams.deviceId = deviceId;
-              logger.info(`[PlanExecutor] Injecting deviceId ${deviceId} into ${step.tool}`);
-            }
-
-            // Inject sessionUuid if provided and not already set - this enables session-based device routing
-            if (sessionUuid && !enhancedParams.sessionUuid) {
-              enhancedParams.sessionUuid = sessionUuid;
-              logger.info(`[PlanExecutor] Injecting sessionUuid ${sessionUuid} into ${step.tool}`);
-            }
-          }
-
-          // Parse and validate the parameters, then mark this as an internal
-          // tool-to-tool call (#3053) so finalize emits the full observation on the
-          // step envelope — never a diff or a stripped payload — regardless of
-          // `--actions-diff-observe`/`--actions-no-observe`. Marked AFTER schema.parse
-          // (which strips unknown keys) so it reaches the wrapped handler; mirrors
-          // the `__mcpSessionId` internal-param convention.
-          const parsedParams = markInternalToolCall(
-            tool.schema.parse(enhancedParams) as Record<string, unknown>
-          );
-
-          if (deviceId) {
-            ScreenshotJobTracker.cancelJob(deviceId);
-          }
-
-          // Execute the tool
-          logger.info(`[PLAN_STEP_${i + 1}] Calling ${step.tool} with params: ${JSON.stringify(parsedParams).substring(0, 200)}`);
-          const response = await tool.handler(parsedParams, undefined, signal);
-          throwIfAborted(signal);
-
-          // Extract the actual tool result from the response.
-          // Tool handlers return MCP-formatted responses via createJSONToolResponse():
-          //   { content: [{ type: "text", text: '{"success": false, "error": "..."}' }] }
-          // We need to unwrap this to check the actual success/failure status.
-          const toolResult = this.extractToolResult(response);
-          logger.info(`[PLAN_STEP_${i + 1}] ${step.tool} completed. Response success: ${toolResult?.success !== false ? "true" : "FALSE"}`);
-
-          const observeTimedOut = step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
-
-          // Check if the response indicates failure
-          if (toolResult && typeof toolResult === "object" && "success" in toolResult && toolResult.success === false) {
-            const errorMsg = toolResult.error || "Unknown error";
-            if (step.optional) {
-              this.recordSkippedOptionalStep(debugSteps, i + 1, step, this.timer.now() - stepStartTime, String(errorMsg));
-              continue;
-            }
-            logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${errorMsg}`);
-            const failureObservation = await this.buildFailureObservationContext(
-              step.tool,
-              response,
-              platform,
-              deviceId,
-              sessionUuid,
-            );
-            const failedToolDetails: Record<string, unknown> = {
-              params: step.params,
-              error: String(errorMsg),
-              ...(toolResult.debug ? { toolDebug: toolResult.debug } : {}),
-              ...(failureObservation ? { failureObservation } : {})
-            };
-            this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, failedToolDetails);
-            debugSteps.push({
-              step: `Execute step ${i + 1}: ${step.tool}`,
-              status: "failed",
-              durationMs: this.timer.now() - stepStartTime,
-              details: failedToolDetails,
-            });
-
-            return {
-              success: false,
-              executedSteps,
-              totalSteps: plan.steps.length,
-              failedStep: {
-                stepIndex: i,
-                tool: step.tool,
-                error: String(errorMsg),
-                ...(failureObservation ? { failureObservation } : {})
-              },
-              debug: {
-                executionTimeMs: this.timer.now() - startTime,
-                steps: debugSteps
-              }
-            };
-          }
-
-          if (observeTimedOut) {
-            const errorMsg = `observe waitFor timed out after ${observeTimedOut.awaitDuration ?? "unknown"}ms`;
-            if (step.optional) {
-              this.recordSkippedOptionalStep(debugSteps, i + 1, step, this.timer.now() - stepStartTime, errorMsg);
-              continue;
-            }
-            logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${errorMsg}`);
-            debugSteps.push({
-              step: `Execute step ${i + 1}: ${step.tool}`,
-              status: "failed",
-              durationMs: this.timer.now() - stepStartTime,
-              details: {
-                params: step.params,
-                error: errorMsg,
-              }
-            });
-
-            return {
-              success: false,
-              executedSteps,
-              totalSteps: plan.steps.length,
-              failedStep: {
-                stepIndex: i,
-                tool: step.tool,
-                error: errorMsg,
-              },
-              debug: {
-                executionTimeMs: this.timer.now() - startTime,
-                steps: debugSteps
-              }
-            };
-          }
-
-          const completedDetails: Record<string, unknown> = {
-            params: step.params,
-          };
-          if (
-            step.tool === "observe" &&
-            executionOptions?.captureObserveSteps
-          ) {
-            const stepObservation = this.buildObserveStepCaptureFromResponse(
-              response,
-              executionOptions.captureObserveSteps
-            );
-            if (stepObservation) {
-              completedDetails.stepObservation = stepObservation;
-            }
-          }
-          this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, completedDetails);
-
-          debugSteps.push({
-            step: `Execute step ${i + 1}: ${step.tool}`,
-            status: "completed",
-            durationMs: this.timer.now() - stepStartTime,
-            details: completedDetails,
-          });
-
-          executedSteps++;
-          logger.info(`[PLAN_STEP_${i + 1}] Successfully completed. Total executed: ${executedSteps}/${plan.steps.length}`);
-        } catch (error) {
-          // `optional` skips runtime UI/tool failures, NOT plan-authoring errors: a schema
-          // validation throw (ZodError from tool.schema.parse) stays fatal so a typo in an optional
-          // step surfaces instead of silently becoming a no-op. An abort must also never be swallowed
-          // as a skip.
-          if (step.optional && !signal?.aborted && !(error instanceof ZodError)) {
-            this.recordSkippedOptionalStep(debugSteps, i + 1, step, this.timer.now() - stepStartTime, `${error}`);
-            continue;
-          }
-          logger.error(`[PLAN_STEP_${i + 1}] EXCEPTION in ${step.tool}: ${error}`);
-          const failureObservation = await this.buildFailureObservationContext(
-            step.tool,
-            undefined,
-            platform,
-            deviceId,
-            sessionUuid,
-          );
-          debugSteps.push({
-            step: `Execute step ${i + 1}: ${step.tool}`,
-            status: "failed",
-            durationMs: this.timer.now() - stepStartTime,
-            details: {
-              params: step.params,
-              error: `${error}`,
-              ...(failureObservation ? { failureObservation } : {})
-            }
-          });
-
-          return {
-            success: false,
-            executedSteps,
-            totalSteps: plan.steps.length,
-            failedStep: {
-              stepIndex: i,
-              tool: step.tool,
-              error: `${error}`,
-              ...(failureObservation ? { failureObservation } : {})
-            },
-            debug: {
-              executionTimeMs: this.timer.now() - startTime,
-              steps: debugSteps
-            }
-          };
-        }
+        executedSteps++;
+        logger.info(`[PLAN_STEP_${i + 1}] Successfully completed. Total executed: ${executedSteps}/${plan.steps.length}`);
       }
 
       logger.info(`Plan execution completed successfully: ${executedSteps}/${plan.steps.length} steps`);
@@ -696,7 +745,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     // Create an abort controller for internal cancellation
     const internalAbortController = new AbortController();
     const combinedSignal = signal
-      ? this.createCombinedSignal(signal, internalAbortController.signal)
+      ? AbortSignal.any([signal, internalAbortController.signal])
       : internalAbortController.signal;
 
     // Track per-device results
@@ -915,10 +964,26 @@ export class DefaultPlanExecutor implements PlanExecutor {
           `[PARALLEL_EXEC][${device}] Step ${trackIndex + 1}/${track.length} (plan step ${planIndex}): ${step.tool}, Label: ${stepLabel}`
         );
 
-        // Get the registered tool
-        const tool = ToolRegistry.getToolForPlan(step.tool);
-        if (!tool) {
-          logger.error(`[PARALLEL_EXEC][${device}] Unknown tool: ${step.tool}`);
+        const stepResult = await this.executeStep(step, {
+          platform,
+          deviceId,
+          sessionUuid,
+          signal,
+          logPrefix: `[PARALLEL_EXEC][${device}]`,
+          debugLog: true,
+        });
+
+        if (stepResult.status === "skipped") {
+          // Parallel tracks do not emit the unified debug-step array (see the captureObserveSteps
+          // warning in executeParallel), so a skipped optional step is logged rather than recorded.
+          logger.warn(
+            `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${stepResult.error}`
+          );
+          continue;
+        }
+
+        if (stepResult.status === "failed") {
+          logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${stepResult.error}`);
           return {
             success: false,
             executedSteps,
@@ -927,154 +992,16 @@ export class DefaultPlanExecutor implements PlanExecutor {
               stepIndex: planIndex,
               trackIndex,
               tool: step.tool,
-              error: `Unknown tool: ${step.tool}`,
+              error: stepResult.error ?? "Unknown error",
+              ...(stepResult.failureObservation ? { failureObservation: stepResult.failureObservation } : {}),
             },
           };
         }
 
-        try {
-          // Inject device context
-          const enhancedParams = { ...step.params };
-
-          if (tool.requiresDevice) {
-            if (platform && !enhancedParams.platform) {
-              enhancedParams.platform = platform;
-            }
-            // Only inject deviceId if session-based routing won't work (see detailed comment in executeSequential)
-            const shouldSuppressDeviceId = sessionUuid && DaemonState.getInstance().isInitialized();
-            if (deviceId && !shouldSuppressDeviceId && !enhancedParams.deviceId && !enhancedParams.device) {
-              enhancedParams.deviceId = deviceId;
-            }
-            if (sessionUuid && !enhancedParams.sessionUuid) {
-              enhancedParams.sessionUuid = sessionUuid;
-            }
-          }
-
-          // Parse and validate parameters, then mark internal (#3053): same guard
-          // as the sequential path — a plan step's finalized envelope is never
-          // diffed/stripped, so a future internal `.observation` reader stays
-          // correct under the flags.
-          const parsedParams = markInternalToolCall(
-            tool.schema.parse(enhancedParams) as Record<string, unknown>
-          );
-
-          if (deviceId) {
-            ScreenshotJobTracker.cancelJob(deviceId);
-          }
-
-          // Execute the tool
-          logger.debug(
-            `[PARALLEL_EXEC][${device}] Executing ${step.tool} with params: ${JSON.stringify(parsedParams).substring(0, 200)}`
-          );
-          const response = await tool.handler(parsedParams, undefined, signal);
-          throwIfAborted(signal);
-
-          // Unwrap MCP-formatted responses (same as sequential path) so that
-          // failures inside { content: [{ text: '{"success":false,...}' }] }
-          // are detected instead of silently treated as success.
-          const toolResult = this.extractToolResult(response);
-          const checkResult = toolResult ?? response;
-
-          if (
-            checkResult &&
-            typeof checkResult === "object" &&
-            "success" in checkResult &&
-            checkResult.success === false
-          ) {
-            const errorMsg = "error" in checkResult ? String(checkResult.error) : "Tool execution failed";
-            if (step.optional) {
-              // Parallel tracks do not emit the unified debug-step array (see the captureObserveSteps
-              // warning in executeParallel), so — consistently with that design — a skipped optional
-              // step is logged rather than recorded as a debug step.
-              logger.warn(
-                `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${errorMsg}`
-              );
-              continue;
-            }
-            logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${errorMsg}`);
-
-            const failureObservation = await this.buildFailureObservationContext(
-              step.tool,
-              response,
-              platform,
-              deviceId,
-              sessionUuid,
-            );
-
-            return {
-              success: false,
-              executedSteps,
-              totalSteps: track.length,
-              failedStep: {
-                stepIndex: planIndex,
-                trackIndex,
-                tool: step.tool,
-                error: errorMsg,
-                ...(failureObservation ? { failureObservation } : {}),
-              },
-            };
-          }
-
-          const observeTimedOutParallel =
-            step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
-          if (observeTimedOutParallel) {
-            const errorMsg = `observe waitFor timed out after ${observeTimedOutParallel.awaitDuration ?? "unknown"}ms`;
-            if (step.optional) {
-              logger.warn(
-                `[PARALLEL_EXEC][${device}] optional step ${step.tool} timed out; skipping and continuing: ${errorMsg}`
-              );
-              continue;
-            }
-            logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${errorMsg}`);
-            return {
-              success: false,
-              executedSteps,
-              totalSteps: track.length,
-              failedStep: {
-                stepIndex: planIndex,
-                trackIndex,
-                tool: step.tool,
-                error: errorMsg,
-              },
-            };
-          }
-
-          executedSteps++;
-          logger.debug(
-            `[PARALLEL_EXEC][${device}] Step completed successfully. Executed: ${executedSteps}/${track.length}`
-          );
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          // Skip runtime failures only — a schema validation throw (ZodError) or an abort stays fatal.
-          if (step.optional && !signal?.aborted && !(error instanceof ZodError)) {
-            logger.warn(
-              `[PARALLEL_EXEC][${device}] optional step ${step.tool} threw; skipping and continuing: ${errorMessage}`
-            );
-            continue;
-          }
-          logger.error(`[PARALLEL_EXEC][${device}] Step execution error: ${errorMessage}`);
-
-          const failureObservation = await this.buildFailureObservationContext(
-            step.tool,
-            undefined,
-            platform,
-            deviceId,
-            sessionUuid,
-          );
-
-          return {
-            success: false,
-            executedSteps,
-            totalSteps: track.length,
-            failedStep: {
-              stepIndex: planIndex,
-              trackIndex,
-              tool: step.tool,
-              error: errorMessage,
-              ...(failureObservation ? { failureObservation } : {}),
-            },
-          };
-        }
+        executedSteps++;
+        logger.debug(
+          `[PARALLEL_EXEC][${device}] Step completed successfully. Executed: ${executedSteps}/${track.length}`
+        );
       }
 
       logger.info(
@@ -1104,21 +1031,4 @@ export class DefaultPlanExecutor implements PlanExecutor {
     }
   }
 
-  /**
-   * Creates a combined abort signal from two signals.
-   */
-  private createCombinedSignal(signal1: AbortSignal, signal2: AbortSignal): AbortSignal {
-    const controller = new AbortController();
-
-    const abort = () => controller.abort();
-
-    if (signal1.aborted || signal2.aborted) {
-      controller.abort();
-    } else {
-      signal1.addEventListener("abort", abort);
-      signal2.addEventListener("abort", abort);
-    }
-
-    return controller.signal;
-  }
 }

@@ -209,6 +209,28 @@ describe("AppPermissions", () => {
     ]);
   });
 
+  test("returns a physical-aware failure for getPermissions on a physical iOS device", async () => {
+    const tccReader: TccPermissionReader = {
+      readPermissions: async () => {
+        throw new Error("TCC reader must not be used for physical iOS devices");
+      },
+    };
+    const permissions = new AppPermissions(iosPhysical, { tccReader });
+
+    const result = await permissions.getPermissions("com.example.app", {
+      permissions: ["camera"],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.platform).toBe("ios");
+    expect(result.appId).toBe("com.example.app");
+    expect(result.deviceId).toBe(iosPhysical.deviceId);
+    expect(result.permissions).toEqual([]);
+    expect(result.error).toBe(
+      "iOS permission state queries are not available on physical devices (no readable TCC store); use setAppPermissions with action=reset to re-arm the system prompt"
+    );
+  });
+
   test("rejects grant on a physical iOS device with a reset-only failure", async () => {
     const iosPhysicalClient = new RecordingPhysicalPrivacyClient();
     const permissions = new AppPermissions(iosPhysical, { iosPhysicalClient });

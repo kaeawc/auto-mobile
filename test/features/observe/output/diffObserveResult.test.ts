@@ -6,6 +6,7 @@ import {
   sanitizeObserveResult,
   DIFF_SCALAR_FIELDS,
   DIFF_ELEMENT_FIELDS,
+  DIFF_IGNORED_ATTRS,
 } from "../../../../src/features/observe/output/ObserveResultOutput";
 import {
   loadAndroidHomeObserve,
@@ -793,6 +794,156 @@ describe("diffObserveResult", () => {
     expect(diff.changed).toEqual([]);
     expect(diff.added.map(n => n.attributes["resource-id"])).toEqual(["fresh"]);
     expect(diff.removed.map(n => n.attributes["resource-id"])).toEqual(["gone"]);
+  });
+});
+
+// --- Volatile `extras` a11y metadata exclusion (issue #3051 real-device sign-off)
+//
+// The real-device sign-off (docs/design-docs/plat/android/actions-diff-observe-signoff.md)
+// found that the `extras` node attribute — a bag of AccessibilityNodeInfo SDK
+// metadata (`AccessibilityNodeInfoCompat.SPANS_START_KEY`,
+// `EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL`, `AccessibilityNodeInfo.roleDescription`)
+// — churns nondeterministically between two captures of the SAME screen: the
+// traversal-order index shifts whenever the tree changes, and empty span arrays
+// (`"[]"`) appear/disappear on capture-timing races. On a real text-entry diff
+// this flooded `changed` with 83 phantom entries out of 85. Excluding `extras`
+// from the *changed* comparison collapses that to the ~2 genuinely-actionable
+// deltas. `added`/`removed` still carry the full node (incl. `extras`) so a
+// consumer can still reconstruct a new/gone node without the baseline.
+describe("diffObserveResult — volatile `extras` metadata exclusion (#3051)", () => {
+  test("a node whose only change is `extras` churn produces no `changed` entry", () => {
+    const baseline = obs({
+      "resource-id": "n",
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+      "text": "Hi",
+    });
+    const next = obs({
+      "resource-id": "n",
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+      "text": "Hi",
+      "extras": { "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]" },
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+  });
+
+  test("a real attribute change alongside `extras` churn reports ONLY the real change", () => {
+    const baseline = obs({
+      "resource-id": "sig",
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+      "content-desc": "Phone two bars.",
+      "extras": { "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "84" },
+    });
+    const next = obs({
+      "resource-id": "sig",
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+      "content-desc": "Phone three bars.",
+      "extras": { "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "335" },
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(Object.keys(diff.changed[0].changes)).toEqual(["content-desc"]);
+    expect(diff.changed[0].changes["content-desc"]).toEqual({
+      from: "Phone two bars.",
+      to: "Phone three bars.",
+    });
+    expect(diff.changed[0].changes.extras).toBeUndefined();
+  });
+
+  test("`extras` gained/lost on an otherwise-identical node is not a change", () => {
+    // roleDescription appearing only on the `to` side (a common capture-timing
+    // race) must not surface as a phantom change.
+    const baseline = obs({ "resource-id": "tab", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } });
+    const next = obs({
+      "resource-id": "tab",
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+      "extras": { "AccessibilityNodeInfo.roleDescription": "Tab" },
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+  });
+
+  test("an added node still carries its `extras` (full reconstruction preserved)", () => {
+    const baseline = obs({ "resource-id": "root", "bounds": { left: 0, top: 0, right: 100, bottom: 100 } });
+    const next = obs({
+      "resource-id": "root",
+      "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+      "node": [{
+        "resource-id": "new",
+        "bounds": { left: 1, top: 1, right: 2, bottom: 2 },
+        "text": "Added",
+        "extras": { "AccessibilityNodeInfo.roleDescription": "Button" },
+      }],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.added[0].attributes.extras).toEqual({ "AccessibilityNodeInfo.roleDescription": "Button" });
+  });
+
+  test("a re-paired (scroll) node ignores `extras` churn in its emitted changes", () => {
+    // A uniquely-identified row that only moves (bounds delta) re-pairs to a
+    // `changed`; if it also churns `extras`, the change must carry bounds only.
+    const baseline = obs({
+      "resource-id": "row",
+      "text": "Item",
+      "bounds": { left: 0, top: 0, right: 100, bottom: 10 },
+      "extras": { "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "10" },
+    });
+    const next = obs({
+      "resource-id": "row",
+      "text": "Item",
+      "bounds": { left: 0, top: 40, right: 100, bottom: 50 },
+      "extras": { "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "22" },
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(Object.keys(diff.changed[0].changes)).toEqual(["bounds"]);
+  });
+
+  test("DIFF_IGNORED_ATTRS names `extras` (single source of truth)", () => {
+    expect([...DIFF_IGNORED_ATTRS]).toContain("extras");
+  });
+
+  test("a mirror field (focusedElement) whose only change is `extras` churn is not reported", () => {
+    // The element mirror fields are diffed separately from node attributes
+    // (leanElementForDiff / elementValuesEqual), so the ignore-list must apply
+    // there too — otherwise a stable focus with only volatile `extras` churn emits
+    // a phantom fields.focusedElement (Codex review on PR #3132).
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const fe = (t: string) => ({
+      "resource-id": "f",
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+      "extras": { "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": t },
+    });
+    const baseline = obs({ ...node }, { focusedElement: fe("84") as any });
+    const next = obs({ ...node }, { focusedElement: fe("335") as any });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields).toBeUndefined();
+  });
+
+  test("a genuinely-changed mirror field is emitted WITHOUT its volatile `extras`", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, {
+      focusedElement: { "resource-id": "f1", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "extras": { "k": "1" } } as any,
+    });
+    const next = obs({ ...node }, {
+      focusedElement: { "resource-id": "f2", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "extras": { "k": "2" } } as any,
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields!.focusedElement).toBeDefined();
+    expect((diff.fields!.focusedElement.from as any)["resource-id"]).toBe("f1");
+    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("f2");
+    expect((diff.fields!.focusedElement.from as any).extras).toBeUndefined();
+    expect((diff.fields!.focusedElement.to as any).extras).toBeUndefined();
   });
 });
 

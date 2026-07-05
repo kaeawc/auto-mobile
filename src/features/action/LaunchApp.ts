@@ -8,7 +8,7 @@ import { ClearAppDataIos } from "./ClearAppDataIos";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { DisplayedTimeMetricsCollector } from "../performance/DisplayedTimeMetricsCollector";
@@ -33,7 +33,7 @@ export interface InstalledAppsProvider {
 /**
  * Launch an app on a physical iOS device via devicectl. Narrow injection point
  * so tests never shell out; parallels `DeviceAppUninstaller` in UninstallApp.
- * Implemented by `DeviceAppInspector`. `terminateExisting` provides cold-boot
+ * Implemented by `DeviceAppManager`. `terminateExisting` provides cold-boot
  * relaunch (terminate + fresh process); there is no standalone device terminate
  * here because devicectl cannot reliably resolve a PID by bundle id (deferred).
  */
@@ -75,7 +75,7 @@ export class LaunchApp extends BaseVisualChange {
     super(device, adb, timer);
     this.device = device;
     this.simctl = simctl || new SimCtlClient(this.device);
-    this.deviceAppLauncher = dependencies.deviceAppLauncher ?? new DeviceAppInspector();
+    this.deviceAppLauncher = dependencies.deviceAppLauncher ?? new DeviceAppManager();
     this.targetUserDetector = dependencies.targetUserDetector ?? {
       detectTargetUserId: (packageName: string, userId?: number) => this.detectTargetUserId(packageName, userId)
     };

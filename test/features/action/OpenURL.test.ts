@@ -5,7 +5,7 @@ import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
-import { FakeDeviceCtlClient } from "../../fakes/FakeDeviceCtlClient";
+import { FakeDeviceUrlLauncher } from "../../fakes/FakeDeviceUrlLauncher";
 
 const SIMULATOR_UDID = "ABCDEF01-1234-1234-1234-1234567890AB";
 const PHYSICAL_UDID = "00008110-000A4D8E1234567E";
@@ -21,7 +21,7 @@ const iosDevice = (deviceId: string): BootedDevice => ({
 const openIos = (
   device: BootedDevice,
   simctl: FakeSimCtlClient,
-  devicectl: FakeDeviceCtlClient,
+  devicectl: FakeDeviceUrlLauncher,
   url: string
 ) => {
   const openURL = new OpenURL(device, new FakeAdbExecutor() as unknown as any, simctl as any, devicectl as any);
@@ -36,7 +36,7 @@ describe("OpenURL iOS routing", () => {
 
   test("(a) simulator UDID routes to `simctl openurl` and never touches devicectl", async () => {
     const simctl = new FakeSimCtlClient();
-    const devicectl = new FakeDeviceCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
 
     const result = await openIos(iosDevice(SIMULATOR_UDID), simctl, devicectl, "https://example.com/x");
 
@@ -49,7 +49,7 @@ describe("OpenURL iOS routing", () => {
 
   test("(b) physical UDID + http URL launches Safari with the payload URL", async () => {
     const simctl = new FakeSimCtlClient();
-    const devicectl = new FakeDeviceCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
 
     const result = await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "https://example.com/order/123");
 
@@ -67,7 +67,7 @@ describe("OpenURL iOS routing", () => {
     restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
-    const devicectl = new FakeDeviceCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
 
     const result = await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "myapp://order/123");
 
@@ -82,7 +82,7 @@ describe("OpenURL iOS routing", () => {
     restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
-    const devicectl = new FakeDeviceCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
 
     await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "myapp://order/123");
 
@@ -97,7 +97,7 @@ describe("OpenURL iOS routing", () => {
     restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
-    const devicectl = new FakeDeviceCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
 
     const result = await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "mailto:a@b.com");
 
@@ -112,7 +112,7 @@ describe("OpenURL iOS routing", () => {
     restores.push(() => targetSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
-    const devicectl = new FakeDeviceCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
 
     await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "tel:+15551234567");
 
@@ -121,7 +121,7 @@ describe("OpenURL iOS routing", () => {
 
   test("(d) unavailable devicectl returns an explicit iOS 17+/Xcode 15+ error (no throw, no simctl)", async () => {
     const simctl = new FakeSimCtlClient();
-    const devicectl = new FakeDeviceCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
     devicectl.setAvailable(false);
 
     const result = await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "https://example.com");
@@ -134,7 +134,7 @@ describe("OpenURL iOS routing", () => {
 
   test("(e) devicectl launch failure returns { success:false, error }", async () => {
     const simctl = new FakeSimCtlClient();
-    const devicectl = new FakeDeviceCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
     devicectl.setLaunchError(new Error("device locked"));
 
     const result = await openIos(iosDevice(PHYSICAL_UDID), simctl, devicectl, "https://example.com");
@@ -146,7 +146,7 @@ describe("OpenURL iOS routing", () => {
   test("(a-neg) simulator simctl failure returns { success:false, error }", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandError(`openurl ${SIMULATOR_UDID} "https://example.com"`, new Error("Invalid device"));
-    const devicectl = new FakeDeviceCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
 
     const result = await openIos(iosDevice(SIMULATOR_UDID), simctl, devicectl, "https://example.com");
 
@@ -166,7 +166,7 @@ describe("OpenURL package: delegation is unchanged", () => {
     restores.push(() => launchSpy.mockRestore());
 
     const simctl = new FakeSimCtlClient();
-    const devicectl = new FakeDeviceCtlClient();
+    const devicectl = new FakeDeviceUrlLauncher();
     const openURL = new OpenURL(
       iosDevice(PHYSICAL_UDID),
       new FakeAdbExecutor() as unknown as any,

@@ -1,12 +1,12 @@
-import type { DeviceUrlLauncher } from "../../src/utils/ios-cmdline-tools/DeviceAppInspector";
+import type { DeviceUrlLauncher } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 
 /**
- * Test double for {@link DeviceAppInspector}'s {@link DeviceUrlLauncher} seam
+ * Test double for {@link DeviceAppManager}'s {@link DeviceUrlLauncher} seam
  * OpenURL depends on for the physical-device open-URL path. Records every
  * launchWithPayloadUrl call so tests can assert the exact
  * (deviceUdid, bundleId, url) devicectl would receive without shelling out.
  */
-export class FakeDeviceCtlClient implements DeviceUrlLauncher {
+export class FakeDeviceUrlLauncher implements DeviceUrlLauncher {
   private available = true;
   private launchError: Error | null = null;
   public readonly launchCalls: Array<{ deviceUdid: string; bundleId: string; url: string }> = [];

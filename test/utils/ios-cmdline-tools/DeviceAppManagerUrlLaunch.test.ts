@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DeviceAppInspector } from "../../../src/utils/ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import type { ExecResult } from "../../../src/models";
 
 const execResult = (stdout = ""): ExecResult => ({
@@ -22,18 +22,18 @@ interface Overrides {
 }
 
 interface Harness {
-  inspector: DeviceAppInspector;
+  inspector: DeviceAppManager;
   commands: string[];
 }
 
-// Build a DeviceAppInspector wired for the URL-launch surface only. The
+// Build a DeviceAppManager wired for the URL-launch surface only. The
 // open-URL primitive (isAvailable / launchWithPayloadUrl) touches nothing but
 // `platform`, `exec`, and the two host-control flags, so the file/temp deps are
 // stubbed to throw — any use would be a real regression the test should catch.
 const makeInspector = (overrides: Overrides = {}): Harness => {
   const commands: string[] = [];
   const unused = () => { throw new Error("unexpected filesystem dependency use in URL-launch path"); };
-  const inspector = new DeviceAppInspector({
+  const inspector = new DeviceAppManager({
     platform: overrides.platform ?? (() => "darwin"),
     exec: overrides.exec ?? (async (command: string) => {
       commands.push(command);
@@ -58,7 +58,7 @@ const makeInspector = (overrides: Overrides = {}): Harness => {
   return { inspector, commands };
 };
 
-describe("DeviceAppInspector.isUrlLaunchAvailable", () => {
+describe("DeviceAppManager.isUrlLaunchAvailable", () => {
   test("returns false on a non-darwin host without probing", async () => {
     const { inspector, commands } = makeInspector({ platform: () => "linux" });
     expect(await inspector.isUrlLaunchAvailable()).toBe(false);
@@ -89,7 +89,7 @@ describe("DeviceAppInspector.isUrlLaunchAvailable", () => {
   });
 });
 
-describe("DeviceAppInspector.launchWithPayloadUrl", () => {
+describe("DeviceAppManager.launchWithPayloadUrl", () => {
   test("builds the devicectl command: device unquoted, url + bundle quoted, terminate-existing", async () => {
     const { inspector, commands } = makeInspector();
     await inspector.launchWithPayloadUrl("00008110-000A4D", "com.apple.mobilesafari", "https://example.com/order/123");

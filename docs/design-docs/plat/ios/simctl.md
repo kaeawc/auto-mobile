@@ -41,13 +41,13 @@ For `launchApp` specifically:
 For `terminateApp` specifically:
 
 - **Simulator** — `xcrun simctl terminate <udid> <bundle-id>`; a "found nothing to terminate" error is treated as `wasRunning: false` rather than a failure.
-- **Physical device** — `devicectl` has no terminate-by-bundle-id verb, so termination is a **two-step** operation (`DeviceAppInspector.terminateApp`):
+- **Physical device** — `devicectl` has no terminate-by-bundle-id verb, so termination is a **two-step** operation (`DeviceAppManager.terminateApp`):
   1. Resolve the on-device bundle path via `xcrun devicectl device info apps --device <udid> --bundle-id <id> --json-output <file> --quiet`. No matching bundle → `{ wasInstalled: false, wasRunning: false }` (no terminate issued).
   2. Enumerate running processes via `xcrun devicectl device info processes --device <udid> --json-output <file> --quiet` and match the process whose executable path lives **inside** the resolved bundle directory (the app's own main binary, a direct child of `<bundle>.app/` — nested `PlugIns/*.appex/*` extensions are excluded). No match → `{ wasInstalled: true, wasRunning: false }`.
   3. Force-kill the matched PID with the dedicated verb: `xcrun devicectl device process terminate --device <udid> --pid <pid> --kill --quiet` → `{ wasInstalled: true, wasRunning: true }`. `--kill` sends SIGKILL (uncatchable), matching Android `am force-stop` semantics; the bare verb would send a catchable SIGTERM.
   - **Already-exited race (#3054).** The resolved PID can exit on its own between step 2 and the kill; devicectl then returns non-zero (ESRCH / "No such process") and the promisified `exec` rejects. `isDevicectlProcessGoneError` recognizes that text and treats it as `{ wasInstalled: true, wasRunning: true }` (the app was running and is now gone) instead of a false `success: false`, mirroring the simulator's "found nothing to terminate" tolerance. Any other terminate failure (device locked, not connected) still propagates.
   - **JSON field-name caveat.** The `device info processes` envelope is **not formally documented by Apple**; `findRunningProcessPid` deep-walks it and accepts several spellings (executable as a string or `{ url | path }`; PID as `processIdentifier` / `pid` / `processID`). A basename fallback matches when the process path root differs from the `info apps` bundle URL (e.g. `/var` vs `/private/var` symlink). Pin the real field names against captured device output when possible.
-  - **iOS ≤16 / non-macOS / Docker (host control)** — `devicectl` process management requires iOS 17+ on a macOS host; unsupported combinations surface as a clear, non-crashing `success: false` error (thrown by `DeviceAppInspector.terminateApp`, mapped to a result by `TerminateApp`) rather than a silent `success: true` no-op.
+  - **iOS ≤16 / non-macOS / Docker (host control)** — `devicectl` process management requires iOS 17+ on a macOS host; unsupported combinations surface as a clear, non-crashing `success: false` error (thrown by `DeviceAppManager.terminateApp`, mapped to a result by `TerminateApp`) rather than a silent `success: true` no-op.
 
 ## Live locale changes
 

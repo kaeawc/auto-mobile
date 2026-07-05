@@ -3,7 +3,7 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { GetAppMetadata, IosAppMetadataSource } from "../features/observe/GetAppMetadata";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { findBundleEntry } from "../utils/ios-cmdline-tools/DeviceAppInspector";
+import { findBundleEntry } from "../utils/ios-cmdline-tools/DeviceAppManager";
 import { BootedDevice, InstalledApp, InstalledAppsByProfile, Platform, SystemInstalledApp } from "../models";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -757,7 +757,7 @@ function createIosMetadataSource(device: BootedDevice): IosAppMetadataSource {
     getPhysicalDeviceAppInfo: async (deviceId: string, bundleId: string) => {
       // devicectl requires macOS — in Docker/Linux containers physical device
       // metadata is not available (host control only exposes bundle hash, not
-      // full app info). Match DeviceAppInspector's platform guard.
+      // full app info). Match DeviceAppManager's platform guard.
       if (process.platform !== "darwin") {
         return null;
       }

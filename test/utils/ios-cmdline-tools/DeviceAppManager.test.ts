@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { DeviceAppInspector, findProcessIdentifier, findRunningProcessPid, isDevicectlProcessGoneError, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppManager, findProcessIdentifier, findRunningProcessPid, isDevicectlProcessGoneError, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { isProcessAlreadyGoneError } from "../../../src/utils/ios-cmdline-tools/iosProcessErrors";
 import { hashAppBundle } from "../../../src/utils/ios-cmdline-tools/AppBundleHasher";
-import { FakeHostControlDeviceAppInspector } from "../../fakes/FakeHostControlDeviceAppInspector";
+import { FakeHostControlDeviceAppManager } from "../../fakes/FakeHostControlDeviceAppManager";
 
 const bundleId = "dev.jasonpearson.automobile.ctrlproxy";
 
@@ -43,12 +43,12 @@ const parseArgValue = (command: string, arg: string): string | null => {
   return match[1].replace(/^['"]|['"]$/g, "");
 };
 
-describe("DeviceAppInspector", () => {
+describe("DeviceAppManager", () => {
   test("computes installed app hash via devicectl copy", async () => {
     const workDir = await createTempDir();
     const fixtureApp = await createFixtureApp(workDir);
     const fixtureHash = await hashAppBundle(fixtureApp);
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
 
     const exec = async (command: string) => {
       if (command.includes("device info apps")) {
@@ -82,7 +82,7 @@ describe("DeviceAppInspector", () => {
       };
     };
 
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       exec,
       readFile: async path => fs.readFile(path, "utf-8"),
@@ -100,13 +100,13 @@ describe("DeviceAppInspector", () => {
   });
 
   test("delegates app hash to host control when enabled", async () => {
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     hostControl.setUseHostControl(true);
     hostControl.setRunningInDocker(true);
     hostControl.setAvailable(true);
     hostControl.setAppHash("host-hash");
 
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "linux",
       exec: async () => ({
         stdout: "",
@@ -133,7 +133,7 @@ describe("DeviceAppInspector", () => {
     const workDir = await createTempDir();
     const fixtureApp = await createFixtureApp(workDir);
     const fixtureHash = await hashAppBundle(fixtureApp);
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
 
     const exec = async (command: string) => {
       if (command.includes("simctl get_app_container")) {
@@ -154,7 +154,7 @@ describe("DeviceAppInspector", () => {
       };
     };
 
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       exec,
       readFile: async path => fs.readFile(path, "utf-8"),
@@ -172,9 +172,9 @@ describe("DeviceAppInspector", () => {
   });
 
   test("logs missing simulator app bundle lookup at debug rather than warn", async () => {
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     const fakeLogger = createFakeLogger();
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       exec: async command => {
         if (command.includes("simctl get_app_container")) {
@@ -213,9 +213,9 @@ describe("DeviceAppInspector", () => {
   });
 
   test("keeps real simulator app bundle lookup failures at warn", async () => {
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     const fakeLogger = createFakeLogger();
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       exec: async command => {
         if (command.includes("simctl get_app_container")) {
@@ -254,9 +254,9 @@ describe("DeviceAppInspector", () => {
   });
 
   test("keeps physical device installed bundle lookup failures at warn", async () => {
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     const fakeLogger = createFakeLogger();
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       exec: async command => {
         if (command.includes("devicectl device info apps")) {
@@ -289,9 +289,9 @@ describe("DeviceAppInspector", () => {
   });
 
   test("keeps simulator app bundle hashing failures at warn", async () => {
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     const fakeLogger = createFakeLogger();
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       exec: async command => {
         if (command.includes("simctl get_app_container")) {
@@ -335,7 +335,7 @@ describe("DeviceAppInspector", () => {
 
   test("uninstallApp uses simctl for simulators", async () => {
     const commands: string[] = [];
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     const exec = async (command: string) => {
       commands.push(command);
       return {
@@ -347,7 +347,7 @@ describe("DeviceAppInspector", () => {
       };
     };
 
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       exec,
       readFile: async path => fs.readFile(path, "utf-8"),
@@ -369,7 +369,7 @@ describe("DeviceAppInspector", () => {
 
   test("uninstallApp issues devicectl uninstall command", async () => {
     const commands: string[] = [];
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     const exec = async (command: string) => {
       commands.push(command);
       return {
@@ -381,7 +381,7 @@ describe("DeviceAppInspector", () => {
       };
     };
 
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       exec,
       readFile: async path => fs.readFile(path, "utf-8"),
@@ -403,7 +403,7 @@ describe("DeviceAppInspector", () => {
   test("clearAppDataViaReinstall copies the bundle, uninstalls, then reinstalls it", async () => {
     const workDir = await createTempDir();
     const fixtureApp = await createFixtureApp(workDir);
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     const commands: string[] = [];
 
     const exec = async (command: string) => {
@@ -432,7 +432,7 @@ describe("DeviceAppInspector", () => {
       };
     };
 
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       exec,
       readFile: async path => fs.readFile(path, "utf-8"),
@@ -457,8 +457,8 @@ describe("DeviceAppInspector", () => {
   });
 
   test("clearAppDataViaReinstall throws when the installed bundle cannot be resolved", async () => {
-    const hostControl = new FakeHostControlDeviceAppInspector();
-    const inspector = new DeviceAppInspector({
+    const hostControl = new FakeHostControlDeviceAppManager();
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       // info apps writes no/empty json → bundle entry not found
       exec: async (command: string) => {
@@ -487,13 +487,13 @@ describe("DeviceAppInspector", () => {
   });
 
   test("clearAppDataViaReinstall fails explicitly under host control (no copy primitive)", async () => {
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     hostControl.setUseHostControl(true);
     hostControl.setRunningInDocker(true);
     hostControl.setAvailable(true);
 
     const commands: string[] = [];
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "linux",
       exec: async (command: string) => {
         commands.push(command);
@@ -523,7 +523,7 @@ describe("DeviceAppInspector", () => {
   test("clearAppDataViaReinstall surfaces the install error (not 'could not resolve') when reinstall fails after uninstall", async () => {
     const workDir = await createTempDir();
     const fixtureApp = await createFixtureApp(workDir);
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     const commands: string[] = [];
 
     const exec = async (command: string) => {
@@ -556,7 +556,7 @@ describe("DeviceAppInspector", () => {
       };
     };
 
-    const inspector = new DeviceAppInspector({
+    const inspector = new DeviceAppManager({
       platform: () => "darwin",
       exec,
       readFile: async path => fs.readFile(path, "utf-8"),
@@ -577,7 +577,7 @@ describe("DeviceAppInspector", () => {
   });
 });
 
-describe("DeviceAppInspector launch (devicectl)", () => {
+describe("DeviceAppManager launch (devicectl)", () => {
   const makeExecResult = (stdout = "") => ({
     stdout,
     stderr: "",
@@ -589,9 +589,9 @@ describe("DeviceAppInspector launch (devicectl)", () => {
   const createInspector = (opts: {
     platform?: NodeJS.Platform;
     exec: (command: string) => Promise<ReturnType<typeof makeExecResult>>;
-    hostControl?: FakeHostControlDeviceAppInspector;
+    hostControl?: FakeHostControlDeviceAppManager;
   }) => {
-    return new DeviceAppInspector({
+    return new DeviceAppManager({
       platform: () => opts.platform ?? "darwin",
       exec: opts.exec,
       readFile: async path => fs.readFile(path, "utf-8"),
@@ -601,7 +601,7 @@ describe("DeviceAppInspector launch (devicectl)", () => {
       stat: async path => fs.stat(path),
       tmpdir,
       logger: createFakeLogger(),
-      hostControl: opts.hostControl ?? new FakeHostControlDeviceAppInspector()
+      hostControl: opts.hostControl ?? new FakeHostControlDeviceAppManager()
     });
   };
 
@@ -689,7 +689,7 @@ describe("DeviceAppInspector launch (devicectl)", () => {
   test("launchApp returns an explicit host-control error without shelling out", async () => {
     const commands: string[] = [];
     const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     hostControl.setUseHostControl(true);
     hostControl.setRunningInDocker(true);
     hostControl.setAvailable(true);
@@ -835,7 +835,7 @@ describe("findRunningProcessPid", () => {
   });
 });
 
-describe("DeviceAppInspector terminate (devicectl)", () => {
+describe("DeviceAppManager terminate (devicectl)", () => {
   const bundlePath = "/private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app";
   const makeExecResult = (stdout = "") => ({
     stdout,
@@ -848,8 +848,8 @@ describe("DeviceAppInspector terminate (devicectl)", () => {
   const createInspector = (opts: {
     platform?: NodeJS.Platform;
     exec: (command: string) => Promise<ReturnType<typeof makeExecResult>>;
-    hostControl?: FakeHostControlDeviceAppInspector;
-  }) => new DeviceAppInspector({
+    hostControl?: FakeHostControlDeviceAppManager;
+  }) => new DeviceAppManager({
     platform: () => opts.platform ?? "darwin",
     exec: opts.exec,
     readFile: async path => fs.readFile(path, "utf-8"),
@@ -859,7 +859,7 @@ describe("DeviceAppInspector terminate (devicectl)", () => {
     stat: async path => fs.stat(path),
     tmpdir,
     logger: createFakeLogger(),
-    hostControl: opts.hostControl ?? new FakeHostControlDeviceAppInspector()
+    hostControl: opts.hostControl ?? new FakeHostControlDeviceAppManager()
   });
 
   const writeAppsJson = async (command: string, installed: boolean) => {
@@ -962,7 +962,7 @@ describe("DeviceAppInspector terminate (devicectl)", () => {
   test("throws an explicit host-control error without shelling out", async () => {
     const commands: string[] = [];
     const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
-    const hostControl = new FakeHostControlDeviceAppInspector();
+    const hostControl = new FakeHostControlDeviceAppManager();
     hostControl.setUseHostControl(true);
     hostControl.setRunningInDocker(true);
     hostControl.setAvailable(true);

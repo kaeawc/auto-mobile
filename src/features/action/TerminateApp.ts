@@ -3,7 +3,7 @@ import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isProcessAlreadyGoneError } from "../../utils/ios-cmdline-tools/iosProcessErrors";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -11,7 +11,7 @@ import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 
 /**
- * Physical-device app terminator. `DeviceAppInspector` satisfies this
+ * Physical-device app terminator. `DeviceAppManager` satisfies this
  * structurally (via `xcrun devicectl device process terminate --kill`); tests
  * inject a fake so the physical path is exercised without a real device. Mirrors
  * the `DeviceAppUninstaller`/`DeviceAppLauncher` injection in the sibling tools.
@@ -42,7 +42,7 @@ export class TerminateApp extends BaseVisualChange {
     super(device, adb, timer);
     this.device = device;
     this.simctl = simctl || new SimCtlClient(device);
-    this.deviceTerminator = deviceTerminator || new DeviceAppInspector();
+    this.deviceTerminator = deviceTerminator || new DeviceAppManager();
   }
 
   /**

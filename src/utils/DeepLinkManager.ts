@@ -29,7 +29,7 @@ import { isRunningInDocker } from "./dockerEnv";
  * backticks, `;`, … — is handed to the program as a single literal argument and
  * can never be expanded into host command execution. The optional `stdin` feeds
  * one program's output into the next without a shell pipe. Modeled on
- * {@link DeviceAppInspector}'s injected `exec` so the iOS path is fully fakeable
+ * {@link DeviceAppManager}'s injected `exec` so the iOS path is fully fakeable
  * in unit tests.
  */
 export type HostExec = (file: string, args: string[], stdin?: string) => Promise<ExecResult>;

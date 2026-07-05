@@ -9,7 +9,7 @@ import { type ChildProcess } from "child_process";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "./PortManager";
 import { DefaultProcessExecutor, type ProcessExecutor } from "./ProcessExecutor";
 import { XcodeSigningManager } from "./ios-cmdline-tools/XcodeSigning";
-import { DeviceAppInspector } from "./ios-cmdline-tools/DeviceAppInspector";
+import { DeviceAppManager } from "./ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { isRunningInDocker } from "./dockerEnv";
 import { exponentialBackoff } from "./Backoff";
@@ -167,7 +167,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly builder: IOSCtrlProxyBuilder;
   private readonly processExecutor: ProcessExecutor;
   private readonly signingManager: XcodeSigningManager;
-  private readonly appInspector: DeviceAppInspector;
+  private readonly appInspector: DeviceAppManager;
   private readonly hostControl: HostControlCtrlProxyIOSRunner;
   private readonly hostPortAvailabilityChecker: HostPortAvailabilityChecker;
   private hostControlAvailability: Promise<boolean> | null = null;
@@ -250,7 +250,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     builder?: IOSCtrlProxyBuilder,
     processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
     signingManager: XcodeSigningManager = new XcodeSigningManager(),
-    appInspector: DeviceAppInspector = new DeviceAppInspector(),
+    appInspector: DeviceAppManager = new DeviceAppManager(),
     hostControlRunner?: HostControlCtrlProxyIOSRunner,
     hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker()
   ) {
@@ -309,7 +309,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     builder: IOSCtrlProxyBuilder | undefined,
     processExecutor: ProcessExecutor,
     signingManager?: XcodeSigningManager,
-    appInspector?: DeviceAppInspector,
+    appInspector?: DeviceAppManager,
     hostControlRunner?: HostControlCtrlProxyIOSRunner,
     hostPortAvailabilityChecker?: HostPortAvailabilityChecker
   ): IOSCtrlProxyManager {

@@ -226,3 +226,29 @@ export interface ObserveResult {
    */
   rawViewHierarchy?: RawViewHierarchyResult;
 }
+
+/**
+ * The payload the `observe` tool packs into its MCP `structuredContent` envelope.
+ * Equals {@link ObserveResult} (which already carries the `awaitedElement` /
+ * `awaitDuration` / `awaitTimeout` wait fields the handler spreads) plus the
+ * optional base64 `screenshot` slot the toolRegistry `setLastScreenshot` read
+ * consumes.
+ *
+ * WARNING — the `screenshot` chain is currently DEAD: production `observe` does
+ * NOT emit `screenshot` (its envelope is built from an `ObserveResult`, which has
+ * no such field), so `setLastScreenshot` never fires and the `lastScreenshot`
+ * session slot has no reader. This field only gives the *pre-existing* dead read
+ * a typed home so it compiles against a real key instead of a stringly-typed
+ * guess — no behavior change. Resolving the dead chain (remove it, or make
+ * `observe` actually emit a screenshot with a real consumer) is tracked in
+ * **#3221**; do not assume screenshot caching works.
+ *
+ * Used to annotate the `StructuredToolResponse<ObserveToolPayload>` the handler
+ * returns and to type the toolRegistry lastHierarchy/lastScreenshot read sites
+ * so an envelope-top-level `response.viewHierarchy` read is a **compile error**
+ * (issue #2932; envelope-vs-`structuredContent` dead-read class, issue #2907).
+ */
+export interface ObserveToolPayload extends ObserveResult {
+  /** Optional base64 screenshot; the toolRegistry cache read is dead today — see #3221. */
+  screenshot?: string;
+}

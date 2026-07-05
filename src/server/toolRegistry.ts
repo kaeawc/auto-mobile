@@ -1,8 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
-import { ActionableError, BootedDevice, SomePlatform } from "../models";
-import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
+import { ActionableError, BootedDevice, ObserveToolPayload, SomePlatform, SwipeOnToolPayload } from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -28,7 +27,7 @@ import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
 import { finalizeToolResponse, type ObservationBaselineStore } from "./finalizeToolResponse";
 import { INTERNAL_NO_DIFF_PARAM } from "./internalToolCall";
-import { getStructuredField } from "../utils/toolUtils";
+import { asToolEnvelope, getStructuredField } from "../utils/toolUtils";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -555,23 +554,33 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       getMcpRecorder()?.record(name, args);
     }
 
-    if (name === "swipeOn" && args.lookFor && getStructuredField<boolean>(response, "success") && getStructuredField<boolean>(response, "found")) {
-      const scrollPosition = UIStateExtractor.createScrollPosition(args);
-      if (scrollPosition) {
-        const scrollNavManager = sessionUuid
-          ? NavigationGraphManager.getInstanceForSession(sessionUuid)
-          : NavigationGraphManager.getInstance();
-        scrollNavManager.updateScrollPosition(scrollPosition);
+    // Typed envelope views (issue #2932): the heterogeneous pipeline hands back
+    // `any`, so narrow to the concrete tool payload via `asToolEnvelope` before
+    // reading (it names the unchecked `any`→typed crossing). Reading a
+    // non-hoisted field off the envelope top level (`swipeEnvelope.found`) is now
+    // a compile error, and `getStructuredField`'s key is checked against the
+    // payload — the stringly-typed dead-read footgun is gone.
+    if (name === "swipeOn" && args.lookFor) {
+      const swipeEnvelope = asToolEnvelope<SwipeOnToolPayload>(response);
+      if (getStructuredField(swipeEnvelope, "success") && getStructuredField(swipeEnvelope, "found")) {
+        const scrollPosition = UIStateExtractor.createScrollPosition(args);
+        if (scrollPosition) {
+          const scrollNavManager = sessionUuid
+            ? NavigationGraphManager.getInstanceForSession(sessionUuid)
+            : NavigationGraphManager.getInstance();
+          scrollNavManager.updateScrollPosition(scrollPosition);
+        }
       }
     }
 
     if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
       const sessionManager = DaemonState.getInstance().getSessionManager();
-      const observeHierarchy = name === "observe" ? getStructuredField<ViewHierarchyResult>(response, "viewHierarchy") : undefined;
+      const observeEnvelope = asToolEnvelope<ObserveToolPayload>(response);
+      const observeHierarchy = name === "observe" ? getStructuredField(observeEnvelope, "viewHierarchy") : undefined;
       if (observeHierarchy) {
         sessionManager.setLastHierarchy(sessionUuid, observeHierarchy);
       }
-      const observeScreenshot = name === "observe" ? getStructuredField<string>(response, "screenshot") : undefined;
+      const observeScreenshot = name === "observe" ? getStructuredField(observeEnvelope, "screenshot") : undefined;
       if (observeScreenshot) {
         sessionManager.setLastScreenshot(sessionUuid, observeScreenshot);
       }

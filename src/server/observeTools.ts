@@ -4,8 +4,8 @@ import { ResourceRegistry } from "./resourceRegistry";
 import { RESOURCE_URIS } from "./observationResources";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { createJSONToolResponse, createStructuredToolResponse, throwIfAborted } from "../utils/toolUtils";
-import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../models";
+import { createJSONToolResponse, createStructuredToolResponse, throwIfAborted, StructuredToolResponse } from "../utils/toolUtils";
+import { BootedDevice, Element, ObserveResult, ObserveToolPayload, ViewHierarchyResult } from "../models";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { IdentifyInteractions, IdentifyInteractionsOptions } from "../features/observe/IdentifyInteractions";
@@ -202,7 +202,7 @@ const waitForObservation = async (
 // Register tools (this will be called when this file is imported)
 export function registerObserveTools() {
   // Observe handler
-  const observeHandler = async (device: BootedDevice, args: ObserveArgs, _progress?: unknown, signal?: AbortSignal) => {
+  const observeHandler = async (device: BootedDevice, args: ObserveArgs, _progress?: unknown, signal?: AbortSignal): Promise<StructuredToolResponse<ObserveToolPayload>> => {
     try {
       const observeScreen = new RealObserveScreen(device);
       const waitFor = args.waitFor;

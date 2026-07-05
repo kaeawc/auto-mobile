@@ -165,38 +165,65 @@ export const getStructuredPayload = <T = Record<string, unknown>>(
 
 /**
  * The typed seam for reading a single payload field off an MCP tool-call
- * envelope (issue #2907). Payload fields live under `structuredContent`, not on
- * the envelope top level — a raw `response.found` read is always `undefined`
- * and produces a silently-dead branch. Route every payload-field read through
- * this accessor so the read targets `structuredContent`, not the envelope.
+ * envelope (issues #2907 / #2932). Payload fields live under `structuredContent`,
+ * not on the envelope top level — a raw `response.found` read is always
+ * `undefined` and produces a silently-dead branch. Route every payload-field
+ * read through this accessor so the read targets `structuredContent`, not the
+ * envelope.
  *
- * This is a *structural* guard: it guarantees you read from `structuredContent`
- * and not the envelope top level, and only an own key resolves. It does NOT
- * validate that `key` exists on the payload or that the value matches `T` — the
- * caller asserts `T`, so a wrong `key` or `T` still yields a silent `undefined`
- * / mistyped value. Making those a compile error requires a fully typed handler
- * boundary (see follow-up); this accessor closes the envelope-vs-payload half.
+ * Fully typed against a concrete payload `TPayload`: because `response` is a
+ * `StructuredToolResponse<TPayload>`, the `key` is constrained to
+ * `keyof TPayload` (a typo like `"founded"` is a **compile error**) and the
+ * return type is `TPayload[K]` (a wrong `T` assertion is gone — the value type
+ * is inferred). This closes the stringly-typed hole the earlier loose
+ * `getStructuredField<T>(response, "key")` left open (issue #2932): both the
+ * envelope-vs-payload half AND the typo/wrong-type half are now compiler-caught.
  *
- * Accepts a loosely-typed envelope (handlers hand back `any`), safely narrows,
- * and returns `undefined` for null/undefined responses, a missing or
- * non-object `structuredContent`, or an absent (or non-own) field.
+ * Still a *structural* guard at runtime: only an own key resolves, so an
+ * inherited prototype key never leaks through. Returns `undefined` for
+ * null/undefined responses, a missing or non-object `structuredContent`, or an
+ * absent (own) field.
  *
- * @param response The tool-call envelope (or anything envelope-shaped).
- * @param key The payload field to read from `structuredContent`.
+ * Requires a fully-typed `StructuredToolResponse<TPayload>`, not a bare
+ * envelope-shaped literal — narrow an `any`-boundary value through
+ * {@link asToolEnvelope} first. Caveat: keep `TPayload` a *closed* type; if it
+ * carries a string index signature, `keyof TPayload` widens to include `string`
+ * and the typo-protection silently evaporates.
+ *
+ * @param response The typed tool-call envelope.
+ * @param key The payload field to read from `structuredContent` (keyof TPayload).
  */
-export const getStructuredField = <T = unknown>(
-  response: { structuredContent?: unknown } | null | undefined,
-  key: string
-): T | undefined => {
+export const getStructuredField = <TPayload, K extends keyof TPayload & string>(
+  response: StructuredToolResponse<TPayload> | null | undefined,
+  key: K
+): TPayload[K] | undefined => {
   const structuredContent = response?.structuredContent;
   if (structuredContent && typeof structuredContent === "object") {
     if (!Object.hasOwn(structuredContent, key)) {
       return undefined;
     }
-    return (structuredContent as Record<string, unknown>)[key] as T | undefined;
+    return (structuredContent as TPayload)[key];
   }
   return undefined;
 };
+
+/**
+ * Names the single unchecked narrowing at the heterogeneous `ToolHandler`
+ * boundary (issue #2932): the registry stores handlers as `Promise<any>`, so a
+ * consumer that knows which tool it invoked asserts the concrete envelope shape
+ * here. This is deliberately an UNCHECKED cast (no runtime validation) — its
+ * value is that the `any`→typed crossing is explicit and greppable, and that a
+ * runtime shape assertion (or the removal that a genericized registry allows)
+ * has one home. Prefer this over a bare `const e: StructuredToolResponse<T> =
+ * anyValue`, which reads as if the compiler had checked the shape.
+ *
+ * Once read through the returned typed envelope, an envelope-top-level
+ * `e.found` read is a compile error and {@link getStructuredField} keys are
+ * checked against `T`. Removing this cast entirely requires threading the
+ * payload generic through the registry — tracked as a follow-up to #2932.
+ */
+export const asToolEnvelope = <T>(response: unknown): StructuredToolResponse<T> =>
+  response as StructuredToolResponse<T>;
 
 export const throwIfAborted = (signal?: AbortSignal): void => {
   if (signal?.aborted) {

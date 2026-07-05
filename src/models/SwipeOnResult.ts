@@ -47,3 +47,21 @@ export interface ScrollableCandidate {
   contentDesc?: string;
   className?: string;
 }
+
+/**
+ * The payload the `swipeOn` tool packs into its MCP `structuredContent` envelope:
+ * the {@link SwipeOnResult} the command produces plus the human-readable
+ * `message` the handler attaches.
+ *
+ * This is the single source of truth used to (a) annotate the
+ * `StructuredToolResponse<SwipeOnToolPayload>` the handler returns and (b) type
+ * the internal read sites (the toolRegistry scroll-position update and
+ * `DefaultUIStateSetup` scroll setup). With the envelope typed, a `found`/
+ * `success` read is compiler-checked against this payload and an
+ * envelope-top-level `response.found` read is a **compile error** rather than a
+ * silent `undefined` (issue #2932; envelope-vs-`structuredContent` dead-read
+ * class, issue #2907).
+ */
+export interface SwipeOnToolPayload extends SwipeOnResult {
+  message: string;
+}

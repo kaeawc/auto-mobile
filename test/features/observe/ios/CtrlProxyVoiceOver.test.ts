@@ -274,11 +274,14 @@ describe("CtrlProxyVoiceOver", function() {
       expect(_roundTrip).toBeDefined();
     });
 
-    // Regression guard for #2956: keeping `requestVoiceOverActivate` as a
-    // convenience wrapper means it gains the `unsupportedCommandError` handler
-    // its sibling `requestVoiceOverState` has. When the connected device does not
-    // advertise `request_action`, the call must resolve to a graceful failure
-    // (never send on the wire, never hang) rather than time out.
+    // Regression guard for #2956: when the connected device does not advertise
+    // `request_action`, `requestVoiceOverActivate` must resolve to a graceful
+    // failure (never send on the wire, never hang) rather than time out. Note
+    // this contract is satisfied by `sendCommand`'s default unsupported-command
+    // fallback too — the wrapper's own `unsupportedCommandError` handler (added
+    // here for parity with `requestVoiceOverState`) produces the byte-identical
+    // shape, so this test pins the observable behavior, not the handler's
+    // presence specifically.
     test("resolves gracefully when the device does not support request_action", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
       const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);

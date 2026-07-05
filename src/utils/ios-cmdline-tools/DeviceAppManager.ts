@@ -29,6 +29,10 @@ interface DeviceAppManagerDependencies {
   };
 }
 
+type LaunchPreconditionResult =
+  | { ok: true }
+  | { ok: false; reason: "host-control" | "non-darwin" };
+
 const defaultDependencies: DeviceAppManagerDependencies = {
   platform: () => process.platform,
   exec: async command => {
@@ -392,11 +396,21 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * host-control bridge rather than driving a local `devicectl`. The bridge
    * exposes install/uninstall but no process-launch/URL primitives, so the
    * launch-family methods return an explicit "not supported under host control"
-   * posture instead of shelling out. Single source for the gate expression that
-   * every devicectl entry point shares.
+   * posture instead of shelling out. Single source for the host-control gate
+   * expression that devicectl entry points share.
    */
   private isHostControlMode(): boolean {
     return this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
+  }
+
+  private getLaunchPrecondition(): LaunchPreconditionResult {
+    if (this.isHostControlMode()) {
+      return { ok: false, reason: "host-control" };
+    }
+    if (this.deps.platform() !== "darwin") {
+      return { ok: false, reason: "non-darwin" };
+    }
+    return { ok: true };
   }
 
   /**
@@ -442,13 +456,14 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * because it carries no PID-capture/JSON-output plumbing.
    */
   async launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void> {
-    if (this.isHostControlMode()) {
+    const precondition = this.getLaunchPrecondition();
+    if (!precondition.ok && precondition.reason === "host-control") {
       throw new Error(
         "Opening a URL on a physical iOS device is not supported under host control: " +
         "the host-control bridge exposes no devicectl launch-with-URL primitive."
       );
     }
-    if (this.deps.platform() !== "darwin") {
+    if (!precondition.ok && precondition.reason === "non-darwin") {
       throw new Error("Opening URLs on a physical iOS device requires macOS");
     }
     const command = [
@@ -694,7 +709,8 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     bundleId: string,
     options: { terminateExisting?: boolean } = {}
   ): Promise<{ success: boolean; pid?: number; error?: string }> {
-    if (this.isHostControlMode()) {
+    const precondition = this.getLaunchPrecondition();
+    if (!precondition.ok && precondition.reason === "host-control") {
       return {
         success: false,
         error: `Launching apps on a physical device is not supported under host control for ${bundleId}: ` +
@@ -702,7 +718,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       };
     }
 
-    if (this.deps.platform() !== "darwin") {
+    if (!precondition.ok && precondition.reason === "non-darwin") {
       return { success: false, error: "Physical device app launch requires macOS" };
     }
 

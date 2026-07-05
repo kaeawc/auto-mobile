@@ -238,6 +238,27 @@ describe("DefaultIosSdkEventIngestor", () => {
     });
   });
 
+  test("storage_changed forces previousValue: null for adds (defeats the repo auto-lookup)", async () => {
+    // An "add" has no prior value by definition. Swift's Encodable omits the nil
+    // previousValue, so the ingestor must assert null explicitly — otherwise the
+    // repository would auto-look-up a stale earlier row for the same suite/key.
+    await ingestor.recordSdkEvent(event("storage_changed", {
+      suiteName: "defaults", key: "k", newValue: "v", valueType: "string", changeType: "add",
+    }), "com.app");
+    // Present AND null (not undefined), so recordStorageEvent skips its lookup.
+    expect(recorder.storage[0].event).toHaveProperty("previousValue", null);
+  });
+
+  test("storage_changed does NOT force previousValue for modify (auto-lookup preserved)", async () => {
+    // A modify without a runner-supplied previousValue must omit it so the
+    // repository's `!== undefined` guard falls through to the auto-lookup (#3000).
+    await ingestor.recordSdkEvent(event("storage_changed", {
+      suiteName: "defaults", key: "k", newValue: "v2", valueType: "string", changeType: "modify",
+    }), "com.app");
+    expect(recorder.storage[0].event.previousValue).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(recorder.storage[0].event, "previousValue")).toBe(false);
+  });
+
   test("storage_changed reads changeType remove, and defaults to modify when the wire omits it", async () => {
     await ingestor.recordSdkEvent(event("storage_changed", {
       suiteName: "defaults", key: "gone", newValue: null, valueType: "string", changeType: "remove",

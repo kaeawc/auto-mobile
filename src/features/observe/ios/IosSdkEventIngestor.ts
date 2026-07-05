@@ -248,7 +248,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
               details: { durationMs: String((p.durationMs as number) ?? 0) },
             });
             break;
-          case "storage_changed":
+          case "storage_changed": {
             // The iOS SDK's SdkStorageChangedEvent serializes as suiteName/key/newValue/
             // valueType/changeType/sequenceNumber (ios/auto-mobile-sdk/.../SdkEvent.swift).
             // It carries no `value` and no `operation`; the recorder REQUIRES valueType +
@@ -256,20 +256,30 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
             // valueType through, and use the SDK-diffed changeType (add/modify/remove).
             // Older SDK builds emitted no change kind — fall back to `operation` then
             // "modify" for wire compatibility.
+            const changeType = (p.changeType as string) ?? (p.operation as string) ?? "modify";
+            // Resolve the prior value:
+            //  - "add" ⇒ the key had no prior value by definition. Assert null
+            //    EXPLICITLY: Swift's synthesized Encodable omits nil optionals, so the
+            //    SDK's `previousValue: nil` for adds never reaches the wire, and without
+            //    this the repository's auto-lookup could attribute a stale earlier row
+            //    (e.g. a key removed while offline then re-added) as the previous value.
+            //  - otherwise ⇒ thread the runner-supplied prior value when present, else
+            //    omit so the repository's `previousValue !== undefined` guard falls
+            //    through to the auto-lookup (#3000). An explicit null is honored verbatim.
+            const previousValue: string | null | undefined = changeType === "add"
+              ? null
+              : ("previousValue" in p ? (p.previousValue as string | null) : undefined);
             await recorder.recordStorageEvent({
               timestamp: ts, applicationId,
               fileName: (p.suiteName as string) ?? "",
               key: (p.key as string) ?? null,
               value: (p.newValue as string) ?? (p.value as string) ?? null,
               valueType: (p.valueType as string) ?? null,
-              changeType: (p.changeType as string) ?? (p.operation as string) ?? "modify",
-              // Thread the runner-supplied prior value ONLY when the payload carries
-              // it, so the repository's `previousValue !== undefined` guard falls
-              // through to the auto-lookup for legacy runners that omit it (#3000).
-              // An explicit null ("no prior value") is honored verbatim.
-              ...("previousValue" in p ? { previousValue: (p.previousValue as string | null) } : {}),
+              changeType,
+              ...(previousValue !== undefined ? { previousValue } : {}),
             });
             break;
+          }
           default:
           // Record unknown types as log events
             await recorder.recordLogEvent({

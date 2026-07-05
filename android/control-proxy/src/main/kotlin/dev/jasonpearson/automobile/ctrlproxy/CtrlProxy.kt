@@ -46,6 +46,7 @@ import dev.jasonpearson.automobile.protocol.BroadcastEventResponse
 import dev.jasonpearson.automobile.protocol.CrashData
 import dev.jasonpearson.automobile.protocol.CrashEvent
 import dev.jasonpearson.automobile.protocol.DeviceInfo
+import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
@@ -79,6 +80,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
 import kotlin.coroutines.resume
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -1892,29 +1894,46 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       ACTION_EXTRACT_HIERARCHY -> {
         val uuid = intent.getStringExtra("uuid")
         if (uuid.isNullOrBlank()) {
+          // No uuid to correlate a WebSocket error frame to, so only the legacy ADB result is sent.
           sendResult(success = false, error = "UUID parameter is required")
           return
         }
 
-        val textFilter = intent.getStringExtra("text")
-        val disableAllFiltering = intent.getBooleanExtra("disableAllFiltering", false)
-        val hierarchy = extractHierarchy(textFilter, disableAllFiltering)
-        if (hierarchy != null) {
-          val filename = "hierarchy_$uuid.json"
-          writeHierarchyToFile(hierarchy, filename)
+        // The daemon's ADB-broadcast hierarchy fallback awaits this uuid over the WebSocket in
+        // waitForFreshData. On extraction failure we send a correlated error frame keyed by the
+        // uuid so that wait fails fast rather than hanging to timeout, closing the last member of
+        // the #3032/#3061 hang class (issue #3089). The legacy ADB result broadcast is retained.
+        try {
+          val textFilter = intent.getStringExtra("text")
+          val disableAllFiltering = intent.getBooleanExtra("disableAllFiltering", false)
+          val hierarchy = extractHierarchy(textFilter, disableAllFiltering)
+          if (hierarchy != null) {
+            val filename = "hierarchy_$uuid.json"
+            writeHierarchyToFile(hierarchy, filename)
 
-          // Broadcast to WebSocket clients
-          broadcastHierarchyUpdate(hierarchy)
+            // Broadcast to WebSocket clients
+            broadcastHierarchyUpdate(hierarchy)
 
-          val message =
-            if (textFilter != null) {
-              "Hierarchy extracted with text filter: '$textFilter', saved as $filename"
-            } else {
-              "Hierarchy extracted successfully, saved as $filename"
-            }
-          sendResult(success = true, data = message)
-        } else {
-          sendResult(success = false, error = "Failed to extract hierarchy")
+            val message =
+              if (textFilter != null) {
+                "Hierarchy extracted with text filter: '$textFilter', saved as $filename"
+              } else {
+                "Hierarchy extracted successfully, saved as $filename"
+              }
+            sendResult(success = true, data = message)
+          } else {
+            sendResult(success = false, error = "Failed to extract hierarchy")
+            broadcastHierarchyExtractError(uuid, "Failed to extract hierarchy")
+          }
+        } catch (e: CancellationException) {
+          // Cooperative cancellation (service scope shutting down) must never be converted into an
+          // error frame — let it propagate so the coroutine unwinds cleanly.
+          throw e
+        } catch (e: Exception) {
+          val cause = e.message ?: e::class.simpleName ?: "unknown error"
+          Log.e(TAG, "Error extracting hierarchy for uuid=$uuid", e)
+          sendResult(success = false, error = cause)
+          broadcastHierarchyExtractError(uuid, "Hierarchy extraction failed: $cause")
         }
       }
     }
@@ -1961,6 +1980,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         error?.let { putExtra("error", it) }
       }
     sendBroadcast(resultIntent)
+  }
+
+  /**
+   * Emit a correlated WebSocket `type:"error"` frame for a failed `EXTRACT_HIERARCHY` broadcast,
+   * keyed by the broadcast's `sync_` [requestId] uuid.
+   *
+   * The daemon's ADB-broadcast hierarchy fallback awaits that uuid in `waitForFreshData` over this
+   * same WebSocket (the response channel the success-path `hierarchy_update` push also travels on).
+   * Before issue #3089 a broadcast-handler failure only sent an ADB [ACTION_OPERATION_RESULT]
+   * result that the daemon's wait could not correlate, so it degraded to a full timeout. Emitting
+   * this frame closes that last member of the #3032/#3061 `waitForFreshData` hang class, mirroring
+   * the WebSocket `req_`/`stale_` paths and the #2985 decode/handler error envelope.
+   *
+   * Routed through [ResultBroadcaster.guard] so a throw while *sending* this frame degrades to the
+   * daemon's timeout rather than escaping the receiver coroutine (issue #3045 / #3085).
+   */
+  private suspend fun broadcastHierarchyExtractError(requestId: String?, error: String) {
+    resultBroadcaster.guard(requestId, "hierarchy_extract_error") {
+      if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+        webSocketServer.broadcast(ErrorResponse(requestId = requestId, error = error))
+      }
+    }
   }
 
   /**

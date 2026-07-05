@@ -364,17 +364,19 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // callers keep reading `structuredContent`, and so plain-registered tools
       // are covered.
       // Field-debuggability trace (issue #2962): when the wire boundary actually
-      // drops a `structuredContent` tree, emit one debug line naming the tool and
+      // drops a `structuredContent` tree, emit one debug trace naming the tool and
       // WHY, so a client that reads both paths can tell an intentional omission
       // from an accidental miss. The reason is resolved once here and passed into
       // the strip (single source of truth), and the trace is gated on the same
       // "a field is actually present" condition as the strip, so it never
       // over-reports on non-envelope responses. Debug level → dropped at the
       // default INFO level, so no per-call noise beyond the guard. Aligns with the
-      // "log-and-continue with a why" convention.
+      // "log-and-continue with a why" convention. The tool/reason ride as a
+      // structured second argument (issue #3216) so field extraction is stable
+      // (grep `"tool":"..."`) without coupling consumers to the message text.
       const omissionReason = structuredContentOmissionReason(toolHasOutputSchema(tool));
       if (omissionReason !== null && responseCarriesStructuredContent(result)) {
-        logger.debug(`[MCP] Omitted structuredContent for tool "${name}" (reason: ${omissionReason})`);
+        logger.debug("[MCP] Omitted structuredContent", { tool: name, reason: omissionReason });
       }
       return stripToolResultStructuredContent(result, omissionReason);
     } finally {

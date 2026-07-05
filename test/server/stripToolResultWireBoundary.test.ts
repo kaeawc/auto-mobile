@@ -4,7 +4,7 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { logger } from "../../src/utils/logger";
+import { logger, LogLevel } from "../../src/utils/logger";
 
 /**
  * End-to-end proof that the `--tool-results-no-structured-content` strip runs at
@@ -63,10 +63,17 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
 
 /**
  * Field-debuggability trace (issue #2962): when the wire boundary intentionally
- * omits `structuredContent`, it emits exactly one `logger.debug` line naming the
- * tool and the omission reason (no-schema vs flag). Debug level only — never
- * info/warn — so there is no default (INFO) noise. A retained call (schema tool,
- * flag off) emits no omission trace.
+ * omits `structuredContent`, it emits exactly one `logger.debug` trace naming the
+ * tool and the omission reason (no-schema vs flag) as structured fields (issue
+ * #3216). Debug level only — never info/warn — so there is no default (INFO)
+ * noise. A retained call (schema tool, flag off) emits no omission trace.
+ *
+ * Level-gate coverage (issue #3215): the method-spy tests below replace
+ * `logger.debug` wholesale, which bypasses the real `currentLogLevel` gate in
+ * src/utils/logger.ts — so the final two tests instead observe the actual log
+ * sink (stdout mirroring; the fixture's MCP wire is an InMemoryTransport, not
+ * stdio) with the real, un-spied logger methods, proving the trace is suppressed
+ * at INFO and written at DEBUG by the real gate.
  */
 describe("CallTool wire boundary debug-logs structuredContent omission (issue #2962)", () => {
   let fixture: McpTestFixture;
@@ -76,15 +83,19 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
   const NOSCHEMA_TOOL = "__strip_log_noschema_2962__";
   const PLAIN_TOOL = "__strip_log_plain_2962__";
 
-  // Match ONLY the exact omission trace emitted at the strip site (index.ts),
-  // anchored to the real message format, and return the captured reason. This is
-  // precise on purpose: it must not be satisfied by any other debug line the
-  // handler path emits, nor by the tool name happening to contain a keyword.
+  // Match ONLY the exact omission trace emitted at the strip site (index.ts):
+  // exact message equality plus the structured fields argument (issue #3216),
+  // scoped to the probe tool, returning the `reason` field. This is precise on
+  // purpose: it must not be satisfied by any other debug line the handler path
+  // emits, nor by the tool name happening to contain a keyword — and it reads
+  // stable fields instead of regex-parsing a formatted message.
   const omissionReasons = (calls: unknown[][], tool: string): string[] =>
     calls
-      .map(args => new RegExp(`^\\[MCP\\] Omitted structuredContent for tool "${tool}" \\(reason: (no-schema|flag)\\)$`).exec(String(args[0] ?? "")))
-      .filter((m): m is RegExpExecArray => m !== null)
-      .map(m => m[1]);
+      .filter(args => args[0] === "[MCP] Omitted structuredContent")
+      .map(args => args[1] as { tool?: unknown; reason?: unknown } | undefined)
+      .filter((fields): fields is { tool: string; reason: string } =>
+        fields !== undefined && fields !== null && fields.tool === tool && typeof fields.reason === "string")
+      .map(fields => fields.reason);
 
   beforeAll(async () => {
     ToolRegistry.register(
@@ -186,6 +197,85 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
       expect(omissionReasons(debugSpy.mock.calls, PLAIN_TOOL)).toEqual([]);
     } finally {
       debugSpy.mockRestore();
+    }
+  });
+
+  // ---- Real level-gate coverage (issue #3215) ----
+  //
+  // The logger's file/stdout writes are fire-and-forget async (each performs one
+  // real fs.stat before writing), so sink assertions flush with a bounded
+  // event-loop poll rather than a fixed sleep. This is I/O settling, not
+  // time-based logic, so FakeTimer does not apply; the loop exits on the first
+  // tick the predicate holds (typically 1-2 ticks).
+  const flushSink = async (done: () => boolean): Promise<void> => {
+    for (let i = 0; i < 200 && !done(); i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+  };
+
+  // Extract the level and structured fields of omission traces that actually
+  // reached the stdout sink for the given probe tool. Anchored to the exact
+  // `[LEVEL] <message> {json}` line the logger composes, but deliberately
+  // level-AGNOSTIC — so the suppression test also catches a regression that
+  // re-emits the trace at info/warn (which would pass the INFO gate).
+  const sinkOmissionFields = (writes: unknown[][], tool: string): Array<{ level: string; tool: string; reason: string }> =>
+    writes
+      .map(args => String(args[0] ?? ""))
+      .flatMap(chunk => chunk.split("\n"))
+      .map(line => / \[(DEBUG|INFO|WARN|ERROR)\] \[MCP\] Omitted structuredContent (\{.*\})$/.exec(line))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map(m => ({ level: m[1], ...(JSON.parse(m[2]) as { tool: string; reason: string }) }))
+      .filter(fields => fields.tool === tool);
+
+  test("real gate at INFO (default): omission trace never reaches the log sink", async () => {
+    // No method spy on logger.debug here — a wholesale spy bypasses the
+    // `currentLogLevel <= LogLevel.DEBUG` guard this test exists to exercise.
+    const previousLevel = logger.getLogLevel();
+    const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(() => true);
+    logger.enableStdoutLogging();
+    try {
+      logger.setLogLevel(LogLevel.INFO);
+      serverConfig.setToolResultsNoStructuredContentEnabled(false);
+      const { client } = fixture.getContext();
+      await client.callTool({ name: NOSCHEMA_TOOL, arguments: {} });
+
+      // Sentinel barrier: prove the sink pipeline flushes at this level, so the
+      // empty assertion below cannot pass merely because async writes never
+      // landed. info() passes the INFO gate; the omission trace must not have.
+      const SENTINEL = "__sink_flush_sentinel_3215__";
+      logger.info(SENTINEL);
+      await flushSink(() => stdoutSpy.mock.calls.some(args => String(args[0] ?? "").includes(SENTINEL)));
+      expect(stdoutSpy.mock.calls.some(args => String(args[0] ?? "").includes(SENTINEL))).toBe(true);
+
+      expect(sinkOmissionFields(stdoutSpy.mock.calls, NOSCHEMA_TOOL)).toEqual([]);
+    } finally {
+      logger.setLogLevel(previousLevel);
+      logger.disableStdoutLogging();
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  test("real gate at DEBUG: exactly one structured omission trace reaches the log sink", async () => {
+    const previousLevel = logger.getLogLevel();
+    const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(() => true);
+    logger.enableStdoutLogging();
+    try {
+      logger.setLogLevel(LogLevel.DEBUG);
+      serverConfig.setToolResultsNoStructuredContentEnabled(false);
+      const { client } = fixture.getContext();
+      await client.callTool({ name: NOSCHEMA_TOOL, arguments: {} });
+
+      await flushSink(() => sinkOmissionFields(stdoutSpy.mock.calls, NOSCHEMA_TOOL).length > 0);
+      // Structured fields (issue #3216) are asserted by object equality — the
+      // sink line carries the exact { tool, reason } payload, exactly once, at
+      // DEBUG level specifically.
+      expect(sinkOmissionFields(stdoutSpy.mock.calls, NOSCHEMA_TOOL)).toEqual([
+        { level: "DEBUG", tool: NOSCHEMA_TOOL, reason: "no-schema" },
+      ]);
+    } finally {
+      logger.setLogLevel(previousLevel);
+      logger.disableStdoutLogging();
+      stdoutSpy.mockRestore();
     }
   });
 });

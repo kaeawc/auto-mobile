@@ -70,6 +70,7 @@ function createHostControlRunner(options: {
   const starts: { deviceId: string; port: number; xctestrunPath?: string }[] = [];
   const stops: { deviceId?: string; pid?: number }[] = [];
   const iproxyStarts: { deviceId: string; localPort: number; devicePort?: number }[] = [];
+  const iproxyStops: { pid?: number }[] = [];
   const runningCtrlProxyProcesses = new Map<number, { pid: number; port: number; deviceId?: string }>();
   for (const pid of options.runningCtrlProxyPids ?? []) {
     runningCtrlProxyProcesses.set(pid, { pid, port: 8765 });
@@ -85,6 +86,7 @@ function createHostControlRunner(options: {
     starts,
     stops,
     iproxyStarts,
+    iproxyStops,
     runner: {
       shouldUseHostControl: () => true,
       isRunningInDocker: () => true,
@@ -100,6 +102,7 @@ function createHostControlRunner(options: {
         return { success: true, data: { pid } };
       },
       stopIproxy: async (params: { pid?: number }) => {
+        iproxyStops.push(params);
         if (params.pid) {
           runningIproxyPids.delete(params.pid);
         }
@@ -586,6 +589,7 @@ describe("IOSCtrlProxyManager", function() {
       await (manager as unknown as { startIproxyTunnel: () => Promise<void> }).startIproxyTunnel();
 
       fakeProcess.emit("exit", 1, null);
+      await Promise.resolve();
       fakeTimer.advanceTime(1000);
       await Promise.resolve();
 
@@ -753,7 +757,6 @@ describe("IOSCtrlProxyManager", function() {
       await (manager as unknown as { startOnDevice: () => Promise<void> }).startOnDevice();
       (manager as unknown as { iproxyProcessId: null }).iproxyProcessId = null;
 
-      (manager as unknown as { startIproxyMonitoring: () => void }).startIproxyMonitoring();
       fakeTimer.advanceTime(5000);
       for (let i = 0; i < 10; i++) {
         await Promise.resolve();
@@ -801,7 +804,6 @@ describe("IOSCtrlProxyManager", function() {
         { deviceId: physicalDevice.deviceId, localPort: 8767, devicePort: 8765 },
       ]);
 
-      (manager as unknown as { startIproxyMonitoring: () => void }).startIproxyMonitoring();
       fakeTimer.advanceTime(5000);
       for (let i = 0; i < 10; i++) {
         await Promise.resolve();
@@ -924,6 +926,43 @@ describe("IOSCtrlProxyManager", function() {
       expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBeNull();
       // The auto-restart suppression latch is not left set across the throw (MINOR-2).
       expect((manager as unknown as { isStopping: boolean }).isStopping).toBe(false);
+    });
+
+    test("start() re-arms supervision after hung-runner cleanup so the next pre-health exit restarts", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+      const runnerProcs = [ownRunnerProcess(12345)];
+      installListeningProcessFakes(fakeExecutor, runnerProcs);
+
+      await withHealthBudget("1", async () => {
+        fakeTimer.enableAutoAdvance();
+        await expect(manager.start()).rejects.toThrow(/failed to start within timeout/);
+      });
+
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+      expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBeNull();
+
+      const failedPreHealthProcess = new FakeChildProcess();
+      failedPreHealthProcess.pid = 22222;
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = failedPreHealthProcess.pid;
+      (manager as unknown as { xcTestProcess: FakeChildProcess }).xcTestProcess = failedPreHealthProcess;
+      fakeExecutor.setCommandHandler("curl -s", () => createExecResult(
+        fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "",
+        ""
+      ));
+
+      (manager as unknown as { handleProcessExit: () => void }).handleProcessExit();
+      fakeTimer.advanceTime(1000);
+      for (let i = 0; i < 5; i++) {await new Promise(resolve => setImmediate(resolve));}
+
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
     });
 
     test("start() does NOT terminate the tracked PID if it was recycled during the wait (#2834)", async function() {
@@ -1297,7 +1336,7 @@ describe("IOSCtrlProxyManager", function() {
       (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 1234;
 
       fakeTimer.enableAutoAdvance();
-      (manager as unknown as { scheduleIproxyRestart: () => void }).scheduleIproxyRestart();
+      (manager as unknown as { iproxySupervisor: { processExited: () => void } }).iproxySupervisor.processExited();
       for (let i = 0; i < 10; i++) {
         await new Promise(resolve => setImmediate(resolve));
       }
@@ -1317,7 +1356,7 @@ describe("IOSCtrlProxyManager", function() {
       ]);
     });
 
-    test("startProcessMonitoring uses the injected timer so tests can control it", function() {
+    test("xctest process supervisor uses the injected timer so tests can control it", async function() {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
@@ -1327,7 +1366,7 @@ describe("IOSCtrlProxyManager", function() {
 
       expect(fakeTimer.getPendingIntervals().length).toBe(0);
 
-      (manager as unknown as { startProcessMonitoring: () => void }).startProcessMonitoring();
+      await (manager as unknown as { processSupervisor: { start: () => Promise<void> } }).processSupervisor.start();
 
       expect(fakeTimer.getPendingIntervals().length).toBe(1);
       expect(fakeTimer.getPendingIntervals()[0]).toBe(30000);
@@ -1351,8 +1390,6 @@ describe("IOSCtrlProxyManager", function() {
         // Health endpoint fails (would have triggered restart in old code)
         fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
         // kill -0 succeeds by default → iproxy process alive
-
-        (manager as unknown as { startIproxyMonitoring: () => void }).startIproxyMonitoring();
 
         // Fire one monitor interval
         fakeTimer.advanceTime(5000);
@@ -1378,15 +1415,13 @@ describe("IOSCtrlProxyManager", function() {
 
         fakeExecutor.setNextSpawnProcess(fakeProcess2);
 
-        (manager as unknown as { startIproxyMonitoring: () => void }).startIproxyMonitoring();
-
         // Fire monitor — sees no tracked process → schedules restart
         fakeTimer.advanceTime(5000);
-        for (let i = 0; i < 5; i++) {await Promise.resolve();}
+        for (let i = 0; i < 5; i++) {await new Promise(resolve => setImmediate(resolve));}
 
         // Fire restart timer (first attempt = 1000 ms base delay)
         fakeTimer.advanceTime(1000);
-        for (let i = 0; i < 5; i++) {await Promise.resolve();}
+        for (let i = 0; i < 5; i++) {await new Promise(resolve => setImmediate(resolve));}
 
         expect(fakeExecutor.getSpawnedProcesses().length).toBe(2);
       });
@@ -1403,15 +1438,77 @@ describe("IOSCtrlProxyManager", function() {
 
         // Process exit triggers scheduleIproxyRestart
         fakeProcess1.emit("exit", 1, null);
+        await Promise.resolve();
 
         fakeExecutor.setNextSpawnProcess(fakeProcess2);
 
         // Fire restart timer (1000 ms base delay for first attempt)
         fakeTimer.advanceTime(1000);
-        for (let i = 0; i < 5; i++) {await Promise.resolve();}
+        for (let i = 0; i < 5; i++) {await new Promise(resolve => setImmediate(resolve));}
 
         // After restart, startIproxyMonitoring() should have been called → new interval pending
         expect(fakeTimer.getPendingIntervals().length).toBe(1);
+      });
+
+      test("keeps retrying when a scheduled iproxy restart attempt fails before the tunnel is supervised", async function() {
+        const fakeProcess1 = new FakeChildProcess();
+        const fakeProcess2 = new FakeChildProcess();
+        fakeProcess2.pid = undefined as unknown as number;
+        fakeExecutor.setNextSpawnProcess(fakeProcess1);
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          physicalDevice, fakeTimer, undefined, fakeExecutor
+        );
+
+        await (manager as unknown as { startIproxyTunnel: () => Promise<void> }).startIproxyTunnel();
+
+        fakeProcess1.emit("exit", 1, null);
+        await Promise.resolve();
+        expect(fakeTimer.getPendingTimeouts()).toEqual([1000]);
+
+        fakeExecutor.setNextSpawnProcess(fakeProcess2);
+        fakeTimer.advanceTime(1000);
+        for (let i = 0; i < 5; i++) {await Promise.resolve();}
+
+        expect(fakeExecutor.getSpawnedProcesses().length).toBe(2);
+        expect(fakeTimer.getPendingTimeouts()).toEqual([2000]);
+      });
+
+      test("stops a stale host-control iproxy before clearing its tracked pid", async function() {
+        const { runner, iproxyStarts, iproxyStops } = createHostControlRunner();
+        runner.runIdeviceId = async () => ({
+          success: true,
+          data: { stdout: `${physicalDevice.deviceId}\n` },
+        });
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          physicalDevice,
+          fakeTimer,
+          undefined,
+          fakeExecutor,
+          undefined,
+          undefined,
+          runner,
+          new FakeHostPortAvailabilityChecker()
+        );
+
+        await (manager as unknown as { startIproxyTunnel: () => Promise<void> }).startIproxyTunnel();
+        runner.getIproxyStatus = async (params: { pid?: number }) => ({
+          success: true,
+          data: { running: false, pid: params.pid },
+        });
+
+        fakeTimer.advanceTime(5000);
+        for (let i = 0; i < 5; i++) {await new Promise(resolve => setImmediate(resolve));}
+
+        expect(iproxyStops).toEqual([{ pid: 4321 }]);
+        expect(fakeTimer.getPendingTimeouts()).toEqual([1000]);
+
+        fakeTimer.advanceTime(1000);
+        for (let i = 0; i < 5; i++) {await new Promise(resolve => setImmediate(resolve));}
+
+        expect(iproxyStarts).toEqual([
+          { deviceId: physicalDevice.deviceId, localPort: 8765, devicePort: 8765 },
+          { deviceId: physicalDevice.deviceId, localPort: 8765, devicePort: 8765 },
+        ]);
       });
     });
   });

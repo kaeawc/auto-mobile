@@ -18,6 +18,8 @@ interface RegisteredMcpTool {
 
 class FakeMcpServer {
   registeredTools: RegisteredMcpTool[] = [];
+  // Underlying Protocol stand-in — registerWithServer chains `onclose` here.
+  server: { onclose?: () => void } = {};
 
   registerTool(name: string, config: any, handler: any): void {
     this.registeredTools.push({ name, config, handler });

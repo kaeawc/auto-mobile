@@ -238,15 +238,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   // Emit notifications/tools/list_changed when a runtime feature-flag toggle
   // changes tool definitions (outputSchema advertisement or tool availability),
   // so caching clients re-fetch tools/list (issue #2963). The emit itself lives on
-  // ToolRegistry (which now holds the server), mirroring ResourceRegistry's
-  // resources/list_changed; this only routes the feature-flag singleton to it.
-  // Wired here because the singleton is constructed before the server exists.
+  // ToolRegistry (which tracks every live session's server), mirroring
+  // ResourceRegistry's resources/list_changed; this only routes the feature-flag
+  // singleton to it. Wired here because the singleton is constructed before the
+  // server exists.
   //
-  // NOTE: in the default proxy topology (external client -> proxy -> daemon) this
-  // notification is not yet forwarded/honored by DaemonMcpProxy (it serves cached
-  // tools and does not invalidate on tools/list_changed) — a pre-existing,
-  // cross-cutting proxy limitation shared with resources/list_changed, tracked as
-  // a follow-up. Direct-mode clients receive and honor it.
+  // In the default proxy topology (external client -> proxy -> daemon) the
+  // notification also reaches proxy-mode clients (issue #3223): ToolRegistry
+  // fans out to all live daemon sessions AND emits on the ListChangedBroadcaster,
+  // which the daemon's Unix socket server pushes to subscribed DaemonMcpProxy
+  // clients; each proxy invalidates its tool cache and re-emits to its client.
   FeatureFlagService.getInstance().setToolListChangedNotifier({
     notifyToolListChanged: () => ToolRegistry.notifyToolListChanged(),
   });

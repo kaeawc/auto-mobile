@@ -27,6 +27,7 @@ import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
 import { finalizeToolResponse, type ObservationBaselineStore } from "./finalizeToolResponse";
 import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
+import { ListChangedBroadcaster } from "./listChangedBroadcast";
 import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
 import {
   InternalToolName,
@@ -647,7 +648,12 @@ class DefaultPlanLifecycleManager implements PlanLifecycleManager {
 // The registry that holds all tools
 class ToolRegistryClass {
   private tools: Map<string, RegisteredTool> = new Map();
-  private server: McpServer | null = null;
+  // Every live MCP server this registry has been registered with. In daemon
+  // mode `registerWithServer` runs once per HTTP session, so notifications must
+  // fan out to ALL live sessions — a single retained server would be
+  // last-writer-wins (issue #3223). Entries are pruned via the underlying
+  // server's onclose hook when a session's transport closes.
+  private servers: Set<McpServer> = new Set();
   private deviceSessionManager: DeviceSessionManager;
   private cleanupService: AppCleanupService;
   private toolCallRepository: ToolCallRepository;
@@ -902,9 +908,10 @@ class ToolRegistryClass {
   // Register all tools with an MCP server
   registerWithServer(server: McpServer): void {
     // Retained so runtime changes that alter tool definitions can emit
-    // notifications/tools/list_changed (issue #2963), mirroring how
-    // ResourceRegistry retains the server for resources/list_changed.
-    this.server = server;
+    // notifications/tools/list_changed (issue #2963) to EVERY live session, not
+    // just the most recently created one (issue #3223), mirroring how
+    // ResourceRegistry retains its servers for resources/list_changed.
+    this.trackServer(server);
 
     this.tools.forEach(tool => {
       if (!this.isToolAvailable(tool)) {
@@ -948,6 +955,28 @@ class ToolRegistryClass {
     });
   }
 
+  // Track a server for list-changed fan-out and prune it when its session's
+  // transport closes. The underlying Protocol preserves a pre-set `onclose`
+  // (both the transport's and the server's), so chaining here cannot clobber
+  // other lifecycle hooks — and vice versa.
+  private trackServer(server: McpServer): void {
+    if (this.servers.has(server)) {
+      return;
+    }
+    this.servers.add(server);
+    const underlying = server.server;
+    const existingOnClose = underlying.onclose;
+    underlying.onclose = () => {
+      this.servers.delete(server);
+      existingOnClose?.();
+    };
+  }
+
+  // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
+  clearServersForTesting(): void {
+    this.servers.clear();
+  }
+
   // Emit notifications/tools/list_changed so caching clients re-fetch tools/list
   // after a runtime change that alters tool definitions — outputSchema
   // advertisement (getToolDefinitions) or tool availability (isToolAvailable).
@@ -956,23 +985,24 @@ class ToolRegistryClass {
   // sendToolListChanged() is itself a guarded no-op until a client connects, so
   // this is safe to call before any transport attaches.
   //
-  // Last-writer-wins: registerWithServer runs per HTTP session in daemon mode, so
-  // this.server points at the most-recently-created session — only that session
-  // is notified. This matches ResourceRegistry's single `server` field; a
-  // cross-cutting multi-session broadcaster is tracked as a follow-up.
+  // Fan-out (issue #3223): every live session's server is notified (not just the
+  // most recently created one), and the ListChangedBroadcaster carries the event
+  // to non-MCP transports — the daemon's Unix socket server pushes it to
+  // connected DaemonMcpProxy clients, which invalidate their tool cache and
+  // re-emit to their own external clients.
   notifyToolListChanged(): void {
-    if (!this.server) {
-      return;
+    for (const server of this.servers) {
+      try {
+        server.sendToolListChanged();
+      } catch (error) {
+        // Best-effort: a failed notification must never break the flag toggle
+        // that triggered it, nor block sibling sessions. Unexpected for a
+        // connected client (transport mid-teardown is the only expected case),
+        // so warn — matching notifyResourceListChanged.
+        logger.warn(`[ToolRegistry] Failed to notify tool list change: ${error}`);
+      }
     }
-
-    try {
-      this.server.sendToolListChanged();
-    } catch (error) {
-      // Best-effort: a failed notification must never break the flag toggle that
-      // triggered it. Unexpected for a connected client (transport mid-teardown
-      // is the only expected case), so warn — matching notifyResourceListChanged.
-      logger.warn(`[ToolRegistry] Failed to notify tool list change: ${error}`);
-    }
+    ListChangedBroadcaster.emit("tools");
   }
 
   // Get tools in MCP format

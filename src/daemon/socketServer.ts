@@ -11,11 +11,22 @@ import { logger } from "../utils/logger";
 import { resolveMcpRequestTimeoutMs, MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import {
+  DaemonNotification,
   DaemonRequest,
   DaemonResponse,
   SessionContext,
 } from "./types";
-import { SOCKET_PATH, DAEMON_HANDSHAKE_ENABLED, DAEMON_VERSION } from "./constants";
+import {
+  SOCKET_PATH,
+  DAEMON_HANDSHAKE_ENABLED,
+  DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+  DAEMON_VERSION,
+} from "./constants";
+import {
+  ListChangedBroadcaster,
+  LIST_CHANGED_NOTIFICATION_METHODS,
+  type ListChangedKind,
+} from "../server/listChangedBroadcast";
 import {
   evaluateClientHandshake,
   extractClientHandshake,
@@ -84,6 +95,11 @@ export class UnixSocketServer {
   private server: NetServer | null = null;
   private socketFileIdentity: SocketFileIdentity | null = null;
   private sessions: Map<string, SessionContext> = new Map();
+  /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
+  private clientSockets: Map<string, Socket> = new Map();
+  /** Socket sessions that opted in to server-pushed notifications. */
+  private notificationSubscribers: Set<string> = new Set();
+  private listChangedUnsubscribe: (() => void) | null = null;
   private socketPath: string;
   private mcpEndpoint: string;
   private daemonState: DaemonStateAccess;
@@ -134,6 +150,14 @@ export class UnixSocketServer {
       this.handleConnection(socket);
     });
 
+    // Fan list-changed events out to subscribed socket clients (issue #3223).
+    // Subscribed here (not in the daemon) so a socket-server recreation during
+    // recovery re-wires itself; close() unsubscribes symmetrically.
+    this.listChangedUnsubscribe?.();
+    this.listChangedUnsubscribe = ListChangedBroadcaster.subscribe(kind => {
+      this.broadcastListChanged(kind);
+    });
+
     return new Promise((resolve, reject) => {
       this.server!.listen(this.socketPath, () => {
         this.socketFileIdentity = this.readSocketFileIdentity();
@@ -161,6 +185,7 @@ export class UnixSocketServer {
     };
 
     this.sessions.set(sessionId, session);
+    this.clientSockets.set(sessionId, socket);
     logger.info(`New client connection: ${sessionId}`);
 
     let buffer = "";
@@ -189,7 +214,7 @@ export class UnixSocketServer {
           const request: DaemonRequest = JSON.parse(line);
           requestId = request.id;
           const response = await this.handleRequest(sessionId, request);
-          this.writeResponse(socket, sessionId, response);
+          this.writeFrame(socket, sessionId, response);
         } catch (error) {
           logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
           const errorResponse: DaemonResponse = {
@@ -198,7 +223,7 @@ export class UnixSocketServer {
             success: false,
             error: error instanceof Error ? error.message : String(error),
           };
-          this.writeResponse(socket, sessionId, errorResponse);
+          this.writeFrame(socket, sessionId, errorResponse);
         }
       }
     });
@@ -206,23 +231,46 @@ export class UnixSocketServer {
     socket.on("close", () => {
       logger.info(`Client disconnected: ${sessionId}`);
       this.sessions.delete(sessionId);
+      this.clientSockets.delete(sessionId);
+      this.notificationSubscribers.delete(sessionId);
     });
 
     socket.on("error", error => {
       logger.error(`Socket error for ${sessionId}:`, error);
       this.sessions.delete(sessionId);
+      this.clientSockets.delete(sessionId);
+      this.notificationSubscribers.delete(sessionId);
       if (!socket.destroyed) {
         socket.destroy();
       }
     });
   }
 
-  private writeResponse(socket: Socket, sessionId: string, response: DaemonResponse): void {
+  /**
+   * Push a list-changed notification frame to every subscribed client socket
+   * (issue #3223). Best-effort per socket: a dead/mid-teardown socket is
+   * skipped or destroyed by the write helper, never thrown.
+   */
+  private broadcastListChanged(kind: ListChangedKind): void {
+    const notification: DaemonNotification = {
+      type: "daemon_notification",
+      method: LIST_CHANGED_NOTIFICATION_METHODS[kind],
+    };
+    for (const sessionId of this.notificationSubscribers) {
+      const socket = this.clientSockets.get(sessionId);
+      if (!socket) {
+        continue;
+      }
+      this.writeFrame(socket, sessionId, notification);
+    }
+  }
+
+  private writeFrame(socket: Socket, sessionId: string, frame: DaemonResponse | DaemonNotification): void {
     if (socket.destroyed) {
       return;
     }
     try {
-      const ok = socket.write(JSON.stringify(response) + "\n");
+      const ok = socket.write(JSON.stringify(frame) + "\n");
       if (!ok) {
         logger.debug(
           `Daemon RPC socket ${sessionId} backpressured; awaiting drain (idle timeout still armed)`
@@ -256,6 +304,18 @@ export class UnixSocketServer {
     const handshakeError = this.rejectOnHandshakeMismatch(request);
     if (handshakeError) {
       return handshakeError;
+    }
+
+    // Notification opt-in is per-socket-session state owned here, not by the
+    // daemon request handlers — answer immediately without queueing (issue #3223).
+    if (request.method === DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD) {
+      this.notificationSubscribers.add(sessionId);
+      return {
+        id: request.id,
+        type: "mcp_response",
+        success: true,
+        result: { subscribed: true },
+      };
     }
 
     // Enqueue request to maintain order
@@ -950,6 +1010,10 @@ export class UnixSocketServer {
   async close(): Promise<void> {
     logger.info("Closing Unix socket server...");
 
+    // Stop receiving list-changed events (mirrors the subscribe in start()).
+    this.listChangedUnsubscribe?.();
+    this.listChangedUnsubscribe = null;
+
     // Close MCP clients
     const clients = Array.from(this.mcpClients.entries());
     this.mcpClients.clear();
@@ -969,6 +1033,8 @@ export class UnixSocketServer {
 
     // Clear sessions
     this.sessions.clear();
+    this.clientSockets.clear();
+    this.notificationSubscribers.clear();
 
     const ownsSocketPath = this.isOwnedSocketFile();
 

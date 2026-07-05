@@ -53,6 +53,25 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     },
   });
 
+  // Forward daemon-emitted list-changed notifications to the external client
+  // (issue #3223): the proxy has already invalidated its matching cache, so a
+  // client re-fetch after this notification returns fresh definitions. The
+  // McpServer send helpers are no-ops until a transport connects, and the
+  // try/catch keeps a mid-teardown transport from breaking the forward path.
+  proxy.onListChanged(kind => {
+    try {
+      if (kind === "tools") {
+        server.sendToolListChanged();
+      } else {
+        server.sendResourceListChanged();
+      }
+    } catch (error) {
+      // Best-effort: a failed client notification must never break the proxy
+      // connection; the client just keeps its stale list until the next fetch.
+      logger.warn(`[ProxyServer] Failed to forward ${kind} list_changed notification: ${error}`);
+    }
+  });
+
   // Register ping handler as per MCP specification
   const PingRequestSchema = require("@modelcontextprotocol/sdk/types.js").PingRequestSchema;
   server.server.setRequestHandler(PingRequestSchema, async () => {

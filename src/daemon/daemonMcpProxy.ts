@@ -2,7 +2,8 @@ import { DaemonClient, DaemonUnavailableError, type DaemonClientLike, type Daemo
 import { DaemonManager, type DaemonManagerLike } from "./manager";
 import { logger } from "../utils/logger";
 import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "./constants";
-import type { DaemonOptions } from "./types";
+import type { DaemonNotification, DaemonOptions } from "./types";
+import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
@@ -250,6 +251,14 @@ export class DaemonMcpProxy {
   private cachedResources: ProxiedResourceDefinition[] | null = null;
   private cachedResourceTemplates: ProxiedResourceTemplate[] | null = null;
 
+  // Listeners for daemon-forwarded list-changed notifications (issue #3223),
+  // fired after the matching cache is invalidated so a re-fetch is never stale.
+  private readonly listChangedListeners = new Set<(kind: ListChangedKind) => void>();
+  // Releases this proxy's handler on the current client. Needed because a
+  // clientFactory may return a shared/reused client (test fakes do); without it
+  // every reconnect would stack another handler on that client.
+  private notificationUnsubscribe: (() => void) | null = null;
+
   constructor(config: DaemonMcpProxyConfig = {}) {
     this.config = {
       autoStartDaemon: true,
@@ -313,9 +322,73 @@ export class DaemonMcpProxy {
 
     // Create and connect client
     this.client = this.clientFactory();
-    await this.client.connect();
+    const client = this.client;
+    // Wire daemon-pushed list-changed forwarding (issue #3223) when the client
+    // supports it. The handler is registered BEFORE connect so no early frame
+    // is dropped; the opt-in subscription request goes out after connect.
+    const supportsNotifications =
+      typeof client.onNotification === "function" &&
+      typeof client.subscribeToNotifications === "function";
+    if (supportsNotifications) {
+      this.notificationUnsubscribe?.();
+      this.notificationUnsubscribe = client.onNotification!(
+        notification => this.handleDaemonNotification(notification)
+      );
+    }
+    await client.connect();
     this.connected = true;
     logger.info("[DaemonMcpProxy] Connected to daemon");
+
+    if (supportsNotifications) {
+      try {
+        await client.subscribeToNotifications!();
+      } catch (error) {
+        // Best-effort: without the subscription the proxy degrades to the old
+        // cached behavior instead of failing the connection. Unexpected against
+        // a same-version daemon (the handshake gate pins versions), so warn.
+        logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
+      }
+    }
+  }
+
+  /**
+   * Register a listener for daemon-forwarded list-changed notifications
+   * (issue #3223). The proxy invalidates the matching cache before firing, so
+   * listeners re-fetching `listTools()`/`listResources()` always see fresh
+   * definitions. Returns an unsubscribe function.
+   */
+  onListChanged(listener: (kind: ListChangedKind) => void): () => void {
+    this.listChangedListeners.add(listener);
+    return () => {
+      this.listChangedListeners.delete(listener);
+    };
+  }
+
+  private handleDaemonNotification(notification: DaemonNotification): void {
+    const kind = listChangedKindForMethod(notification.method);
+    if (kind === undefined) {
+      // Unknown pushed methods are expected as the daemon grows new
+      // notification families; ignoring keeps old proxies forward-compatible.
+      logger.debug(`[DaemonMcpProxy] Ignoring unknown daemon notification: ${notification.method}`);
+      return;
+    }
+
+    if (kind === "tools") {
+      this.cachedTools = null;
+    } else {
+      this.cachedResources = null;
+      this.cachedResourceTemplates = null;
+    }
+
+    for (const listener of this.listChangedListeners) {
+      try {
+        listener(kind);
+      } catch (error) {
+        // Best-effort re-emit: a dead/mid-teardown client transport must not
+        // break cache invalidation or sibling listeners.
+        logger.warn(`[DaemonMcpProxy] list_changed listener failed for ${kind}: ${error}`);
+      }
+    }
   }
 
   /**
@@ -612,6 +685,8 @@ export class DaemonMcpProxy {
     const staleClient = this.client;
     this.connected = false;
     this.client = null;
+    this.notificationUnsubscribe?.();
+    this.notificationUnsubscribe = null;
     this.invalidateCache();
 
     if (!staleClient) {
@@ -758,6 +833,8 @@ export class DaemonMcpProxy {
       await this.client.close();
       this.client = null;
     }
+    this.notificationUnsubscribe?.();
+    this.notificationUnsubscribe = null;
     this.connected = false;
     this.invalidateCache();
     logger.debug("[DaemonMcpProxy] Disconnected from daemon");

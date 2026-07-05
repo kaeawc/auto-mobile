@@ -178,8 +178,9 @@ describe("SessionManager", () => {
       expect(session.cacheData.lastHierarchy).toEqual(hierarchy);
       expect(session.cacheData.lastHierarchy?.hierarchy.node?.["view-id"]).toBe("com.example:id/root");
       expect(session.cacheData.lastObserveTime).toBe(123456);
-      // The dormant-decoy key must not reappear under customData.
-      expect(session.cacheData.customData?.lastHierarchy).toBeUndefined();
+      // The dormant-decoy key never leaks into an untyped bag — the `customData`
+      // escape hatch no longer exists at all (#2917/#2973).
+      expect((session.cacheData as Record<string, unknown>).customData).toBeUndefined();
     });
 
     test("setLastScreenshot stores the base64 string in the typed top-level slot (#2917)", async () => {
@@ -189,7 +190,7 @@ describe("SessionManager", () => {
 
       const session = sessionManager.getSession("session-1")!;
       expect(session.cacheData.lastScreenshot).toBe("base64-screenshot");
-      expect(session.cacheData.customData?.lastScreenshot).toBeUndefined();
+      expect((session.cacheData as Record<string, unknown>).customData).toBeUndefined();
     });
 
     test("setLastHierarchy on a missing session is a no-op (no throw)", () => {
@@ -200,14 +201,14 @@ describe("SessionManager", () => {
     test("should get session cache without modifying other fields", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
       sessionManager.updateSessionCache("session-1", {
-        customData: { key: "value" },
+        deviceLabels: { A: "session-1" },
       });
       const session1 = sessionManager.getSession("session-1");
       const initialLastUsed = session1?.lastUsedAt ?? 0;
       fakeTimer.advanceTime(10);
       const cache = sessionManager.getSessionCache("session-1");
       const session2 = sessionManager.getSession("session-1");
-      expect(cache?.customData).toEqual({ key: "value" });
+      expect(cache?.deviceLabels).toEqual({ A: "session-1" });
       expect((session2?.lastUsedAt ?? 0)).toBe(initialLastUsed + 10);
     });
 
@@ -228,7 +229,7 @@ describe("SessionManager", () => {
       sessionManager.updateSessionCache("session-1", {
         lastHierarchy: makeHierarchy("root"),
         lastScreenshot: "base64-data",
-        customData: { key: "value" },
+        deviceLabels: { A: "session-1" },
       });
       sessionManager.clearSessionCache("session-1");
       const cache = sessionManager.getSessionCache("session-1");

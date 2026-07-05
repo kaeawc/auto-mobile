@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
-import type { Session } from "../../src/daemon/sessionManager";
+import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
 
 interface FakeMcpClient {
   callTool: (...args: unknown[]) => Promise<unknown>;
@@ -22,7 +22,7 @@ interface FakeMcpClient {
 function createFakeSession(
   sessionId: string,
   assignedDevice: string,
-  customData: Record<string, unknown> = {}
+  deviceLabels?: DeviceLabelMap
 ): Session {
   return {
     sessionId,
@@ -31,7 +31,7 @@ function createFakeSession(
     createdAt: 0,
     lastUsedAt: 0,
     expiresAt: 60_000,
-    cacheData: { customData },
+    cacheData: { deviceLabels },
     lastHeartbeat: 0,
     sessionTimeoutMs: 60_000,
     heartbeatTimeoutMs: 10_000,
@@ -42,7 +42,7 @@ function createFakeSession(
 
 function createFakeDaemonState(
   sessionDevices: Map<string, string>,
-  sessionCustomData: Map<string, Record<string, unknown>>,
+  sessionDeviceLabels: Map<string, DeviceLabelMap>,
   mcpAutolockSessions: Map<string, string>
 ) {
   return {
@@ -50,8 +50,9 @@ function createFakeDaemonState(
     getSessionManager: () => ({
       getSession: (sessionId: string) => {
         const assignedDevice = sessionDevices.get(sessionId);
-        return assignedDevice ? createFakeSession(sessionId, assignedDevice, sessionCustomData.get(sessionId) ?? {}) : null;
+        return assignedDevice ? createFakeSession(sessionId, assignedDevice, sessionDeviceLabels.get(sessionId)) : null;
       },
+      getDeviceLabels: (sessionId: string) => sessionDeviceLabels.get(sessionId),
       releaseSession: async () => null,
     }),
     getDevicePool: () => ({
@@ -170,7 +171,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   let server: UnixSocketServer;
   let fakeTimer: FakeTimer;
   let sessionDevices: Map<string, string>;
-  let sessionCustomData: Map<string, Record<string, unknown>>;
+  let sessionDeviceLabels: Map<string, DeviceLabelMap>;
   let mcpAutolockSessions: Map<string, string>;
 
   beforeEach(async () => {
@@ -178,12 +179,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     sessionDevices = new Map();
-    sessionCustomData = new Map();
+    sessionDeviceLabels = new Map();
     mcpAutolockSessions = new Map();
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
-      createFakeDaemonState(sessionDevices, sessionCustomData, mcpAutolockSessions),
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
     await server.start();
@@ -305,12 +306,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("device-label tools/call serializes with explicit calls for the mapped device", async () => {
     sessionDevices.set("session-a", "device-1");
     sessionDevices.set("session-a:B", "device-2");
-    sessionCustomData.set("session-a", {
-      deviceLabelMap: {
-        A: "session-a",
-        B: "session-a:B",
-      },
-    });
+    sessionDeviceLabels.set("session-a", { A: "session-a", B: "session-a:B" });
     let inFlight = 0;
     let maxInFlight = 0;
 
@@ -348,12 +344,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("device-label tools/call ignores a stale deviceId when choosing the forward key", async () => {
     sessionDevices.set("session-a", "device-1");
     sessionDevices.set("session-a:B", "device-2");
-    sessionCustomData.set("session-a", {
-      deviceLabelMap: {
-        A: "session-a",
-        B: "session-a:B",
-      },
-    });
+    sessionDeviceLabels.set("session-a", { A: "session-a", B: "session-a:B" });
     let inFlight = 0;
     let maxInFlight = 0;
 

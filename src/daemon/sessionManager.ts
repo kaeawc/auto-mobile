@@ -1,11 +1,28 @@
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
-import { KeepScreenAwakeManager, KEEP_SCREEN_AWAKE_STATE_KEY, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
+import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
+
+/**
+ * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
+ * label its own session (the primary label reuses the base session UUID), so a
+ * `device: "B"` tool argument can be routed to the correct label session.
+ */
+export type DeviceLabelMap = Record<string, string>;
+
+/**
+ * Narrow seam for restoring keep-awake state on session release. Production uses
+ * `KeepScreenAwakeManager`; tests inject a fake to assert (without a real device)
+ * that `releaseSession` reads the typed `keepScreenAwake` slot and passes its full
+ * payload to `restore` — the behavioral half of the #2973 typed-slot round trip.
+ */
+export interface KeepScreenAwakeRestorer {
+  restore(state: KeepScreenAwakeState): Promise<void>;
+}
 
 /**
  * Session Cache Data
@@ -13,22 +30,24 @@ import type { ObserveResult } from "../models/ObserveResult";
  * Stores data that can be reused across multiple tool calls
  * within the same test session, reducing redundant API calls.
  *
- * The observe cache lives in the typed top-level slots below — they are the
- * canonical source of truth (issue #2917). Write them through the dedicated
- * `setLastHierarchy` / `setLastScreenshot` setters.
+ * Every field is a typed top-level slot — the canonical source of truth for its
+ * concern (issue #2917). Write each through its dedicated setter
+ * (`setLastHierarchy`, `setLastScreenshot`, `setKeepScreenAwake`,
+ * `setDeviceLabels`, …) so a writer/reader type drift is caught at compile time.
  *
- * `customData` still holds other keyed tool state accessed via well-known
- * constants (keep-awake `KeepScreenAwakeState`, the device-label map). Those
- * remain untyped and are candidates for the same typed-slot treatment — the
- * `Record<string, any>` shape is an escape hatch that can reintroduce the
- * #2917 decoy bug for any future key.
+ * There is deliberately NO `customData?: Record<string, any>` escape hatch
+ * (issue #2973): it previously held well-known, fixed-type keyed state
+ * (keep-awake, device-label map) fished out with unchecked `as` casts, which
+ * could silently reintroduce the #2917 decoy bug for any key. Any new
+ * cross-tool session state gets its own typed slot here, not an untyped bag.
  */
 export interface SessionCacheData {
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
   lastScreenshot?: string;     // Base64 encoded last screenshot
   lastObserveTime?: number;    // Timestamp of last hierarchy observation (hierarchy only, not screenshot)
   lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
-  customData?: Record<string, any>; // Custom data set by tools
+  keepScreenAwake?: KeepScreenAwakeState; // Keep-awake state applied at session setup, restored on release
+  deviceLabels?: DeviceLabelMap; // Device-label → session map for multi-device (`device:`-labelled) sessions
 }
 
 /**
@@ -84,6 +103,7 @@ export class SessionManager {
   private releaseCallbacks: SessionReleaseCallback[] = [];
   private deviceSessionRepository: DeviceSessionRepository;
   private readonly getBarrier: () => DbWriteBarrier;
+  private readonly keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer;
 
   // Session timeout: 30 minutes
   private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000;
@@ -100,10 +120,15 @@ export class SessionManager {
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912).
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
+    // Seam for keep-awake restore (issue #2973): defaults to the real manager;
+    // tests inject a fake to assert the typed slot's payload reaches `restore`.
+    keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer =
+    device => new KeepScreenAwakeManager(device),
   ) {
     this.timer = timer;
     this.deviceSessionRepository = deviceSessionRepository;
     this.getBarrier = getBarrier;
+    this.keepScreenAwakeRestorerFactory = keepScreenAwakeRestorerFactory;
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -376,6 +401,46 @@ export class SessionManager {
   }
 
   /**
+   * Cache the keep-awake state applied for a session in the typed top-level
+   * `keepScreenAwake` slot (issue #2973). `ToolExecutionContext` writes it once at
+   * session setup; `restoreKeepScreenAwake` reads the same slot on release. Both
+   * go through this typed slot rather than an untyped `customData` cast, so a
+   * writer/reader type drift is a compile error (the #2917 bug class).
+   */
+  setKeepScreenAwake(sessionId: string, state: KeepScreenAwakeState): void {
+    this.updateSessionCache(sessionId, { keepScreenAwake: state });
+  }
+
+  /**
+   * Read the keep-awake state without recording session activity (mirrors
+   * `getLastRenderedObservation`, issue #3053): this is a best-effort setup/restore
+   * read, not a tool interaction, so it must not fire a session-activity write.
+   * Returns `undefined` for an unknown/expired session or before setup ran.
+   */
+  getKeepScreenAwake(sessionId: string): KeepScreenAwakeState | undefined {
+    return this.getSession(sessionId)?.cacheData.keepScreenAwake;
+  }
+
+  /**
+   * Cache the device-label → session map for a multi-device session in the typed
+   * top-level `deviceLabels` slot (issue #2973). Written by `registerDeviceLabelMap`
+   * and read on the `device:`-label routing hot path (`resolveDeviceLabelSession`).
+   */
+  setDeviceLabels(sessionId: string, labels: DeviceLabelMap): void {
+    this.updateSessionCache(sessionId, { deviceLabels: labels });
+  }
+
+  /**
+   * Read the device-label map without recording session activity (issue #3053):
+   * label routing reads this on every `device:`-labelled request, so it must not
+   * fire a session-activity write per read. Returns `undefined` for an
+   * unknown/expired session or a session with no registered labels.
+   */
+  getDeviceLabels(sessionId: string): DeviceLabelMap | undefined {
+    return this.getSession(sessionId)?.cacheData.deviceLabels;
+  }
+
+  /**
    * Get session cache data
    */
   getSessionCache(sessionId: string): SessionCacheData | null {
@@ -483,7 +548,7 @@ export class SessionManager {
     if (session.platform !== "android") {
       return;
     }
-    const state = session.cacheData.customData?.[KEEP_SCREEN_AWAKE_STATE_KEY] as KeepScreenAwakeState | undefined;
+    const state = session.cacheData.keepScreenAwake;
     if (!state || !state.applied) {
       return;
     }
@@ -493,7 +558,7 @@ export class SessionManager {
       platform: session.platform,
       deviceId: session.assignedDevice
     };
-    const manager = new KeepScreenAwakeManager(device);
+    const manager = this.keepScreenAwakeRestorerFactory(device);
     await manager.restore(state);
   }
 

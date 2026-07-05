@@ -8,7 +8,6 @@ import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { KEEP_SCREEN_AWAKE_STATE_KEY } from "../../src/utils/KeepScreenAwakeManager";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
@@ -49,14 +48,9 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     const sessionId = (await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1"))!;
 
-    const session = daemonSessionManager.getSession(sessionId)!;
-    daemonSessionManager.updateSessionCache(sessionId, {
-      ...session.cacheData,
-      customData: {
-        ...(session.cacheData.customData ?? {}),
-        [KEEP_SCREEN_AWAKE_STATE_KEY]: { applied: false, skipReason: "test" },
-      },
-    });
+    // Seed the typed keep-awake slot so ensureKeepScreenAwake short-circuits
+    // instead of touching a device during setup (issue #2973).
+    daemonSessionManager.setKeepScreenAwake(sessionId, { applied: false, skipReason: "disabled" });
     return sessionId;
   }
 

@@ -1,12 +1,9 @@
 import { DaemonState } from "../daemon/daemonState";
 import { ActionableError } from "../models";
-import { createToolExecutionContext, updateSessionCache } from "./ToolExecutionContext";
+import { createToolExecutionContext } from "./ToolExecutionContext";
 import type { SessionOptions } from "./ToolExecutionContext";
+import type { DeviceLabelMap } from "../daemon/sessionManager";
 import { logger } from "../utils/logger";
-
-type DeviceLabelMap = Record<string, string>;
-
-const DEVICE_LABEL_CACHE_KEY = "deviceLabelMap";
 
 const buildDeviceLabelList = (labels: string[]): string[] => {
   const seen = new Set<string>();
@@ -56,17 +53,7 @@ export const getDeviceLabelMap = (baseSessionUuid: string): DeviceLabelMap | nul
   }
 
   const sessionManager = DaemonState.getInstance().getSessionManager();
-  const session = sessionManager.getSession(baseSessionUuid);
-  if (!session) {
-    return null;
-  }
-
-  const map = session.cacheData.customData?.[DEVICE_LABEL_CACHE_KEY];
-  if (!map || typeof map !== "object" || Array.isArray(map)) {
-    return null;
-  }
-
-  return map as DeviceLabelMap;
+  return sessionManager.getDeviceLabels(baseSessionUuid) ?? null;
 };
 
 export const registerDeviceLabelMap = async (
@@ -87,8 +74,10 @@ export const registerDeviceLabelMap = async (
     return deviceLabelMap;
   }
 
-  const baseContext = await createToolExecutionContext(baseSessionUuid, sessionManager, devicePool, sessionOptions);
-  await updateSessionCache(baseContext, DEVICE_LABEL_CACHE_KEY, deviceLabelMap);
+  // Ensure the base session is set up (accessibility/keep-awake side effects),
+  // then store the label map in its typed `deviceLabels` slot (issue #2973).
+  await createToolExecutionContext(baseSessionUuid, sessionManager, devicePool, sessionOptions);
+  sessionManager.setDeviceLabels(baseSessionUuid, deviceLabelMap);
 
   const assignedSessions = new Set(Object.values(deviceLabelMap));
   assignedSessions.delete(baseSessionUuid);

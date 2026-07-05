@@ -5,7 +5,7 @@ import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";
-import { KeepScreenAwakeManager, KEEP_SCREEN_AWAKE_STATE_KEY, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
+import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { createPerformanceTracker, type TimingData } from "../utils/PerformanceTracker";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
@@ -196,7 +196,7 @@ async function ensureKeepScreenAwake(
   if (session.platform !== "android") {
     return;
   }
-  const existingState = session.cacheData.customData?.[KEEP_SCREEN_AWAKE_STATE_KEY] as KeepScreenAwakeState | undefined;
+  const existingState = session.cacheData.keepScreenAwake;
   if (existingState) {
     return;
   }
@@ -217,37 +217,5 @@ async function ensureKeepScreenAwake(
     state = { applied: false, skipReason: "failed" };
   }
 
-  const customData = {
-    ...(session.cacheData.customData ?? {}),
-    [KEEP_SCREEN_AWAKE_STATE_KEY]: state
-  };
-  sessionManager.updateSessionCache(session.sessionId, { customData });
-}
-
-/**
- * Update session cache after tool execution
- *
- * Tools can use this to cache results (hierarchy, screenshot, etc.)
- * for reuse across tool calls within the same session.
- */
-export async function updateSessionCache(
-  context: ToolExecutionContext,
-  cacheKey: string,
-  cacheValue: any
-): Promise<void> {
-  if (!context.sessionId || !context.sessionManager) {
-    return;
-  }
-
-  const session = context.sessionManager.getSession(context.sessionId);
-  if (!session) {
-    return;
-  }
-
-  if (!session.cacheData.customData) {
-    session.cacheData.customData = {};
-  }
-
-  session.cacheData.customData[cacheKey] = cacheValue;
-  context.sessionManager.updateSessionCache(context.sessionId, session.cacheData);
+  sessionManager.setKeepScreenAwake(session.sessionId, state);
 }

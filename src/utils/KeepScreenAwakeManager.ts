@@ -4,8 +4,6 @@ import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor
 import { logger } from "./logger";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 
-export const KEEP_SCREEN_AWAKE_STATE_KEY = "keepScreenAwakeState";
-
 export type KeepScreenAwakeState = {
   applied: boolean;
   method?: "svc" | "settings";

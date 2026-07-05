@@ -17,7 +17,12 @@ export interface RecordStorageEventInput {
 }
 
 const RETENTION_MAX_ROWS = 10_000;
+// Amortize the retention scan (#2799): run the count(*) gate at most once per
+// this many inserts instead of on every insert. Worst-case overshoot is bounded
+// (cap + CLEANUP_CHECK_INTERVAL rows) and negligible against the 10k cap.
+const CLEANUP_CHECK_INTERVAL = 256;
 let cleanupInProgress = false;
+let insertsSinceCleanup = 0;
 
 function getDb(db?: Kysely<Database>): Kysely<Database> {
   return db ?? (getDatabase() as unknown as Kysely<Database>);
@@ -115,30 +120,45 @@ export async function getStorageEvents(
 
 export async function cleanupIfNeeded(
   db?: Kysely<Database>,
-  maxRows: number = RETENTION_MAX_ROWS
+  maxRows: number = RETENTION_MAX_ROWS,
+  checkInterval: number = CLEANUP_CHECK_INTERVAL
 ): Promise<void> {
+  // Amortize (#2799): only scan once per checkInterval inserts. The counter is
+  // bumped synchronously on every call (recordX dispatches this fire-and-forget),
+  // so retention still fires deterministically every N inserts without putting a
+  // scan on the hot path each time.
+  if (++insertsSinceCleanup < checkInterval) {
+    return;
+  }
+  insertsSinceCleanup = 0;
+
   if (cleanupInProgress) {return;}
   cleanupInProgress = true;
   try {
     const d = getDb(db);
-    // Amortized retention (#2799): probe the (maxRows+1)-th newest row directly
-    // via an indexed backward walk on idx_storage_events_timestamp instead of a
-    // full-table count(*) on every insert. If the probe returns a row the table
-    // is over cap and everything strictly older is pruned — byte-identical to the
-    // previous count-gated path, minus the hot-path scan.
-    const cutoff = await d
+    // count(*) is the cheap gate: SQLite compiles it to the page-granular Count
+    // opcode (~0.6µs on a 10k-row covering index), far cheaper than the O(cap)
+    // offset probe, which only runs on the rare insert that pushes over the cap.
+    const count = await d
       .selectFrom("storage_events")
-      .select("timestamp")
-      .orderBy("timestamp", "desc")
-      .offset(maxRows)
-      .limit(1)
-      .executeTakeFirst();
+      .select(d.fn.countAll().as("count"))
+      .executeTakeFirstOrThrow();
 
-    if (cutoff) {
-      await d
-        .deleteFrom("storage_events")
-        .where("timestamp", "<", cutoff.timestamp)
-        .execute();
+    if (Number(count.count) > maxRows) {
+      const cutoff = await d
+        .selectFrom("storage_events")
+        .select("timestamp")
+        .orderBy("timestamp", "desc")
+        .offset(maxRows)
+        .limit(1)
+        .executeTakeFirst();
+
+      if (cutoff) {
+        await d
+          .deleteFrom("storage_events")
+          .where("timestamp", "<", cutoff.timestamp)
+          .execute();
+      }
     }
   } catch (error) {
     // Best-effort retention cleanup: a failure must not surface to the telemetry

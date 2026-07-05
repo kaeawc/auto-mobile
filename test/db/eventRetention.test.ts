@@ -5,7 +5,6 @@ import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import type { Database } from "../../src/db/types";
 import { runMigrations } from "../../src/db/migrator";
 import { logger } from "../../src/utils/logger";
-import { defaultTimer } from "../../src/utils/SystemTimer";
 import { recordNetworkEvent, cleanupIfNeeded as cleanupNetwork } from "../../src/db/networkEventRepository";
 import { recordLogEvent, cleanupIfNeeded as cleanupLog } from "../../src/db/logEventRepository";
 import { recordOsEvent, cleanupIfNeeded as cleanupOs } from "../../src/db/osEventRepository";
@@ -16,17 +15,23 @@ import { recordStorageEvent, cleanupIfNeeded as cleanupStorage } from "../../src
 /**
  * Retention behavior for the six telemetry event repositories (#2799).
  *
- * The per-insert full-table `count(*)` was removed in favor of a single indexed
- * offset-probe on `idx_<table>_timestamp`. These tests lock in three things:
- *   1. the retention SQL no longer issues a `count(*)` (the hot-path scan is gone),
+ * The retention scan is now *amortized*: `cleanupIfNeeded` runs the `count(*)`
+ * gate at most once per `checkInterval` inserts instead of on every insert
+ * (issue Option A). These tests lock in:
+ *   1. amortization — the `count(*)` gate runs at most once per interval; the
+ *      other N-1 calls are synchronous no-ops that touch neither the DB nor the
+ *      re-entrancy guard,
  *   2. retention still trims to the cap and prunes the same rows (output-preserving),
  *   3. a cleanup failure is logged, not silently swallowed (CLAUDE.md convention).
  *
- * `RETENTION_MAX_ROWS` is injectable via `cleanupIfNeeded(db, maxRows)` so the trim
- * behavior is verified at a low cap in <100ms without inserting 10k real rows.
+ * `maxRows` and `checkInterval` are injectable via
+ * `cleanupIfNeeded(db, maxRows, checkInterval)`, so behavior is verified at a low
+ * cap / interval in <100ms without inserting 10k real rows or 256 to force a scan.
+ * `checkInterval: 1` fires the scan on every call regardless of the module
+ * counter's residual value, so behavior tests are deterministic and self-normalizing.
  */
 
-/** Builds an in-memory test DB that records every executed SQL string. */
+/** In-memory test DB that also records every executed SQL string (for the amortization spy). */
 async function createInstrumentedTestDatabase(): Promise<{ db: Kysely<Database>; sqls: string[] }> {
   const bunDb = new BunDatabase(":memory:");
   const sqls: string[] = [];
@@ -42,23 +47,17 @@ async function createInstrumentedTestDatabase(): Promise<{ db: Kysely<Database>;
   return { db, sqls };
 }
 
-/** Lets detached fire-and-forget cleanups from `recordX` settle before assertions. */
-async function flushPendingCleanups(): Promise<void> {
-  await new Promise<void>(resolve => defaultTimer.setTimeout(() => resolve(), 15));
-}
-
 interface RepoUnderTest {
   name: string;
-  record: (input: any, db?: Kysely<Database>) => Promise<number>;
-  cleanup: (db?: Kysely<Database>, maxRows?: number) => Promise<void>;
+  table: string;
+  record: (input: any, db?: Kysely<Database>) => Promise<unknown>;
+  cleanup: (db?: Kysely<Database>, maxRows?: number, checkInterval?: number) => Promise<void>;
   make: (timestamp: number) => any;
 }
 
 const REPOS: RepoUnderTest[] = [
   {
-    name: "network",
-    record: recordNetworkEvent,
-    cleanup: cleanupNetwork,
+    name: "network", table: "network_events", record: recordNetworkEvent, cleanup: cleanupNetwork,
     make: ts => ({
       deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
       url: "https://x/y", method: "GET", statusCode: 200, durationMs: 1,
@@ -66,36 +65,28 @@ const REPOS: RepoUnderTest[] = [
     }),
   },
   {
-    name: "log",
-    record: recordLogEvent,
-    cleanup: cleanupLog,
+    name: "log", table: "log_events", record: recordLogEvent, cleanup: cleanupLog,
     make: ts => ({
       deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
       level: 3, tag: "T", message: "m", filterName: "f",
     }),
   },
   {
-    name: "os",
-    record: recordOsEvent,
-    cleanup: cleanupOs,
+    name: "os", table: "os_events", record: recordOsEvent, cleanup: cleanupOs,
     make: ts => ({
       deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
       category: "lifecycle", kind: "resume", details: null,
     }),
   },
   {
-    name: "navigation",
-    record: recordNavigationEvent,
-    cleanup: cleanupNavigation,
+    name: "navigation", table: "navigation_events", record: recordNavigationEvent, cleanup: cleanupNavigation,
     make: ts => ({
       deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
       destination: "Home", source: null, arguments: null, metadata: null,
     }),
   },
   {
-    name: "layout",
-    record: recordLayoutEvent,
-    cleanup: cleanupLayout,
+    name: "layout", table: "layout_events", record: recordLayoutEvent, cleanup: cleanupLayout,
     make: ts => ({
       deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
       subType: "recomposition", composableName: null, composableId: null,
@@ -103,9 +94,7 @@ const REPOS: RepoUnderTest[] = [
     }),
   },
   {
-    name: "storage",
-    record: recordStorageEvent,
-    cleanup: cleanupStorage,
+    name: "storage", table: "storage_events", record: recordStorageEvent, cleanup: cleanupStorage,
     make: ts => ({
       deviceId: "d1", timestamp: ts, applicationId: null, sessionId: null,
       fileName: "prefs.xml", key: "k", value: "v", valueType: "string", changeType: "update",
@@ -113,34 +102,29 @@ const REPOS: RepoUnderTest[] = [
   },
 ];
 
-const TABLE_BY_NAME: Record<string, string> = {
-  network: "network_events",
-  log: "log_events",
-  os: "os_events",
-  navigation: "navigation_events",
-  layout: "layout_events",
-  storage: "storage_events",
-};
+const countOccurrences = (sqls: string[], needle: string): number =>
+  sqls.filter(s => s.toLowerCase().includes(needle)).length;
 
 describe("event repository retention (#2799)", () => {
   for (const repo of REPOS) {
     describe(repo.name, () => {
-      test("cleanup issues no count(*) — only the indexed offset probe", async () => {
+      test("amortizes: count(*) gate runs at most once per checkInterval", async () => {
         const { db, sqls } = await createInstrumentedTestDatabase();
         try {
-          // A few rows via the public record path; then isolate the explicit cleanup SQL.
-          for (let ts = 1; ts <= 3; ts++) {
-            await repo.record(repo.make(ts), db);
-          }
-          await flushPendingCleanups();
+          const interval = 5;
+          // Drain any residual counter to a known state; this fires one scan.
+          await repo.cleanup(db, 1000, 1);
           sqls.length = 0;
 
-          await repo.cleanup(db, 2);
+          // The first interval-1 calls must be pure no-ops: no DB query at all.
+          for (let i = 0; i < interval - 1; i++) {
+            await repo.cleanup(db, 1000, interval);
+          }
+          expect(sqls).toHaveLength(0);
 
-          const joined = sqls.join("\n").toLowerCase();
-          expect(joined.length).toBeGreaterThan(0);
-          expect(joined).not.toContain("count(");
-          expect(joined).toContain("offset");
+          // The interval-th call fires exactly one count(*) gate.
+          await repo.cleanup(db, 1000, interval);
+          expect(countOccurrences(sqls, "count(")).toBe(1);
         } finally {
           await db.destroy();
         }
@@ -150,16 +134,14 @@ describe("event repository retention (#2799)", () => {
         const { db } = await createInstrumentedTestDatabase();
         try {
           const cap = 5;
-          const total = 12;
-          for (let ts = 1; ts <= total; ts++) {
+          for (let ts = 1; ts <= 12; ts++) {
             await repo.record(repo.make(ts), db);
           }
-          await flushPendingCleanups();
-
-          await repo.cleanup(db, cap);
+          // checkInterval: 1 forces the scan to run now, regardless of the counter.
+          await repo.cleanup(db, cap, 1);
 
           const rows = await db
-            .selectFrom(TABLE_BY_NAME[repo.name] as any)
+            .selectFrom(repo.table as any)
             .select("timestamp")
             .orderBy("timestamp", "asc")
             .execute();
@@ -178,14 +160,9 @@ describe("event repository retention (#2799)", () => {
           for (let ts = 1; ts <= 3; ts++) {
             await repo.record(repo.make(ts), db);
           }
-          await flushPendingCleanups();
+          await repo.cleanup(db, 10, 1);
 
-          await repo.cleanup(db, 10);
-
-          const rows = await db
-            .selectFrom(TABLE_BY_NAME[repo.name] as any)
-            .select("timestamp")
-            .execute();
+          const rows = await db.selectFrom(repo.table as any).select("timestamp").execute();
           expect(rows).toHaveLength(3);
         } finally {
           await db.destroy();
@@ -197,10 +174,11 @@ describe("event repository retention (#2799)", () => {
         const warnSpy = spyOn(logger, "warn");
         try {
           await db.destroy(); // force every subsequent query to throw
-          await expect(repo.cleanup(db, 3)).resolves.toBeUndefined(); // never propagates
+          // checkInterval: 1 so the scan actually runs (and then throws).
+          await expect(repo.cleanup(db, 3, 1)).resolves.toBeUndefined(); // never propagates
           expect(warnSpy).toHaveBeenCalled();
           const logged = warnSpy.mock.calls.map(c => String(c[0])).join("\n");
-          expect(logged).toContain(TABLE_BY_NAME[repo.name]);
+          expect(logged).toContain(repo.table);
         } finally {
           warnSpy.mockRestore();
         }

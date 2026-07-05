@@ -588,10 +588,11 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       if (observeHierarchy) {
         sessionManager.setLastHierarchy(sessionUuid, observeHierarchy);
       }
-      const observeScreenshot = name === "observe" ? getStructuredField(observeEnvelope, "screenshot") : undefined;
-      if (observeScreenshot) {
-        sessionManager.setLastScreenshot(sessionUuid, observeScreenshot);
-      }
+      // NOTE: there is deliberately no `screenshot` read here. Production
+      // `observe` never emitted a `screenshot` payload field and the session
+      // `lastScreenshot` slot had no reader, so the whole cache chain was dead
+      // and was removed (issue #3221). If observe ever attaches a screenshot,
+      // reintroduce the write together with a real consumer.
     }
 
     const baselineStore: ObservationBaselineStore | undefined =

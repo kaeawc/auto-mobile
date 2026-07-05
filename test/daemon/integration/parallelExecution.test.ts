@@ -188,12 +188,12 @@ describe("Parallel Execution Across Multiple Devices", function() {
       const hierarchy2: ViewHierarchyResult = { hierarchy: { node: { "$": {}, "view-id": "session-2" } } };
       sessionManager.updateSessionCache(session1Id, {
         lastHierarchy: hierarchy1,
-        lastScreenshot: "screenshot-session-1",
+        deviceLabels: { A: session1Id },
       });
 
       sessionManager.updateSessionCache(session2Id, {
         lastHierarchy: hierarchy2,
-        lastScreenshot: "screenshot-session-2",
+        deviceLabels: { A: session2Id },
       });
 
       // Verify each session has its own cache
@@ -201,13 +201,13 @@ describe("Parallel Execution Across Multiple Devices", function() {
       const cache2 = sessionManager.getSessionCache(session2Id);
 
       expect(cache1?.lastHierarchy).toEqual(hierarchy1);
-      expect(cache1?.lastScreenshot).toBe("screenshot-session-1");
+      expect(cache1?.deviceLabels).toEqual({ A: session1Id });
       expect(cache2?.lastHierarchy).toEqual(hierarchy2);
-      expect(cache2?.lastScreenshot).toBe("screenshot-session-2");
+      expect(cache2?.deviceLabels).toEqual({ A: session2Id });
 
       // Verify caches are different
       expect(cache1?.lastHierarchy).not.toBe(cache2?.lastHierarchy);
-      expect(cache1?.lastScreenshot).not.toBe(cache2?.lastScreenshot);
+      expect(cache1?.deviceLabels).not.toEqual(cache2?.deviceLabels);
     });
 
     test("should ensure device assignment persistence across session operations", async function() {

@@ -159,11 +159,11 @@ describe("SessionManager", () => {
       const hierarchy = makeHierarchy("root");
       sessionManager.updateSessionCache("session-1", {
         lastHierarchy: hierarchy,
-        lastScreenshot: "base64-data",
+        lastObserveTime: 987654,
       });
       const cache = sessionManager.getSessionCache("session-1");
       expect(cache?.lastHierarchy).toEqual(hierarchy);
-      expect(cache?.lastScreenshot).toBe("base64-data");
+      expect(cache?.lastObserveTime).toBe(987654);
     });
 
     test("setLastHierarchy stores a ViewHierarchyResult in the typed top-level slot and stamps lastObserveTime (#2917)", async () => {
@@ -180,16 +180,6 @@ describe("SessionManager", () => {
       expect(session.cacheData.lastObserveTime).toBe(123456);
       // The dormant-decoy key never leaks into an untyped bag — the `customData`
       // escape hatch no longer exists at all (#2917/#2973).
-      expect((session.cacheData as Record<string, unknown>).customData).toBeUndefined();
-    });
-
-    test("setLastScreenshot stores the base64 string in the typed top-level slot (#2917)", async () => {
-      await sessionManager.createSession("session-1", "emulator-5554", "android");
-
-      sessionManager.setLastScreenshot("session-1", "base64-screenshot");
-
-      const session = sessionManager.getSession("session-1")!;
-      expect(session.cacheData.lastScreenshot).toBe("base64-screenshot");
       expect((session.cacheData as Record<string, unknown>).customData).toBeUndefined();
     });
 
@@ -216,19 +206,19 @@ describe("SessionManager", () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
       sessionManager.updateSessionCache("session-1", {
         lastHierarchy: makeHierarchy("root"),
-        lastScreenshot: "base64-data",
+        lastObserveTime: 987654,
       });
       sessionManager.clearSessionCache("session-1", "lastHierarchy");
       const cache = sessionManager.getSessionCache("session-1");
       expect(cache?.lastHierarchy).toBeUndefined();
-      expect(cache?.lastScreenshot).toBe("base64-data");
+      expect(cache?.lastObserveTime).toBe(987654);
     });
 
     test("should clear all cache when no key specified", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
       sessionManager.updateSessionCache("session-1", {
         lastHierarchy: makeHierarchy("root"),
-        lastScreenshot: "base64-data",
+        lastObserveTime: 987654,
         deviceLabels: { A: "session-1" },
       });
       sessionManager.clearSessionCache("session-1");

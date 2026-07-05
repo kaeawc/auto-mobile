@@ -191,6 +191,15 @@ public protocol GesturePerforming {
 
     /// Update the internal application reference for gesture operations.
     func updateApplication(bundleId: String)
+
+    // MARK: - App Privacy Permissions
+
+    /// Reset privacy authorizations for the given app back to the not-determined
+    /// ("ask next time") state via `XCUIApplication.resetAuthorizationStatus(for:)`.
+    /// Each entry in `resources` is an AutoMobile permission name mapped to an
+    /// `XCUIProtectedResource`; an unmapped name throws so the caller can surface a
+    /// per-permission failure. Works on physical devices, not just simulators. (#2491)
+    func resetAuthorizations(bundleId: String, resources: [String]) throws
 }
 
 // MARK: - StorageInspecting Protocol

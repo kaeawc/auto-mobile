@@ -12,6 +12,12 @@ import {
   type IosSimulatorPrivacyClient,
   type TccPermissionReader
 } from "./IosSimulatorPermissions";
+import {
+  CtrlProxyIosPhysicalPrivacyClient,
+  IosPhysicalPermissions,
+  type IosPhysicalPrivacyClient
+} from "./IosPhysicalPermissions";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 
 export type AppPermissionAction = IosSimulatorPermissionAction;
 
@@ -73,6 +79,7 @@ export interface AppPermissionsDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorPrivacyClient | null;
   tccReader?: TccPermissionReader | null;
+  iosPhysicalClient?: IosPhysicalPrivacyClient | null;
 }
 
 function parseAndroidRuntimePermissions(output: string): Map<string, AppPermissionStateResult> {
@@ -109,11 +116,14 @@ export class AppPermissions {
 
   private tccReader: TccPermissionReader | null;
 
+  private iosPhysicalClient: IosPhysicalPrivacyClient | null;
+
   constructor(device: BootedDevice, dependencies: AppPermissionsDependencies = {}) {
     this.device = device;
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl ?? null;
     this.tccReader = dependencies.tccReader ?? null;
+    this.iosPhysicalClient = dependencies.iosPhysicalClient ?? null;
   }
 
   async setPermissions(appId: string, input: SetAppPermissionsInput): Promise<SetAppPermissionsResult> {
@@ -156,6 +166,13 @@ export class AppPermissions {
         error,
       };
     }
+
+    // Physical iOS devices cannot use simctl privacy; route reset through the
+    // CtrlProxy XCUITest runner (grant/revoke surface a clear "reset only" failure).
+    if (!isIosSimulatorUdid(this.device.deviceId)) {
+      return this.setIosPhysicalPermissions(appId, action, permissions);
+    }
+
     const iosPermissions = new IosSimulatorPermissions(this.device, this.simctl, this.tccReader);
     const result = await iosPermissions.setPermissions(action, appId, permissions);
 
@@ -169,6 +186,35 @@ export class AppPermissions {
       failedCount: result.failedCount,
       operations: result.results.map(permissionResult => ({
         operationId: `ios_simctl_privacy:${action}:${permissionResult.permission}`,
+        success: permissionResult.success,
+        changedCount: permissionResult.success ? 1 : 0,
+        failedCount: permissionResult.success ? 0 : 1,
+        result: permissionResult,
+        ...(permissionResult.error ? { error: permissionResult.error } : {}),
+      })),
+      ...(result.error ? { error: result.error } : {}),
+    };
+  }
+
+  private async setIosPhysicalPermissions(
+    appId: string,
+    action: AppPermissionAction,
+    permissions: string[]
+  ): Promise<SetAppPermissionsResult> {
+    const client = this.iosPhysicalClient ?? new CtrlProxyIosPhysicalPrivacyClient(this.device);
+    const iosPermissions = new IosPhysicalPermissions(this.device, client);
+    const result = await iosPermissions.setPermissions(action, appId, permissions);
+
+    return {
+      success: result.success,
+      appId: result.appId,
+      deviceId: result.deviceId,
+      platform: result.platform,
+      action,
+      changedCount: result.changedCount,
+      failedCount: result.failedCount,
+      operations: result.results.map(permissionResult => ({
+        operationId: `ios_xcuitest_reset:${action}:${permissionResult.permission}`,
         success: permissionResult.success,
         changedCount: permissionResult.success ? 1 : 0,
         failedCount: permissionResult.success ? 0 : 1,

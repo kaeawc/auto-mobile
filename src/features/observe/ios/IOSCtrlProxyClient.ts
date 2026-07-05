@@ -109,6 +109,7 @@ import { CtrlProxyVoiceOver } from "./CtrlProxyVoiceOver";
 import { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyDatabase } from "./CtrlProxyDatabase";
+import { CtrlProxyPermissions } from "./CtrlProxyPermissions";
 import { decodeCtrlProxyMessage } from "./decodeCtrlProxyMessage";
 import { DefaultIosSdkEventIngestor, type IosSdkEventIngestor } from "./IosSdkEventIngestor";
 
@@ -135,6 +136,7 @@ import type {
   CtrlProxyRecentAppsResult,
   CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
+  CtrlProxyResetPermissionsResult,
   CtrlProxyPerfTiming,
   CtrlProxyPerformanceSnapshot,
   CtrlProxyCachedHierarchy,
@@ -258,6 +260,10 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     bundleId: string, timeoutMs?: number, perf?: PerformanceTracker, coldBoot?: boolean
   ): Promise<CtrlProxyLaunchAppResult>;
 
+  requestResetPermissions(
+    bundleId: string, permissions: string[], timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<CtrlProxyResetPermissionsResult>;
+
   requestScreenshot(
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyScreenshotResult>;
@@ -356,6 +362,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private _keyboard: CtrlProxyKeyboard | null = null;
   private _highlights: CtrlProxyHighlights | null = null;
   private _database: CtrlProxyDatabase | null = null;
+  private _permissions: CtrlProxyPermissions | null = null;
 
   // Logging tag for base class
   protected readonly logTag = "IOSCtrlProxyClient";
@@ -739,6 +746,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this._database = new CtrlProxyDatabase(this.createDelegateContext());
     }
     return this._database;
+  }
+
+  private get permissions(): CtrlProxyPermissions {
+    if (!this._permissions) {
+      this._permissions = new CtrlProxyPermissions(this.createDelegateContext());
+    }
+    return this._permissions;
   }
 
   // ===========================================================================
@@ -1259,6 +1273,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     bundleId: string, timeoutMs: number = 10000, perf?: PerformanceTracker, coldBoot: boolean = false
   ): Promise<CtrlProxyLaunchAppResult> {
     return this.navigation.requestLaunchApp(bundleId, timeoutMs, perf, coldBoot);
+  }
+
+  // ===========================================================================
+  // Delegated Public Methods - App Privacy Permissions
+  // ===========================================================================
+
+  async requestResetPermissions(
+    bundleId: string, permissions: string[], timeoutMs: number = 5000, perf?: PerformanceTracker
+  ): Promise<CtrlProxyResetPermissionsResult> {
+    return this.permissions.requestResetPermissions(bundleId, permissions, timeoutMs, perf);
   }
 
   // ===========================================================================

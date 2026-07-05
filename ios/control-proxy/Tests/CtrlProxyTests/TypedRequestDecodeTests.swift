@@ -159,6 +159,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             .listTables: "{}",
             .getTableData: "{}",
             .getTableStructure: "{}",
+            .requestResetPermissions: #"{"bundleId":"com.example.app","permissions":["camera"]}"#,
         ]
 
         for requestType in RequestType.allCases {
@@ -494,6 +495,20 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         XCTAssertEqual(history.first?.text, "payload")
     }
 
+    // MARK: - Reset permissions
+
+    func testResetPermissionsDecodeDispatchForwardsResources() {
+        let response = dispatch(
+            #"{"type":"request_reset_permissions","requestId":"rp-1","bundleId":"com.example.app","permissions":["camera","photos"]}"#,
+            as: WebSocketResponse.self
+        )
+        XCTAssertEqual(response?.type, "reset_permissions_result")
+        XCTAssertEqual(response?.requestId, "rp-1")
+        let history = fakeGesturePerformer.getResetAuthorizationsHistory()
+        XCTAssertEqual(history.first?.bundleId, "com.example.app")
+        XCTAssertEqual(history.first?.resources, ["camera", "photos"])
+    }
+
     // MARK: - Hierarchy / screenshot
 
     func testHierarchyDecodeDispatchForwardsDisableAllFiltering() throws {
@@ -717,6 +732,8 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             (#"{"type":"set_preference","requestId":"x","value":"v","valueType":"STRING"}"#, "key"),
             (#"{"type":"remove_preference","requestId":"x"}"#, "key"),
             (#"{"type":"set_network_mock_rules","requestId":"x"}"#, "rules"),
+            (#"{"type":"request_reset_permissions","requestId":"x","permissions":["camera"]}"#, "bundleId"),
+            (#"{"type":"request_reset_permissions","requestId":"x","bundleId":"com.example.app"}"#, "permissions"),
         ]
         for (json, missingKey) in cases {
             XCTAssertThrowsError(try decodeWebSocketRequest(json), "expected \(json) to be rejected") { error in

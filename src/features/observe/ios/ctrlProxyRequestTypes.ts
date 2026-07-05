@@ -48,6 +48,9 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "request_action",
   "request_launch_app",
 
+  // App privacy permissions
+  "request_reset_permissions",
+
   // Device control
   "request_rotate",
 

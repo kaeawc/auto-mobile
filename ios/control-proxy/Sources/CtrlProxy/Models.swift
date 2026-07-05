@@ -137,6 +137,24 @@ public struct RequestLaunchApp: Decodable {
     public var coldBoot: Bool?
 }
 
+// MARK: App privacy permissions
+
+/// Reset privacy authorizations (camera/photos/etc.) for an app back to
+/// not-determined via `XCUIApplication.resetAuthorizationStatus(for:)`. `bundleId`
+/// and `permissions` are decode-required so their absence is rejected at the wire
+/// boundary rather than silently no-op'ing. See issue #2491.
+public struct RequestResetPermissions: Decodable {
+    public var requestId: String?
+    public var bundleId: String
+    public var permissions: [String]
+
+    public init(requestId: String? = nil, bundleId: String, permissions: [String]) {
+        self.requestId = requestId
+        self.bundleId = bundleId
+        self.permissions = permissions
+    }
+}
+
 // MARK: Device control
 
 public struct RequestRotate: Decodable {
@@ -264,6 +282,7 @@ public enum WebSocketRequest: Decodable {
 
     case action(RequestAction)
     case launchApp(RequestLaunchApp)
+    case resetPermissions(RequestResetPermissions)
     case rotate(RequestRotate)
     case clipboard(RequestClipboard)
 
@@ -346,6 +365,8 @@ public enum WebSocketRequest: Decodable {
             self = try .action(RequestAction(from: decoder))
         case .requestLaunchApp:
             self = try .launchApp(RequestLaunchApp(from: decoder))
+        case .requestResetPermissions:
+            self = try .resetPermissions(RequestResetPermissions(from: decoder))
         case .requestRotate:
             self = try .rotate(RequestRotate(from: decoder))
         case .requestClipboard:
@@ -409,6 +430,7 @@ public enum WebSocketRequest: Decodable {
         case .recentApps: return .requestRecentApps
         case .action: return .requestAction
         case .launchApp: return .requestLaunchApp
+        case .resetPermissions: return .requestResetPermissions
         case .rotate: return .requestRotate
         case .clipboard: return .requestClipboard
         case .getCurrentFocus: return .getCurrentFocus
@@ -464,6 +486,7 @@ public enum WebSocketRequest: Decodable {
         case let .pressButton(payload): return payload.requestId
         case let .action(payload): return payload.requestId
         case let .launchApp(payload): return payload.requestId
+        case let .resetPermissions(payload): return payload.requestId
         case let .rotate(payload): return payload.requestId
         case let .clipboard(payload): return payload.requestId
         case let .addHighlight(payload): return payload.requestId
@@ -1372,6 +1395,9 @@ public enum RequestType: String, CaseIterable {
     case requestAction = "request_action"
     case requestLaunchApp = "request_launch_app"
 
+    /// App privacy permissions
+    case requestResetPermissions = "request_reset_permissions"
+
     /// Device control
     case requestRotate = "request_rotate"
 
@@ -1426,6 +1452,7 @@ public enum ResponseType: String {
     case recentAppsResult = "recent_apps_result"
     case actionResult = "action_result"
     case launchAppResult = "launch_app_result"
+    case resetPermissionsResult = "reset_permissions_result"
     case rotateResult = "rotate_result"
     case clipboardResult = "clipboard_result"
     case currentFocusResult = "current_focus_result"

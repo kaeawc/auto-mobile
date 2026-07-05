@@ -76,6 +76,7 @@ const SWIFT_REQUEST_TYPES = [
   "list_tables",
   "get_table_data",
   "get_table_structure",
+  "request_reset_permissions",
 ];
 
 /**

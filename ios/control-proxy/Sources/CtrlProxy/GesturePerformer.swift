@@ -1282,6 +1282,44 @@ public class GesturePerformer: GesturePerforming {
             }, fallback: ())
         }
 
+        // MARK: - App Privacy Permissions
+
+        /// Reset each named resource's authorization to not-determined on the target
+        /// app. `resetAuthorizationStatus(for:)` (Xcode 11.4+) works on real devices,
+        /// not just simulators — the whole point of #2491. An AutoMobile permission
+        /// with no `XCUIProtectedResource` equivalent (e.g. `siri`, `motion`) throws
+        /// `invalidParameter` so the caller reports it as a per-permission failure.
+        public func resetAuthorizations(bundleId: String, resources: [String]) throws {
+            try runOnMainThread {
+                let app = XCUIApplication(bundleIdentifier: bundleId)
+                for raw in resources {
+                    guard let resource = Self.protectedResource(for: raw) else {
+                        throw CommandError.invalidParameter("permission", raw)
+                    }
+                    app.resetAuthorizationStatus(for: resource)
+                }
+            }
+        }
+
+        /// Map an AutoMobile permission name to the `XCUIProtectedResource` the
+        /// runner can reset. Names without an XCUITest equivalent return nil (the
+        /// support matrix is advertised honestly — see issue #2491). The mapping is
+        /// authoritative here rather than duplicated on the TS host, since
+        /// `XCUIProtectedResource` only exists in this process.
+        private static func protectedResource(for name: String) -> XCUIProtectedResource? {
+            switch name {
+            case "camera": return .camera
+            case "photos", "photos-add": return .photos
+            case "microphone": return .microphone
+            case "contacts", "contacts-limited": return .contacts
+            case "location", "location-always": return .location
+            case "calendar": return .calendar
+            case "reminders": return .reminders
+            case "media-library": return .mediaLibrary
+            default: return nil
+            }
+        }
+
     #else
         /// Non-iOS stub implementation
         private let elementLocator: ElementLocating
@@ -1434,6 +1472,10 @@ public class GesturePerformer: GesturePerforming {
 
         public func updateApplication(bundleId _: String) {
             // no-op on non-iOS
+        }
+
+        public func resetAuthorizations(bundleId _: String, resources _: [String]) throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
         }
     #endif
 }

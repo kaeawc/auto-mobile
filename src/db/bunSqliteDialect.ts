@@ -18,6 +18,7 @@ import { ActionableError } from "../models/ActionableError";
 const MAX_CACHED_STATEMENTS = 200;
 
 type BunStatement = ReturnType<BunDatabase["prepare"]>;
+type SchemaVersionRow = { schema_version?: number | bigint };
 
 /**
  * Kysely dialect for Bun's built-in SQLite.
@@ -116,6 +117,7 @@ export class BunSqliteConnectionState {
   #activeQueries = 0;
   #waiters: Array<() => void> = [];
   #statementCache = new Map<string, BunStatement>();
+  #observedSchemaVersion: number | null = null;
   #closed = false;
 
   constructor(database: BunDatabase | (() => BunDatabase), beforeQuery?: () => Promise<void>) {
@@ -278,13 +280,26 @@ export class BunSqliteConnectionState {
   }
 
   #getStatement(db: BunDatabase, sql: string): BunStatement {
-    const cached = this.#statementCache.get(sql);
-    if (cached) {
-      this.#statementCache.delete(sql);
-      this.#statementCache.set(sql, cached);
-      return cached;
+    if (this.#statementCache.size === 0) {
+      this.#observedSchemaVersion = this.#readSchemaVersion(db);
     }
 
+    const cached = this.#statementCache.get(sql);
+    if (cached) {
+      this.#invalidateCacheIfSchemaVersionChanged(db);
+      const current = this.#statementCache.get(sql);
+      if (!current) {
+        return this.#prepareAndCacheStatement(db, sql);
+      }
+      this.#statementCache.delete(sql);
+      this.#statementCache.set(sql, current);
+      return current;
+    }
+
+    return this.#prepareAndCacheStatement(db, sql);
+  }
+
+  #prepareAndCacheStatement(db: BunDatabase, sql: string): BunStatement {
     const statement = db.prepare(sql);
     this.#statementCache.set(sql, statement);
     if (this.#statementCache.size > MAX_CACHED_STATEMENTS) {
@@ -296,6 +311,32 @@ export class BunSqliteConnectionState {
       }
     }
     return statement;
+  }
+
+  #invalidateCacheIfSchemaVersionChanged(db: BunDatabase): void {
+    const schemaVersion = this.#readSchemaVersion(db);
+    if (this.#observedSchemaVersion === null) {
+      this.#observedSchemaVersion = schemaVersion;
+      return;
+    }
+    if (this.#observedSchemaVersion !== schemaVersion) {
+      this.#clearStatementCache();
+      this.#observedSchemaVersion = schemaVersion;
+    }
+  }
+
+  #readSchemaVersion(db: BunDatabase): number {
+    const statement = db.prepare("PRAGMA schema_version");
+    try {
+      const row = statement.get() as SchemaVersionRow | undefined;
+      const schemaVersion = row?.schema_version;
+      if (schemaVersion === undefined) {
+        throw new Error("PRAGMA schema_version did not return a schema_version value");
+      }
+      return Number(schemaVersion);
+    } finally {
+      statement.finalize();
+    }
   }
 
   #isSchemaChangingSql(sql: string): boolean {

@@ -122,6 +122,20 @@ class FakeStatement {
     return this.db.rows;
   }
 
+  get(...params: unknown[]): unknown {
+    if (this.finalized) {
+      throw new Error(`Statement was finalized: ${this.sql}`);
+    }
+    this.db.record("all", this.sql, params);
+    if (this.db.throwOn) {
+      throw this.db.throwOn;
+    }
+    if (this.sql === "PRAGMA schema_version") {
+      return { schema_version: this.db.schemaVersion };
+    }
+    return this.db.rows[0];
+  }
+
   run(...params: unknown[]): FakeRunResult {
     if (this.finalized) {
       throw new Error(`Statement was finalized: ${this.sql}`);
@@ -144,6 +158,7 @@ class FakeDatabase {
   readonly prepareCalls: string[] = [];
   rows: unknown[] = [];
   runResult: FakeRunResult = { changes: 0, lastInsertRowid: 0 };
+  schemaVersion = 1;
   throwOn?: unknown;
 
   prepare(sql: string): FakeStatement {
@@ -167,6 +182,14 @@ class FakeDatabase {
 
   preparedFor(sql: string): FakeStatement[] {
     return this.preparedStatements.filter(statement => statement.sql === sql);
+  }
+
+  get applicationPrepareCalls(): string[] {
+    return this.prepareCalls.filter(sql => sql !== "PRAGMA schema_version");
+  }
+
+  get applicationCalls(): Array<{ method: "all" | "run"; sql: string; params: unknown[] }> {
+    return this.calls.filter(call => call.sql !== "PRAGMA schema_version");
   }
 }
 
@@ -255,8 +278,8 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     await state.executeQuery(rawQuery("insert into foo (id) values (?)", [2]), owner);
     await state.executeQuery(rawQuery("insert into foo (id) values (?)", [3]), owner);
 
-    expect(db.prepareCalls).toEqual(["insert into foo (id) values (?)"]);
-    expect(db.calls.map(call => call.params)).toEqual([[1], [2], [3]]);
+    expect(db.applicationPrepareCalls).toEqual(["insert into foo (id) values (?)"]);
+    expect(db.applicationCalls.map(call => call.params)).toEqual([[1], [2], [3]]);
   });
 
   test("keeps distinct SQL strings as distinct cache entries", async () => {
@@ -268,7 +291,7 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     await state.executeQuery(rawQuery("insert into foo (id, name) values (?, ?)", [2, "x"]), owner);
     await state.executeQuery(rawQuery("insert into foo (id) values (?)", [3]), owner);
 
-    expect(db.prepareCalls).toEqual([
+    expect(db.applicationPrepareCalls).toEqual([
       "insert into foo (id) values (?)",
       "insert into foo (id, name) values (?, ?)",
     ]);
@@ -292,8 +315,12 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
 
     expect(oldest.finalized).toBe(false);
     expect(nextOldest.finalized).toBe(true);
-    expect(db.prepareCalls).toHaveLength(201);
-    expect(db.preparedStatements.filter(statement => !statement.finalized)).toHaveLength(200);
+    expect(db.applicationPrepareCalls).toHaveLength(201);
+    expect(
+      db.preparedStatements.filter(
+        statement => statement.sql !== "PRAGMA schema_version" && !statement.finalized
+      )
+    ).toHaveLength(200);
   });
 
   test("prepares a fresh statement after an evicted SQL is used again", async () => {
@@ -323,8 +350,11 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
 
     state.close();
 
-    expect(db.preparedStatements).toHaveLength(2);
-    expect(db.preparedStatements.every(statement => statement.finalized)).toBe(true);
+    const applicationStatements = db.preparedStatements.filter(
+      statement => statement.sql !== "PRAGMA schema_version"
+    );
+    expect(applicationStatements).toHaveLength(2);
+    expect(applicationStatements.every(statement => statement.finalized)).toBe(true);
   });
 
   test("clears cached statements after successful schema-changing SQL", async () => {
@@ -364,6 +394,22 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
 
     await state.executeQuery(rawQuery("select * from foo"), owner);
 
+    expect(db.preparedFor("select * from foo")).toHaveLength(2);
+    expect(db.preparedFor("select * from foo")[1].finalized).toBe(false);
+  });
+
+  test("clears cached statements before reuse when schema_version changes", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+    const cachedSelect = db.preparedFor("select * from foo")[0];
+
+    db.schemaVersion += 1;
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+
+    expect(cachedSelect.finalized).toBe(true);
     expect(db.preparedFor("select * from foo")).toHaveLength(2);
     expect(db.preparedFor("select * from foo")[1].finalized).toBe(false);
   });

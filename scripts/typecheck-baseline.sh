@@ -93,14 +93,25 @@ detect_tsc_version() {
   fi
 }
 
+# Absolute repo root escaped for use in a `sed` `s|...|` pattern. Some tsc
+# diagnostics (TS2694/TS2345 `import("<abs>")`, TS1149, TS7016) embed the
+# ABSOLUTE project path in the message, which differs per checkout
+# (`/Users/...` locally vs `/home/runner/work/...` in CI). Stripping the local
+# root makes those signatures path-independent so the baseline matches on any
+# machine.
+ROOT_SED_PATTERN="$(printf '%s' "$ROOT" | sed 's/[][\.*^$|/]/\\&/g')"
+
 # Reduce raw tsc output to a sorted multiset of stable error signatures.
-# `sed` without the /g flag rewrites only the FIRST "(n,n)" on the line -- the
-# file location -- and never touches numbers inside the message text. The `grep`
-# is guarded with `|| true` so a clean tree (zero matching lines) does not abort
-# the script under `set -o pipefail`.
+# 1. keep only top-level error lines (indented detail lines are dropped);
+# 2. strip the "(line,col)" file location (first "(n,n)" only, via no /g flag),
+#    so line shifts don't churn the baseline and message-embedded numbers survive;
+# 3. strip the absolute repo-root prefix from message-embedded paths.
+# The `grep` is guarded with `|| true` so a clean tree (zero matching lines) does
+# not abort the script under `set -o pipefail`.
 normalize() {
   { grep -E '^[^[:space:]].*: error TS[0-9]+' || true; } \
     | sed -E 's/\(([0-9]+),([0-9]+)\)//' \
+    | sed "s|${ROOT_SED_PATTERN}/||g" \
     | sort
 }
 

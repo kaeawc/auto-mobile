@@ -75,6 +75,22 @@ teardown() {
   [[ "$output" == *"no new type errors"* ]]
 }
 
+@test "normalize strips the absolute repo root from message-embedded paths" {
+  # tsc embeds ABSOLUTE paths in some diagnostics (TS2694/TS2345 import("<abs>")).
+  # Those differ per checkout (/Users locally vs /home/runner in CI), so they must
+  # be stripped to a relative form or the baseline can never match across machines.
+  local abs="$REPO_ROOT/src/features/observe/DeviceService"
+  TYPECHECK_TSC_CMD="printf '%s\\n' \"src/x.ts(1,1): error TS2694: Namespace '$abs' has no exported member.\"" \
+    run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+
+  # No absolute path leaks into the committed baseline...
+  run grep -c "$REPO_ROOT" "$TYPECHECK_BASELINE"
+  [ "$output" -eq 0 ]
+  # ...and the path survives in relative form.
+  grep -q "Namespace 'src/features/observe/DeviceService'" "$TYPECHECK_BASELINE"
+}
+
 @test "check mode passes when current output matches the baseline" {
   TYPECHECK_TSC_CMD="$FIXTURE_TSC" bash "$SCRIPT" --update
   TYPECHECK_TSC_CMD="$FIXTURE_TSC" run bash "$SCRIPT"

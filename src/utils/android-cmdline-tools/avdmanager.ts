@@ -13,7 +13,6 @@ import {
   validateRequiredTools,
   type AndroidToolsLocation
 } from "./detection";
-import { installAndroidTools } from "./install";
 
 // Dependencies interface for dependency injection
 export interface AvdManagerDependencies {
@@ -24,7 +23,6 @@ export interface AvdManagerDependencies {
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;
   getBestAndroidToolsLocation: typeof getBestAndroidToolsLocation;
   validateRequiredTools: typeof validateRequiredTools;
-  installAndroidTools: typeof installAndroidTools;
 }
 
 // Create default dependencies
@@ -36,7 +34,6 @@ const createDefaultDependencies = (): AvdManagerDependencies => ({
   getAndroidHomeWithSystemImages,
   getBestAndroidToolsLocation,
   validateRequiredTools,
-  installAndroidTools // This function now throws - kept for compatibility with existing code
 });
 
 const SDK_ROOT_MARKERS = ["system-images", "platforms", "platform-tools", "build-tools"];

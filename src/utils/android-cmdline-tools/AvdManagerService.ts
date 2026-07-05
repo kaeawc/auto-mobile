@@ -13,20 +13,7 @@ import {
   DeviceProfile,
   AvdManagerDependencies
 } from "./avdmanager";
-
-/**
- * Interface for AVD Manager operations
- * Enables dependency injection and testing with fakes
- */
-interface AvdManager {
-  acceptLicenses(): Promise<{ success: boolean; message: string }>;
-  listSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]>;
-  installSystemImage(packageName: string, acceptLicense?: boolean): Promise<{ success: boolean; message: string }>;
-  listDeviceImages(): Promise<AvdInfo[]>;
-  createAvd(params: CreateAvdParams): Promise<{ success: boolean; message: string; avdName?: string }>;
-  deleteAvd(name: string): Promise<{ success: boolean; message: string }>;
-  listDevices(): Promise<DeviceProfile[]>;
-}
+import type { AvdManager } from "./interfaces/AvdManager";
 
 /**
  * Service wrapper for AVD Manager operations

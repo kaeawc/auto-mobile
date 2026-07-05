@@ -243,4 +243,20 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       restoreEnv();
     }
   });
+
+  test("lists available AVD names when requested AVD does not exist", async () => {
+    const execAsync = async (command: string): Promise<ExecResult> => {
+      if (command.includes("-list-avds")) {
+        return createExecResult("Pixel_9_Pro\nMedium_Phone_API_35\n");
+      }
+      return createExecResult("");
+    };
+
+    const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
+
+    await expect(client.startEmulator("Missing_Device")).rejects.toThrow(
+      "AVD 'Missing_Device' not found. Available AVDs: Pixel_9_Pro, Medium_Phone_API_35"
+    );
+  });
 });

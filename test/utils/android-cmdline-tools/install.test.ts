@@ -1,21 +1,9 @@
 import { expect, describe, test } from "bun:test";
 import {
-  DEFAULT_REQUIRED_TOOLS,
   CMDLINE_TOOLS_DOWNLOAD,
-  getDefaultInstallPath
 } from "../../../src/utils/android-cmdline-tools/install";
 
 describe("Android Command Line Tools - Installation", () => {
-  describe("DEFAULT_REQUIRED_TOOLS", () => {
-    test("should contain essential Android tools", () => {
-      expect(DEFAULT_REQUIRED_TOOLS).toEqual([
-        "apkanalyzer",
-        "avdmanager",
-        "sdkmanager"
-      ]);
-    });
-  });
-
   describe("CMDLINE_TOOLS_DOWNLOAD", () => {
     test("should have correct download information", () => {
       expect(CMDLINE_TOOLS_DOWNLOAD.version).toBe("13114758");
@@ -34,14 +22,6 @@ describe("Android Command Line Tools - Installation", () => {
         expect(typeof platform.checksum).toBe("string");
         expect(platform.checksum.length).toBe(64); // SHA-256 hex
       });
-    });
-  });
-
-  describe("getDefaultInstallPath", () => {
-    test("should return a valid path string", () => {
-      const result = getDefaultInstallPath();
-      expect(typeof result).toBe("string");
-      expect(result).not.toHaveLength(0);
     });
   });
 });

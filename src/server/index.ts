@@ -13,7 +13,7 @@ import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanEx
 
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
-import { stripToolResultStructuredContent } from "./stripToolResultStructuredContent";
+import { stripToolResultStructuredContent, structuredContentOmissionReason, responseCarriesStructuredContent } from "./stripToolResultStructuredContent";
 
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
@@ -347,7 +347,20 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // #2899). Applied here — not inside a tool handler — so internal handler
       // callers keep reading `structuredContent`, and so plain-registered tools
       // are covered.
-      return stripToolResultStructuredContent(result, toolHasOutputSchema(tool));
+      // Field-debuggability trace (issue #2962): when the wire boundary actually
+      // drops a `structuredContent` tree, emit one debug line naming the tool and
+      // WHY, so a client that reads both paths can tell an intentional omission
+      // from an accidental miss. The reason is resolved once here and passed into
+      // the strip (single source of truth), and the trace is gated on the same
+      // "a field is actually present" condition as the strip, so it never
+      // over-reports on non-envelope responses. Debug level → dropped at the
+      // default INFO level, so no per-call noise beyond the guard. Aligns with the
+      // "log-and-continue with a why" convention.
+      const omissionReason = structuredContentOmissionReason(toolHasOutputSchema(tool));
+      if (omissionReason !== null && responseCarriesStructuredContent(result)) {
+        logger.debug(`[MCP] Omitted structuredContent for tool "${name}" (reason: ${omissionReason})`);
+      }
+      return stripToolResultStructuredContent(result, omissionReason);
     } finally {
       executionTracker.endExecution(execution.id);
     }

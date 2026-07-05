@@ -1,3 +1,4 @@
+import { rmSync as fsRmSync } from "node:fs";
 import { rm as fsRm } from "node:fs/promises";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
@@ -52,6 +53,27 @@ export interface RemoveTempDbDirOptions {
   onGiveUp?: (dir: string, error: unknown) => void;
 }
 
+export interface SyncTimer {
+  sleep(ms: number): void;
+}
+
+export interface RemoveTempDbDirSyncOptions {
+  /** Removal primitive. Defaults to `rmSync(dir, { recursive: true, force: true })`. */
+  rmSync?: (dir: string) => void;
+  /** Synchronous backoff sleeper. Defaults to a bounded blocking sleep. */
+  timer?: SyncTimer;
+  /** Total attempts before giving up. Bounded so cleanup can never stall CI. */
+  maxAttempts?: number;
+  /** Delay between attempts, in ms. */
+  delayMs?: number;
+  /**
+   * Invoked once if every attempt loses to a persistent lock. Defaults to a
+   * single `logger.warn` so a leaked dir is visible in CI logs; the unit test
+   * injects a spy instead.
+   */
+  onGiveUp?: (dir: string, error: unknown) => void;
+}
+
 // Windows raises these while a bun:sqlite handle outlives destroy(); they are
 // the only codes we treat as a transient lock and retry. Anything else is a
 // real failure and rethrown.
@@ -60,12 +82,27 @@ const TRANSIENT_LOCK_CODES = new Set(["EBUSY", "EPERM", "ENOTEMPTY"]);
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_DELAY_MS = 50;
 
-function defaultOnGiveUp(dir: string, error: unknown): void {
+const defaultSyncTimer: SyncTimer = {
+  sleep(ms: number): void {
+    if (ms <= 0) {
+      return;
+    }
+    const shared = new Int32Array(new SharedArrayBuffer(4));
+    Atomics.wait(shared, 0, 0, ms);
+  },
+};
+
+function isTransientLockError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return Boolean(code && TRANSIENT_LOCK_CODES.has(code));
+}
+
+function defaultOnGiveUp(helperName: string, dir: string, error: unknown): void {
   const code = (error as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
   // Log-and-continue: the dir is a throwaway temp dir the OS will sweep; a
   // Windows handle livelock is the expected reason and is safe to swallow.
   logger.warn(
-    `removeTempDbDir: gave up removing ${dir} after ${code}; leaving it for OS temp cleanup (issue #2916)`,
+    `${helperName}: gave up removing ${dir} after ${code}; leaving it for OS temp cleanup (issue #2916)`,
     error
   );
 }
@@ -78,7 +115,7 @@ export async function removeTempDbDir(
   const timer = options.timer ?? defaultTimer;
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const delayMs = options.delayMs ?? DEFAULT_DELAY_MS;
-  const onGiveUp = options.onGiveUp ?? defaultOnGiveUp;
+  const onGiveUp = options.onGiveUp ?? ((target, error) => defaultOnGiveUp("removeTempDbDir", target, error));
 
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -86,13 +123,42 @@ export async function removeTempDbDir(
       await rm(dir);
       return;
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (!code || !TRANSIENT_LOCK_CODES.has(code)) {
+      if (!isTransientLockError(error)) {
         throw error;
       }
       lastError = error;
       if (attempt < maxAttempts - 1) {
         await timer.sleep(delayMs);
+      }
+    }
+  }
+
+  onGiveUp(dir, lastError);
+}
+
+export function removeTempDbDirSync(
+  dir: string,
+  options: RemoveTempDbDirSyncOptions = {}
+): void {
+  const rmSync = options.rmSync ?? (target => fsRmSync(target, { recursive: true, force: true }));
+  const timer = options.timer ?? defaultSyncTimer;
+  const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const delayMs = options.delayMs ?? DEFAULT_DELAY_MS;
+  const onGiveUp =
+    options.onGiveUp ?? ((target, error) => defaultOnGiveUp("removeTempDbDirSync", target, error));
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      rmSync(dir);
+      return;
+    } catch (error) {
+      if (!isTransientLockError(error)) {
+        throw error;
+      }
+      lastError = error;
+      if (attempt < maxAttempts - 1) {
+        timer.sleep(delayMs);
       }
     }
   }

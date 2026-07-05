@@ -197,3 +197,101 @@ export const accessibilityFocusResultSchema = z.object({
   warning: z.string().optional(),
   focusedElement: elementSchema.optional()
 }).passthrough();
+
+/**
+ * A recursive view-hierarchy / element node (issue #3025). Its `bounds` routes
+ * through {@link elementBoundsSchema} so the compact tuple is advertised at
+ * every depth, and `node` is polymorphic — a single object OR an array, as real
+ * captures vary (the fixture's root `node` is an array while nested children can
+ * be either). `.passthrough()` keeps the polymorphic `$` attribute bag and any
+ * per-node metadata (`view-id`, `occlusionState`, `test-tag`, …) the model does
+ * not enumerate, so the schema describes the bounds shape without over-fitting
+ * the large, dynamic node payload.
+ */
+export const viewHierarchyNodeSchema = z.lazy(() =>
+  z.object({
+    bounds: elementBoundsSchema.optional(),
+    node: z.union([viewHierarchyNodeSchema, z.array(viewHierarchyNodeSchema)]).optional()
+  }).passthrough()
+);
+
+const hierarchyNodeField = z
+  .union([viewHierarchyNodeSchema, z.array(viewHierarchyNodeSchema)])
+  .optional();
+
+const contentHiddenRegionSchema = z.object({
+  bounds: elementBoundsSchema,
+  reason: z.string(),
+  areaPercent: z.number()
+}).passthrough();
+
+const viewHierarchyWindowSchema = z.object({
+  bounds: elementBoundsSchema.optional(),
+  hierarchy: viewHierarchyNodeSchema.optional()
+}).passthrough();
+
+/**
+ * The `viewHierarchy` sub-tree of an observe result (issue #3025). Only the
+ * bounds-carrying sites are typed — the root `hierarchy.node` (+ its iOS root
+ * `bounds`), per-window `bounds`/`hierarchy`, `contentHiddenRegions[].bounds`,
+ * and the accessibility-focused node — so every hierarchy `bounds` is advertised
+ * through the union. Everything else (`packageName`, `sources`, screen/density
+ * metadata, …) rides `.passthrough()`.
+ */
+export const viewHierarchyResultSchema = z.object({
+  "hierarchy": z.object({
+    error: z.string().optional(),
+    node: hierarchyNodeField,
+    bounds: elementBoundsSchema.optional()
+  }).passthrough().optional(),
+  // Real captures emit `null` (not an absent key) for the empty case, so these
+  // are nullish rather than merely optional.
+  "windows": z.array(viewHierarchyWindowSchema).nullish(),
+  "contentHiddenRegions": z.array(contentHiddenRegionSchema).nullish(),
+  "accessibility-focused-element": viewHierarchyNodeSchema.optional(),
+  "systemInsets": systemInsetsSchema.optional()
+}).passthrough();
+
+/**
+ * The flattened `elements` block of an observe result. Each category is an array
+ * of hierarchy-node-shaped entries (they carry `bounds` and nested `node`
+ * children in real captures), so they route through {@link viewHierarchyNodeSchema}
+ * and their bounds advertise the compact union at every depth. `media`
+ * (MediaView) is left open — it is not a bounds-canonical shape.
+ */
+const observeElementsSchema = z.object({
+  clickable: z.array(viewHierarchyNodeSchema),
+  scrollable: z.array(viewHierarchyNodeSchema),
+  text: z.array(viewHierarchyNodeSchema),
+  media: z.array(z.any())
+}).passthrough();
+
+/**
+ * Machine-readable `outputSchema` for the headline `observe` tool (issue #3025).
+ *
+ * `observe`'s payload is large and dynamic (the hierarchy `node` field is
+ * polymorphic; `elements` duplicates the tree), so this follows the pragmatic
+ * middle ground the issue calls for: a `.passthrough()` top level with typed
+ * `viewHierarchy`/`elements`/`bounds` sub-schemas. The value it buys is that
+ * *every* `bounds` field — hierarchy nodes, window/root/region, `elements`, and
+ * the focused/awaited element fields — routes through {@link elementBoundsSchema},
+ * so the `--observe-result-compact` tuple is advertised here (via
+ * `advertiseBoundsForCompact` in `getToolDefinitions`) exactly as it is on the
+ * schema-declaring action tools (`tapOn`, `accessibilityFocus`). Unmodeled fields
+ * (perf timing, back stack, wakefulness, user id, errors, …) pass through so the
+ * advertisement never rejects a real observation.
+ */
+export const observeResultSchema = z.object({
+  screenSize: screenSizeSchema.optional(),
+  systemInsets: systemInsetsSchema.optional(),
+  viewHierarchy: viewHierarchyResultSchema.optional(),
+  activeWindow: activeWindowSchema.optional(),
+  elements: observeElementsSchema.optional(),
+  selectedElements: z.array(selectedElementSchema).optional(),
+  focusedElement: elementSchema.optional(),
+  accessibilityFocusedElement: elementSchema.optional(),
+  awaitedElement: elementSchema.optional(),
+  freshness: freshnessSchema.optional(),
+  predictions: predictionsSchema.optional(),
+  accessibilityState: accessibilityStateSchema.optional()
+}).passthrough();

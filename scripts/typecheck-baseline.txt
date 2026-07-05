@@ -471,8 +471,18 @@ src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on 
 src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'lazy' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'nullish' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'nullish' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.

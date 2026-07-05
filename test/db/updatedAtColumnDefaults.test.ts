@@ -13,20 +13,18 @@ import { createTestDatabase } from "./testDbHelper";
  *
  * Each row below inserts ONLY the columns that are required with no default,
  * deliberately OMITTING `updated_at`, so the SQL-level default path is exercised
- * exactly the way a future defaulted writer would hit it. Before the fix these
- * inserts throw a NOT NULL constraint failure; after it they store a real
- * timestamp.
+ * exactly the way a defaulted writer hits it. Before #2922 these inserts threw a
+ * NOT NULL constraint failure; after it they store a real timestamp.
  *
- * NOTE the insert casts (`as never`): the `updated_at` TypeScript type is
- * INTENTIONALLY left required (`string`, not `Generated<string>`) even though
- * the fresh schema now carries a default. An upgraded database — one that
- * already ran the historical migration — keeps the old no-default column, since
- * editing a migration body does not re-run it (Kysely tracks migrations by name).
- * Advertising the column as omittable in TypeScript would let a writer pass local
- * validation yet fail `NOT NULL` for upgraded users. The type may be relaxed once
- * a repair migration rebuilds these columns' defaults on upgraded DBs (unlike
- * `created_at`, whose default #2915 already repaired everywhere). The cast lets
- * this test exercise the SQL default directly, which is what the fix delivers.
+ * The `updated_at` TypeScript type was relaxed to `Generated<string>` by #2937,
+ * once its companion repair migration
+ * (`2026_07_05_000_repair_updated_at_defaults`) rebuilt these columns' defaults on
+ * already-upgraded databases too — so an omitted-`updated_at` insert is now sound
+ * on every database, not just fresh ones (mirroring `created_at`, whose default
+ * #2915 repaired everywhere). The insert casts (`as never`) remain only because
+ * `table` iterates a heterogeneous union of `keyof Database`, which Kysely's
+ * insert builder cannot correlate to a single row shape — not because of the
+ * column type.
  *
  * The source-grep guard that rejects the buggy string-literal form
  * (`defaultTo("datetime('now')")`, the #2895 class) lives in

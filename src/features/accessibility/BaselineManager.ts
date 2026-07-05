@@ -2,7 +2,9 @@
  * Manages accessibility violation baselines for suppressing known violations
  */
 
+import { sql, type Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
+import type { Database } from "../../db/types";
 import type { WcagViolation } from "../../models/AccessibilityAudit";
 import { getCutoffDate, DEFAULT_TTL } from "../shared/MetricsUtils";
 
@@ -13,11 +15,28 @@ interface BaselineData {
 }
 
 export class BaselineManager {
+  private readonly injectedDb: Kysely<Database> | null;
+
+  /**
+   * @param db Optional Kysely handle. Resolved LAZILY (per use, via {@link db})
+   * rather than in a field initializer so merely constructing a manager does not
+   * open the real file-backed database. Inject an in-memory DB
+   * (`createTestDatabase`) for tests that exercise the query paths (issue #3067).
+   */
+  constructor(db?: Kysely<Database>) {
+    this.injectedDb = db ?? null;
+  }
+
+  /** The injected DB, or the shared singleton resolved on first use. */
+  private get db(): Kysely<Database> {
+    return this.injectedDb ?? getDatabase();
+  }
+
   /**
    * Get baseline for a screen
    */
   async getBaseline(screenId: string): Promise<BaselineData | null> {
-    const db = getDatabase();
+    const db = this.db;
 
     const result = await db
       .selectFrom("accessibility_baselines")
@@ -40,7 +59,7 @@ export class BaselineManager {
    * Save baseline for a screen
    */
   async saveBaseline(screenId: string, violations: WcagViolation[]): Promise<void> {
-    const db = getDatabase();
+    const db = this.db;
     const now = new Date().toISOString();
 
     // Upsert baseline
@@ -77,7 +96,7 @@ export class BaselineManager {
    * Clear baseline for a screen
    */
   async clearBaseline(screenId: string): Promise<void> {
-    const db = getDatabase();
+    const db = this.db;
 
     await db
       .deleteFrom("accessibility_baselines")
@@ -89,7 +108,7 @@ export class BaselineManager {
    * List all baselines
    */
   async listBaselines(): Promise<BaselineData[]> {
-    const db = getDatabase();
+    const db = this.db;
 
     const results = await db
       .selectFrom("accessibility_baselines")
@@ -107,7 +126,7 @@ export class BaselineManager {
    * Clear all baselines
    */
   async clearAllBaselines(): Promise<void> {
-    const db = getDatabase();
+    const db = this.db;
 
     await db.deleteFrom("accessibility_baselines").execute();
   }
@@ -116,12 +135,21 @@ export class BaselineManager {
    * Clean up old baselines (older than specified days)
    */
   async cleanupOldBaselines(daysOld: number = DEFAULT_TTL.baselineDays): Promise<number> {
-    const db = getDatabase();
+    const db = this.db;
     const cutoffIso = getCutoffDate(daysOld);
 
+    // Normalize BOTH sides through `datetime(...)` before comparing, exactly as
+    // ThresholdManager.cleanupExpiredThresholds does. A raw
+    // string `<` would compare `updated_at` and the ISO cutoff lexically, which
+    // is only sound while every stored value is ISO-8601. Once a defaulted
+    // `updated_at` writer lands (issue #2937), the column can hold SQLite's
+    // `YYYY-MM-DD HH:MM:SS` form (no `T`), and a bare-space sorts before `T` — so
+    // a same-day-but-newer row would sort before the ISO cutoff and be wrongly
+    // deleted. `datetime(...)` renders both forms to one canonical format,
+    // comparing them as actual instants.
     const result = await db
       .deleteFrom("accessibility_baselines")
-      .where("updated_at", "<", cutoffIso)
+      .where(sql`datetime(updated_at)`, "<", sql`datetime(${cutoffIso})`)
       .executeTakeFirst();
 
     return Number(result.numDeletedRows) || 0;

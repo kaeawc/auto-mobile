@@ -1,124 +1,39 @@
 /**
  * Unit tests for BaselineManager
  * Tests baseline CRUD operations and database interactions
+ *
+ * The real `BaselineManager` is exercised directly with an injected in-memory
+ * database (its constructor takes an optional `Kysely<Database>`, resolved lazily
+ * so construction never touches the file-backed singleton — issue #3067). The
+ * database is built from the real migration chain so `saveBaseline` can rely on
+ * the schema's `created_at`/`updated_at` defaults exactly as it does in
+ * production.
  */
 
 import { expect, describe, it, beforeEach, afterEach } from "bun:test";
 import type { WcagViolation } from "../../../src/models/AccessibilityAudit";
-import { createTestDatabase, destroyTestDatabase } from "../../helpers/test-database";
+import { createTestDatabase } from "../../db/testDbHelper";
+import { BaselineManager } from "../../../src/features/accessibility/BaselineManager";
 import type { Kysely } from "kysely";
 import type { Database as DatabaseSchema } from "../../../src/db/types";
 
-// We'll create a test-specific BaselineManager that uses our test database
-let testDb: Kysely<DatabaseSchema>;
-
-// Create a custom BaselineManager class that uses our test database instead of the singleton
-class TestBaselineManager {
-  private db: Kysely<DatabaseSchema>;
-
-  constructor(db: Kysely<DatabaseSchema>) {
-    this.db = db;
-  }
-
-  async getBaseline(screenId: string) {
-    const result = await this.db
-      .selectFrom("accessibility_baselines")
-      .selectAll()
-      .where("screen_id", "=", screenId)
-      .executeTakeFirst();
-
-    if (!result) {
-      return null;
-    }
-
-    return {
-      screenId: result.screen_id,
-      violations: JSON.parse(result.violations_json),
-      updatedAt: result.updated_at,
-    };
-  }
-
-  async saveBaseline(screenId: string, violations: WcagViolation[]) {
-    const now = new Date().toISOString();
-
-    const existing = await this.db
-      .selectFrom("accessibility_baselines")
-      .select("id")
-      .where("screen_id", "=", screenId)
-      .executeTakeFirst();
-
-    if (existing) {
-      await this.db
-        .updateTable("accessibility_baselines")
-        .set({
-          violations_json: JSON.stringify(violations),
-          updated_at: now,
-        })
-        .where("screen_id", "=", screenId)
-        .execute();
-    } else {
-      await this.db
-        .insertInto("accessibility_baselines")
-        .values({
-          screen_id: screenId,
-          violations_json: JSON.stringify(violations),
-          created_at: now,
-          updated_at: now,
-        })
-        .execute();
-    }
-  }
-
-  async clearBaseline(screenId: string) {
-    await this.db
-      .deleteFrom("accessibility_baselines")
-      .where("screen_id", "=", screenId)
-      .execute();
-  }
-
-  async listBaselines() {
-    const results = await this.db
-      .selectFrom("accessibility_baselines")
-      .selectAll()
-      .execute();
-
-    return results.map(row => ({
-      screenId: row.screen_id,
-      violations: JSON.parse(row.violations_json),
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  async clearAllBaselines() {
-    await this.db.deleteFrom("accessibility_baselines").execute();
-  }
-
-  async cleanupOldBaselines(daysOld: number) {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysOld);
-    const cutoffIso = cutoffDate.toISOString();
-
-    const result = await this.db
-      .deleteFrom("accessibility_baselines")
-      .where("updated_at", "<", cutoffIso)
-      .executeTakeFirst();
-
-    return Number(result.numDeletedRows) || 0;
-  }
+/** Render a Date as SQLite's `YYYY-MM-DD HH:MM:SS` (UTC) — the format a
+ * `datetime('now')` column default produces (no `T`, no `Z`, no milliseconds). */
+function toSqliteFormat(date: Date): string {
+  return date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
 }
 
 describe("BaselineManager", function() {
-  let manager: TestBaselineManager;
+  let testDb: Kysely<DatabaseSchema>;
+  let manager: BaselineManager;
 
   beforeEach(async function() {
-    // Create in-memory test database
     testDb = await createTestDatabase();
-    manager = new TestBaselineManager(testDb);
+    manager = new BaselineManager(testDb);
   });
 
   afterEach(async function() {
-    // Destroy test database
-    await destroyTestDatabase(testDb);
+    await testDb.destroy();
   });
 
   describe("CRUD Operations", function() {
@@ -291,6 +206,55 @@ describe("BaselineManager", function() {
 
       expect(deletedCount).toBe(0);
     });
+
+    it("should not delete a SQLite-format row that is newer than the cutoff (#2937)", async function() {
+      // Regression guard for the ISO-vs-`datetime('now')` format trap. Once a
+      // defaulted `updated_at` writer lands, the column can hold SQLite's
+      // `YYYY-MM-DD HH:MM:SS` form. A naive string `<` against the ISO-8601 cutoff
+      // compares the two lexically: at the date/time separator a SQLite space
+      // (0x20) sorts before the ISO `T` (0x54), so a row on the SAME calendar date
+      // as the cutoff but at a LATER time-of-day sorts BEFORE the cutoff and would
+      // be wrongly deleted despite being newer. `datetime(...)` normalization
+      // compares them as real instants.
+      const daysOld = 30;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - daysOld);
+
+      // Same UTC date as the cutoff, at end-of-day — chronologically newer than
+      // the cutoff instant (tests do not run in the final second of a UTC day),
+      // yet lexically smaller than the ISO cutoff string.
+      const sameDay = cutoff.toISOString().slice(0, 10);
+      const newerSqliteFormat = `${sameDay} 23:59:59`;
+
+      // An unambiguously ancient SQLite-format row that must still be deleted.
+      const ancientSqliteFormat = toSqliteFormat(new Date("2000-01-01T00:00:00Z"));
+
+      await testDb
+        .insertInto("accessibility_baselines")
+        .values({
+          screen_id: "boundary_newer",
+          violations_json: "[]",
+          created_at: newerSqliteFormat,
+          updated_at: newerSqliteFormat,
+        })
+        .execute();
+      await testDb
+        .insertInto("accessibility_baselines")
+        .values({
+          screen_id: "ancient",
+          violations_json: "[]",
+          created_at: ancientSqliteFormat,
+          updated_at: ancientSqliteFormat,
+        })
+        .execute();
+
+      const deletedCount = await manager.cleanupOldBaselines(daysOld);
+
+      // Only the genuinely-ancient row is removed; the newer boundary row lives.
+      expect(deletedCount).toBe(1);
+      expect(await manager.getBaseline("boundary_newer")).not.toBeNull();
+      expect(await manager.getBaseline("ancient")).toBeNull();
+    });
   });
 
   describe("Data Integrity", function() {
@@ -344,8 +308,8 @@ describe("BaselineManager", function() {
       expect(baseline).not.toBeNull();
 
       const updatedAt = new Date(baseline!.updatedAt);
-      expect(updatedAt.getTime()).toBeGreaterThanOrEqual(beforeSave.getTime());
-      expect(updatedAt.getTime()).toBeLessThanOrEqual(new Date().getTime());
+      expect(updatedAt.getTime()).toBeGreaterThanOrEqual(beforeSave.getTime() - 1000);
+      expect(updatedAt.getTime()).toBeLessThanOrEqual(new Date().getTime() + 1000);
     });
   });
 });

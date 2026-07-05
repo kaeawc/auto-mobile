@@ -28,6 +28,15 @@ let bunDatabaseConstructor: BunDatabaseConstructor | null = null;
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
+/**
+ * Runtime cap on the WAL file: after each passive/auto checkpoint SQLite
+ * truncates the WAL back to this bound instead of leaving it allocated at its
+ * high-water mark. This is a steady-state knob only — it is independent of the
+ * one-shot `wal_checkpoint(TRUNCATE)` issued at connection close (which
+ * truncates the WAL to zero unconditionally, ignoring this limit). See #2802.
+ */
+export const SQLITE_WAL_SIZE_LIMIT_BYTES = 4 * 1024 * 1024;
+
 interface SqlitePragmaDatabase {
   exec(sql: string): unknown;
 }
@@ -55,6 +64,10 @@ export function configureSqliteDatabase(sqliteDb: SqlitePragmaDatabase): void {
 
   // Enable WAL mode for better concurrent read performance
   sqliteDb.exec("PRAGMA journal_mode = WAL;");
+
+  // Truncate the WAL back to this bound after each passive/auto checkpoint
+  // instead of leaving it allocated at its high-water mark (issue #2802).
+  sqliteDb.exec(`PRAGMA journal_size_limit = ${SQLITE_WAL_SIZE_LIMIT_BYTES};`);
 
   // WAL + NORMAL avoids an fsync per commit while remaining corruption-safe.
   // The whole DB stores local telemetry, diagnostics, cache, config, and session

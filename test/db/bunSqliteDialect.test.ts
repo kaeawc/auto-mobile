@@ -156,10 +156,13 @@ class FakeDatabase {
   readonly calls: Array<{ method: "all" | "run"; sql: string; params: unknown[] }> = [];
   readonly preparedStatements: FakeStatement[] = [];
   readonly prepareCalls: string[] = [];
+  /** Ordered exec/close events so close-path ordering is assertable (#2802). */
+  readonly lifecycleEvents: string[] = [];
   rows: unknown[] = [];
   runResult: FakeRunResult = { changes: 0, lastInsertRowid: 0 };
   schemaVersion = 1;
   throwOn?: unknown;
+  throwOnExec?: unknown;
 
   prepare(sql: string): FakeStatement {
     const statement = new FakeStatement(this, sql);
@@ -172,8 +175,15 @@ class FakeDatabase {
     this.calls.push({ method, sql, params });
   }
 
+  exec(sql: string): void {
+    this.lifecycleEvents.push(`exec:${sql}`);
+    if (this.throwOnExec) {
+      throw this.throwOnExec;
+    }
+  }
+
   close(): void {
-    // no-op
+    this.lifecycleEvents.push("close");
   }
 
   get last(): { method: "all" | "run"; sql: string; params: unknown[] } | undefined {
@@ -522,5 +532,58 @@ describe("BunSqliteConnectionState — C6 word-boundary RETURNING detection", ()
     await state.executeQuery(compiled, owner);
 
     expect(db.last?.method).toBe("all");
+  });
+});
+
+describe("BunSqliteConnectionState — WAL checkpoint on close (issue #2802)", () => {
+  test("issues wal_checkpoint(TRUNCATE) before closing the handle", () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+
+    state.close();
+
+    expect(db.lifecycleEvents).toEqual([
+      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
+      "close",
+    ]);
+  });
+
+  test("a failing checkpoint never blocks the close", () => {
+    const db = new FakeDatabase();
+    db.throwOnExec = new Error("database is locked");
+    const state = makeState(db);
+
+    // Best-effort: the checkpoint error must be swallowed, not rethrown.
+    expect(() => state.close()).not.toThrow();
+
+    expect(db.lifecycleEvents).toEqual([
+      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
+      "close",
+    ]);
+  });
+
+  test("close is idempotent: the checkpoint and close run once", () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+
+    state.close();
+    state.close();
+
+    expect(db.lifecycleEvents).toEqual([
+      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
+      "close",
+    ]);
+  });
+
+  test("does not open a lazily-unopened database just to checkpoint it", () => {
+    let opened = false;
+    const state = new BunSqliteConnectionState(() => {
+      opened = true;
+      return new FakeDatabase() as unknown as never;
+    });
+
+    state.close();
+
+    expect(opened).toBe(false);
   });
 });

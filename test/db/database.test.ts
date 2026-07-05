@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "fs";
 import { Kysely } from "kysely";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -8,6 +8,7 @@ import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import {
   configureSqliteDatabase,
   SQLITE_BUSY_TIMEOUT_MS,
+  SQLITE_WAL_SIZE_LIMIT_BYTES,
 } from "../../src/db/database";
 
 class FakeSqliteDatabase {
@@ -33,7 +34,7 @@ function createDeferred<T = void>(): Deferred<T> {
 }
 
 describe("configureSqliteDatabase", () => {
-  test("enables WAL, busy timeout, and foreign keys for new connections", () => {
+  test("enables WAL, busy timeout, WAL size limit, and foreign keys for new connections", () => {
     const db = new FakeSqliteDatabase();
 
     configureSqliteDatabase(db);
@@ -41,6 +42,7 @@ describe("configureSqliteDatabase", () => {
     expect(db.statements).toEqual([
       `PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`,
       "PRAGMA journal_mode = WAL;",
+      `PRAGMA journal_size_limit = ${SQLITE_WAL_SIZE_LIMIT_BYTES};`,
       "PRAGMA synchronous = NORMAL;",
       "PRAGMA foreign_keys = ON;",
     ]);
@@ -79,6 +81,94 @@ describe("configureSqliteDatabase", () => {
       expect(synchronous?.synchronous).toBe(1);
     } finally {
       sqliteDb.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("caps the WAL size via journal_size_limit on Bun SQLite databases", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "auto-mobile-sqlite-"));
+    const sqliteDb = new BunDatabase(join(tempDir, "test.db"));
+
+    try {
+      configureSqliteDatabase(sqliteDb);
+
+      const limit = sqliteDb
+        .query<{ journal_size_limit: number }, []>("PRAGMA journal_size_limit;")
+        .get();
+      expect(limit?.journal_size_limit).toBe(SQLITE_WAL_SIZE_LIMIT_BYTES);
+    } finally {
+      sqliteDb.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("WAL checkpoint on close (issue #2802)", () => {
+  /** Size of the WAL sidecar, or 0 when SQLite already deleted it. */
+  function walSize(dbPath: string): number {
+    const walPath = `${dbPath}-wal`;
+    return existsSync(walPath) ? statSync(walPath).size : 0;
+  }
+
+  test("wal_checkpoint(TRUNCATE) reports not-busy and truncates the WAL on the single owning connection", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "auto-mobile-sqlite-"));
+    const dbPath = join(tempDir, "test.db");
+    const sqliteDb = new BunDatabase(dbPath);
+
+    try {
+      configureSqliteDatabase(sqliteDb);
+      sqliteDb.exec("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL);");
+      for (let i = 0; i < 50; i += 1) {
+        sqliteDb.exec(`INSERT INTO items (name) VALUES ('row-${i}');`);
+      }
+      // The uncheckpointed writes must live in the WAL sidecar.
+      expect(walSize(dbPath)).toBeGreaterThan(0);
+
+      // `.query(...).get()` (not `.exec()`) so the `busy` flag is observable:
+      // a busy checkpoint would silently skip truncation (issue #2802 review).
+      const result = sqliteDb
+        .query<{ busy: number; log: number; checkpointed: number }, []>(
+          "PRAGMA wal_checkpoint(TRUNCATE);"
+        )
+        .get();
+      expect(result?.busy).toBe(0);
+      expect(result?.checkpointed).toBe(result?.log);
+
+      expect(walSize(dbPath)).toBe(0);
+    } finally {
+      sqliteDb.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("a clean Kysely destroy leaves no WAL sidecar bytes behind", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "auto-mobile-sqlite-"));
+    const dbPath = join(tempDir, "test.db");
+    const sqliteDb = new BunDatabase(dbPath);
+    configureSqliteDatabase(sqliteDb);
+
+    const db = new Kysely<{ items: { id: number; name: string } }>({
+      dialect: new BunSqliteDialect({ database: sqliteDb }),
+    });
+
+    try {
+      await db.schema
+        .createTable("items")
+        .addColumn("id", "integer", col => col.primaryKey())
+        .addColumn("name", "text", col => col.notNull())
+        .execute();
+      for (let i = 0; i < 50; i += 1) {
+        await db.insertInto("items").values({ id: i, name: `row-${i}` }).execute();
+      }
+      expect(walSize(dbPath)).toBeGreaterThan(0);
+
+      // This is the same path `closeDatabase()` takes: Kysely destroy() ->
+      // driver destroy() -> BunSqliteConnectionState.close() -> checkpoint.
+      await db.destroy();
+
+      expect(walSize(dbPath)).toBe(0);
+    } finally {
+      await db.destroy();
       rmSync(tempDir, { recursive: true, force: true });
     }
   });

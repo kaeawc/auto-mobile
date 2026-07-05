@@ -1017,9 +1017,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    * Generate a deterministic UUID from a hierarchy path string. Uses SHA-256 to hash the path and
    * formats the first 16 bytes as a UUID string.
    *
-   * NOTE (#3228): this id is *positional* — a list scroll shifts child indices, so a moved row
-   * gets a different UUID and the row now occupying its old slot inherits the departed row's.
-   * The daemon's TS ingest (`StableNodeIdentity.assignStableViewIds`) therefore rewrites every
+   * NOTE (#3228): this id is *positional* — a list scroll shifts child indices, so a moved row gets
+   * a different UUID and the row now occupying its old slot inherits the departed row's. The
+   * daemon's TS ingest (`StableNodeIdentity.assignStableViewIds`) therefore rewrites every
    * UUID-shaped viewId into a content-derived stable id before the hierarchy reaches consumers.
    * Keep the UUID shape here (8-4-4-4-12 lowercase hex): it is the marker the ingest matches;
    * emitting a different shape would make ids pass through unrewritten.

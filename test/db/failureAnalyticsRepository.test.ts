@@ -1,7 +1,6 @@
 import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
-import type { Kysely } from "kysely";
-import { Kysely as KyselyRuntime } from "kysely";
+import { Kysely as KyselyRuntime, sql, type Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import {
   FailureAnalyticsRepository,
@@ -163,6 +162,75 @@ describe("FailureAnalyticsRepository", () => {
       expect(screens[0].screen_name).toBe("Login");
       expect(screens[1].screen_name).toBe("Home");
       expect(screens[2].screen_name).toBe("Settings");
+    });
+
+    test("rolls back the group count when the occurrence insert fails", async () => {
+      await repo.recordFailure(makeFailureInput());
+      const originalGroup = await db.selectFrom("failure_groups").selectAll().executeTakeFirstOrThrow();
+      await sql`
+        CREATE TEMP TRIGGER fail_failure_occurrence_insert
+        BEFORE INSERT ON failure_occurrences
+        BEGIN
+          SELECT RAISE(ABORT, 'forced occurrence insert failure');
+        END
+      `.execute(db);
+
+      await expect(repo.recordFailure(
+        makeFailureInput({
+          capture: {
+            type: "screenshot",
+            path: "/tmp/failed-screenshot.png",
+          },
+          occurrence: {
+            deviceModel: "Pixel 8",
+            os: "Android 15",
+            appVersion: "2.0.0",
+            sessionId: "session-2",
+            screensVisited: ["Home", "FailureDetails"],
+          },
+        })
+      )).rejects.toThrow("forced occurrence insert failure");
+
+      const groups = await db.selectFrom("failure_groups").selectAll().execute();
+      expect(groups).toHaveLength(1);
+      expect(groups[0]).toEqual(originalGroup);
+
+      expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(1);
+      expect(await db.selectFrom("failure_occurrence_screens").selectAll().execute()).toHaveLength(0);
+      expect(await db.selectFrom("failure_captures").selectAll().execute()).toHaveLength(0);
+      expect(await db.selectFrom("failure_notifications").selectAll().execute()).toHaveLength(1);
+    });
+
+    test("rolls back occurrence detail rows when notification insert fails", async () => {
+      await sql`
+        CREATE TEMP TRIGGER fail_failure_notification_insert
+        BEFORE INSERT ON failure_notifications
+        BEGIN
+          SELECT RAISE(ABORT, 'forced notification insert failure');
+        END
+      `.execute(db);
+
+      await expect(repo.recordFailure(
+        makeFailureInput({
+          capture: {
+            type: "screenshot",
+            path: "/tmp/failed-notification.png",
+          },
+          occurrence: {
+            deviceModel: "Pixel 8",
+            os: "Android 15",
+            appVersion: "2.0.0",
+            sessionId: "session-2",
+            screensVisited: ["Home", "FailureDetails"],
+          },
+        })
+      )).rejects.toThrow("forced notification insert failure");
+
+      expect(await db.selectFrom("failure_groups").selectAll().execute()).toHaveLength(0);
+      expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(0);
+      expect(await db.selectFrom("failure_occurrence_screens").selectAll().execute()).toHaveLength(0);
+      expect(await db.selectFrom("failure_captures").selectAll().execute()).toHaveLength(0);
+      expect(await db.selectFrom("failure_notifications").selectAll().execute()).toHaveLength(0);
     });
   });
 

@@ -170,4 +170,4 @@ What this sign-off does and does not establish:
 - **#3107** — adopt/wire stable node identity to shrink scroll diffs.
 - Capture-layer: surface Compose toggle state (`checked`/`selected`/
   `stateDescription`) in the extracted hierarchy so state toggles diff as
-  `changed` on real Compose apps (filed separately).
+  `changed` on real Compose apps (**#3139**).

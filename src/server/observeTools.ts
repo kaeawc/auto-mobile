@@ -11,6 +11,7 @@ import { NavigationGraphManager } from "../features/navigation/NavigationGraphMa
 import { IdentifyInteractions, IdentifyInteractionsOptions } from "../features/observe/IdentifyInteractions";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import { elementContainerSchema } from "./elementSelectorSchemas";
+import { observeResultSchema } from "./toolOutputSchemas";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import type { ElementFinder } from "../utils/interfaces/ElementFinder";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -298,12 +299,21 @@ export function registerObserveTools() {
     }
   };
 
-  // Register with the tool registry using the new device-aware method
+  // Register with the tool registry using the new device-aware method.
+  // Advertise a machine-readable `ObserveResult` outputSchema (issue #3025) so
+  // observe's hierarchy/window/element bounds — the bulk of compacted bounds —
+  // are described on the wire, and so its `bounds` fields route through
+  // `elementBoundsSchema` (the `--observe-result-compact` tuple is flag-advertised
+  // via `advertiseBoundsForCompact` in `getToolDefinitions`). Composes with
+  // `--tool-results-no-structured-content`, which suppresses the advertisement.
   ToolRegistry.registerDeviceAware(
     "observe",
     "Get screen view hierarchy",
     observeSchema,
-    observeHandler
+    observeHandler,
+    false,
+    false,
+    { outputSchema: observeResultSchema }
   );
 
   ToolRegistry.registerDeviceAware("identifyInteractions", "Suggest likely interactions", identifyInteractionsSchema, identifyInteractionsHandler, { debugOnly: true });

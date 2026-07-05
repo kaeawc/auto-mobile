@@ -217,6 +217,41 @@ final class UserDefaultsInspectorTests: XCTestCase {
         inspector.stopListening()
     }
 
+    func testDiffEmitsModifyWhenOnlyTypeChanges() {
+        // Same string representation ("1"), but Int -> String is a real change.
+        let harness = makeDiffHarness(seed: [(key: "flag", value: "1", type: .int)])
+
+        harness.driver.setValue(suiteName: nil, key: "flag", value: "1", type: .string)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        let events = harness.events()
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events[0].key, "flag")
+        XCTAssertEqual(events[0].changeType, "modify")
+        XCTAssertEqual(events[0].valueType, "string")
+    }
+
+    func testChangesDuringDisabledWindowAreNotReplayedAfterReEnable() {
+        let harness = makeDiffHarness(seed: [(key: "a", value: "1", type: .string)])
+
+        // A write happens while disabled — it must not be captured, and it must
+        // not be replayed on the next notification after re-enabling.
+        AutoMobileSDK.shared.setEnabled(false)
+        harness.driver.setValue(suiteName: nil, key: "a", value: "2", type: .string)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+        XCTAssertTrue(harness.events().isEmpty)
+
+        AutoMobileSDK.shared.setEnabled(true)
+        // An unrelated later change: only this one should be reported, not the
+        // "a: 1 -> 2" that happened during the disabled window.
+        harness.driver.setValue(suiteName: nil, key: "b", value: "x", type: .string)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        let events = harness.events()
+        XCTAssertEqual(events.compactMap { $0.key }, ["b"])
+        XCTAssertEqual(events.first?.changeType, "add")
+    }
+
     /// Baselines are bucketed per suite, so a change in one suite must not be
     /// attributed to (or suppressed by) another suite's snapshot.
     func testDiffTracksSeparateBaselinesPerSuite() {

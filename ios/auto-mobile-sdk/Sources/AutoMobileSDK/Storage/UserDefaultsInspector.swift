@@ -131,7 +131,12 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     /// `SdkStorageChangedEvent` per changed key. Internal so tests can drive it
     /// deterministically without relying on the KVO callback firing.
     func handleDidChange(suiteName: String?) {
-        guard AutoMobileSDK.shared.isEnabled, isEnabled else { return }
+        // Read the enabled state up front (both getters lock, and NSLock isn't
+        // recursive). When disabled we still refresh the baseline below but skip
+        // emitting — otherwise changes made during a disabled window would leak
+        // out on the first notification after re-enable, diffed against a stale
+        // pre-disable snapshot.
+        let enabled = AutoMobileSDK.shared.isEnabled && isEnabled
 
         lock.lock()
         guard let driver = _driver else {
@@ -149,6 +154,12 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         // UserDefaults read (real), so holding the lock briefly is acceptable.
         let current = Self.snapshotDict(driver.getValues(suiteName: suiteName))
         lastSnapshots[suiteKey] = current
+
+        guard enabled else {
+            // Baseline advanced silently so the disabled window is not replayed.
+            lock.unlock()
+            return
+        }
 
         let changes = Self.diff(previous: previous, current: current)
         var events: [SdkStorageChangedEvent] = []
@@ -211,7 +222,10 @@ public final class UserDefaultsInspector: @unchecked Sendable {
 
         for (key, pair) in current {
             if let prior = previous[key] {
-                if prior.value != pair.value {
+                // Compare type as well as value: a real type change with the same
+                // string representation (e.g. Int 1 -> String "1") is still a
+                // modification the telemetry surfaces via valueType.
+                if prior.value != pair.value || prior.type != pair.type {
                     changes.append(StorageChange(
                         key: key, newValue: pair.value,
                         valueType: pair.type.rawValue, changeType: "modify"

@@ -24,6 +24,7 @@ import type {
 } from "./types";
 import { generateSecureId } from "./types";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
+import { assignStableViewIds } from "./StableNodeIdentity";
 
 /** Cooldown after a WebSocket timeout before retrying fresh-data waits.
  *  Keep short: a long cooldown (e.g. 5s) turns a single slow response into
@@ -486,10 +487,20 @@ export class CtrlProxyHierarchy {
       // Convert the accessibility node format
       const convertedHierarchy = this.convertAccessibilityNode(hierarchyToConvert);
 
+      // Capture-layer stable node identity (issue #3228): rewrite the runner's
+      // positional (path-derived UUID) view-ids into content-derived stable ids
+      // so id-less rows keep their identity across a scroll and the diff
+      // layer's content-identity re-pair can collapse scroll churn.
+      assignStableViewIds(convertedHierarchy);
+
       // Convert accessibility-focused element if present
       const accessibilityFocusedElement = accessibilityHierarchy["accessibility-focused-element"]
         ? this.convertAccessibilityNode(accessibilityHierarchy["accessibility-focused-element"])
         : undefined;
+      // Same rewrite for the focus mirror so its view-id matches the hierarchy
+      // node's (the mirror is the same node content, so the content hash
+      // agrees; only a content-identical duplicate's ordinal suffix can differ).
+      assignStableViewIds(accessibilityFocusedElement);
 
       const result: ViewHierarchyResult = {
         "hierarchy": convertedHierarchy,

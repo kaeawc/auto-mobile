@@ -2165,6 +2165,58 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
+   * Dispatch a built gesture and centralize the callback/perf lifecycle shared by every gesture
+   * action. The caller owns gesture construction and result broadcasting; this helper owns the
+   * `dispatchGesture` perf operation, callback result conversion, and guaranteed outer perf close.
+   */
+  private fun dispatchGestureWithResult(
+    perfLabel: String,
+    gesture: GestureDescription,
+    requestId: String?,
+    startTimeMs: Long,
+    gestureBuiltTimeMs: Long,
+    beforeCompletedResult: () -> Unit = {},
+    onResult: (GestureDispatchOutcome) -> Unit,
+  ) {
+    val lifecycle =
+      GestureDispatchLifecycle(
+        startTimeMs = startTimeMs,
+        gestureBuiltTimeMs = gestureBuiltTimeMs,
+        nowMs = { System.currentTimeMillis() },
+        startOperation = { perfProvider.startOperation(it) },
+        endOperation = { perfProvider.endOperation(it) },
+        endPerfBlock = { perfProvider.end() },
+      )
+
+    lifecycle.startDispatch()
+    val dispatched =
+      try {
+        dispatchGesture(
+          gesture,
+          object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+              lifecycle.completed(beforeResult = beforeCompletedResult, onResult = onResult)
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+              lifecycle.cancelled(onResult)
+            }
+          },
+          null,
+        )
+      } catch (e: Exception) {
+        Log.e(TAG, "Error dispatching $perfLabel gesture (requestId=$requestId)", e)
+        lifecycle.failed(e, onResult)
+        return
+      }
+
+    if (!dispatched) {
+      Log.e(TAG, "Failed to dispatch $perfLabel gesture (requestId=$requestId)")
+      lifecycle.notDispatched(onResult)
+    }
+  }
+
+  /**
    * Perform a swipe gesture using AccessibilityService's dispatchGesture API. This is significantly
    * faster than ADB's input swipe command.
    */
@@ -2199,55 +2251,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val gestureBuiltTime = System.currentTimeMillis()
       Log.d(TAG, "Gesture built in ${gestureBuiltTime - startTime}ms")
 
-      perfProvider.startOperation("dispatchGesture")
-      // Dispatch the gesture
-      val dispatched =
-        dispatchGesture(
-          gesture,
-          object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-              perfProvider.endOperation("dispatchGesture")
-              perfProvider.end() // end performSwipe block
-              val completedTime = System.currentTimeMillis()
-              val totalTime = completedTime - startTime
-              val gestureTime = completedTime - gestureBuiltTime
-              Log.d(TAG, "Swipe completed: gesture=${gestureTime}ms, total=${totalTime}ms")
-
-              // Broadcast success result
-              serviceScope.launch {
-                broadcastSwipeResult(requestId, true, null, totalTime, gestureTime)
-              }
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-              perfProvider.endOperation("dispatchGesture")
-              perfProvider.end() // end performSwipe block
-              val cancelledTime = System.currentTimeMillis()
-              val totalTime = cancelledTime - startTime
-              Log.w(TAG, "Swipe cancelled after ${totalTime}ms")
-
-              // Broadcast cancelled result
-              serviceScope.launch {
-                broadcastSwipeResult(requestId, false, "Gesture was cancelled", totalTime, null)
-              }
-            }
-          },
-          null,
-        )
-
-      if (!dispatched) {
-        perfProvider.endOperation("dispatchGesture")
-        perfProvider.end() // end performSwipe block
-        val failTime = System.currentTimeMillis()
-        Log.e(TAG, "Failed to dispatch swipe gesture")
-        serviceScope.launch {
-          broadcastSwipeResult(
-            requestId,
-            false,
-            "Failed to dispatch gesture",
-            failTime - startTime,
-            null,
+      dispatchGestureWithResult("performSwipe", gesture, requestId, startTime, gestureBuiltTime) {
+        outcome ->
+        if (outcome.completed) {
+          Log.d(
+            TAG,
+            "Swipe completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
+          serviceScope.launch {
+            broadcastSwipeResult(
+              requestId,
+              true,
+              null,
+              outcome.totalTimeMs,
+              outcome.gestureTimeMs,
+            )
+          }
+        } else {
+          Log.w(TAG, "Swipe failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
+          serviceScope.launch {
+            broadcastSwipeResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
+          }
         }
       }
     } catch (e: Exception) {
@@ -2399,52 +2423,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val gestureBuiltTime = System.currentTimeMillis()
       Log.d(TAG, "Drag gesture built in ${gestureBuiltTime - startTime}ms")
 
-      perfProvider.startOperation("dispatchGesture")
-      val dispatched =
-        dispatchGesture(
-          gesture,
-          object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-              perfProvider.endOperation("dispatchGesture")
-              perfProvider.end() // end performDrag block
-              val completedTime = System.currentTimeMillis()
-              val totalTime = completedTime - startTime
-              val gestureTime = completedTime - gestureBuiltTime
-              Log.d(TAG, "Drag completed: gesture=${gestureTime}ms, total=${totalTime}ms")
-
-              serviceScope.launch {
-                broadcastDragResult(requestId, true, null, totalTime, gestureTime)
-              }
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-              perfProvider.endOperation("dispatchGesture")
-              perfProvider.end() // end performDrag block
-              val cancelledTime = System.currentTimeMillis()
-              val totalTime = cancelledTime - startTime
-              Log.w(TAG, "Drag cancelled after ${totalTime}ms")
-
-              serviceScope.launch {
-                broadcastDragResult(requestId, false, "Gesture was cancelled", totalTime, null)
-              }
-            }
-          },
-          null,
-        )
-
-      if (!dispatched) {
-        perfProvider.endOperation("dispatchGesture")
-        perfProvider.end() // end performDrag block
-        val failTime = System.currentTimeMillis()
-        Log.e(TAG, "Failed to dispatch drag gesture")
-        serviceScope.launch {
-          broadcastDragResult(
-            requestId,
-            false,
-            "Failed to dispatch gesture",
-            failTime - startTime,
-            null,
+      dispatchGestureWithResult("performDrag", gesture, requestId, startTime, gestureBuiltTime) {
+        outcome ->
+        if (outcome.completed) {
+          Log.d(
+            TAG,
+            "Drag completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
+          serviceScope.launch {
+            broadcastDragResult(
+              requestId,
+              true,
+              null,
+              outcome.totalTimeMs,
+              outcome.gestureTimeMs,
+            )
+          }
+        } else {
+          Log.w(TAG, "Drag failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
+          serviceScope.launch {
+            broadcastDragResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
+          }
         }
       }
     } catch (e: Exception) {
@@ -2486,73 +2485,38 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val gestureBuiltTime = System.currentTimeMillis()
       Log.d(TAG, "Tap gesture built in ${gestureBuiltTime - startTime}ms")
 
-      perfProvider.startOperation("dispatchGesture")
-      // Dispatch the gesture
-      val dispatched =
-        dispatchGesture(
-          gesture,
-          object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-              perfProvider.endOperation("dispatchGesture")
-
-              // Wait for UI to settle after tap, then extract fresh hierarchy
-              val freshHierarchy =
-                hierarchyDebouncer.extractAfterQuiescence(
-                  quiescenceMs = 50L,
-                  maxWaitMs = 500L,
-                  pollIntervalMs = 10L,
-                )
-              if (freshHierarchy != null) {
-                kotlinx.coroutines.runBlocking {
-                  broadcastHierarchyUpdate(freshHierarchy, sync = true)
-                }
-              }
-
-              perfProvider.end() // end performTapCoordinates block
-              val completedTime = System.currentTimeMillis()
-              val totalTime = completedTime - startTime
-              val gestureTime = completedTime - gestureBuiltTime
-              Log.d(TAG, "Tap completed: gesture=${gestureTime}ms, total=${totalTime}ms")
-
-              // Broadcast success result
-              serviceScope.launch {
-                broadcastTapCoordinatesResult(requestId, true, null, totalTime)
-              }
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-              perfProvider.endOperation("dispatchGesture")
-              perfProvider.end() // end performTapCoordinates block
-              val cancelledTime = System.currentTimeMillis()
-              val totalTime = cancelledTime - startTime
-              Log.w(TAG, "Tap cancelled after ${totalTime}ms")
-
-              // Broadcast cancelled result
-              serviceScope.launch {
-                broadcastTapCoordinatesResult(
-                  requestId,
-                  false,
-                  "Gesture was cancelled",
-                  totalTime,
-                )
-              }
-            }
-          },
-          null,
-        )
-
-      if (!dispatched) {
-        perfProvider.endOperation("dispatchGesture")
-        perfProvider.end() // end performTapCoordinates block
-        val failTime = System.currentTimeMillis()
-        Log.e(TAG, "Failed to dispatch tap gesture")
-        serviceScope.launch {
-          broadcastTapCoordinatesResult(
-            requestId,
-            false,
-            "Failed to dispatch gesture",
-            failTime - startTime,
+      dispatchGestureWithResult(
+        "performTapCoordinates",
+        gesture,
+        requestId,
+        startTime,
+        gestureBuiltTime,
+        beforeCompletedResult = {
+          // Wait for UI to settle after tap, then extract fresh hierarchy.
+          val freshHierarchy =
+            hierarchyDebouncer.extractAfterQuiescence(
+              quiescenceMs = 50L,
+              maxWaitMs = 500L,
+              pollIntervalMs = 10L,
+            )
+          if (freshHierarchy != null) {
+            kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(freshHierarchy, sync = true) }
+          }
+        },
+      ) { outcome ->
+        if (outcome.completed) {
+          Log.d(
+            TAG,
+            "Tap completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
+          serviceScope.launch {
+            broadcastTapCoordinatesResult(requestId, true, null, outcome.totalTimeMs)
+          }
+        } else {
+          Log.w(TAG, "Tap failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
+          serviceScope.launch {
+            broadcastTapCoordinatesResult(requestId, false, outcome.error, outcome.totalTimeMs)
+          }
         }
       }
     } catch (e: Exception) {
@@ -2619,58 +2583,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val gestureBuiltTime = System.currentTimeMillis()
       Log.d(TAG, "Two-finger gesture built in ${gestureBuiltTime - startTime}ms")
 
-      perfProvider.startOperation("dispatchGesture")
-      // Dispatch the gesture
-      val dispatched =
-        dispatchGesture(
-          gesture,
-          object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-              perfProvider.endOperation("dispatchGesture")
-              perfProvider.end() // end performTwoFingerSwipe block
-              val completedTime = System.currentTimeMillis()
-              val totalTime = completedTime - startTime
-              val gestureTime = completedTime - gestureBuiltTime
-              Log.d(
-                TAG,
-                "Two-finger swipe completed: gesture=${gestureTime}ms, total=${totalTime}ms",
-              )
-
-              // Broadcast success result
-              serviceScope.launch {
-                broadcastSwipeResult(requestId, true, null, totalTime, gestureTime)
-              }
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-              perfProvider.endOperation("dispatchGesture")
-              perfProvider.end() // end performTwoFingerSwipe block
-              val cancelledTime = System.currentTimeMillis()
-              val totalTime = cancelledTime - startTime
-              Log.w(TAG, "Two-finger swipe cancelled after ${totalTime}ms")
-
-              // Broadcast cancelled result
-              serviceScope.launch {
-                broadcastSwipeResult(requestId, false, "Gesture was cancelled", totalTime, null)
-              }
-            }
-          },
-          null,
-        )
-
-      if (!dispatched) {
-        perfProvider.endOperation("dispatchGesture")
-        perfProvider.end() // end performTwoFingerSwipe block
-        val failTime = System.currentTimeMillis()
-        Log.e(TAG, "Failed to dispatch two-finger swipe gesture")
-        serviceScope.launch {
-          broadcastSwipeResult(
-            requestId,
-            false,
-            "Failed to dispatch gesture",
-            failTime - startTime,
-            null,
+      dispatchGestureWithResult(
+        "performTwoFingerSwipe",
+        gesture,
+        requestId,
+        startTime,
+        gestureBuiltTime,
+      ) { outcome ->
+        if (outcome.completed) {
+          Log.d(
+            TAG,
+            "Two-finger swipe completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
+          serviceScope.launch {
+            broadcastSwipeResult(
+              requestId,
+              true,
+              null,
+              outcome.totalTimeMs,
+              outcome.gestureTimeMs,
+            )
+          }
+        } else {
+          Log.w(TAG, "Two-finger swipe failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
+          serviceScope.launch {
+            broadcastSwipeResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
+          }
         }
       }
     } catch (e: Exception) {
@@ -2728,58 +2666,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val gestureBuiltTime = System.currentTimeMillis()
       Log.d(TAG, "Pinch gesture built in ${gestureBuiltTime - startTime}ms")
 
-      perfProvider.startOperation("dispatchGesture")
-      val dispatched =
-        dispatchGesture(
-          gesture,
-          object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-              perfProvider.endOperation("dispatchGesture")
-              perfProvider.end()
-              val completedTime = System.currentTimeMillis()
-              val totalTime = completedTime - startTime
-              val gestureTime = completedTime - gestureBuiltTime
-              Log.d(TAG, "Pinch completed: gesture=${gestureTime}ms, total=${totalTime}ms")
-
-              serviceScope.launch {
-                broadcastPinchResult(requestId, true, null, totalTime, gestureTime)
-              }
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-              perfProvider.endOperation("dispatchGesture")
-              perfProvider.end()
-              val cancelledTime = System.currentTimeMillis()
-              val totalTime = cancelledTime - startTime
-              Log.w(TAG, "Pinch cancelled after ${totalTime}ms")
-
-              serviceScope.launch {
-                broadcastPinchResult(
-                  requestId,
-                  false,
-                  "Gesture was cancelled",
-                  totalTime,
-                  null,
-                )
-              }
-            }
-          },
-          null,
-        )
-
-      if (!dispatched) {
-        perfProvider.endOperation("dispatchGesture")
-        perfProvider.end()
-        val failTime = System.currentTimeMillis()
-        Log.e(TAG, "Failed to dispatch pinch gesture")
-        serviceScope.launch {
-          broadcastPinchResult(
-            requestId,
-            false,
-            "Failed to dispatch gesture",
-            failTime - startTime,
-            null,
+      dispatchGestureWithResult("performPinch", gesture, requestId, startTime, gestureBuiltTime) {
+        outcome ->
+        if (outcome.completed) {
+          Log.d(
+            TAG,
+            "Pinch completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
+          serviceScope.launch {
+            broadcastPinchResult(
+              requestId,
+              true,
+              null,
+              outcome.totalTimeMs,
+              outcome.gestureTimeMs,
+            )
+          }
+        } else {
+          Log.w(TAG, "Pinch failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
+          serviceScope.launch {
+            broadcastPinchResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
+          }
         }
       }
     } catch (e: Exception) {

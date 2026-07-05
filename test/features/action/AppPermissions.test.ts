@@ -176,7 +176,7 @@ describe("AppPermissions", () => {
 
     const result = await permissions.setPermissions("com.example.app", {
       action: "reset",
-      permissions: ["all"],
+      permissions: ["all", "photos-add", "contacts-limited", "location-always"],
     });
 
     expect(result.success).toBe(true);

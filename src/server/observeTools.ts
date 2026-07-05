@@ -311,8 +311,6 @@ export function registerObserveTools() {
     "Get screen view hierarchy",
     observeSchema,
     observeHandler,
-    false,
-    false,
     { outputSchema: observeResultSchema }
   );
 

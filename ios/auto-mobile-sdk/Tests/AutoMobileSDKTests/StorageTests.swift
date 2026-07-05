@@ -130,8 +130,27 @@ final class UserDefaultsInspectorTests: XCTestCase {
         let event = events[0]
         XCTAssertEqual(event.key, "session")
         XCTAssertNil(event.newValue)
+        XCTAssertEqual(event.previousValue, "abc")
         XCTAssertEqual(event.valueType, "string")
         XCTAssertEqual(event.changeType, "remove")
+    }
+
+    func testDiffThreadsPreviousValueForModifyAndNilForAdd() {
+        let harness = makeDiffHarness(seed: [(key: "count", value: "1", type: .int)])
+
+        harness.driver.setValue(suiteName: nil, key: "count", value: "2", type: .int)
+        harness.driver.setValue(suiteName: nil, key: "fresh", value: "new", type: .string)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        let events = harness.events().sorted { ($0.key ?? "") < ($1.key ?? "") }
+        // "count" modified: prior value threaded so the ingest can skip its lookup.
+        XCTAssertEqual(events[0].key, "count")
+        XCTAssertEqual(events[0].changeType, "modify")
+        XCTAssertEqual(events[0].previousValue, "1")
+        // "fresh" added: no prior value.
+        XCTAssertEqual(events[1].key, "fresh")
+        XCTAssertEqual(events[1].changeType, "add")
+        XCTAssertNil(events[1].previousValue)
     }
 
     func testDiffEmitsNothingWhenNoValueChanged() {

@@ -170,6 +170,7 @@ public final class UserDefaultsInspector: @unchecked Sendable {
                 suiteName: suiteName,
                 key: change.key,
                 newValue: change.newValue,
+                previousValue: change.previousValue,
                 valueType: change.valueType,
                 changeType: change.changeType,
                 sequenceNumber: sequenceCounter
@@ -188,10 +189,12 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     // MARK: - Diff Helpers
 
     /// A single detected change: the key, its new value/type (nil/type of the
-    /// removed value for a removal), and the add/modify/remove kind.
+    /// removed value for a removal), the prior value (nil for an add), and the
+    /// add/modify/remove kind.
     private struct StorageChange {
         let key: String
         let newValue: String?
+        let previousValue: String?
         let valueType: String
         let changeType: String
     }
@@ -227,13 +230,13 @@ public final class UserDefaultsInspector: @unchecked Sendable {
                 // modification the telemetry surfaces via valueType.
                 if prior.value != pair.value || prior.type != pair.type {
                     changes.append(StorageChange(
-                        key: key, newValue: pair.value,
+                        key: key, newValue: pair.value, previousValue: prior.value,
                         valueType: pair.type.rawValue, changeType: "modify"
                     ))
                 }
             } else {
                 changes.append(StorageChange(
-                    key: key, newValue: pair.value,
+                    key: key, newValue: pair.value, previousValue: nil,
                     valueType: pair.type.rawValue, changeType: "add"
                 ))
             }
@@ -241,7 +244,7 @@ public final class UserDefaultsInspector: @unchecked Sendable {
 
         for (key, prior) in previous where current[key] == nil {
             changes.append(StorageChange(
-                key: key, newValue: nil,
+                key: key, newValue: nil, previousValue: prior.value,
                 valueType: prior.type.rawValue, changeType: "remove"
             ))
         }

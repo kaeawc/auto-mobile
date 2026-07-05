@@ -7,7 +7,7 @@
  */
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
-import type { DelegateContext, CtrlProxyVoiceOverResult, CtrlProxyVoiceOverActionResult, CtrlProxyActionResult } from "./types";
+import type { DelegateContext, CtrlProxyVoiceOverResult, CtrlProxyActionResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
 /**
@@ -85,7 +85,8 @@ export class CtrlProxyVoiceOver {
    * dedicated `request_voiceover_action` command, which never existed in the Swift
    * `RequestType` and so failed to decode on-device — always falling back to a
    * coordinate tap (issue #2857). The runner replies `action_result`, which decodes
-   * into the same shape as `CtrlProxyVoiceOverActionResult`.
+   * into a `CtrlProxyActionResult` — the same shape `requestAction` returns (the
+   * two were merged in #2956).
    *
    * @param label - The accessibility label of the target element
    * @param action - The action to perform: "activate" or "long_press"
@@ -98,8 +99,8 @@ export class CtrlProxyVoiceOver {
     action: "activate" | "long_press",
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
-  ): Promise<CtrlProxyVoiceOverActionResult> {
-    return sendCommand<CtrlProxyVoiceOverActionResult>(this.context, {
+  ): Promise<CtrlProxyActionResult> {
+    return sendCommand<CtrlProxyActionResult>(this.context, {
       idPrefix: "voiceover_action",
       responseType: "action",
       messageType: "request_action",
@@ -108,6 +109,9 @@ export class CtrlProxyVoiceOver {
       perf,
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
+      // Parity with requestVoiceOverState: request_action is a real command, so this
+      // is defense-in-depth against an older runner that predates it (#2956).
+      unsupportedCommandError: (_messageType, error) => ({ success: false, totalTimeMs: 0, error }),
       timeoutError: () => ({ success: false, error: "Timeout waiting for action_result" }),
     });
   }

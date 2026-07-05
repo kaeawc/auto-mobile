@@ -13,7 +13,7 @@ export interface DeviceConfigTable {
   active_mode: string | null;
   config_json: string; // JSON blob for flexible config storage
   created_at: Generated<string>;
-  updated_at: string;
+  updated_at: Generated<string>;
 }
 
 // Installed apps cache table
@@ -78,7 +78,7 @@ export interface PerformanceAuditResultsTable {
 export interface NavigationAppsTable {
   app_id: string;
   created_at: Generated<string>;
-  updated_at: string;
+  updated_at: Generated<string>;
 }
 
 export interface NavigationNodesTable {
@@ -212,7 +212,7 @@ export interface PredictionTransitionStatsTable {
   successes: number;
   total_confidence: number;
   brier_score_sum: number;
-  updated_at: string;
+  updated_at: Generated<string>;
   created_at: Generated<string>;
 }
 
@@ -283,7 +283,7 @@ interface AccessibilityBaselinesTable {
   screen_id: string;
   violations_json: string; // JSON blob of WcagViolation[]
   created_at: Generated<string>;
-  updated_at: string;
+  updated_at: Generated<string>;
 }
 
 // Memory audit tables
@@ -468,7 +468,7 @@ export interface DeviceSessionsTable {
   heartbeat_timeout_ms: number;
   has_received_heartbeat: number;
   created_at: Generated<string>;
-  updated_at: string;
+  updated_at: Generated<string>;
 }
 
 // Feature flags table
@@ -477,7 +477,7 @@ export interface FeatureFlagsTable {
   enabled: number; // SQLite boolean (0/1)
   config_json: string | null;
   created_at: Generated<string>;
-  updated_at: string;
+  updated_at: Generated<string>;
 }
 
 // Device snapshot tables
@@ -498,7 +498,7 @@ export interface DeviceSnapshotsTable {
 export interface DeviceSnapshotConfigsTable {
   key: string;
   config_json: string;
-  updated_at: string;
+  updated_at: Generated<string>;
   created_at: Generated<string>;
 }
 
@@ -526,14 +526,14 @@ export interface VideoRecordingsTable {
 export interface VideoRecordingConfigsTable {
   key: string;
   config_json: string;
-  updated_at: string;
+  updated_at: Generated<string>;
   created_at: Generated<string>;
 }
 
 export interface AppearanceConfigsTable {
   key: string;
   config_json: string;
-  updated_at: string;
+  updated_at: Generated<string>;
   created_at: Generated<string>;
 }
 
@@ -775,7 +775,7 @@ interface FailureGroupsTable {
   stack_trace_json: string | null;
   tool_call_info_json: string | null;
   created_at: Generated<string>;
-  updated_at: string;
+  updated_at: Generated<string>;
 }
 
 interface FailureOccurrencesTable {

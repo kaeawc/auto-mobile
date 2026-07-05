@@ -1,11 +1,16 @@
 import { beforeEach, afterEach, describe, expect, test } from "bun:test";
+import { Database as BunDatabase } from "bun:sqlite";
 import type { Kysely } from "kysely";
+import { Kysely as KyselyRuntime } from "kysely";
 import type { Database } from "../../src/db/types";
+import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
+import { SQLITE_MAX_BOUND_PARAMETERS } from "../../src/db/sqliteBatch";
 import {
   TestExecutionRepository,
   type TestExecutionRecord,
   type TestStepRecord,
 } from "../../src/db/testExecutionRepository";
+import { runMigrations } from "../../src/db/migrator";
 import { createTestDatabase } from "./testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -179,6 +184,66 @@ describe("TestExecutionRepository", () => {
       expect(runs[0].startTime).toBe(1000);
       expect(runs[1].startTime).toBe(2000);
       expect(runs[2].startTime).toBe(3000);
+    });
+
+    test("fetches executions, steps, and screens with exactly three queries", async () => {
+      const instrumented = await createInstrumentedTestDatabase();
+      const instrumentedRepo = new TestExecutionRepository(timer, instrumented.db);
+      try {
+        for (let i = 0; i < 5; i++) {
+          await instrumentedRepo.recordExecution(
+            makeExecution({
+              testClass: `Class${i}`,
+              testMethod: `method${i}`,
+              timestamp: 1000 + i,
+              steps: [
+                makeStep({ stepIndex: 0, action: "tapOn", target: `button-${i}` }),
+                makeStep({ stepIndex: 1, action: "inputText", target: `field-${i}` }),
+              ],
+              screensVisited: [
+                { screenName: `Screen${i}A`, timestamp: 1000 + i },
+                { screenName: `Screen${i}B`, timestamp: 2000 + i },
+              ],
+            })
+          );
+        }
+
+        instrumented.resetQueryCount();
+        const runs = await instrumentedRepo.getTestRuns({ limit: 5 });
+
+        expect(runs).toHaveLength(5);
+        expect(runs[0].steps.map(step => step.stepIndex)).toEqual([0, 1]);
+        expect(runs[0].screensVisited).toEqual(["Screen4A", "Screen4B"]);
+        expect(instrumented.queryCount()).toBe(3);
+      } finally {
+        await instrumented.db.destroy();
+      }
+    });
+
+    test("chunks more than SQLite's conservative bound-parameter limit without mixing steps or screens", async () => {
+      const instrumented = await createInstrumentedTestDatabase();
+      const instrumentedRepo = new TestExecutionRepository(timer, instrumented.db);
+      const executionCount = SQLITE_MAX_BOUND_PARAMETERS + 6;
+      try {
+        await seedTestExecutions(instrumented.db, executionCount);
+
+        instrumented.resetQueryCount();
+        const runs = await instrumentedRepo.getTestRuns({ limit: executionCount });
+
+        expect(runs).toHaveLength(executionCount);
+        expect(instrumented.queryCount()).toBe(1 + 2 * Math.ceil(executionCount / SQLITE_MAX_BOUND_PARAMETERS));
+        for (const id of [SQLITE_MAX_BOUND_PARAMETERS - 1, SQLITE_MAX_BOUND_PARAMETERS, SQLITE_MAX_BOUND_PARAMETERS + 1]) {
+          const run = runs.find(item => item.id === id);
+          expect(run?.steps).toHaveLength(1);
+          expect(run?.steps[0]).toMatchObject({
+            action: `action-${id}`,
+            target: `target-${id}`,
+          });
+          expect(run?.screensVisited).toEqual([`Screen ${id}`]);
+        }
+      } finally {
+        await instrumented.db.destroy();
+      }
     });
   });
 
@@ -450,3 +515,96 @@ describe("TestExecutionRepository", () => {
     });
   });
 });
+
+async function createInstrumentedTestDatabase(): Promise<{
+  db: Kysely<Database>;
+  queryCount: () => number;
+  resetQueryCount: () => void;
+}> {
+  const bunDb = new BunDatabase(":memory:");
+  let count = 0;
+  const db = new KyselyRuntime<Database>({
+    dialect: new BunSqliteDialect({
+      database: bunDb,
+      beforeQuery: async () => {
+        count++;
+      },
+    }),
+  });
+  await runMigrations(db as Kysely<unknown>);
+  return {
+    db,
+    queryCount: () => count,
+    resetQueryCount: () => {
+      count = 0;
+    },
+  };
+}
+
+async function seedTestExecutions(db: Kysely<Database>, count: number): Promise<void> {
+  const ids = Array.from({ length: count }, (_unused, index) => index + 1);
+  for (const chunk of chunkArray(ids, 200)) {
+    await db
+      .insertInto("test_executions")
+      .values(chunk.map(id => ({
+        id,
+        test_class: `Class${id}`,
+        test_method: `method${id}`,
+        duration_ms: id,
+        status: "passed" as const,
+        timestamp: id,
+        device_id: null,
+        device_name: null,
+        device_platform: "android" as const,
+        device_type: "emulator" as const,
+        app_version: null,
+        git_commit: null,
+        target_sdk: null,
+        jdk_version: null,
+        jvm_target: null,
+        gradle_version: null,
+        is_ci: null,
+        session_uuid: null,
+        error_message: null,
+        video_path: null,
+        snapshot_path: null,
+      })))
+      .execute();
+
+    await db
+      .insertInto("test_execution_steps")
+      .values(chunk.map(id => ({
+        id,
+        execution_id: id,
+        step_index: 0,
+        action: `action-${id}`,
+        target: `target-${id}`,
+        status: "completed" as const,
+        duration_ms: id,
+        screen_name: `Screen ${id}`,
+        screenshot_path: null,
+        error_message: null,
+        details_json: null,
+      })))
+      .execute();
+
+    await db
+      .insertInto("test_execution_screens")
+      .values(chunk.map(id => ({
+        id,
+        execution_id: id,
+        screen_name: `Screen ${id}`,
+        visit_order: 0,
+        timestamp: id,
+      })))
+      .execute();
+  }
+}
+
+function chunkArray<T>(values: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}

@@ -5,6 +5,7 @@ import type { Database, NewTestExecution, NewTestExecutionStep, NewTestExecution
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
 
 const TEST_EXECUTION_RETENTION_MAX_ROWS = 10_000;
 export const TEST_EXECUTION_RETENTION_MAX_DAYS = 90;
@@ -243,12 +244,29 @@ export class TestExecutionRepository {
 
     const executions = await query.execute();
 
-    // Fetch steps and screens for each execution
-    const runs: TestRun[] = [];
-    for (const exec of executions) {
+    const executionIds = executions.map(exec => exec.id);
+    if (executionIds.length === 0) {
+      return [];
+    }
+
+    const stepsByExecutionId = new Map<number, Array<{
+      id: number;
+      stepIndex: number;
+      action: string;
+      target: string | null;
+      status: "completed" | "failed" | "skipped";
+      durationMs: number;
+      screenName: string | null;
+      screenshotPath: string | null;
+      errorMessage: string | null;
+    }>>();
+    const screensByExecutionId = new Map<number, string[]>();
+
+    for (const chunk of chunkBySqliteParameterLimit(executionIds)) {
       const steps = await db
         .selectFrom("test_execution_steps")
         .select([
+          "execution_id as executionId",
           "id",
           "step_index as stepIndex",
           "action",
@@ -259,18 +277,42 @@ export class TestExecutionRepository {
           "screenshot_path as screenshotPath",
           "error_message as errorMessage",
         ])
-        .where("execution_id", "=", exec.id)
+        .where("execution_id", "in", chunk)
+        .orderBy("execution_id", "asc")
         .orderBy("step_index", "asc")
         .execute();
 
       const screens = await db
         .selectFrom("test_execution_screens")
-        .select(["screen_name as screenName"])
-        .where("execution_id", "=", exec.id)
+        .select(["execution_id as executionId", "screen_name as screenName"])
+        .where("execution_id", "in", chunk)
+        .orderBy("execution_id", "asc")
         .orderBy("visit_order", "asc")
         .execute();
 
-      runs.push({
+      for (const step of steps) {
+        appendToBucket(stepsByExecutionId, step.executionId, {
+          id: step.id,
+          stepIndex: step.stepIndex,
+          action: step.action,
+          target: step.target,
+          status: step.status as "completed" | "failed" | "skipped",
+          durationMs: step.durationMs,
+          screenName: step.screenName,
+          screenshotPath: step.screenshotPath,
+          errorMessage: step.errorMessage,
+        });
+      }
+
+      for (const screen of screens) {
+        appendToBucket(screensByExecutionId, screen.executionId, screen.screenName);
+      }
+    }
+
+    return executions.map(exec => {
+      const steps = stepsByExecutionId.get(exec.id) ?? [];
+      const screensVisited = screensByExecutionId.get(exec.id) ?? [];
+      return {
         id: exec.id,
         testClass: exec.testClass,
         testMethod: exec.testMethod,
@@ -283,22 +325,10 @@ export class TestExecutionRepository {
         errorMessage: exec.errorMessage,
         videoPath: exec.videoPath,
         snapshotPath: exec.snapshotPath,
-        steps: steps.map(s => ({
-          id: s.id,
-          stepIndex: s.stepIndex,
-          action: s.action,
-          target: s.target,
-          status: s.status as "completed" | "failed" | "skipped",
-          durationMs: s.durationMs,
-          screenName: s.screenName,
-          screenshotPath: s.screenshotPath,
-          errorMessage: s.errorMessage,
-        })),
-        screensVisited: screens.map(s => s.screenName),
-      });
-    }
-
-    return runs;
+        steps,
+        screensVisited,
+      };
+    });
   }
 
   private async cleanupRetention(): Promise<void> {

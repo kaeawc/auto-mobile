@@ -743,6 +743,42 @@ describe("diffObserveResult", () => {
     });
   });
 
+  test("a re-paired `changed` carries `fromKey` = the pre-move key (issue #3107, #3088 limitation 2)", () => {
+    // A uniquely-identified row that only moves (bounds change) re-pairs into one
+    // `changed`. Its emitted `key` is the post-move (added-side) key; `fromKey`
+    // recovers the pre-move (removed-side) key so a consumer can locate the node
+    // in the baseline. The two differ because the node's key embeds its bounds.
+    const baseline = obs({ "resource-id": "row", "text": "Only one", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } });
+    const next = obs({ "resource-id": "row", "text": "Only one", "bounds": { left: 0, top: 40, right: 10, bottom: 50 } });
+
+    // The positional-only diff exposes the two side keys directly, so the test
+    // does not have to reconstruct the NUL-joined key format by hand.
+    const positional = diffObserveResult(baseline, next, { contentIdentity: false });
+    const preMoveKey = positional.removed[0].key;
+    const postMoveKey = positional.added[0].key;
+    expect(preMoveKey).not.toBe(postMoveKey);
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].key).toBe(postMoveKey);
+    expect(diff.changed[0].fromKey).toBe(preMoveKey);
+  });
+
+  test("a positional (non-re-paired) `changed` carries no `fromKey` — re-paired entries only", () => {
+    // A state-only toggle keeps the same positional key on both sides, so it is
+    // matched in place, never re-paired. `fromKey` is for re-paired entries only,
+    // so it stays absent (the pre-move key is identical to `key` anyway).
+    const baseline = obs({ "resource-id": "row", "text": "T", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "checked": "false" });
+    const next = obs({ "resource-id": "row", "text": "T", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "checked": "true" });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.checked).toEqual({ from: "false", to: "true" });
+    expect(diff.changed[0].fromKey).toBeUndefined();
+  });
+
   test("on a real observation with no scroll, content identity is a no-op vs positional-only", () => {
     // A same-screen state toggle produces no leftovers, so re-pairing changes
     // nothing — content identity must not alter non-scroll diffs of real data.

@@ -82,9 +82,10 @@ export type CompactBounds = [number, number, number, number];
 
 /**
  * Return an output-only copy of `obs` shrunk for serialization. Applies, in
- * order: perf-audit strip (always), per-node trim (default on), bounds compaction
- * (gated by `cfg.compact`), and elements-drop (gated by `cfg.dropElements`). The
- * input is never mutated.
+ * order: perf-audit strip (always), top-level debug-perf telemetry strip
+ * (always), per-node trim (default on), bounds compaction (gated by
+ * `cfg.compact`), and elements-drop (gated by `cfg.dropElements`). The input is
+ * never mutated.
  */
 export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveConfig): ObserveResult {
   // Deep-clone boundary: mutate only the copy that goes to the wire. The
@@ -94,6 +95,7 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
   const out = JSON.parse(JSON.stringify(obs)) as ObserveResult;
 
   stripPerformanceAudit(out);
+  stripTopLevelDebugPerfTelemetry(out);
 
   if (cfg.trimNodes !== false) {
     for (const root of toNodeArray(out.viewHierarchy?.hierarchy?.node)) {
@@ -110,6 +112,17 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
   }
 
   return out;
+}
+
+/**
+ * Drop top-level debug-perf telemetry that is useful while measuring capture
+ * internals but not for agent decisions. `performanceAudit` keeps the computed
+ * summary metrics; these fields duplicate timing/raw graphics detail and are
+ * only removed from the output copy.
+ */
+function stripTopLevelDebugPerfTelemetry(out: ObserveResult): void {
+  delete out.perfTiming;
+  delete out.gfxMetrics;
 }
 
 /**

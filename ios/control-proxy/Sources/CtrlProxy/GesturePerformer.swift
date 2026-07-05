@@ -62,6 +62,35 @@ public class GesturePerformer: GesturePerforming {
         }
     }
 
+    static let allResettablePrivacyResourceNames = [
+        "camera",
+        "photos",
+        "microphone",
+        "contacts",
+        "location",
+        "calendar",
+        "reminders",
+        "media-library",
+    ]
+
+    private static let resettablePrivacyResourceAliases = Set(
+        allResettablePrivacyResourceNames + [
+            "photos-add",
+            "contacts-limited",
+            "location-always",
+        ]
+    )
+
+    static func expandedPrivacyResourceNames(for name: String) -> [String]? {
+        if name == "all" {
+            return allResettablePrivacyResourceNames
+        }
+        if resettablePrivacyResourceAliases.contains(name) {
+            return [name]
+        }
+        return nil
+    }
+
     #if canImport(XCTest) && os(iOS)
         private weak var application: XCUIApplication?
         /// Strong reference to keep the application alive when set via updateApplication.
@@ -1289,6 +1318,8 @@ public class GesturePerformer: GesturePerforming {
         /// not just simulators — the whole point of #2491. An AutoMobile permission
         /// with no `XCUIProtectedResource` equivalent (e.g. `siri`, `motion`) throws
         /// `invalidParameter` so the caller reports it as a per-permission failure.
+        /// The aggregate `all` keyword expands to every unique resettable
+        /// `XCUIProtectedResource` value before calling XCTest.
         public func resetAuthorizations(bundleId: String, resources: [String]) throws {
             // Throws on the first unmapped resource, so a mixed batch applies the
             // resets before it and then fails as a whole. The TS client sends one
@@ -1297,10 +1328,12 @@ public class GesturePerformer: GesturePerforming {
             try runOnMainThread {
                 let app = XCUIApplication(bundleIdentifier: bundleId)
                 for raw in resources {
-                    guard let resource = Self.protectedResource(for: raw) else {
+                    guard let resettableResources = Self.protectedResources(for: raw) else {
                         throw CommandError.invalidParameter("permission", raw)
                     }
-                    app.resetAuthorizationStatus(for: resource)
+                    for resource in resettableResources {
+                        app.resetAuthorizationStatus(for: resource)
+                    }
                 }
             }
         }
@@ -1310,6 +1343,20 @@ public class GesturePerformer: GesturePerforming {
         /// support matrix is advertised honestly — see issue #2491). The mapping is
         /// authoritative here rather than duplicated on the TS host, since
         /// `XCUIProtectedResource` only exists in this process.
+        private static func protectedResources(for name: String) -> [XCUIProtectedResource]? {
+            guard let names = expandedPrivacyResourceNames(for: name) else {
+                return nil
+            }
+            var resources: [XCUIProtectedResource] = []
+            for name in names {
+                guard let resource = protectedResource(for: name) else {
+                    return nil
+                }
+                resources.append(resource)
+            }
+            return resources
+        }
+
         private static func protectedResource(for name: String) -> XCUIProtectedResource? {
             switch name {
             case "camera": return .camera

@@ -81,6 +81,15 @@ public class GesturePerformer: GesturePerforming {
         ]
     )
 
+    static func canonicalPrivacyResourceName(for name: String) -> String {
+        switch name {
+        case "photos-add": return "photos"
+        case "contacts-limited": return "contacts"
+        case "location-always": return "location"
+        default: return name
+        }
+    }
+
     static func expandedPrivacyResourceNames(for name: String) -> [String]? {
         if name == "all" {
             return allResettablePrivacyResourceNames
@@ -1327,11 +1336,20 @@ public class GesturePerformer: GesturePerforming {
             // this only matters for a hypothetical multi-resource single request.
             try runOnMainThread {
                 let app = XCUIApplication(bundleIdentifier: bundleId)
+                var resetResourceNames = Set<String>()
                 for raw in resources {
-                    guard let resettableResources = Self.protectedResources(for: raw) else {
+                    guard let resettableResourceNames = Self.expandedPrivacyResourceNames(for: raw) else {
                         throw CommandError.invalidParameter("permission", raw)
                     }
-                    for resource in resettableResources {
+                    for resettableResourceName in resettableResourceNames {
+                        let canonicalResourceName = Self.canonicalPrivacyResourceName(for: resettableResourceName)
+                        if resetResourceNames.contains(canonicalResourceName) {
+                            continue
+                        }
+                        guard let resource = Self.protectedResource(for: resettableResourceName) else {
+                            throw CommandError.invalidParameter("permission", resettableResourceName)
+                        }
+                        resetResourceNames.insert(canonicalResourceName)
                         app.resetAuthorizationStatus(for: resource)
                     }
                 }
@@ -1343,20 +1361,6 @@ public class GesturePerformer: GesturePerforming {
         /// support matrix is advertised honestly — see issue #2491). The mapping is
         /// authoritative here rather than duplicated on the TS host, since
         /// `XCUIProtectedResource` only exists in this process.
-        private static func protectedResources(for name: String) -> [XCUIProtectedResource]? {
-            guard let names = expandedPrivacyResourceNames(for: name) else {
-                return nil
-            }
-            var resources: [XCUIProtectedResource] = []
-            for name in names {
-                guard let resource = protectedResource(for: name) else {
-                    return nil
-                }
-                resources.append(resource)
-            }
-            return resources
-        }
-
         private static func protectedResource(for name: String) -> XCUIProtectedResource? {
             switch name {
             case "camera": return .camera

@@ -27,6 +27,14 @@ public final class SdkEventBuffer {
     }
 }
 
+/// A sink for one outbound framed message. `WebSocketConnection` is the
+/// production implementation; `WebSocketServerTests` injects a capturing fake so
+/// it can drive the real `handleMessage` — including its decode-failure catch —
+/// end-to-end without a live `NWConnection` (issue #2859 part 4).
+protocol WebSocketResponding: AnyObject {
+    func send(_ data: Data)
+}
+
 /// WebSocket server for CtrlProxy iOS
 /// Implements RFC 6455 WebSocket protocol over TCP
 public class WebSocketServer: WebSocketServing {
@@ -129,7 +137,17 @@ public class WebSocketServer: WebSocketServing {
 
     private func handleMessage(_ data: Data, connectionId: Int) {
         guard let connection = connections[connectionId] else { return }
+        handleMessage(data, responder: connection)
+    }
 
+    /// Decode → dispatch → encode → send, with the decode-failure `catch` #2854
+    /// moved here from `CommandHandler.handle`: it recovers the correlation id from
+    /// the raw JSON (`extractRequestId`) and emits a structured error envelope
+    /// (`sendErrorResponse`). Internal and connection-abstracted (via
+    /// `WebSocketResponding`) so `WebSocketServerTests` can drive this whole path —
+    /// including the catch's `extractRequestId`/`sendErrorResponse` wiring — with a
+    /// fake responder, no live `NWConnection` (issue #2859 part 4).
+    func handleMessage(_ data: Data, responder: WebSocketResponding) {
         do {
             let request = try JSONDecoder().decode(WebSocketRequest.self, from: data)
             print("[WebSocketServer] Received request type=\(request.typeString) requestId=\(request.requestId ?? "nil")")
@@ -146,13 +164,13 @@ public class WebSocketServer: WebSocketServing {
             // Flush perf timing data and encode response
             let perfTiming = flushPerfTiming()
             let responseData = try encodeResponse(response, totalTimeMs: totalTimeMs, perfTiming: perfTiming)
-            connection.send(responseData)
+            responder.send(responseData)
 
         } catch {
             print("[WebSocketServer] Error handling message: \(error)")
             perfProvider.clear()
             let requestId = Self.extractRequestId(from: data)
-            Self.sendErrorResponse(connection: connection, requestId: requestId, error: error)
+            Self.sendErrorResponse(responder: responder, requestId: requestId, error: error)
         }
     }
 
@@ -272,9 +290,9 @@ public class WebSocketServer: WebSocketServing {
     // MARK: - Error Response Helpers
 
     /// Sends an error response with fallback to raw JSON if encoding fails.
-    static func sendErrorResponse(connection: WebSocketConnection, requestId: String?, error: Error) {
+    static func sendErrorResponse(responder: WebSocketResponding, requestId: String?, error: Error) {
         let data = buildErrorResponseData(requestId: requestId, error: error)
-        connection.send(data)
+        responder.send(data)
     }
 
     /// Builds error response data, falling back to hand-crafted JSON if encoding fails.
@@ -433,7 +451,7 @@ public class WebSocketServer: WebSocketServing {
 // MARK: - WebSocket Connection
 
 /// Handles a single WebSocket connection with handshake and framing
-class WebSocketConnection {
+class WebSocketConnection: WebSocketResponding {
     let id: Int
     private let connection: NWConnection
     private let queue: DispatchQueue

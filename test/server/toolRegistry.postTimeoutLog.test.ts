@@ -19,18 +19,8 @@ describe("ToolRegistry post-timeout result logging", () => {
   });
 
   function registerProbe(): void {
-    ToolRegistry.registerDeviceAware(
-      "postTimeoutProbe",
-      "Resolves with success regardless of caller state",
-      z.object({}),
-      async () => ({ success: true }),
-      false,
-      false,
-      {
-        shouldEnsureDevice: () => false,
-        nonDeviceHandler: async () => ({ success: true }),
-      }
-    );
+    ToolRegistry.registerDeviceAware("postTimeoutProbe", "Resolves with success regardless of caller state", z.object({}), async () => ({ success: true }), { shouldEnsureDevice: () => false,
+      nonDeviceHandler: async () => ({ success: true }), });
   }
 
   test("warns (not infos) when the caller's request already timed out", async () => {

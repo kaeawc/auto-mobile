@@ -99,13 +99,5 @@ export function registerAccessibilityTools() {
     throw new ActionableError(`Unsupported platform: ${device.platform}`);
   };
 
-  ToolRegistry.registerDeviceAware(
-    "accessibility",
-    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator only). Always returns fresh state from the device.",
-    accessibilitySchema,
-    accessibilityHandler,
-    false,
-    false,
-    { outputSchema: accessibilityStateSchema }
-  );
+  ToolRegistry.registerDeviceAware("accessibility", "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator only). Always returns fresh state from the device.", accessibilitySchema, accessibilityHandler, { outputSchema: accessibilityStateSchema });
 }

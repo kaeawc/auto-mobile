@@ -236,7 +236,6 @@ src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2345: Argument of type '
 src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2420: Class 'NoOpIOSCtrlProxyManager' incorrectly implements interface 'CtrlProxyIosManager'.
 src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2739: Type '{ fps: number; frameTimeMs: number; jankFrames: number; droppedFrames: number; memoryUsageMb: number; cpuUsagePercent: number; touchLatencyMs: number | null; timeToInteractiveMs: number | null; screenName: string | null; isResponsive: boolean; }' is missing the following properties from type 'PerformanceStreamData': recompositionCount, recompositionRate
 src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2741: Property 'resetSetupState' is missing in type 'NoOpIOSCtrlProxyManager' but required in type 'CtrlProxyIosManager'.
-src/features/observe/ios/IosSdkEventIngestor.ts: error TS2353: Object literal may only specify known properties, and 'operation' does not exist in type '{ timestamp: number; applicationId: string | null; fileName: string; key: string | null; value: string | null; valueType: string | null; changeType: string; previousValue?: string | null | undefined; }'.
 src/features/observe/ios/index.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
 src/features/observe/ios/index.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
 src/features/performance/PerformanceAudit.ts: error TS2551: Property 'refreshRateHz' does not exist on type 'DeviceCapabilities'. Did you mean 'refreshRate'?

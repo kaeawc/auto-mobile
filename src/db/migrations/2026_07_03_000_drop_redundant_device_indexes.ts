@@ -1,14 +1,11 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import { EVENT_TABLES } from "../eventTables";
 
 async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
-  const result = await db
-    .selectFrom("sqlite_master" as never)
-    .select("name")
-    .where("type", "=", "table")
-    .where("name", "=", tableName)
-    .execute();
-  return result.length > 0;
+  const result = await sql<{ name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${tableName}
+  `.execute(db);
+  return result.rows.length > 0;
 }
 
 /**
@@ -62,8 +59,8 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     await db.schema
       .createIndex(`idx_${table}_device`)
       .ifNotExists()
-      .on(table)
-      .column("device_id")
+      .on(table as never)
+      .column("device_id" as never)
       .execute();
   }
 }

@@ -20,15 +20,7 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
   const TOOL = "__strip_probe_2899__";
 
   beforeAll(async () => {
-    ToolRegistry.register(
-      TOOL,
-      "probe tool for structuredContent strip",
-      z.object({}).passthrough(),
-      async () => createStructuredToolResponse({ success: true, marker: "probe" }),
-      false,
-      false,
-      z.object({ success: z.boolean(), marker: z.string() })
-    );
+    ToolRegistry.register(TOOL, "probe tool for structuredContent strip", z.object({}).passthrough(), async () => createStructuredToolResponse({ success: true, marker: "probe" }), { outputSchema: z.object({ success: z.boolean(), marker: z.string() }) });
     fixture = new McpTestFixture();
     await fixture.setup();
   });

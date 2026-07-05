@@ -265,33 +265,9 @@ export function registerStorageTools(): void {
     }
   };
 
-  ToolRegistry.registerDeviceAware(
-    "setKeyValue",
-    "Set app key-value storage entry.",
-    setKeyValueSchema,
-    setKeyValueHandler,
-    false,
-    false,
-    { embeddedSdkOnly: true }
-  );
+  ToolRegistry.registerDeviceAware("setKeyValue", "Set app key-value storage entry.", setKeyValueSchema, setKeyValueHandler, { embeddedSdkOnly: true });
 
-  ToolRegistry.registerDeviceAware(
-    "removeKeyValue",
-    "Remove app key-value storage entry.",
-    removeKeyValueSchema,
-    removeKeyValueHandler,
-    false,
-    false,
-    { embeddedSdkOnly: true }
-  );
+  ToolRegistry.registerDeviceAware("removeKeyValue", "Remove app key-value storage entry.", removeKeyValueSchema, removeKeyValueHandler, { embeddedSdkOnly: true });
 
-  ToolRegistry.registerDeviceAware(
-    "clearKeyValueFile",
-    "Clear app key-value storage file.",
-    clearKeyValueFileSchema,
-    clearKeyValueFileHandler,
-    false,
-    false,
-    { embeddedSdkOnly: true }
-  );
+  ToolRegistry.registerDeviceAware("clearKeyValueFile", "Clear app key-value storage file.", clearKeyValueFileSchema, clearKeyValueFileHandler, { embeddedSdkOnly: true });
 }

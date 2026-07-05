@@ -216,13 +216,7 @@ const criticalSectionHandler = async (
  * Register the criticalSection tool.
  */
 export function registerCriticalSectionTools(): void {
-  ToolRegistry.registerDeviceAware(
-    "criticalSection",
-    "Synchronize multiple devices at a barrier, then run steps serially.",
-    criticalSectionSchema,
-    criticalSectionHandler,
-    false // Does not support progress notifications
-  );
+  ToolRegistry.registerDeviceAware("criticalSection", "Synchronize multiple devices at a barrier, then run steps serially.", criticalSectionSchema, criticalSectionHandler);
 
   logger.info("Critical section tools registered");
 }

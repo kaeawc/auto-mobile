@@ -71,13 +71,5 @@ export function registerAccessibilityFocusTools() {
   // to focus an arbitrary node. Re-evaluate whether it should be removed, kept as
   // an internal debug primitive, or implemented through human-representative
   // TalkBack navigation gestures instead.
-  ToolRegistry.registerDeviceAware(
-    "accessibilityFocus",
-    "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
-    accessibilityFocusSchema,
-    handler,
-    false,
-    true,
-    { outputSchema: accessibilityFocusResultSchema }
-  );
+  ToolRegistry.registerDeviceAware("accessibilityFocus", "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.", accessibilityFocusSchema, handler, { debugOnly: true, outputSchema: accessibilityFocusResultSchema });
 }

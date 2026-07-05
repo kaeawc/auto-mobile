@@ -289,44 +289,12 @@ const recordStepsTool = async (params: { action: "begin" | "end" | "status"; pla
 
 // Register plan tools for daemon-backed MCP servers and CLI usage.
 export const registerPlanTools = () => {
-  ToolRegistry.registerDeviceAware(
-    "executePlan",
-    "Execute YAML plan steps; stops on first failed step.",
-    executePlanSchema,
-    executePlanTool,
-    true,
-    false,
-    { outputSchema: executePlanResultSchema }
-  );
+  ToolRegistry.registerDeviceAware("executePlan", "Execute YAML plan steps; stops on first failed step.", executePlanSchema, executePlanTool, { supportsProgress: true, outputSchema: executePlanResultSchema });
 
-  ToolRegistry.registerDeviceAware(
-    "startTestRecording",
-    "Start recording user interactions for exportPlan.",
-    startTestRecordingSchema,
-    startTestRecordingTool,
-    false,
-    false,
-    { outputSchema: startTestRecordingResultSchema }
-  );
+  ToolRegistry.registerDeviceAware("startTestRecording", "Start recording user interactions for exportPlan.", startTestRecordingSchema, startTestRecordingTool, { outputSchema: startTestRecordingResultSchema });
 
-  ToolRegistry.register(
-    "exportPlan",
-    "Stop active recording and export a YAML plan.",
-    exportPlanSchema,
-    exportPlanTool,
-    false,
-    false,
-    exportPlanResultSchema
-  );
+  ToolRegistry.register("exportPlan", "Stop active recording and export a YAML plan.", exportPlanSchema, exportPlanTool, { outputSchema: exportPlanResultSchema });
 
   // MCP call recording — begin/end gated by "mcp-recording" feature flag; status always available.
-  ToolRegistry.register(
-    "recordSteps",
-    "Record MCP tool calls to YAML. begin/end require mcp-recording; status always works.",
-    recordStepsSchema,
-    recordStepsTool,
-    false,
-    false,
-    recordStepsResultSchema
-  );
+  ToolRegistry.register("recordSteps", "Record MCP tool calls to YAML. begin/end require mcp-recording; status always works.", recordStepsSchema, recordStepsTool, { outputSchema: recordStepsResultSchema });
 };

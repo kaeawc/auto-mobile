@@ -155,172 +155,140 @@ export function registerNetworkTools(): void {
   const state = NetworkState.getInstance();
 
   // --- network ---
-  ToolRegistry.registerDeviceAware(
-    "network",
-    "Control network capture and error simulation.",
-    networkSchema,
-    async (device, args: NetworkArgs) => {
-      if (args.capture !== undefined) {
-        state.setCapture(args.capture);
-      }
+  ToolRegistry.registerDeviceAware("network", "Control network capture and error simulation.", networkSchema, async (device, args: NetworkArgs) => {
+    if (args.capture !== undefined) {
+      state.setCapture(args.capture);
+    }
 
-      if (args.simulateErrors !== undefined) {
-        if (device.platform !== "android") {
-          throw new ActionableError(
-            "Network error simulation is only supported on Android devices."
-          );
+    if (args.simulateErrors !== undefined) {
+      if (device.platform !== "android") {
+        throw new ActionableError(
+          "Network error simulation is only supported on Android devices."
+        );
+      }
+      if (args.simulateErrors.cancel) {
+        state.cancelSimulation();
+      } else {
+        if (!args.simulateErrors.durationSeconds) {
+          throw new ActionableError("durationSeconds is required unless cancel is true");
         }
-        if (args.simulateErrors.cancel) {
-          state.cancelSimulation();
-        } else {
-          if (!args.simulateErrors.durationSeconds) {
-            throw new ActionableError("durationSeconds is required unless cancel is true");
-          }
-          const errorType: SimulatedErrorType =
-            args.simulateErrors.errorType ?? "http500";
-          state.startSimulation(
-            errorType,
-            args.simulateErrors.durationSeconds,
-            args.simulateErrors.limit ?? null
-          );
-        }
-        syncErrorSimulationToDevice(device, state);
+        const errorType: SimulatedErrorType =
+                args.simulateErrors.errorType ?? "http500";
+        state.startSimulation(
+          errorType,
+          args.simulateErrors.durationSeconds,
+          args.simulateErrors.limit ?? null
+        );
       }
+      syncErrorSimulationToDevice(device, state);
+    }
 
-      if (args.notifFilter !== undefined) {
-        state.setNotifFilter(args.notifFilter);
-      }
-      if (args.notifDebounceMs !== undefined) {
-        state.setNotifDebounceMs(args.notifDebounceMs);
-      }
-      if (args.slowThresholdMs !== undefined) {
-        state.setSlowThresholdMs(args.slowThresholdMs);
-      }
+    if (args.notifFilter !== undefined) {
+      state.setNotifFilter(args.notifFilter);
+    }
+    if (args.notifDebounceMs !== undefined) {
+      state.setNotifDebounceMs(args.notifDebounceMs);
+    }
+    if (args.slowThresholdMs !== undefined) {
+      state.setSlowThresholdMs(args.slowThresholdMs);
+    }
 
-      return createJSONToolResponse(state.getSnapshot());
-    },
-    false,
-    false,
-    { embeddedSdkOnly: true }
-  );
+    return createJSONToolResponse(state.getSnapshot());
+  }, { embeddedSdkOnly: true });
 
   // --- mockNetwork ---
-  ToolRegistry.registerDeviceAware(
-    "mockNetwork",
-    "Add mock network response rule.",
-    mockNetworkSchema,
-    async (device, args: MockNetworkArgs) => {
-      if (!serverConfig.isNetworkMockableEnabled()) {
-        throw new ActionableError(
-          "Network mocking is disabled. Start the server with --network-mockable to enable."
-        );
-      }
-      if (device.platform !== "android" && device.platform !== "ios") {
-        throw new ActionableError(
-          "Network mocking is only supported on Android and iOS devices."
-        );
-      }
+  ToolRegistry.registerDeviceAware("mockNetwork", "Add mock network response rule.", mockNetworkSchema, async (device, args: MockNetworkArgs) => {
+    if (!serverConfig.isNetworkMockableEnabled()) {
+      throw new ActionableError(
+        "Network mocking is disabled. Start the server with --network-mockable to enable."
+      );
+    }
+    if (device.platform !== "android" && device.platform !== "ios") {
+      throw new ActionableError(
+        "Network mocking is only supported on Android and iOS devices."
+      );
+    }
 
-      // Validate regex patterns before creating the mock rule
-      try {
-        new RegExp(args.host);
-      } catch {
-        throw new ActionableError(`Invalid host regex: ${args.host}`);
-      }
-      try {
-        new RegExp(args.path);
-      } catch {
-        throw new ActionableError(`Invalid path regex: ${args.path}`);
-      }
+    // Validate regex patterns before creating the mock rule
+    try {
+      new RegExp(args.host);
+    } catch {
+      throw new ActionableError(`Invalid host regex: ${args.host}`);
+    }
+    try {
+      new RegExp(args.path);
+    } catch {
+      throw new ActionableError(`Invalid path regex: ${args.path}`);
+    }
 
-      const mock = state.addMock({
-        host: args.host,
-        path: args.path,
-        method: args.method ?? "*",
-        limit: args.limit ?? null,
-        remaining: args.limit ?? null,
-        statusCode: args.statusCode ?? 200,
-        responseHeaders: args.responseHeaders ?? {},
-        responseBody: args.responseBody ?? "",
-        contentType: args.contentType ?? "application/json",
-      });
+    const mock = state.addMock({
+      host: args.host,
+      path: args.path,
+      method: args.method ?? "*",
+      limit: args.limit ?? null,
+      remaining: args.limit ?? null,
+      statusCode: args.statusCode ?? 200,
+      responseHeaders: args.responseHeaders ?? {},
+      responseBody: args.responseBody ?? "",
+      contentType: args.contentType ?? "application/json",
+    });
 
-      syncMockRulesToDevice(device, state);
+    syncMockRulesToDevice(device, state);
 
-      return createJSONToolResponse({
-        mockId: mock.mockId,
-        mocked: state.getMockSummary(),
-      });
-    },
-    false,
-    false,
-    { embeddedSdkOnly: true }
-  );
+    return createJSONToolResponse({
+      mockId: mock.mockId,
+      mocked: state.getMockSummary(),
+    });
+  }, { embeddedSdkOnly: true });
 
   // --- clearMockNetwork ---
-  ToolRegistry.registerDeviceAware(
-    "clearMockNetwork",
-    "Clear mock network response rules.",
-    clearMockNetworkSchema,
-    async (device, args: ClearMockNetworkArgs) => {
-      if (!serverConfig.isNetworkMockableEnabled()) {
-        throw new ActionableError(
-          "Network mocking is disabled. Start the server with --network-mockable to enable."
-        );
-      }
-      if (device.platform !== "android" && device.platform !== "ios") {
-        throw new ActionableError(
-          "Network mocking is only supported on Android and iOS devices."
-        );
-      }
+  ToolRegistry.registerDeviceAware("clearMockNetwork", "Clear mock network response rules.", clearMockNetworkSchema, async (device, args: ClearMockNetworkArgs) => {
+    if (!serverConfig.isNetworkMockableEnabled()) {
+      throw new ActionableError(
+        "Network mocking is disabled. Start the server with --network-mockable to enable."
+      );
+    }
+    if (device.platform !== "android" && device.platform !== "ios") {
+      throw new ActionableError(
+        "Network mocking is only supported on Android and iOS devices."
+      );
+    }
 
-      let cleared: number;
-      if (args.mockId) {
-        cleared = state.removeMock(args.mockId) ? 1 : 0;
-        if (cleared === 0) {
-          throw new ActionableError(`Mock '${args.mockId}' not found`);
-        }
-      } else {
-        cleared = state.clearAllMocks();
+    let cleared: number;
+    if (args.mockId) {
+      cleared = state.removeMock(args.mockId) ? 1 : 0;
+      if (cleared === 0) {
+        throw new ActionableError(`Mock '${args.mockId}' not found`);
       }
+    } else {
+      cleared = state.clearAllMocks();
+    }
 
-      syncMockRulesToDevice(device, state);
+    syncMockRulesToDevice(device, state);
 
-      return createJSONToolResponse({
-        cleared,
-        remaining: state.getMockSummary(),
-      });
-    },
-    false,
-    false,
-    { embeddedSdkOnly: true }
-  );
+    return createJSONToolResponse({
+      cleared,
+      remaining: state.getMockSummary(),
+    });
+  }, { embeddedSdkOnly: true });
 
   // --- getNetworkGraph ---
-  ToolRegistry.registerDeviceAware(
-    "getNetworkGraph",
-    "Get aggregate captured network graph.",
-    getNetworkGraphSchema,
-    async (device, args: GetNetworkGraphArgs) => {
-      const sinceTimestamp = args.sinceSeconds
-        ? defaultTimer.now() - args.sinceSeconds * 1000
-        : undefined;
+  ToolRegistry.registerDeviceAware("getNetworkGraph", "Get aggregate captured network graph.", getNetworkGraphSchema, async (device, args: GetNetworkGraphArgs) => {
+    const sinceTimestamp = args.sinceSeconds
+      ? defaultTimer.now() - args.sinceSeconds * 1000
+      : undefined;
 
-      const events = await getNetworkEvents({
-        deviceId: device.deviceId,
-        sinceTimestamp,
-        method: args.method,
-        limit: 10_000,
-      });
+    const events = await getNetworkEvents({
+      deviceId: device.deviceId,
+      sinceTimestamp,
+      method: args.method,
+      limit: 10_000,
+    });
 
-      const graph = buildNetworkGraph(events, {
-        minRequests: args.minRequests,
-      });
+    const graph = buildNetworkGraph(events, {
+      minRequests: args.minRequests,
+    });
 
-      return createJSONToolResponse(graph);
-    },
-    false,
-    false,
-    { embeddedSdkOnly: true }
-  );
+    return createJSONToolResponse(graph);
+  }, { embeddedSdkOnly: true });
 }

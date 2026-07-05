@@ -9,6 +9,8 @@
     "test:image:bun": "bun scripts/ci/image-runtime-smoke.ts",
     "test:memory-leaks": "bun --expose-gc scripts/detect-memory-leaks.ts",
     "lint": "eslint . --fix",
+    "typecheck": "bash scripts/typecheck-baseline.sh",
+    "typecheck:update": "bash scripts/typecheck-baseline.sh --update",
     "watch": "bun --watch src/index.ts",
     "build": "bun build.ts && chmod +x dist/src/index.js",
     "clean": "rm -rf dist",

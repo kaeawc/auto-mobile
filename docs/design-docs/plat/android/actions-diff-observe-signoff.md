@@ -69,9 +69,12 @@ run through that serializer) carries the full `extras` objects. So the flood is
 real in both representations; stripping at serialize-time does not fix it.
 
 **Fix (this PR):** `DIFF_IGNORED_ATTRS = { "extras" }` — `extras` is excluded
-from the per-node *changed* comparison, so the phantom entries are never emitted
-at all (no empty husks, no `structuredContent` bloat). `added`/`removed` still
-carry the full node (incl. `extras`) for reconstruction, `extras` is never part
+from **both** volatile-prone diff paths: the per-node *changed* comparison
+(`diffAttributes`) and the Element mirror fields (`leanElementForDiff`, so a
+stable focus with only `extras` churn no longer emits a phantom
+`fields.focusedElement`). Phantom entries are never emitted at all (no empty
+husks, no `structuredContent` bloat). `added`/`removed` still carry the full node
+(incl. `extras`) for reconstruction, `extras` is never part
 of the node identity key, and the top-level `fields` diff is untouched. Result
 on the same real pair: **85 → 2 `changed`** entries, both genuinely actionable.
 

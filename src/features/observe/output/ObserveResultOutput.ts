@@ -546,11 +546,12 @@ function elementValuesEqual(a: unknown, b: unknown): boolean {
  * text-entry diff with 83 phantom `changed` entries out of 85, burying the
  * genuinely-actionable deltas and defeating the point of `--actions-diff-observe`.
  *
- * Scope is deliberately narrow: this only suppresses `extras` from the per-node
- * *changed* delta. A node that is `added`/`removed` still carries its full
- * attribute set (including `extras`) so a consumer can reconstruct it without the
- * baseline, and the top-level `fields` diff is untouched. `extras` is never part
- * of the node identity key either, so this changes only what a matched node
+ * Consulted by two diff paths that both compare volatile-prone attributes: the
+ * per-node *changed* delta (`diffAttributes`) and the Element mirror fields
+ * (`leanElementForDiff`, for `fields.focusedElement` &c.). A node that is
+ * `added`/`removed` still carries its full attribute set (including `extras`) so a
+ * consumer can reconstruct it without the baseline, and `extras` is never part of
+ * the node identity key — so this changes only what a matched node / mirror
  * *reports*, never how nodes are paired.
  */
 export const DIFF_IGNORED_ATTRS: ReadonlySet<string> = new Set(["extras"]);

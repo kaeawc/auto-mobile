@@ -15,7 +15,6 @@ describe("AVDManager", function() {
     // Clear module cache first
     delete require.cache[require.resolve("../../../src/utils/android-cmdline-tools/avdmanager")];
     delete require.cache[require.resolve("../../../src/utils/android-cmdline-tools/detection")];
-    delete require.cache[require.resolve("../../../src/utils/android-cmdline-tools/install")];
 
     // Now require the modules
     avdmanager = require("../../../src/utils/android-cmdline-tools/avdmanager");
@@ -98,14 +97,6 @@ describe("AVDManager", function() {
       getAndroidHomeWithSystemImages: () => null,
       getBestAndroidToolsLocation: () => mockLocation,
       validateRequiredTools: () => ({ valid: true, missing: [] }),
-      installAndroidTools: async () => ({
-        success: true,
-        installed_tools: ["avdmanager", "sdkmanager"],
-        failed_tools: [],
-        installation_path: "/mock/path",
-        installation_method: "manual",
-        message: "Success"
-      }),
       ...overrides
     };
   }
@@ -683,7 +674,7 @@ id: pixel_4
   });
 
   describe("Error Handling", () => {
-    test("should handle tools installation failure", async () => {
+    test("should report manual install guidance when command-line tools are unavailable", async () => {
       const mockDeps = createDependencies();
 
       mockDeps.detectAndroidCommandLineTools = async () => [];
@@ -695,7 +686,7 @@ id: pixel_4
       expect(result.message).toContain("Tool installation functionality has been removed");
     });
 
-    test("should handle missing tools after installation", async () => {
+    test("should report manual install guidance when required tools are missing", async () => {
       const mockDeps = createDependencies();
 
       mockDeps.detectAndroidCommandLineTools = async () => [];

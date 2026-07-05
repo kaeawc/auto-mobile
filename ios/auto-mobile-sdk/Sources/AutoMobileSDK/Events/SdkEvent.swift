@@ -446,6 +446,9 @@ public struct SdkStorageChangedEvent: SdkEvent {
     public let suiteName: String?
     public let key: String?
     public let newValue: String?
+    /// The value BEFORE the change (nil if there was no prior value). Emitted so the
+    /// TS telemetry ingest can skip its per-insert previous-value lookup (#3000).
+    public let previousValue: String?
     public let valueType: String
     public let sequenceNumber: Int64
 
@@ -454,6 +457,7 @@ public struct SdkStorageChangedEvent: SdkEvent {
         suiteName: String?,
         key: String?,
         newValue: String?,
+        previousValue: String? = nil,
         valueType: String,
         sequenceNumber: Int64
     ) {
@@ -461,6 +465,7 @@ public struct SdkStorageChangedEvent: SdkEvent {
         self.suiteName = suiteName
         self.key = key
         self.newValue = newValue
+        self.previousValue = previousValue
         self.valueType = valueType
         self.sequenceNumber = sequenceNumber
     }

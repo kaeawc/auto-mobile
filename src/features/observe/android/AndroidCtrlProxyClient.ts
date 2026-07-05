@@ -574,6 +574,48 @@ interface WsStorageChangedMessage extends WsMessageBase {
   valueType?: KeyValueType;
   sequenceNumber?: number;
   changeType?: string;
+  // Prior value for this key, emitted by runners that capture it on-device
+  // (#3000). Absent on legacy runners; an explicit null means "no prior value".
+  previousValue?: string | null;
+}
+
+/** Telemetry `recordStorageEvent` input shape built from a `storage_changed` wire message. */
+export interface StorageTelemetryInput {
+  timestamp: number;
+  applicationId: string | null;
+  fileName: string;
+  key: string | null;
+  value: string | null;
+  valueType: KeyValueType;
+  changeType: string;
+  previousValue?: string | null;
+}
+
+/**
+ * Build the telemetry `recordStorageEvent` input from a `storage_changed` wire
+ * message. The runner-supplied `previousValue` is threaded through ONLY when the
+ * wire message carries it (`!== undefined`), so the repository's
+ * `previousValue !== undefined` guard falls through to the per-insert auto-lookup
+ * for legacy runners that omit it (#3000). An explicit null ("no prior value")
+ * is honored verbatim and also skips the lookup.
+ */
+export function storageTelemetryInputFromWire(
+  message: WsStorageChangedMessage,
+  resolvedTimestamp: number
+): StorageTelemetryInput {
+  const input: StorageTelemetryInput = {
+    timestamp: resolvedTimestamp,
+    applicationId: message.packageName ?? null,
+    fileName: message.fileName ?? "",
+    key: message.key ?? null,
+    value: message.value ?? null,
+    valueType: message.valueType ?? "STRING",
+    changeType: message.changeType ?? "modify",
+  };
+  if (message.previousValue !== undefined) {
+    input.previousValue = message.previousValue;
+  }
+  return input;
 }
 
 /**
@@ -2567,15 +2609,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         // Record to telemetry timeline
         const recorder = TelemetryRecorder.getInstance();
         recorder.setContext(this.device.deviceId, null);
-        recorder.recordStorageEvent({
-          timestamp: storageEvent.timestamp,
-          applicationId: message.packageName ?? null,
-          fileName: storageEvent.fileName,
-          key: storageEvent.key,
-          value: storageEvent.value,
-          valueType: storageEvent.valueType,
-          changeType: message.changeType ?? "modify",
-        });
+        recorder.recordStorageEvent(storageTelemetryInputFromWire(message, storageEvent.timestamp));
       }
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error handling WebSocket message: ${error}`);

@@ -371,6 +371,12 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
         type = change.type.name,
         timestamp = change.timestamp,
         sequenceNumber = change.sequenceNumber,
+        // Serialize the prior value with ITS OWN type (not change.type) so a removed
+        // or type-changed STRING/STRING_SET prior value still serializes correctly —
+        // change.type is UNKNOWN when the new value is null (#3000). A newly-added key
+        // has no prior value, so serializeValue(null, …) yields null.
+        previousValue = serializeValue(change.previousValue, change.previousValueType),
+        previousValueType = change.previousValueType.name,
       )
     }
 

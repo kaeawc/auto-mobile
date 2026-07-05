@@ -60,4 +60,16 @@ data class PreferenceChange(
   val timestamp: Long,
   /** Monotonically increasing sequence number for ordering changes. */
   val sequenceNumber: Long,
+  /**
+   * The value BEFORE this change, or null if there was no prior value. Captured from a per-file
+   * snapshot the driver maintains, so downstream telemetry can skip re-reading the prior value
+   * (#3000).
+   */
+  val previousValue: Any? = null,
+  /**
+   * The type of [previousValue], which may differ from [type] on a remove (new value null) or a
+   * type-changing write. Serialized/quoted by its OWN type downstream so the prior value stays
+   * valid JSON on the wire even when [type] is UNKNOWN (#3000).
+   */
+  val previousValueType: KeyValueType = KeyValueType.UNKNOWN,
 )

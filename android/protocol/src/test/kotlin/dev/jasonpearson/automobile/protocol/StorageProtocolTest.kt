@@ -204,6 +204,8 @@ class StorageProtocolTest {
               type = "INT",
               timestamp = 1234567890L,
               sequenceNumber = 1L,
+              previousValue = "41",
+              previousValueType = "INT",
             ),
             StorageChangeEvent(
               fileName = "prefs",
@@ -224,7 +226,30 @@ class StorageProtocolTest {
     assertEquals("prefs", deserialized.fileName)
     assertEquals(2, deserialized.changes.size)
     assertEquals("counter", deserialized.changes[0].key)
+    // The runner-supplied prior value and its own type round-trip (#3000).
+    assertEquals("41", deserialized.changes[0].previousValue)
+    assertEquals("INT", deserialized.changes[0].previousValueType)
     assertNull(deserialized.changes[1].key)
+    // Absent prior value defaults to null (value and type).
+    assertNull(deserialized.changes[1].previousValue)
+    assertNull(deserialized.changes[1].previousValueType)
+  }
+
+  @Test
+  fun `Changes response decodes previousValue when omitted (backward compat)`() {
+    // A payload emitted by an older SDK that predates previousValue must still
+    // deserialize, defaulting the field to null (#3000).
+    val legacyJson =
+      """{"type":"changes","fileName":"prefs","changes":[""" +
+        """{"fileName":"prefs","key":"k","value":"v","type":"STRING",""" +
+        """"timestamp":1,"sequenceNumber":1}]}"""
+
+    val deserialized = StorageProtocolSerializer.responseFromJson(legacyJson)
+
+    assertNotNull(deserialized)
+    assertIs<StorageResponse.Changes>(deserialized)
+    assertEquals(1, deserialized.changes.size)
+    assertNull(deserialized.changes[0].previousValue)
   }
 
   @Test

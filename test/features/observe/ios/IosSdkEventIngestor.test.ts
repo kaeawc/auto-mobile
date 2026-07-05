@@ -202,6 +202,31 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect(recorder.storage[0].event.changeType).toBe("delete");
   });
 
+  test("storage_changed threads a runner-supplied previousValue through (#3000)", async () => {
+    await ingestor.recordSdkEvent(event("storage_changed", {
+      suiteName: "defaults", key: "k", value: "new", previousValue: "old", operation: "write",
+    }), "com.app");
+    expect(recorder.storage[0].event).toMatchObject({ key: "k", value: "new", previousValue: "old" });
+  });
+
+  test("storage_changed threads an explicit previousValue: null through (#3000)", async () => {
+    await ingestor.recordSdkEvent(event("storage_changed", {
+      suiteName: "defaults", key: "k", value: "new", previousValue: null, operation: "write",
+    }), "com.app");
+    // Explicit null asserts "no prior value" — must be preserved verbatim, not dropped.
+    expect(recorder.storage[0].event).toHaveProperty("previousValue", null);
+  });
+
+  test("storage_changed omits previousValue when the runner does not emit it (auto-lookup preserved)", async () => {
+    await ingestor.recordSdkEvent(event("storage_changed", {
+      suiteName: "defaults", key: "k", value: "new", operation: "write",
+    }), "com.app");
+    // Field must be absent (undefined) so the repository's `!== undefined` guard
+    // falls through to the auto-lookup for legacy runners.
+    expect(recorder.storage[0].event.previousValue).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(recorder.storage[0].event, "previousValue")).toBe(false);
+  });
+
   test("unknown event types fall back to a log event", async () => {
     await ingestor.recordSdkEvent(event("totally_new_type", { foo: "bar" }), "com.app");
     expect(recorder.logs[0].event).toMatchObject({ tag: "UnknownEvent", filterName: "custom" });

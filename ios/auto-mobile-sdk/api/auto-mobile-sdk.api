@@ -223,9 +223,10 @@ public struct SdkStorageChangedEvent: SdkEvent
   public let suiteName: String?
   public let key: String?
   public let newValue: String?
+  public let previousValue: String?
   public let valueType: String
   public let sequenceNumber: Int64
-  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), suiteName: String?, key: String?, newValue: String?, valueType: String, sequenceNumber: Int64 )
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), suiteName: String?, key: String?, newValue: String?, previousValue: String? = nil, valueType: String, sequenceNumber: Int64 )
 public struct SdkEventBatch: Codable, Sendable
   public let bundleId: String?
   public let events: [SdkEventEnvelope]

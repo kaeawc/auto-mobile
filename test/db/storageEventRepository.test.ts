@@ -1,6 +1,9 @@
 import { beforeEach, afterEach, describe, expect, test } from "bun:test";
-import type { Kysely } from "kysely";
+import { Database as BunDatabase } from "bun:sqlite";
+import { Kysely } from "kysely";
+import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import type { Database } from "../../src/db/types";
+import { runMigrations } from "../../src/db/migrator";
 import { createTestDatabase } from "./testDbHelper";
 import { recordStorageEvent, getStorageEvents } from "../../src/db/storageEventRepository";
 
@@ -143,6 +146,81 @@ describe("StorageEventRepository", () => {
     }, db);
     const events = await getStorageEvents({}, db);
     expect(events[0].previousValue).toBeNull();
+  });
+
+  describe("previous-value lookup query count (acceptance #3000)", () => {
+    // A Kysely wired with a `log` sink that counts SELECT statements issued
+    // against `storage_events`. This is the "query-counting fake" the issue
+    // acceptance asks for: with a runner-supplied previousValue the hot path
+    // must issue ZERO such SELECTs.
+    const buildCountingDb = (): { db: Kysely<Database>; selectCount: () => number } => {
+      let selects = 0;
+      const bunDb = new BunDatabase(":memory:");
+      const kysely = new Kysely<Database>({
+        dialect: new BunSqliteDialect({ database: bunDb }),
+        log: event => {
+          if (event.level === "query") {
+            const sql = event.query.sql.toLowerCase();
+            // Match ONLY the previous-value lookup shape (`select "value" from
+            // "storage_events" …`), not the retention gate's `count(*)`/`timestamp`
+            // probes — so the assertion can't be confounded if retention ever fires
+            // (it won't at this fixture size, but keep the filter precise).
+            if (sql.startsWith('select "value"') && sql.includes("storage_events")) {
+              selects += 1;
+            }
+          }
+        },
+      });
+      return { db: kysely, selectCount: () => selects };
+    };
+
+    test("issues NO select on the hot path when previousValue is supplied", async () => {
+      const { db: counting, selectCount } = buildCountingDb();
+      await runMigrations(counting as Kysely<unknown>);
+      try {
+        // A competing prior row exists that the auto-lookup WOULD read.
+        await recordStorageEvent({
+          deviceId: "d1", timestamp: 1000, applicationId: null, sessionId: null,
+          fileName: "prefs.xml", key: "theme", value: "light", valueType: null, changeType: "add",
+        }, counting);
+        const baseline = selectCount();
+
+        await recordStorageEvent({
+          deviceId: "d1", timestamp: 2000, applicationId: null, sessionId: null,
+          fileName: "prefs.xml", key: "theme", value: "dark", valueType: null, changeType: "modify",
+          previousValue: "runner-supplied",
+        }, counting);
+
+        // No new SELECT against storage_events was issued for the supplied insert.
+        expect(selectCount()).toBe(baseline);
+        const events = await getStorageEvents({ deviceId: "d1", limit: 10 }, counting);
+        expect(events[0].previousValue).toBe("runner-supplied");
+      } finally {
+        await counting.destroy();
+      }
+    });
+
+    test("issues a select on the hot path when previousValue is omitted (auto-lookup)", async () => {
+      const { db: counting, selectCount } = buildCountingDb();
+      await runMigrations(counting as Kysely<unknown>);
+      try {
+        await recordStorageEvent({
+          deviceId: "d1", timestamp: 1000, applicationId: null, sessionId: null,
+          fileName: "prefs.xml", key: "theme", value: "light", valueType: null, changeType: "add",
+        }, counting);
+        const baseline = selectCount();
+
+        await recordStorageEvent({
+          deviceId: "d1", timestamp: 2000, applicationId: null, sessionId: null,
+          fileName: "prefs.xml", key: "theme", value: "dark", valueType: null, changeType: "modify",
+        }, counting);
+
+        // The omitted-field path performs the previous-value lookup.
+        expect(selectCount()).toBeGreaterThan(baseline);
+      } finally {
+        await counting.destroy();
+      }
+    });
   });
 
   test("getStorageEvents filters by deviceId", async () => {

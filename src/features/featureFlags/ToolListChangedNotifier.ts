@@ -1,12 +1,16 @@
-import { logger } from "../../utils/logger";
-
 /**
  * Emits `notifications/tools/list_changed` to connected MCP clients so they
  * re-fetch `tools/list` after a runtime change that alters tool definitions —
  * either the advertised `outputSchema` or which tools are available. Injected
  * into {@link FeatureFlagService} so the notification stays fakeable in unit
- * tests and the feature-flag layer keeps no hard dependency on the MCP server.
+ * tests and the feature-flag layer keeps no hard dependency on the MCP server /
+ * `ToolRegistry`. The production wiring (in `createMcpServer`) delegates to
+ * `ToolRegistry.notifyToolListChanged()`, which owns the server reference and the
+ * best-effort emit — mirroring how `ResourceRegistry` emits `resources/list_changed`.
  * See issue #2963.
+ *
+ * Contract: implementations are best-effort and MUST NOT throw — a failed
+ * notification must never break the flag toggle that triggered it.
  */
 export interface ToolListChangedNotifier {
   notifyToolListChanged(): void;
@@ -20,33 +24,5 @@ export interface ToolListChangedNotifier {
 export class NoopToolListChangedNotifier implements ToolListChangedNotifier {
   notifyToolListChanged(): void {
     // No server/transport to notify — intentionally a no-op.
-  }
-}
-
-/**
- * Minimal surface of the MCP server needed to broadcast the notification. The
- * SDK's `McpServer` satisfies this. Kept narrow so the concrete notifier is
- * testable without constructing a full server (YAGNI).
- */
-export interface ToolListChangeBroadcaster {
-  sendToolListChanged(): void;
-}
-
-/**
- * Production notifier backed by the MCP server. The SDK's `sendToolListChanged()`
- * is itself a guarded no-op when no client is connected, so calling it before a
- * transport attaches (e.g. during startup CLI flag overrides) is safe.
- */
-export class McpServerToolListChangedNotifier implements ToolListChangedNotifier {
-  constructor(private readonly server: ToolListChangeBroadcaster) {}
-
-  notifyToolListChanged(): void {
-    try {
-      this.server.sendToolListChanged();
-    } catch (error) {
-      // Best-effort: a failed tools/list_changed notification must never break a
-      // flag toggle. Expected transient (e.g. transport mid-teardown), so debug.
-      logger.debug(`Failed to send tools/list_changed notification: ${error}`);
-    }
   }
 }

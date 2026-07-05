@@ -89,18 +89,6 @@ describe("FeatureFlagService tools/list_changed notifications", () => {
     expect(notifier.count).toBe(2);
   });
 
-  test("a throwing notifier never breaks the flag toggle", async () => {
-    const notifier = new FakeToolListChangedNotifier();
-    notifier.shouldThrow = true;
-    const service = makeService(notifier);
-    await service.listFlags();
-
-    const updated = await service.setFlag("debug", true);
-
-    expect(updated.enabled).toBe(true);
-    expect(notifier.count).toBe(1);
-  });
-
   test("defaults to a no-op notifier when none is injected", async () => {
     const service = new FeatureFlagService(
       new FakeFeatureFlagRepository(),

@@ -6,7 +6,6 @@ import type { FeatureFlagApplier } from "./FeatureFlagApplier";
 import { DefaultFeatureFlagApplier } from "./FeatureFlagApplier";
 import type { ToolListChangedNotifier } from "./ToolListChangedNotifier";
 import { NoopToolListChangedNotifier } from "./ToolListChangedNotifier";
-import { logger } from "../../utils/logger";
 
 interface FeatureFlagState {
   key: FeatureFlagKey;
@@ -116,14 +115,10 @@ export class FeatureFlagService {
     // advertisement or tool availability) must tell caching clients to re-fetch.
     // Startup application happens in `initialize()`, which deliberately does not
     // call this path, so no notification storm before the first `tools/list`.
+    // The notifier is best-effort and never throws (see ToolListChangedNotifier),
+    // so no guard is needed here — the flag is already committed above regardless.
     if (enabled !== previousEnabled && TOOL_DEFINITION_AFFECTING_FLAGS.has(key)) {
-      try {
-        this.notifier.notifyToolListChanged();
-      } catch (error) {
-        // A failing notification must never break persisting/applying the flag;
-        // the flag state is already committed above. Best-effort, so log at debug.
-        logger.debug(`Failed to notify tools/list_changed for ${key}: ${error}`);
-      }
+      this.notifier.notifyToolListChanged();
     }
 
     return {
@@ -146,6 +141,11 @@ export class FeatureFlagService {
     await this.repository.upsertFlag(key, enabled, config);
     this.configsByKey.set(key, config);
     this.applier.apply(key, enabled, config);
+
+    // No tools/list_changed emit here: `enabled` is unchanged, and no member of
+    // TOOL_DEFINITION_AFFECTING_FLAGS derives its tools/list output from `config`
+    // (all three are pure booleans). Extend this if a config-driven flag ever
+    // starts affecting tool definitions. See issue #2963.
 
     return {
       key: definition.key,

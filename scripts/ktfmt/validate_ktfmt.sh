@@ -239,48 +239,34 @@ printf '%s\n' "${files_to_process[@]}" > "$temp_file"
 
 # Run ktfmt with xargs and capture output
 echo -e "${YELLOW}Running ktfmt...${NC}"
-ktfmt_output=""
 
-# Run ktfmt in check mode to see if files need formatting
 if [[ -s "$temp_file" ]]; then
-    # Use --dry-run or similar flag to check formatting without modifying files
-    # ktfmt doesn't have a --check flag, so we'll run it and capture any output
-    if ktfmt --dry-run < "$temp_file" 2>&1 | grep -q 'Formatted'; then
-        ktfmt_output=$(ktfmt --dry-run < "$temp_file" 2>&1)
-    else
-        # If ktfmt doesn't support --dry-run, use a different approach
-        # Create a temporary directory to test formatting
-        temp_dir=$(mktemp -d)
-        trap 'rm -rf "$temp_dir"' EXIT
+    temp_dir=$(mktemp -d)
+    trap 'rm -rf "$temp_dir"' EXIT
 
-        while IFS= read -r file; do
-            if [[ -f "$file" ]]; then
-                # Copy file to temp directory
-                temp_file_path="$temp_dir/$(basename "$file")"
-                cp "$file" "$temp_file_path"
+    while IFS= read -r file; do
+        if [[ -f "$file" ]]; then
+            # Preserve the file name for actionable output while formatting an
+            # isolated copy so validation never mutates the working tree.
+            temp_file_path="$temp_dir/$(basename "$file")"
+            cp "$file" "$temp_file_path"
 
-                # Format the temp file with --google-style (2-space block and
-                # 2-space continuation indent — the style the tree is formatted
-                # with). Treat a non-zero ktfmt exit as a failure rather than
-                # silently diffing an unformatted copy (which would falsely report
-                # the file as clean).
-                if ! ktfmt --google-style "$temp_file_path" >/dev/null 2>&1; then
-                    errors="${errors}${file}: ktfmt failed to run (non-zero exit)\n"
-                    continue
-                fi
-
-                # Compare original and formatted versions
-                if ! diff -q "$file" "$temp_file_path" >/dev/null 2>&1; then
-                    errors="${errors}${file}: File needs formatting\n"
-                fi
+            # Format the temp file with --google-style (2-space block and
+            # 2-space continuation indent — the style the tree is formatted
+            # with). Treat a non-zero ktfmt exit as a failure rather than
+            # silently diffing an unformatted copy (which would falsely report
+            # the file as clean).
+            if ! ktfmt --google-style "$temp_file_path" >/dev/null 2>&1; then
+                errors="${errors}${file}: ktfmt failed to run (non-zero exit)\n"
+                continue
             fi
-        done < "$temp_file"
-    fi
 
-    # If ktfmt supports --dry-run and produced output, it means files need formatting
-    if [[ -n "$ktfmt_output" ]]; then
-        errors="$ktfmt_output"
-    fi
+            # Compare original and formatted versions.
+            if ! diff -q "$file" "$temp_file_path" >/dev/null 2>&1; then
+                errors="${errors}${file}: File needs formatting\n"
+            fi
+        fi
+    done < "$temp_file"
 else
     echo -e "${GREEN}No files to process${NC}"
 fi
@@ -298,7 +284,7 @@ if [[ -n "$errors" ]]; then
     echo -e "${RED}Formatting issues found in the following files:${NC}"
     echo -e "$errors"
     echo -e "${YELLOW}To fix these issues, run:${NC}"
-    echo "cat <<EOF | xargs ktfmt"
+    echo "cat <<EOF | xargs ktfmt --google-style"
     printf '%s\n' "${files_to_process[@]}"
     echo "EOF"
     echo -e "${RED}Total time elapsed: $total_elapsed ms.${NC}"

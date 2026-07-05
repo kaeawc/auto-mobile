@@ -15,7 +15,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger } from "../utils/logger";
 import { DaemonState } from "../daemon/daemonState";
-import { createToolExecutionContext, updateSessionCache } from "./ToolExecutionContext";
+import { createToolExecutionContext } from "./ToolExecutionContext";
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
 import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
@@ -454,11 +454,6 @@ class ToolRegistryClass {
           // Update session cache if sessionUuid provided
           if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
             const sessionManager = DaemonState.getInstance().getSessionManager();
-            const devicePool = DaemonState.getInstance().getDevicePool();
-            const context = await createToolExecutionContext(sessionUuid, sessionManager, devicePool, {
-              keepScreenAwake,
-              platform: platform === "android" || platform === "ios" ? platform : undefined
-            });
 
             // Cache observation data for certain tools to reduce API calls.
             // Handlers pre-serialize into an MCP envelope, so the ObserveResult
@@ -476,15 +471,6 @@ class ToolRegistryClass {
             const observeScreenshot = name === "observe" ? getStructuredField<string>(response, "screenshot") : undefined;
             if (observeScreenshot) {
               sessionManager.setLastScreenshot(sessionUuid, observeScreenshot);
-            }
-
-            // Update last action timestamp for interaction tools. Unlike the
-            // observe hierarchy/screenshot above, `lastActionTime` is ad-hoc
-            // interaction bookkeeping with no typed slot or consumer, so it
-            // intentionally stays on the generic `customData` path (see #2917
-            // follow-up to type or remove it).
-            if (["tapOn", "swipeOn", "pinchOn", "dragAndDrop", "scroll", "inputText", "clearText", "pressButton"].includes(name)) {
-              await updateSessionCache(context, "lastActionTime", this.timer.now());
             }
           }
 

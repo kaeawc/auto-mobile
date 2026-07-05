@@ -18,10 +18,10 @@ import type { ObserveResult } from "../models/ObserveResult";
  * `setLastHierarchy` / `setLastScreenshot` setters.
  *
  * `customData` still holds other keyed tool state accessed via well-known
- * constants (keep-awake `KeepScreenAwakeState`, the device-label map, the
- * ad-hoc `lastActionTime`). Those remain untyped and are candidates for the
- * same typed-slot treatment — the `Record<string, any>` shape is an escape
- * hatch that can reintroduce the #2917 decoy bug for any future key.
+ * constants (keep-awake `KeepScreenAwakeState`, the device-label map). Those
+ * remain untyped and are candidates for the same typed-slot treatment — the
+ * `Record<string, any>` shape is an escape hatch that can reintroduce the
+ * #2917 decoy bug for any future key.
  */
 export interface SessionCacheData {
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)

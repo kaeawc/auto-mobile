@@ -142,7 +142,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   });
 
   test("sanitizes a tapOn action response's .observation end-to-end through the chokepoint", async () => {
-    await setupAutolockedSession();
+    const sessionId = await setupAutolockedSession();
 
     const observation = makeObserveResult();
     ToolRegistry.registerDeviceAware(
@@ -171,5 +171,8 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     const parsed = JSON.parse(response.content[0].text);
     expect(parsed.observation.viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
     expect(response.content[0].text).toBe(stringifyToolResponse(response.structuredContent));
+
+    const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
+    expect(cacheData.customData?.lastActionTime).toBeUndefined();
   });
 });

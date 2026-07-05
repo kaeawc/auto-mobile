@@ -116,6 +116,10 @@ export class Daemon {
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
+  // Detached iOS CtrlProxy warm-up started AFTER readiness (socket + PID). Kept
+  // as a handle purely so tests (and, if ever needed, shutdown) can await the
+  // best-effort warm-up; readiness never depends on it. See start().
+  private iosServicesWarmup: Promise<void> = Promise.resolve();
 
   constructor(
     options: DaemonOptions = {},
@@ -243,14 +247,25 @@ export class Daemon {
     // Initialize device pool BEFORE starting socket server
     // This ensures clients connecting via socket will see initialized device pool
     // Wait up to 5 seconds - emulators should already be running
+    //
+    // The device pool stays on the readiness critical path deliberately: the
+    // socket-server contract below is that a client connecting right after
+    // readiness sees a populated pool (git blame 811381b7/0a01f468). Its warm-up
+    // is bounded (initializeDevicePoolWithTimeout(5000)).
+    //
+    // iOS CtrlProxy warm-up (initializeIosServices) is NOT gated here anymore.
+    // It is a pure latency optimization ("so observe calls are fast") whose own
+    // contract already says failures are non-fatal and the service is set up on
+    // the first tool call if needed (see initializeIosServices below). Awaiting
+    // it added up to 5s/device to the readiness path, so on a cold macOS CI
+    // runner the serial bring-up (Bun cold start + migrations + device pool +
+    // iOS warm-up) could blow the 10s DAEMON_STARTUP_TIMEOUT_MS budget and fail
+    // with "Daemon failed to start within 10000ms". It is now started detached
+    // AFTER the socket + PID file are up (issue #3110, structural fix "B2").
     logger.info("Initializing device pool...");
     startupBenchmark.startPhase("deviceDiscovery");
     await this.initializeDevicePoolWithTimeout(5000);
     startupBenchmark.endPhase("deviceDiscovery");
-
-    // Initialize iOS CtrlProxy iOS connections for discovered iOS devices
-    // This establishes WebSocket connections early so observe calls are fast
-    await this.initializeIosServices();
 
     // Start Unix socket server AFTER device pool is ready
     logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
@@ -290,6 +305,19 @@ export class Daemon {
 
     // Write PID file
     await this.writePidFile();
+
+    // Readiness is now reached: the socket server is listening AND the PID file
+    // is written, which is exactly what DaemonManager.waitForReady() checks
+    // (socket exists + status().running + a successful connect probe). Only now
+    // do we kick off the best-effort iOS CtrlProxy warm-up, detached, so its
+    // per-device 5s cap can never delay readiness (issue #3110).
+    //
+    // This runs after readiness on purpose. An early iOS tool call arriving in
+    // the warm-up window is already handled by initializeIosServices' contract:
+    // the service is (re)established on first use, so a not-yet-warm connection
+    // is a latency cost, not a correctness bug — the same behavior an iOS device
+    // discovered after startup already gets.
+    this.startIosServicesWarmup();
 
     // Verify DaemonState is initialized
     const isInitialized = DaemonState.getInstance().isInitialized();
@@ -1088,6 +1116,25 @@ export class Daemon {
       // Continue daemon startup even if device discovery fails
       // Tools will handle "no devices" errors when sessions are created
     }
+  }
+
+  /**
+   * Kick off the best-effort iOS CtrlProxy warm-up WITHOUT awaiting it, so its
+   * per-device timeout can never delay daemon readiness (issue #3110). Called
+   * only after the socket server is listening and the PID file is written — i.e.
+   * after DaemonManager.waitForReady()'s conditions are already satisfiable.
+   *
+   * The detached promise must never surface as an unhandled rejection.
+   * initializeIosServices already swallows per-device failures (logging via the
+   * shared logger), but we still attach a defensive catch so any unforeseen throw
+   * is logged rather than crashing the process via the daemon's unhandled-rejection
+   * fatal handler (per the repo error-handling convention). The promise is retained
+   * on `iosServicesWarmup` so tests (and, if ever needed, shutdown) can await it.
+   */
+  private startIosServicesWarmup(): void {
+    this.iosServicesWarmup = this.initializeIosServices().catch(error => {
+      logger.warn(`[Daemon] Detached iOS CtrlProxy warm-up failed: ${error}`);
+    });
   }
 
   /**

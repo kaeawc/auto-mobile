@@ -1117,6 +1117,58 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("unknown command errors are rewritten with Android runner upgrade guidance", async function() {
+      const errorTimer = new FakeTimer();
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        errorTimer
+      );
+
+      const shape: HighlightShape = {
+        type: "box",
+        bounds: { x: 10, y: 20, width: 100, height: 80 },
+        style: { strokeColor: "#FF0000", strokeWidth: 4 }
+      };
+
+      try {
+        const requestPromise = testClient.requestAddHighlight("highlight-stale-runner", shape, 2000);
+
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket as CapturingWebSocket, 2);
+
+        const highlightMsg = (socket as CapturingWebSocket).sentMessages.find(m => {
+          try { return JSON.parse(m).type === "add_highlight"; } catch { return false; }
+        });
+        expect(highlightMsg).toBeDefined();
+        const payload = JSON.parse(highlightMsg!);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: payload.requestId,
+          success: false,
+          error: "Unknown command type: add_highlight",
+          timestamp: errorTimer.now()
+        }));
+
+        const result = await errorTimer.resolvePromise(requestPromise);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("add_highlight");
+        expect(result.error).toContain("Android CtrlProxy APK");
+        expect(result.error).toContain("older than this daemon");
+        expect(result.error).toContain("AUTOMOBILE_CTRL_PROXY_APK_PATH");
+        expect(result.error).not.toContain("AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED");
+        expect(result.error).not.toContain("iOS CtrlProxy runner");
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("a type:error frame with a non-matching requestId does not disturb other requests", async function() {
       // A null/unknown requestId (e.g. an unparseable payload the runner couldn't correlate) must
       // be a safe no-op: it must not crash, and must not wrongly resolve an unrelated pending

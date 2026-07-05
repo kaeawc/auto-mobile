@@ -19,6 +19,7 @@ import { AdbClientFactory, defaultAdbClientFactory } from "../../../utils/androi
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
 import { logger } from "../../../utils/logger";
+import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import {
   BootedDevice,
   ImeAction,
@@ -1988,7 +1989,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // routed into CtrlProxyHierarchy's bespoke wait or the hierarchy caller hangs to timeout
       // (issue #3032). Both calls are safe no-ops on unknown ids.
       if (message.type === "error") {
-        const errorText = message.error || "Runner reported an unstructured protocol error";
+        const errorText = rewriteUnknownCommandError(
+          message.error || "Runner reported an unstructured protocol error",
+          "android"
+        );
         logger.warn(`[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`);
         if (message.requestId) {
           this.requestManager.resolveError(message.requestId, errorText);

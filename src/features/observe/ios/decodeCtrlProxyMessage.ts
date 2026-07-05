@@ -8,6 +8,7 @@
  */
 
 import type { WebSocketMessage } from "./types";
+import { rewriteUnknownCommandError as rewritePlatformUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 
 /**
  * Decoded request/response message. Exactly one of `result` / `errorMessage` is
@@ -28,11 +29,7 @@ export interface DecodedCtrlProxyMessage {
  * through unchanged.
  */
 export function rewriteUnknownCommandError(error: string): string {
-  const match = /^Unknown command type: (.+)$/.exec(error);
-  if (!match) {
-    return error;
-  }
-  return `iOS CtrlProxy runner rejected ${match[1]} as unknown. The runner is likely older than this daemon; rebuild and redeploy the iOS CtrlProxy runner from this source checkout, or run the iOS hot-reload watcher with --manage-ios-runner.`;
+  return rewritePlatformUnknownCommandError(error, "ios");
 }
 
 /**

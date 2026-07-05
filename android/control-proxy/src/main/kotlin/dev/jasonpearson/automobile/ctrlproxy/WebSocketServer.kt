@@ -92,12 +92,20 @@ class WebSocketServer(
           return "Unknown command type: $type"
         }
       }
+      val looksLikeOutOfRangeNumber =
+        cause.contains("special floating-point value", ignoreCase = true) ||
+          cause.contains("non-finite floating point", ignoreCase = true) ||
+          cause.contains("does not conform JSON specification", ignoreCase = true)
+      if (looksLikeOutOfRangeNumber) {
+        return "Malformed request: a numeric value is out of range or not representable."
+      }
       return "Malformed request: $cause"
     }
   }
 
   private var server: EmbeddedServer<*, *>? = null
   private val connections = mutableSetOf<DefaultWebSocketSession>()
+  private val requestConnections = mutableMapOf<String, DefaultWebSocketSession>()
   private val connectionCount = AtomicInteger(0)
 
   // Flow to broadcast messages to all connected clients
@@ -158,7 +166,7 @@ class WebSocketServer(
                       is Frame.Text -> {
                         val text = frame.readText()
                         Log.d(TAG, "Received from client #$connectionId: $text")
-                        handleClientMessage(text)
+                        handleClientMessage(text, this)
                       }
                       is Frame.Close -> {
                         Log.d(TAG, "Client #$connectionId closed connection")
@@ -171,7 +179,10 @@ class WebSocketServer(
                 } catch (e: Exception) {
                   Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
                 } finally {
-                  synchronized(connections) { connections.remove(this) }
+                  synchronized(connections) {
+                    connections.remove(this)
+                    requestConnections.values.removeAll { it == this }
+                  }
                   Log.d(
                     TAG,
                     "Client #$connectionId disconnected. Active connections: ${connections.size}",
@@ -211,6 +222,7 @@ class WebSocketServer(
           }
         }
         connections.clear()
+        requestConnections.clear()
       }
 
       server?.stop(1000, 2000)
@@ -223,6 +235,7 @@ class WebSocketServer(
 
   /** Broadcast a message to all connected clients */
   suspend fun broadcast(message: String) {
+    forgetRequestConnectionForRawMessage(message)
     _messageFlow.emit(message)
   }
 
@@ -236,6 +249,7 @@ class WebSocketServer(
   suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
     val perfTiming = perfProvider.flush()
     val message = messageBuilder(perfTiming)
+    forgetRequestConnectionForRawMessage(message)
     _messageFlow.emit(message)
   }
 
@@ -249,6 +263,7 @@ class WebSocketServer(
   suspend fun broadcastWithPerfSync(messageBuilder: (perfTiming: JsonElement?) -> String) {
     val perfTiming = perfProvider.flush()
     val message = messageBuilder(perfTiming)
+    forgetRequestConnectionForRawMessage(message)
     broadcastToClients(message)
   }
 
@@ -278,6 +293,22 @@ class WebSocketServer(
    */
   suspend fun broadcast(response: WebSocketResponse, mode: BroadcastMode = BroadcastMode.Async) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
+    val requestId = extractRequestId(message)
+    if (response is ErrorResponse) {
+      val target =
+        if (requestId != null) {
+          synchronized(connections) { requestConnections.remove(requestId) }
+        } else {
+          null
+        }
+      if (target != null) {
+        sendToClient(target, message)
+        return
+      }
+    } else {
+      forgetRequestConnection(requestId)
+    }
+
     when (mode) {
       BroadcastMode.Async -> _messageFlow.emit(message)
       BroadcastMode.Sync -> broadcastToClients(message)
@@ -319,6 +350,41 @@ class WebSocketServer(
     }
   }
 
+  /** Internal method to send a message to a single client connection. */
+  private suspend fun sendToClient(connection: DefaultWebSocketSession, message: String) {
+    try {
+      connection.send(Frame.Text(message))
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to send to originating connection, marking as dead", e)
+      synchronized(connections) {
+        connections.remove(connection)
+        requestConnections.values.removeAll { it == connection }
+      }
+    }
+  }
+
+  /** Send a typed error response only to the client whose inbound message failed. */
+  private suspend fun sendErrorResponse(
+    connection: DefaultWebSocketSession,
+    response: ErrorResponse,
+  ) {
+    val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
+    response.requestId?.let { requestId ->
+      synchronized(connections) { requestConnections.remove(requestId) }
+    }
+    sendToClient(connection, message)
+  }
+
+  private fun forgetRequestConnectionForRawMessage(message: String) {
+    forgetRequestConnection(extractRequestId(message))
+  }
+
+  private fun forgetRequestConnection(requestId: String?) {
+    requestId?.let {
+      synchronized(connections) { requestConnections.remove(requestId) }
+    }
+  }
+
   /** Get the number of active connections */
   fun getConnectionCount(): Int {
     return synchronized(connections) { connections.size }
@@ -344,7 +410,7 @@ class WebSocketServer(
   }
 
   /** Handle an incoming client message by decoding it and dispatching via [messageHandler]. */
-  private suspend fun handleClientMessage(message: String) {
+  private suspend fun handleClientMessage(message: String, connection: DefaultWebSocketSession) {
     val handler = messageHandler
     if (handler == null) {
       Log.w(TAG, "No message handler configured; ignoring inbound message: $message")
@@ -359,16 +425,20 @@ class WebSocketServer(
         // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
         // #2985.
         Log.w(TAG, "Failed to parse client message: $message", e)
-        broadcast(
+        sendErrorResponse(
+          connection,
           ErrorResponse(
             requestId = extractRequestId(message),
             error = describeDecodeFailure(message, e),
-          )
+          ),
         )
         return
       }
 
     Log.d(TAG, "Received ${request::class.simpleName} (requestId: ${request.requestId})")
+    request.requestId?.let { requestId ->
+      synchronized(connections) { requestConnections[requestId] = connection }
+    }
     // Dispatch inline on the WebSocket read loop (already a coroutine) rather than launching into
     // `scope`, so commands execute in wire order: a synchronous command such as
     // set_accessibility_flags fully applies before the next frame (e.g. a request_hierarchy that
@@ -378,6 +448,9 @@ class WebSocketServer(
       val response = handler.handleMessage(request)
       if (response != null) {
         broadcast(response)
+        request.requestId?.let { requestId ->
+          synchronized(connections) { requestConnections.remove(requestId) }
+        }
       }
     } catch (e: CancellationException) {
       // Never convert cooperative cancellation into an error frame — it means the read loop /
@@ -387,11 +460,12 @@ class WebSocketServer(
       // Surface a structured error correlated by the decoded requestId instead of only logging, so
       // the awaiting client fails fast rather than timing out. See #2985.
       Log.e(TAG, "Error handling message via handler", e)
-      broadcast(
+      sendErrorResponse(
+        connection,
         ErrorResponse(
           requestId = request.requestId,
           error = "Handler error: ${e.message ?: e::class.simpleName ?: "unknown error"}",
-        )
+        ),
       )
     }
   }

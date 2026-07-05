@@ -57,6 +57,8 @@ export function configureSqliteDatabase(sqliteDb: SqlitePragmaDatabase): void {
   sqliteDb.exec("PRAGMA journal_mode = WAL;");
 
   // WAL + NORMAL avoids an fsync per commit while remaining corruption-safe.
+  // The whole DB stores local telemetry, diagnostics, cache, config, and session
+  // state where losing the last commit on OS/power loss is acceptable.
   sqliteDb.exec("PRAGMA synchronous = NORMAL;");
 
   // Enable foreign key enforcement for cascade deletes

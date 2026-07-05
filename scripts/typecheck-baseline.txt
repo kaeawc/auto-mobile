@@ -31,6 +31,12 @@ src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2345: Argu
 src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
 src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
 src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2769: No overload matches this call.
+src/db/migrations/2026_07_02_000_event_composite_indexes.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
+src/db/migrations/2026_07_02_000_event_composite_indexes.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
+src/db/migrations/2026_07_02_000_event_composite_indexes.ts: error TS2769: No overload matches this call.
+src/db/migrations/2026_07_03_000_drop_redundant_device_indexes.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
+src/db/migrations/2026_07_03_000_drop_redundant_device_indexes.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
+src/db/migrations/2026_07_03_000_drop_redundant_device_indexes.ts: error TS2769: No overload matches this call.
 src/db/migrator.ts: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
 src/db/migrator.ts: error TS2307: Cannot find module 'kysely/migration' or its corresponding type declarations.
 src/db/migrator.ts: error TS2307: Cannot find module 'kysely/migration' or its corresponding type declarations.
@@ -236,7 +242,6 @@ src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2345: Argument of type '
 src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2420: Class 'NoOpIOSCtrlProxyManager' incorrectly implements interface 'CtrlProxyIosManager'.
 src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2739: Type '{ fps: number; frameTimeMs: number; jankFrames: number; droppedFrames: number; memoryUsageMb: number; cpuUsagePercent: number; touchLatencyMs: number | null; timeToInteractiveMs: number | null; screenName: string | null; isResponsive: boolean; }' is missing the following properties from type 'PerformanceStreamData': recompositionCount, recompositionRate
 src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2741: Property 'resetSetupState' is missing in type 'NoOpIOSCtrlProxyManager' but required in type 'CtrlProxyIosManager'.
-src/features/observe/ios/IosSdkEventIngestor.ts: error TS2353: Object literal may only specify known properties, and 'operation' does not exist in type '{ timestamp: number; applicationId: string | null; fileName: string; key: string | null; value: string | null; valueType: string | null; changeType: string; previousValue?: string | null | undefined; }'.
 src/features/observe/ios/index.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
 src/features/observe/ios/index.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
 src/features/performance/PerformanceAudit.ts: error TS2551: Property 'refreshRateHz' does not exist on type 'DeviceCapabilities'. Did you mean 'refreshRate'?

@@ -3,70 +3,103 @@ import {
   createStructuredToolResponse,
   getStructuredField,
   getStructuredPayload,
+  StructuredToolResponse,
 } from "../../src/utils/toolUtils";
 
 /**
- * Typed seam for the envelope-vs-`structuredContent` dead-read bug class (issue
- * #2907). `createStructuredToolResponse` hoists ONLY `success`/`error` to the
- * envelope top level; every other payload field lives under `structuredContent`.
- * A raw `response.found` read silently yields `undefined`. `getStructuredField`
- * is the single accessor every payload-field read must route through.
+ * Typed seam for the envelope-vs-`structuredContent` dead-read bug class (issues
+ * #2907 / #2932). `createStructuredToolResponse` hoists ONLY `success`/`error`
+ * to the envelope top level; every other payload field lives under
+ * `structuredContent`, so a raw `response.found` read silently yields
+ * `undefined`.
+ *
+ * `getStructuredField` is now fully typed against a concrete payload: the `key`
+ * is constrained to `keyof TPayload` and the return type is `TPayload[K]`. That
+ * makes BOTH the envelope-top-level read AND a key typo / wrong `<T>` a **compile
+ * error** (issue #2932) — the compile-time half is asserted by the typecheck
+ * gate over the migrated src read sites (toolRegistry, DefaultUIStateSetup); the
+ * runtime behavior below asserts the accessor is otherwise unchanged.
  */
-describe("getStructuredField", () => {
+
+/** Minimal concrete payload standing in for a real tool payload. */
+interface SamplePayload {
+  success: boolean;
+  found?: boolean;
+  viewHierarchy?: { hierarchy: { node: object } };
+  awaitTimeout?: boolean;
+}
+
+// A loose view of the accessor, used ONLY to exercise the runtime own-key guard
+// with keys the type system now (correctly) forbids passing directly.
+const looseField = getStructuredField as unknown as (
+  response: unknown,
+  key: string
+) => unknown;
+
+describe("getStructuredField (typed)", () => {
   test("returns a payload field that lives under structuredContent", () => {
-    const response = createStructuredToolResponse({ success: true, found: true });
-    expect(getStructuredField<boolean>(response, "found")).toBe(true);
+    const response = createStructuredToolResponse<SamplePayload>({ success: true, found: true });
+    const found: boolean | undefined = getStructuredField(response, "found");
+    expect(found).toBe(true);
   });
 
   test("returns a nested object field by reference", () => {
     const hierarchy = { hierarchy: { node: {} } };
-    const response = createStructuredToolResponse({ success: true, viewHierarchy: hierarchy });
+    const response = createStructuredToolResponse<SamplePayload>({ success: true, viewHierarchy: hierarchy });
     expect(getStructuredField(response, "viewHierarchy")).toBe(hierarchy);
   });
 
   test("returns undefined for a field absent from the payload", () => {
-    const response = createStructuredToolResponse({ success: true });
+    const response = createStructuredToolResponse<SamplePayload>({ success: true });
     expect(getStructuredField(response, "found")).toBeUndefined();
   });
 
   test("ignores a field that exists only at the envelope top level, not in structuredContent", () => {
     // Hand-built envelope where `found` sits at the top level but NOT in the
     // payload — the accessor must read only `structuredContent` and not leak it.
-    const envelope = { content: [], structuredContent: { success: true }, found: true };
-    expect(getStructuredField<boolean>(envelope, "found")).toBeUndefined();
+    const envelope: StructuredToolResponse<SamplePayload> = {
+      content: [],
+      structuredContent: { success: true },
+    };
+    (envelope as Record<string, unknown>).found = true;
+    expect(getStructuredField(envelope, "found")).toBeUndefined();
   });
 
   test("returns undefined for null / undefined responses", () => {
-    expect(getStructuredField(null, "found")).toBeUndefined();
-    expect(getStructuredField(undefined, "found")).toBeUndefined();
+    expect(getStructuredField<SamplePayload, "found">(null, "found")).toBeUndefined();
+    expect(getStructuredField<SamplePayload, "found">(undefined, "found")).toBeUndefined();
   });
 
   test("returns undefined when structuredContent is missing or not an object", () => {
-    expect(getStructuredField({ content: [] }, "found")).toBeUndefined();
-    expect(getStructuredField({ structuredContent: "not-an-object" }, "found")).toBeUndefined();
-    expect(getStructuredField({ structuredContent: null }, "found")).toBeUndefined();
+    expect(looseField({ content: [] }, "found")).toBeUndefined();
+    expect(looseField({ structuredContent: "not-an-object" }, "found")).toBeUndefined();
+    expect(looseField({ structuredContent: null }, "found")).toBeUndefined();
   });
 
   test("reading the same field off the envelope top level is undefined (the foot-gun)", () => {
-    const response = createStructuredToolResponse({ success: true, found: true });
-    // Raw top-level read — the mistake this accessor exists to prevent.
+    const response = createStructuredToolResponse<SamplePayload>({ success: true, found: true });
+    // Raw top-level read — the mistake this accessor exists to prevent. At the
+    // migrated src read sites this line is now a COMPILE error; here we cast to
+    // reproduce the historical runtime foot-gun.
     expect((response as Record<string, unknown>).found).toBeUndefined();
     // Accessor gets the real value.
-    expect(getStructuredField<boolean>(response, "found")).toBe(true);
+    expect(getStructuredField(response, "found")).toBe(true);
   });
 
   test("does not resolve inherited (non-own) keys like prototype methods", () => {
-    const response = createStructuredToolResponse({ success: true });
-    // `toString`/`constructor` exist on Object.prototype but are not payload
-    // fields — an own-key guard must keep them from leaking through.
-    expect(getStructuredField(response, "toString")).toBeUndefined();
-    expect(getStructuredField(response, "constructor")).toBeUndefined();
-    expect(getStructuredField(response, "__proto__")).toBeUndefined();
+    const response = createStructuredToolResponse<SamplePayload>({ success: true });
+    // `toString`/`constructor`/`__proto__` exist on Object.prototype but are not
+    // payload fields. The keyof constraint now makes passing them a compile error,
+    // so the own-key runtime guard is defense-in-depth — exercised via the loose
+    // view to prove it still holds.
+    expect(looseField(response, "toString")).toBeUndefined();
+    expect(looseField(response, "constructor")).toBeUndefined();
+    expect(looseField(response, "__proto__")).toBeUndefined();
   });
 
   test("resolves an own key whose value is falsy (found: false)", () => {
-    const response = createStructuredToolResponse({ success: true, found: false });
-    expect(getStructuredField<boolean>(response, "found")).toBe(false);
+    const response = createStructuredToolResponse<SamplePayload>({ success: true, found: false });
+    expect(getStructuredField(response, "found")).toBe(false);
   });
 });
 

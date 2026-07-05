@@ -9,7 +9,8 @@ import { NavigationEdge, UIState } from "./NavigationGraphManager";
 import { ModalState, ScrollPosition } from "../../utils/interfaces/NavigationGraph";
 import { UIStateExtractor } from "./UIStateExtractor";
 import { RealObserveScreen } from "../observe/ObserveScreen";
-import { getStructuredField } from "../../utils/toolUtils";
+import { getStructuredField, StructuredToolResponse } from "../../utils/toolUtils";
+import { SwipeOnToolPayload } from "../../models";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
 
@@ -165,15 +166,19 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // `--actions-diff-observe` this setup scroll neither diffs its observation
       // nor advances the agent-facing diff baseline — the `found` read below still
       // sees the full (unstripped) result.
-      const result = await swipeOnTool.handler(markInternalToolCall(swipeOnArgs));
+      // Typed envelope (issue #2932): `swipeOnTool.handler` is declared
+      // `Promise<any>` at the registry boundary, so narrow to the concrete
+      // `SwipeOnToolPayload` envelope here. `found` lives under
+      // `structuredContent` (createStructuredToolResponse hoists only
+      // `success`/`error`); a raw `result?.found` off the envelope was always
+      // undefined, leaving this success branch dead so setup logged the "could
+      // not find" warning even on a successful scroll (issue #2897; same class
+      // as the toolRegistry scroll-position and #2758 lastHierarchy fixes). With
+      // `result` typed, `result.found` is now a compile error and the
+      // `getStructuredField` keys are checked against the payload.
+      const result: StructuredToolResponse<SwipeOnToolPayload> = await swipeOnTool.handler(markInternalToolCall(swipeOnArgs));
 
-      // `swipeOn` pre-serializes into an MCP envelope via createStructuredToolResponse,
-      // which hoists only `success`/`error` to the top level — `found` lives under
-      // `structuredContent`. Reading `result?.found` off the envelope was always
-      // undefined, so this success branch was dead and setup always logged the
-      // "could not find" warning even on a successful scroll (issue #2897; same class
-      // as the toolRegistry scroll-position and #2758 lastHierarchy fixes).
-      if (getStructuredField<boolean>(result, "success") && getStructuredField<boolean>(result, "found")) {
+      if (getStructuredField(result, "success") && getStructuredField(result, "found")) {
         logger.info(`[UI_STATE_SETUP] Successfully scrolled to target element`);
         return `swipeOn(lookFor: ${JSON.stringify(scrollPosition.targetElement)})`;
       } else {

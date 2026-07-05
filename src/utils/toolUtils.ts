@@ -165,35 +165,38 @@ export const getStructuredPayload = <T = Record<string, unknown>>(
 
 /**
  * The typed seam for reading a single payload field off an MCP tool-call
- * envelope (issue #2907). Payload fields live under `structuredContent`, not on
- * the envelope top level — a raw `response.found` read is always `undefined`
- * and produces a silently-dead branch. Route every payload-field read through
- * this accessor so the read targets `structuredContent`, not the envelope.
+ * envelope (issues #2907 / #2932). Payload fields live under `structuredContent`,
+ * not on the envelope top level — a raw `response.found` read is always
+ * `undefined` and produces a silently-dead branch. Route every payload-field
+ * read through this accessor so the read targets `structuredContent`, not the
+ * envelope.
  *
- * This is a *structural* guard: it guarantees you read from `structuredContent`
- * and not the envelope top level, and only an own key resolves. It does NOT
- * validate that `key` exists on the payload or that the value matches `T` — the
- * caller asserts `T`, so a wrong `key` or `T` still yields a silent `undefined`
- * / mistyped value. Making those a compile error requires a fully typed handler
- * boundary (see follow-up); this accessor closes the envelope-vs-payload half.
+ * Fully typed against a concrete payload `TPayload`: because `response` is a
+ * `StructuredToolResponse<TPayload>`, the `key` is constrained to
+ * `keyof TPayload` (a typo like `"founded"` is a **compile error**) and the
+ * return type is `TPayload[K]` (a wrong `T` assertion is gone — the value type
+ * is inferred). This closes the stringly-typed hole the earlier loose
+ * `getStructuredField<T>(response, "key")` left open (issue #2932): both the
+ * envelope-vs-payload half AND the typo/wrong-type half are now compiler-caught.
  *
- * Accepts a loosely-typed envelope (handlers hand back `any`), safely narrows,
- * and returns `undefined` for null/undefined responses, a missing or
- * non-object `structuredContent`, or an absent (or non-own) field.
+ * Still a *structural* guard at runtime: only an own key resolves, so an
+ * inherited prototype key never leaks through. Returns `undefined` for
+ * null/undefined responses, a missing or non-object `structuredContent`, or an
+ * absent (own) field.
  *
- * @param response The tool-call envelope (or anything envelope-shaped).
- * @param key The payload field to read from `structuredContent`.
+ * @param response The typed tool-call envelope.
+ * @param key The payload field to read from `structuredContent` (keyof TPayload).
  */
-export const getStructuredField = <T = unknown>(
-  response: { structuredContent?: unknown } | null | undefined,
-  key: string
-): T | undefined => {
+export const getStructuredField = <TPayload, K extends keyof TPayload & string>(
+  response: StructuredToolResponse<TPayload> | null | undefined,
+  key: K
+): TPayload[K] | undefined => {
   const structuredContent = response?.structuredContent;
   if (structuredContent && typeof structuredContent === "object") {
     if (!Object.hasOwn(structuredContent, key)) {
       return undefined;
     }
-    return (structuredContent as Record<string, unknown>)[key] as T | undefined;
+    return (structuredContent as TPayload)[key];
   }
   return undefined;
 };

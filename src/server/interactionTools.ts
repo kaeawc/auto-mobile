@@ -21,9 +21,10 @@ import {
   ActionableError,
   BootedDevice,
   ClipboardResult,
+  SwipeOnToolPayload,
 } from "../models";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
-import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
+import { createJSONToolResponse, createStructuredToolResponse, StructuredToolResponse } from "../utils/toolUtils";
 import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
@@ -749,7 +750,7 @@ export function registerInteractionTools() {
   };
 
   // Swipe on handler
-  const swipeOnHandler = async (device: BootedDevice, args: SwipeOnArgs, progress?: ProgressCallback) => {
+  const swipeOnHandler = async (device: BootedDevice, args: SwipeOnArgs, progress?: ProgressCallback): Promise<StructuredToolResponse<SwipeOnToolPayload>> => {
     RecompositionTracker.getInstance().recordInteraction();
     const swipeOn = new SwipeOn(device);
     const resolvedDirection = resolveSwipeDirection({ direction: args.direction, gestureType: args.gestureType });

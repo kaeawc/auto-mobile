@@ -82,7 +82,7 @@ export type CompactBounds = [number, number, number, number];
 
 /**
  * Return an output-only copy of `obs` shrunk for serialization. Applies, in
- * order: perf-audit strip (always), top-level debug-perf telemetry strip
+ * order: perf-audit strip (always), top-level debug-perf telemetry reduction
  * (always), per-node trim (default on), bounds compaction (gated by
  * `cfg.compact`), and elements-drop (gated by `cfg.dropElements`). The input is
  * never mutated.
@@ -95,7 +95,7 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
   const out = JSON.parse(JSON.stringify(obs)) as ObserveResult;
 
   stripPerformanceAudit(out);
-  stripTopLevelDebugPerfTelemetry(out);
+  reduceTopLevelDebugPerfTelemetry(out);
 
   if (cfg.trimNodes !== false) {
     for (const root of toNodeArray(out.viewHierarchy?.hierarchy?.node)) {
@@ -115,14 +115,26 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
 }
 
 /**
- * Drop top-level debug-perf telemetry that is useful while measuring capture
- * internals but not for agent decisions. `performanceAudit` keeps the computed
- * summary metrics; these fields duplicate timing/raw graphics detail and are
- * only removed from the output copy.
+ * Reduce top-level debug-perf telemetry that is useful while measuring capture
+ * internals but mostly duplicates richer summaries. `perfTiming` is raw capture
+ * timing, so it is dropped. `gfxMetrics` also carries action UI-stability
+ * fields, so only frame timing fields covered by `performanceAudit.metrics` are
+ * removed, and only when an audit summary exists.
  */
-function stripTopLevelDebugPerfTelemetry(out: ObserveResult): void {
+function reduceTopLevelDebugPerfTelemetry(out: ObserveResult): void {
   delete out.perfTiming;
-  delete out.gfxMetrics;
+
+  if (!out.performanceAudit || !out.gfxMetrics) {
+    return;
+  }
+
+  delete out.gfxMetrics.percentile50thMs;
+  delete out.gfxMetrics.percentile90thMs;
+  delete out.gfxMetrics.percentile95thMs;
+  delete out.gfxMetrics.percentile99thMs;
+  delete out.gfxMetrics.missedVsyncCount;
+  delete out.gfxMetrics.slowUiThreadCount;
+  delete out.gfxMetrics.frameDeadlineMissedCount;
 }
 
 /**

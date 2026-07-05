@@ -149,7 +149,7 @@ describe("sanitizeObserveResult", () => {
     });
   });
 
-  describe("top-level debug-perf telemetry strip (always)", () => {
+  describe("top-level debug-perf telemetry reduction (always)", () => {
     test("drops perfTiming from the output copy while leaving the input untouched", () => {
       const { observe } = loadAndroidHomeObserve();
       expect(observe.perfTiming).toBeDefined();
@@ -170,48 +170,81 @@ describe("sanitizeObserveResult", () => {
       expect(measureValue(out).tokens).toBeLessThan(measureValue(withPerfTiming).tokens);
     });
 
-    test("drops redundant gfxMetrics without mutating performanceAudit metrics", () => {
+    test("preserves action UI-stability gfxMetrics when no performanceAudit exists", () => {
       const { observe } = loadAndroidHomeObserve();
+      delete observe.performanceAudit;
       observe.gfxMetrics = {
-        p50Ms: 12,
-        p90Ms: 18,
-        p95Ms: 22,
-        p99Ms: 30,
-        jankCount: 2,
+        packageName: "com.example.app",
+        percentile50thMs: 12,
+        percentile90thMs: 18,
+        percentile95thMs: 22,
+        percentile99thMs: 30,
         missedVsyncCount: 1,
         slowUiThreadCount: 1,
         frameDeadlineMissedCount: 0,
-        gfxinfoRaw: "raw gfxinfo dump that overlaps performanceAudit.metrics",
-      } as any;
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      };
+      const gfxMetricsBefore = JSON.stringify(observe.gfxMetrics);
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+
+      expect(out.gfxMetrics).toEqual(observe.gfxMetrics);
+      expect(JSON.stringify(observe.gfxMetrics)).toBe(gfxMetricsBefore);
+    });
+
+    test("trims redundant gfxMetrics frame fields when performanceAudit metrics are present", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.gfxMetrics = {
+        packageName: "com.example.app",
+        percentile50thMs: 12,
+        percentile90thMs: 18,
+        percentile95thMs: 22,
+        percentile99thMs: 30,
+        missedVsyncCount: 1,
+        slowUiThreadCount: 1,
+        frameDeadlineMissedCount: 0,
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      };
       const auditMetricsBefore = JSON.stringify(observe.performanceAudit?.metrics);
       const gfxMetricsBefore = JSON.stringify(observe.gfxMetrics);
 
       const out = sanitizeObserveResult(observe, DROP_NONE);
 
-      expect(out.gfxMetrics).toBeUndefined();
+      expect(out.gfxMetrics).toEqual({
+        packageName: "com.example.app",
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      });
       expect(JSON.stringify(observe.gfxMetrics)).toBe(gfxMetricsBefore);
       expect(JSON.stringify(observe.performanceAudit?.metrics)).toBe(auditMetricsBefore);
     });
 
-    test("measurably shrinks bytes and tokens by dropping synthetic gfxMetrics", () => {
+    test("measurably shrinks bytes and tokens by trimming redundant gfxMetrics frame fields", () => {
       const { observe } = loadAndroidHomeObserve();
       observe.gfxMetrics = {
-        p50Ms: 12,
-        p90Ms: 18,
-        p95Ms: 22,
-        p99Ms: 30,
-        jankCount: 2,
+        packageName: "com.example.app",
+        percentile50thMs: 12,
+        percentile90thMs: 18,
+        percentile95thMs: 22,
+        percentile99thMs: 30,
         missedVsyncCount: 1,
         slowUiThreadCount: 1,
         frameDeadlineMissedCount: 0,
-        gfxinfoRaw: "Frame timing raw dump\n".repeat(100),
-      } as any;
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      };
 
       const out = sanitizeObserveResult(observe, DROP_NONE);
-      const withGfxMetrics = { ...out, gfxMetrics: observe.gfxMetrics };
+      const withFullGfxMetrics = { ...out, gfxMetrics: observe.gfxMetrics };
 
-      expect(measureValue(out).bytes).toBeLessThan(measureValue(withGfxMetrics).bytes);
-      expect(measureValue(out).tokens).toBeLessThan(measureValue(withGfxMetrics).tokens);
+      expect(measureValue(out).bytes).toBeLessThan(measureValue(withFullGfxMetrics).bytes);
+      expect(measureValue(out).tokens).toBeLessThan(measureValue(withFullGfxMetrics).tokens);
     });
 
     test("preserves the perfTimingTruncated signal", () => {

@@ -60,8 +60,6 @@ src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
 src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
 src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
 src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
-src/doctor/checks/ios.ts: error TS2339: Property 'toString' does not exist on type 'never'.
-src/doctor/checks/ios.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 src/doctor/index.ts: error TS2367: This comparison appears to be unintentional because the types 'false | undefined' and 'true' have no overlap.
 src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'Map<string, number>' is not assignable to parameter of type 'Map<string, { timestamp: number; }>'.
 src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
@@ -111,43 +109,6 @@ src/features/action/swipeon/ScrollUntilVisible.ts: error TS2345: Argument of typ
 src/features/action/swipeon/SwipeOn.ts: error TS2322: Type '(block: (observeResult: ObserveResult) => Promise<any>, options: ObservedChangeOptions) => Promise<any>' is not assignable to type '<T>(action: (observeResult: ObserveResult) => Promise<T>, options: { changeExpected: boolean; timeoutMs: number; progress?: unknown; perf?: PerformanceTracker | undefined; skipPreviousObserve?: boolean | undefined; queryOptions?: { ...; } | undefined; predictionContext?: { ...; } | undefined; }) => Promise<...>'.
 src/features/action/swipeon/SwipeOn.ts: error TS2322: Type 'AndroidCtrlProxyClient' is not assignable to type 'ScrollAccessibilityService'.
 src/features/action/swipeon/TalkBackSwipeExecutor.ts: error TS2345: Argument of type 'null' is not assignable to parameter of type 'AdbExecutor'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'discriminatedUnion' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'nonempty' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'positive' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'positive' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'safeParse' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'superRefine' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2339: Property 'superRefine' does not exist on type 'ZodSchema'.
-src/features/debug/VisualHighlight.ts: error TS2503: Cannot find namespace 'z'.
-src/features/debug/VisualHighlight.ts: error TS2503: Cannot find namespace 'z'.
-src/features/debug/VisualHighlight.ts: error TS2503: Cannot find namespace 'z'.
-src/features/debug/VisualHighlight.ts: error TS2503: Cannot find namespace 'z'.
-src/features/debug/VisualHighlight.ts: error TS2554: Expected 1 arguments, but got 2.
-src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
-src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
-src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'issue' implicitly has an 'any' type.
-src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'issue' implicitly has an 'any' type.
-src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'issue' implicitly has an 'any' type.
-src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
 src/features/navigation/Explore.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 src/features/navigation/Explore.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 src/features/navigation/Explore.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
@@ -258,81 +219,18 @@ src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable
 src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
 src/index.ts: error TS2339: Property 'networkMockable' does not exist on type '{ cliMode: boolean; cliArgs: string[]; daemonPort: number | undefined; daemonHost: string | undefined; debugPerf: boolean; debug: boolean; uiPerfMode: boolean; memPerfAuditMode: boolean; ... 23 more ...; outputReduction: OutputReductionFlags; }'.
 src/index.ts: error TS2353: Object literal may only specify known properties, and 'networkMockable' does not exist in type '{ cliMode: boolean; cliArgs: string[]; daemonPort: number | undefined; daemonHost: string | undefined; debugPerf: boolean; debug: boolean; uiPerfMode: boolean; memPerfAuditMode: boolean; ... 23 more ...; outputReduction: OutputReductionFlags; }'.
-src/server/appFileContract.ts: error TS2339: Property 'superRefine' does not exist on type 'ZodSchema'.
-src/server/appFileContract.ts: error TS2345: Argument of type 'readonly ["documents", "library", "cache", "tmp", "externalFiles"]' is not assignable to parameter of type 'string[]'.
-src/server/appFileContract.ts: error TS7006: Parameter 'args' implicitly has an 'any' type.
-src/server/appFileContract.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
 src/server/appFileService.ts: error TS2345: Argument of type 'PutAppFileRequest' is not assignable to parameter of type 'PutAppFileArgs'.
 src/server/appFileService.ts: error TS2430: Interface 'PutAppFileRequest' incorrectly extends interface 'PutAppFileArgs'.
 src/server/appResources.ts: error TS2345: Argument of type 'string[]' is not assignable to parameter of type 'readonly ("platform" | "type" | "search" | "deviceId" | "profile")[]'.
-src/server/appTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/appTools.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/appTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/appTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/appTools.ts: error TS7006: Parameter 'args' implicitly has an 'any' type.
-src/server/biometricTools.ts: error TS2339: Property 'refine' does not exist on type 'ZodSchema'.
-src/server/biometricTools.ts: error TS7006: Parameter 'data' implicitly has an 'any' type.
 src/server/bootedDeviceResources.ts: error TS2322: Type '"local" | "remote"' is not assignable to type '"local" | undefined'.
 src/server/compactBoundsAdvertisement.ts: error TS2698: Spread types may only be created from object types.
-src/server/criticalSectionTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/criticalSectionTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/criticalSectionTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/criticalSectionTools.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/criticalSectionTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/criticalSectionTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/criticalSectionTools.ts: error TS2554: Expected 1 arguments, but got 2.
-src/server/criticalSectionTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
-src/server/criticalSectionTools.ts: error TS7006: Parameter 'step' implicitly has an 'any' type.
-src/server/debugTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
-src/server/debugTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
-src/server/debugTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
 src/server/deviceTools.ts: error TS2322: Type 'TimingData | null' is not assignable to type 'Record<string, number>'.
-src/server/deviceTools.ts: error TS2339: Property 'preprocess' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/deviceTools.ts: error TS7006: Parameter 'input' implicitly has an 'any' type.
-src/server/doctorTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
-src/server/elementSelectorSchemas.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/elementSelectorSchemas.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
-src/server/elementSelectorSchemas.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
-src/server/elementSelectorSchemas.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
-src/server/elementSelectorSchemas.ts: error TS2503: Cannot find namespace 'z'.
-src/server/formTools.ts: error TS2339: Property 'refine' does not exist on type 'ZodSchema'.
 src/server/formTools.ts: error TS2345: Argument of type 'AdbExecutor | null' is not assignable to parameter of type 'AdbClient | null | undefined'.
-src/server/formTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/formTools.ts: error TS2554: Expected 1 arguments, but got 2.
-src/server/formTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
-src/server/formTools.ts: error TS7006: Parameter 'data' implicitly has an 'any' type.
-src/server/formTools.ts: error TS7006: Parameter 'f' implicitly has an 'any' type.
-src/server/formTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/server/highlightTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/highlightTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/highlightTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/highlightTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/highlightTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/highlightTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
-src/server/highlightTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/highlightTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
-src/server/highlightTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
 src/server/interactionTools.ts: error TS18048: 'freshness.actualTimestamp' is possibly 'undefined'.
 src/server/interactionTools.ts: error TS18048: 'freshness.requestedAfter' is possibly 'undefined'.
 src/server/interactionTools.ts: error TS18048: 'searchStats' is possibly 'undefined'.
 src/server/interactionTools.ts: error TS18048: 'searchStats' is possibly 'undefined'.
 src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
-src/server/interactionTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/interactionTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/interactionTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/interactionTools.ts: error TS2339: Property 'discriminatedUnion' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/interactionTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/interactionTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/interactionTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/interactionTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/interactionTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
-src/server/interactionTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
-src/server/interactionTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
-src/server/interactionTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
-src/server/interactionTools.ts: error TS2554: Expected 0 arguments, but got 1.
-src/server/interactionTools.ts: error TS2554: Expected 1 arguments, but got 2.
-src/server/interactionTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
-src/server/interactionTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
 src/server/navigationTools.ts: error TS2339: Property 'coverage' does not exist on type 'ExploreExecutionResult'.
 src/server/navigationTools.ts: error TS2339: Property 'interactionsPerformed' does not exist on type 'ExploreExecutionResult'.
 src/server/navigationTools.ts: error TS2339: Property 'screensDiscovered' does not exist on type 'ExploreExecutionResult'.
@@ -343,152 +241,15 @@ src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
 src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
 src/server/networkGraph.ts: error TS2322: Type 'string | null | undefined' is not assignable to type 'string | null'.
 src/server/networkGraph.ts: error TS2345: Argument of type 'EventGroup | undefined' is not assignable to parameter of type 'EventGroup'.
-src/server/networkTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/networkTools.ts: error TS2339: Property 'positive' does not exist on type 'ZodSchema'.
-src/server/networkTools.ts: error TS2339: Property 'positive' does not exist on type 'ZodSchema'.
-src/server/networkTools.ts: error TS2339: Property 'superRefine' does not exist on type 'ZodSchema'.
 src/server/networkTools.ts: error TS2459: Module '"../utils/deviceUtils"' declares 'BootedDevice' locally, but it is not exported.
-src/server/networkTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/networkTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/networkTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/networkTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/networkTools.ts: error TS2554: Expected 1 arguments, but got 2.
-src/server/networkTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
-src/server/networkTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/server/notificationTools.ts: error TS2339: Property 'discriminatedUnion' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/notificationTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/notificationTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/notificationTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/notificationTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/notificationTools.ts: error TS2554: Expected 0 arguments, but got 1.
-src/server/notificationTools.ts: error TS2554: Expected 1 arguments, but got 2.
-src/server/observeTools.ts: error TS2304: Cannot find name 'ObserveScreen'.
 src/server/observeTools.ts: error TS2322: Type 'TimingData' is not assignable to type 'TimingEntry'.
-src/server/observeTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
 src/server/observeTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'IdentifyInteractionsOptions'.
 src/server/observeTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'IdentifyInteractionsOptions'.
 src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol.iterator]()' method that returns an iterator.
-src/server/observeTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/observeTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/planTools.ts: error TS2339: Property 'coerce' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/planTools.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/planTools.ts: error TS2554: Expected 1 arguments, but got 2.
-src/server/preferenceTools.ts: error TS2339: Property 'extend' does not exist on type 'ZodSchema'.
-src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/snapshotTools.ts: error TS2339: Property 'discriminatedUnion' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/snapshotTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/snapshotTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/snapshotTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/snapshotTools.ts: error TS2554: Expected 0 arguments, but got 1.
-src/server/snapshotTools.ts: error TS2554: Expected 1 arguments, but got 2.
-src/server/storageTools.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
-src/server/storageTools.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
-src/server/storageTools.ts: error TS2345: Argument of type 'readonly ["STRING", "INT", "LONG", "FLOAT", "DOUBLE", "BOOLEAN", "STRING_SET", "DATA", "DATE", "ARRAY", "DICTIONARY", "UNKNOWN"]' is not assignable to parameter of type 'string[]'.
-src/server/storageTools.ts: error TS2345: Argument of type 'readonly ["STRING", "INT", "LONG", "FLOAT", "DOUBLE", "BOOLEAN", "STRING_SET", "DATA", "DATE", "ARRAY", "DICTIONARY", "UNKNOWN"]' is not assignable to parameter of type 'string[]'.
 src/server/systemTrayHelpers.ts: error TS2322: Type 'SystemTrayDependencies | null' is not assignable to type 'SystemTrayDependencies'.
 src/server/systemTrayHelpers.ts: error TS2741: Property 'getDeviceTimestampMs' is missing in type 'AdbExecutor' but required in type 'SystemTrayAdb'.
 src/server/testRunResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"limit" | "testClass" | "testMethod" | "lookbackDays" | "orderDirection" | "latestOnly"'.
 src/server/testTimingResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"deviceId" | "limit" | "deviceType" | "sessionUuid" | "devicePlatform" | "testClass" | "testMethod" | "deviceName" | "appVersion" | "gitCommit" | "targetSdk" | "jdkVersion" | ... 6 more ... | "orderDirection"'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'lazy' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'nullish' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'nullish' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
-src/server/toolOutputSchemas.ts: error TS2339: Property 'tuple' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/toolSchemaHelpers.ts: error TS2339: Property 'preprocess' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
-src/server/toolSchemaHelpers.ts: error TS7006: Parameter 'input' implicitly has an 'any' type.
-src/server/utilityTools.ts: error TS2339: Property 'refine' does not exist on type 'ZodSchema'.
-src/server/utilityTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/utilityTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/utilityTools.ts: error TS7006: Parameter 'values' implicitly has an 'any' type.
-src/server/utilityTools.ts: error TS7006: Parameter 'values' implicitly has an 'any' type.
-src/server/utilityTools.ts: error TS7006: Parameter 'values' implicitly has an 'any' type.
-src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
-src/server/videoRecordingTools.ts: error TS2339: Property 'positive' does not exist on type 'ZodSchema'.
 src/utils/Backoff.ts: error TS2322: Type 'BackoffPolicy | readonly number[]' is not assignable to type 'BackoffPolicy'.
 src/utils/CtrlProxyManager.ts: error TS7006: Parameter 'entry' implicitly has an 'any' type.
 src/utils/CtrlProxyManager.ts: error TS7006: Parameter 'entry' implicitly has an 'any' type.

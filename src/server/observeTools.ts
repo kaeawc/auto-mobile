@@ -4,6 +4,7 @@ import { ResourceRegistry } from "./resourceRegistry";
 import { RESOURCE_URIS } from "./observationResources";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
 import { createJSONToolResponse, createStructuredToolResponse, throwIfAborted, StructuredToolResponse } from "../utils/toolUtils";
 import { BootedDevice, Element, ObserveResult, ObserveToolPayload, ViewHierarchyResult } from "../models";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";

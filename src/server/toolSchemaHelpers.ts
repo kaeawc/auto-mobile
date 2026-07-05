@@ -75,6 +75,57 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+/** Fields added by {@link addSessionUuidToSchema}. */
+const sessionUuidShape = {
+  sessionUuid: z.string().optional().describe("Session"),
+  keepScreenAwake: z.boolean().optional(),
+};
+
+/**
+ * Device-targeting fields added by {@link addDeviceTargetingToSchema}:
+ *
+ * - `sessionUuid` / `keepScreenAwake` enable session-based device assignment.
+ * - `device` is the device label; authored plans should prefer labels over
+ *   concrete device IDs, because runtime device IDs are not known ahead of
+ *   execution.
+ * - `deviceId` exists so the executor can inject a resolved deviceId into
+ *   requiresDevice tool calls after device allocation without tripping strict
+ *   schema validation.
+ * - `platform` is only applied when the base schema does not already define
+ *   its own (possibly stricter) platform field.
+ */
+const deviceTargetingShape = {
+  // Field order is load-bearing for schemas/tool-definitions.json: it must
+  // match the historical helper-composition order (platform first).
+  platform: platformSchema.optional(),
+  ...sessionUuidShape,
+  device: z.string().optional().describe(DEVICE_LABEL_DESCRIPTION),
+  deviceId: z.string().optional(),
+};
+
+/**
+ * Extend a schema with additional fields while preserving the base schema's
+ * inferred type. Keys already present in the base shape keep the base
+ * definition (used for `platform`, where some schemas declare a stricter
+ * required/defaulted field).
+ *
+ * The cast is safe: at runtime the result is `schema.extend(...)` with base
+ * keys taking precedence, which matches the declared intersection type modulo
+ * key-precedence (base keys win in both).
+ */
+function extendPreservingBase<T extends z.ZodObject<z.ZodRawShape>, S extends z.ZodRawShape>(
+  schema: T,
+  fields: S
+): z.ZodObject<Omit<S, keyof T["shape"]> & T["shape"]> {
+  const added: Record<string, z.core.$ZodType> = {};
+  for (const [key, field] of Object.entries(fields)) {
+    if (!(key in schema.shape)) {
+      added[key] = field;
+    }
+  }
+  return schema.extend(added) as unknown as z.ZodObject<Omit<S, keyof T["shape"]> & T["shape"]>;
+}
+
 /**
  * Helper to add sessionUuid field to tool schemas
  *
@@ -82,53 +133,13 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * The sessionUuid parameter is optional and allows tools to be targeted
  * at specific devices through session context.
  */
-export function addSessionUuidToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
-  return schema.extend({
-    sessionUuid: z.string().optional().describe("Session"),
-    keepScreenAwake: z.boolean().optional(),
-  }) as z.ZodObject<any>;
-}
-
-/**
- * Helper to add device label field to tool schemas.
- */
-function addDeviceLabelToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
-  return schema.extend({
-    device: z.string().optional().describe(DEVICE_LABEL_DESCRIPTION),
-  }) as z.ZodObject<any>;
-}
-
-/**
- * Helper to add deviceId field to tool schemas.
- *
- * Authored plans should prefer device labels (`device`) rather than concrete
- * device IDs, because runtime device IDs are not known ahead of execution.
- *
- * The executor may still inject a resolved deviceId into requiresDevice tool
- * calls after device allocation. Tools with strict schemas must explicitly
- * declare deviceId to avoid validation failures for that internal injection.
- */
-function addDeviceIdToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
-  return schema.extend({
-    deviceId: z.string().optional(),
-  }) as z.ZodObject<any>;
-}
-
-/**
- * Helper to add optional platform field only when the base schema doesn't already define one.
- */
-function addPlatformToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
-  if ("platform" in schema.shape) {
-    return schema;
-  }
-  return schema.extend({
-    platform: platformSchema.optional(),
-  }) as z.ZodObject<any>;
+export function addSessionUuidToSchema<T extends z.ZodObject<z.ZodRawShape>>(schema: T) {
+  return extendPreservingBase(schema, sessionUuidShape);
 }
 
 /**
  * Helper to add sessionUuid + device label + deviceId + platform fields to tool schemas.
  */
-export function addDeviceTargetingToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
-  return addDeviceIdToSchema(addDeviceLabelToSchema(addSessionUuidToSchema(addPlatformToSchema(schema))));
+export function addDeviceTargetingToSchema<T extends z.ZodObject<z.ZodRawShape>>(schema: T) {
+  return extendPreservingBase(schema, deviceTargetingShape);
 }

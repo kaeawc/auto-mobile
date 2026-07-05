@@ -35,13 +35,44 @@ teardown() {
   [ "$status" -eq 0 ]
 
   # Three top-level errors captured; the indented detail and summary are dropped.
-  run wc -l < "$TYPECHECK_BASELINE"
-  [ "${output// /}" -eq 3 ]
+  run grep -c ': error TS' "$TYPECHECK_BASELINE"
+  [ "$output" -eq 3 ]
+
+  # A provenance header is written so version drift can be detected later.
+  grep -q '^# generated-with: tsc' "$TYPECHECK_BASELINE"
 
   # (line,col) is stripped so line shifts do not churn the baseline.
   run grep -c '(10,5)' "$TYPECHECK_BASELINE"
   [ "$output" -eq 0 ]
   grep -q '^src/a.ts: error TS2339:' "$TYPECHECK_BASELINE"
+}
+
+@test "update refuses to grow the baseline without --allow-grow" {
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" bash "$SCRIPT" --update
+
+  local more="$FIXTURE_TSC"' && printf "%s\n" "src/z.ts(2,2): error TS2322: Type (a) is not assignable to type (b)."'
+  TYPECHECK_TSC_CMD="$more" run bash "$SCRIPT" --update
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refusing to grow"* ]]
+
+  # Baseline is left untouched at the original count.
+  run grep -c ': error TS' "$TYPECHECK_BASELINE"
+  [ "$output" -eq 3 ]
+
+  # --allow-grow lets it through.
+  TYPECHECK_TSC_CMD="$more" run bash "$SCRIPT" --update --allow-grow
+  [ "$status" -eq 0 ]
+  run grep -c ': error TS' "$TYPECHECK_BASELINE"
+  [ "$output" -eq 4 ]
+}
+
+@test "check warns (non-fatal) when tsc version differs from the baseline" {
+  TYPECHECK_TSC_VERSION="6.0.3" TYPECHECK_TSC_CMD="$FIXTURE_TSC" bash "$SCRIPT" --update
+
+  TYPECHECK_TSC_VERSION="9.9.9" TYPECHECK_TSC_CMD="$FIXTURE_TSC" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"generated with tsc 6.0.3 but tsc 9.9.9"* ]]
+  [[ "$output" == *"no new type errors"* ]]
 }
 
 @test "check mode passes when current output matches the baseline" {

@@ -1005,8 +1005,12 @@ jobs:
       # gate is infeasible (~550 pre-existing errors), so this compares against a
       # committed baseline and fails only on NEW type errors. Runs on this single
       # ubuntu job with the pinned tsc so the baseline is reproducible.
-      # See scripts/typecheck-baseline.sh.
+      # Gated on ts_changed: the baseline only references src/, so a diff that
+      # touches no TypeScript cannot introduce a local error -- skipping it avoids
+      # blocking native-only PRs on base-branch drift. See
+      # scripts/typecheck-baseline.sh.
       - name: "Run Typecheck Gate"
+        if: needs.detect-changes.outputs.ts_changed == 'true'
         run: bun run typecheck
 
       - name: "Run Build"

@@ -1,3 +1,5 @@
+# AutoMobile typecheck baseline (issue #3001) -- see scripts/typecheck-baseline.sh
+# generated-with: tsc 6.0.3
 src/daemon/SocketServerRegistry.ts: error TS2345: Argument of type 'Promise<void | BaseSocketServer>' is not assignable to parameter of type 'Promise<void>'.
 src/daemon/client.ts: error TS2345: Argument of type 'string | NonSharedBuffer' is not assignable to parameter of type 'Buffer<ArrayBufferLike>'.
 src/daemon/failuresStreamSocketServer.ts: error TS2559: Type 'FailuresStreamSocketRequest' has no properties in common with type 'SocketRequest'.

@@ -40,19 +40,19 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<A11ySwipeResult> {
-    // The two-finger path hard-rounds coordinates here (matching the delegate's roundCoordinates
-    // rounding) so TalkBack two-finger swipes land on whole pixels. Intentional and not to be
-    // regressed — the runner accepts fractional coordinates (#2927), but this path deliberately
-    // sends integers. See the constructor note.
+    // Coordinates go through the shared `coord()` policy (roundCoordinates: true for Android) so
+    // TalkBack two-finger swipes land on whole pixels, exactly like the sibling swipe/tap/drag/
+    // pinch gestures (#3049). Intentional and not to be regressed — the runner accepts fractional
+    // coordinates (#2927), but this path deliberately sends integers. See the constructor note.
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "two_finger_swipe",
       responseType: "swipe",
       messageType: "request_two_finger_swipe",
       params: {
-        x1: Math.round(x1),
-        y1: Math.round(y1),
-        x2: Math.round(x2),
-        y2: Math.round(y2),
+        x1: this.coord(x1),
+        y1: this.coord(y1),
+        x2: this.coord(x2),
+        y2: this.coord(y2),
         duration,
         offset,
       },

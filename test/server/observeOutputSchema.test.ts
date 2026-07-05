@@ -10,7 +10,7 @@ import {
 } from "../../src/server/compactBoundsAdvertisement";
 import { flattenTopLevelUnion } from "../../src/server/TopLevelUnionFlattener";
 import { sanitizeObserveResult } from "../../src/features/observe/output/ObserveResultOutput";
-import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
+import { loadAndroidHomeObserve, loadIosFractionalObserve } from "../fixtures/observe/observeFixture";
 import { ToolRegistry, toolHasOutputSchema } from "../../src/server/toolRegistry";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -64,12 +64,24 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
 
   test("accepts an iOS root hierarchy.bounds with optional left/top (points)", () => {
     // Hierarchy.bounds is `{left?, top?, right, bottom}` on iOS — the element
-    // union (all-four-int) would wrongly reject it, so it rides passthrough.
+    // union (all four keys required) would wrongly reject it, so it rides
+    // passthrough.
     const objectRoot = { viewHierarchy: { hierarchy: { bounds: { right: 390, bottom: 844 } } } };
     expect(() => observeResultSchema.parse(objectRoot)).not.toThrow();
     // ...and its compacted `[null, null, r, b]` tuple form is not rejected either.
     const compactedRoot = { viewHierarchy: { hierarchy: { bounds: [null, null, 390, 844] } } };
     expect(() => observeResultSchema.parse(compactedRoot)).not.toThrow();
+  });
+
+  test("accepts the iOS fractional-points fixture, object and compacted forms (#3206)", () => {
+    // iOS bounds are XCUITest points — legitimately fractional. The previous
+    // `z.number().int()` claim made a strict client reject such an observation.
+    const observe = loadIosFractionalObserve();
+    // Sanity: the fixture really does carry fractional coordinates.
+    expect(JSON.stringify(observe)).toContain("786.5");
+    expect(() => observeResultSchema.parse(observe)).not.toThrow();
+    const compacted = sanitizeObserveResult(observe, { dropElements: false, compact: true });
+    expect(() => observeResultSchema.parse(compacted)).not.toThrow();
   });
 
   test("routes elements.media[].bounds through the advertised union (object + tuple)", () => {

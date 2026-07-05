@@ -5,13 +5,22 @@ import { z } from "zod";
 const booleanOrString = z.union([z.boolean(), z.literal("true"), z.literal("false")]).optional();
 
 // Default (verbose) bounds shape: the four-key object plus optional centers.
+//
+// Coordinates are plain numbers, NOT `.int()` (issue #3206): Android bounds are
+// integer pixels (accessibility-service `Rect`s), but iOS bounds are XCUITest
+// points — a coordinate space where fractional values (retina point→pixel,
+// sub-point layout) are legitimate. The iOS runner happens to truncate to `Int`
+// today (`ios/control-proxy/.../ElementLocator.swift`), but the TS model layer
+// (`ElementBounds`) is `number` end-to-end and nothing between the model and the
+// wire enforces integrality, so advertising `integer` would make a strict MCP
+// client reject a real observation the moment any producer emits a `.5`.
 const boundsObjectSchema = z.object({
-  left: z.number().int(),
-  top: z.number().int(),
-  right: z.number().int(),
-  bottom: z.number().int(),
-  centerX: z.number().int().optional(),
-  centerY: z.number().int().optional()
+  left: z.number(),
+  top: z.number(),
+  right: z.number(),
+  bottom: z.number(),
+  centerX: z.number().optional(),
+  centerY: z.number().optional()
 });
 
 // Compact bounds shape emitted only when the `--observe-result-compact` output-
@@ -20,7 +29,7 @@ const boundsObjectSchema = z.object({
 // The tuple carries no centers — a consumer derives them as (left+right)/2,
 // (top+bottom)/2. This is a fixed-length 4-tuple so it round-trips losslessly.
 const compactBoundsTupleSchema = z
-  .tuple([z.number().int(), z.number().int(), z.number().int(), z.number().int()])
+  .tuple([z.number(), z.number(), z.number(), z.number()])
   .describe(
     "Compact bounds tuple [left, top, right, bottom]; emitted in place of the " +
       "{left, top, right, bottom} object only when the --observe-result-compact " +
@@ -238,9 +247,9 @@ const viewHierarchyWindowSchema = z.object({
  *
  * The iOS root `Hierarchy.bounds` is deliberately NOT routed through the union:
  * its `left`/`top` are optional (`{left?, top?, right, bottom}`, points), so the
- * element union (which requires all four integer keys, and whose compact tuple
- * cannot express the `[null, null, r, b]` holes `compactObserveBounds` emits for
- * a partial root) would wrongly reject a real iOS observation. It rides
+ * element union (which requires all four keys, and whose compact tuple cannot
+ * express the `[null, null, r, b]` holes `compactObserveBounds` emits for a
+ * partial root) would wrongly reject a real iOS observation. It rides
  * `.passthrough()` on the hierarchy object instead — honest by omission rather
  * than advertising a shape the server never emits for that site. Everything else
  * (`packageName`, `sources`, screen/density metadata, …) also passes through.

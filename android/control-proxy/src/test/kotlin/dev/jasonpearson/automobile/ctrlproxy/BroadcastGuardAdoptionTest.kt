@@ -104,7 +104,7 @@ class BroadcastGuardAdoptionTest {
       fail("could not find the `launchRequestScope(...)` helper in CtrlProxy.kt")
     }
 
-    val signatureEnd = BroadcastGuardScanner.matchParen(source, helper!!.range.last)
+    val signatureEnd = KotlinSourceScan.matchParen(source, helper!!.range.last)
     val bodyOrExpressionEnd =
       source.indexOf("\n\n", signatureEnd).takeIf { it >= 0 } ?: source.length
     val helperText = source.substring(helper.range.first, bodyOrExpressionEnd)
@@ -939,14 +939,15 @@ object BroadcastGuardScanner {
   fun scan(source: String): ScanResult {
     // `code` masks all string/char literal contents and comments with spaces (newlines preserved)
     // so structural brace/paren matching is not fooled by braces inside `"""{"type":...}"""`.
-    val code = maskLiteralsAndComments(source)
+    val code = KotlinSourceScan.maskLiteralsAndComments(source)
 
     val guardedHelpers = mutableListOf<String>()
     val violations = mutableListOf<Violation>()
 
     for (m in HELPER.findAll(code)) {
       val name = m.groupValues[1]
-      val sigEnd = matchParen(code, m.range.first + m.value.indexOf('(')) // index after ')'
+      val sigEnd =
+        KotlinSourceScan.matchParen(code, m.range.first + m.value.indexOf('(')) // index after ')'
       val signature = code.substring(m.range.first, sigEnd)
       if (!signature.contains("requestId"))
         continue // only requestId-correlated helpers are in scope
@@ -954,7 +955,7 @@ object BroadcastGuardScanner {
       guardedHelpers.add(name)
 
       val bodyOpen = code.indexOf('{', sigEnd)
-      val bodyClose = matchBrace(code, bodyOpen)
+      val bodyClose = KotlinSourceScan.matchBrace(code, bodyOpen)
       val body = code.substring(bodyOpen, bodyClose)
 
       // The correlated-error-on-throw guarantee is provided by `resultBroadcaster.guard { … }` (the
@@ -966,20 +967,34 @@ object BroadcastGuardScanner {
         guardedSpans.isEmpty() && broadcastCalls.isNotEmpty() ->
           // Broadcasts a result but wraps none of it — the exact "forgot the guard" regression.
           violations.add(
-            Violation(Kind.MISSING_GUARD, name, lineOf(source, bodyOpen + broadcastCalls.first()))
+            Violation(
+              Kind.MISSING_GUARD,
+              name,
+              KotlinSourceScan.lineOf(source, bodyOpen + broadcastCalls.first()),
+            )
           )
         else ->
           // Guard/launch present: every result broadcast must sit *inside* one of those spans. A
           // broadcast outside them is unguarded even though the guard call textually exists.
           for (offset in broadcastCalls) {
             if (guardedSpans.none { offset >= it.first && offset < it.second }) {
-              violations.add(Violation(Kind.MISSING_GUARD, name, lineOf(source, bodyOpen + offset)))
+              violations.add(
+                Violation(
+                  Kind.MISSING_GUARD,
+                  name,
+                  KotlinSourceScan.lineOf(source, bodyOpen + offset),
+                )
+              )
             }
           }
       }
       for (offset in swallowingCatchOffsets(body)) {
         violations.add(
-          Violation(Kind.SWALLOW_IN_BROADCAST, name, lineOf(source, bodyOpen + offset))
+          Violation(
+            Kind.SWALLOW_IN_BROADCAST,
+            name,
+            KotlinSourceScan.lineOf(source, bodyOpen + offset),
+          )
         )
       }
     }
@@ -987,16 +1002,16 @@ object BroadcastGuardScanner {
     var launchBlocks = 0
     for (m in LAUNCH.findAll(code)) {
       launchBlocks++
-      val parenEnd = matchParen(code, m.range.first + m.value.indexOf('('))
+      val parenEnd = KotlinSourceScan.matchParen(code, m.range.first + m.value.indexOf('('))
       val blockOpen = code.indexOf('{', parenEnd)
-      val blockClose = matchBrace(code, blockOpen)
+      val blockClose = KotlinSourceScan.matchBrace(code, blockOpen)
       val block = code.substring(blockOpen, blockClose)
       for (offset in swallowingCatchOffsets(block)) {
         violations.add(
           Violation(
             Kind.SWALLOW_IN_LAUNCH,
             "asyncActionRunner.launch",
-            lineOf(source, blockOpen + offset),
+            KotlinSourceScan.lineOf(source, blockOpen + offset),
           )
         )
       }
@@ -1018,7 +1033,7 @@ object BroadcastGuardScanner {
           Violation(
             Kind.RAW_REQUEST_ID_LAUNCH,
             "serviceScope.launch",
-            lineOf(source, call.blockOpen),
+            KotlinSourceScan.lineOf(source, call.blockOpen),
           )
         )
       }
@@ -1041,10 +1056,10 @@ object BroadcastGuardScanner {
     val args: String
     if (cursor < code.length && code[cursor] == '(') {
       val argsStart = cursor + 1
-      val parenEnd = matchParen(code, cursor)
+      val parenEnd = KotlinSourceScan.matchParen(code, cursor)
       args = code.substring(argsStart, parenEnd - 1)
       findInlineBlockArgument(code, argsStart, parenEnd - 1)?.let { blockOpen ->
-        return LaunchCall(args, blockOpen, matchBrace(code, blockOpen))
+        return LaunchCall(args, blockOpen, KotlinSourceScan.matchBrace(code, blockOpen))
       }
       cursor = parenEnd
     } else {
@@ -1055,7 +1070,7 @@ object BroadcastGuardScanner {
     if (cursor >= code.length || code[cursor] != '{') return null
 
     val blockOpen = code.indexOf('{', cursor)
-    return LaunchCall(args, blockOpen, matchBrace(code, blockOpen))
+    return LaunchCall(args, blockOpen, KotlinSourceScan.matchBrace(code, blockOpen))
   }
 
   private fun findInlineBlockArgument(code: String, start: Int, endExclusive: Int): Int? {
@@ -1074,10 +1089,10 @@ object BroadcastGuardScanner {
   private fun blockSpans(region: String, call: Regex): List<Pair<Int, Int>> {
     val spans = mutableListOf<Pair<Int, Int>>()
     for (m in call.findAll(region)) {
-      val parenEnd = matchParen(region, m.range.first + m.value.indexOf('('))
+      val parenEnd = KotlinSourceScan.matchParen(region, m.range.first + m.value.indexOf('('))
       val blockOpen = region.indexOf('{', parenEnd)
       if (blockOpen < 0) continue
-      spans.add(blockOpen to matchBrace(region, blockOpen))
+      spans.add(blockOpen to KotlinSourceScan.matchBrace(region, blockOpen))
     }
     return spans
   }
@@ -1090,10 +1105,10 @@ object BroadcastGuardScanner {
   private fun swallowingCatchOffsets(region: String): List<Int> {
     val offsets = mutableListOf<Int>()
     for (c in CATCH.findAll(region)) {
-      val parenEnd = matchParen(region, c.range.first + c.value.indexOf('('))
+      val parenEnd = KotlinSourceScan.matchParen(region, c.range.first + c.value.indexOf('('))
       val blockOpen = region.indexOf('{', parenEnd)
       if (blockOpen < 0) continue
-      val blockClose = matchBrace(region, blockOpen)
+      val blockClose = KotlinSourceScan.matchBrace(region, blockOpen)
       val catchBody = region.substring(blockOpen, blockClose)
       val surfacesViaBroadcast =
         BROADCAST_CALL_TOKEN.findAll(catchBody).any { !EVENT_BROADCAST_TOKEN.matches(it.value) }
@@ -1102,218 +1117,4 @@ object BroadcastGuardScanner {
     }
     return offsets
   }
-
-  /** [open] must index a '('; returns the index just past the matching ')'. */
-  fun matchParen(s: String, open: Int): Int {
-    var depth = 0
-    var i = open
-    while (i < s.length) {
-      when (s[i]) {
-        '(' -> depth++
-        ')' -> {
-          depth--
-          if (depth == 0) return i + 1
-        }
-      }
-      i++
-    }
-    error("unbalanced parentheses starting at $open")
-  }
-
-  /** [open] must index a '{'; returns the index just past the matching '}'. */
-  private fun matchBrace(s: String, open: Int): Int {
-    var depth = 0
-    var i = open
-    while (i < s.length) {
-      when (s[i]) {
-        '{' -> depth++
-        '}' -> {
-          depth--
-          if (depth == 0) return i + 1
-        }
-      }
-      i++
-    }
-    error("unbalanced braces starting at $open")
-  }
-
-  private fun lineOf(source: String, index: Int): Int {
-    var line = 1
-    var i = 0
-    while (i < index && i < source.length) {
-      if (source[i] == '\n') line++
-      i++
-    }
-    return line
-  }
-
-  /**
-   * Replace the contents of every string/char literal and comment with spaces (newlines preserved,
-   * so line numbers and length are unchanged), leaving real code structure -- braces, parens,
-   * identifiers -- intact so structural matching is not fooled.
-   *
-   * A stack of lexer states handles the constructs that break a naive scan:
-   * - Kotlin raw strings ("\"\"\"...\"\"\"") close on the *last* three quotes of a trailing run.
-   * - String-template interpolation "${ ... }" is code, may nest strings that themselves contain
-   *   braces/quotes (e.g. `"a ${f("}")}"`), and must not let an inner quote close the outer string.
-   *   Interpolation contents are blanked but their braces are balanced (both blanked), so the
-   *   surrounding code's brace/paren matching stays correct.
-   */
-  private fun maskLiteralsAndComments(src: String): String {
-    val out = StringBuilder(src.length)
-    val n = src.length
-    var i = 0
-    // Parallel stacks: lexer state + (for INTERP) its running brace depth.
-    val states = ArrayDeque<Int>().apply { addLast(CODE) }
-    val interpDepth = ArrayDeque<Int>()
-
-    fun blank(count: Int) {
-      repeat(count) { out.append(' ') }
-    }
-
-    while (i < n) {
-      val c = src[i]
-      val next = if (i + 1 < n) src[i + 1] else ' '
-      when (states.last()) {
-        CODE,
-        INTERP -> {
-          when {
-            c == '/' && next == '/' -> {
-              states.addLast(LINE_COMMENT)
-              blank(2)
-              i += 2
-            }
-            c == '/' && next == '*' -> {
-              states.addLast(BLOCK_COMMENT)
-              blank(2)
-              i += 2
-            }
-            c == '"' && next == '"' && i + 2 < n && src[i + 2] == '"' -> {
-              states.addLast(RAW)
-              blank(3)
-              i += 3
-            }
-            c == '"' -> {
-              states.addLast(STR)
-              blank(1)
-              i++
-            }
-            c == '\'' -> {
-              states.addLast(CHAR)
-              blank(1)
-              i++
-            }
-            states.last() == INTERP && c == '{' -> {
-              interpDepth.addLast(interpDepth.removeLast() + 1)
-              blank(1)
-              i++
-            }
-            states.last() == INTERP && c == '}' -> {
-              val d = interpDepth.removeLast() - 1
-              blank(1)
-              i++
-              if (d == 0) states.removeLast() else interpDepth.addLast(d)
-            }
-            states.last() == INTERP -> {
-              out.append(if (c == '\n') '\n' else ' ')
-              i++
-            }
-            else -> { // CODE: preserve real structure (braces, parens, identifiers).
-              out.append(c)
-              i++
-            }
-          }
-        }
-        STR -> {
-          when {
-            c == '\\' -> {
-              blank(2)
-              i += 2
-            }
-            c == '$' && next == '{' -> {
-              states.addLast(INTERP)
-              interpDepth.addLast(1)
-              blank(2)
-              i += 2
-            }
-            c == '"' -> {
-              states.removeLast()
-              blank(1)
-              i++
-            }
-            else -> {
-              out.append(if (c == '\n') '\n' else ' ')
-              i++
-            }
-          }
-        }
-        RAW -> {
-          when {
-            c == '$' && next == '{' -> {
-              states.addLast(INTERP)
-              interpDepth.addLast(1)
-              blank(2)
-              i += 2
-            }
-            c == '"' -> {
-              var run = 0
-              while (i + run < n && src[i + run] == '"') run++
-              blank(run)
-              i += run
-              if (run >= 3) states.removeLast() // last three quotes close the raw string
-            }
-            else -> {
-              out.append(if (c == '\n') '\n' else ' ')
-              i++
-            }
-          }
-        }
-        CHAR -> {
-          when {
-            c == '\\' -> {
-              blank(2)
-              i += 2
-            }
-            c == '\'' -> {
-              states.removeLast()
-              blank(1)
-              i++
-            }
-            else -> {
-              blank(1)
-              i++
-            }
-          }
-        }
-        LINE_COMMENT -> {
-          if (c == '\n') {
-            states.removeLast()
-            out.append('\n')
-          } else {
-            blank(1)
-          }
-          i++
-        }
-        else -> { // BLOCK_COMMENT
-          if (c == '*' && next == '/') {
-            states.removeLast()
-            blank(2)
-            i += 2
-          } else {
-            out.append(if (c == '\n') '\n' else ' ')
-            i++
-          }
-        }
-      }
-    }
-    return out.toString()
-  }
-
-  private const val CODE = 0
-  private const val STR = 1 // regular string
-  private const val RAW = 2 // raw triple-quoted string
-  private const val CHAR = 3 // char literal
-  private const val LINE_COMMENT = 4
-  private const val BLOCK_COMMENT = 5
-  private const val INTERP = 6 // ${ ... } string-template interpolation (code; brace depth tracked)
 }

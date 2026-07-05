@@ -27,7 +27,7 @@ import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
 import { finalizeToolResponse, type ObservationBaselineStore } from "./finalizeToolResponse";
 import { INTERNAL_NO_DIFF_PARAM } from "./internalToolCall";
-import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
+import { asToolEnvelope, getStructuredField } from "../utils/toolUtils";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -555,12 +555,13 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     }
 
     // Typed envelope views (issue #2932): the heterogeneous pipeline hands back
-    // `any`, so narrow to the concrete tool payload before reading. Reading a
+    // `any`, so narrow to the concrete tool payload via `asToolEnvelope` before
+    // reading (it names the unchecked `any`→typed crossing). Reading a
     // non-hoisted field off the envelope top level (`swipeEnvelope.found`) is now
     // a compile error, and `getStructuredField`'s key is checked against the
     // payload — the stringly-typed dead-read footgun is gone.
     if (name === "swipeOn" && args.lookFor) {
-      const swipeEnvelope: StructuredToolResponse<SwipeOnToolPayload> = response;
+      const swipeEnvelope = asToolEnvelope<SwipeOnToolPayload>(response);
       if (getStructuredField(swipeEnvelope, "success") && getStructuredField(swipeEnvelope, "found")) {
         const scrollPosition = UIStateExtractor.createScrollPosition(args);
         if (scrollPosition) {
@@ -574,7 +575,7 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 
     if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
       const sessionManager = DaemonState.getInstance().getSessionManager();
-      const observeEnvelope: StructuredToolResponse<ObserveToolPayload> = response;
+      const observeEnvelope = asToolEnvelope<ObserveToolPayload>(response);
       const observeHierarchy = name === "observe" ? getStructuredField(observeEnvelope, "viewHierarchy") : undefined;
       if (observeHierarchy) {
         sessionManager.setLastHierarchy(sessionUuid, observeHierarchy);

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  asToolEnvelope,
   createStructuredToolResponse,
   getStructuredField,
   getStructuredPayload,
@@ -100,6 +101,25 @@ describe("getStructuredField (typed)", () => {
   test("resolves an own key whose value is falsy (found: false)", () => {
     const response = createStructuredToolResponse<SamplePayload>({ success: true, found: false });
     expect(getStructuredField(response, "found")).toBe(false);
+  });
+});
+
+describe("asToolEnvelope", () => {
+  test("is an identity narrowing — returns the same reference, no runtime validation", () => {
+    // It only names the unchecked any->typed crossing at the registry boundary;
+    // it must NOT copy, wrap, or validate the value.
+    const response = createStructuredToolResponse<SamplePayload>({ success: true, found: true });
+    const narrowed = asToolEnvelope<SamplePayload>(response as unknown);
+    expect(narrowed).toBe(response);
+    expect(getStructuredField(narrowed, "found")).toBe(true);
+  });
+
+  test("passes non-envelope values straight through (unchecked)", () => {
+    // No runtime shape assertion today — a garbage value is returned as-is, and
+    // the downstream getStructuredField guard still yields undefined.
+    const garbage = asToolEnvelope<SamplePayload>(42 as unknown);
+    expect(garbage as unknown).toBe(42);
+    expect(getStructuredField(garbage, "found")).toBeUndefined();
   });
 });
 

@@ -39,6 +39,10 @@ if [[ " $* " == *" --version "* ]]; then
   if [[ -n "${KTFMT_STUB_NOISE:-}" ]]; then
     echo "$KTFMT_STUB_NOISE" >&2
   fi
+  if [[ -n "${KTFMT_STUB_CRLF:-}" ]]; then
+    printf 'ktfmt version %s\r\n' "${KTFMT_STUB_VERSION:-0.64}"
+    exit 0
+  fi
   echo "ktfmt version ${KTFMT_STUB_VERSION:-0.64}"
   exit 0
 fi
@@ -74,6 +78,10 @@ teardown() {
 
 # Helper: write a clean (already-formatted) Kotlin file.
 clean_kt() { printf 'fun a() {}\n' > "$1"; }
+
+@test "validator runs under strict bash mode" {
+  grep -qx 'set -euo pipefail' "$SCRIPT"
+}
 
 @test "empty SHA processes the whole tree" {
   clean_kt app/src/Base.kt
@@ -122,6 +130,46 @@ clean_kt() { printf 'fun a() {}\n' > "$1"; }
   # It must actually validate the tree, not report "No Kotlin files".
   [[ "$output" == *"Found 1 Kotlin file(s) to process"* ]]
   [[ "$output" != *"No Kotlin files to process"* ]]
+}
+
+@test "REGRESSION: full-tree file discovery failure does not pass with zero files" {
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+
+  cat > "$STUB_BIN/find" <<'STUB'
+#!/usr/bin/env bash
+echo "find exploded" >&2
+exit 42
+STUB
+  chmod +x "$STUB_BIN/find"
+
+  run env ONLY_CHANGED_SINCE_SHA="" ONLY_TOUCHED_FILES=false bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Failed to collect Kotlin files"* ]]
+  [[ "$output" != *"No Kotlin files to process"* ]]
+  [[ "$output" != *"properly formatted"* ]]
+}
+
+@test "REGRESSION: touched-file git diff failure does not pass with zero files" {
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+
+  local bash_env="$TEST_DIR/git-diff-fails.bash"
+  cat > "$bash_env" <<'STUB'
+git() {
+  if [[ "${1:-}" == "diff" ]]; then
+    echo "git diff exploded" >&2
+    return 42
+  fi
+  command git "$@"
+}
+STUB
+
+  run env BASH_ENV="$bash_env" ONLY_CHANGED_SINCE_SHA="" ONLY_TOUCHED_FILES=true bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Failed to collect Kotlin files"* ]]
+  [[ "$output" != *"No Kotlin files to process"* ]]
+  [[ "$output" != *"properly formatted"* ]]
 }
 
 @test "a misformatted changed file fails the scoped check (not a no-op)" {
@@ -193,6 +241,17 @@ clean_kt() { printf 'fun a() {}\n' > "$1"; }
   # the gate should still read ktfmt's real 0.64 and pass.
   run env KTFMT_STUB_VERSION="0.64" \
     KTFMT_STUB_NOISE="OpenJDK 64-Bit Server VM warning: using JDK 11.0.2" \
+    ONLY_CHANGED_SINCE_SHA="" ONLY_TOUCHED_FILES=false bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Found 1 Kotlin file(s) to process"* ]]
+  [[ "$output" != *"version mismatch"* ]]
+}
+
+@test "CRLF version output still passes the pin gate" {
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+
+  run env KTFMT_STUB_VERSION="0.64" KTFMT_STUB_CRLF=true \
     ONLY_CHANGED_SINCE_SHA="" ONLY_TOUCHED_FILES=false bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Found 1 Kotlin file(s) to process"* ]]

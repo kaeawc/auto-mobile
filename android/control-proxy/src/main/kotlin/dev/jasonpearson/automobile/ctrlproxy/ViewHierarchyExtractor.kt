@@ -531,7 +531,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       return false
     }
 
-    if (countTextBearingNodes(node) > 0) {
+    if (hasTextContent(node)) {
       return false
     }
 
@@ -543,10 +543,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     return childCoverage <= MAX_VISIBLE_CHILD_COVERAGE
   }
 
-  private fun countTextBearingNodes(node: UIElementInfo): Int {
-    val hasText = !node.text.isNullOrBlank() || !node.contentDesc.isNullOrBlank()
-    return (if (hasText) 1 else 0) +
-      extractChildrenFromNode(node.node).sumOf { countTextBearingNodes(it) }
+  private fun hasTextContent(node: UIElementInfo): Boolean {
+    return !node.text.isNullOrBlank() || !node.contentDesc.isNullOrBlank()
   }
 
   private fun isInteractive(node: UIElementInfo): Boolean {

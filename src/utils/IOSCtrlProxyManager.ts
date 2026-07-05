@@ -13,6 +13,7 @@ import { DeviceAppManager } from "./ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { isRunningInDocker } from "./dockerEnv";
 import { exponentialBackoff } from "./Backoff";
+import { DefaultProcessSupervisor, type ProcessSupervisor } from "./ProcessSupervisor";
 import { createConnection } from "node:net";
 import {
   getHostControlHost,
@@ -204,13 +205,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private xcTestProcessId: number | null = null;
   private xcTestProcess: ChildProcess | null = null;
 
-  // Process monitoring
-  private processMonitorInterval: ReturnType<typeof setInterval> | null = null;
-
-  // Auto-restart state
-  private autoRestartEnabled: boolean = true;
-  private restartAttempts: number = 0;
-  private restartTimeout: ReturnType<Timer["setTimeout"]> | null = null;
+  // Process supervision
+  private readonly processSupervisor: ProcessSupervisor;
+  private readonly iproxySupervisor: ProcessSupervisor;
+  private isProcessSupervisorRestarting = false;
   private static readonly MAX_RESTART_ATTEMPTS = 5;
   private static readonly RESTART_BASE_DELAY_MS = 2000;
   private static readonly RESTART_MAX_DELAY_MS = 30000;
@@ -221,9 +219,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private iproxyProcessId: number | null = null;
   private iproxyProcess: ChildProcess | null = null;
   private iproxyDevicePort: number | null = null;
-  private iproxyMonitorInterval: ReturnType<typeof setInterval> | null = null;
-  private iproxyRestartTimeout: ReturnType<Timer["setTimeout"]> | null = null;
-  private iproxyRestartAttempts: number = 0;
   private isStopping: boolean = false;
 
   // Mutex to prevent concurrent start() calls from spawning multiple processes
@@ -277,6 +272,54 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       stop: params => stopCtrlProxyIOS(params),
       status: params => getCtrlProxyIOSStatus(params)
     };
+    this.processSupervisor = new DefaultProcessSupervisor({
+      name: "iOS CtrlProxy XCTest runner",
+      timer: this.timer,
+      monitorIntervalMs: 30000,
+      maxRestartAttempts: IOSCtrlProxyManager.MAX_RESTART_ATTEMPTS,
+      restartBackoff: exponentialBackoff({
+        initialDelayMs: IOSCtrlProxyManager.RESTART_BASE_DELAY_MS,
+        maxDelayMs: IOSCtrlProxyManager.RESTART_MAX_DELAY_MS
+      }),
+      restart: async () => {
+        this.isProcessSupervisorRestarting = true;
+        try {
+          await this.start();
+        } finally {
+          this.isProcessSupervisorRestarting = false;
+        }
+      },
+      isAlive: () => this.isSupervisedCtrlProxyProcessAlive(),
+      onExit: () => {
+        this.xcTestProcessId = null;
+        this.xcTestProcess = null;
+        this.clearCaches();
+      },
+      onRestartSuccess: () => {
+        logger.info("[IOSCtrlProxy] Auto-restart successful");
+      },
+      onRestartFailure: error => {
+        logger.warn(`[IOSCtrlProxy] Auto-restart failed: ${error instanceof Error ? error.message : String(error)}`);
+      },
+    });
+    this.iproxySupervisor = new DefaultProcessSupervisor({
+      name: "iOS iproxy tunnel",
+      timer: this.timer,
+      monitorIntervalMs: IOSCtrlProxyManager.IPROXY_MONITOR_INTERVAL_MS,
+      restartBackoff: exponentialBackoff({
+        initialDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_BASE_DELAY_MS,
+        maxDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_MAX_DELAY_MS
+      }),
+      restart: () => this.restartIproxyTunnel(),
+      isAlive: () => this.isSupervisedIproxyTunnelAlive(),
+      onExit: () => {
+        this.iproxyProcessId = null;
+        this.iproxyProcess = null;
+      },
+      onRestartFailure: error => {
+        logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${error instanceof Error ? error.message : String(error)}`);
+      },
+    });
   }
 
   /**
@@ -613,10 +656,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         }
         if (!restartedAliveProcess) {
           perf.endOperation("iproxyTunnel");
-          this.startIproxyMonitoring();
+          await this.iproxySupervisor.start();
         }
       }
       if (!restartedAliveProcess) {
+        await this.startProcessSupervision();
         return;
       }
     }
@@ -627,6 +671,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       perf.endOperation("runningCheck");
       if (alreadyRunning) {
         logger.info("[IOSCtrlProxy] Service is already running");
+        await this.startProcessSupervision();
         return;
       }
 
@@ -700,6 +745,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         perf.endOperation("healthPolling");
         logger.info("[IOSCtrlProxy] HTTP health endpoint is ready");
         this.clearCaches();
+        await this.startProcessSupervision();
 
         // Wait additional time for WebSocket server to be ready
         // The HTTP server can respond before WebSocket is fully initialized
@@ -709,7 +755,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         perf.endOperation("websocketInit");
 
         if (!this.isSimulator()) {
-          this.startIproxyMonitoring();
+          await this.iproxySupervisor.start();
         }
         return;
       }
@@ -736,6 +782,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.clearCaches();
         // Mirror the normal success path's WebSocket-init settle (#2834 review — MINOR-3).
         await this.timer.sleep(500);
+        await this.startProcessSupervision();
         return;
       }
       // Otherwise it is genuinely hung. Merely un-tracking it is NOT enough: the process
@@ -792,7 +839,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             `(exited/PID-reused); un-tracking without terminating`
           );
         }
-        this.stopProcessMonitoring();
         this.xcTestProcessId = null;
         this.xcTestProcess = null;
         // Host-control mode has no local child-exit event to clear these as a side
@@ -800,6 +846,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         // cachedRunning/cachedAvailability can serve a stale positive to the next
         // setup() for up to STATUS_CACHE_TTL (#2834 review).
         this.clearCaches();
+        this.processSupervisor.stop();
+        await this.processSupervisor.start();
       } finally {
         // Do NOT leave isStopping latched across the throw below (#2834 review — MINOR-2):
         // a caller that does not retry start() would otherwise wedge the manager in
@@ -828,12 +876,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     logger.info("[IOSCtrlProxy] Stopping CtrlProxy");
     this.isStopping = true;
 
-    // Cancel any pending restart
-    if (this.restartTimeout) {
-      this.timer.clearTimeout(this.restartTimeout);
-      this.restartTimeout = null;
-    }
-    this.restartAttempts = 0;
+    this.processSupervisor.stop();
 
     if (this.useHostControl()) {
       try {
@@ -850,16 +893,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       this.xcTestProcessId = null;
       this.xcTestProcess = null;
-      this.stopProcessMonitoring();
       this.clearCaches();
       PortManager.release(this.device.deviceId);
       this.isStopping = false;
       logger.info("[IOSCtrlProxy] Service stopped");
       return;
     }
-
-    // Stop process monitoring first
-    this.stopProcessMonitoring();
 
     // Stop iproxy tunnel if running
     await this.stopIproxyTunnel({ clearDevicePort: true });
@@ -1259,9 +1298,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       this.xcTestProcess = child;
       logger.info(`[IOSCtrlProxy] Started xcodebuild test with PID ${child.pid}`);
 
-      // Start process monitoring
-      this.startProcessMonitoring();
-
       // Capture output for debugging
       this.captureProcessOutput(child);
     }
@@ -1304,107 +1340,38 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
-   * Start process health monitoring
-   */
-  private startProcessMonitoring(): void {
-    // Clear any existing monitor
-    this.stopProcessMonitoring();
-
-    // Check every 30 seconds
-    this.processMonitorInterval = this.timer.setInterval(async () => {
-      try {
-        const isHealthy = await this.checkHealthEndpoint();
-
-        if (!isHealthy && this.xcTestProcessId) {
-          // Check if process is still running
-          const processRunning = await this.isProcessRunning(this.xcTestProcessId);
-          if (!processRunning) {
-            logger.warn("[IOSCtrlProxy] XCTest process crashed, health endpoint not responding");
-            // Don't auto-restart here - let the next setup() call handle it
-            this.handleProcessExit();
-          }
-        }
-      } catch {
-        // Ignore monitoring errors
-      }
-    }, 30000);
-  }
-
-  /**
-   * Stop process monitoring
-   */
-  private stopProcessMonitoring(): void {
-    if (this.processMonitorInterval) {
-      this.timer.clearInterval(this.processMonitorInterval);
-      this.processMonitorInterval = null;
-    }
-  }
-
-  /**
    * Handle process exit
    */
   private handleProcessExit(): void {
-    this.xcTestProcessId = null;
-    this.xcTestProcess = null;
-    this.stopProcessMonitoring();
-    this.clearCaches();
+    this.processSupervisor.processExited();
+  }
 
-    // Schedule auto-restart if enabled and not stopping intentionally
-    if (this.autoRestartEnabled && !this.isStopping) {
-      this.scheduleAutoRestart();
+  private async startProcessSupervision(): Promise<void> {
+    if (!this.isProcessSupervisorRestarting) {
+      await this.processSupervisor.start();
     }
   }
 
-  /**
-   * Schedule automatic restart with exponential backoff
-   */
-  private scheduleAutoRestart(): void {
-    if (this.restartTimeout || this.isStopping) {
-      return;
+  private async isSupervisedCtrlProxyProcessAlive(): Promise<boolean> {
+    const isHealthy = await this.checkHealthEndpoint();
+    if (isHealthy || !this.xcTestProcessId) {
+      return true;
     }
 
-    if (this.restartAttempts >= IOSCtrlProxyManager.MAX_RESTART_ATTEMPTS) {
-      logger.warn(`[IOSCtrlProxy] Max restart attempts (${IOSCtrlProxyManager.MAX_RESTART_ATTEMPTS}) reached, giving up`);
-      this.restartAttempts = 0;
-      return;
+    const processRunning = this.useHostControl()
+      ? await this.isOwnRunnerProcessAlive()
+      : await this.isProcessRunning(this.xcTestProcessId);
+    if (!processRunning) {
+      logger.warn("[IOSCtrlProxy] XCTest process crashed, health endpoint not responding");
     }
-
-    this.restartAttempts++;
-    const delay = exponentialBackoff({
-      initialDelayMs: IOSCtrlProxyManager.RESTART_BASE_DELAY_MS,
-      maxDelayMs: IOSCtrlProxyManager.RESTART_MAX_DELAY_MS
-    }).delayForAttempt(this.restartAttempts);
-
-    logger.info(`[IOSCtrlProxy] Scheduling auto-restart in ${delay}ms (attempt ${this.restartAttempts}/${IOSCtrlProxyManager.MAX_RESTART_ATTEMPTS})`);
-
-    this.restartTimeout = this.timer.setTimeout(() => {
-      this.restartTimeout = null;
-
-      // Don't restart if we're stopping
-      if (this.isStopping) {
-        return;
-      }
-
-      logger.info("[IOSCtrlProxy] Attempting automatic restart...");
-      void this.start().then(() => {
-        logger.info("[IOSCtrlProxy] Auto-restart successful");
-        this.restartAttempts = 0; // Reset on success
-      }).catch(error => {
-        logger.warn(`[IOSCtrlProxy] Auto-restart failed: ${error instanceof Error ? error.message : String(error)}`);
-        // handleProcessExit will be called again, triggering another restart attempt
-      });
-    }, delay);
+    return processRunning;
   }
 
   /**
    * Enable or disable auto-restart
    */
   public setAutoRestart(enabled: boolean): void {
-    this.autoRestartEnabled = enabled;
-    if (!enabled && this.restartTimeout) {
-      this.timer.clearTimeout(this.restartTimeout);
-      this.restartTimeout = null;
-    }
+    this.processSupervisor.setAutoRestart(enabled);
     logger.info(`[IOSCtrlProxy] Auto-restart ${enabled ? "enabled" : "disabled"}`);
   }
 
@@ -1412,7 +1379,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Check if auto-restart is enabled
    */
   public isAutoRestartEnabled(): boolean {
-    return this.autoRestartEnabled;
+    return this.processSupervisor.isAutoRestartEnabled();
   }
 
   /**
@@ -1421,15 +1388,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public async forceRestart(): Promise<void> {
     logger.info("[IOSCtrlProxy] Force restart requested");
 
-    // Clear any pending restart
-    if (this.restartTimeout) {
-      this.timer.clearTimeout(this.restartTimeout);
-      this.restartTimeout = null;
-    }
-
     // Stop and restart
     await this.stop();
-    this.restartAttempts = 0; // Reset attempts for forced restart
     await this.start();
   }
 
@@ -2124,9 +2084,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       this.xcTestProcess = child;
       logger.info(`[IOSCtrlProxy] Started xcodebuild test with PID ${child.pid}`);
 
-      // Start process monitoring
-      this.startProcessMonitoring();
-
       // Capture output for debugging
       this.captureProcessOutput(child);
     }
@@ -2294,6 +2251,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private async startIproxyTunnel(options: {
     allowServicePortReallocation?: boolean;
     devicePort?: number;
+    supervise?: boolean;
   } = {}): Promise<void> {
     if (this.isSimulator()) {
       return;
@@ -2303,12 +2261,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (this.iproxyProcessId) {
         const status = await this.hostControl.getIproxyStatus({ pid: this.iproxyProcessId });
         if (status.success && status.data?.running) {
+          if (options.supervise !== false) {
+            await this.iproxySupervisor.start();
+          }
           return;
         }
       }
 
       const fixedDevicePort = options.devicePort ?? this.iproxyDevicePort;
-      await this.stopIproxyTunnel();
+      await this.stopIproxyTunnel({ stopSupervisor: options.supervise !== false });
       await this.ensureHostControlServicePortAvailable({
         allowReallocation: options.allowServicePortReallocation ?? true,
       });
@@ -2327,14 +2288,20 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       this.iproxyProcess = null;
       this.iproxyDevicePort = devicePort;
       await this.waitForIproxyStartup();
+      if (options.supervise !== false) {
+        await this.iproxySupervisor.start();
+      }
       return;
     }
 
     if (this.iproxyProcessId && await this.isProcessRunning(this.iproxyProcessId)) {
+      if (options.supervise !== false) {
+        await this.iproxySupervisor.start();
+      }
       return;
     }
 
-    await this.stopIproxyTunnel();
+    await this.stopIproxyTunnel({ stopSupervisor: options.supervise !== false });
 
     logger.info(`[IOSCtrlProxy] Starting iproxy tunnel (localhost:${this.servicePort} -> device:${this.servicePort})`);
     const child = this.processExecutor.spawn(
@@ -2354,30 +2321,26 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     child.on("exit", () => {
       if (!this.isStopping) {
         logger.warn("[IOSCtrlProxy] iproxy exited unexpectedly");
-        this.iproxyProcessId = null;
-        this.iproxyProcess = null;
-        this.scheduleIproxyRestart();
+        this.iproxySupervisor.processExited();
       }
     });
 
     child.on("error", error => {
       if (!this.isStopping) {
         logger.warn(`[IOSCtrlProxy] iproxy error: ${error.message}`);
-        this.iproxyProcessId = null;
-        this.iproxyProcess = null;
-        this.scheduleIproxyRestart();
+        this.iproxySupervisor.processExited();
       }
     });
 
     await this.waitForIproxyStartup();
+    if (options.supervise !== false) {
+      await this.iproxySupervisor.start();
+    }
   }
 
-  private async stopIproxyTunnel(options: { clearDevicePort?: boolean } = {}): Promise<void> {
-    this.stopIproxyMonitoring();
-
-    if (this.iproxyRestartTimeout) {
-      this.timer.clearTimeout(this.iproxyRestartTimeout);
-      this.iproxyRestartTimeout = null;
+  private async stopIproxyTunnel(options: { clearDevicePort?: boolean; stopSupervisor?: boolean } = {}): Promise<void> {
+    if (options.stopSupervisor !== false) {
+      this.iproxySupervisor.stop();
     }
 
     if (this.useHostControl()) {
@@ -2406,7 +2369,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (options.clearDevicePort) {
       this.iproxyDevicePort = null;
     }
-    this.iproxyRestartAttempts = 0;
   }
 
   private async waitForIproxyStartup(): Promise<void> {
@@ -2430,76 +2392,47 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     throw new Error(`iproxy failed to stay running within ${timeoutMs}ms`);
   }
 
-  private scheduleIproxyRestart(): void {
-    if (this.iproxyRestartTimeout || this.isStopping) {
-      return;
-    }
-
-    this.iproxyRestartAttempts++;
-    const delay = exponentialBackoff({
-      initialDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_BASE_DELAY_MS,
-      maxDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_MAX_DELAY_MS
-    }).delayForAttempt(this.iproxyRestartAttempts);
-
-    this.iproxyRestartTimeout = this.timer.setTimeout(() => {
-      this.iproxyRestartTimeout = null;
-      void this.startIproxyTunnel({
+  private async restartIproxyTunnel(): Promise<void> {
+    try {
+      await this.startIproxyTunnel({
         allowServicePortReallocation: false,
         devicePort: this.iproxyDevicePort ?? undefined,
-      }).then(() => {
-        this.startIproxyMonitoring();
-      }).catch(error => {
-        if (error instanceof HostControlServicePortUnavailableError) {
-          logger.warn(
-            "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available during iproxy restart; restarting"
-          );
-          void this.restartDeviceProcessAfterHostPortCollision().then(() => {
-            this.startIproxyMonitoring();
-          }).catch(restartError => {
-            logger.warn(`[IOSCtrlProxy] Failed to restart CtrlProxy after iproxy port collision: ${restartError instanceof Error ? restartError.message : String(restartError)}`);
-          });
-          return;
-        }
-        logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${error instanceof Error ? error.message : String(error)}`);
+        supervise: false,
       });
-    }, delay);
-  }
-
-  private startIproxyMonitoring(): void {
-    if (this.iproxyMonitorInterval || this.isSimulator()) {
-      return;
-    }
-
-    this.iproxyMonitorInterval = this.timer.setInterval(async () => {
-      try {
-        const isConnected = await this.isDeviceDetected();
-        if (!isConnected) {
-          logger.warn(`[IOSCtrlProxy] Device ${this.device.deviceId} not detected, stopping iproxy monitoring`);
-          await this.stopIproxyTunnel({ clearDevicePort: true });
-          return;
-        }
-
-        // Check iproxy process liveness — not CtrlProxy health. A temporarily slow
-        // CtrlProxy would fail a health check even though the tunnel is fine; restarting
-        // the tunnel in that case is harmful. CtrlProxy's own health is covered by the
-        // separate 30 s process monitor.
-        const iproxyAlive = await this.isIproxyProcessAlive();
-        if (!iproxyAlive) {
-          logger.warn("[IOSCtrlProxy] iproxy process is no longer running, scheduling restart");
-          await this.stopIproxyTunnel();
-          this.scheduleIproxyRestart();
-        }
-      } catch (error) {
-        logger.warn(`[IOSCtrlProxy] iproxy monitor error: ${error instanceof Error ? error.message : String(error)}`);
+    } catch (error) {
+      if (!(error instanceof HostControlServicePortUnavailableError)) {
+        throw error;
       }
-    }, IOSCtrlProxyManager.IPROXY_MONITOR_INTERVAL_MS);
+      logger.warn(
+        "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available during iproxy restart; restarting"
+      );
+      await this.restartDeviceProcessAfterHostPortCollision();
+      await this.processSupervisor.start();
+    }
   }
 
-  private stopIproxyMonitoring(): void {
-    if (this.iproxyMonitorInterval) {
-      this.timer.clearInterval(this.iproxyMonitorInterval);
-      this.iproxyMonitorInterval = null;
+  private async isSupervisedIproxyTunnelAlive(): Promise<boolean> {
+    if (this.isSimulator()) {
+      return true;
     }
+
+    const isConnected = await this.isDeviceDetected();
+    if (!isConnected) {
+      logger.warn(`[IOSCtrlProxy] Device ${this.device.deviceId} not detected, stopping iproxy monitoring`);
+      await this.stopIproxyTunnel({ clearDevicePort: true });
+      return true;
+    }
+
+    // Check iproxy process liveness — not CtrlProxy health. A temporarily slow
+    // CtrlProxy would fail a health check even though the tunnel is fine; restarting
+    // the tunnel in that case is harmful. CtrlProxy's own health is covered by the
+    // separate process supervisor.
+    const iproxyAlive = await this.isIproxyProcessAlive();
+    if (!iproxyAlive) {
+      logger.warn("[IOSCtrlProxy] iproxy process is no longer running, scheduling restart");
+      await this.stopIproxyTunnel({ stopSupervisor: false });
+    }
+    return iproxyAlive;
   }
 
   private async isDeviceDetected(): Promise<boolean> {

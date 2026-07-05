@@ -104,12 +104,17 @@ interface FakeRunResult {
 }
 
 class FakeStatement {
+  finalized = false;
+
   constructor(
     private readonly db: FakeDatabase,
-    private readonly sql: string
+    readonly sql: string
   ) {}
 
   all(...params: unknown[]): unknown[] {
+    if (this.finalized) {
+      throw new Error(`Statement was finalized: ${this.sql}`);
+    }
     this.db.record("all", this.sql, params);
     if (this.db.throwOn) {
       throw this.db.throwOn;
@@ -118,21 +123,34 @@ class FakeStatement {
   }
 
   run(...params: unknown[]): FakeRunResult {
+    if (this.finalized) {
+      throw new Error(`Statement was finalized: ${this.sql}`);
+    }
     this.db.record("run", this.sql, params);
     if (this.db.throwOn) {
       throw this.db.throwOn;
     }
-    return { changes: 0, lastInsertRowid: 0 };
+    return this.db.runResult;
+  }
+
+  finalize(): void {
+    this.finalized = true;
   }
 }
 
 class FakeDatabase {
   readonly calls: Array<{ method: "all" | "run"; sql: string; params: unknown[] }> = [];
+  readonly preparedStatements: FakeStatement[] = [];
+  readonly prepareCalls: string[] = [];
   rows: unknown[] = [];
+  runResult: FakeRunResult = { changes: 0, lastInsertRowid: 0 };
   throwOn?: unknown;
 
   prepare(sql: string): FakeStatement {
-    return new FakeStatement(this, sql);
+    const statement = new FakeStatement(this, sql);
+    this.preparedStatements.push(statement);
+    this.prepareCalls.push(sql);
+    return statement;
   }
 
   record(method: "all" | "run", sql: string, params: unknown[]): void {
@@ -145,6 +163,10 @@ class FakeDatabase {
 
   get last(): { method: "all" | "run"; sql: string; params: unknown[] } | undefined {
     return this.calls[this.calls.length - 1];
+  }
+
+  preparedFor(sql: string): FakeStatement[] {
+    return this.preparedStatements.filter(statement => statement.sql === sql);
   }
 }
 
@@ -220,6 +242,117 @@ describe("BunSqliteConnectionState — C4 nested-transaction guard", () => {
     // Same for rollback.
     await withTimeout(state.rollbackTransaction(owner), 1000);
     await expect(withTimeout(state.beginTransaction(owner), 1000)).resolves.toBeUndefined();
+  });
+});
+
+describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => {
+  test("reuses a cached statement for repeated identical SQL", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    await state.executeQuery(rawQuery("insert into foo (id) values (?)", [1]), owner);
+    await state.executeQuery(rawQuery("insert into foo (id) values (?)", [2]), owner);
+    await state.executeQuery(rawQuery("insert into foo (id) values (?)", [3]), owner);
+
+    expect(db.prepareCalls).toEqual(["insert into foo (id) values (?)"]);
+    expect(db.calls.map(call => call.params)).toEqual([[1], [2], [3]]);
+  });
+
+  test("keeps distinct SQL strings as distinct cache entries", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    await state.executeQuery(rawQuery("insert into foo (id) values (?)", [1]), owner);
+    await state.executeQuery(rawQuery("insert into foo (id, name) values (?, ?)", [2, "x"]), owner);
+    await state.executeQuery(rawQuery("insert into foo (id) values (?)", [3]), owner);
+
+    expect(db.prepareCalls).toEqual([
+      "insert into foo (id) values (?)",
+      "insert into foo (id, name) values (?, ?)",
+    ]);
+  });
+
+  test("evicts and finalizes the least-recently-used statement when the cache is full", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    await state.executeQuery(rawQuery("insert into foo_0 (id) values (?)", [0]), owner);
+    for (let index = 1; index < 200; index += 1) {
+      await state.executeQuery(rawQuery(`insert into foo_${index} (id) values (?)`, [index]), owner);
+    }
+
+    const oldest = db.preparedFor("insert into foo_0 (id) values (?)")[0];
+    const nextOldest = db.preparedFor("insert into foo_1 (id) values (?)")[0];
+
+    await state.executeQuery(rawQuery("insert into foo_0 (id) values (?)", [999]), owner);
+    await state.executeQuery(rawQuery("insert into foo_200 (id) values (?)", [200]), owner);
+
+    expect(oldest.finalized).toBe(false);
+    expect(nextOldest.finalized).toBe(true);
+    expect(db.prepareCalls).toHaveLength(201);
+    expect(db.preparedStatements.filter(statement => !statement.finalized)).toHaveLength(200);
+  });
+
+  test("prepares a fresh statement after an evicted SQL is used again", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    for (let index = 0; index < 201; index += 1) {
+      await state.executeQuery(rawQuery(`insert into foo_${index} (id) values (?)`, [index]), owner);
+    }
+    const evicted = db.preparedFor("insert into foo_0 (id) values (?)")[0];
+    expect(evicted.finalized).toBe(true);
+
+    await state.executeQuery(rawQuery("insert into foo_0 (id) values (?)", [999]), owner);
+
+    expect(db.preparedFor("insert into foo_0 (id) values (?)")).toHaveLength(2);
+    expect(db.preparedFor("insert into foo_0 (id) values (?)")[1].finalized).toBe(false);
+  });
+
+  test("finalizes all cached statements on close", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    await state.executeQuery(rawQuery("select * from foo where id = ?", [1]), owner);
+    await state.executeQuery(rawQuery("insert into foo (id) values (?)", [1]), owner);
+
+    state.close();
+
+    expect(db.preparedStatements).toHaveLength(2);
+    expect(db.preparedStatements.every(statement => statement.finalized)).toBe(true);
+  });
+
+  test("preserves SELECT, RETURNING, and write result shapes", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    db.rows = [{ id: 1 }, { id: 2 }];
+    await expect(state.executeQuery(rawQuery("select * from foo"), owner)).resolves.toEqual({
+      rows: [{ id: 1 }, { id: 2 }],
+      numAffectedRows: undefined,
+    });
+
+    await expect(
+      state.executeQuery(rawQuery("insert into foo (name) values (?) returning id", ["x"]), owner)
+    ).resolves.toEqual({
+      rows: [{ id: 1 }, { id: 2 }],
+      numAffectedRows: 2n,
+    });
+
+    db.runResult = { changes: 3, lastInsertRowid: 42 };
+    await expect(
+      state.executeQuery(rawQuery("update foo set name = ? where id = ?", ["y", 1]), owner)
+    ).resolves.toEqual({
+      rows: [],
+      numAffectedRows: 3n,
+      insertId: 42n,
+    });
   });
 });
 

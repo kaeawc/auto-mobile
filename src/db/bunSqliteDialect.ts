@@ -15,6 +15,10 @@ import {
 import { CompiledQuery } from "kysely";
 import { ActionableError } from "../models/ActionableError";
 
+const MAX_CACHED_STATEMENTS = 200;
+
+type BunStatement = ReturnType<BunDatabase["prepare"]>;
+
 /**
  * Kysely dialect for Bun's built-in SQLite.
  * Based on SqliteDialect but uses bun:sqlite instead of better-sqlite3.
@@ -111,6 +115,7 @@ export class BunSqliteConnectionState {
   #pendingTransactions = 0;
   #activeQueries = 0;
   #waiters: Array<() => void> = [];
+  #statementCache = new Map<string, BunStatement>();
   #closed = false;
 
   constructor(database: BunDatabase | (() => BunDatabase), beforeQuery?: () => Promise<void>) {
@@ -177,8 +182,7 @@ export class BunSqliteConnectionState {
         }
         const db = this.#getDatabase();
 
-        // Prepare statement
-        const stmt = db.prepare(sql);
+        const stmt = this.#getStatement(db, sql);
 
         // Check if this is a SELECT query or query with RETURNING clause
         const sqlLower = sql.trim().toLowerCase();
@@ -238,6 +242,7 @@ export class BunSqliteConnectionState {
     // observes the closed state and rejects instead of running against a dead
     // handle. Then wake waiters so queued queries settle promptly.
     this.#closed = true;
+    this.#clearStatementCache();
     if (this.#db) {
       this.#db.close();
       this.#db = null;
@@ -254,6 +259,34 @@ export class BunSqliteConnectionState {
     }
 
     return this.#db;
+  }
+
+  #getStatement(db: BunDatabase, sql: string): BunStatement {
+    const cached = this.#statementCache.get(sql);
+    if (cached) {
+      this.#statementCache.delete(sql);
+      this.#statementCache.set(sql, cached);
+      return cached;
+    }
+
+    const statement = db.prepare(sql);
+    this.#statementCache.set(sql, statement);
+    if (this.#statementCache.size > MAX_CACHED_STATEMENTS) {
+      const oldestKey = this.#statementCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        const evicted = this.#statementCache.get(oldestKey);
+        this.#statementCache.delete(oldestKey);
+        evicted?.finalize();
+      }
+    }
+    return statement;
+  }
+
+  #clearStatementCache(): void {
+    for (const statement of this.#statementCache.values()) {
+      statement.finalize();
+    }
+    this.#statementCache.clear();
   }
 
   #assertOpen(): void {

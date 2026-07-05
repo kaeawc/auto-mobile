@@ -1,11 +1,13 @@
 [test]
-# LOAD-BEARING: this preload arms the unit-test real-DB guard by setting
-# AUTOMOBILE_UNIT_TEST_DB_GUARD=1 (see test/setup/unitTestDbGuard.ts and
-# assertUnitTestDbAccessAllowed in src/db/database.ts). Removing this line — or
-# running `bun test` in a way that doesn't read this bunfig — SILENTLY disables
-# the guard, letting a real-DB race (the #3063 class) flake unguarded while the
-# suite reports a false green. test/db/unitTestDbGuardPreloadArmed.test.ts is the
-# tripwire that fails loudly if this preload ever stops running (issue #3083).
+# BELT-AND-SUSPENDERS: this preload force-arms the unit-test real-DB guard by
+# setting AUTOMOBILE_UNIT_TEST_DB_GUARD=1 (see test/setup/unitTestDbGuard.ts and
+# assertUnitTestDbAccessAllowed in src/db/database.ts). As of #3140 the guard also
+# arms BY DEFAULT under a bun-test context (NODE_ENV=test), so skipping this
+# preload no longer silently disables it. This flag is retained to cover the one
+# gap arm-by-default leaves: `NODE_ENV=production bun test` slips past the context
+# check (bun won't override an explicit NODE_ENV) and relies on this flag.
+# test/db/unitTestDbGuardPreloadArmed.test.ts is the tripwire that fails loudly if
+# this fallback preload ever stops running (issues #3083 / #3140).
 preload = ["./test/setup/unitTestDbGuard.ts"]
 coverageReporter = ["text", "lcov"]
 coverageDir = "./coverage"

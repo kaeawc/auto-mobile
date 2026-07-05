@@ -110,11 +110,44 @@ export function resolveDatabasePathFromEnvironment(
 }
 
 /**
- * Env var, set only by the bun test preload (`test/setup/unitTestDbGuard.ts`),
- * that arms {@link assertUnitTestDbAccessAllowed}. It is never set in production,
- * so the guard is inert outside `bun test`.
+ * Explicit force-arm env var for {@link assertUnitTestDbAccessAllowed}.
+ *
+ * As of #3140 the guard arms BY DEFAULT under a bun-test context (see
+ * {@link isBunTestContext}), so this flag is no longer the *sole* arming path and
+ * the guard can no longer silently fail open if the bun test preload
+ * (`test/setup/unitTestDbGuard.ts`) is skipped. It is retained as an OR'd
+ * belt-and-suspenders fallback for the one gap arm-by-default leaves open: bun
+ * does NOT override an explicitly-set `NODE_ENV`, so `NODE_ENV=production bun
+ * test` would slip past the {@link isBunTestContext} check — the preload's flag
+ * keeps that run guarded. It is never set in production, so it does not widen the
+ * guard's production footprint beyond {@link isBunTestContext}.
  */
 export const UNIT_TEST_DB_GUARD_ENV = "AUTOMOBILE_UNIT_TEST_DB_GUARD";
+
+/**
+ * True when this process is a Bun test runner context. `bun test` sets
+ * `NODE_ENV=test` automatically when it is not already set, and nothing in
+ * production (the daemon runs under `bun run`/a compiled binary) sets it, so this
+ * is the arm-by-default signal for the real-DB guard (#3140). It is deliberately
+ * env-based — not a `bun:test`/`Bun.jest` runtime probe — because `Bun.jest` is a
+ * function under any Bun runtime (including a plain `bun run`), so it does not
+ * distinguish a test run from production.
+ */
+function isBunTestContext(env: NodeJS.ProcessEnv): boolean {
+  return env.NODE_ENV === "test";
+}
+
+/**
+ * Whether the real-DB guard is armed for this process. Armed when EITHER the
+ * arm-by-default bun-test context holds ({@link isBunTestContext}) OR the explicit
+ * force-arm flag is set ({@link UNIT_TEST_DB_GUARD_ENV}). The OR is what removes
+ * the single-point-of-failure preload dependency: a runner that never loaded the
+ * preload still arms via `NODE_ENV=test`, while an explicit flag still arms a
+ * `NODE_ENV`-overridden bun test run (#3140).
+ */
+function isUnitTestDbGuardArmed(env: NodeJS.ProcessEnv): boolean {
+  return isBunTestContext(env) || env[UNIT_TEST_DB_GUARD_ENV] === "1";
+}
 
 // The four env vars that redirect the database off the default `~/.auto-mobile`
 // location. A test that sets any of these has explicitly opted into a real
@@ -146,13 +179,14 @@ function hasExplicitDbPathOverride(env: NodeJS.ProcessEnv): boolean {
  * exact call site that reached for the real DB, forcing the test to inject an
  * in-memory DB instead — the durable fix for the whole class (issue #3067).
  *
- * The guard is armed only under the bun test preload ({@link UNIT_TEST_DB_GUARD_ENV})
- * and deliberately fires ONLY on the default path: a test that sets
- * AUTOMOBILE_DB_PATH / AUTOMOBILE_DB_DIR (the DB-lifecycle tests that must
- * exercise real file behavior) or `:memory:` has explicitly opted in and passes.
+ * The guard is armed by default under a bun-test context and deliberately fires
+ * ONLY on the default path: a test that sets AUTOMOBILE_DB_PATH /
+ * AUTOMOBILE_DB_DIR (the DB-lifecycle tests that must exercise real file
+ * behavior) or `:memory:` has explicitly opted in and passes. See
+ * {@link isUnitTestDbGuardArmed} for the arm-by-default / force-arm signals.
  */
 function assertUnitTestDbAccessAllowed(env: NodeJS.ProcessEnv, resolvedPath: string): void {
-  if (env[UNIT_TEST_DB_GUARD_ENV] !== "1") {
+  if (!isUnitTestDbGuardArmed(env)) {
     return;
   }
   if (isInMemoryDatabasePath(resolvedPath) || hasExplicitDbPathOverride(env)) {

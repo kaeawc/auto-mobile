@@ -8,6 +8,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { spawnSync } from "child_process";
+import { copyDatabaseRuntimeFiles } from "./scripts/build/copy-db-runtime-files";
 
 // Clean dist directory
 const distPath = join(import.meta.dir, "dist");
@@ -73,16 +74,8 @@ if (existsSync(sourcemapPath)) {
   }
 }
 
-// Copy migrations for runtime usage (FileMigrationProvider reads from disk)
-const migrationsSource = join(import.meta.dir, "src", "db", "migrations");
-const migrationsDest = join(import.meta.dir, "dist", "src", "db", "migrations");
-if (existsSync(migrationsSource)) {
-  mkdirSync(migrationsDest, { recursive: true });
-  cpSync(migrationsSource, migrationsDest, { recursive: true });
-  console.log("✓ Copied database migrations");
-} else {
-  console.warn(`Database migrations not found at ${migrationsSource}`);
-}
+// Copy raw DB runtime files for FileMigrationProvider usage.
+copyDatabaseRuntimeFiles({ projectRoot: import.meta.dir });
 
 // Copy schemas for runtime validation (PlanSchemaValidator reads from disk)
 const schemasSource = join(import.meta.dir, "schemas");

@@ -1,4 +1,15 @@
 import type { Kysely } from "kysely";
+import { EVENT_TABLES } from "../eventTables";
+
+async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
+  const result = await db
+    .selectFrom("sqlite_master" as never)
+    .select("name")
+    .where("type", "=", "table")
+    .where("name", "=", tableName)
+    .execute();
+  return result.length > 0;
+}
 
 /**
  * Composite (device_id, timestamp) indexes for the telemetry event tables (#2788).
@@ -29,17 +40,11 @@ import type { Kysely } from "kysely";
  *     `idx_<table>_device` indexes to cut per-insert write amplification is
  *     deferred to a follow-up so the change is reviewed on its own (see #2788).
  */
-const TABLES = [
-  "network_events",
-  "log_events",
-  "os_events",
-  "navigation_events",
-  "storage_events",
-  "layout_events",
-] as const;
-
 export async function up(db: Kysely<unknown>): Promise<void> {
-  for (const table of TABLES) {
+  for (const table of EVENT_TABLES) {
+    if (!(await tableExists(db, table))) {
+      continue;
+    }
     // .ifNotExists() so the migration survives #2785's destructive-recovery
     // replay (drop-all then replay every migration on an empty DB).
     await db.schema
@@ -52,7 +57,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
-  for (const table of TABLES) {
+  for (const table of EVENT_TABLES) {
     // .ifExists() so a partial-up followed by down (recovery machinery can
     // invoke migrations in unusual orders) does not throw.
     await db.schema.dropIndex(`idx_${table}_device_timestamp`).ifExists().execute();

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
+import { EVENT_TABLES } from "../../src/db/eventTables";
 import { runMigrations } from "../../src/db/migrator";
 import { up as telemetryUp } from "../../src/db/migrations/2026_03_15_000_telemetry_events";
 import { up as navigationUp } from "../../src/db/migrations/2026_03_18_000_navigation_events";
@@ -24,15 +25,6 @@ import {
  * planner actually uses it, the filesort disappears, results are unchanged, and
  * the migration is idempotent / reversible / replay-safe.
  */
-const TABLES = [
-  "network_events",
-  "log_events",
-  "os_events",
-  "navigation_events",
-  "storage_events",
-  "layout_events",
-] as const;
-
 /**
  * Build the six event tables via their original migrations (no composite index
  * yet). The later `alterTable` migrations (…_002_storage_events_previous_value,
@@ -92,13 +84,13 @@ describe("2026_07_02_000_event_composite_indexes migration", () => {
   });
 
   test("up creates a composite (device_id, timestamp) index on all six tables", async () => {
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       expect(await indexExists(db, `idx_${table}_device_timestamp`)).toBe(false);
     }
 
     await compositeUp(db);
 
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       const name = `idx_${table}_device_timestamp`;
       expect(await indexExists(db, name)).toBe(true);
       // Columns are ordered (device_id, timestamp) ascending — mirrors precedent.
@@ -108,14 +100,14 @@ describe("2026_07_02_000_event_composite_indexes migration", () => {
 
   test("planner uses the composite index and drops the temp B-tree filesort", async () => {
     // Before: device filter picks the single-column device index, forcing a sort.
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       const before = queryPlan(bunDb, table).join("\n");
       expect(before).toContain("USE TEMP B-TREE FOR ORDER BY");
     }
 
     await compositeUp(db);
 
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       const after = queryPlan(bunDb, table).join("\n");
       const indexName = `idx_${table}_device_timestamp`;
       // The composite index now satisfies both the equality filter and the order.
@@ -154,15 +146,34 @@ describe("2026_07_02_000_event_composite_indexes migration", () => {
   test("up is idempotent (safe to re-run, as destructive-recovery replay would)", async () => {
     await compositeUp(db);
     await expect(compositeUp(db)).resolves.toBeUndefined();
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       expect(await indexExists(db, `idx_${table}_device_timestamp`)).toBe(true);
+    }
+  });
+
+  test("up skips canonical tables that are not present yet during replay", async () => {
+    const partialBunDb = new BunDatabase(":memory:");
+    const partialDb = new Kysely<unknown>({
+      dialect: new BunSqliteDialect({ database: partialBunDb }),
+    });
+    try {
+      await telemetryUp(partialDb);
+      await navigationUp(partialDb);
+      await storageUp(partialDb);
+
+      await expect(compositeUp(partialDb)).resolves.toBeUndefined();
+      expect(await indexExists(partialDb, "idx_storage_events_device_timestamp")).toBe(true);
+      expect(await indexExists(partialDb, "idx_layout_events_device_timestamp")).toBe(false);
+    } finally {
+      await partialDb.destroy();
+      partialBunDb.close();
     }
   });
 
   test("down drops all six composite indexes", async () => {
     await compositeUp(db);
     await compositeDown(db);
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       expect(await indexExists(db, `idx_${table}_device_timestamp`)).toBe(false);
     }
   });
@@ -202,7 +213,7 @@ describe("2026_07_02_000_event_composite_indexes migration — full replay", () 
   });
 
   test("the composite indexes exist after a fresh full migration chain", async () => {
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       expect(await indexExists(db, `idx_${table}_device_timestamp`)).toBe(true);
     }
   });

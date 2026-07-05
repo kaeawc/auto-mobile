@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
+import { EVENT_TABLES } from "../../src/db/eventTables";
 import { runMigrations } from "../../src/db/migrator";
 import { up as telemetryUp } from "../../src/db/migrations/2026_03_15_000_telemetry_events";
 import { up as navigationUp } from "../../src/db/migrations/2026_03_18_000_navigation_events";
@@ -28,17 +29,8 @@ import {
  * the composite with no filesort, the standalone `timestamp` and category indexes
  * are left intact, and the migration is reversible / idempotent / replay-safe.
  */
-const TABLES = [
-  "network_events",
-  "log_events",
-  "os_events",
-  "navigation_events",
-  "storage_events",
-  "layout_events",
-] as const;
-
 /** Category/content indexes that must survive the drop (different query shapes). */
-const CATEGORY_INDEX: Partial<Record<(typeof TABLES)[number], string>> = {
+const CATEGORY_INDEX: Partial<Record<(typeof EVENT_TABLES)[number], string>> = {
   network_events: "idx_network_events_host",
   log_events: "idx_log_events_tag",
   os_events: "idx_os_events_category",
@@ -102,14 +94,14 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
 
   test("up drops the six redundant idx_<table>_device indexes", async () => {
     // Precondition: the device indexes exist before the drop.
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       expect(await indexExists(db, `idx_${table}_device`)).toBe(true);
     }
 
     await dropUp(db);
 
     // sqlite_master no longer lists any of the six device indexes.
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       expect(await indexExists(db, `idx_${table}_device`)).toBe(false);
     }
   });
@@ -117,7 +109,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
   test("up leaves the composite, timestamp, and category indexes intact", async () => {
     await dropUp(db);
 
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       const list = await indexList(db, table);
       // Composite survives — it is what subsumes the dropped device index.
       expect(list).toContain(`idx_${table}_device_timestamp`);
@@ -136,7 +128,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
   test("device_id=? ORDER BY timestamp DESC LIMIT n still uses the composite, no filesort", async () => {
     await dropUp(db);
 
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       const plan = queryPlan(
         bunDb,
         `SELECT * FROM ${table} WHERE device_id = 'dev-1' ORDER BY timestamp DESC LIMIT 100`
@@ -152,7 +144,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
   test("bare device_id=? (no ORDER BY) still uses the composite left-prefix", async () => {
     await dropUp(db);
 
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       const plan = queryPlan(
         bunDb,
         `SELECT * FROM ${table} WHERE device_id = 'dev-1'`
@@ -164,7 +156,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
   test("COUNT(*) WHERE device_id=? is served by the composite (covering scan)", async () => {
     await dropUp(db);
 
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       const plan = queryPlan(
         bunDb,
         `SELECT COUNT(*) FROM ${table} WHERE device_id = 'dev-1'`
@@ -193,7 +185,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
   test("retention cutoff (ORDER BY timestamp DESC, no device filter) still uses the timestamp index", async () => {
     await dropUp(db);
 
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       const plan = queryPlan(
         bunDb,
         `SELECT timestamp FROM ${table} ORDER BY timestamp DESC LIMIT 1 OFFSET 10000`
@@ -231,7 +223,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
   test("up is idempotent (safe to re-run, as destructive-recovery replay would)", async () => {
     await dropUp(db);
     await expect(dropUp(db)).resolves.toBeUndefined();
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       expect(await indexExists(db, `idx_${table}_device`)).toBe(false);
     }
   });
@@ -239,7 +231,7 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
   test("down recreates the six single-column device indexes", async () => {
     await dropUp(db);
     await dropDown(db);
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       const name = `idx_${table}_device`;
       expect(await indexExists(db, name)).toBe(true);
       expect(await indexColumns(db, name)).toEqual(["device_id"]);
@@ -249,13 +241,32 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration", () => {
   test("down is idempotent — a partial-up followed by down does not throw", async () => {
     // Never dropped: down() must recreate cleanly even though indexes already exist.
     await expect(dropDown(db)).resolves.toBeUndefined();
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       expect(await indexExists(db, `idx_${table}_device`)).toBe(true);
     }
     // And after a full up, a double down is still safe.
     await dropUp(db);
     await dropDown(db);
     await expect(dropDown(db)).resolves.toBeUndefined();
+  });
+
+  test("down skips canonical tables that are not present yet during replay", async () => {
+    const partialBunDb = new BunDatabase(":memory:");
+    const partialDb = new Kysely<unknown>({
+      dialect: new BunSqliteDialect({ database: partialBunDb }),
+    });
+    try {
+      await telemetryUp(partialDb);
+      await navigationUp(partialDb);
+      await storageUp(partialDb);
+
+      await expect(dropDown(partialDb)).resolves.toBeUndefined();
+      expect(await indexExists(partialDb, "idx_storage_events_device")).toBe(true);
+      expect(await indexExists(partialDb, "idx_layout_events_device")).toBe(false);
+    } finally {
+      await partialDb.destroy();
+      partialBunDb.close();
+    }
   });
 });
 
@@ -277,13 +288,13 @@ describe("2026_07_03_000_drop_redundant_device_indexes migration — full replay
   });
 
   test("the six device indexes are gone after a fresh full migration chain", async () => {
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       expect(await indexExists(db, `idx_${table}_device`)).toBe(false);
     }
   });
 
   test("the composite and timestamp indexes survive the full chain", async () => {
-    for (const table of TABLES) {
+    for (const table of EVENT_TABLES) {
       expect(await indexExists(db, `idx_${table}_device_timestamp`)).toBe(true);
       expect(await indexExists(db, `idx_${table}_timestamp`)).toBe(true);
     }

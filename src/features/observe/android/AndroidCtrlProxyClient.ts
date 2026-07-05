@@ -2361,13 +2361,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           }
 
           logger.info(`[CTRL_PROXY] Navigation event: ${event.destination} (app: ${event.applicationId})`);
-          // Not routed through the DB-write barrier on purpose: this write
-          // interleaves with hierarchy_update processing to preserve SDK screen
-          // names, and adding a drain await hop would perturb that ordering on
-          // the hot path. A shutdown race here is already made safe by the
-          // dialect's reject-on-closed handling (issue #2792), so the row is
-          // dropped cleanly rather than stranding.
-          await this.getNavigationGraphManager().recordNavigationEvent(event);
+          // Barrier-tracked via trackExisting so graceful shutdown drains this
+          // fire-and-forget write, WITHOUT wrapping it in track(): the caller keeps
+          // awaiting the original promise, so the nav-event↔hierarchy-update
+          // interleaving that "preserve SDK screen names" depends on is unchanged
+          // (issue #2885). If the write is still in flight when the drain window
+          // closes, Part 1's dialect reject-on-closed drops the row cleanly
+          // (issue #2792).
+          const navWrite = this.getNavigationGraphManager().recordNavigationEvent(event);
+          void getDbWriteBarrier().trackExisting(navWrite);
+          await navWrite;
 
           if (event.applicationId && event.destination && serverConfig.isNavigationScreenshotsEnabled()) {
             NavigationScreenshotManager.getInstance()

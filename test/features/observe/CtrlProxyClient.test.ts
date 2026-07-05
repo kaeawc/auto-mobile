@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -594,6 +595,78 @@ describe("AndroidCtrlProxyClient", function() {
       } finally {
         await testClient.close();
         await navHarness.dispose();
+      }
+    });
+
+    test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function() {
+      NavigationGraphManager.resetInstance();
+      resetDbWriteBarrier();
+      // The Android handler resolves getDbWriteBarrier() per write (#2912), so a
+      // spy on the freshly-reset shared barrier observes the nav write's
+      // registration. trackExisting (not track) proves the write is drain-covered
+      // without a track() await hop that would perturb the ordering the preceding
+      // test guards.
+      const barrier = getDbWriteBarrier();
+      const trackExistingSpy = spyOn(barrier, "trackExisting");
+      const navHarness = await installInMemoryNavManager();
+      const navManager = navHarness.manager;
+
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "navigation_event",
+          event: {
+            destination: "SdkHome",
+            source: "SdkStart",
+            arguments: {},
+            metadata: {},
+            timestamp: testTimer.now(),
+            sequenceNumber: 1,
+            applicationId: "com.example.sdk",
+          }
+        }));
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: testTimer.now(),
+            packageName: "com.example.sdk",
+            hierarchy: {
+              "text": "SDK Home",
+              "resource-id": "com.example.sdk:id/home",
+            }
+          }
+        }));
+
+        await resultPromise;
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
+
+        expect(trackExistingSpy).toHaveBeenCalledTimes(1);
+        // Ordering still preserved: the write committed the SDK screen name.
+        expect(navManager.getCurrentScreen()).toBe("SdkHome");
+      } finally {
+        trackExistingSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+        resetDbWriteBarrier();
       }
     });
   });

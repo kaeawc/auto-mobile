@@ -18,6 +18,7 @@ import type { FailureRecorderService } from "../../failures/interfaces/FailureRe
 import { logger } from "../../../utils/logger";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
+import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import type { NavigationEvent } from "../../../utils/interfaces/NavigationGraph";
 import type { ViewHierarchyResult } from "../../../models";
 import type { SdkEvent, SdkEventIngestor } from "../interfaces/SdkEventIngestor";
@@ -150,11 +151,17 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
             const navMeta = (p.metadata as Record<string, string>) ?? null;
             let screenshotUri: string | null = null;
             if (applicationId && destination) {
-              await this.getNavigationGraphManager().recordNavigationEvent({
+              // Barrier-tracked via trackExisting so graceful shutdown drains this
+              // fire-and-forget write without a track() await hop perturbing the
+              // nav-event↔hierarchy-update ordering (issue #2885); a mid-flight
+              // shutdown race is dropped cleanly by Part 1 (issue #2792).
+              const navWrite = this.getNavigationGraphManager().recordNavigationEvent({
                 applicationId, destination, source: navSource,
                 arguments: navArgs ?? {}, metadata: navMeta ?? {},
                 triggeringInteraction: null,
               } as NavigationEvent);
+              void getDbWriteBarrier().trackExisting(navWrite);
+              await navWrite;
 
               if (this.navigationScreenshotsEnabled()) {
                 try {

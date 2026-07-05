@@ -21,8 +21,8 @@ import { truncateBodyText } from "../utils/truncateBodyText";
  * (#2801). Network bodies are already capped upstream in the repository
  * `mapRow`; this bounds the remaining plain-text columns at the backfill
  * boundary so the DB read contract for those repos is unchanged. Only opaque
- * text is listed — structured JSON columns (os `details_json`, failure blobs)
- * would be corrupted by a blind slice and are tracked as a follow-up.
+ * text is listed — structured JSON columns (os `details`, layout `detailsJson`,
+ * failure blobs) would be corrupted by a blind slice and are tracked in #3182.
  */
 const BOUNDED_BACKFILL_TEXT_FIELDS: Record<string, readonly string[]> = {
   log: ["message"],

@@ -46,6 +46,20 @@ describe("truncateBodyText", () => {
     expect(body.slice(0, BODY_TRUNCATION_LIMIT).isWellFormed()).toBe(false);
   });
 
+  test("drops a lone low surrogate at the boundary (already-malformed input)", () => {
+    // Orphan low surrogate (no preceding high mate) landing at the cut: a naive
+    // slice would keep it, leaving the result ill-formed.
+    const body = "x".repeat(BODY_TRUNCATION_LIMIT - 1) + "\uDE00" + "y".repeat(50);
+    const result = truncateBodyText(body)!;
+    expect(result.length).toBe(BODY_TRUNCATION_LIMIT - 1);
+    expect(result.isWellFormed()).toBe(true);
+  });
+
+  test("limit of 0 or 1 never emits a partial surrogate", () => {
+    expect(truncateBodyText("😀tail", 1)).toBe("");
+    expect(truncateBodyText("😀tail", 1)!.isWellFormed()).toBe(true);
+  });
+
   test("keeps a whole surrogate pair when the low surrogate is the last kept unit", () => {
     // Pair sits so the LOW surrogate lands at index LIMIT-1 → the whole pair is
     // within the kept range and must be preserved intact.

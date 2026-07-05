@@ -154,8 +154,9 @@ describe("networkEventRepository extended queries", () => {
     expect(events).toHaveLength(100);
     const serializedBytes = JSON.stringify(events).length;
     const rawBytes = 100 * 100_000;
-    // Capped payload is far under the raw size and near the 100 x 10KB target.
-    expect(serializedBytes).toBeLessThan(rawBytes / 5);
+    // Capped payload is ~1MB (100 x 10KB) vs ~10MB raw — assert the ~10x win
+    // with margin for the non-body JSON scaffolding per row.
+    expect(serializedBytes).toBeLessThan(rawBytes / 8);
     expect(events.every(e => e.responseBody!.length === 10_240)).toBe(true);
   });
 

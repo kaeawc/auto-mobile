@@ -13,6 +13,8 @@ import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
 import type { Database } from "../../../src/db/types";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { useTempFileDatabase, type TempFileDatabaseHandle } from "../../helpers/tempFileDatabase";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 // The older suites below drive the REAL getDatabase() singleton via getInstance()
 // and getInstanceForSession() (session instances have no in-memory injection seam),
@@ -1028,26 +1030,30 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     // is still 0 — is caught rather than masked by a later post-commit fire.
     const touchSpy = spyOn(NavigationRepository.prototype, "touchApp");
 
-    const notifyTouchCounts: number[] = [];
-    manager.setGraphUpdateListener(() => {
-      notifyTouchCounts.push(touchSpy.mock.calls.length);
-    });
+    // try/finally so a throwing assertion below cannot leak this prototype spy into
+    // sibling suites in the same bun test process (#3075 fold-in from #3090 review).
+    try {
+      const notifyTouchCounts: number[] = [];
+      manager.setGraphUpdateListener(() => {
+        notifyTouchCounts.push(touchSpy.mock.calls.length);
+      });
 
-    const telemetryTouchCounts: number[] = [];
-    telemetrySpy.mockImplementation(async () => {
-      telemetryTouchCounts.push(touchSpy.mock.calls.length);
-    });
+      const telemetryTouchCounts: number[] = [];
+      telemetrySpy.mockImplementation(async () => {
+        telemetryTouchCounts.push(touchSpy.mock.calls.length);
+      });
 
-    await manager.recordNavigationEvent(createEvent("Screen1", 1000));
+      await manager.recordNavigationEvent(createEvent("Screen1", 1000));
 
-    // touchApp runs exactly once (one event), and notify + telemetry each fire
-    // exactly once, each AFTER that final in-transaction write completed — never
-    // inside the transaction and never before it.
-    expect(touchSpy).toHaveBeenCalledTimes(1);
-    expect(notifyTouchCounts).toEqual([1]);
-    expect(telemetryTouchCounts).toEqual([1]);
-
-    touchSpy.mockRestore();
+      // touchApp runs exactly once (one event), and notify + telemetry each fire
+      // exactly once, each AFTER that final in-transaction write completed — never
+      // inside the transaction and never before it.
+      expect(touchSpy).toHaveBeenCalledTimes(1);
+      expect(notifyTouchCounts).toEqual([1]);
+      expect(telemetryTouchCounts).toEqual([1]);
+    } finally {
+      touchSpy.mockRestore();
+    }
   });
 
   test("does not deadlock a concurrent writer on the shared connection", async () => {
@@ -1327,6 +1333,64 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     // never applied — the guard stopped the transaction before it opened.
     expect(await countNodeCoverage(navDb)).toBe(0);
     expect(await homeVisitCount(navDb)).toBe(visitsBefore);
+  });
+});
+
+// #3075: the assertSharedConnection() + runInTransaction + bind-both-repos preamble
+// used to be inlined in both recordNavigationEvent and recordHierarchyNavigation
+// Case 1 (two sites, two copies of the guard). It is now consolidated into a single
+// shared helper that owns the invariant, so a future third both-repos writer cannot
+// forget the guard. These tests pin that consolidation structurally (the guard is
+// invoked from exactly one place) and behaviorally (the generalized error names no
+// specific method). The teeth from the guard suite above are preserved: because both
+// call sites now flow through the single guard, deleting that one call fails the
+// foreign-bound-connection tests for BOTH methods, not just one.
+describe("NavigationGraphManager - shared two-repo transaction helper (#3075)", () => {
+  const managerSource = readFileSync(
+    join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
+    "utf8"
+  );
+
+  test("assertSharedConnection is invoked from exactly one place (the shared helper)", () => {
+    // Two inline copies (the pre-#3075 state) would make this 2 and fail. Consolidating
+    // into a single helper is what makes the guard un-forgettable for a future site:
+    // there is one call, and both both-repos writers route through it.
+    const callSites = managerSource.match(/this\.assertSharedConnection\(\)/g) ?? [];
+    expect(callSites.length).toBe(1);
+  });
+
+  test("both both-repos writers delegate to the shared helper (no inline runInTransaction bind-both)", () => {
+    // The helper name is asserted from the issue's proposed shape; both writers call it.
+    const delegations = managerSource.match(/this\.runBothReposInTransaction[<(]/g) ?? [];
+    expect(delegations.length).toBe(2);
+  });
+
+  test("guard error message names no specific method (generalized in #3075)", async () => {
+    // A foreign-bound coverage repo trips the guard. The message must still name the
+    // connection-identity invariant (the stable substring guard tests match on) but must
+    // NOT name a single method — the guard now fires from more than one call site.
+    const navDb = await createTestDatabase({ foreignKeys: true });
+    const coverageDb = await createTestDatabase({ foreignKeys: true });
+    try {
+      const navRepo = new NavigationRepository(navDb);
+      const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+      const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
+      await manager.setCurrentApp("com.test.msg");
+
+      let caught: unknown;
+      await manager.recordNavigationEvent(createEvent("Screen1", 1000)).catch(e => {
+        caught = e;
+      });
+
+      expect(caught).toBeInstanceOf(ActionableError);
+      const message = (caught as Error).message;
+      expect(message).toMatch(/different database connections/i);
+      expect(message).not.toMatch(/recordNavigationEvent/);
+      expect(message).not.toMatch(/recordHierarchyNavigation/);
+    } finally {
+      await navDb.destroy();
+      await coverageDb.destroy();
+    }
   });
 });
 

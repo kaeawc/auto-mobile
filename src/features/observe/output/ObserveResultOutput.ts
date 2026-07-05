@@ -125,10 +125,11 @@ function reduceTopLevelDebugPerfTelemetry(out: ObserveResult): void {
   delete out.perfTiming;
 
   const auditMetrics = out.performanceAudit?.metrics;
-  const gfxMetrics = out.gfxMetrics;
-  if (!auditMetrics || !gfxMetrics) {
+  if (!auditMetrics || !out.gfxMetrics) {
     return;
   }
+
+  const gfxMetrics = out.gfxMetrics as Partial<NonNullable<ObserveResult["gfxMetrics"]>>;
 
   if (auditMetrics.p50Ms !== null && auditMetrics.p50Ms !== undefined) {
     delete gfxMetrics.percentile50thMs;

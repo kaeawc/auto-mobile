@@ -118,23 +118,39 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
  * Reduce top-level debug-perf telemetry that is useful while measuring capture
  * internals but mostly duplicates richer summaries. `perfTiming` is raw capture
  * timing, so it is dropped. `gfxMetrics` also carries action UI-stability
- * fields, so only frame timing fields covered by `performanceAudit.metrics` are
- * removed, and only when an audit summary exists.
+ * fields, so only frame timing fields with non-null replacements in
+ * `performanceAudit.metrics` are removed.
  */
 function reduceTopLevelDebugPerfTelemetry(out: ObserveResult): void {
   delete out.perfTiming;
 
-  if (!out.performanceAudit || !out.gfxMetrics) {
+  const auditMetrics = out.performanceAudit?.metrics;
+  const gfxMetrics = out.gfxMetrics;
+  if (!auditMetrics || !gfxMetrics) {
     return;
   }
 
-  delete out.gfxMetrics.percentile50thMs;
-  delete out.gfxMetrics.percentile90thMs;
-  delete out.gfxMetrics.percentile95thMs;
-  delete out.gfxMetrics.percentile99thMs;
-  delete out.gfxMetrics.missedVsyncCount;
-  delete out.gfxMetrics.slowUiThreadCount;
-  delete out.gfxMetrics.frameDeadlineMissedCount;
+  if (auditMetrics.p50Ms !== null && auditMetrics.p50Ms !== undefined) {
+    delete gfxMetrics.percentile50thMs;
+  }
+  if (auditMetrics.p90Ms !== null && auditMetrics.p90Ms !== undefined) {
+    delete gfxMetrics.percentile90thMs;
+  }
+  if (auditMetrics.p95Ms !== null && auditMetrics.p95Ms !== undefined) {
+    delete gfxMetrics.percentile95thMs;
+  }
+  if (auditMetrics.p99Ms !== null && auditMetrics.p99Ms !== undefined) {
+    delete gfxMetrics.percentile99thMs;
+  }
+  if (auditMetrics.missedVsyncCount !== null && auditMetrics.missedVsyncCount !== undefined) {
+    delete gfxMetrics.missedVsyncCount;
+  }
+  if (auditMetrics.slowUiThreadCount !== null && auditMetrics.slowUiThreadCount !== undefined) {
+    delete gfxMetrics.slowUiThreadCount;
+  }
+  if (auditMetrics.frameDeadlineMissedCount !== null && auditMetrics.frameDeadlineMissedCount !== undefined) {
+    delete gfxMetrics.frameDeadlineMissedCount;
+  }
 }
 
 /**

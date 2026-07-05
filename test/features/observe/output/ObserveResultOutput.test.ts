@@ -224,6 +224,34 @@ describe("sanitizeObserveResult", () => {
       expect(JSON.stringify(observe.performanceAudit?.metrics)).toBe(auditMetricsBefore);
     });
 
+    test("preserves gfxMetrics frame fields when audit replacements are null", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.performanceAudit!.metrics.p50Ms = null;
+      observe.performanceAudit!.metrics.p90Ms = null;
+      observe.performanceAudit!.metrics.p95Ms = null;
+      observe.performanceAudit!.metrics.p99Ms = null;
+      observe.performanceAudit!.metrics.missedVsyncCount = null;
+      observe.performanceAudit!.metrics.slowUiThreadCount = null;
+      observe.performanceAudit!.metrics.frameDeadlineMissedCount = null;
+      observe.gfxMetrics = {
+        packageName: "com.example.app",
+        percentile50thMs: 12,
+        percentile90thMs: 18,
+        percentile95thMs: 22,
+        percentile99thMs: 30,
+        missedVsyncCount: 1,
+        slowUiThreadCount: 1,
+        frameDeadlineMissedCount: 0,
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      };
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+
+      expect(out.gfxMetrics).toEqual(observe.gfxMetrics);
+    });
+
     test("measurably shrinks bytes and tokens by trimming redundant gfxMetrics frame fields", () => {
       const { observe } = loadAndroidHomeObserve();
       observe.gfxMetrics = {

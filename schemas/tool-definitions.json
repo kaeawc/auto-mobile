@@ -3337,49 +3337,6 @@
                       }
                     }
                   ]
-                },
-                "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "left": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "top": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "right": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "bottom": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerX": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerY": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    }
-                  },
-                  "required": [
-                    "left",
-                    "top",
-                    "right",
-                    "bottom"
-                  ],
-                  "additionalProperties": false,
-                  "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
                 }
               },
               "additionalProperties": {}
@@ -3597,7 +3554,55 @@
             },
             "media": {
               "type": "array",
-              "items": {}
+              "items": {
+                "type": "object",
+                "properties": {
+                  "bounds": {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "top": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "right": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "bottom": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "centerX": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "centerY": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                  }
+                },
+                "additionalProperties": {}
+              }
             }
           },
           "required": [

@@ -231,18 +231,24 @@ const viewHierarchyWindowSchema = z.object({
 }).passthrough();
 
 /**
- * The `viewHierarchy` sub-tree of an observe result (issue #3025). Only the
- * bounds-carrying sites are typed — the root `hierarchy.node` (+ its iOS root
- * `bounds`), per-window `bounds`/`hierarchy`, `contentHiddenRegions[].bounds`,
- * and the accessibility-focused node — so every hierarchy `bounds` is advertised
- * through the union. Everything else (`packageName`, `sources`, screen/density
- * metadata, …) rides `.passthrough()`.
+ * The `viewHierarchy` sub-tree of an observe result (issue #3025). The
+ * bounds-carrying sites are typed — the root `hierarchy.node`, per-window
+ * `bounds`/`hierarchy`, `contentHiddenRegions[].bounds`, and the
+ * accessibility-focused node — so those `bounds` advertise the compact union.
+ *
+ * The iOS root `Hierarchy.bounds` is deliberately NOT routed through the union:
+ * its `left`/`top` are optional (`{left?, top?, right, bottom}`, points), so the
+ * element union (which requires all four integer keys, and whose compact tuple
+ * cannot express the `[null, null, r, b]` holes `compactObserveBounds` emits for
+ * a partial root) would wrongly reject a real iOS observation. It rides
+ * `.passthrough()` on the hierarchy object instead — honest by omission rather
+ * than advertising a shape the server never emits for that site. Everything else
+ * (`packageName`, `sources`, screen/density metadata, …) also passes through.
  */
 export const viewHierarchyResultSchema = z.object({
   "hierarchy": z.object({
     error: z.string().optional(),
-    node: hierarchyNodeField,
-    bounds: elementBoundsSchema.optional()
+    node: hierarchyNodeField
   }).passthrough().optional(),
   // Real captures emit `null` (not an absent key) for the empty case, so these
   // are nullish rather than merely optional.
@@ -253,17 +259,27 @@ export const viewHierarchyResultSchema = z.object({
 }).passthrough();
 
 /**
+ * A `MediaView` entry from the `elements.media` array. Real captures carry an
+ * object `bounds`, and `compactObserveBounds` flattens it to a tuple like every
+ * other bounds, so it routes through {@link elementBoundsSchema} too (its other
+ * fields — `mediaType`, `className`, `resourceId`, … — ride `.passthrough()`).
+ */
+const observeMediaSchema = z.object({
+  bounds: elementBoundsSchema.optional()
+}).passthrough();
+
+/**
  * The flattened `elements` block of an observe result. Each category is an array
- * of hierarchy-node-shaped entries (they carry `bounds` and nested `node`
- * children in real captures), so they route through {@link viewHierarchyNodeSchema}
- * and their bounds advertise the compact union at every depth. `media`
- * (MediaView) is left open — it is not a bounds-canonical shape.
+ * of bounds-carrying entries — `clickable`/`scrollable`/`text` are
+ * hierarchy-node-shaped (bounds + nested `node`), `media` is a MediaView — so
+ * every entry's `bounds` routes through the union and advertises the compact
+ * tuple at every depth.
  */
 const observeElementsSchema = z.object({
   clickable: z.array(viewHierarchyNodeSchema),
   scrollable: z.array(viewHierarchyNodeSchema),
   text: z.array(viewHierarchyNodeSchema),
-  media: z.array(z.any())
+  media: z.array(observeMediaSchema)
 }).passthrough();
 
 /**

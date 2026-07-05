@@ -503,6 +503,7 @@ src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not e
 src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'tuple' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
 src/server/toolRegistry.ts: error TS2305: Module '"zod"' has no exported member 'toJSONSchema'.
 src/server/toolRegistry.ts: error TS2698: Spread types may only be created from object types.

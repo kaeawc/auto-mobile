@@ -62,6 +62,23 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
     expect(() => observeResultSchema.parse(compacted)).not.toThrow();
   });
 
+  test("accepts an iOS root hierarchy.bounds with optional left/top (points)", () => {
+    // Hierarchy.bounds is `{left?, top?, right, bottom}` on iOS — the element
+    // union (all-four-int) would wrongly reject it, so it rides passthrough.
+    const objectRoot = { viewHierarchy: { hierarchy: { bounds: { right: 390, bottom: 844 } } } };
+    expect(() => observeResultSchema.parse(objectRoot)).not.toThrow();
+    // ...and its compacted `[null, null, r, b]` tuple form is not rejected either.
+    const compactedRoot = { viewHierarchy: { hierarchy: { bounds: [null, null, 390, 844] } } };
+    expect(() => observeResultSchema.parse(compactedRoot)).not.toThrow();
+  });
+
+  test("routes elements.media[].bounds through the advertised union (object + tuple)", () => {
+    const objectMedia = { elements: { clickable: [], scrollable: [], text: [], media: [{ mediaType: "image", bounds: { left: 101, top: 2144, right: 227, bottom: 2270 } }] } };
+    const tupleMedia = { elements: { clickable: [], scrollable: [], text: [], media: [{ mediaType: "image", bounds: [101, 2144, 227, 2270] }] } };
+    expect(() => observeResultSchema.parse(objectMedia)).not.toThrow();
+    expect(() => observeResultSchema.parse(tupleMedia)).not.toThrow();
+  });
+
   test("preserves unmodeled top-level fields (passthrough)", () => {
     const parsed = observeResultSchema.parse({
       screenSize: { width: 1080, height: 2400 },

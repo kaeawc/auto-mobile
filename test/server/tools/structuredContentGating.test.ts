@@ -12,8 +12,8 @@ import { McpTestFixture } from "../../fixtures/mcpTestFixture";
  * Exercises the real CallTool wire boundary (`createMcpServer` custom
  * `CallToolRequestSchema` handler) and `tools/list` (`getToolDefinitions`) via
  * an in-memory client, using two throwaway tools:
- *   - `__test_no_schema__`  — no outputSchema (models `observe`)
- *   - `__test_schema__`     — declares outputSchema (models `tapOn`)
+ *   - `__test_no_schema__`  — no outputSchema (e.g. a plain `register()` tool)
+ *   - `__test_schema__`     — declares outputSchema (models `observe`/`tapOn`)
  */
 
 const NO_SCHEMA_TOOL = "__test_no_schema__";

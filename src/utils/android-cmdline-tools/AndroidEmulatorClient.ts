@@ -857,7 +857,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const availableAvds = await this.listAvds();
     perf.endOperation("validateAvd");
     if (!availableAvds.find(emu => emu.name === avdName)) {
-      throw new ActionableError(`AVD '${avdName}' not found. Available AVDs: ${availableAvds.join(", ")}`);
+      throw new ActionableError(`AVD '${avdName}' not found. Available AVDs: ${availableAvds.map(emu => emu.name).join(", ")}`);
     }
 
     // Check if already running or starting

@@ -11,9 +11,9 @@ import org.junit.Test
 
 /**
  * Validates the `storage_changed` wire payload built by [buildStorageChangedMessage] (#3000). The
- * critical guard is that `previousValue` is quoted by its OWN type: a removed or type-changed STRING
- * prior value must stay valid JSON even when the new value's type is UNKNOWN — otherwise the whole
- * message fails JSON.parse on the TS side and the telemetry event is dropped.
+ * critical guard is that `previousValue` is quoted by its OWN type: a removed or type-changed
+ * STRING prior value must stay valid JSON even when the new value's type is UNKNOWN — otherwise the
+ * whole message fails JSON.parse on the TS side and the telemetry event is dropped.
  */
 class StorageChangeWireEncoderTest {
 
@@ -79,6 +79,21 @@ class StorageChangeWireEncoderTest {
   }
 
   @Test
+  fun `legacy SDK without previousValueType omits the previousValue field entirely`() {
+    // A target app embedding an older SDK does not supply previousValue/previousValueType;
+    // they decode to null through the protocol and StorageSubscriptionManager. The encoder
+    // must OMIT `previousValue` (not emit null) so the TS ingest's `!== undefined` guard falls
+    // through to the DB auto-lookup instead of recording a spurious null for a change that
+    // lands after an existing row (#3000, Codex review on PR #3170).
+    val obj = encodeAndParse(baseEvent("dark", "STRING", null, null))
+    assertEquals("dark", obj["value"]!!.jsonPrimitive.content)
+    assertTrue(
+      "previousValue must be absent, not JSON null, for a legacy SDK",
+      !obj.containsKey("previousValue"),
+    )
+  }
+
+  @Test
   fun `string with quotes and backslashes is escaped in previousValue`() {
     // Ensures JSON escaping (not just wrapping) — a raw append would corrupt this.
     val nasty = "a\"b\\c"
@@ -92,6 +107,8 @@ class StorageChangeWireEncoderTest {
     // (not re-quoted) and remain valid JSON.
     val obj = encodeAndParse(baseEvent("""["x"]""", "STRING_SET", """["a","b"]""", "STRING_SET"))
     // previousValue parses as an array element, not a string — assert it is not a primitive string.
-    assertTrue(obj["previousValue"] !is JsonPrimitive || !obj["previousValue"]!!.jsonPrimitive.isString)
+    assertTrue(
+      obj["previousValue"] !is JsonPrimitive || !obj["previousValue"]!!.jsonPrimitive.isString
+    )
   }
 }

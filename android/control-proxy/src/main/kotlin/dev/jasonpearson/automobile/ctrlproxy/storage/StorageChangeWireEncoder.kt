@@ -10,11 +10,11 @@ import kotlinx.serialization.json.Json
  * `value`/`previousValue` — can be unit-tested for validity across add / modify / remove /
  * type-change cases (#3000).
  *
- * STRING values need JSON quoting + escaping; all other types (numbers, booleans, STRING_SET
- * arrays produced by the SDK) are already valid JSON fragments. Crucially, `previousValue` is
- * quoted by its OWN [PreferenceChangeEvent.previousValueType], not by the new value's [type]: on a
- * remove (new value null) or a type-changing write the new type is UNKNOWN, so quoting the prior
- * value by it would emit an unquoted STRING and break the entire message's JSON.
+ * STRING values need JSON quoting + escaping; all other types (numbers, booleans, STRING_SET arrays
+ * produced by the SDK) are already valid JSON fragments. Crucially, `previousValue` is quoted by
+ * its OWN [PreferenceChangeEvent.previousValueType], not by the new value's [type]: on a remove
+ * (new value null) or a type-changing write the new type is UNKNOWN, so quoting the prior value by
+ * it would emit an unquoted STRING and break the entire message's JSON.
  */
 internal fun buildStorageChangedMessage(
   event: PreferenceChangeEvent,
@@ -31,9 +31,19 @@ internal fun buildStorageChangedMessage(
   }
   append(""","value":${encodeTypedValue(event.value, event.type, json)}""")
   append(""","valueType":${json.encodeToString(event.type)}""")
-  append(
-    ""","previousValue":${encodeTypedValue(event.previousValue, event.previousValueType, json)}"""
-  )
+  // Emit `previousValue` ONLY when the SDK actually supplied a prior-value type — i.e.
+  // it captured the change and knows the prior value (a genuine "no prior value" add
+  // still carries previousValueType = UNKNOWN, so it is emitted as null). A legacy SDK
+  // that predates #3000 omits previousValueType (it decodes to null through the protocol
+  // and StorageSubscriptionManager), so we omit `previousValue` entirely. That leaves the
+  // field absent on the wire, so the TS ingest's `previousValue !== undefined` guard falls
+  // through to the DB auto-lookup instead of recording a spurious null for a legacy-SDK
+  // change that lands after an existing row.
+  if (event.previousValueType != null) {
+    append(
+      ""","previousValue":${encodeTypedValue(event.previousValue, event.previousValueType, json)}"""
+    )
+  }
   append(""","eventTimestamp":${event.timestamp}""")
   append(""","sequenceNumber":${event.sequenceNumber}""")
   append("}")

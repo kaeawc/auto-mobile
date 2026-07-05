@@ -127,7 +127,7 @@ export class CtrlProxyHierarchy {
 
     }
 
-    const reconnectStatus = this.context.getReconnectStatus?.();
+    const reconnectStatus = this.context.getReconnectStatus?.() ?? undefined;
 
     // Return cached (stale) data if available
     if (cachedHierarchy) {
@@ -316,7 +316,7 @@ export class CtrlProxyHierarchy {
   /**
    * Check if a node has meaningful content (text, identifier, test-tag)
    */
-  private hasContentProperties(attrs: Record<string, string>): boolean {
+  private hasContentProperties(attrs: Record<string, unknown>): boolean {
     return Boolean(
       (attrs["text"] && attrs["text"] !== "") ||
       (attrs["value"] && attrs["value"] !== "") ||
@@ -331,7 +331,7 @@ export class CtrlProxyHierarchy {
    * Check if a node has meaningful interaction properties
    * Note: iOS marks many containers as clickable, so we're more selective here
    */
-  private hasInteractionProperties(attrs: Record<string, string>): boolean {
+  private hasInteractionProperties(attrs: Record<string, unknown>): boolean {
     return Boolean(
       attrs["scrollable"] === "true" ||
       attrs["focused"] === "true" ||
@@ -343,8 +343,8 @@ export class CtrlProxyHierarchy {
   /**
    * Check if a node is a structural wrapper (UIView with no meaningful properties)
    */
-  private isStructuralWrapper(attrs: Record<string, string>, hasChildren: boolean): boolean {
-    const className = attrs["class"] || "";
+  private isStructuralWrapper(attrs: Record<string, unknown>, hasChildren: boolean): boolean {
+    const className = typeof attrs["class"] === "string" ? attrs["class"] : "";
     const isContainerClass = className === "UIView" || className === "UIImageView";
 
     // Not a wrapper if it has content or is focused/selected/scrollable
@@ -360,8 +360,8 @@ export class CtrlProxyHierarchy {
   /**
    * Clean node attributes by removing false booleans and empty values
    */
-  private cleanAttributes(attrs: Record<string, string>): Record<string, string> {
-    const cleaned: Record<string, string> = {};
+  private cleanAttributes(attrs: Record<string, unknown>): Record<string, unknown> {
+    const cleaned: Record<string, unknown> = {};
     const booleanFields = ["clickable", "enabled", "focusable", "focused", "scrollable",
       "password", "checkable", "checked", "selected", "long-clickable"];
 

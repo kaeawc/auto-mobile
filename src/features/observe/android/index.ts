@@ -32,7 +32,6 @@ export type {
   A11yImeActionResult,
   A11ySelectAllResult,
   A11yActionResult,
-  AndroidHitTestResult,
   A11yClipboardResult,
   A11yCaCertResult,
   A11yDeviceOwnerStatusResult,

@@ -75,18 +75,41 @@ carry the full node (incl. `extras`) for reconstruction, `extras` is never part
 of the node identity key, and the top-level `fields` diff is untouched. Result
 on the same real pair: **85 → 2 `changed`** entries, both genuinely actionable.
 
-### 2. AC#1 (agent-consumable) — PASS (after fix)
+### 2. AC#1 (agent-consumable) — PASS for localized actions, with caveats
 
-The text-entry diff is a legible handful: `added=1, removed=3, changed=2` plus a
-`focusedElement` field change. Every entry has a readable key; the new
-`EditText` carries its typed text in `added`, reconstructable without the tree.
+After the fix the text-entry diff is a compact handful: `added=1, removed=3,
+changed=2` plus a `focusedElement` field change — small enough to act on without
+the full tree, and the new `EditText` carries its typed text in `added`
+(reconstructable from the diff alone). Two honest limits:
 
-### 3. AC#2 (`changed` fires with `{from,to}`) — PASS
+- **The node `key` is not always a semantic handle.** It is
+  `[resource-id, bounds, text, sibling-index]` NUL-joined (`\x00`). For a node
+  with a `resource-id`/`text` it reads fine; for an id-less/text-less node it
+  degrades to `bounds + index` — opaque (the consumer can't name what it is) and
+  awkward to display (embedded NUL bytes render blank). So the key is *stable and
+  unique*, not universally *human-legible*.
+- **Typing surfaces as remove+add, not a `text` `changed`** (see AC#2).
 
-- The `focusedElement` mirror reports the newly-focused field with the typed
-  value on the `to` side (`text: "SignOff3051"`), `node` subtree stripped.
-- Node `changed` entries are clean `{from,to}` on actionable attributes
-  (`content-desc`, `bounds`).
+### 3. AC#2 (`changed` fires with `{from,to}`) — PARTIAL on real output
+
+- **`focused` — demonstrated on real data.** The `focusedElement` mirror
+  (#3052) reports the newly-focused field with the typed value on the `to` side
+  (`text: "SignOff3051"`), `node` subtree stripped. Note this rides the top-level
+  `fields` map, not a node `changed` entry.
+- **`checked` / `selected` — NOT reproduced on real output**, only covered by
+  the synthetic tests (`diffObserveResult.test.ts`). The Playground toggles
+  surface no state delta (finding #3 caveat below), so the classic
+  `checked: false→true` `changed` could not be captured live. On real data,
+  AC#2 is therefore **1 of 3 enumerated states** (`focused`).
+- **Text edits are remove+add, not `changed.text`.** Because `text` is part of
+  the node identity key, editing a field's text changes its key: the empty field
+  lands in `removed` and the typed field in `added` — there is no
+  `changed: { text: { from, to } }`. A consumer that wants the typed value reads
+  it off the `added` node (or correlates the removed+added pair by bounds). This
+  is the documented content-key limitation (`diffObserveResult.test.ts`: "a
+  content-key field change reads as remove+add"), surfaced here on real output.
+- Node `changed` entries that *do* fire are clean `{from,to}` on actionable
+  attributes (`content-desc`, `bounds`).
 
 > Caveat — **Compose toggle state is not surfaced.** Tapping the Playground
 > `Switch` / `CheckBox` returned success but produced **no** hierarchy delta:
@@ -103,8 +126,11 @@ The text-entry diff is a legible handful: `added=1, removed=3, changed=2` plus a
 On a ~250px scroll, content identity (#3053, default on) re-paired **9 shifted
 rows** carrying stable `resource-id`s into compact **bounds-only `changed`**
 deltas instead of remove+add. Churn dropped from **65** (positional-only) to
-**56**. Rows *without* a stable id still churn as add/remove — the concrete
-motivation for the stable-node-identity follow-up (**#3107**), not a blocker.
+**56**. But the re-pair only helps rows with a stable id: of the residual 56
+entries, **~28 are opaque** (id-less *and* text-less — just `bounds + index`),
+so an agent can't tell what entered/left the screen. That opacity — not just the
+raw churn count — is the concrete motivation for the stable-node-identity
+follow-up (**#3107**). Not a blocker for an off-by-default flag.
 
 ### 5. AC#4 (byte/token reduction) — PASS for localized, bounded for scroll
 
@@ -122,12 +148,20 @@ a large fraction of the full observation. Still a reduction, never an inflation.
 
 ## Recommendation
 
-**Sign off the diff shape** `{ isDiff, added, removed, changed, fields }` for
-general use **with the `extras`-exclusion fix landed**, on this evidence:
+**Sign off the diff shape** `{ isDiff, added, removed, changed, fields }` as the
+**plumbing for localized actions**, **with the `extras`-exclusion fix landed**.
+What this sign-off does and does not establish:
 
-- The format is agent-consumable and self-describing for localized actions
-  (tap/type/focus), with ~95–98% output reduction on real device output.
-- The flag remains **off by default**; its clearest wins are localized-change
+- **Established:** the shape is compact and consumable for localized actions
+  (tap/type/focus) with ~95–98% output reduction on real device output; the
+  `extras` flood is fixed; scroll behavior and its content-identity win are
+  quantified.
+- **Bounded / deferred to capture + #3107:** full agent-consumability across
+  *all* the interaction states the issue enumerated is not yet reached — real
+  toggle state (`checked`/`selected`) is not surfaced by the capture layer (so
+  it is synthetic-only here), typing reads as remove+add rather than a `text`
+  delta, and id-less nodes carry opaque keys that a scroll exposes in bulk.
+- The flag stays **off by default**; its clearest wins are localized-change
   interaction loops. Scroll-heavy loops benefit less until stable node identity
   (#3107) collapses more of the cascade.
 

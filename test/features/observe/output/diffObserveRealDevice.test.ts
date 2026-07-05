@@ -24,8 +24,13 @@ import { loadDiffFixture, measureValue } from "../../../fixtures/observe/observe
  * data) and in `diffObserveResult.test.ts` (synthetically).
  */
 
-/** All nodes touched by a diff carry a readable, non-empty key (AC#1 helper). */
-function everyEntryHasReadableKey(diff: ObserveDiff): boolean {
+/**
+ * Every diff entry carries a non-empty identity `key` (AC#1 helper). NB: this
+ * asserts the key is *present and unique*, not that it is human-legible — an
+ * id-less/text-less node degrades to a `bounds + index` key (see the sign-off
+ * doc's AC#1 caveat), which is stable but opaque.
+ */
+function everyEntryHasNonEmptyKey(diff: ObserveDiff): boolean {
   const keyed = [...diff.added, ...diff.removed, ...diff.changed];
   return keyed.length > 0 && keyed.every(e => typeof e.key === "string" && e.key.length > 0);
 }
@@ -53,12 +58,22 @@ describe("actions-diff-observe real-device sign-off (#3051)", () => {
       // The whole point of the flag: a localized action is a tiny, legible delta.
       const total = diff.added.length + diff.removed.length + diff.changed.length;
       expect(total).toBeLessThanOrEqual(12);
-      expect(everyEntryHasReadableKey(diff)).toBe(true);
+      expect(everyEntryHasNonEmptyKey(diff)).toBe(true);
       // The new EditText is fully reconstructable from `added` alone (no baseline
       // needed): its typed text rides along in the emitted attributes.
       const typed = diff.added.find(n => n.attributes["text"] === "SignOff3051");
       expect(typed).toBeDefined();
       expect(typed!.attributes["className"]).toBe("android.widget.EditText");
+    });
+
+    test("typing surfaces as remove+add (not a `text` change) — documented key limitation", () => {
+      // `text` is part of the node identity key, so editing a field's text changes
+      // its identity: the empty field lands in `removed`, the typed field in
+      // `added`, and there is NO `changed: { text: {from,to} }`. Pinned here on real
+      // output so the sign-off doc's AC#2 caveat can't silently regress.
+      const diff = diffObserveResult(textBefore, textAfter);
+      expect(diff.added.some(n => n.attributes["text"] === "SignOff3051")).toBe(true);
+      expect(diff.changed.some(c => "text" in c.changes)).toBe(false);
     });
 
     test("no `changed` entry is polluted by volatile `extras` metadata (#3051 fix, on real data)", () => {

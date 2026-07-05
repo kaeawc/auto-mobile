@@ -142,6 +142,7 @@ nav:
             - 'Emulator Startup': design-docs/plat/android/emulator-startup.md
             - 'CtrlProxy': design-docs/plat/android/control-proxy.md
             - 'AutoMobile SDK': design-docs/plat/android/auto-mobile-sdk.md
+            - 'actions-diff-observe sign-off': design-docs/plat/android/actions-diff-observe-signoff.md
             - 'JUnitRunner':
               - 'Overview': design-docs/plat/android/junit-runner/index.md
               - 'Project Setup': design-docs/plat/android/junit-runner/project-setup.md

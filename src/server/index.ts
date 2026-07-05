@@ -65,6 +65,7 @@ import { registerAppFileResources } from "./appFileResources";
 import { registerFeatureFlagResources } from "./featureFlagResources";
 import { registerNetworkResources } from "./networkResources";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
+import { McpServerToolListChangedNotifier } from "../features/featureFlags/ToolListChangedNotifier";
 import { startupBenchmark } from "../utils/startupBenchmark";
 
 export interface McpServerOptions {
@@ -230,6 +231,21 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     }
   });
   startupBenchmark.endPhase("sdkInitialization");
+
+  // Emit notifications/tools/list_changed when a runtime feature-flag toggle
+  // changes tool definitions (outputSchema advertisement or tool availability),
+  // so caching clients re-fetch tools/list (issue #2963). Wired here because the
+  // singleton is constructed before the server exists; sendToolListChanged() is a
+  // guarded no-op until a client connects.
+  //
+  // Last-writer-wins: in daemon mode createMcpServer runs per HTTP session, so
+  // this points the shared singleton at the most-recently-created server — only
+  // that session is notified on a toggle. This mirrors ResourceRegistry's single
+  // `server` field (resourceRegistry.ts) and is acceptable while flags are set at
+  // startup; a cross-cutting multi-session broadcaster is tracked as a follow-up.
+  FeatureFlagService.getInstance().setToolListChangedNotifier(
+    new McpServerToolListChangedNotifier(server)
+  );
 
   // Register all tools with the server
   startupBenchmark.startPhase("serverHandlerRegistration");

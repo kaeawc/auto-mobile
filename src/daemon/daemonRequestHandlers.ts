@@ -1,10 +1,11 @@
 import { DaemonRequest } from "./types";
-import { Session } from "./sessionManager";
+import { DeviceLabelMap, Session } from "./sessionManager";
 
 export interface DaemonStateAccess {
   isInitialized(): boolean;
   getSessionManager(): {
     getSession(sessionId: string): Session | null;
+    getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
   };
   getDevicePool(): {

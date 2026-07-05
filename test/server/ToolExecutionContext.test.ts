@@ -76,6 +76,27 @@ describe("ToolExecutionContext", () => {
     expect(passed.platform).toBe("android");
   });
 
+  test("writes the keep-awake state to the typed keepScreenAwake slot on setup (#2973)", async () => {
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => ({ success: true, message: "ok" }),
+      } as any);
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    // keepScreenAwake:false → apply() short-circuits to an applied:false state,
+    // which ensureKeepScreenAwake must persist to the typed slot (not customData).
+    await createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions);
+
+    const state = sessionManager.getKeepScreenAwake("session-1");
+    expect(state).toBeDefined();
+    expect(state!.applied).toBe(false);
+    expect((sessionManager.getSessionCache("session-1") as Record<string, unknown>).customData).toBeUndefined();
+  });
+
   test("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>

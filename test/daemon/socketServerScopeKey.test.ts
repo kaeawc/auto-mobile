@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { Session } from "../../src/daemon/sessionManager";
+import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
 
 function createFakeSession(
   sessionId: string,
   assignedDevice: string,
-  customData: Record<string, unknown> = {}
+  deviceLabels?: DeviceLabelMap
 ): Session {
   return {
     sessionId,
@@ -18,7 +18,7 @@ function createFakeSession(
     createdAt: 0,
     lastUsedAt: 0,
     expiresAt: 60_000,
-    cacheData: { customData },
+    cacheData: { deviceLabels },
     lastHeartbeat: 0,
     sessionTimeoutMs: 60_000,
     heartbeatTimeoutMs: 10_000,
@@ -29,7 +29,7 @@ function createFakeSession(
 
 function createFakeDaemonState(
   sessionDevices: Map<string, string>,
-  sessionCustomData: Map<string, Record<string, unknown>>,
+  sessionDeviceLabels: Map<string, DeviceLabelMap>,
   mcpAutolockSessions: Map<string, string>
 ) {
   return {
@@ -38,9 +38,10 @@ function createFakeDaemonState(
       getSession: (sessionId: string) => {
         const assignedDevice = sessionDevices.get(sessionId);
         return assignedDevice
-          ? createFakeSession(sessionId, assignedDevice, sessionCustomData.get(sessionId) ?? {})
+          ? createFakeSession(sessionId, assignedDevice, sessionDeviceLabels.get(sessionId))
           : null;
       },
+      getDeviceLabels: (sessionId: string) => sessionDeviceLabels.get(sessionId),
       releaseSession: async () => null,
     }),
     getDevicePool: () => ({
@@ -56,23 +57,21 @@ function createFakeDaemonState(
 
 function createServer() {
   const sessionDevices = new Map<string, string>();
-  const sessionCustomData = new Map<string, Record<string, unknown>>();
+  const sessionDeviceLabels = new Map<string, DeviceLabelMap>();
   const mcpAutolockSessions = new Map<string, string>();
 
   // session-a is bound to device-1
   sessionDevices.set("session-a", "device-1");
   // device label "B" on session-a maps to session-a:B, bound to device-2
   sessionDevices.set("session-a:B", "device-2");
-  sessionCustomData.set("session-a", {
-    deviceLabelMap: { A: "session-a", B: "session-a:B" },
-  });
+  sessionDeviceLabels.set("session-a", { A: "session-a", B: "session-a:B" });
   // mcp-bound has an autolock session resolving to session-a (device-1)
   mcpAutolockSessions.set("mcp-bound", "session-a");
 
   const server = new UnixSocketServer(
     join(tmpdir(), `scope-${randomUUID()}.sock`),
     "http://localhost:0/mcp",
-    createFakeDaemonState(sessionDevices, sessionCustomData, mcpAutolockSessions),
+    createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
     new FakeTimer(),
   );
   return server;

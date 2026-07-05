@@ -46,7 +46,6 @@ import type { KeyValueType } from "../features/storage/storageTypes";
 /** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
 const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
-const DEVICE_LABEL_CACHE_KEY = "deviceLabelMap";
 
 /**
  * Unix Socket Server that proxies requests to the HTTP MCP server
@@ -529,12 +528,11 @@ export class UnixSocketServer {
     try {
       const labelMap = this.daemonState
         .getSessionManager()
-        .getSession(baseSessionUuid)
-        ?.cacheData.customData?.[DEVICE_LABEL_CACHE_KEY];
-      if (!labelMap || typeof labelMap !== "object" || Array.isArray(labelMap)) {
+        .getDeviceLabels(baseSessionUuid);
+      if (!labelMap) {
         return baseSessionUuid;
       }
-      const mappedSession = (labelMap as Record<string, unknown>)[deviceLabel];
+      const mappedSession = labelMap[deviceLabel];
       return typeof mappedSession === "string" && mappedSession.length > 0
         ? mappedSession
         : baseSessionUuid;

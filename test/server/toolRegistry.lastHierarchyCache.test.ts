@@ -8,7 +8,6 @@ import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { KEEP_SCREEN_AWAKE_STATE_KEY } from "../../src/utils/KeepScreenAwakeManager";
 import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
@@ -64,14 +63,9 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     const sessionId = (await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1"))!;
 
-    const session = daemonSessionManager.getSession(sessionId)!;
-    daemonSessionManager.updateSessionCache(sessionId, {
-      ...session.cacheData,
-      customData: {
-        ...(session.cacheData.customData ?? {}),
-        [KEEP_SCREEN_AWAKE_STATE_KEY]: { applied: false, skipReason: "test" },
-      },
-    });
+    // Seed the typed keep-awake slot so ensureKeepScreenAwake short-circuits
+    // instead of touching a device during setup (issue #2973).
+    daemonSessionManager.setKeepScreenAwake(sessionId, { applied: false, skipReason: "disabled" });
     return sessionId;
   }
 
@@ -130,9 +124,9 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     expect(typeof cacheData.lastObserveTime).toBe("number");
     // Screenshot cache repair (symmetric structuredContent read).
     expect(cacheData.lastScreenshot).toBe("base64-screenshot-data");
-    // The dormant-decoy keys must NOT be written under customData anymore (#2917).
-    expect(cacheData.customData?.lastHierarchy).toBeUndefined();
-    expect(cacheData.customData?.lastScreenshot).toBeUndefined();
+    // The dormant-decoy keys never leak into an untyped bag — the `customData`
+    // escape hatch no longer exists at all (#2917/#2973).
+    expect((cacheData as Record<string, unknown>).customData).toBeUndefined();
 
     // Returned wire response is sanitized at the chokepoint.
     const returnedRoot = (response.structuredContent as ObserveResult).viewHierarchy!.hierarchy.node as any;
@@ -173,6 +167,6 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     expect(response.content[0].text).toBe(stringifyToolResponse(response.structuredContent));
 
     const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
-    expect(cacheData.customData?.lastActionTime).toBeUndefined();
+    expect((cacheData as Record<string, unknown>).customData).toBeUndefined();
   });
 });

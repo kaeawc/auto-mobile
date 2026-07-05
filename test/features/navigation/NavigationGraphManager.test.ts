@@ -6,6 +6,10 @@ import {
 } from "../../../src/features/navigation/NavigationGraphManager";
 import { runMigrations } from "../../helpers/database";
 import { createTestDatabase } from "../../db/testDbHelper";
+import {
+  installInMemoryNavManager,
+  type InMemoryNavManagerHarness
+} from "../../helpers/navigationTestHarness";
 import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
 import { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
@@ -16,45 +20,39 @@ import { useTempFileDatabase, type TempFileDatabaseHandle } from "../../helpers/
 import { readFileSync } from "fs";
 import { join } from "path";
 
-// The older suites below drive the REAL getDatabase() singleton via getInstance()
-// and getInstanceForSession() (session instances have no in-memory injection seam),
-// so back it with a temp-dir file DB for the whole file. The tests await their
-// writes, so the #3063 real-DB race does not apply; this just keeps them off the
-// user's ~/.auto-mobile DB and satisfies the unit-test guard (issue #3067). The
-// newer createForTesting-based suites inject their own in-memory DBs and never
-// touch getDatabase(), so this is inert for them.
-let tempFileDb: TempFileDatabaseHandle;
-
-beforeAll(async () => {
-  tempFileDb = await useTempFileDatabase();
-});
-
-afterAll(async () => {
-  await tempFileDb.cleanup();
-});
-
 describe("NavigationGraphManager", () => {
+  let harness: InMemoryNavManagerHarness;
   let manager: NavigationGraphManager;
 
-  beforeAll(async () => {
-    // Run database migrations once before all tests
-    await runMigrations();
-  });
-
   beforeEach(async () => {
-    // Reset singleton between tests
-    NavigationGraphManager.resetInstance();
-    manager = NavigationGraphManager.getInstance();
-    // Set up a test app and clear any existing data
-    await manager.setCurrentApp("com.test.app");
-    await manager.clearCurrentGraph();
-    // Re-set app after clearing (clearCurrentGraph sets currentScreen to null)
+    // Fresh in-memory, already-migrated DB per test (issue #2969): the manager is
+    // built via createForTesting on an isolated connection and installed as the
+    // getInstance() singleton, so no test can observe leftover state from a prior
+    // test, file, or worktree run (the cold-first-run flake this suite used to
+    // have when it shared the real getDatabase() singleton).
+    harness = await installInMemoryNavManager();
+    manager = harness.manager;
     await manager.setCurrentApp("com.test.app");
   });
 
   afterEach(async () => {
-    NavigationGraphManager.resetInstance();
+    await harness.dispose();
   });
+
+  /**
+   * A fresh no-current-app manager on the SAME in-memory connection, for tests
+   * that need pristine in-memory state. These paths used to be exercised via
+   * resetInstance()+getInstance(), but a lazily rebuilt default instance binds
+   * its repositories to the real getDatabase() singleton — the shared-state
+   * dependency this suite is isolated from (and the unit-test DB guard, #3067,
+   * rejects).
+   */
+  function makeFreshManager(): NavigationGraphManager {
+    return NavigationGraphManager.createForTesting(
+      new NavigationRepository(harness.db),
+      new TestCoverageRepository(undefined, harness.db)
+    );
+  }
 
   describe("singleton pattern", () => {
     test("should return the same instance", () => {
@@ -70,7 +68,12 @@ describe("NavigationGraphManager", () => {
 
       NavigationGraphManager.resetInstance();
 
+      // getInstance() lazily rebuilds a default instance here. Only accessors
+      // that never resolve its (real-getDatabase-bound) repositories are safe:
+      // getCurrentAppId() is in-memory, and getKnownScreens() short-circuits to
+      // [] while currentAppId is null.
       const instance2 = NavigationGraphManager.getInstance();
+      expect(instance2).not.toBe(instance1);
       expect(instance2.getCurrentAppId()).toBeNull();
       expect(await instance2.getKnownScreens()).toEqual([]);
     });
@@ -109,8 +112,7 @@ describe("NavigationGraphManager", () => {
     });
 
     test("should auto-set current app from applicationId in event", async () => {
-      NavigationGraphManager.resetInstance();
-      const freshManager = NavigationGraphManager.getInstance();
+      const freshManager = makeFreshManager();
 
       // No app set initially
       expect(freshManager.getCurrentAppId()).toBeNull();
@@ -307,9 +309,8 @@ describe("NavigationGraphManager", () => {
     });
 
     test("should return not found when no current screen", async () => {
-      NavigationGraphManager.resetInstance();
-      const freshManager = NavigationGraphManager.getInstance();
-      await freshManager.setCurrentApp("com.test.app");
+      const freshManager = makeFreshManager();
+      await freshManager.setCurrentApp("com.test.app.pathless");
 
       const result = await freshManager.findPath("SomeScreen");
       expect(result.found).toBe(false);
@@ -441,22 +442,19 @@ function createEventWithApp(
 }
 
 describe("NavigationGraphManager - Scroll Position", () => {
+  let harness: InMemoryNavManagerHarness;
   let manager: NavigationGraphManager;
 
-  beforeAll(async () => {
-    // Run database migrations once before all tests
-    await runMigrations();
-  });
-
   beforeEach(async () => {
-    // Get singleton and clear
-    manager = NavigationGraphManager.getInstance();
-    await manager.clearAllGraphs();
+    // Isolated in-memory DB per test (issue #2969) — no singleton getDatabase()
+    // state shared with other tests, so clearAllGraphs bookkeeping is unnecessary.
+    harness = await installInMemoryNavManager();
+    manager = harness.manager;
     await manager.setCurrentApp("com.test.scrollapp");
   });
 
   afterEach(async () => {
-    await manager.clearAllGraphs();
+    await harness.dispose();
   });
 
   it("should update scroll position on most recent swipeOn tool call", async () => {
@@ -585,22 +583,19 @@ describe("NavigationGraphManager - Scroll Position", () => {
 });
 
 describe("NavigationGraphManager - Named Nodes Only", () => {
+  let harness: InMemoryNavManagerHarness;
   let manager: NavigationGraphManager;
 
-  beforeAll(async () => {
-    await runMigrations();
-  });
-
   beforeEach(async () => {
-    NavigationGraphManager.resetInstance();
-    manager = NavigationGraphManager.getInstance();
-    await manager.setCurrentApp("com.test.namedapp");
-    await manager.clearCurrentGraph();
+    // Isolated in-memory DB per test (issue #2969) — clearCurrentGraph/reset
+    // bookkeeping is unnecessary because nothing is shared across tests.
+    harness = await installInMemoryNavManager();
+    manager = harness.manager;
     await manager.setCurrentApp("com.test.namedapp");
   });
 
   afterEach(async () => {
-    NavigationGraphManager.resetInstance();
+    await harness.dispose();
   });
 
   describe("recordHierarchyNavigation", () => {
@@ -781,77 +776,100 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
     });
   });
 
-  describe("Multi-session isolation", () => {
-    beforeEach(() => {
-      NavigationGraphManager.resetInstance();
-    });
+});
 
-    test("getInstanceForSession returns independent instances", async () => {
-      const sessionA = NavigationGraphManager.getInstanceForSession("session-A");
-      const sessionB = NavigationGraphManager.getInstanceForSession("session-B");
+// getInstanceForSession() constructs unbound managers on the process-wide
+// getDatabase() singleton — there is no in-memory injection seam for session
+// instances — so this block (alone in this file) backs that singleton with a
+// fresh temp-dir file DB (see useTempFileDatabase docs). Every assertion here is
+// on in-memory instance state (identity, currentAppId); the file DB only absorbs
+// incidental awaited writes (setCurrentApp's getOrCreateApp), so no test depends
+// on leftover DB state and cold runs stay deterministic (issue #2969).
+describe("NavigationGraphManager - Multi-session isolation", () => {
+  let tempFileDb: TempFileDatabaseHandle;
 
-      await sessionA.setCurrentApp("com.app.a");
-      await sessionB.setCurrentApp("com.app.b");
+  beforeAll(async () => {
+    tempFileDb = await useTempFileDatabase();
+    await runMigrations();
+  });
 
-      expect(sessionA.getCurrentAppId()).toBe("com.app.a");
-      expect(sessionB.getCurrentAppId()).toBe("com.app.b");
-    });
+  afterAll(async () => {
+    await tempFileDb.cleanup();
+  });
 
-    test("getInstanceForSession returns same instance for same sessionId", () => {
-      const first = NavigationGraphManager.getInstanceForSession("session-X");
-      const second = NavigationGraphManager.getInstanceForSession("session-X");
-      expect(first).toBe(second);
-    });
+  beforeEach(() => {
+    NavigationGraphManager.resetInstance();
+  });
 
-    test("recordToolCall on session A does not appear in session B", () => {
-      const sessionA = NavigationGraphManager.getInstanceForSession("session-A");
-      const sessionB = NavigationGraphManager.getInstanceForSession("session-B");
+  afterEach(() => {
+    NavigationGraphManager.resetInstance();
+  });
 
-      sessionA.recordToolCall("tapOn", { element: "button" });
+  test("getInstanceForSession returns independent instances", async () => {
+    const sessionA = NavigationGraphManager.getInstanceForSession("session-A");
+    const sessionB = NavigationGraphManager.getInstanceForSession("session-B");
 
-      // Session A should have the tool call in history
-      // Session B should have no tool calls
-      // We verify isolation by checking that they are different instances
-      expect(sessionA).not.toBe(sessionB);
-    });
+    await sessionA.setCurrentApp("com.app.a");
+    await sessionB.setCurrentApp("com.app.b");
 
-    test("releaseSession cleans up the instance", async () => {
-      const session = NavigationGraphManager.getInstanceForSession("session-cleanup");
-      await session.setCurrentApp("com.test.cleanup");
-      expect(session.getCurrentAppId()).toBe("com.test.cleanup");
+    expect(sessionA.getCurrentAppId()).toBe("com.app.a");
+    expect(sessionB.getCurrentAppId()).toBe("com.app.b");
+  });
 
-      NavigationGraphManager.releaseSession("session-cleanup");
+  test("getInstanceForSession returns same instance for same sessionId", () => {
+    const first = NavigationGraphManager.getInstanceForSession("session-X");
+    const second = NavigationGraphManager.getInstanceForSession("session-X");
+    expect(first).toBe(second);
+  });
 
-      // Getting the session again should return a fresh instance
-      const fresh = NavigationGraphManager.getInstanceForSession("session-cleanup");
-      expect(fresh.getCurrentAppId()).toBeNull();
-    });
+  test("recordToolCall on session A does not appear in session B", () => {
+    const sessionA = NavigationGraphManager.getInstanceForSession("session-A");
+    const sessionB = NavigationGraphManager.getInstanceForSession("session-B");
 
-    test("releaseSession does not affect other sessions", async () => {
-      const sessionA = NavigationGraphManager.getInstanceForSession("session-A");
-      const sessionB = NavigationGraphManager.getInstanceForSession("session-B");
+    sessionA.recordToolCall("tapOn", { element: "button" });
 
-      await sessionA.setCurrentApp("com.app.a");
-      await sessionB.setCurrentApp("com.app.b");
+    // Session A should have the tool call in history
+    // Session B should have no tool calls
+    // We verify isolation by checking that they are different instances
+    expect(sessionA).not.toBe(sessionB);
+  });
 
-      NavigationGraphManager.releaseSession("session-A");
+  test("releaseSession cleans up the instance", async () => {
+    const session = NavigationGraphManager.getInstanceForSession("session-cleanup");
+    await session.setCurrentApp("com.test.cleanup");
+    expect(session.getCurrentAppId()).toBe("com.test.cleanup");
 
-      expect(sessionB.getCurrentAppId()).toBe("com.app.b");
-    });
+    NavigationGraphManager.releaseSession("session-cleanup");
 
-    test("resetInstance clears both singleton and session instances", async () => {
-      NavigationGraphManager.getInstanceForSession("session-reset");
-      const singleton = NavigationGraphManager.getInstance();
-      await singleton.setCurrentApp("com.singleton");
+    // Getting the session again should return a fresh instance
+    const fresh = NavigationGraphManager.getInstanceForSession("session-cleanup");
+    expect(fresh.getCurrentAppId()).toBeNull();
+  });
 
-      NavigationGraphManager.resetInstance();
+  test("releaseSession does not affect other sessions", async () => {
+    const sessionA = NavigationGraphManager.getInstanceForSession("session-A");
+    const sessionB = NavigationGraphManager.getInstanceForSession("session-B");
 
-      const freshSingleton = NavigationGraphManager.getInstance();
-      expect(freshSingleton.getCurrentAppId()).toBeNull();
+    await sessionA.setCurrentApp("com.app.a");
+    await sessionB.setCurrentApp("com.app.b");
 
-      const freshSession = NavigationGraphManager.getInstanceForSession("session-reset");
-      expect(freshSession.getCurrentAppId()).toBeNull();
-    });
+    NavigationGraphManager.releaseSession("session-A");
+
+    expect(sessionB.getCurrentAppId()).toBe("com.app.b");
+  });
+
+  test("resetInstance clears both singleton and session instances", async () => {
+    NavigationGraphManager.getInstanceForSession("session-reset");
+    const singleton = NavigationGraphManager.getInstance();
+    await singleton.setCurrentApp("com.singleton");
+
+    NavigationGraphManager.resetInstance();
+
+    const freshSingleton = NavigationGraphManager.getInstance();
+    expect(freshSingleton.getCurrentAppId()).toBeNull();
+
+    const freshSession = NavigationGraphManager.getInstanceForSession("session-reset");
+    expect(freshSession.getCurrentAppId()).toBeNull();
   });
 });
 
@@ -1453,6 +1471,7 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
   const APP_ID = "com.test.promo";
 
   let db: Kysely<Database>;
+  let telemetrySpy: ReturnType<typeof spyOn>;
 
   async function countNodes(screenName?: string): Promise<number> {
     let q = db
@@ -1478,9 +1497,18 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
   beforeEach(async () => {
     db = await createTestDatabase({ foreignKeys: true });
     TelemetryRecorder.resetInstance();
+    // Stub the post-commit fire-and-forget telemetry write fired by
+    // seedSuggestion's recordNavigationEvent. The file-level temp-file DB that
+    // used to absorb it is gone (issue #2969), so an unstubbed write would
+    // resolve the real getDatabase() and trip the unit-test DB guard (#3067).
+    telemetrySpy = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordNavigationEvent"
+    ).mockResolvedValue(undefined);
   });
 
   afterEach(async () => {
+    telemetrySpy.mockRestore();
     TelemetryRecorder.resetInstance();
     await db.destroy();
   });

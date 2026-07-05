@@ -280,6 +280,15 @@ jobs:
               # The XCTestRunner job runs these readiness scripts directly, so
               # changes to them must exercise the job (they were skipped before).
               - 'scripts/ci/**'
+              # This job runs a bun-side integration test (iosVideoRecordingStartStop),
+              # so the bun test config and any test-setup preload affect it. bunfig.toml
+              # wires a [test].preload that runs before EVERY bun test the job invokes,
+              # and test/setup/** holds those preloaded modules; a change to either can
+              # break the integration test deterministically (issue #3109), so they
+              # must exercise this job pre-merge instead of landing latent.
+              - 'bunfig.toml'
+              - 'test/setup/**'
+              - 'test/integration/iosVideoRecordingStartStop.integration.test.ts'
               - 'package.json'
               - 'bun.lock'
 

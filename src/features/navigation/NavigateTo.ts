@@ -5,7 +5,6 @@ import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { ToolRegistry } from "../../server/toolRegistry";
-import { markInternalToolCall } from "../../server/internalToolCall";
 import {
   NavigationGraphManager,
   ToolCallInteraction,
@@ -307,18 +306,18 @@ export class NavigateTo {
    * Execute a tool call by looking up the tool in the registry.
    */
   private async executeToolCall(interaction: ToolCallInteraction): Promise<void> {
-    const tool = ToolRegistry.getTool(interaction.toolName);
-    if (!tool) {
-      throw new Error(`Tool not found: ${interaction.toolName}`);
-    }
-
     logger.info(`[NAVIGATE_TO] Replaying tool call: ${interaction.toolName}`);
 
-    // Call the tool handler with the original args, marked internal (#3087):
-    // `markInternalToolCall` returns a copy, so the stored edge `interaction.args`
-    // is never mutated. Under `--actions-diff-observe` this replay neither diffs
-    // its observation nor advances the agent-facing diff baseline.
-    await tool.handler(markInternalToolCall(interaction.args as Record<string, unknown>));
+    // Replay through the internal-call seam (#3108): it resolves the tool,
+    // marks the call internal (#3087), and invokes the handler in one step.
+    // `callInternal` copies the args before marking, so the stored edge
+    // `interaction.args` is never mutated. Under `--actions-diff-observe` this
+    // replay neither diffs its observation nor advances the agent-facing diff
+    // baseline. Throws ActionableError if the tool is not registered.
+    await ToolRegistry.callInternal(
+      interaction.toolName,
+      interaction.args as Record<string, unknown>
+    );
   }
 
   /**

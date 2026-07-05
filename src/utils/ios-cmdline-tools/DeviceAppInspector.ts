@@ -362,11 +362,101 @@ const isExpectedMissingLegacySimulatorApp = (bundleId: string, errorMessage: str
   (errorMessage.includes("No such file or directory") ||
     errorMessage.includes("NSPOSIXErrorDomain, code=2"));
 
-export class DeviceAppInspector {
+/**
+ * Narrow seam OpenURL depends on to open a URL on a *physical* iOS device.
+ * Implemented by {@link DeviceAppInspector} (the shared `devicectl` wrapper);
+ * faked in tests so the URL path never shells out. Kept minimal (YAGNI): OpenURL
+ * only needs to know whether the physical-device path is usable and how to launch
+ * a bundle with a payload URL.
+ */
+export interface DeviceUrlLauncher {
+  /** True when `devicectl` can service a physical-device open-URL request. */
+  isAvailable(): Promise<boolean>;
+  /**
+   * Open `url` on a physical iOS device by launching `bundleId` with the URL as
+   * its launch payload. Throws with actionable context on failure (unsupported
+   * host, host-control mode, or an underlying devicectl error).
+   */
+  launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void>;
+}
+
+export class DeviceAppInspector implements DeviceUrlLauncher {
   private readonly deps: DeviceAppInspectorDependencies;
 
   constructor(deps: DeviceAppInspectorDependencies = defaultDependencies) {
     this.deps = deps;
+  }
+
+  /**
+   * Docker host-control mode: we're proxying a physical device through the
+   * host-control bridge rather than driving a local `devicectl`. The bridge
+   * exposes install/uninstall but no process-launch/URL primitives, so the
+   * launch-family methods return an explicit "not supported under host control"
+   * posture instead of shelling out. Single source for the gate expression that
+   * every devicectl entry point shares.
+   */
+  private isHostControlMode(): boolean {
+    return this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
+  }
+
+  /**
+   * True when the physical-device open-URL path is usable.
+   *
+   * Under Docker host control we report `true` even though `devicectl` isn't
+   * reachable locally: the host-control bridge exposes no launch-with-URL
+   * primitive yet, so we let the caller proceed to {@link launchWithPayloadUrl},
+   * which returns the precise "not supported under host control" error rather
+   * than the generic missing-devicectl message. Otherwise this requires a macOS
+   * host with a working `devicectl` (Xcode 15+).
+   *
+   * Part of the {@link DeviceUrlLauncher} seam OpenURL depends on; simulators are
+   * handled by the `simctl openurl` path in OpenURL and never reach this method.
+   */
+  async isAvailable(): Promise<boolean> {
+    if (this.isHostControlMode()) {
+      return true;
+    }
+    if (this.deps.platform() !== "darwin") {
+      return false;
+    }
+    try {
+      await this.deps.exec("xcrun devicectl --version");
+      return true;
+    } catch {
+      // Missing/broken devicectl → not available; OpenURL surfaces the
+      // actionable Xcode 15+/iOS 17+ guidance to the caller.
+      return false;
+    }
+  }
+
+  /**
+   * Open a URL on a physical iOS device (Xcode 15+/iOS 17+) by launching
+   * `bundleId` with the URL as its launch payload. For http(s) URLs the caller
+   * passes `com.apple.mobilesafari` so Safari resolves universal links;
+   * custom-scheme URLs pass the owning/target app bundle id. `--device <udid>`
+   * is passed unquoted (UDIDs are `[0-9A-F-]`), while the user-controlled url +
+   * bundle id are single-quoted to prevent shell injection. Near-clone of
+   * {@link launchApp}, differing only by the `--payload-url` flag; kept distinct
+   * because it carries no PID-capture/JSON-output plumbing.
+   */
+  async launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void> {
+    if (this.isHostControlMode()) {
+      throw new Error(
+        "Opening a URL on a physical iOS device is not supported under host control: " +
+        "the host-control bridge exposes no devicectl launch-with-URL primitive."
+      );
+    }
+    if (this.deps.platform() !== "darwin") {
+      throw new Error("Opening URLs on a physical iOS device requires macOS");
+    }
+    const command = [
+      "xcrun", "devicectl", "device", "process", "launch",
+      "--device", deviceUdid,            // unquoted, matching the other devicectl calls
+      "--payload-url", quoteShell(url),
+      "--terminate-existing",
+      quoteShell(bundleId)
+    ].join(" ");
+    await this.deps.exec(command);
   }
 
   public async getInstalledAppBundleHash(deviceUdid: string, bundleId: string, isSimulator = false): Promise<string | null> {
@@ -374,8 +464,7 @@ export class DeviceAppInspector {
       return this.getSimulatorAppBundleHash(deviceUdid, bundleId);
     }
 
-    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
-    if (useHostControl) {
+    if (this.isHostControlMode()) {
       const available = await this.deps.hostControl.isAvailable();
       if (!available) {
         this.deps.logger.warn("[DeviceAppInspector] Host control not available for devicectl");
@@ -415,8 +504,7 @@ export class DeviceAppInspector {
    * rather than the misleading "could not resolve bundle" from the darwin path.
    */
   public async clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void> {
-    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
-    if (useHostControl) {
+    if (this.isHostControlMode()) {
       throw new Error(
         `Clearing app data via uninstall+reinstall is not supported under host control for ${bundleId}: ` +
         "the host-control bridge cannot copy the installed bundle off-device to reinstall it."
@@ -520,8 +608,7 @@ export class DeviceAppInspector {
       return this.uninstallSimulatorApp(deviceUdid, bundleId);
     }
 
-    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
-    if (useHostControl) {
+    if (this.isHostControlMode()) {
       const available = await this.deps.hostControl.isAvailable();
       if (!available) {
         this.deps.logger.warn("[DeviceAppInspector] Host control not available for devicectl uninstall");
@@ -552,8 +639,7 @@ export class DeviceAppInspector {
   }
 
   public async installApp(deviceUdid: string, artifactPath: string): Promise<void> {
-    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
-    if (useHostControl) {
+    if (this.isHostControlMode()) {
       const available = await this.deps.hostControl.isAvailable();
       if (!available) {
         this.deps.logger.warn("[DeviceAppInspector] Host control not available for devicectl install");
@@ -606,8 +692,7 @@ export class DeviceAppInspector {
     bundleId: string,
     options: { terminateExisting?: boolean } = {}
   ): Promise<{ success: boolean; pid?: number; error?: string }> {
-    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
-    if (useHostControl) {
+    if (this.isHostControlMode()) {
       return {
         success: false,
         error: `Launching apps on a physical device is not supported under host control for ${bundleId}: ` +
@@ -672,8 +757,7 @@ export class DeviceAppInspector {
    * terminate at the tool level and surface as a thrown devicectl error).
    */
   public async terminateApp(deviceUdid: string, bundleId: string): Promise<{ wasInstalled: boolean; wasRunning: boolean }> {
-    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
-    if (useHostControl) {
+    if (this.isHostControlMode()) {
       throw new Error(
         `Terminating an app on a physical device is not supported under host control for ${bundleId}: ` +
         "the host-control bridge exposes install/uninstall but no devicectl process-management primitive."

@@ -2,7 +2,7 @@ import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, OpenURLResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { DeviceCtlClient, DeviceUrlLauncher } from "../../utils/ios-cmdline-tools/DeviceCtlClient";
+import { DeviceAppInspector, DeviceUrlLauncher } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { logger } from "../../utils/logger";
@@ -224,7 +224,7 @@ export class OpenURL extends BaseVisualChange {
    * @returns Result of the URL opening operation
    */
   private async executeiOSPhysicalOpenURL(url: string): Promise<OpenURLResult> {
-    const devicectl = this.devicectl ?? new DeviceCtlClient();
+    const devicectl = this.devicectl ?? new DeviceAppInspector();
 
     if (!(await devicectl.isAvailable())) {
       return {

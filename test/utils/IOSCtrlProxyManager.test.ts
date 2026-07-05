@@ -236,6 +236,7 @@ function createFakeBuilder(xctestrunPath = "/tmp/CtrlProxy.xctestrun") {
 describe("IOSCtrlProxyManager", function() {
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
+  let prevHealthMaxAttempts: string | undefined;
 
   beforeEach(function() {
     fakeTimer = new FakeTimer();
@@ -247,6 +248,20 @@ describe("IOSCtrlProxyManager", function() {
       name: "iPhone 16 Simulator"
     };
 
+    // Cap the health-poll budget suite-wide. The timeout-path tests
+    // (`enableAutoAdvance()` + `start()` rejects "failed to start within timeout")
+    // run the FULL health-poll loop, and each iteration's `timer.sleep(500)`
+    // resolves via a real `setImmediate` under auto-advance — so the loop costs
+    // one real event-loop tick per attempt. At the default 60 attempts that is 60
+    // real ticks whose wall-clock scales with event-loop load, which intermittently
+    // blew past bun's 5000ms per-test timeout in the full suite (a real macOS-CI
+    // flake, e.g. "ignores xcodebuild CtrlProxy processes for other simulators").
+    // A tiny budget proves the same timeout/spawn behavior deterministically and
+    // fast. Tests that need a specific budget still override this locally
+    // (`withHealthBudget` / the resolver parsing test) and restore to this value.
+    prevHealthMaxAttempts = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = "3";
+
     // Reset singleton instances
     IOSCtrlProxyManager.resetInstances();
     PortManager.reset();
@@ -254,6 +269,11 @@ describe("IOSCtrlProxyManager", function() {
   });
 
   afterEach(function() {
+    if (prevHealthMaxAttempts === undefined) {
+      delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    } else {
+      process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = prevHealthMaxAttempts;
+    }
     IOSCtrlProxyManager.resetInstances();
     PortManager.reset();
     PortManager.setPortAvailabilityCheckerForTesting(null);

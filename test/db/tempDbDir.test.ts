@@ -1,10 +1,32 @@
 import { describe, expect, test } from "bun:test";
 import path from "path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { removeTempDbDir } from "./tempDbDir";
+import { removeTempDbDir, removeTempDbDirSync } from "./tempDbDir";
+
+function ebusy(code = "EBUSY"): NodeJS.ErrnoException {
+  const error = new Error(`${code}: resource busy`) as NodeJS.ErrnoException;
+  error.code = code;
+  return error;
+}
+
+class FakeSyncTimer {
+  private readonly sleepHistory: number[] = [];
+
+  sleep(ms: number): void {
+    this.sleepHistory.push(ms);
+  }
+
+  getSleepHistory(): number[] {
+    return [...this.sleepHistory];
+  }
+
+  getSleepCallCount(): number {
+    return this.sleepHistory.length;
+  }
+}
 
 /**
  * Unit tests for the shared bounded temp-dir cleanup helper (issue #2916).
@@ -19,12 +41,6 @@ import { removeTempDbDir } from "./tempDbDir";
  * These run with no real filesystem or wall-clock, so they stay <100ms.
  */
 describe("removeTempDbDir (issue #2916)", () => {
-  function ebusy(code = "EBUSY"): NodeJS.ErrnoException {
-    const error = new Error(`${code}: resource busy`) as NodeJS.ErrnoException;
-    error.code = code;
-    return error;
-  }
-
   test("removes the dir on the first attempt and never sleeps when rm succeeds", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -148,6 +164,121 @@ describe("removeTempDbDir (issue #2916)", () => {
     await expect(
       removeTempDbDir("/tmp/auto-mobile-x", { rm, timer, maxAttempts: 5, delayMs: 50 })
     ).rejects.toThrow("EACCES");
+    expect(attempts).toBe(1);
+    expect(timer.getSleepCallCount()).toBe(0);
+  });
+});
+
+describe("removeTempDbDirSync (issue #2948)", () => {
+  test("removes the dir on the first attempt and never sleeps when rmSync succeeds", () => {
+    const timer = new FakeSyncTimer();
+    const calls: string[] = [];
+    const rmSync = (dir: string) => {
+      calls.push(dir);
+    };
+
+    removeTempDbDirSync("/tmp/auto-mobile-x", { rmSync, timer });
+
+    expect(calls).toEqual(["/tmp/auto-mobile-x"]);
+    expect(timer.getSleepCallCount()).toBe(0);
+  });
+
+  test("retries a transient EBUSY synchronously, then succeeds", () => {
+    const timer = new FakeSyncTimer();
+    let attempts = 0;
+    const rmSync = () => {
+      attempts += 1;
+      if (attempts < 3) {
+        throw ebusy();
+      }
+    };
+
+    removeTempDbDirSync("/tmp/auto-mobile-x", { rmSync, timer, maxAttempts: 5, delayMs: 50 });
+
+    expect(attempts).toBe(3);
+    expect(timer.getSleepHistory()).toEqual([50, 50]);
+  });
+
+  test("gives up WITHOUT throwing after a persistent sync lock, within a bounded sleep budget", () => {
+    const timer = new FakeSyncTimer();
+    let attempts = 0;
+    const rmSync = () => {
+      attempts += 1;
+      throw ebusy();
+    };
+    const gaveUp: Array<{ dir: string; error: unknown }> = [];
+
+    removeTempDbDirSync("/tmp/auto-mobile-locked", {
+      rmSync,
+      timer,
+      maxAttempts: 5,
+      delayMs: 50,
+      onGiveUp: (dir, error) => gaveUp.push({ dir, error }),
+    });
+
+    expect(attempts).toBe(5);
+    const history = timer.getSleepHistory();
+    expect(history.length).toBe(4);
+    expect(history.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(200);
+    expect(gaveUp.length).toBe(1);
+    expect(gaveUp[0].dir).toBe("/tmp/auto-mobile-locked");
+    expect((gaveUp[0].error as NodeJS.ErrnoException).code).toBe("EBUSY");
+  });
+
+  test.each(["EPERM", "ENOTEMPTY"])(
+    "treats %s as a transient sync Windows lock and gives up gracefully",
+    code => {
+      const timer = new FakeSyncTimer();
+      const rmSync = () => {
+        throw ebusy(code);
+      };
+      let gaveUp = false;
+
+      removeTempDbDirSync("/tmp/auto-mobile-x", {
+        rmSync,
+        timer,
+        maxAttempts: 3,
+        delayMs: 10,
+        onGiveUp: () => {
+          gaveUp = true;
+        },
+      });
+
+      expect(gaveUp).toBe(true);
+    }
+  );
+
+  test("removes a real temp dir (and its contents) through the default sync rm/timer", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-mobile-tempdbdir-sync-real-"));
+    writeFileSync(path.join(dir, "auto-mobile.db"), "not-a-real-db");
+    expect(existsSync(dir)).toBe(true);
+
+    removeTempDbDirSync(dir);
+
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  test("the default sync onGiveUp runs without throwing when a lock never clears", () => {
+    const rmSync = () => {
+      throw ebusy();
+    };
+
+    expect(() =>
+      removeTempDbDirSync("/tmp/auto-mobile-locked", { rmSync, maxAttempts: 2, delayMs: 1 })
+    ).not.toThrow();
+  });
+
+  test("rethrows an unexpected sync non-lock error code without retrying", () => {
+    const timer = new FakeSyncTimer();
+    let attempts = 0;
+    const rmSync = () => {
+      attempts += 1;
+      throw ebusy("EACCES");
+    };
+
+    expect(() =>
+      removeTempDbDirSync("/tmp/auto-mobile-x", { rmSync, timer, maxAttempts: 5, delayMs: 50 })
+    ).toThrow("EACCES");
     expect(attempts).toBe(1);
     expect(timer.getSleepCallCount()).toBe(0);
   });

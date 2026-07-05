@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, readdirSync } from "fs";
 import * as os from "os";
 import * as path from "path";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { backupDatabaseFile } from "../../src/db/database";
 import { ActionableError } from "../../src/models/ActionableError";
+import { removeTempDbDirSync } from "./tempDbDir";
 
 describe("backupDatabaseFile", () => {
   let dir: string;
@@ -24,14 +25,7 @@ describe("backupDatabaseFile", () => {
 
   afterEach(async () => {
     await db.destroy();
-    // Windows releases the sqlite file handle lazily after destroy(), so removing
-    // the temp dir can transiently hit EBUSY — retry, and treat cleanup as
-    // best-effort (a leftover temp dir must not fail the test).
-    try {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-    } catch {
-      // best-effort: OS will reclaim the temp dir
-    }
+    removeTempDbDirSync(dir);
   });
 
   test("captures uncheckpointed WAL rows into a timestamped backup file", async () => {

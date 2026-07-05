@@ -1,13 +1,9 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
 import type { ExecResult } from "../models";
-import { wrapCommandError } from "./CommandError";
+import { runExecSeam, type ExecRequestOptions, type ExecSeamOptions, type RawExecOutput } from "./ExecSeam";
 
-export interface HostCommandOptions {
-  timeoutMs?: number;
-  maxBuffer?: number;
-  cwd?: string;
-}
+export type HostCommandOptions = ExecRequestOptions;
 
 export interface HostCommandExecutor {
   executeCommand(
@@ -17,25 +13,17 @@ export interface HostCommandExecutor {
   ): Promise<ExecResult>;
 }
 
-type ExecFileAsync = (
+export type ExecFileAsync = (
   file: string,
   args: string[],
-  options?: {
-    timeout?: number;
-    maxBuffer?: number;
-    cwd?: string;
-  }
-) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
+  options?: ExecSeamOptions
+) => Promise<RawExecOutput>;
 
 const execFileAsync: ExecFileAsync = async (
   file: string,
   args: string[],
-  options?: {
-    timeout?: number;
-    maxBuffer?: number;
-    cwd?: string;
-  }
-): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> => {
+  options?: ExecSeamOptions
+): Promise<RawExecOutput> => {
   return promisify(execFile)(file, args, options);
 };
 
@@ -51,32 +39,10 @@ export class DefaultHostCommandExecutor implements HostCommandExecutor {
     args: string[] = [],
     options: HostCommandOptions = {}
   ): Promise<ExecResult> {
-    const execOptions = {
-      timeout: options.timeoutMs,
-      maxBuffer: options.maxBuffer,
-      cwd: options.cwd
-    };
-
-    let result: { stdout: string | Buffer; stderr: string | Buffer };
-    try {
-      result = await this.execAsync(file, args, execOptions);
-    } catch (error) {
-      throw wrapCommandError(error, {
-        command: file,
-        args,
-        cwd: options.cwd,
-      });
-    }
-
-    const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
-    const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();
-
-    return {
-      stdout,
-      stderr,
-      toString() { return stdout; },
-      trim() { return stdout.trim(); },
-      includes(searchString: string) { return stdout.includes(searchString); }
-    };
+    return runExecSeam(
+      execOptions => this.execAsync(file, args, execOptions),
+      options,
+      { command: file, args, cwd: options.cwd }
+    );
   }
 }

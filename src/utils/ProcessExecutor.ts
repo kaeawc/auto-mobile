@@ -2,13 +2,9 @@ import { execFile, spawn, type ChildProcess, type SpawnOptions } from "child_pro
 import process from "node:process";
 import { promisify } from "util";
 import type { ExecResult } from "../models";
-import { wrapCommandError } from "./CommandError";
+import { runExecSeam, type ExecRequestOptions, type ExecSeamOptions, type RawExecOutput } from "./ExecSeam";
 
-export interface ProcessExecOptions {
-  timeoutMs?: number;
-  maxBuffer?: number;
-  cwd?: string;
-}
+export type ProcessExecOptions = ExecRequestOptions;
 
 export interface ProcessExecutor {
   exec(command: string, options?: ProcessExecOptions): Promise<ExecResult>;
@@ -17,12 +13,8 @@ export interface ProcessExecutor {
 
 export type ExecAsync = (
   command: string,
-  options?: {
-    timeout?: number;
-    maxBuffer?: number;
-    cwd?: string;
-  }
-) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
+  options?: ExecSeamOptions
+) => Promise<RawExecOutput>;
 
 const execFileAsync = promisify(execFile);
 
@@ -46,18 +38,6 @@ const execAsync: ExecAsync = async (command, options) => {
   return { stdout, stderr };
 };
 
-const createExecResult = (stdout: string | Buffer, stderr: string | Buffer): ExecResult => {
-  const stdoutText = typeof stdout === "string" ? stdout : stdout.toString();
-  const stderrText = typeof stderr === "string" ? stderr : stderr.toString();
-  return {
-    stdout: stdoutText,
-    stderr: stderrText,
-    toString() { return stdoutText; },
-    trim() { return stdoutText.trim(); },
-    includes(searchString: string) { return stdoutText.includes(searchString); }
-  };
-};
-
 export class DefaultProcessExecutor implements ProcessExecutor {
   private execAsync: ExecAsync;
 
@@ -69,19 +49,11 @@ export class DefaultProcessExecutor implements ProcessExecutor {
   }
 
   async exec(command: string, options: ProcessExecOptions = {}): Promise<ExecResult> {
-    try {
-      const { stdout, stderr } = await this.execAsync(command, {
-        timeout: options.timeoutMs,
-        maxBuffer: options.maxBuffer,
-        cwd: options.cwd
-      });
-      return createExecResult(stdout, stderr);
-    } catch (error) {
-      throw wrapCommandError(error, {
-        command,
-        cwd: options.cwd,
-      });
-    }
+    return runExecSeam(
+      execOptions => this.execAsync(command, execOptions),
+      options,
+      { command, cwd: options.cwd }
+    );
   }
 
   spawn(command: string, args: string[], options?: SpawnOptions): ChildProcess {

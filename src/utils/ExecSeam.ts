@@ -1,0 +1,55 @@
+import type { ExecResult } from "../models";
+import { wrapCommandError, type CommandErrorFormatOptions } from "./CommandError";
+import { createExecResult } from "./execResult";
+
+/**
+ * Node exec option names as passed to the underlying `execFile`/`promisify`
+ * seam. Shared by the shell (`ProcessExecutor`) and file+argv
+ * (`HostCommandExecutor`) executors so the mapping lives in one place.
+ */
+export interface ExecSeamOptions {
+  timeout?: number;
+  maxBuffer?: number;
+  cwd?: string;
+}
+
+/** Raw stdout/stderr an exec seam resolves with, before Buffer coercion. */
+export interface RawExecOutput {
+  stdout: string | Buffer;
+  stderr: string | Buffer;
+}
+
+/**
+ * Public exec-request options as callers pass them, before mapping to node's
+ * exec option names (`timeoutMs` → `timeout`).
+ */
+export interface ExecRequestOptions {
+  timeoutMs?: number;
+  maxBuffer?: number;
+  cwd?: string;
+}
+
+/**
+ * Shared exec runner: maps request options to node exec option names, invokes
+ * the executor's exec seam (shell string vs. file+argv, supplied by the
+ * `invoke` closure), coerces the raw output via the canonical
+ * {@link createExecResult} factory, and wraps any thrown error with actionable
+ * command context. This is the single place the two executors share the option
+ * mapping and the `wrapCommandError` catch path.
+ */
+export async function runExecSeam(
+  invoke: (options: ExecSeamOptions) => Promise<RawExecOutput>,
+  options: ExecRequestOptions,
+  errorContext: CommandErrorFormatOptions
+): Promise<ExecResult> {
+  try {
+    const { stdout, stderr } = await invoke({
+      timeout: options.timeoutMs,
+      maxBuffer: options.maxBuffer,
+      cwd: options.cwd,
+    });
+    return createExecResult(stdout, stderr);
+  } catch (error) {
+    throw wrapCommandError(error, errorContext);
+  }
+}

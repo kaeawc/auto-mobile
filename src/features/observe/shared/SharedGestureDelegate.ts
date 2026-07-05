@@ -25,7 +25,14 @@ export class SharedGestureDelegate {
     this.config = config;
   }
 
-  private coord(v: number): number {
+  /**
+   * Applies the platform coordinate policy (Android rounds to integers, iOS passes exact values).
+   *
+   * `protected` so platform-specific gesture overrides (e.g. the Android-only two-finger swipe)
+   * reuse this single rounding source instead of re-inlining `Math.round`, making it structurally
+   * impossible for a platform override to diverge from the sibling gestures' policy (#3049).
+   */
+  protected coord(v: number): number {
     return this.config.roundCoordinates ? Math.round(v) : v;
   }
 

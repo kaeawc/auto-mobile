@@ -35,11 +35,14 @@ function createFakeContext(overrides?: Partial<DelegateContext>): {
   return { context, sent, timer, requestManager };
 }
 
-/** Let the async ensureConnected chain flush so the request is registered + sent. */
+/**
+ * Let the async ensureConnected/sendCommand chain flush so the request is registered + sent.
+ * A single setImmediate hop is a settle signal for the purely microtask-based chain: the event
+ * loop drains the entire pending microtask queue (however many awaits sendCommand grows) before
+ * running the immediate callback, so this stays robust against await-count changes (#3049).
+ */
 async function flush(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise<void>(resolve => setImmediate(resolve));
 }
 
 describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
@@ -112,6 +115,35 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     // Resolve so the promise settles (avoid a dangling pending request).
     requestManager.resolve<A11ySwipeResult>(sentMsg.requestId as string, { success: true, totalTimeMs: 1 });
     await promise;
+  });
+
+  it("rounds coordinates identically to the shared base gesture path (#3049)", async () => {
+    // The two-finger override must reuse SharedGestureDelegate.coord() — the single Android
+    // rounding source — so its wire coordinates can never diverge from the sibling gestures.
+    const { context, sent, requestManager } = createFakeContext();
+    const gestures = new CtrlProxyGestures(context);
+    const coords = [10.5, 20.49, -3.5, 40.999] as const;
+
+    const swipePromise = gestures.requestSwipe(...coords, 300, 5000);
+    await flush();
+    const swipeMsg = JSON.parse(sent[sent.length - 1]);
+
+    const twoFingerPromise = gestures.requestTwoFingerSwipe(...coords, 300, 100, 5000);
+    await flush();
+    const twoFingerMsg = JSON.parse(sent[sent.length - 1]);
+
+    expect(twoFingerMsg.type).toBe("request_two_finger_swipe");
+    expect(swipeMsg.type).toBe("request_swipe");
+    for (const key of ["x1", "y1", "x2", "y2"] as const) {
+      expect(twoFingerMsg[key]).toBe(swipeMsg[key]);
+      expect(Number.isInteger(twoFingerMsg[key])).toBe(true);
+    }
+
+    // Resolve both so no pending request dangles.
+    requestManager.resolve(swipeMsg.requestId as string, { success: true, totalTimeMs: 1 });
+    requestManager.resolve(twoFingerMsg.requestId as string, { success: true, totalTimeMs: 1 });
+    await Promise.all([swipePromise, twoFingerPromise]);
+    expect(requestManager.getPendingCount()).toBe(0);
   });
 
   it("still times out when the runner never replies", async () => {

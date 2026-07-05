@@ -2,6 +2,7 @@ import type { Kysely } from "kysely";
 import type { Database } from "./types";
 import { getDatabase } from "./database";
 import { logger } from "../utils/logger";
+import { truncateBodyText } from "../utils/truncateBodyText";
 
 export interface RecordNetworkEventInput {
   deviceId: string | null;
@@ -86,8 +87,6 @@ export interface NetworkEventQuery {
   minStatusCode?: number;
 }
 
-const BODY_TRUNCATION_LIMIT = 10_240; // 10KB
-
 function mapRow(r: any): NetworkEventWithId {
   return {
     id: r.id,
@@ -107,8 +106,13 @@ function mapRow(r: any): NetworkEventWithId {
     error: r.error,
     requestHeaders: r.request_headers_json ? JSON.parse(r.request_headers_json) : null,
     responseHeaders: r.response_headers_json ? JSON.parse(r.response_headers_json) : null,
-    requestBody: r.request_body ?? null,
-    responseBody: r.response_body ?? null,
+    // Truncate bodies to 10KB here so both getNetworkEventById and the
+    // getNetworkEvents list projection (fanned out 100-at-a-time by the
+    // telemetry backfill) share one cap — the dashboard renders at most this
+    // many bytes anyway (#2801). Original sizes are preserved in
+    // request_body_size / response_body_size for truncation-flag callers.
+    requestBody: truncateBodyText(r.request_body ?? null),
+    responseBody: truncateBodyText(r.response_body ?? null),
     contentType: r.content_type ?? null,
   };
 }
@@ -127,17 +131,9 @@ export async function getNetworkEventById(
     return null;
   }
 
-  const event = mapRow(row);
-
-  // Truncate bodies to 10KB
-  if (event.requestBody && event.requestBody.length > BODY_TRUNCATION_LIMIT) {
-    event.requestBody = event.requestBody.slice(0, BODY_TRUNCATION_LIMIT);
-  }
-  if (event.responseBody && event.responseBody.length > BODY_TRUNCATION_LIMIT) {
-    event.responseBody = event.responseBody.slice(0, BODY_TRUNCATION_LIMIT);
-  }
-
-  return event;
+  // mapRow already caps bodies at BODY_TRUNCATION_LIMIT (surrogate-safe), so
+  // there is exactly one truncation site shared with getNetworkEvents (#2801).
+  return mapRow(row);
 }
 
 export async function getNetworkEvents(

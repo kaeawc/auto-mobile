@@ -13,6 +13,47 @@ import { getDatabase } from "../db/database";
 import type { Database } from "../db/types";
 import type { Kysely } from "kysely";
 import { TELEMETRY_PUSH_SOCKET_CONFIG } from "./daemonFiles";
+import { truncateBodyText } from "../utils/truncateBodyText";
+
+/**
+ * Opaque plain-text fields that the backfill fans out (limit=100) and that can
+ * balloon a single subscribe by megabytes the dashboard already caps at 10KB
+ * (#2801). Network bodies are already capped upstream in the repository
+ * `mapRow`; this bounds the remaining plain-text columns at the backfill
+ * boundary so the DB read contract for those repos is unchanged. Only opaque
+ * text is listed — structured JSON columns (os `details`, layout `detailsJson`,
+ * failure blobs) would be corrupted by a blind slice and are tracked in #3182.
+ */
+const BOUNDED_BACKFILL_TEXT_FIELDS: Record<string, readonly string[]> = {
+  log: ["message"],
+  storage: ["value", "previousValue"],
+};
+
+/**
+ * Cap known large plain-text fields on a backfilled telemetry event to
+ * BODY_TRUNCATION_LIMIT, returning a shallow copy when anything changed so the
+ * caller's source rows are not mutated. Surrogate-safe (see truncateBodyText).
+ */
+export function boundBackfillEventText(event: TelemetryEvent): TelemetryEvent {
+  const fields = BOUNDED_BACKFILL_TEXT_FIELDS[event.category];
+  if (!fields || event.data === null || typeof event.data !== "object") {
+    return event;
+  }
+  const data = event.data as Record<string, unknown>;
+  let bounded: Record<string, unknown> | null = null;
+  for (const field of fields) {
+    const value = data[field];
+    if (typeof value !== "string") {
+      continue;
+    }
+    const capped = truncateBodyText(value);
+    if (capped !== value) {
+      bounded = bounded ?? { ...data };
+      bounded[field] = capped;
+    }
+  }
+  return bounded ? { ...event, data: bounded as TelemetryEvent["data"] } : event;
+}
 
 interface TelemetryFilter {
   category: string | null; // "network", "log", "os", "navigation", "crash", "anr", "nonfatal", "storage", "layout", or null for all
@@ -215,7 +256,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     events.sort((a, b) => a.timestamp - b.timestamp);
 
     for (const event of events) {
-      const msg = this.createPushMessage(event);
+      // Single boundary cap for large plain-text fields (#2801): network bodies
+      // are already capped in the repository mapRow; this bounds log/storage.
+      const msg = this.createPushMessage(boundBackfillEventText(event));
       this.sendJson(socket, msg);
     }
 

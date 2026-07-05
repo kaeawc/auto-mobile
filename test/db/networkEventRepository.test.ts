@@ -81,6 +81,85 @@ describe("networkEventRepository extended queries", () => {
     expect(event!.responseBody!.length).toBe(10_240);
   });
 
+  test("getNetworkEvents truncates bodies over 10KB", async () => {
+    const largeRequest = "q".repeat(15_000);
+    const largeResponse = "r".repeat(20_000);
+    await recordNetworkEvent(
+      makeInput({
+        requestBody: largeRequest,
+        responseBody: largeResponse,
+        requestBodySize: 15_000,
+        responseBodySize: 20_000,
+      }),
+      db
+    );
+
+    const events = await getNetworkEvents({}, db);
+    expect(events).toHaveLength(1);
+    expect(events[0].requestBody!.length).toBe(10_240);
+    expect(events[0].responseBody!.length).toBe(10_240);
+  });
+
+  test("getNetworkEvents leaves sub-10KB bodies unchanged and null bodies null", async () => {
+    const small = '{"ok":true}';
+    await recordNetworkEvent(
+      makeInput({ requestBody: small, responseBody: null }),
+      db
+    );
+
+    const events = await getNetworkEvents({}, db);
+    expect(events[0].requestBody).toBe(small);
+    expect(events[0].responseBody).toBeNull();
+  });
+
+  test("getNetworkEvents and getNetworkEventById agree on the truncated body", async () => {
+    const largeBody = "z".repeat(50_000);
+    const id = await recordNetworkEvent(
+      makeInput({ responseBody: largeBody, responseBodySize: 50_000 }),
+      db
+    );
+
+    const single = await getNetworkEventById(id, db);
+    const listed = (await getNetworkEvents({}, db)).find(e => e.id === id);
+    expect(listed).toBeDefined();
+    expect(listed!.responseBody).toBe(single!.responseBody!);
+    expect(listed!.responseBody!.length).toBe(10_240);
+  });
+
+  test("getNetworkEvents truncation does not split a surrogate pair", async () => {
+    // Place a 😀 (surrogate pair) so its high surrogate lands at the 10_240th
+    // code unit — a naive slice would leave a lone surrogate (mojibake).
+    const body = "x".repeat(10_239) + "😀" + "y".repeat(5_000);
+    const id = await recordNetworkEvent(
+      makeInput({ responseBody: body, responseBodySize: body.length }),
+      db
+    );
+
+    const listed = (await getNetworkEvents({}, db)).find(e => e.id === id);
+    expect(listed!.responseBody!.length).toBe(10_239);
+    expect(listed!.responseBody!.isWellFormed()).toBe(true);
+  });
+
+  test("backfill payload shrinks ~10x once list bodies are capped", async () => {
+    // 100 rows each carrying a 100KB body: the serialized list should drop from
+    // ~10MB (raw) to ~1MB (100 x 10KB) — the win the issue measures.
+    const bigBody = "b".repeat(100_000);
+    for (let i = 0; i < 100; i++) {
+      await recordNetworkEvent(
+        makeInput({ timestamp: 1000 + i, responseBody: bigBody, responseBodySize: 100_000 }),
+        db
+      );
+    }
+    const events = await getNetworkEvents({ limit: 100 }, db);
+    expect(events).toHaveLength(100);
+    const serializedBytes = JSON.stringify(events).length;
+    const rawBytes = 100 * 100_000;
+    // Capped payload is ~1MB (100 x 10KB) vs ~10MB raw — assert the ~10x win
+    // with margin for the non-body JSON scaffolding per row.
+    expect(serializedBytes).toBeLessThan(rawBytes / 8);
+    expect(events.every(e => e.responseBody!.length === 10_240)).toBe(true);
+  });
+
   test("getNetworkEvents returns id on each event", async () => {
     await recordNetworkEvent(makeInput({ timestamp: 100 }), db);
     await recordNetworkEvent(makeInput({ timestamp: 200 }), db);

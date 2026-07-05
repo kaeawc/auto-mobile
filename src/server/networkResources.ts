@@ -6,8 +6,7 @@ import {
   type NetworkEventWithId,
 } from "../db/networkEventRepository";
 import { NetworkState } from "./NetworkState";
-
-const BODY_TRUNCATION_LIMIT = 10_240; // 10KB
+import { BODY_TRUNCATION_LIMIT } from "../utils/truncateBodyText";
 
 const NETWORK_RESOURCE_URIS = {
   REQUEST: "automobile:network/request/{requestId}",

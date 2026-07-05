@@ -257,6 +257,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         serviceScope.launch {
           try {
             handleCommand(intent)
+          } catch (e: CancellationException) {
+            // Cooperative cancellation (service scope shutting down) must never become an error
+            // result — let it propagate so the coroutine unwinds cleanly. Mirrors the inner
+            // ACTION_EXTRACT_HIERARCHY rethrow (PR #3126), which would otherwise be re-swallowed
+            // here (issue #3130).
+            throw e
           } catch (e: Exception) {
             Log.e(TAG, "Error handling command: ${intent.action}", e)
             sendResult(success = false, error = e.message)
@@ -1452,6 +1458,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     serviceScope.launch {
       try {
         broadcastInteractionEvent(interaction)
+      } catch (e: CancellationException) {
+        // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3130).
+        throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error broadcasting interaction event", e)
       }
@@ -5350,6 +5359,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val result =
         try {
           withContext(Dispatchers.Main) { overlayDrawer.addHighlight(highlightId, shape) }
+        } catch (e: CancellationException) {
+          // Let cooperative cancellation unwind cleanly rather than reporting a failed highlight
+          // result (#3130).
+          throw e
         } catch (e: Exception) {
           HighlightOperationResult(false, e.message ?: "Failed to add highlight")
         }

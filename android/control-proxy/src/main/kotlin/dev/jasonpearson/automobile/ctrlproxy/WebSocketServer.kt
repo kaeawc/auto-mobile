@@ -216,6 +216,10 @@ class WebSocketServer(
           scope.launch {
             try {
               connection.close(CloseReason(CloseReason.Codes.GOING_AWAY, "Server shutting down"))
+            } catch (e: CancellationException) {
+              // Let cooperative cancellation unwind cleanly rather than logging it as an error
+              // (#3130).
+              throw e
             } catch (e: Exception) {
               Log.e(TAG, "Error closing connection", e)
             }
@@ -337,6 +341,10 @@ class WebSocketServer(
       .forEach { connection ->
         try {
           connection.send(Frame.Text(message))
+        } catch (e: CancellationException) {
+          // The broadcast collector is cancelled when `scope` shuts down mid-send; let it unwind
+          // rather than mis-marking a live connection as dead and continuing the loop (#3130).
+          throw e
         } catch (e: Exception) {
           Log.w(TAG, "Failed to send to connection, marking as dead", e)
           deadConnections.add(connection)

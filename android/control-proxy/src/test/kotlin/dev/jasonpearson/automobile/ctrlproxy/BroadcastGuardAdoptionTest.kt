@@ -28,8 +28,12 @@ import org.junit.Test
  * swallow). [AsyncActionRunner] coverage is the swallow-regression check only — detecting that a
  * brand-new async action forgot `asyncActionRunner.launch` entirely is not structurally feasible
  * without false positives (raw `serviceScope.launch { … }` is used pervasively for legitimate
- * non-action work, e.g. wrapping already-guarded `broadcast*Result` calls), so that is tracked
- * separately per the issue's acceptance criteria.
+ * non-action work, e.g. wrapping already-guarded `broadcast*Result` calls). That residual half is
+ * now closed *by construction* rather than by source-scanning: [ServiceScopeGuard]'s
+ * [kotlinx.coroutines.CoroutineExceptionHandler] on `serviceScope` emits a correlated error frame
+ * for any raw launch that throws uncaught (issue #3104). This class enforces that wiring can't
+ * silently regress (the `serviceScope installs the ServiceScopeGuard CoroutineExceptionHandler`
+ * test below).
  */
 class BroadcastGuardAdoptionTest {
 
@@ -76,6 +80,31 @@ class BroadcastGuardAdoptionTest {
         "logs-and-swallows (issue #3023/#3085). Offenders:\n" +
         swallows.joinToString("\n") { "  - ${it.symbol} (CtrlProxy.kt:${it.line})" },
       swallows.isEmpty(),
+    )
+  }
+
+  @Test
+  fun `serviceScope installs the ServiceScopeGuard CoroutineExceptionHandler`() {
+    // Enforcement backstop for issue #3104: the raw-`serviceScope.launch` silent-hang gap is closed
+    // *by construction* only if the guard's handler is actually part of the scope's context. If the
+    // `serviceScope = CoroutineScope(...)` initializer ever drops `serviceScopeGuard.handler`, a
+    // throw in a raw launch would again escape to the bare SupervisorJob with no correlated error
+    // frame — so fail CI the moment the wiring regresses.
+    val source = readCtrlProxySource()
+
+    // Match the `val serviceScope[: Type] = CoroutineScope(` declaration, then take the initializer
+    // text up to the end of that statement's line-continuation. Nested parens (`SupervisorJob()`)
+    // make a `[^)]*` capture unreliable, so scan a bounded window after the declaration instead.
+    val decl = Regex("""val\s+serviceScope\s*(?::[^=]+)?=\s*CoroutineScope\(""").find(source)
+    if (decl == null) {
+      fail("could not find the `serviceScope = CoroutineScope(...)` initializer in CtrlProxy.kt")
+    }
+
+    val window = source.substring(decl!!.range.last, minOf(source.length, decl.range.last + 200))
+    assertTrue(
+      "serviceScope must be built with `serviceScopeGuard.handler` so uncaught throws in raw " +
+        "launches emit a correlated error frame (issue #3104). Initializer window was: $window",
+      window.contains("serviceScopeGuard.handler"),
     )
   }
 

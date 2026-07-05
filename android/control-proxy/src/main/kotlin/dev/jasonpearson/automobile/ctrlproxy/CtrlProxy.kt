@@ -111,7 +111,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     const val ACTION_OPERATION_RESULT = "dev.jasonpearson.automobile.OPERATION_RESULT"
   }
 
-  private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+  /**
+   * Emits a correlated `type:"error"` frame when *any* raw `serviceScope.launch { … }` throws
+   * uncaught — closing the raw-launch half of the silent-hang gap by construction (issue #3104).
+   * Its [ServiceScopeGuard.handler] is installed on [serviceScope] below. `emitScope` resolves
+   * [serviceScope] lazily to break the scope↔handler construction cycle (the handler re-launches
+   * its fallback broadcast on the same scope); the broadcast sink resolves [webSocketServer] lazily
+   * because it is `lateinit` (assigned in [onServiceConnected]). See [AsyncActionRunner] /
+   * [ResultBroadcaster] for the sibling seams on the dispatch and result-send paths.
+   */
+  private val serviceScopeGuard: ServiceScopeGuard =
+    ServiceScopeGuard(
+      emitScope = { serviceScope },
+      broadcastResponse = { response ->
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          webSocketServer.broadcast(response)
+        }
+      },
+      logError = { message, error -> Log.e(TAG, message, error) },
+    )
+
+  private val serviceScope: CoroutineScope =
+    CoroutineScope(Dispatchers.IO + SupervisorJob() + serviceScopeGuard.handler)
 
   /**
    * Wraps fire-and-forget action launches so a throw inside the launched coroutine broadcasts a

@@ -135,6 +135,17 @@ so an agent can't tell what entered/left the screen. That opacity — not just t
 raw churn count — is the concrete motivation for the stable-node-identity
 follow-up (**#3107**). Not a blocker for an off-by-default flag.
 
+> **#3107 resolution (this data).** The `structuralIdentity` prototype (#3088
+> limitation 1, keyed on `resource-id`/`view-id` only) was *not* the fix for this
+> opacity: those ~28 residual entries are **id-less *and* text-less**, so a
+> structural key is `null` for them and they fall back to positional remove+add
+> regardless. The prototype only collapses in-place edits of nodes that already
+> carry an id — a marginal win over the shipped content-identity diff — while
+> adding a real false-merge surface on recycled `resource-id`s. It was therefore
+> **removed** (not adopted, not wired to a CLI flag). The genuine fix for scroll
+> opacity is real stable node identity emitted by the **capture layer**, which is
+> orthogonal to the diff format. See "Decision" below.
+
 ### 5. AC#4 (byte/token reduction) — PASS for localized, bounded for scroll
 
 Measured with the production `stringifyToolResponse` formatter + cl100k_base:
@@ -159,18 +170,45 @@ What this sign-off does and does not establish:
   (tap/type/focus) with ~95–98% output reduction on real device output; the
   `extras` flood is fixed; scroll behavior and its content-identity win are
   quantified.
-- **Bounded / deferred to capture + #3107:** full agent-consumability across
+- **Bounded / deferred to the capture layer:** full agent-consumability across
   *all* the interaction states the issue enumerated is not yet reached — real
   toggle state (`checked`/`selected`) is not surfaced by the capture layer (so
   it is synthetic-only here), typing reads as remove+add rather than a `text`
-  delta, and id-less nodes carry opaque keys that a scroll exposes in bulk.
+  delta, and id-less nodes carry opaque keys that a scroll exposes in bulk. The
+  #3107 revisit (see "Decision" below) confirmed the diff-format side of this is
+  as good as it gets without real stable ids from capture.
 - The flag stays **off by default**; its clearest wins are localized-change
-  interaction loops. Scroll-heavy loops benefit less until stable node identity
-  (#3107) collapses more of the cascade.
+  interaction loops. Scroll-heavy loops benefit less until **capture-layer**
+  stable node identity collapses more of the cascade — a diff-format toggle
+  (the removed `structuralIdentity` prototype) cannot, since the opaque rows
+  carry no id to key on.
+
+## Decision (#3107)
+
+Revisiting the two limitations deferred in #3088/#3080 with the real-device data
+above:
+
+1. **`structuralIdentity` prototype (limitation 1) — removed.** The data shows it
+   does not address the scroll bottleneck (id-less/text-less nodes get a `null`
+   structural key and never re-pair) and only marginally helps in-place edits of
+   already-id'd nodes, while adding a real false-merge surface on recycled
+   `resource-id`s. Never adopted, never wired to a CLI flag — kept as dead
+   scaffolding it is not (YAGNI). `structuralIdentityKey`, the
+   `DiffObserveConfig.structuralIdentity` toggle, and
+   `structuralIdentityDiff.test.ts` were deleted. Default behavior (content
+   identity) is unchanged. The real scroll fix is **capture-layer stable node
+   identity**, tracked separately.
+2. **Pre-move key (limitation 2) — implemented.** `ObserveDiffNodeChange` now
+   carries an optional `fromKey` (the baseline-side key) on **re-paired** entries
+   only, so a consumer can locate a moved node in the baseline. Positionally
+   matched entries omit it (their `key` already serves both sides). Pinned by
+   `diffObserveResult.test.ts`.
 
 ### Follow-ups
 
-- **#3107** — adopt/wire stable node identity to shrink scroll diffs.
+- Capture-layer: emit real stable node identity so scroll diffs collapse the
+  id-less/text-less cascade (the residual opacity in §4) — the genuine fix
+  #3107 pointed at, orthogonal to the diff format.
 - Capture-layer: surface Compose toggle state (`checked`/`selected`/
   `stateDescription`) in the extracted hierarchy so state toggles diff as
   `changed` on real Compose apps (**#3139**).

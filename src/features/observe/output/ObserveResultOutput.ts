@@ -307,6 +307,16 @@ export interface ObserveDiffNode {
 /** A node matched by key whose non-key attributes changed. */
 export interface ObserveDiffNodeChange {
   key: string;
+  /**
+   * The node's key on the *baseline* side, present only on entries produced by
+   * content-identity **re-pairing** (issue #3088 limitation 2, #3107). A re-pair
+   * collapses a leftover remove+add into one `changed`; its `key` is the
+   * post-move (added-side) key, so a consumer that wants to locate the node in
+   * the baseline needs the pre-move key too. Absent on positionally-matched
+   * entries, whose baseline and next keys are identical (so `key` already serves
+   * both sides).
+   */
+  fromKey?: string;
   /** Per-attribute `{ from, to }`; a missing side is `undefined`. */
   changes: Record<string, { from?: unknown; to?: unknown }>;
 }
@@ -357,22 +367,6 @@ export interface DiffObserveConfig {
    * by the path key. Set `false` for exact positional-only behavior.
    */
   contentIdentity?: boolean;
-  /**
-   * Structural-only node identity (issue #3088 — **prototype**, default **off**).
-   * Requires `contentIdentity` (has no effect when that is off). When on, the
-   * re-pair identity key is keyed on the *structural* id alone (`resource-id` /
-   * `view-id`), with `text` / `content-desc` demoted to ordinary *changed*
-   * attributes rather than identity. This lets a node whose **label changes in
-   * place** (same position, edited text) collapse to a single `changed` delta
-   * instead of remove+add — a real compaction win for list rows whose text
-   * updates. The trade-off is a larger false-merge surface: recycled/reused
-   * `resource-id`s (common for RecyclerView rows) are far more likely to be
-   * non-unique among the leftovers, so most fall back to positional matching, but
-   * a lone reused id that is unique-on-both-sides *can* mis-merge two unrelated
-   * nodes. Off by default and not wired to any CLI flag pending a real-device
-   * token-win vs. false-merge measurement (see the #3088 tests + issue #3051).
-   */
-  structuralIdentity?: boolean;
 }
 
 /**
@@ -643,33 +637,11 @@ function contentIdentityKey(attrs: Record<string, unknown>): string | null {
   return [resourceId, viewId, contentDesc, text].join(" ");
 }
 
-/**
- * A node's *structural* identity key (issue #3088 prototype): `resource-id /
- * view-id` only, NUL-joined — `text` and `content-desc` are deliberately excluded
- * so a node keeps this key across an in-place label edit (they become ordinary
- * `changed` attributes instead). Returns `null` when the node carries no
- * structural id (both empty) — the same "empty key is not identity" rule as
- * `contentIdentityKey`. Distinct key space from `contentIdentityKey`; only one is
- * ever used per diff (selected by `DiffObserveConfig.structuralIdentity`).
- */
-function structuralIdentityKey(attrs: Record<string, unknown>): string | null {
-  const resourceId = String(attrs["resource-id"] ?? "");
-  const viewId = String(attrs["view-id"] ?? "");
-  if (resourceId === "" && viewId === "") {
-    return null;
-  }
-  // NUL-joined, matching `contentIdentityKey`'s convention.
-  return [resourceId, viewId].join(" ");
-}
-
-/** Identity-key function for a diff node's attributes; `null` = no stable identity. */
-type IdentityKeyFn = (attrs: Record<string, unknown>) => string | null;
-
-/** Index leftover diff nodes by an identity key, dropping keyless nodes. */
-function indexByContentKey(nodes: ObserveDiffNode[], keyFn: IdentityKeyFn): Map<string, number[]> {
+/** Index leftover diff nodes by their content-identity key, dropping keyless nodes. */
+function indexByContentKey(nodes: ObserveDiffNode[]): Map<string, number[]> {
   const byKey = new Map<string, number[]>();
   nodes.forEach((node, index) => {
-    const key = keyFn(node.attributes);
+    const key = contentIdentityKey(node.attributes);
     if (key === null) {
       return;
     }
@@ -697,11 +669,10 @@ function indexByContentKey(nodes: ObserveDiffNode[], keyFn: IdentityKeyFn): Map<
 function repairByContentIdentity(
   added: ObserveDiffNode[],
   removed: ObserveDiffNode[],
-  changed: ObserveDiffNodeChange[],
-  keyFn: IdentityKeyFn
+  changed: ObserveDiffNodeChange[]
 ): { added: ObserveDiffNode[]; removed: ObserveDiffNode[] } {
-  const addedByKey = indexByContentKey(added, keyFn);
-  const removedByKey = indexByContentKey(removed, keyFn);
+  const addedByKey = indexByContentKey(added);
+  const removedByKey = indexByContentKey(removed);
   const consumedAdded = new Set<number>();
   const consumedRemoved = new Set<number>();
 
@@ -718,7 +689,10 @@ function repairByContentIdentity(
     consumedRemoved.add(removedIndices[0]);
     const attrChanges = diffAttributes(removedNode.attributes, addedNode.attributes);
     if (Object.keys(attrChanges).length > 0) {
-      changed.push({ key: addedNode.key, changes: attrChanges });
+      // `key` is the post-move (added-side) key; `fromKey` carries the pre-move
+      // (removed-side) key so a consumer can locate the node in the baseline
+      // (#3088 limitation 2, #3107). Emitted only on re-paired entries.
+      changed.push({ key: addedNode.key, fromKey: removedNode.key, changes: attrChanges });
     }
   }
 
@@ -811,11 +785,7 @@ export function diffObserveResult(
   let finalAdded = added;
   let finalRemoved = removed;
   if (cfg?.contentIdentity !== false) {
-    // #3088 prototype: structural-only identity (resource-id/view-id) demotes
-    // text/content-desc to changed attributes, collapsing in-place label edits;
-    // default keeps the full content key (text/content-desc part of identity).
-    const keyFn = cfg?.structuralIdentity ? structuralIdentityKey : contentIdentityKey;
-    const repaired = repairByContentIdentity(added, removed, changed, keyFn);
+    const repaired = repairByContentIdentity(added, removed, changed);
     finalAdded = repaired.added;
     finalRemoved = repaired.removed;
   }

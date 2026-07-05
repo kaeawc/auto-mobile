@@ -148,6 +148,18 @@ describe("unit-test real-DB guard (issues #3067 / #3140)", () => {
 
       expect(db.getDatabasePath()).toBe(DEFAULT_DB_PATH);
     });
+
+    test("NODE_ENV is matched by exact equality — an empty string is NOT a bun-test context", async () => {
+      // Pins `isBunTestContext`'s strict `=== "test"` so a future loosening to a
+      // substring/prefix match (which "" would satisfy under some sloppy checks)
+      // trips here rather than arming the guard in production.
+      setEnv("NODE_ENV", "");
+      setEnv(UNIT_TEST_DB_GUARD_ENV, undefined);
+      clearOverrides();
+      const db = await importFreshDatabaseModule();
+
+      expect(db.getDatabasePath()).toBe(DEFAULT_DB_PATH);
+    });
   });
 
   describe("shared opt-out surface (issue #3067)", () => {

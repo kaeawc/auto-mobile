@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 INSTALL_KTFMT_WHEN_MISSING=${INSTALL_KTFMT_WHEN_MISSING:-false}
 ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-false}
@@ -98,15 +99,20 @@ find_all_kotlin_files() {
 # Function to get changed files since SHA
 get_changed_files_since_sha() {
     local sha="$1"
+    local changed_files
 
     # Verify SHA exists
     if ! git rev-parse --verify "$sha" >/dev/null 2>&1; then
-        echo -e "${RED}SHA '$sha' does not exist in the repository${NC}"
-        exit 1
+        echo -e "${RED}SHA '$sha' does not exist in the repository${NC}" >&2
+        return 1
     fi
 
     # Get list of changed files since SHA
-    git diff --name-only "$sha"...HEAD | while read -r file; do
+    if ! changed_files="$(git diff --name-only "$sha"...HEAD)"; then
+        return 1
+    fi
+
+    printf '%s\n' "$changed_files" | while read -r file; do
         if [[ "$file" =~ ^.*\.(kt|kts)$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
             echo "$PROJECT_ROOT/$file"
         fi
@@ -115,21 +121,25 @@ get_changed_files_since_sha() {
 
 # Function to get touched/staged files
 get_touched_files() {
-    {
-        # Get staged files
-        git diff --cached --name-only --diff-filter=ACMR | while read -r file; do
-            if [[ "$file" =~ ^.*\.(kt|kts)$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-                echo "$PROJECT_ROOT/$file"
-            fi
-        done
+    local staged_files
+    local modified_files
 
-        # Get modified but not staged files
-        git diff --name-only --diff-filter=ACMR | while read -r file; do
-            if [[ "$file" =~ ^.*\.(kt|kts)$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-                echo "$PROJECT_ROOT/$file"
-            fi
-        done
-    } | sort | uniq
+    if ! staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"; then
+        return 1
+    fi
+
+    if ! modified_files="$(git diff --name-only --diff-filter=ACMR)"; then
+        return 1
+    fi
+
+    {
+        printf '%s\n' "$staged_files"
+        printf '%s\n' "$modified_files"
+    } | while read -r file; do
+        if [[ "$file" =~ ^.*\.(kt|kts)$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
+            echo "$PROJECT_ROOT/$file"
+        fi
+    done | sort | uniq
 }
 
 # Determine which files to process
@@ -141,14 +151,51 @@ if builtin help mapfile >/dev/null 2>&1; then
     supports_mapfile=true
 fi
 
+load_files_to_process() {
+    local mode="$1"
+    shift
+
+    local file_list
+    file_list="$(mktemp)"
+
+    if ! case "$mode" in
+        changed)
+            get_changed_files_since_sha "$@" > "$file_list"
+            ;;
+        touched)
+            get_touched_files > "$file_list"
+            ;;
+        all)
+            find_all_kotlin_files > "$file_list"
+            ;;
+        *)
+            echo -e "${RED}Unknown Kotlin file collection mode: $mode${NC}" >&2
+            return 1
+            ;;
+    esac
+    then
+        rm -f "$file_list"
+        echo -e "${RED}Failed to collect Kotlin files${NC}" >&2
+        exit 1
+    fi
+
+    if [[ "$supports_mapfile" == "true" ]]; then
+        mapfile -t files_to_process < "$file_list"
+    else
+        while IFS= read -r file; do
+            files_to_process+=("$file")
+        done < "$file_list"
+    fi
+
+    rm -f "$file_list"
+}
+
 # If a base SHA was requested but does not resolve in this checkout (base branch
 # force-pushed/rebased, or its commit was never fetched), fall back to a
 # full-tree check instead of silently passing. get_changed_files_since_sha also
-# guards the SHA, but its `exit 1` runs inside the `< <(...)` process
-# substitution below and only kills that subshell -- the main script would
-# continue with an empty file list and exit 0, a false green (the worst outcome
-# for a linter). Verifying here, in the main shell, keeps the failure fatal to
-# the scoped path while still validating every file via the full-tree fallback.
+# guards the SHA, and load_files_to_process checks producer failures in the main
+# shell, but this up-front branch preserves the intended CI behavior: scoped
+# mode degrades to a full-tree validation when a fetched base is unavailable.
 if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]] \
     && ! git rev-parse --verify -q "${ONLY_CHANGED_SINCE_SHA}^{commit}" >/dev/null 2>&1; then
     echo -e "${YELLOW}Base SHA '${ONLY_CHANGED_SINCE_SHA}' does not resolve; falling back to a full-tree ktfmt check.${NC}"
@@ -157,42 +204,15 @@ fi
 
 if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]]; then
     echo -e "${YELLOW}Processing files changed since SHA: $ONLY_CHANGED_SINCE_SHA${NC}"
-
-    # Get list of changed files since SHA
-    if [[ "$supports_mapfile" == "true" ]]; then
-        mapfile -t changed_files < <(get_changed_files_since_sha "$ONLY_CHANGED_SINCE_SHA")
-        files_to_process=("${changed_files[@]}")
-    else
-        while IFS= read -r file; do
-            files_to_process+=("$file")
-        done < <(get_changed_files_since_sha "$ONLY_CHANGED_SINCE_SHA")
-    fi
+    load_files_to_process changed "$ONLY_CHANGED_SINCE_SHA"
 
 elif [[ "${ONLY_TOUCHED_FILES}" == "true" ]]; then
     echo -e "${YELLOW}Processing only touched/staged files${NC}"
-
-    # Get list of touched files
-    if [[ "$supports_mapfile" == "true" ]]; then
-        mapfile -t touched_files < <(get_touched_files)
-        files_to_process=("${touched_files[@]}")
-    else
-        while IFS= read -r file; do
-            files_to_process+=("$file")
-        done < <(get_touched_files)
-    fi
+    load_files_to_process touched
 
 else
     echo -e "${YELLOW}Processing all Kotlin files in the project${NC}"
-
-    # Get all Kotlin files
-    if [[ "$supports_mapfile" == "true" ]]; then
-        mapfile -t all_files < <(find_all_kotlin_files)
-        files_to_process=("${all_files[@]}")
-    else
-        while IFS= read -r file; do
-            files_to_process+=("$file")
-        done < <(find_all_kotlin_files)
-    fi
+    load_files_to_process all
 fi
 
 # Check if we have files to process
@@ -219,6 +239,7 @@ printf '%s\n' "${files_to_process[@]}" > "$temp_file"
 
 # Run ktfmt with xargs and capture output
 echo -e "${YELLOW}Running ktfmt...${NC}"
+ktfmt_output=""
 
 # Run ktfmt in check mode to see if files need formatting
 if [[ -s "$temp_file" ]]; then

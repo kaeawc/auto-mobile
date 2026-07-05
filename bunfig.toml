@@ -1,4 +1,11 @@
 [test]
+# LOAD-BEARING: this preload arms the unit-test real-DB guard by setting
+# AUTOMOBILE_UNIT_TEST_DB_GUARD=1 (see test/setup/unitTestDbGuard.ts and
+# assertUnitTestDbAccessAllowed in src/db/database.ts). Removing this line — or
+# running `bun test` in a way that doesn't read this bunfig — SILENTLY disables
+# the guard, letting a real-DB race (the #3063 class) flake unguarded while the
+# suite reports a false green. test/db/unitTestDbGuardPreloadArmed.test.ts is the
+# tripwire that fails loudly if this preload ever stops running (issue #3083).
 preload = ["./test/setup/unitTestDbGuard.ts"]
 coverageReporter = ["text", "lcov"]
 coverageDir = "./coverage"

@@ -26,6 +26,46 @@ export interface DbWriteBarrier {
   track<T>(work: () => Promise<T>): Promise<T | undefined>;
 
   /**
+   * Count an ALREADY-STARTED best-effort write toward the shutdown drain without
+   * inserting an await hop into the caller's chain (issue #2885). The caller
+   * starts the promise itself and keeps awaiting the *original* promise object, so
+   * the write's start time and its resolution timing relative to anything the
+   * caller interleaves are byte-for-byte identical to a world with no barrier at
+   * all. This lets the fire-and-forget navigation-graph write be drained without
+   * touching the hot-path nav-event↔hierarchy-update ordering that "preserve SDK
+   * screen names" depends on.
+   *
+   * Why not {@link track} here? `await track(() => write())` would work today —
+   * the current post-#3063 ordering test tolerates the one extra microtask tick
+   * `track` adds — but the #2885 author flagged this specific interleaving as
+   * timing-sensitive, and a future regression from that tick would be SILENT (no
+   * test guards it). `trackExisting` takes on *zero* ordering risk instead of a
+   * small-but-untested one, which is the right trade for a best-effort drain
+   * feature. Prefer plain {@link track} everywhere the caller does not already own
+   * the started promise on an ordering-sensitive path — this method is the narrow
+   * exception, not the default.
+   *
+   * Contract / misuse warning: the returned promise NEVER rejects (it resolves the
+   * value on success and `undefined` on rejection) so a fire-and-forget
+   * `void barrier.trackExisting(p)` cannot surface an unhandled rejection. But it
+   * only swallows ITS OWN derived copy — the ORIGINAL `p`'s rejection is still the
+   * caller's to own. Always use the exact idiom
+   * `const p = write(); void barrier.trackExisting(p); await p;` (or otherwise
+   * `.catch` `p`); passing an un-awaited promise
+   * (`void barrier.trackExisting(write())`) leaks an unhandled rejection on the
+   * original. Unlike {@link track}, which owns promise creation, this method
+   * cannot enforce that for you.
+   *
+   * While draining it short-circuits: the write already started and cannot be
+   * skipped, so it is simply not counted (Part 1's dialect reject-on-closed makes
+   * that mid-flight close race safe, issue #2792) and `undefined` is returned.
+   * Consequence: `trackExisting` only meaningfully drains writes registered
+   * *before* {@link beginDrain}; a write registered mid-drain gets best-effort
+   * Part-1 coverage, not a drain guarantee.
+   */
+  trackExisting<T>(work: Promise<T>): Promise<T | undefined>;
+
+  /**
    * Flip the draining flag so subsequent {@link track} calls short-circuit.
    * The flag latches for the instance's lifetime; a fresh cold start comes from
    * a new barrier. `closeDatabase()` clears the *shared* barrier via
@@ -81,19 +121,54 @@ export class InMemoryDbWriteBarrier implements DbWriteBarrier {
       return undefined;
     }
 
+    this.#enter();
+    try {
+      return await work();
+    } finally {
+      this.#leave();
+    }
+  }
+
+  trackExisting<T>(work: Promise<T>): Promise<T | undefined> {
+    if (this.#draining) {
+      // The write already started and cannot be un-started; it is simply not
+      // counted toward the drain (Part 1's reject-on-closed covers the race,
+      // issue #2792). Resolve `undefined` and never reject — safe to `void`.
+      logger.debug("[DbWriteBarrier] Not tracking an in-flight DB write during shutdown drain");
+      return work.then(() => undefined, () => undefined);
+    }
+
+    this.#enter();
+    // Attach the settle handler to the ORIGINAL promise so the caller can keep
+    // awaiting `work` directly with unchanged timing. The derived promise
+    // swallows rejection to `undefined` so a fire-and-forget `void` of it never
+    // surfaces an unhandled rejection — the caller's own await owns `work`'s error.
+    return work.then(
+      value => {
+        this.#leave();
+        return value as T | undefined;
+      },
+      () => {
+        this.#leave();
+        return undefined;
+      }
+    );
+  }
+
+  /** Increment the in-flight count, arming the idle promise on the 0→1 edge. */
+  #enter(): void {
     if (this.#inFlight++ === 0) {
       this.#idle = new Promise<void>(resolve => {
         this.#resolveIdle = resolve;
       });
     }
+  }
 
-    try {
-      return await work();
-    } finally {
-      if (--this.#inFlight === 0) {
-        this.#resolveIdle?.();
-        this.#resolveIdle = undefined;
-      }
+  /** Decrement the in-flight count, resolving the idle promise on the 1→0 edge. */
+  #leave(): void {
+    if (--this.#inFlight === 0) {
+      this.#resolveIdle?.();
+      this.#resolveIdle = undefined;
     }
   }
 

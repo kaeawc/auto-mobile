@@ -101,4 +101,86 @@ describe("InMemoryDbWriteBarrier", () => {
     await expect(p).rejects.toThrow("boom");
     expect(barrier.inFlightCount()).toBe(0);
   });
+
+  describe("trackExisting (issue #2885)", () => {
+    it("counts an already-started promise and clears on settle (E1)", async () => {
+      const d = deferred<number>();
+      const started = d.promise; // the write is already in flight
+      void barrier.trackExisting(started);
+      expect(barrier.inFlightCount()).toBe(1);
+      d.resolve(1);
+      await started;
+      // Let the barrier's settle handler run.
+      await Promise.resolve();
+      expect(barrier.inFlightCount()).toBe(0);
+    });
+
+    it("drain waits for a trackExisting promise then resolves true (E2)", async () => {
+      const d = deferred<void>();
+      void barrier.trackExisting(d.promise);
+      expect(barrier.inFlightCount()).toBe(1);
+
+      const drainPromise = barrier.drain(1000);
+      expect(timer.getPendingTimeoutCount()).toBe(1);
+
+      d.resolve();
+      await d.promise;
+
+      expect(await drainPromise).toBe(true);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    it("a wedged trackExisting promise times out at the bound (E2)", async () => {
+      const wedged = deferred<void>();
+      void barrier.trackExisting(wedged.promise);
+      expect(barrier.inFlightCount()).toBe(1);
+
+      const drainPromise = barrier.drain(1000);
+      timer.advanceTime(1000);
+      expect(await drainPromise).toBe(false);
+    });
+
+    it("decrements the counter when the underlying promise rejects (E3)", async () => {
+      const d = deferred<void>();
+      const started = d.promise;
+      const tracked = barrier.trackExisting(started);
+      expect(barrier.inFlightCount()).toBe(1);
+      d.reject(new Error("boom"));
+      // The derived promise never rejects (E4) — it swallows to undefined.
+      expect(await tracked).toBeUndefined();
+      // The original promise still carries the rejection for the caller.
+      await expect(started).rejects.toThrow("boom");
+      expect(barrier.inFlightCount()).toBe(0);
+    });
+
+    it("returned promise resolves undefined on reject — safe to void (E4)", async () => {
+      const d = deferred<void>();
+      const started = d.promise;
+      // Original owner handles the rejection (mirrors the WS handler's `await`).
+      const ownerHandled = started.catch(() => "handled");
+      // Fire-and-forget registration must not surface an unhandled rejection.
+      void barrier.trackExisting(started);
+      d.reject(new Error("boom"));
+      expect(await ownerHandled).toBe("handled");
+      // Give the microtask queue a beat; no unhandled rejection should escape.
+      await Promise.resolve();
+      expect(barrier.inFlightCount()).toBe(0);
+    });
+
+    it("passes the resolved value through when not draining", async () => {
+      const tracked = barrier.trackExisting(Promise.resolve(42));
+      expect(await tracked).toBe(42);
+    });
+
+    it("short-circuits without counting while draining (E5)", async () => {
+      barrier.beginDrain();
+      const d = deferred<void>();
+      const started = d.promise;
+      const tracked = barrier.trackExisting(started);
+      // Not counted — the write already started; Part-1 covers the close race.
+      expect(barrier.inFlightCount()).toBe(0);
+      d.resolve();
+      expect(await tracked).toBeUndefined();
+    });
+  });
 });

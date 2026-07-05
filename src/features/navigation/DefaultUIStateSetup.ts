@@ -11,7 +11,7 @@ import { UIStateExtractor } from "./UIStateExtractor";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { getStructuredField } from "../../utils/toolUtils";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
-import { defaultTimer } from "../../utils/SystemTimer";
+import { defaultTimer, Timer } from "../../utils/SystemTimer";
 
 /**
  * Default implementation of UIStateSetup that handles UI state alignment
@@ -29,14 +29,17 @@ export class DefaultUIStateSetup implements UIStateSetup {
   private device: BootedDevice;
   private adb: AdbClient;
   private observeScreenProvider: () => ObserveScreenLike;
+  private timer: Timer;
 
   constructor(
     device: BootedDevice,
     adb: AdbClient,
-    observeScreenProvider?: () => ObserveScreenLike
+    observeScreenProvider?: () => ObserveScreenLike,
+    timer: Timer = defaultTimer
   ) {
     this.device = device;
     this.adb = adb;
+    this.timer = timer;
     // The setup holds a resolved AdbClient (not a factory), so wrap it in a
     // trivial factory to satisfy ObserveScreen's factory-only contract (matches
     // the AndroidCtrlProxyClient.getInstance call below).
@@ -355,12 +358,17 @@ export class DefaultUIStateSetup implements UIStateSetup {
     // Strategy 2: Swipe down for bottom sheets
     if (modal.type === "bottomsheet") {
       try {
-        const swipeTool = ToolRegistry.getTool("swipe");
+        // The registered interaction tool is `swipeOn`, not `swipe` (see
+        // src/server/interactionTools.ts). Resolving `getTool("swipe")` always
+        // returned undefined, so this whole branch was dead code and bottom
+        // sheets that only dismiss via swipe-down silently fell through to the
+        // back-button fallback below (issue #3106).
+        const swipeTool = ToolRegistry.getTool("swipeOn");
         if (swipeTool) {
-          // Swipe down from middle of screen to dismiss bottom sheet.
-          // Internal setup swipe (#3087): no diff/strip, no baseline advance.
+          // Swipe down to dismiss the bottom sheet. `swipeOn` takes `direction`
+          // (no `action` field). Internal setup swipe (#3087): no diff/strip, no
+          // baseline advance.
           await swipeTool.handler(markInternalToolCall({
-            action: "swipe",
             direction: "down",
             platform
           }));
@@ -501,6 +509,6 @@ export class DefaultUIStateSetup implements UIStateSetup {
    * Sleep for the specified duration.
    */
   private sleep(ms: number): Promise<void> {
-    return defaultTimer.sleep(ms);
+    return this.timer.sleep(ms);
   }
 }

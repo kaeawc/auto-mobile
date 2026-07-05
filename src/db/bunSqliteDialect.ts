@@ -15,6 +15,11 @@ import {
 import { CompiledQuery } from "kysely";
 import { ActionableError } from "../models/ActionableError";
 
+const MAX_CACHED_STATEMENTS = 200;
+
+type BunStatement = ReturnType<BunDatabase["prepare"]>;
+type SchemaVersionRow = { schema_version?: number | bigint };
+
 /**
  * Kysely dialect for Bun's built-in SQLite.
  * Based on SqliteDialect but uses bun:sqlite instead of better-sqlite3.
@@ -111,6 +116,8 @@ export class BunSqliteConnectionState {
   #pendingTransactions = 0;
   #activeQueries = 0;
   #waiters: Array<() => void> = [];
+  #statementCache = new Map<string, BunStatement>();
+  #observedSchemaVersion: number | null = null;
   #closed = false;
 
   constructor(database: BunDatabase | (() => BunDatabase), beforeQuery?: () => Promise<void>) {
@@ -149,6 +156,7 @@ export class BunSqliteConnectionState {
   async rollbackTransaction(owner: symbol): Promise<void> {
     try {
       await this.executeQuery(CompiledQuery.raw("rollback"), owner);
+      this.#clearStatementCache();
     } finally {
       this.#clearTransactionOwner(owner);
     }
@@ -177,8 +185,8 @@ export class BunSqliteConnectionState {
         }
         const db = this.#getDatabase();
 
-        // Prepare statement
-        const stmt = db.prepare(sql);
+        const schemaChanging = this.#isSchemaChangingSql(sql);
+        const stmt = schemaChanging ? db.prepare(sql) : this.#getStatement(db, sql);
 
         // Check if this is a SELECT query or query with RETURNING clause
         const sqlLower = sql.trim().toLowerCase();
@@ -188,24 +196,38 @@ export class BunSqliteConnectionState {
         // word char, so `\breturning\b` correctly rejects `returning_items`.
         const hasReturning = /\breturning\b/.test(sqlLower);
 
-        if (isSelect || hasReturning) {
-          // For SELECT queries or queries with RETURNING, return all rows
-          const rows = stmt.all(...(parameters as any[])) as R[];
-          return {
-            rows,
-            numAffectedRows: hasReturning ? BigInt(rows.length) : undefined,
-          };
-        } else {
-          // For INSERT/UPDATE/DELETE queries without RETURNING, execute and return changes
-          const result = stmt.run(...(parameters as any[]));
-          return {
-            rows: [],
-            numAffectedRows: BigInt(result.changes),
-            insertId:
-              result.lastInsertRowid !== undefined
-                ? BigInt(result.lastInsertRowid)
-                : undefined,
-          };
+        try {
+          if (isSelect || hasReturning) {
+            // For SELECT queries or queries with RETURNING, return all rows
+            const rows = stmt.all(...(parameters as any[])) as R[];
+            const result = {
+              rows,
+              numAffectedRows: hasReturning ? BigInt(rows.length) : undefined,
+            };
+            if (schemaChanging) {
+              this.#clearStatementCache();
+            }
+            return result;
+          } else {
+            // For INSERT/UPDATE/DELETE queries without RETURNING, execute and return changes
+            const writeResult = stmt.run(...(parameters as any[]));
+            const result = {
+              rows: [],
+              numAffectedRows: BigInt(writeResult.changes),
+              insertId:
+                writeResult.lastInsertRowid !== undefined
+                  ? BigInt(writeResult.lastInsertRowid)
+                  : undefined,
+            };
+            if (schemaChanging) {
+              this.#clearStatementCache();
+            }
+            return result;
+          }
+        } finally {
+          if (schemaChanging) {
+            stmt.finalize();
+          }
         }
       } catch (error) {
         // BigInt-safe: Kysely can bind BigInt params, and a bare
@@ -238,6 +260,7 @@ export class BunSqliteConnectionState {
     // observes the closed state and rejects instead of running against a dead
     // handle. Then wake waiters so queued queries settle promptly.
     this.#closed = true;
+    this.#clearStatementCache();
     if (this.#db) {
       this.#db.close();
       this.#db = null;
@@ -254,6 +277,77 @@ export class BunSqliteConnectionState {
     }
 
     return this.#db;
+  }
+
+  #getStatement(db: BunDatabase, sql: string): BunStatement {
+    if (this.#statementCache.size === 0) {
+      this.#observedSchemaVersion = this.#readSchemaVersion(db);
+    }
+
+    const cached = this.#statementCache.get(sql);
+    if (cached) {
+      this.#invalidateCacheIfSchemaVersionChanged(db);
+      const current = this.#statementCache.get(sql);
+      if (!current) {
+        return this.#prepareAndCacheStatement(db, sql);
+      }
+      this.#statementCache.delete(sql);
+      this.#statementCache.set(sql, current);
+      return current;
+    }
+
+    return this.#prepareAndCacheStatement(db, sql);
+  }
+
+  #prepareAndCacheStatement(db: BunDatabase, sql: string): BunStatement {
+    const statement = db.prepare(sql);
+    this.#statementCache.set(sql, statement);
+    if (this.#statementCache.size > MAX_CACHED_STATEMENTS) {
+      const oldestKey = this.#statementCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        const evicted = this.#statementCache.get(oldestKey);
+        this.#statementCache.delete(oldestKey);
+        evicted?.finalize();
+      }
+    }
+    return statement;
+  }
+
+  #invalidateCacheIfSchemaVersionChanged(db: BunDatabase): void {
+    const schemaVersion = this.#readSchemaVersion(db);
+    if (this.#observedSchemaVersion === null) {
+      this.#observedSchemaVersion = schemaVersion;
+      return;
+    }
+    if (this.#observedSchemaVersion !== schemaVersion) {
+      this.#clearStatementCache();
+      this.#observedSchemaVersion = schemaVersion;
+    }
+  }
+
+  #readSchemaVersion(db: BunDatabase): number {
+    const statement = db.prepare("PRAGMA schema_version");
+    try {
+      const row = statement.get() as SchemaVersionRow | undefined;
+      const schemaVersion = row?.schema_version;
+      if (schemaVersion === undefined) {
+        throw new Error("PRAGMA schema_version did not return a schema_version value");
+      }
+      return Number(schemaVersion);
+    } finally {
+      statement.finalize();
+    }
+  }
+
+  #isSchemaChangingSql(sql: string): boolean {
+    return /^(?:create|alter|drop)\b/i.test(sql.trim());
+  }
+
+  #clearStatementCache(): void {
+    for (const statement of this.#statementCache.values()) {
+      statement.finalize();
+    }
+    this.#statementCache.clear();
   }
 
   #assertOpen(): void {

@@ -14,6 +14,7 @@ import {
 } from "kysely";
 import { CompiledQuery } from "kysely";
 import { ActionableError } from "../models/ActionableError";
+import { logger } from "../utils/logger";
 
 const MAX_CACHED_STATEMENTS = 200;
 
@@ -262,6 +263,17 @@ export class BunSqliteConnectionState {
     this.#closed = true;
     this.#clearStatementCache();
     if (this.#db) {
+      try {
+        // Flush the WAL into the main DB and truncate the `-wal`/`-shm`
+        // sidecars so a clean shutdown leaves a single-file artifact. Stays
+        // synchronous — close() runs inside destroy() and must not introduce
+        // an await point that could reorder with the mutex (issue #2802).
+        this.#db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+      } catch (error) {
+        // Best-effort: a busy/failed checkpoint at shutdown is expected under
+        // load and safe to ignore — db.close() still persists committed data.
+        logger.debug(`WAL checkpoint on close failed: ${error}`);
+      }
       this.#db.close();
       this.#db = null;
     }

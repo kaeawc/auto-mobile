@@ -1000,6 +1000,19 @@ jobs:
           NO_COLOR: "1"
         run: turbo run lint --output-logs=errors-only --log-order=grouped
 
+      # Scoped `tsc --noEmit` gate (issue #3001). Bun's bundler skips type
+      # checking, so the build/test steps cannot catch type errors. A repo-wide
+      # gate is infeasible (~550 pre-existing errors), so this compares against a
+      # committed baseline and fails only on NEW type errors. Runs on this single
+      # ubuntu job with the pinned tsc so the baseline is reproducible.
+      # Gated on ts_changed: the baseline only references src/, so a diff that
+      # touches no TypeScript cannot introduce a local error -- skipping it avoids
+      # blocking native-only PRs on base-branch drift. See
+      # scripts/typecheck-baseline.sh.
+      - name: "Run Typecheck Gate"
+        if: needs.detect-changes.outputs.ts_changed == 'true'
+        run: bun run typecheck
+
       - name: "Run Build"
         shell: bash
         env:

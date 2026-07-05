@@ -88,6 +88,24 @@ bun test --bail        # Stop on first failure (no cache)
 bun test <file>        # Run specific test file (no cache)
 ```
 
+## Typecheck baseline gate
+
+Bun's bundler skips type-checking, so `build`/`test` do NOT catch `tsc` errors.
+A scoped gate (issue #3001) runs `tsc --noEmit` and fails CI only on errors NOT
+already in the committed baseline (`scripts/typecheck-baseline.txt`, ~550
+tolerated errors):
+
+```bash
+bun run typecheck             # gate: fail on NEW type errors (CI runs this)
+bun run typecheck:update      # regenerate the baseline after fixing errors
+```
+
+When you FIX type errors, run `bun run typecheck:update` and commit the smaller
+baseline — it is a one-way ratchet (`--update` refuses to grow it without
+`-- --allow-grow`). When you INTRODUCE a new error the gate prints it; fix it, or
+(rarely) record it with `typecheck:update`. The baseline is version-sensitive:
+regenerate it in the same PR that bumps the `typescript` dependency.
+
 ## File-backed DB lifecycle tests
 
 Any test suite that opens a real `auto-mobile.db` (module close/reopen, migration

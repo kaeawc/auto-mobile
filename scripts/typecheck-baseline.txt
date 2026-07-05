@@ -1,0 +1,554 @@
+# AutoMobile typecheck baseline (issue #3001) -- see scripts/typecheck-baseline.sh
+# generated-with: tsc 6.0.3
+src/daemon/SocketServerRegistry.ts: error TS2345: Argument of type 'Promise<void | BaseSocketServer>' is not assignable to parameter of type 'Promise<void>'.
+src/daemon/client.ts: error TS2345: Argument of type 'string | NonSharedBuffer' is not assignable to parameter of type 'Buffer<ArrayBufferLike>'.
+src/daemon/failuresStreamSocketServer.ts: error TS2559: Type 'FailuresStreamSocketRequest' has no properties in common with type 'SocketRequest'.
+src/daemon/manager.ts: error TS18048: 'signal' is possibly 'undefined'.
+src/daemon/performanceStreamSocketServer.ts: error TS2559: Type 'PerformanceStreamSocketRequest' has no properties in common with type 'SocketRequest'.
+src/daemon/socketServer.ts: error TS2322: Type 'unknown' is not assignable to type '{ [x: string]: unknown; } | undefined'.
+src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
+src/daemon/telemetryPushSocketServer.ts: error TS2339: Property 'sessionId' does not exist on type '{ type: "crash" | "anr" | "tool_failure"; title: string; severity: "critical" | "high" | "medium" | "low"; stack_trace_json: string | null; timestamp: number; occurrenceId: string; groupId: string; deviceId: string | null; screen: string | null; }'.
+src/daemon/telemetryPushSocketServer.ts: error TS2345: Argument of type '"crash" | "anr" | "nonfatal"' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_groups" | "failure_occurrences", "failure_groups.type">'.
+src/daemon/testRecordingSocketServer.ts: error TS2322: Type 'string' is not assignable to type 'Platform | undefined'.
+src/daemon/testRecordingSocketServer.ts: error TS2322: Type 'string' is not assignable to type 'Platform | undefined'.
+src/daemon/testRecordingSocketServer.ts: error TS2559: Type 'TestRecordingCommand' has no properties in common with type 'SocketRequest'.
+src/db/bunSqliteDialect.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
+src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
+src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
+src/db/failureAnalyticsRepository.ts: error TS2322: Type 'FailureType' is not assignable to type '"crash" | "anr" | "tool_failure"'.
+src/db/failureAnalyticsRepository.ts: error TS2322: Type 'FailureType' is not assignable to type 'ValueExpression<Database, "failure_groups", "crash" | "anr" | "tool_failure">'.
+src/db/failureAnalyticsRepository.ts: error TS2345: Argument of type 'FailureType' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_groups", "type">'.
+src/db/failureAnalyticsRepository.ts: error TS2345: Argument of type 'FailureType' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_notifications", "type">'.
+src/db/failureAnalyticsRepository.ts: error TS2367: This comparison appears to be unintentional because the types '"crash" | "anr" | "tool_failure"' and '"nonfatal"' have no overlap.
+src/db/failureAnalyticsRepository.ts: error TS2678: Type '"nonfatal"' is not comparable to type '"crash" | "anr" | "tool_failure"'.
+src/db/logEventRepository.ts: error TS2322: Type '{ deviceId: string | null; timestamp: number; applicationId: string | null; sessionId: string | null; level: number; tag: string; message: string; filterName: string | null; }[]' is not assignable to type 'RecordLogEventInput[]'.
+src/db/migrations/2026_01_27_000_failures.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
+src/db/migrations/2026_01_27_000_failures.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
+src/db/migrations/2026_01_27_000_failures.ts: error TS2769: No overload matches this call.
+src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
+src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
+src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'DataTypeExpression'.
+src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
+src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
+src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2769: No overload matches this call.
+src/db/migrator.ts: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
+src/db/migrator.ts: error TS2307: Cannot find module 'kysely/migration' or its corresponding type declarations.
+src/db/migrator.ts: error TS2307: Cannot find module 'kysely/migration' or its corresponding type declarations.
+src/db/migrator.ts: error TS2339: Property 'execute' does not exist on type 'never'.
+src/db/migrator.ts: error TS2339: Property 'execute' does not exist on type 'never'.
+src/db/migrator.ts: error TS2339: Property 'select' does not exist on type 'never'.
+src/db/migrator.ts: error TS2339: Property 'select' does not exist on type 'never'.
+src/db/migrator.ts: error TS2339: Property 'select' does not exist on type 'never'.
+src/db/migrator.ts: error TS2339: Property 'select' does not exist on type 'never'.
+src/db/migrator.ts: error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+src/db/migrator.ts: error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+src/db/migrator.ts: error TS7006: Parameter 'index' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'migration' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'migration' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'name' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'name' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'name' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'row' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'row' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'row' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'row' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'row' implicitly has an 'any' type.
+src/db/migrator.ts: error TS7006: Parameter 'table' implicitly has an 'any' type.
+src/db/performanceAuditRepository.ts: error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "performance_audit_results", "timestamp">'.
+src/db/performanceAuditRepository.ts: error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "performance_audit_results", "timestamp">'.
+src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
+src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
+src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
+src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
+src/doctor/checks/ios.ts: error TS2322: Type 'IOSCtrlProxyClient | null' is not assignable to type 'IosObserveRoundTripClient | null'.
+src/doctor/checks/ios.ts: error TS2322: Type 'IOSCtrlProxyClient' is not assignable to type 'IosObserveRoundTripClient'.
+src/doctor/checks/ios.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/doctor/checks/ios.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/doctor/index.ts: error TS2367: This comparison appears to be unintentional because the types 'false | undefined' and 'true' have no overlap.
+src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'Map<string, number>' is not assignable to parameter of type 'Map<string, { timestamp: number; }>'.
+src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+src/features/accessibility/ContrastChecker.ts: error TS2532: Object is possibly 'undefined'.
+src/features/accessibility/WcagAudit.ts: error TS2339: Property 'children' does not exist on type 'ViewHierarchyNode'.
+src/features/accessibility/WcagAudit.ts: error TS2339: Property 'children' does not exist on type 'ViewHierarchyNode'.
+src/features/accessibility/WcagAudit.ts: error TS2339: Property 'class' does not exist on type 'ViewHierarchyNode'.
+src/features/accessibility/WcagAudit.ts: error TS2352: Conversion of type 'ViewHierarchyNode[]' to type 'ViewHierarchyNode' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/features/accessibility/WcagAudit.ts: error TS7053: Element implicitly has an 'any' type because expression of type '"resource-id"' can't be used to index type 'ViewHierarchyNode'.
+src/features/action/BaseVisualChange.ts: error TS2322: Type '{ warning: string; requestedAfter?: number; actualTimestamp?: number; isFresh?: boolean | undefined; staleDurationMs?: number; }' is not assignable to type '{ requestedAfter?: number | undefined; actualTimestamp?: number | undefined; isFresh: boolean; staleDurationMs?: number | undefined; warning?: string | undefined; }'.
+src/features/action/BaseVisualChange.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
+src/features/action/BaseVisualChange.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
+src/features/action/BaseVisualChange.ts: error TS2339: Property 'signal' does not exist on type '{ changeExpected: boolean; tolerancePercent?: number | undefined; queryOptions?: ViewHierarchyQueryOptions | undefined; gfxMetrics?: GfxMetrics | null | undefined; perf?: PerformanceTracker | undefined; actionStartTime?: number | undefined; predictionContext?: PredictionActionContext | undefined; }'.
+src/features/action/BaseVisualChange.ts: error TS2339: Property 'signal' does not exist on type '{ changeExpected: boolean; tolerancePercent?: number | undefined; queryOptions?: ViewHierarchyQueryOptions | undefined; gfxMetrics?: GfxMetrics | null | undefined; perf?: PerformanceTracker | undefined; actionStartTime?: number | undefined; predictionContext?: PredictionActionContext | undefined; }'.
+src/features/action/CaptureSnapshot.ts: error TS2304: Cannot find name 'timeoutHandle'.
+src/features/action/CaptureSnapshot.ts: error TS2304: Cannot find name 'timeoutHandle'.
+src/features/action/InstallApp.ts: error TS2554: Expected 0 arguments, but got 1.
+src/features/action/InstallApp.ts: error TS2554: Expected 0 arguments, but got 1.
+src/features/action/IosSimulatorPermissions.ts: error TS2352: Conversion of type 'TccPermissionRow' to type 'Record<string, string | number | null>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/features/action/LaunchApp.ts: error TS2322: Type 'boolean | null' is not assignable to type 'boolean'.
+src/features/action/LaunchApp.ts: error TS2322: Type 'unknown' is not assignable to type 'number'.
+src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
+src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
+src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
+src/features/action/LaunchApp.ts: error TS2339: Property 'packageName' does not exist on type 'CtrlProxyHierarchy'.
+src/features/action/OpenURL.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
+src/features/action/RestoreSnapshot.ts: error TS2304: Cannot find name 'timeoutHandle'.
+src/features/action/RestoreSnapshot.ts: error TS2304: Cannot find name 'timeoutHandle'.
+src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
+src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
+src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
+src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
+src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
+src/features/action/TapAnyElement.ts: error TS2339: Property 'doubleTap' does not exist on type 'IOSCtrlProxyClient'.
+src/features/action/TapAnyElement.ts: error TS2339: Property 'longPress' does not exist on type 'IOSCtrlProxyClient'.
+src/features/action/TapAnyElement.ts: error TS2339: Property 'selectClickable' does not exist on type 'ElementSelector'.
+src/features/action/TapAnyElement.ts: error TS2339: Property 'tap' does not exist on type 'IOSCtrlProxyClient'.
+src/features/action/TapAnyElement.ts: error TS2416: Property 'hashViewHierarchy' in type 'TapAnyElement' is not assignable to the same property in base type 'BaseVisualChange'.
+src/features/action/TapOnElement.ts: error TS2339: Property 'selectClickableSiblingOfResourceId' does not exist on type 'ElementSelector'.
+src/features/action/TapOnElement.ts: error TS2339: Property 'selectClickableSiblingOfText' does not exist on type 'ElementSelector'.
+src/features/action/TapOnElement.ts: error TS2416: Property 'hashViewHierarchy' in type 'TapOnElement' is not assignable to the same property in base type 'BaseVisualChange'.
+src/features/action/refreshAndroidViewHierarchy.ts: error TS2339: Property 'getUiAutomatorHierarchy' does not exist on type 'ViewHierarchy'.
+src/features/action/refreshAndroidViewHierarchy.ts: error TS2339: Property 'mergeHierarchies' does not exist on type 'ViewHierarchy'.
+src/features/action/swipeon/ScrollUntilVisible.ts: error TS2322: Type 'ViewHierarchyResult | undefined' is not assignable to type 'ViewHierarchyResult | null'.
+src/features/action/swipeon/ScrollUntilVisible.ts: error TS2345: Argument of type 'null' is not assignable to parameter of type 'AdbExecutor'.
+src/features/action/swipeon/SwipeOn.ts: error TS2322: Type '(block: (observeResult: ObserveResult) => Promise<any>, options: ObservedChangeOptions) => Promise<any>' is not assignable to type '<T>(action: (observeResult: ObserveResult) => Promise<T>, options: { changeExpected: boolean; timeoutMs: number; progress?: unknown; perf?: PerformanceTracker | undefined; skipPreviousObserve?: boolean | undefined; queryOptions?: { ...; } | undefined; predictionContext?: { ...; } | undefined; }) => Promise<...>'.
+src/features/action/swipeon/SwipeOn.ts: error TS2322: Type 'AndroidCtrlProxyClient' is not assignable to type 'ScrollAccessibilityService'.
+src/features/action/swipeon/TalkBackSwipeExecutor.ts: error TS2345: Argument of type 'null' is not assignable to parameter of type 'AdbExecutor'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'discriminatedUnion' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'nonempty' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'positive' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'positive' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'safeParse' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'superRefine' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2339: Property 'superRefine' does not exist on type 'ZodSchema'.
+src/features/debug/VisualHighlight.ts: error TS2503: Cannot find namespace 'z'.
+src/features/debug/VisualHighlight.ts: error TS2503: Cannot find namespace 'z'.
+src/features/debug/VisualHighlight.ts: error TS2503: Cannot find namespace 'z'.
+src/features/debug/VisualHighlight.ts: error TS2503: Cannot find namespace 'z'.
+src/features/debug/VisualHighlight.ts: error TS2554: Expected 1 arguments, but got 2.
+src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
+src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
+src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'issue' implicitly has an 'any' type.
+src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'issue' implicitly has an 'any' type.
+src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'issue' implicitly has an 'any' type.
+src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/features/debug/VisualHighlight.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/features/navigation/Explore.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
+src/features/navigation/Explore.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
+src/features/navigation/Explore.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
+src/features/navigation/Explore.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
+src/features/navigation/Explore.ts: error TS2345: Argument of type 'NavigationGraphService' is not assignable to parameter of type 'NavigationGraphManager'.
+src/features/navigation/Explore.ts: error TS2345: Argument of type 'NavigationGraphService' is not assignable to parameter of type 'NavigationGraphManager'.
+src/features/navigation/ExploreElementExtraction.ts: error TS2322: Type '{}' is not assignable to type 'string'.
+src/features/navigation/ExploreElementExtraction.ts: error TS2322: Type '{}' is not assignable to type 'string'.
+src/features/navigation/ExploreElementExtraction.ts: error TS2322: Type '{}' is not assignable to type 'string'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'backStackDepth' does not exist on type 'Promise<NavigationNode | undefined>'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'reason' does not exist on type 'Promise<BackButtonRecommendation>'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'reason' does not exist on type 'Promise<BackButtonRecommendation>'.
+src/features/navigation/NavigateTo.ts: error TS2339: Property 'shouldUseBack' does not exist on type 'Promise<BackButtonRecommendation>'.
+src/features/navigation/NavigateTo.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
+src/features/navigation/NavigateTo.ts: error TS2345: Argument of type 'NavigationGraphService' is not assignable to parameter of type 'NavigationGraphManager'.
+src/features/navigation/NavigateTo.ts: error TS2459: Module '"./NavigationGraphManager"' declares 'ToolCallInteraction' locally, but it is not exported.
+src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+src/features/navigation/UIStateExtractor.ts: error TS2345: Argument of type 'Record<string, any>' is not assignable to parameter of type 'ViewHierarchyNode'.
+src/features/observe/DeviceServiceUtils.ts: error TS2694: Namespace '"src/features/observe/DeviceService"' has no exported member 'ImeActionResult'.
+src/features/observe/GetScreenSize.ts: error TS2345: Argument of type 'import("src/models/ScreenSize").ScreenSize' is not assignable to parameter of type 'import("src/features/observe/interfaces/ScreenSize").ScreenSize'.
+src/features/observe/GetScreenSize.ts: error TS2345: Argument of type 'import("src/models/ScreenSize").ScreenSize' is not assignable to parameter of type 'import("src/features/observe/interfaces/ScreenSize").ScreenSize'.
+src/features/observe/GetScreenSize.ts: error TS2345: Argument of type 'import("src/models/ScreenSize").ScreenSize' is not assignable to parameter of type 'import("src/features/observe/interfaces/ScreenSize").ScreenSize'.
+src/features/observe/GetScreenSize.ts: error TS2739: Type 'ScreenSize' is missing the following properties from type 'ScreenSize': width, height
+src/features/observe/HierarchyPlatformValidator.ts: error TS2339: Property 'startsWith' does not exist on type '{}'.
+src/features/observe/Idle.ts: error TS2741: Property 'updatedPrevTotalFrames' is missing in type '{ isStable: false; shouldUpdateLastNonIdleTime: true; updatedPrevMissedVsync: null; updatedPrevSlowUiThread: null; updatedPrevFrameDeadlineMissed: null; updatedFirstGfxInfoLog: false; }' but required in type 'UiStabilityResult'.
+src/features/observe/ObserveScreen.ts: error TS2345: Argument of type 'ViewHierarchyResult | undefined' is not assignable to parameter of type 'ViewHierarchyResult'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type '(Element | null)[]' is not assignable to type 'Element[]'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number | null'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'string | undefined' is not assignable to type 'string | null'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2339: Property 'event' does not exist on type 'never'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2339: Property 'timestamp' does not exist on type 'never'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
+src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2367: This comparison appears to be unintentional because the types '"screenshot" | "hierarchy_update" | "pinch_result" | "tap_coordinates_result" | "swipe_result" | "drag_result" | "set_text_result" | "select_all_result" | "ime_action_result" | ... 36 more ... | "lifecycle_event"' and '"custom_event"' have no overlap.
+src/features/observe/android/CtrlProxyHierarchy.ts: error TS2554: Expected 0 arguments, but got 1.
+src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type 'null | undefined' is not assignable to type 'NormalizedHighlightBounds | undefined'.
+src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type '{ bounds: NormalizedHighlightBounds | undefined; type: "box"; style?: HighlightStyle | null; }' is not assignable to type 'HighlightShape'.
+src/features/observe/android/index.ts: error TS2305: Module '"./types"' has no exported member 'AndroidHitTestResult'.
+src/features/observe/audits/AccessibilityAuditor.ts: error TS2345: Argument of type 'Hierarchy' is not assignable to parameter of type 'ViewHierarchyNode'.
+src/features/observe/collectors/DeviceStateCollector.ts: error TS2554: Expected 0 arguments, but got 1.
+src/features/observe/ios/CtrlProxyGestures.ts: error TS2345: Argument of type '{ idPrefix: string; responseType: string; messageType: string; params: { x1: number; y1: number; x2: number; y2: number; fingerCount: number; duration: number; offset: number | undefined; }; timeoutMs: number; perf: PerformanceTracker | undefined; notConnectedMessage: string; errorLabel: string; }' is not assignable to parameter of type 'SendCommandOptions<GestureTimingResult>'.
+src/features/observe/ios/CtrlProxyGestures.ts: error TS2459: Module '"./types"' declares 'GestureTimingResult' locally, but it is not exported.
+src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2305: Module '"./types"' has no exported member 'CachedHierarchy'.
+src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2305: Module '"./types"' has no exported member 'XCTestHierarchy'.
+src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2322: Type 'CtrlProxyReconnectStatus | null | undefined' is not assignable to type 'CtrlProxyReconnectStatus | undefined'.
+src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'Record<string, string>'.
+src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'Record<string, string>'.
+src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'Record<string, string>'.
+src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'Record<string, string>'.
+src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'Record<string, string>'.
+src/features/observe/ios/CtrlProxyHighlights.ts: error TS2322: Type '{ bounds: { x: number; y: number; width: number; height: number; sourceWidth: number | null | undefined; sourceHeight: number | null | undefined; } | null | undefined; type: "box"; style?: HighlightStyle | null; }' is not assignable to type 'HighlightShape'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2322: Type '(Record<string, unknown> | Record<string, unknown>[])[]' is not assignable to type 'Record<string, unknown> | Record<string, unknown>[]'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'error' does not exist on type 'CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'error' does not exist on type 'CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'hierarchy' does not exist on type 'CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'hierarchy' does not exist on type 'CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'packageName' does not exist on type 'CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'packageName' does not exist on type 'CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'updatedAt' does not exist on type 'CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2345: Argument of type 'import("src/features/observe/ios/types").CtrlProxyHierarchy' is not assignable to parameter of type 'import("src/features/observe/ios/CtrlProxyHierarchy").CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2345: Argument of type 'import("src/features/observe/ios/types").CtrlProxyHierarchy' is not assignable to parameter of type 'import("src/features/observe/ios/CtrlProxyHierarchy").CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2345: Argument of type 'import("src/features/observe/ios/types").CtrlProxyHierarchy' is not assignable to parameter of type 'import("src/features/observe/ios/CtrlProxyHierarchy").CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2345: Argument of type 'import("src/features/observe/ios/types").CtrlProxyHierarchy' is not assignable to parameter of type 'import("src/features/observe/ios/CtrlProxyHierarchy").CtrlProxyHierarchy'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2420: Class 'NoOpIOSCtrlProxyManager' incorrectly implements interface 'CtrlProxyIosManager'.
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2739: Type '{ fps: number; frameTimeMs: number; jankFrames: number; droppedFrames: number; memoryUsageMb: number; cpuUsagePercent: number; touchLatencyMs: number | null; timeToInteractiveMs: number | null; screenName: string | null; isResponsive: boolean; }' is missing the following properties from type 'PerformanceStreamData': recompositionCount, recompositionRate
+src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2741: Property 'resetSetupState' is missing in type 'NoOpIOSCtrlProxyManager' but required in type 'CtrlProxyIosManager'.
+src/features/observe/ios/IosSdkEventIngestor.ts: error TS2353: Object literal may only specify known properties, and 'operation' does not exist in type '{ timestamp: number; applicationId: string | null; fileName: string; key: string | null; value: string | null; valueType: string | null; changeType: string; previousValue?: string | null | undefined; }'.
+src/features/observe/ios/index.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
+src/features/observe/ios/index.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
+src/features/performance/PerformanceAudit.ts: error TS2551: Property 'refreshRateHz' does not exist on type 'DeviceCapabilities'. Did you mean 'refreshRate'?
+src/features/performance/PerformanceMonitor.ts: error TS2345: Argument of type 'PerformanceDataPusher' is not assignable to parameter of type 'PerformancePushSocketServer'.
+src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
+src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
+src/features/record/android/DualTrackRecorder.ts: error TS2322: Type 'AndroidCtrlProxyClient | A11ySource' is not assignable to type 'A11ySource'.
+src/features/utility/DefaultElementSelector.ts: error TS2339: Property 'findClickableElementsInContainer' does not exist on type 'ElementFinder'.
+src/features/utility/DefaultElementSelector.ts: error TS2339: Property 'findClickableParentsContainingText' does not exist on type 'ElementFinder'.
+src/features/utility/DefaultElementSelector.ts: error TS2339: Property 'findClickableSiblingsOfResourceId' does not exist on type 'ElementFinder'.
+src/features/utility/DefaultElementSelector.ts: error TS2339: Property 'findClickableSiblingsOfText' does not exist on type 'ElementFinder'.
+src/features/utility/ElementFinder.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'ViewHierarchyNode'.
+src/features/utility/ElementFinder.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'ViewHierarchyNode'.
+src/features/utility/ElementFinder.ts: error TS2345: Argument of type 'readonly string[]' is not assignable to parameter of type 'string[]'.
+src/features/utility/ElementFinder.ts: error TS2345: Argument of type 'readonly string[]' is not assignable to parameter of type 'string[]'.
+src/features/utility/ElementParser.ts: error TS2339: Property 'hierarchy' does not exist on type '{ windowLayer: number; }'.
+src/features/utility/ElementParser.ts: error TS2345: Argument of type 'ViewHierarchyWindowInfo[]' is not assignable to parameter of type '{ windowLayer: number; }[]'.
+src/features/utility/ios/IosNotificationAuthorizationReader.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/features/video/FfmpegVideoProcessingBackend.ts: error TS2339: Property 'getBaseCommandParts' does not exist on type 'AdbExecutor'.
+src/features/video/FfmpegVideoProcessingBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/FfmpegVideoProcessingBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/FfmpegVideoProcessingBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/FfmpegVideoProcessingBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/FfmpegVideoProcessingBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/FfmpegVideoProcessingBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/FfmpegVideoProcessingBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/FfmpegVideoProcessingBackend.ts: error TS2349: This expression is not callable.
+src/features/video/PlatformVideoCaptureBackend.ts: error TS2322: Type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to type 'ChildProcessWithoutNullStreams'.
+src/features/video/PlatformVideoCaptureBackend.ts: error TS2322: Type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to type 'ChildProcessWithoutNullStreams'.
+src/features/video/PlatformVideoCaptureBackend.ts: error TS2339: Property 'getBaseCommandParts' does not exist on type 'AdbExecutor'.
+src/features/video/PlatformVideoCaptureBackend.ts: error TS2339: Property 'getBaseCommandParts' does not exist on type 'AdbExecutor'.
+src/features/video/PlatformVideoCaptureBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/PlatformVideoCaptureBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/PlatformVideoCaptureBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/PlatformVideoCaptureBackend.ts: error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+src/features/video/PlatformVideoCaptureBackend.ts: error TS2349: This expression is not callable.
+src/index.ts: error TS2322: Type '["debug", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
+src/index.ts: error TS2322: Type '["debug-perf", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
+src/index.ts: error TS2322: Type '["mcp-recording", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
+src/index.ts: error TS2322: Type '["mem-perf-audit", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
+src/index.ts: error TS2322: Type '["predictive-ui", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
+src/index.ts: error TS2322: Type '["raw-element-search", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
+src/index.ts: error TS2322: Type '["ui-perf-mode", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
+src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
+src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
+src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
+src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
+src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
+src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
+src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
+src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
+src/index.ts: error TS2339: Property 'networkMockable' does not exist on type '{ cliMode: boolean; cliArgs: string[]; daemonPort: number | undefined; daemonHost: string | undefined; debugPerf: boolean; debug: boolean; uiPerfMode: boolean; memPerfAuditMode: boolean; ... 23 more ...; outputReduction: OutputReductionFlags; }'.
+src/index.ts: error TS2353: Object literal may only specify known properties, and 'networkMockable' does not exist in type '{ cliMode: boolean; cliArgs: string[]; daemonPort: number | undefined; daemonHost: string | undefined; debugPerf: boolean; debug: boolean; uiPerfMode: boolean; memPerfAuditMode: boolean; ... 23 more ...; outputReduction: OutputReductionFlags; }'.
+src/server/appFileContract.ts: error TS2339: Property 'superRefine' does not exist on type 'ZodSchema'.
+src/server/appFileContract.ts: error TS2345: Argument of type 'readonly ["documents", "library", "cache", "tmp", "externalFiles"]' is not assignable to parameter of type 'string[]'.
+src/server/appFileContract.ts: error TS7006: Parameter 'args' implicitly has an 'any' type.
+src/server/appFileContract.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
+src/server/appFileService.ts: error TS2345: Argument of type 'PutAppFileRequest' is not assignable to parameter of type 'PutAppFileArgs'.
+src/server/appFileService.ts: error TS2430: Interface 'PutAppFileRequest' incorrectly extends interface 'PutAppFileArgs'.
+src/server/appResources.ts: error TS2345: Argument of type 'string[]' is not assignable to parameter of type 'readonly ("platform" | "type" | "search" | "deviceId" | "profile")[]'.
+src/server/appTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/appTools.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/appTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/appTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/appTools.ts: error TS7006: Parameter 'args' implicitly has an 'any' type.
+src/server/biometricTools.ts: error TS2339: Property 'refine' does not exist on type 'ZodSchema'.
+src/server/biometricTools.ts: error TS7006: Parameter 'data' implicitly has an 'any' type.
+src/server/bootedDeviceResources.ts: error TS2322: Type '"local" | "remote"' is not assignable to type '"local" | undefined'.
+src/server/compactBoundsAdvertisement.ts: error TS2698: Spread types may only be created from object types.
+src/server/criticalSectionTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/criticalSectionTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/criticalSectionTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/criticalSectionTools.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/criticalSectionTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/criticalSectionTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/criticalSectionTools.ts: error TS2554: Expected 1 arguments, but got 2.
+src/server/criticalSectionTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
+src/server/criticalSectionTools.ts: error TS7006: Parameter 'step' implicitly has an 'any' type.
+src/server/debugTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
+src/server/debugTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
+src/server/debugTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/server/deviceTools.ts: error TS2322: Type 'TimingData | null' is not assignable to type 'Record<string, number>'.
+src/server/deviceTools.ts: error TS2339: Property 'preprocess' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/deviceTools.ts: error TS7006: Parameter 'input' implicitly has an 'any' type.
+src/server/doctorTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
+src/server/elementSelectorSchemas.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/elementSelectorSchemas.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
+src/server/elementSelectorSchemas.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
+src/server/elementSelectorSchemas.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
+src/server/elementSelectorSchemas.ts: error TS2503: Cannot find namespace 'z'.
+src/server/formTools.ts: error TS2339: Property 'refine' does not exist on type 'ZodSchema'.
+src/server/formTools.ts: error TS2345: Argument of type 'AdbExecutor | null' is not assignable to parameter of type 'AdbClient | null | undefined'.
+src/server/formTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/formTools.ts: error TS2554: Expected 1 arguments, but got 2.
+src/server/formTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
+src/server/formTools.ts: error TS7006: Parameter 'data' implicitly has an 'any' type.
+src/server/formTools.ts: error TS7006: Parameter 'f' implicitly has an 'any' type.
+src/server/formTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/server/highlightTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/highlightTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/highlightTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/highlightTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/highlightTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/highlightTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
+src/server/highlightTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/highlightTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
+src/server/highlightTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/server/index.ts: error TS18046: 'error' is of type 'unknown'.
+src/server/index.ts: error TS2305: Module '"zod"' has no exported member 'ZodError'.
+src/server/index.ts: error TS2305: Module '"zod"' has no exported member 'ZodIssue'.
+src/server/index.ts: error TS7006: Parameter 'unionIssue' implicitly has an 'any' type.
+src/server/index.ts: error TS7006: Parameter 'unionIssues' implicitly has an 'any' type.
+src/server/interactionTools.ts: error TS18048: 'freshness.actualTimestamp' is possibly 'undefined'.
+src/server/interactionTools.ts: error TS18048: 'freshness.requestedAfter' is possibly 'undefined'.
+src/server/interactionTools.ts: error TS18048: 'searchStats' is possibly 'undefined'.
+src/server/interactionTools.ts: error TS18048: 'searchStats' is possibly 'undefined'.
+src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
+src/server/interactionTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/interactionTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/interactionTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/interactionTools.ts: error TS2339: Property 'discriminatedUnion' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/interactionTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/interactionTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/interactionTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/interactionTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/interactionTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
+src/server/interactionTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
+src/server/interactionTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
+src/server/interactionTools.ts: error TS2339: Property 'strict' does not exist on type 'ZodSchema'.
+src/server/interactionTools.ts: error TS2554: Expected 0 arguments, but got 1.
+src/server/interactionTools.ts: error TS2554: Expected 1 arguments, but got 2.
+src/server/interactionTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
+src/server/interactionTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/server/navigationTools.ts: error TS2339: Property 'coverage' does not exist on type 'ExploreExecutionResult'.
+src/server/navigationTools.ts: error TS2339: Property 'interactionsPerformed' does not exist on type 'ExploreExecutionResult'.
+src/server/navigationTools.ts: error TS2339: Property 'screensDiscovered' does not exist on type 'ExploreExecutionResult'.
+src/server/navigationTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'GetNavigationGraphArgs'.
+src/server/navigationTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'GetNavigationGraphArgs'.
+src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
+src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
+src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
+src/server/networkGraph.ts: error TS2322: Type 'string | null | undefined' is not assignable to type 'string | null'.
+src/server/networkGraph.ts: error TS2345: Argument of type 'EventGroup | undefined' is not assignable to parameter of type 'EventGroup'.
+src/server/networkTools.ts: error TS2339: Property 'ZodIssueCode' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/networkTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/networkTools.ts: error TS2339: Property 'positive' does not exist on type 'ZodSchema'.
+src/server/networkTools.ts: error TS2339: Property 'positive' does not exist on type 'ZodSchema'.
+src/server/networkTools.ts: error TS2339: Property 'superRefine' does not exist on type 'ZodSchema'.
+src/server/networkTools.ts: error TS2459: Module '"../utils/deviceUtils"' declares 'BootedDevice' locally, but it is not exported.
+src/server/networkTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/networkTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/networkTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/networkTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/networkTools.ts: error TS2554: Expected 1 arguments, but got 2.
+src/server/networkTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
+src/server/networkTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/server/notificationTools.ts: error TS2339: Property 'discriminatedUnion' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/notificationTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/notificationTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/notificationTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/notificationTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/notificationTools.ts: error TS2554: Expected 0 arguments, but got 1.
+src/server/notificationTools.ts: error TS2554: Expected 1 arguments, but got 2.
+src/server/observeTools.ts: error TS2304: Cannot find name 'ObserveScreen'.
+src/server/observeTools.ts: error TS2322: Type 'TimingData' is not assignable to type 'TimingEntry'.
+src/server/observeTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/observeTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'IdentifyInteractionsOptions'.
+src/server/observeTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'IdentifyInteractionsOptions'.
+src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol.iterator]()' method that returns an iterator.
+src/server/observeTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/observeTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/planTools.ts: error TS2339: Property 'coerce' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/planTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/planTools.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/planTools.ts: error TS2554: Expected 1 arguments, but got 2.
+src/server/preferenceTools.ts: error TS2339: Property 'extend' does not exist on type 'ZodSchema'.
+src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/resourceRegistry.ts: error TS2305: Module '"@modelcontextprotocol/sdk/types.js"' has no exported member 'Resource'.
+src/server/resourceRegistry.ts: error TS2305: Module '"@modelcontextprotocol/sdk/types.js"' has no exported member 'ResourceTemplate'.
+src/server/resourceRegistry.ts: error TS2305: Module '"@modelcontextprotocol/sdk/types.js"' has no exported member 'SubscribeRequestSchema'.
+src/server/resourceRegistry.ts: error TS2305: Module '"@modelcontextprotocol/sdk/types.js"' has no exported member 'UnsubscribeRequestSchema'.
+src/server/snapshotTools.ts: error TS2339: Property 'discriminatedUnion' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/snapshotTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/snapshotTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/snapshotTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/snapshotTools.ts: error TS2554: Expected 0 arguments, but got 1.
+src/server/snapshotTools.ts: error TS2554: Expected 1 arguments, but got 2.
+src/server/storageTools.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
+src/server/storageTools.ts: error TS2339: Property 'nullable' does not exist on type 'ZodSchema'.
+src/server/storageTools.ts: error TS2345: Argument of type 'readonly ["STRING", "INT", "LONG", "FLOAT", "DOUBLE", "BOOLEAN", "STRING_SET", "DATA", "DATE", "ARRAY", "DICTIONARY", "UNKNOWN"]' is not assignable to parameter of type 'string[]'.
+src/server/storageTools.ts: error TS2345: Argument of type 'readonly ["STRING", "INT", "LONG", "FLOAT", "DOUBLE", "BOOLEAN", "STRING_SET", "DATA", "DATE", "ARRAY", "DICTIONARY", "UNKNOWN"]' is not assignable to parameter of type 'string[]'.
+src/server/systemTrayHelpers.ts: error TS2322: Type 'SystemTrayDependencies | null' is not assignable to type 'SystemTrayDependencies'.
+src/server/systemTrayHelpers.ts: error TS2741: Property 'getDeviceTimestampMs' is missing in type 'AdbExecutor' but required in type 'SystemTrayAdb'.
+src/server/testRunResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"limit" | "testClass" | "testMethod" | "lookbackDays" | "orderDirection" | "latestOnly"'.
+src/server/testTimingResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"deviceId" | "limit" | "deviceType" | "sessionUuid" | "devicePlatform" | "testClass" | "testMethod" | "deviceName" | "appVersion" | "gitCommit" | "targetSdk" | "jdkVersion" | ... 6 more ... | "orderDirection"'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
+src/server/toolOutputSchemas.ts: error TS2339: Property 'tuple' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/toolRegistry.ts: error TS2305: Module '"zod"' has no exported member 'toJSONSchema'.
+src/server/toolRegistry.ts: error TS2698: Spread types may only be created from object types.
+src/server/toolSchemaHelpers.ts: error TS2339: Property 'preprocess' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
+src/server/toolSchemaHelpers.ts: error TS7006: Parameter 'input' implicitly has an 'any' type.
+src/server/utilityTools.ts: error TS2339: Property 'refine' does not exist on type 'ZodSchema'.
+src/server/utilityTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/utilityTools.ts: error TS2503: Cannot find namespace 'z'.
+src/server/utilityTools.ts: error TS7006: Parameter 'values' implicitly has an 'any' type.
+src/server/utilityTools.ts: error TS7006: Parameter 'values' implicitly has an 'any' type.
+src/server/utilityTools.ts: error TS7006: Parameter 'values' implicitly has an 'any' type.
+src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/videoRecordingTools.ts: error TS2339: Property 'int' does not exist on type 'ZodSchema'.
+src/server/videoRecordingTools.ts: error TS2339: Property 'positive' does not exist on type 'ZodSchema'.
+src/utils/Backoff.ts: error TS2322: Type 'BackoffPolicy | readonly number[]' is not assignable to type 'BackoffPolicy'.
+src/utils/CtrlProxyManager.ts: error TS7006: Parameter 'entry' implicitly has an 'any' type.
+src/utils/CtrlProxyManager.ts: error TS7006: Parameter 'entry' implicitly has an 'any' type.
+src/utils/CtrlProxyManager.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
+src/utils/DeepLinkManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/utils/DeepLinkManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/utils/DeviceSessionManager.ts: error TS2304: Cannot find name 'AdbClient'.
+src/utils/IOSCtrlProxyBundleDownloader.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
+src/utils/ProcessExecutor.ts: error TS2769: No overload matches this call.
+src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
+src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
+src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
+src/utils/android-cmdline-tools/cmdlineToolsInstaller.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
+src/utils/androidTransientLoading.ts: error TS2345: Argument of type 'object' is not assignable to parameter of type 'ViewHierarchyNode'.
+src/utils/filesystem/DefaultFileSystem.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/utils/hostEmulatorAutoConnect.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/utils/hostEmulatorAutoConnect.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
+src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
+src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
+src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
+src/utils/image/loadJimp.ts: error TS2307: Cannot find module '@jimp/wasm-webp' or its corresponding type declarations.
+src/utils/ios-cmdline-tools/DeviceAppManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/utils/ios-cmdline-tools/DeviceAppManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string | undefined>' is not assignable to type 'Promise<void>'.
+src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2339: Property 'toString' does not exist on type 'never'.
+src/utils/mcpVersion.ts: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
+src/utils/plan/PlanExecutor.ts: error TS2305: Module '"zod"' has no exported member 'ZodError'.
+src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
+src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("node_modules/ajv/dist/ajv").Ajv' is not assignable to parameter of type 'import("node_modules/ajv-formats/node_modules/ajv/dist/core").default'.

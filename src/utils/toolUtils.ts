@@ -185,8 +185,10 @@ export const getStructuredPayload = <T = Record<string, unknown>>(
  * absent (own) field.
  *
  * Requires a fully-typed `StructuredToolResponse<TPayload>`, not a bare
- * envelope-shaped literal — narrow an `any`-boundary value through
- * {@link asToolEnvelope} first. Caveat: keep `TPayload` a *closed* type; if it
+ * envelope-shaped literal — narrow an `any`-boundary value at the registry
+ * boundary first (e.g. `ToolRegistry.getInternalTool` or
+ * `narrowInternalToolEnvelope`, issue #3222). Caveat: keep `TPayload` a *closed*
+ * type; if it
  * carries a string index signature, `keyof TPayload` widens to include `string`
  * and the typo-protection silently evaporates.
  *
@@ -206,24 +208,6 @@ export const getStructuredField = <TPayload, K extends keyof TPayload & string>(
   }
   return undefined;
 };
-
-/**
- * Names the single unchecked narrowing at the heterogeneous `ToolHandler`
- * boundary (issue #2932): the registry stores handlers as `Promise<any>`, so a
- * consumer that knows which tool it invoked asserts the concrete envelope shape
- * here. This is deliberately an UNCHECKED cast (no runtime validation) — its
- * value is that the `any`→typed crossing is explicit and greppable, and that a
- * runtime shape assertion (or the removal that a genericized registry allows)
- * has one home. Prefer this over a bare `const e: StructuredToolResponse<T> =
- * anyValue`, which reads as if the compiler had checked the shape.
- *
- * Once read through the returned typed envelope, an envelope-top-level
- * `e.found` read is a compile error and {@link getStructuredField} keys are
- * checked against `T`. Removing this cast entirely requires threading the
- * payload generic through the registry — tracked as a follow-up to #2932.
- */
-export const asToolEnvelope = <T>(response: unknown): StructuredToolResponse<T> =>
-  response as StructuredToolResponse<T>;
 
 export const throwIfAborted = (signal?: AbortSignal): void => {
   if (signal?.aborted) {

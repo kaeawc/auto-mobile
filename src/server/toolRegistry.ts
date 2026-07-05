@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
-import { ActionableError, BootedDevice, ObserveToolPayload, SomePlatform, SwipeOnToolPayload } from "../models";
+import { ActionableError, BootedDevice, SomePlatform } from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -27,7 +27,12 @@ import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
 import { finalizeToolResponse, type ObservationBaselineStore } from "./finalizeToolResponse";
 import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
-import { asToolEnvelope, getStructuredField } from "../utils/toolUtils";
+import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
+import {
+  InternalToolName,
+  InternalToolPayloads,
+  narrowInternalToolEnvelope,
+} from "./internalToolPayloads";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -554,14 +559,17 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       getMcpRecorder()?.record(name, args);
     }
 
-    // Typed envelope views (issue #2932): the heterogeneous pipeline hands back
-    // `any`, so narrow to the concrete tool payload via `asToolEnvelope` before
-    // reading (it names the unchecked `any`→typed crossing). Reading a
-    // non-hoisted field off the envelope top level (`swipeEnvelope.found`) is now
-    // a compile error, and `getStructuredField`'s key is checked against the
+    // Typed envelope views (issues #2932 / #3222): the heterogeneous pipeline
+    // hands back `any`, so narrow to the concrete tool payload via
+    // `narrowInternalToolEnvelope` before reading. Unlike a raw unchecked cast,
+    // this validates the envelope shape at runtime (a bad shape
+    // yields `undefined`, matching `getStructuredField`'s existing behavior) and
+    // keys the payload type off the tool name via `InternalToolPayloads`. Reading
+    // a non-hoisted field off the envelope top level (`swipeEnvelope.found`) is a
+    // compile error, and `getStructuredField`'s key is checked against the
     // payload — the stringly-typed dead-read footgun is gone.
     if (name === "swipeOn" && args.lookFor) {
-      const swipeEnvelope = asToolEnvelope<SwipeOnToolPayload>(response);
+      const swipeEnvelope = narrowInternalToolEnvelope("swipeOn", response);
       if (getStructuredField(swipeEnvelope, "success") && getStructuredField(swipeEnvelope, "found")) {
         const scrollPosition = UIStateExtractor.createScrollPosition(args);
         if (scrollPosition) {
@@ -575,7 +583,7 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 
     if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
       const sessionManager = DaemonState.getInstance().getSessionManager();
-      const observeEnvelope = asToolEnvelope<ObserveToolPayload>(response);
+      const observeEnvelope = narrowInternalToolEnvelope("observe", response);
       const observeHierarchy = name === "observe" ? getStructuredField(observeEnvelope, "viewHierarchy") : undefined;
       if (observeHierarchy) {
         sessionManager.setLastHierarchy(sessionUuid, observeHierarchy);
@@ -848,6 +856,29 @@ class ToolRegistryClass {
     return resolved.handler(markInternalToolCall(args), progress, signal);
   }
 
+  // Typed variant of `callInternal` for the handful of internally-consumed tools
+  // whose envelope a caller then reads (issue #3222). Threads the concrete
+  // payload type from `InternalToolPayloads` through the registry seam so
+  // `callInternalTyped("swipeOn", …)` resolves to
+  // `StructuredToolResponse<SwipeOnToolPayload> | undefined` instead of the
+  // untyped `Promise<any>` — reading a non-hoisted field off the envelope top
+  // level is a compile error and `getStructuredField` keys are checked against
+  // the payload. It delegates to `callInternal` (so the #3108 `markInternalToolCall`
+  // guarantee is preserved) and validates the shape at runtime via
+  // `narrowInternalToolEnvelope` — there is NO unchecked `any`→typed cast. A
+  // response that is not envelope-shaped narrows to `undefined`, which the read
+  // sites already handle (`getStructuredField(undefined, …)` is `undefined`).
+  async callInternalTyped<K extends InternalToolName>(
+    name: K,
+    args: Record<string, unknown>,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+    options: { forPlan?: boolean } = {}
+  ): Promise<StructuredToolResponse<InternalToolPayloads[K]> | undefined> {
+    const response = await this.callInternal(name, args, progress, signal, options);
+    return narrowInternalToolEnvelope(name, response);
+  }
+
   // Get a tool for internal plan execution. Some tools are intentionally hidden
   // from MCP navigation surfaces but remain valid in recorded/replayed plans.
   getToolForPlan(name: string): RegisteredTool | undefined {
@@ -1043,3 +1074,30 @@ class ToolRegistryClass {
 
 // Export a singleton instance
 export const ToolRegistry = new ToolRegistryClass();
+
+// --- Compile-time enforcement of AC1 (issue #3222) ---
+// AC1 is a *type* guarantee: `callInternalTyped(name, …)` must thread the concrete
+// payload type from `InternalToolPayloads` through the registry seam rather than
+// collapse back to the untyped `Promise<any>` of `callInternal`. The runtime tests
+// in `test/server/internalToolPayloads.test.ts` cannot pin this — bun's test runner
+// does not typecheck, and the `bun run typecheck` gate compiles only `src`
+// (`tsconfig.json` include), so an assertion in `test/` is never checked and would
+// pass even against an `any` regression. These type-only aliases live in `src` (and
+// beside the method they guard, to avoid a type-resolution cycle) so the gate DOES
+// fail if the seam regresses; they erase at build time (zero runtime cost).
+type _IsAny<T> = 0 extends 1 & T ? true : false;
+type _AssertTrue<T extends true> = T;
+type _ResolvedTypedEnvelope = NonNullable<Awaited<ReturnType<typeof ToolRegistry.callInternalTyped>>>;
+// The aliases are referenced only by the compiler (their constraint check IS the
+// guard); they are intentionally unused at runtime, hence the disable.
+/* eslint-disable @typescript-eslint/no-unused-vars */
+// Fails to compile if the resolved envelope widens to `any` (the seam stopped
+// threading the payload type)...
+type _Ac1ResultIsNotAny = _AssertTrue<_IsAny<_ResolvedTypedEnvelope> extends true ? false : true>;
+// ...or if it is no longer the concrete `StructuredToolResponse<…Payload>` envelope.
+type _Ac1ResultIsConcreteEnvelope = _AssertTrue<
+  _ResolvedTypedEnvelope extends StructuredToolResponse<InternalToolPayloads[InternalToolName]>
+    ? true
+    : false
+>;
+/* eslint-enable @typescript-eslint/no-unused-vars */

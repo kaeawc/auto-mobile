@@ -42,6 +42,46 @@ final class EventPersistenceTests: XCTestCase {
         }
     }
 
+    func testPersistAndLoadStorageChangedEvent() {
+        let event = SdkStorageChangedEvent(
+            timestamp: 1000, suiteName: "defaults", key: "theme",
+            newValue: "dark", valueType: "string", changeType: "add", sequenceNumber: 7
+        )
+        let batchId = persistence.persist([event])
+        XCTAssertNotNil(batchId)
+
+        let pending = persistence.loadPending()
+        XCTAssertEqual(pending.count, 1)
+        guard let loaded = pending[0].events.first as? SdkStorageChangedEvent else {
+            return XCTFail("Expected SdkStorageChangedEvent")
+        }
+        XCTAssertEqual(loaded.eventType, .storageChanged)
+        XCTAssertEqual(loaded.key, "theme")
+        XCTAssertEqual(loaded.newValue, "dark")
+        XCTAssertEqual(loaded.valueType, "string")
+        XCTAssertEqual(loaded.changeType, "add")
+        XCTAssertEqual(loaded.sequenceNumber, 7)
+    }
+
+    /// A storage event persisted by an SDK build predating `changeType` must
+    /// still decode (defaulting to "modify") instead of being silently dropped
+    /// by `loadPending`'s `try?`.
+    func testStorageChangedDecodesLegacyPayloadWithoutChangeType() throws {
+        let legacyJson = Data("""
+        {"eventType":"storage_changed","timestamp":1000,"suiteName":"defaults",\
+        "key":"k","newValue":"v","valueType":"string","sequenceNumber":3}
+        """.utf8)
+
+        let event = try JSONDecoder().decode(SdkStorageChangedEvent.self, from: legacyJson)
+
+        XCTAssertEqual(event.eventType, .storageChanged)
+        XCTAssertEqual(event.key, "k")
+        XCTAssertEqual(event.newValue, "v")
+        XCTAssertEqual(event.valueType, "string")
+        XCTAssertEqual(event.changeType, "modify")
+        XCTAssertEqual(event.sequenceNumber, 3)
+    }
+
     func testPersistAndLoadNavigationEvent() {
         let event = SdkNavigationEvent(
             timestamp: 1000,

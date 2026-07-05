@@ -225,8 +225,10 @@ public struct SdkStorageChangedEvent: SdkEvent
   public let newValue: String?
   public let previousValue: String?
   public let valueType: String
+  public let changeType: String
   public let sequenceNumber: Int64
-  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), suiteName: String?, key: String?, newValue: String?, previousValue: String? = nil, valueType: String, sequenceNumber: Int64 )
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), suiteName: String?, key: String?, newValue: String?, previousValue: String? = nil, valueType: String, changeType: String = "modify", sequenceNumber: Int64 )
+  public init(from decoder: Decoder) throws
 public struct SdkEventBatch: Codable, Sendable
   public let bundleId: String?
   public let events: [SdkEventEnvelope]
@@ -349,6 +351,7 @@ public final class AutoMobileNetwork: @unchecked Sendable
   public func protocolClass() -> AnyClass
   public func recordRequest(_ record: NetworkRequestRecord)
   public func recordRequest( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
+  public func recordFromTask( _ task: URLSessionTask, startTime: Date, receivedData: Data?, error: Error? )
   public func recordWebSocketFrame( url: String, direction: WebSocketFrameDirection, frameType: WebSocketFrameType, payloadSize: Int? = nil )
 public class AutoMobileURLProtocol: URLProtocol
   public override class func canInit(with request: URLRequest) -> Bool
@@ -391,6 +394,48 @@ public final class AutoMobileOsEvents: @unchecked Sendable
   public static let shared = AutoMobileOsEvents()
   public var isEnabled: Bool
   public func setEnabled(_ enabled: Bool)
+
+// Public/AutoMobileAPI.swift
+public protocol AutoMobileAPI: AnyObject, Sendable
+
+// Public/AutoMobileCrashesAPI.swift
+public protocol AutoMobileCrashesAPI: AnyObject, Sendable
+public final class DefaultAutoMobileCrashesAPI: AutoMobileCrashesAPI, @unchecked Sendable
+  public init()
+  public func enableSignalHandlers()
+  public func setCurrentScreenProvider(_ provider: (@Sendable () -> String?)?)
+
+// Public/AutoMobileNetworkAPI.swift
+public protocol AutoMobileNetworkAPI: AnyObject, Sendable
+public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, @unchecked Sendable
+  public init()
+  public func recordRequest(_ record: NetworkRequestRecord)
+  public func setCaptureHeaders(_ enabled: Bool)
+  public func setCaptureBodies(_ enabled: Bool)
+
+// Public/DefaultAutoMobileAPI.swift
+public final class DefaultAutoMobileAPI: AutoMobileAPI, @unchecked Sendable
+  public init()
+  public func initialize()
+  public func initialize(configuration: AutoMobileConfiguration)
+  public func shutdown()
+  public var isEnabled: Bool
+  public func setEnabled(_ enabled: Bool)
+  public var isInitialized: Bool
+  public func addNavigationListener(_ listener: NavigationListener)
+  public func addNavigationListener(_ block: @escaping @Sendable (NavigationEvent) -> Void) -> NavigationListener
+  public func removeNavigationListener(_ listener: NavigationListener)
+  public func clearNavigationListeners()
+  public func notifyNavigationEvent(_ event: NavigationEvent)
+  public var listenerCount: Int
+  public func currentSessionId() -> String?
+  public func addBreadcrumb(message: String, category: BreadcrumbCategory, metadata: [String: String])
+  public func setUserId(_ userId: String?)
+  public func setTag(_ key: String, value: String)
+  public func removeTag(_ key: String)
+  public var configuration: AutoMobileConfiguration?
+  public var bundleId: String?
+  public var dropReport: [DropReason: Int]
 
 // Storage/DatabaseInspector.swift
 public final class DatabaseInspector: @unchecked Sendable
@@ -497,12 +542,16 @@ public struct SdkViewNode: Codable, Sendable
   public let alpha: Float
   public let backgroundColor: String?
   public let cornerRadius: Float
+  public let borderColor: String?
+  public let borderWidth: Float
+  public let isLayerNode: Bool
   public let isHidden: Bool
   public let isUserInteractionEnabled: Bool
   public let hasTapTarget: Bool
   public let isOccluded: Bool
   public let children: [SdkViewNode]?
-  public init( className: String, bounds: SdkBounds, accessibilityLabel: String? = nil, accessibilityIdentifier: String? = nil, isAccessibilityElement: Bool = false, accessibilityElementsHidden: Bool = false, accessibilityTraits: [String] = [], accessibilityCustomActions: [String] = [], gestureRecognizers: [SdkGestureInfo] = [], alpha: Float = 1.0, backgroundColor: String? = nil, cornerRadius: Float = 0, isHidden: Bool = false, isUserInteractionEnabled: Bool = true, hasTapTarget: Bool = false, isOccluded: Bool = false, children: [SdkViewNode]? = nil )
+  public init( className: String, bounds: SdkBounds, accessibilityLabel: String? = nil, accessibilityIdentifier: String? = nil, isAccessibilityElement: Bool = false, accessibilityElementsHidden: Bool = false, accessibilityTraits: [String] = [], accessibilityCustomActions: [String] = [], gestureRecognizers: [SdkGestureInfo] = [], alpha: Float = 1.0, backgroundColor: String? = nil, cornerRadius: Float = 0, borderColor: String? = nil, borderWidth: Float = 0, isLayerNode: Bool = false, isHidden: Bool = false, isUserInteractionEnabled: Bool = true, hasTapTarget: Bool = false, isOccluded: Bool = false, children: [SdkViewNode]? = nil )
+  public init(from decoder: Decoder) throws
 public struct SdkBounds: Codable, Sendable, Hashable
   public let left: Int
   public let top: Int
@@ -526,45 +575,3 @@ public final class ViewHierarchyTracker: @unchecked Sendable
 public enum ViewHierarchyWalker
   public static func walk(bundleId: String? = nil) -> SdkViewHierarchy
   public static func computeHash(_ hierarchy: SdkViewHierarchy) -> Int
-
-// Public/AutoMobileAPI.swift
-public protocol AutoMobileAPI: AnyObject, Sendable
-  func initialize()
-  func initialize(configuration: AutoMobileConfiguration)
-  func shutdown()
-  var isEnabled: Bool { get }
-  func setEnabled(_ enabled: Bool)
-  var isInitialized: Bool { get }
-  func addNavigationListener(_ listener: NavigationListener)
-  @discardableResult func addNavigationListener(_ block: @escaping @Sendable (NavigationEvent) -> Void) -> NavigationListener
-  func removeNavigationListener(_ listener: NavigationListener)
-  func clearNavigationListeners()
-  func notifyNavigationEvent(_ event: NavigationEvent)
-  var listenerCount: Int { get }
-  func currentSessionId() -> String?
-  func addBreadcrumb(message: String, category: BreadcrumbCategory, metadata: [String: String])
-  func setUserId(_ userId: String?)
-  func setTag(_ key: String, value: String)
-  func removeTag(_ key: String)
-  var configuration: AutoMobileConfiguration? { get }
-  var bundleId: String? { get }
-  var dropReport: [DropReason: Int] { get }
-
-// Public/DefaultAutoMobileAPI.swift
-public final class DefaultAutoMobileAPI: AutoMobileAPI, @unchecked Sendable
-  public init()
-
-// Public/AutoMobileNetworkAPI.swift
-public protocol AutoMobileNetworkAPI: AnyObject, Sendable
-  func recordRequest(_ record: NetworkRequestRecord)
-  func setCaptureHeaders(_ enabled: Bool)
-  func setCaptureBodies(_ enabled: Bool)
-public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, @unchecked Sendable
-  public init()
-
-// Public/AutoMobileCrashesAPI.swift
-public protocol AutoMobileCrashesAPI: AnyObject, Sendable
-  func enableSignalHandlers()
-  func setCurrentScreenProvider(_ provider: (@Sendable () -> String?)?)
-public final class DefaultAutoMobileCrashesAPI: AutoMobileCrashesAPI, @unchecked Sendable
-  public init()

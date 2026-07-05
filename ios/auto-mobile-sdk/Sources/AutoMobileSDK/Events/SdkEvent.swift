@@ -440,16 +440,27 @@ public struct SdkInteractionEvent: SdkEvent {
 }
 
 /// A UserDefaults change event with suite, key, and value metadata.
+///
+/// Wire-contract note: the TS ingestor (`IosSdkEventIngestor`) maps
+/// `suiteName` → `fileName` and `newValue` → `value` to match Android's
+/// storage telemetry wire format (Android emits `fileName`/`value`). Don't
+/// assume iOS uses Android's field names.
 public struct SdkStorageChangedEvent: SdkEvent {
     public private(set) var eventType: SdkEventType = .storageChanged
     public let timestamp: Int64
+    /// The UserDefaults suite; maps to `fileName` in the TS ingestor.
     public let suiteName: String?
     public let key: String?
+    /// The value after the change (nil for a removal); maps to `value` in TS.
     public let newValue: String?
     /// The value BEFORE the change (nil if there was no prior value). Emitted so the
     /// TS telemetry ingest can skip its per-insert previous-value lookup (#3000).
     public let previousValue: String?
     public let valueType: String
+    /// The kind of change this event records: "add", "modify", or "remove".
+    /// Mirrors Android's storage `changeType` so the desktop telemetry consumer
+    /// can render added/removed values instead of always treating iOS as "modify".
+    public let changeType: String
     public let sequenceNumber: Int64
 
     public init(
@@ -459,6 +470,7 @@ public struct SdkStorageChangedEvent: SdkEvent {
         newValue: String?,
         previousValue: String? = nil,
         valueType: String,
+        changeType: String = "modify",
         sequenceNumber: Int64
     ) {
         self.timestamp = timestamp
@@ -467,7 +479,33 @@ public struct SdkStorageChangedEvent: SdkEvent {
         self.newValue = newValue
         self.previousValue = previousValue
         self.valueType = valueType
+        self.changeType = changeType
         self.sequenceNumber = sequenceNumber
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType, timestamp, suiteName, key, newValue, previousValue, valueType, changeType, sequenceNumber
+    }
+
+    // Custom decode so events persisted by an older SDK build (before
+    // `changeType`/`previousValue` existed) still load — `EventPersistence
+    // .loadPending()` decodes `SdkStorageChangedEvent`, and Swift's synthesized
+    // `Decodable` would reject the missing keys and silently drop the event.
+    // Legacy payloads default `changeType` to "modify" (the prior implicit
+    // behavior) and leave `previousValue` nil.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let type = try container.decodeIfPresent(SdkEventType.self, forKey: .eventType) {
+            eventType = type
+        }
+        timestamp = try container.decode(Int64.self, forKey: .timestamp)
+        suiteName = try container.decodeIfPresent(String.self, forKey: .suiteName)
+        key = try container.decodeIfPresent(String.self, forKey: .key)
+        newValue = try container.decodeIfPresent(String.self, forKey: .newValue)
+        previousValue = try container.decodeIfPresent(String.self, forKey: .previousValue)
+        valueType = try container.decode(String.self, forKey: .valueType)
+        changeType = try container.decodeIfPresent(String.self, forKey: .changeType) ?? "modify"
+        sequenceNumber = try container.decode(Int64.self, forKey: .sequenceNumber)
     }
 }
 

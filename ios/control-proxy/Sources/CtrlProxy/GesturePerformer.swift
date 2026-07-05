@@ -1290,6 +1290,10 @@ public class GesturePerformer: GesturePerforming {
         /// with no `XCUIProtectedResource` equivalent (e.g. `siri`, `motion`) throws
         /// `invalidParameter` so the caller reports it as a per-permission failure.
         public func resetAuthorizations(bundleId: String, resources: [String]) throws {
+            // Throws on the first unmapped resource, so a mixed batch applies the
+            // resets before it and then fails as a whole. The TS client sends one
+            // permission per request, so each is isolated and accounted per-permission;
+            // this only matters for a hypothetical multi-resource single request.
             try runOnMainThread {
                 let app = XCUIApplication(bundleIdentifier: bundleId)
                 for raw in resources {

@@ -1,4 +1,5 @@
 import type { BootedDevice } from "../../models";
+import { logger } from "../../utils/logger";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import {
   normalizePermissions,
@@ -127,11 +128,12 @@ export class CtrlProxyIosPhysicalPrivacyClient implements IosPhysicalPrivacyClie
             ? { permission, success: true }
             : { permission, success: false, error: response.error ?? "Failed to reset permission" };
         } catch (error) {
-          return {
-            permission,
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-          };
+          // Best-effort per-permission path: log the unexpected failure (so there is
+          // a trace even though the message is also surfaced in the result) and
+          // report it as a typed failure rather than aborting the whole batch.
+          const message = error instanceof Error ? error.message : String(error);
+          logger.warn(`[IosPhysicalPermissions] reset of '${permission}' failed: ${message}`, error);
+          return { permission, success: false, error: message };
         }
       })
     );

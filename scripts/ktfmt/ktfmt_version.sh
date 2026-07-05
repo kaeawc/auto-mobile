@@ -19,7 +19,14 @@ KTFMT_VERSION="0.64"
 # install runs `java -jar`) can't have *its* version grabbed instead. Prints the
 # empty string if ktfmt is absent or emits nothing parseable.
 installed_ktfmt_version() {
-    ktfmt --version 2>&1 | grep -i 'ktfmt version' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1
+    local version_output
+    version_output="$(ktfmt --version 2>&1)" || true
+    awk 'tolower($0) ~ /ktfmt version/ {
+        if (match($0, /[0-9]+\.[0-9]+(\.[0-9]+)?/)) {
+            print substr($0, RSTART, RLENGTH)
+            exit
+        }
+    }' <<<"$version_output"
 }
 
 # Fingerprint gate (issue #2966): assert the ktfmt on PATH is EXACTLY the pinned

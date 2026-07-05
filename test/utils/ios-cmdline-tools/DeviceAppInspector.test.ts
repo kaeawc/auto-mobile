@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { DeviceAppInspector, findProcessIdentifier, findRunningProcessPid, isDevicectlProcessGoneError, parseDevicectlJsonOutputPath } from "../../../src/utils/ios-cmdline-tools/DeviceAppInspector";
+import { isProcessAlreadyGoneError } from "../../../src/utils/ios-cmdline-tools/iosProcessErrors";
 import { hashAppBundle } from "../../../src/utils/ios-cmdline-tools/AppBundleHasher";
 import { FakeHostControlDeviceAppInspector } from "../../fakes/FakeHostControlDeviceAppInspector";
 
@@ -975,8 +976,8 @@ describe("DeviceAppInspector terminate (devicectl)", () => {
   // Issue #3054: the PID can exit between `info processes` resolution and the
   // kill (a real on-device race). devicectl then exits non-zero and promisified
   // exec rejects; the app is nonetheless effectively terminated, so we must not
-  // surface a false success:false — mirroring the simulator path's
-  // isSimctlNotRunningError tolerance.
+  // surface a false success:false — mirroring the simulator path's shared
+  // isProcessAlreadyGoneError tolerance (#3076).
   const runningProcessesExec = (
     commands: string[],
     onTerminate: (command: string) => void
@@ -1059,5 +1060,31 @@ describe("isDevicectlProcessGoneError", () => {
     // "not running" must NOT be swallowed as an already-exited PID.
     expect(isDevicectlProcessGoneError("The device is not running.")).toBe(false);
     expect(isDevicectlProcessGoneError("CoreDevice tunnel is not running")).toBe(false);
+  });
+
+  // Drift guard (issue #3076): devicectl must stay a *superset* of the shared
+  // matcher. If someone drops the `isProcessAlreadyGoneError(...)` delegation,
+  // a shared phrasing that isn't a devicectl-only extra would stop matching and
+  // this fails.
+  test("subsumes every shared already-gone phrasing", () => {
+    for (const shared of ["no such process", "found nothing to terminate", "the process is not running"]) {
+      expect(isProcessAlreadyGoneError(shared)).toBe(true);
+      expect(isDevicectlProcessGoneError(shared)).toBe(true);
+    }
+  });
+
+  // Equivalence guard: before #3076 the process-state phrasings were one regex,
+  // `/process (?:is )?(?:no longer |not )running/`. The refactor split it into a
+  // shared `not running` half and a devicectl-only `no longer running` half, so
+  // assert the union still matches — with and without the optional "is".
+  test("preserves the old combined 'no longer|not running' union on the devicectl path", () => {
+    for (const phrasing of [
+      "process not running",
+      "The process is not running",
+      "process no longer running",
+      "The process is no longer running"
+    ]) {
+      expect(isDevicectlProcessGoneError(phrasing)).toBe(true);
+    }
   });
 });

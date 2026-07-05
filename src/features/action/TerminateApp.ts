@@ -4,6 +4,7 @@ import { BootedDevice, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { isProcessAlreadyGoneError } from "../../utils/ios-cmdline-tools/iosProcessErrors";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
@@ -239,7 +240,13 @@ export class TerminateApp extends BaseVisualChange {
       await perf.track("terminateApp", () => this.simctl.terminateApp(bundleId, this.device.deviceId));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (this.isSimctlNotRunningError(message)) {
+      // Shared already-gone matcher (issue #3076): a simctl "found nothing to
+      // terminate" / process-scoped "not running" means the app was already
+      // stopped, so report wasRunning:false rather than a hard error. Any other
+      // failure (e.g. device-level) surfaces as errorMessage. The simulator path
+      // has no tool-specific extras today; add them here (OR-ing the shared
+      // helper) if simctl error text ever diverges.
+      if (isProcessAlreadyGoneError(message)) {
         wasRunning = false;
       } else {
         errorMessage = message;
@@ -299,17 +306,6 @@ export class TerminateApp extends BaseVisualChange {
         error: message
       };
     }
-  }
-
-  // Simulator-path sibling of DeviceAppInspector.isDevicectlProcessGoneError:
-  // both treat an "already gone" terminate failure as an effectively-terminated
-  // app. Kept separate because simctl and devicectl surface distinct, Apple-
-  // undocumented error text that may diverge (see #3054).
-  private isSimctlNotRunningError(message: string): boolean {
-    const normalized = message.toLowerCase();
-    return normalized.includes("no such process")
-      || normalized.includes("not running")
-      || normalized.includes("found nothing to terminate");
   }
 
   private getBundleId(app: any): string | undefined {

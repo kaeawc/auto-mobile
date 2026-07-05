@@ -3,6 +3,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import type { ExecResult } from "../../models";
 import { hashAppBundle } from "./AppBundleHasher";
+import { isProcessAlreadyGoneError } from "./iosProcessErrors";
 import { logger } from "../logger";
 import { isRunningInDocker } from "../dockerEnv";
 import { getDeviceAppBundleHash, installDeviceApp, isHostControlAvailable, shouldUseHostControl, uninstallDeviceApp } from "../hostControlClient";
@@ -179,9 +180,13 @@ const getExecErrorText = (error: unknown): string => {
  * already gone — it exited between our `info processes` resolution and the kill
  * (a real on-device race, issue #3054). devicectl surfaces ESRCH either as the
  * localized "No such process" strerror text or, on some builds, the bare
- * `NSPOSIXErrorDomain error 3` code without the strerror gloss. This mirrors
- * `TerminateApp.isSimctlNotRunningError` on the simulator path, so a raced exit
- * reports an effectively-terminated app instead of a false `success:false`.
+ * `NSPOSIXErrorDomain error 3` code without the strerror gloss.
+ *
+ * The shared already-gone phrasings live in {@link isProcessAlreadyGoneError}
+ * (used by the simulator path too, issue #3076); here we OR-in the two
+ * devicectl-specific extras so a raced exit reports an effectively-terminated
+ * app instead of a false `success:false`. Together these preserve the exact
+ * prior devicectl behavior: shared `not running` ∪ extra `no longer running`.
  *
  * Deliberately narrow: unrelated failures (device locked, not connected,
  * permission denied) must still propagate as hard errors. The "not running"
@@ -190,10 +195,9 @@ const getExecErrorText = (error: unknown): string => {
  */
 export const isDevicectlProcessGoneError = (message: string): boolean => {
   const normalized = message.toLowerCase();
-  return normalized.includes("no such process")            // ESRCH strerror
-    || normalized.includes("nsposixerrordomain error 3")   // bare ESRCH code
-    || normalized.includes("found nothing to terminate")   // simctl parity
-    || /process (?:is )?(?:no longer |not )running/.test(normalized);
+  return isProcessAlreadyGoneError(message)
+    || normalized.includes("nsposixerrordomain error 3")     // bare ESRCH code
+    || /process (?:is )?no longer running/.test(normalized);  // devicectl-only phrasing
 };
 
 /**

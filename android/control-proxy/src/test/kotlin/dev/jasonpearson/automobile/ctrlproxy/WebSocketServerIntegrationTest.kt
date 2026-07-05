@@ -4,6 +4,8 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.protocol.ErrorResponse
+import dev.jasonpearson.automobile.protocol.SettingsGetResult
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
@@ -21,6 +23,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -481,6 +484,124 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
+  fun `out of range numeric literal returns legible structured error response`() = runBlocking {
+    // Issue #3022: exercise the real kotlinx decode path with an out-of-range literal instead of a
+    // synthetic exception, so Android proves parity with the iOS decode-boundary legibility case.
+    server.start()
+
+    val client = HttpClient(CIO) { install(WebSockets) }
+    client.use { client ->
+      client.webSocket(
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
+      ) {
+        incoming.receive() // Connection message
+
+        send(
+          Frame.Text(
+            """{"type":"request_tap_coordinates","requestId":"req-out-of-range","x":1e309,"y":10}"""
+          )
+        )
+
+        val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+        val responseJson = json.parseToJsonElement(responseFrame.readText()).jsonObject
+
+        assertEquals("error", responseJson["type"]?.jsonPrimitive?.content)
+        assertEquals("req-out-of-range", responseJson["requestId"]?.jsonPrimitive?.content)
+        assertEquals("false", responseJson["success"]?.jsonPrimitive?.content)
+        val error = responseJson["error"]?.jsonPrimitive?.content ?: ""
+        assertTrue("error message should be non-empty", error.isNotEmpty())
+        assertTrue(
+          "expected the out-of-range numeric failure to be legible, was: $error",
+          error.contains("numeric value is out of range", ignoreCase = true) ||
+            error.contains("not representable", ignoreCase = true),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `decode error response is sent only to originating connection`() = runBlocking {
+    // Issue #3022: decode-boundary errors are request/connection scoped. Broadcast events and
+    // normal
+    // responses still fan out, but an unrelated client should not observe another client's parse
+    // failure.
+    server.start()
+
+    val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val ownerReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val bystanderReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val sendOwnerMessage = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val bystanderCheckedErrorWindow = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val sendProbeBroadcast = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+    val ownerClient = HttpClient(CIO) { install(WebSockets) }
+    val bystanderClient = HttpClient(CIO) { install(WebSockets) }
+    ownerClient.use { owner ->
+      bystanderClient.use { bystander ->
+        val ownerJob = launch {
+          owner.webSocket(
+            method = HttpMethod.Get,
+            host = "localhost",
+            port = getServerPort(),
+            path = "/ws",
+          ) {
+            incoming.receive() // Connection message
+            ownerReady.complete(Unit)
+            sendOwnerMessage.await()
+            send(Frame.Text("""{"type":"totally_unknown_command","requestId":"req-owner"}"""))
+            val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+            ownerMessages.add(responseFrame.readText())
+          }
+        }
+
+        val bystanderJob = launch {
+          bystander.webSocket(
+            method = HttpMethod.Get,
+            host = "localhost",
+            port = getServerPort(),
+            path = "/ws",
+          ) {
+            incoming.receive() // Connection message
+            bystanderReady.complete(Unit)
+            sendOwnerMessage.await()
+            val responseFrame = withTimeoutOrNull(250) { incoming.receive() }
+            if (responseFrame is Frame.Text) {
+              bystanderMessages.add(responseFrame.readText())
+            }
+            bystanderCheckedErrorWindow.complete(Unit)
+            sendProbeBroadcast.await()
+            val probeFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+            bystanderMessages.add(probeFrame.readText())
+          }
+        }
+
+        ownerReady.await()
+        bystanderReady.await()
+        sendOwnerMessage.complete(Unit)
+        ownerJob.join()
+        bystanderCheckedErrorWindow.await()
+        server.broadcast("""{"type":"probe"}""")
+        sendProbeBroadcast.complete(Unit)
+        bystanderJob.join()
+
+        assertEquals("originating client should receive one error frame", 1, ownerMessages.size)
+        val ownerJson = json.parseToJsonElement(ownerMessages.single()).jsonObject
+        assertEquals("error", ownerJson["type"]?.jsonPrimitive?.content)
+        assertEquals("req-owner", ownerJson["requestId"]?.jsonPrimitive?.content)
+        assertEquals(
+          "unrelated client should receive only the liveness probe, not another connection's error",
+          listOf("""{"type":"probe"}"""),
+          bystanderMessages.toList(),
+        )
+      }
+    }
+  }
+
+  @Test
   fun `unparseable payload returns error response with null requestId`() = runBlocking {
     // Best-effort requestId extraction (#2985): when the payload can't be parsed at all, the error
     // frame is still emitted with a null requestId rather than swallowed.
@@ -555,6 +676,97 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
+  fun `handler exception error response is sent only to originating connection`() = runBlocking {
+    val throwingServer =
+      WebSocketServer(
+        port = 0,
+        scope = testScope,
+        messageHandler =
+          CtrlProxyMessageHandler(
+            object : NoOpCtrlProxyActions() {
+              override fun requestScreenshot(requestId: String?) {
+                throw RuntimeException("kaboom")
+              }
+            }
+          ),
+      )
+    throwingServer.start()
+    try {
+      val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+      val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+      val ownerReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val sendOwnerMessage = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderCheckedErrorWindow = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val sendProbeBroadcast = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+      val ownerClient = HttpClient(CIO) { install(WebSockets) }
+      val bystanderClient = HttpClient(CIO) { install(WebSockets) }
+      ownerClient.use { owner ->
+        bystanderClient.use { bystander ->
+          val ownerJob = launch {
+            owner.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = throwingServer.getActualPort() ?: error("Server not running"),
+              path = "/ws",
+            ) {
+              incoming.receive() // Connection message
+              ownerReady.complete(Unit)
+              sendOwnerMessage.await()
+              send(Frame.Text("""{"type":"request_screenshot","requestId":"req-throw-owner"}"""))
+              val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+              ownerMessages.add(responseFrame.readText())
+            }
+          }
+
+          val bystanderJob = launch {
+            bystander.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = throwingServer.getActualPort() ?: error("Server not running"),
+              path = "/ws",
+            ) {
+              incoming.receive() // Connection message
+              bystanderReady.complete(Unit)
+              sendOwnerMessage.await()
+              val responseFrame = withTimeoutOrNull(250) { incoming.receive() }
+              if (responseFrame is Frame.Text) {
+                bystanderMessages.add(responseFrame.readText())
+              }
+              bystanderCheckedErrorWindow.complete(Unit)
+              sendProbeBroadcast.await()
+              val probeFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+              bystanderMessages.add(probeFrame.readText())
+            }
+          }
+
+          ownerReady.await()
+          bystanderReady.await()
+          sendOwnerMessage.complete(Unit)
+          ownerJob.join()
+          bystanderCheckedErrorWindow.await()
+          throwingServer.broadcast("""{"type":"probe"}""")
+          sendProbeBroadcast.complete(Unit)
+          bystanderJob.join()
+
+          assertEquals("originating client should receive one error frame", 1, ownerMessages.size)
+          val ownerJson = json.parseToJsonElement(ownerMessages.single()).jsonObject
+          assertEquals("error", ownerJson["type"]?.jsonPrimitive?.content)
+          assertEquals("req-throw-owner", ownerJson["requestId"]?.jsonPrimitive?.content)
+          assertEquals(
+            "unrelated client should receive only the liveness probe, not another connection's error",
+            listOf("""{"type":"probe"}"""),
+            bystanderMessages.toList(),
+          )
+        }
+      }
+    } finally {
+      throwingServer.stop()
+    }
+  }
+
+  @Test
   fun `commands dispatch in wire order`() = runBlocking {
     // Regression guard for message ordering: two synchronous commands sent back-to-back must run
     // in the order they arrive on the wire. This holds only because the server dispatches inline on
@@ -604,6 +816,230 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
+  fun `raw async response clears request owner mapping`() = runBlocking {
+    lateinit var rawSuccessServer: WebSocketServer
+    rawSuccessServer =
+      WebSocketServer(
+        port = 0,
+        scope = testScope,
+        messageHandler =
+          CtrlProxyMessageHandler(
+            object : NoOpCtrlProxyActions() {
+              override fun requestScreenshot(requestId: String?) {
+                testScope.launch {
+                  rawSuccessServer.broadcast("""{"type":"screenshot","requestId":"$requestId"}""")
+                }
+              }
+            }
+          ),
+      )
+    rawSuccessServer.start()
+    try {
+      val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+      val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+      val ownerReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val sendOwnerMessage = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val ownerReceivedRaw = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderReceivedRaw = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val sendLateError = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+      val ownerClient = HttpClient(CIO) { install(WebSockets) }
+      val bystanderClient = HttpClient(CIO) { install(WebSockets) }
+      ownerClient.use { owner ->
+        bystanderClient.use { bystander ->
+          val ownerJob = launch {
+            owner.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = rawSuccessServer.getActualPort() ?: error("Server not running"),
+              path = "/ws",
+            ) {
+              incoming.receive() // Connection message
+              ownerReady.complete(Unit)
+              sendOwnerMessage.await()
+              send(Frame.Text("""{"type":"request_screenshot","requestId":"req-raw-success"}"""))
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerReceivedRaw.complete(Unit)
+              sendLateError.await()
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+            }
+          }
+
+          val bystanderJob = launch {
+            bystander.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = rawSuccessServer.getActualPort() ?: error("Server not running"),
+              path = "/ws",
+            ) {
+              incoming.receive() // Connection message
+              bystanderReady.complete(Unit)
+              sendOwnerMessage.await()
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
+              bystanderReceivedRaw.complete(Unit)
+              sendLateError.await()
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
+            }
+          }
+
+          ownerReady.await()
+          bystanderReady.await()
+          sendOwnerMessage.complete(Unit)
+          ownerReceivedRaw.await()
+          bystanderReceivedRaw.await()
+          rawSuccessServer.broadcast(
+            ErrorResponse(requestId = "req-raw-success", error = "late correlated failure")
+          )
+          sendLateError.complete(Unit)
+          ownerJob.join()
+          bystanderJob.join()
+
+          assertEquals("""{"type":"screenshot","requestId":"req-raw-success"}""", ownerMessages[0])
+          assertEquals(
+            """{"type":"screenshot","requestId":"req-raw-success"}""",
+            bystanderMessages[0],
+          )
+          val ownerError = json.parseToJsonElement(ownerMessages[1]).jsonObject
+          val bystanderError = json.parseToJsonElement(bystanderMessages[1]).jsonObject
+          assertEquals("error", ownerError["type"]?.jsonPrimitive?.content)
+          assertEquals("req-raw-success", ownerError["requestId"]?.jsonPrimitive?.content)
+          assertEquals(
+            "raw success should remove stale request ownership so later same-id errors are not targeted",
+            "error",
+            bystanderError["type"]?.jsonPrimitive?.content,
+          )
+          assertEquals("req-raw-success", bystanderError["requestId"]?.jsonPrimitive?.content)
+        }
+      }
+    } finally {
+      rawSuccessServer.stop()
+    }
+  }
+
+  @Test
+  fun `typed async response clears request owner mapping`() = runBlocking {
+    lateinit var typedSuccessServer: WebSocketServer
+    typedSuccessServer =
+      WebSocketServer(
+        port = 0,
+        scope = testScope,
+        messageHandler =
+          CtrlProxyMessageHandler(
+            object : NoOpCtrlProxyActions() {
+              override fun requestScreenshot(requestId: String?) {
+                testScope.launch {
+                  typedSuccessServer.broadcast(
+                    SettingsGetResult(
+                      timestamp = 1234L,
+                      requestId = requestId,
+                      success = true,
+                      namespace = "secure",
+                      key = "setting",
+                      value = "value",
+                      found = true,
+                      totalTimeMs = 1L,
+                    )
+                  )
+                }
+              }
+            }
+          ),
+      )
+    typedSuccessServer.start()
+    try {
+      val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+      val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+      val ownerReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val sendOwnerMessage = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val ownerReceivedTyped = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderReceivedTyped = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val sendLateError = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+      val ownerClient = HttpClient(CIO) { install(WebSockets) }
+      val bystanderClient = HttpClient(CIO) { install(WebSockets) }
+      ownerClient.use { owner ->
+        bystanderClient.use { bystander ->
+          val ownerJob = launch {
+            owner.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = typedSuccessServer.getActualPort() ?: error("Server not running"),
+              path = "/ws",
+            ) {
+              incoming.receive() // Connection message
+              ownerReady.complete(Unit)
+              sendOwnerMessage.await()
+              send(Frame.Text("""{"type":"request_screenshot","requestId":"req-typed-success"}"""))
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerReceivedTyped.complete(Unit)
+              sendLateError.await()
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+            }
+          }
+
+          val bystanderJob = launch {
+            bystander.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = typedSuccessServer.getActualPort() ?: error("Server not running"),
+              path = "/ws",
+            ) {
+              incoming.receive() // Connection message
+              bystanderReady.complete(Unit)
+              sendOwnerMessage.await()
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
+              bystanderReceivedTyped.complete(Unit)
+              sendLateError.await()
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
+            }
+          }
+
+          ownerReady.await()
+          bystanderReady.await()
+          sendOwnerMessage.complete(Unit)
+          ownerReceivedTyped.await()
+          bystanderReceivedTyped.await()
+          typedSuccessServer.broadcast(
+            ErrorResponse(requestId = "req-typed-success", error = "late correlated failure")
+          )
+          sendLateError.complete(Unit)
+          ownerJob.join()
+          bystanderJob.join()
+
+          val ownerResult = json.parseToJsonElement(ownerMessages[0]).jsonObject
+          val bystanderResult = json.parseToJsonElement(bystanderMessages[0]).jsonObject
+          assertEquals("settings_get_result", ownerResult["type"]?.jsonPrimitive?.content)
+          assertEquals("req-typed-success", ownerResult["requestId"]?.jsonPrimitive?.content)
+          assertEquals("settings_get_result", bystanderResult["type"]?.jsonPrimitive?.content)
+          assertEquals("req-typed-success", bystanderResult["requestId"]?.jsonPrimitive?.content)
+          val ownerError = json.parseToJsonElement(ownerMessages[1]).jsonObject
+          val bystanderError = json.parseToJsonElement(bystanderMessages[1]).jsonObject
+          assertEquals("error", ownerError["type"]?.jsonPrimitive?.content)
+          assertEquals("req-typed-success", ownerError["requestId"]?.jsonPrimitive?.content)
+          assertEquals(
+            "typed success should remove stale request ownership so later same-id errors are not targeted",
+            "error",
+            bystanderError["type"]?.jsonPrimitive?.content,
+          )
+          assertEquals("req-typed-success", bystanderError["requestId"]?.jsonPrimitive?.content)
+        }
+      }
+    } finally {
+      typedSuccessServer.stop()
+    }
+  }
+
+  @Test
   fun `async action failure yields correlated error frame`() = runBlocking {
     // Issue #3023: an action that throws INSIDE its launched coroutine — after the synchronous
     // handleMessage has already returned null — must still yield a correlated type:"error" frame,
@@ -627,7 +1063,8 @@ class WebSocketServerIntegrationTest {
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
               override fun requestScreenshot(requestId: String?) {
-                // Fire-and-forget: the real work runs in a launched coroutine that throws after
+                // Fire-and-forget: the real work runs in a launched coroutine that throws
+                // after
                 // this method (and handleMessage) has already returned.
                 runnerHolder[0]!!.launch(requestId, "screenshot") {
                   throw RuntimeException("async boom")
@@ -662,6 +1099,103 @@ class WebSocketServerIntegrationTest {
           assertTrue(
             "error should name the failing action, was: $error",
             error.contains("screenshot"),
+          )
+        }
+      }
+    } finally {
+      asyncServer.stop()
+    }
+  }
+
+  @Test
+  fun `async action failure error response is sent only to originating connection`() = runBlocking {
+    lateinit var asyncServer: WebSocketServer
+    val runnerHolder = arrayOfNulls<AsyncActionRunner>(1)
+    asyncServer =
+      WebSocketServer(
+        port = 0,
+        scope = testScope,
+        messageHandler =
+          CtrlProxyMessageHandler(
+            object : NoOpCtrlProxyActions() {
+              override fun requestScreenshot(requestId: String?) {
+                runnerHolder[0]!!.launch(requestId, "screenshot") {
+                  throw RuntimeException("async boom")
+                }
+              }
+            }
+          ),
+      )
+    runnerHolder[0] =
+      AsyncActionRunner(scope = testScope, broadcastResponse = { asyncServer.broadcast(it) })
+    asyncServer.start()
+    try {
+      val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+      val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+      val ownerReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val sendOwnerMessage = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderCheckedErrorWindow = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val sendProbeBroadcast = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+      val ownerClient = HttpClient(CIO) { install(WebSockets) }
+      val bystanderClient = HttpClient(CIO) { install(WebSockets) }
+      ownerClient.use { owner ->
+        bystanderClient.use { bystander ->
+          val ownerJob = launch {
+            owner.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = asyncServer.getActualPort() ?: error("Server not running"),
+              path = "/ws",
+            ) {
+              incoming.receive() // Connection message
+              ownerReady.complete(Unit)
+              sendOwnerMessage.await()
+              send(Frame.Text("""{"type":"request_screenshot","requestId":"req-async-owner"}"""))
+              val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+              ownerMessages.add(responseFrame.readText())
+            }
+          }
+
+          val bystanderJob = launch {
+            bystander.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = asyncServer.getActualPort() ?: error("Server not running"),
+              path = "/ws",
+            ) {
+              incoming.receive() // Connection message
+              bystanderReady.complete(Unit)
+              sendOwnerMessage.await()
+              val responseFrame = withTimeoutOrNull(250) { incoming.receive() }
+              if (responseFrame is Frame.Text) {
+                bystanderMessages.add(responseFrame.readText())
+              }
+              bystanderCheckedErrorWindow.complete(Unit)
+              sendProbeBroadcast.await()
+              val probeFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+              bystanderMessages.add(probeFrame.readText())
+            }
+          }
+
+          ownerReady.await()
+          bystanderReady.await()
+          sendOwnerMessage.complete(Unit)
+          ownerJob.join()
+          bystanderCheckedErrorWindow.await()
+          asyncServer.broadcast("""{"type":"probe"}""")
+          sendProbeBroadcast.complete(Unit)
+          bystanderJob.join()
+
+          assertEquals("originating client should receive one error frame", 1, ownerMessages.size)
+          val ownerJson = json.parseToJsonElement(ownerMessages.single()).jsonObject
+          assertEquals("error", ownerJson["type"]?.jsonPrimitive?.content)
+          assertEquals("req-async-owner", ownerJson["requestId"]?.jsonPrimitive?.content)
+          assertEquals(
+            "unrelated client should receive only the liveness probe, not another connection's error",
+            listOf("""{"type":"probe"}"""),
+            bystanderMessages.toList(),
           )
         }
       }

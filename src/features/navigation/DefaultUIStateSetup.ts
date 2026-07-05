@@ -4,7 +4,6 @@ import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { ToolRegistry } from "../../server/toolRegistry";
-import { markInternalToolCall } from "../../server/internalToolCall";
 import { NavigationEdge, UIState } from "./NavigationGraphManager";
 import { ModalState, ScrollPosition } from "../../utils/interfaces/NavigationGraph";
 import { UIStateExtractor } from "./UIStateExtractor";
@@ -177,7 +176,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // scroll-position and #2758 lastHierarchy fixes). With `result` typed,
       // `result.found` is now a compile error and the `getStructuredField` keys
       // are checked against the payload.
-      const result = asToolEnvelope<SwipeOnToolPayload>(await swipeOnTool.handler(markInternalToolCall(swipeOnArgs)));
+      const result = asToolEnvelope<SwipeOnToolPayload>(await ToolRegistry.callInternal(swipeOnTool, swipeOnArgs));
 
       if (getStructuredField(result, "success") && getStructuredField(result, "found")) {
         logger.info(`[UI_STATE_SETUP] Successfully scrolled to target element`);
@@ -282,8 +281,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
         args.elementId = element.resourceId;
       }
 
-      // Internal setup tap (#3087): no diff/strip, no baseline advance.
-      await tapTool.handler(markInternalToolCall(args));
+      // Internal setup tap (#3087) via the callInternal seam (#3108): no
+      // diff/strip, no baseline advance.
+      await ToolRegistry.callInternal(tapTool, args);
 
       // Small delay for UI to update
       await this.sleep(100);
@@ -377,13 +377,13 @@ export class DefaultUIStateSetup implements UIStateSetup {
           // swipeOn targets a scrollable child and would scroll the sheet's inner
           // list instead of dragging the sheet itself down (SwipeOn.execute). We
           // want the full-screen downward swipe (executeScreenSwipe) that a
-          // dismissal needs. Internal setup swipe (#3087): no diff/strip, no
-          // baseline advance.
-          await swipeTool.handler(markInternalToolCall({
+          // dismissal needs. Internal setup swipe (#3087) via the callInternal
+          // seam (#3108): no diff/strip, no baseline advance.
+          await ToolRegistry.callInternal(swipeTool, {
             direction: "down",
             autoTarget: false,
             platform
-          }));
+          });
           await this.sleep(200);
 
           // Verify dismissal
@@ -482,12 +482,13 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
     for (const text of closeTexts) {
       try {
-        // Internal close-button tap (#3087): no diff/strip, no baseline advance.
-        await tapTool.handler(markInternalToolCall({
+        // Internal close-button tap (#3087) via the callInternal seam (#3108):
+        // no diff/strip, no baseline advance.
+        await ToolRegistry.callInternal(tapTool, {
           action: "tap",
           text,
           platform
-        }));
+        });
         logger.debug(`[UI_STATE_SETUP] Tapped close button: "${text}"`);
         return true;
       } catch (error) {

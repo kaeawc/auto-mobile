@@ -8,7 +8,6 @@ import {
 } from "../../models/Plan";
 import { logger } from "../logger";
 import { ToolRegistry, type RegisteredTool } from "../../server/toolRegistry";
-import { markInternalToolCall } from "../../server/internalToolCall";
 import { ActionableError } from "../../models";
 import { isDebugModeEnabled } from "../debug";
 import {
@@ -233,16 +232,16 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (sessionUuid) {
         enhancedParams.sessionUuid = sessionUuid;
       }
-      // Internal failure-recovery observe (#3053): mark internal so it does not
-      // overwrite the agent-facing diff baseline (`observe` always resets it).
-      // This capture is for the plan's failure summary, not shown to the agent.
-      const parsedParams = markInternalToolCall(
-        observeTool.schema.parse(enhancedParams) as Record<string, unknown>
-      );
+      // Internal failure-recovery observe (#3053): the callInternal seam (#3108)
+      // marks it internal so it does not overwrite the agent-facing diff baseline
+      // (`observe` always resets it). This capture is for the plan's failure
+      // summary, not shown to the agent. Parse against the tool schema first, then
+      // pass the resolved tool to the seam so the timeout race stays local.
+      const parsedParams = observeTool.schema.parse(enhancedParams) as Record<string, unknown>;
 
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const response = await Promise.race([
-        observeTool.handler(parsedParams, undefined, undefined),
+        ToolRegistry.callInternal(observeTool, parsedParams),
         new Promise<never>((_, reject) => {
           timeoutHandle = this.timer.setTimeout(() => {
             reject(new Error("failure observation timed out"));
@@ -369,15 +368,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
         context.sessionUuid,
       );
 
-      // Parse and validate the parameters, then mark this as an internal
-      // tool-to-tool call (#3053) so finalize emits the full observation on the
-      // step envelope - never a diff or a stripped payload - regardless of
-      // `--actions-diff-observe`/`--actions-no-observe`. Marked AFTER schema.parse
-      // (which strips unknown keys) so it reaches the wrapped handler; mirrors
-      // the `__mcpSessionId` internal-param convention.
-      const parsedParams = markInternalToolCall(
-        tool.schema.parse(enhancedParams) as Record<string, unknown>
-      );
+      // Parse and validate the parameters (schema.parse strips unknown keys).
+      // The internal marker (#3053) is applied by the callInternal seam (#3108)
+      // below so finalize emits the full observation on the step envelope - never
+      // a diff or a stripped payload - regardless of
+      // `--actions-diff-observe`/`--actions-no-observe`.
+      const parsedParams = tool.schema.parse(enhancedParams) as Record<string, unknown>;
 
       if (context.deviceId) {
         ScreenshotJobTracker.cancelJob(context.deviceId);
@@ -390,7 +386,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         logger.info(`${context.logPrefix} Calling ${step.tool} with params: ${paramsPreview}`);
       }
 
-      const response = await tool.handler(parsedParams, undefined, context.signal);
+      const response = await ToolRegistry.callInternal(tool, parsedParams, undefined, context.signal);
       throwIfAborted(context.signal);
 
       const toolResult = this.extractToolResult(response);

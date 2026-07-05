@@ -26,7 +26,7 @@ import { formatToolResultLog } from "./toolResultLog";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
 import { finalizeToolResponse, type ObservationBaselineStore } from "./finalizeToolResponse";
-import { INTERNAL_NO_DIFF_PARAM } from "./internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
 import { asToolEnvelope, getStructuredField } from "../utils/toolUtils";
 
 // Re-exported for backward compatibility; the implementation now lives in
@@ -815,6 +815,37 @@ class ToolRegistryClass {
       return undefined;
     }
     return tool;
+  }
+
+  // Invoke a tool's wrapped handler on behalf of an internal caller (a
+  // PlanExecutor step or a navigation/setup replay) rather than the agent. In
+  // one call it resolves the tool, marks the args via `markInternalToolCall`,
+  // invokes `.handler()`, and returns the RAW response — callers keep their own
+  // result handling (reading `found`, discarding, racing a timeout).
+  //
+  // This is the single internal-call seam (#3108): marking the call is no longer
+  // a per-site two-step, so a new internal caller cannot forget the
+  // `__internalNoDiff` marker and silently advance the agent-facing diff baseline
+  // (the #3087 bug class). Pass a tool name to also centralize the
+  // resolve-and-null-check (`options.forPlan` selects `getToolForPlan` for tools
+  // hidden from MCP discovery but valid in plans); pass an already-resolved
+  // `RegisteredTool` for sites that must resolve it themselves first (e.g. to run
+  // `tool.schema.parse` before the call). Throws `ActionableError` when a name
+  // does not resolve; callers that degrade gracefully wrap the call in try/catch.
+  async callInternal(
+    tool: string | RegisteredTool,
+    args: Record<string, unknown>,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+    options: { forPlan?: boolean } = {}
+  ): Promise<any> {
+    const resolved = typeof tool === "string"
+      ? (options.forPlan ? this.getToolForPlan(tool) : this.getTool(tool))
+      : tool;
+    if (!resolved) {
+      throw new ActionableError(`Tool not found: ${tool}`);
+    }
+    return resolved.handler(markInternalToolCall(args), progress, signal);
   }
 
   // Get a tool for internal plan execution. Some tools are intentionally hidden

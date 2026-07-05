@@ -182,6 +182,79 @@ final class UserDefaultsInspectorTests: XCTestCase {
         XCTAssertTrue(harness.events().isEmpty)
         AutoMobileSDK.shared.setEnabled(true)
     }
+
+    /// Exercises the real production wiring: `startListening` registers the
+    /// `NotificationCenter` observer and seeds the baseline, and posting the
+    /// actual `UserDefaults.didChangeNotification` drives the diff. The observer
+    /// uses `queue: nil`, so delivery is synchronous — no async waiting needed.
+    func testStartListeningObserverEmitsOnDidChangeNotification() {
+        AutoMobileSDK.shared.setEnabled(true)
+        let fakeDriver = FakeUserDefaultsDriver()
+        fakeDriver.setValue(suiteName: nil, key: "existing", value: "old", type: .string)
+
+        let captured = CapturedEvents()
+        let buffer = SdkEventBuffer { events in
+            captured.append(events.compactMap { $0 as? SdkStorageChangedEvent })
+        }
+        buffer.start()
+        diffBuffer = buffer
+
+        let inspector = UserDefaultsInspector.shared
+        inspector.initialize(buffer: buffer)
+        inspector.setDriver(fakeDriver)
+        inspector.setEnabled(true)
+        inspector.startListening(suiteName: nil)
+
+        // App writes a new key, then the OS posts the change notification.
+        fakeDriver.setValue(suiteName: nil, key: "fresh", value: "new", type: .string)
+        NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: UserDefaults.standard)
+
+        buffer.flush()
+        let events = captured.all
+        XCTAssertEqual(events.compactMap { $0.key }, ["fresh"])
+        XCTAssertEqual(events.first?.changeType, "add")
+
+        inspector.stopListening()
+    }
+
+    /// Baselines are bucketed per suite, so a change in one suite must not be
+    /// attributed to (or suppressed by) another suite's snapshot.
+    func testDiffTracksSeparateBaselinesPerSuite() {
+        AutoMobileSDK.shared.setEnabled(true)
+        let fakeDriver = FakeUserDefaultsDriver()
+        fakeDriver.setValue(suiteName: nil, key: "k1", value: "v1", type: .string)
+        fakeDriver.setValue(suiteName: "group.app", key: "k2", value: "v2", type: .string)
+
+        let captured = CapturedEvents()
+        let buffer = SdkEventBuffer { events in
+            captured.append(events.compactMap { $0 as? SdkStorageChangedEvent })
+        }
+        buffer.start()
+        diffBuffer = buffer
+
+        let inspector = UserDefaultsInspector.shared
+        inspector.initialize(buffer: buffer)
+        inspector.setDriver(fakeDriver)
+        inspector.setEnabled(true)
+        inspector.captureBaseline(suiteName: nil)
+        inspector.captureBaseline(suiteName: "group.app")
+
+        fakeDriver.setValue(suiteName: nil, key: "k1", value: "v1b", type: .string)
+        fakeDriver.setValue(suiteName: "group.app", key: "k2", value: "v2b", type: .string)
+
+        inspector.handleDidChange(suiteName: nil)
+        inspector.handleDidChange(suiteName: "group.app")
+
+        buffer.flush()
+        let events = captured.all.sorted { ($0.suiteName ?? "") < ($1.suiteName ?? "") }
+        XCTAssertEqual(events.count, 2)
+        XCTAssertNil(events[0].suiteName)
+        XCTAssertEqual(events[0].key, "k1")
+        XCTAssertEqual(events[0].changeType, "modify")
+        XCTAssertEqual(events[1].suiteName, "group.app")
+        XCTAssertEqual(events[1].key, "k2")
+        XCTAssertEqual(events[1].changeType, "modify")
+    }
 }
 
 /// Thread-safe collector for events delivered on the buffer's flush queue.

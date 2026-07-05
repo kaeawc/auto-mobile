@@ -440,11 +440,18 @@ public struct SdkInteractionEvent: SdkEvent {
 }
 
 /// A UserDefaults change event with suite, key, and value metadata.
+///
+/// Wire-contract note: the TS ingestor (`IosSdkEventIngestor`) maps
+/// `suiteName` → `fileName` and `newValue` → `value` to match Android's
+/// storage telemetry wire format (Android emits `fileName`/`value`). Don't
+/// assume iOS uses Android's field names.
 public struct SdkStorageChangedEvent: SdkEvent {
     public private(set) var eventType: SdkEventType = .storageChanged
     public let timestamp: Int64
+    /// The UserDefaults suite; maps to `fileName` in the TS ingestor.
     public let suiteName: String?
     public let key: String?
+    /// The value after the change (nil for a removal); maps to `value` in TS.
     public let newValue: String?
     /// The value BEFORE the change (nil if there was no prior value). Emitted so the
     /// TS telemetry ingest can skip its per-insert previous-value lookup (#3000).

@@ -69,6 +69,16 @@ public final class UserDefaultsInspector: @unchecked Sendable {
 
     /// Start listening for changes on a specific UserDefaults suite.
     /// Safe to call multiple times — previous observer is unregistered first.
+    ///
+    /// Uses `NotificationCenter` + snapshot-diffing rather than per-key KVO or
+    /// setter swizzling: `UserDefaults.didChangeNotification` doesn't name the
+    /// changed key, per-key KVO on `UserDefaults` is fragile, and swizzling is
+    /// too invasive for a debug-only SDK.
+    ///
+    /// Note: for the standard suite (`suiteName == nil`) the driver reads
+    /// `UserDefaults.standard.dictionaryRepresentation()`, which includes
+    /// `NSGlobalDomain` system keys — prefer an app-group suite to avoid
+    /// system-pref churn in the telemetry (see follow-up on noise filtering).
     public func startListening(suiteName: String? = nil) {
         guard isEnabled else { return }
 

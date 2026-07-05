@@ -1,4 +1,4 @@
-import { NavigationRepository } from "../../db/NavigationRepository";
+import { NavigationRepository } from "../../db/navigationRepository";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { TTLCache } from "../../utils/cache/Cache";

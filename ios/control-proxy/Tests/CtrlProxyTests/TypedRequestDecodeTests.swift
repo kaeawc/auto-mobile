@@ -836,6 +836,103 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         XCTAssertTrue(fakeGesturePerformer.getPinchHistory().isEmpty, "pinch must not reach the engine")
     }
 
+    /// `rotationDegrees` is a `Float?`, not a coordinate, but it flows into the
+    /// pinch gesture-path math (degrees → radians → cos/sin), so a computed
+    /// non-finite rotation is rejected at the handler boundary too — the iOS
+    /// mirror of Android #2964 / PR #2984 (#2991). Covers all three non-finite
+    /// `Float` values.
+    func testNonFinitePinchRotationIsRejected() {
+        for bad in [Float.infinity, -Float.infinity, Float.nan] {
+            let response = commandHandler.handle(.pinch(RequestPinch(
+                requestId: "pinch-rot",
+                centerX: 100,
+                centerY: 200,
+                distanceStart: 40,
+                distanceEnd: 80,
+                rotationDegrees: bad
+            ))) as? WebSocketResponse
+            assertRejectedNonFinite(response, type: "pinch_result", field: "rotationDegrees")
+            XCTAssertTrue(
+                fakeGesturePerformer.getPinchHistory().isEmpty,
+                "pinch with rotationDegrees=\(bad) must not reach the engine"
+            )
+        }
+    }
+
+    /// Finite rotations — the default (`nil` → 0), zero, negative, and fractional
+    /// degrees — pass the guard unchanged and are forwarded to the engine.
+    func testFinitePinchRotationStillDispatches() {
+        let cases: [(rotation: Float?, forwarded: Double)] = [
+            (nil, 0),
+            (0, 0),
+            (-90, -90),
+            (22.5, 22.5),
+        ]
+        for (rotation, forwarded) in cases {
+            fakeGesturePerformer.clearHistory()
+            let response = commandHandler.handle(.pinch(RequestPinch(
+                requestId: "pinch-ok",
+                centerX: 100,
+                centerY: 200,
+                distanceStart: 40,
+                distanceEnd: 80,
+                rotationDegrees: rotation
+            ))) as? WebSocketResponse
+            XCTAssertEqual(response?.success, true, "finite rotation \(String(describing: rotation)) must succeed")
+            let history = fakeGesturePerformer.getPinchHistory()
+            XCTAssertEqual(history.count, 1)
+            XCTAssertEqual(history.first?.rotationDegrees, forwarded)
+        }
+    }
+
+    /// iOS `offset` (multi-finger spacing) is a `Double?` — unlike Android's
+    /// `Int`, which cannot be non-finite and is deliberately unguarded there — so
+    /// a computed non-finite spacing gets the same defense-in-depth guard (#2991).
+    func testNonFiniteMultiFingerSwipeOffsetIsRejected() {
+        for bad in [Double.infinity, -.infinity, .nan] {
+            let response = commandHandler.handle(.multiFingerSwipe(RequestMultiFingerSwipe(
+                requestId: "mfs-offset",
+                x1: 10,
+                y1: 20,
+                x2: 30,
+                y2: 40,
+                fingerCount: 3,
+                offset: bad
+            ))) as? WebSocketResponse
+            assertRejectedNonFinite(response, type: "multi_finger_swipe_result", field: "offset")
+            XCTAssertTrue(
+                fakeGesturePerformer.getMultiFingerSwipeHistory().isEmpty,
+                "multi-finger swipe with offset=\(bad) must not reach the engine"
+            )
+        }
+    }
+
+    /// Finite offsets — the default (`nil` → 25), fractional, and zero — pass the
+    /// guard and are forwarded as the finger spacing.
+    func testFiniteMultiFingerSwipeOffsetStillDispatches() {
+        let cases: [(offset: Double?, forwarded: Double)] = [
+            (nil, 25),
+            (0, 0),
+            (12.5, 12.5),
+        ]
+        for (offset, forwarded) in cases {
+            fakeGesturePerformer.clearHistory()
+            let response = commandHandler.handle(.multiFingerSwipe(RequestMultiFingerSwipe(
+                requestId: "mfs-ok",
+                x1: 10,
+                y1: 20,
+                x2: 30,
+                y2: 40,
+                fingerCount: 3,
+                offset: offset
+            ))) as? WebSocketResponse
+            XCTAssertEqual(response?.success, true, "finite offset \(String(describing: offset)) must succeed")
+            let history = fakeGesturePerformer.getMultiFingerSwipeHistory()
+            XCTAssertEqual(history.count, 1)
+            XCTAssertEqual(history.first?.fingerSpacing, forwarded)
+        }
+    }
+
     /// The two-finger alias routes through the same multi-finger handler, so it
     /// gets the same guard.
     func testNonFiniteTwoFingerSwipeCoordinateIsRejected() {

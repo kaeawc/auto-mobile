@@ -500,6 +500,12 @@ function valuesEqual(a: unknown, b: unknown): boolean {
  * attributes while still answering "which element is focused/awaited". Returns
  * non-object values (notably `undefined`, for a gained/lost mirror) untouched.
  * Shallow copy — never mutates the caller's object.
+ *
+ * Also drops `DIFF_IGNORED_ATTRS` (volatile `extras` a11y metadata, #3051): the
+ * mirror is diffed here, separately from `diffAttributes`, so without this a
+ * stable focus with only `extras` churn would emit a phantom `fields.focusedElement`
+ * `{from,to}` (Codex review on PR #3132). Stripping it from the leaned form fixes
+ * both the compare (via `elementValuesEqual`) and the emitted value.
  */
 function leanElementForDiff(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -507,6 +513,9 @@ function leanElementForDiff(value: unknown): unknown {
   }
   const copy = { ...(value as Record<string, unknown>) };
   delete copy.node;
+  for (const ignored of DIFF_IGNORED_ATTRS) {
+    delete copy[ignored];
+  }
   return copy;
 }
 

@@ -910,6 +910,41 @@ describe("diffObserveResult — volatile `extras` metadata exclusion (#3051)", (
   test("DIFF_IGNORED_ATTRS names `extras` (single source of truth)", () => {
     expect([...DIFF_IGNORED_ATTRS]).toContain("extras");
   });
+
+  test("a mirror field (focusedElement) whose only change is `extras` churn is not reported", () => {
+    // The element mirror fields are diffed separately from node attributes
+    // (leanElementForDiff / elementValuesEqual), so the ignore-list must apply
+    // there too — otherwise a stable focus with only volatile `extras` churn emits
+    // a phantom fields.focusedElement (Codex review on PR #3132).
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const fe = (t: string) => ({
+      "resource-id": "f",
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+      "extras": { "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": t },
+    });
+    const baseline = obs({ ...node }, { focusedElement: fe("84") as any });
+    const next = obs({ ...node }, { focusedElement: fe("335") as any });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields).toBeUndefined();
+  });
+
+  test("a genuinely-changed mirror field is emitted WITHOUT its volatile `extras`", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, {
+      focusedElement: { "resource-id": "f1", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "extras": { "k": "1" } } as any,
+    });
+    const next = obs({ ...node }, {
+      focusedElement: { "resource-id": "f2", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "extras": { "k": "2" } } as any,
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields!.focusedElement).toBeDefined();
+    expect((diff.fields!.focusedElement.from as any)["resource-id"]).toBe("f1");
+    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("f2");
+    expect((diff.fields!.focusedElement.from as any).extras).toBeUndefined();
+    expect((diff.fields!.focusedElement.to as any).extras).toBeUndefined();
+  });
 });
 
 describe("isSameObservationScreen", () => {

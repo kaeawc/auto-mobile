@@ -317,10 +317,13 @@ per-package resilience of iOS app-data restore.
 <kbd>✅ Implemented</kbd> <kbd>📱 Simulator (iOS ≤17) Only</kbd>
 
 The `setDeviceState` / `getDeviceState` MCP tools control Do Not Disturb. On iOS,
-DND is **simulator-only and binary** (on/off) — this is a hard platform
-limitation, not a missing wiring detail. **On iOS 18+ simulators it is not
-available at all** (see below): DND moved to the private `donotdisturbd` Focus
-daemon, so both read and write report `capability: "unsupported"`.
+DND is **simulator-only and binary** (on/off) when the legacy notification path
+can prove it works — this is a hard platform limitation, not a missing wiring
+detail. Known **iOS 18+ simulators skip the legacy write probe and report
+`capability: "unsupported"`** (see below): DND moved to the private
+`donotdisturbd` Focus daemon. Unknown or older simulator runtimes attempt the
+legacy path, but write success is behavior-based and requires an independent
+fresh-process readback.
 
 ### How it works (iOS ≤17 simulators)
 
@@ -332,38 +335,49 @@ daemon, so both read and write report `capability: "unsupported"`.
      no process has registered the key.
    - `notifyutil -s com.apple.donotdisturb.enabled <0|1>` sets the value while
      the registration is alive.
-   - `notifyutil -g com.apple.donotdisturb.enabled` verifies the registered
-     state in the same invocation.
+   - `notifyutil -g com.apple.donotdisturb.enabled` reads the registered state in
+     the same invocation.
    - `notifyutil -p com.apple.donotdisturb.enabled` posts it so observers react.
+   - After a short settle, a separate fresh-process
+     `notifyutil -g com.apple.donotdisturb.enabled` verifies that the value
+     persisted. Only this independent readback can make the write
+     `verified: true`.
 2. **Honest capability reporting** — every result carries a machine-readable
    `capability` field so callers can branch instead of string-matching warnings:
-   - `binary` — iOS ≤17 simulator: on/off only.
-   - `unsupported` — physical device, or **iOS 18+ simulator**: DND cannot be
-     read or set at all.
+   - `binary` — simulator legacy path verified: on/off only.
+   - `unsupported` — physical device, known **iOS 18+ simulator**, or a legacy
+     write whose independent readback reverted instead of persisting.
    - (`full` is reserved for Android, where all four `zen_mode` tiers are
      distinct, persisted, and verified.)
 3. **No silent downgrade** — a `priority` or `alarms` request applies plain DND
    and reports it honestly: `requestedMode: "priority"|"alarms"`,
    `appliedMode: "none"`, a structured `warning`, and `verified: false` (so
    `success` is `false`). The tool never claims a tier it cannot deliver.
-4. **Best effort** — results are `bestEffort: true`. The setter verifies inside
-   the registered invocation; the readback is advisory, not authoritative.
+4. **Best effort with behavior verification** — results are `bestEffort: true`.
+   The registered set invocation is not authoritative by itself; the setter only
+   reports success when the independent readback observes the requested binary
+   state.
 
 ### Limitations
 
-- **iOS 18+ simulators: unsupported.** iOS 18 moved Do Not Disturb / Focus to the
+- **Known iOS 18+ simulators: unsupported fast-path.** iOS 18 moved Do Not Disturb / Focus to the
   private **`donotdisturbd`** daemon (a Core Data store + Focus-assertion model).
   That daemon owns the legacy `com.apple.donotdisturb.enabled` notification and
   immediately resets it to its authoritative value — verified empirically, a
   `notifyutil -s` write reads back `0` from a fresh process even sub-second later
   (an unmanaged notify key set the same way persists). So the legacy key neither
   reflects nor controls the real Focus state: writes cannot verify and reads are a
-  confident falsehood. The simulator's iOS major version is detected (from device
-  metadata or `simctl list devices <udid> --json`) and, on 18+, both
-  `getDeviceState` and `setDeviceState` return `capability: "unsupported"` with a
-  precise error rather than trusting the dead key. Apple exposes no public API to
-  read or set Focus/DND. Use an iOS 17 or earlier simulator, or set it manually /
-  via a Shortcuts automation.
+  confident falsehood. When the simulator's iOS major version is known from device
+  metadata or `simctl list devices <udid> --json`, iOS 18+ is treated as an
+  unsupported fast-path to avoid a known-dead probe. When the version is unknown
+  or expected to support the legacy path, `setDeviceState` still probes behavior:
+  if the fresh-process readback reverts, the result is `capability:
+  "unsupported"` instead of a false success. On unknown runtimes, an off request
+  reading back disabled is not enough to prove capability, because reclaimed
+  runtimes also settle to `0`; positive enable persistence is the useful proof.
+  Apple exposes no public API to read or set Focus/DND. Use an iOS 17 or earlier
+  simulator with verified legacy behavior, or set it manually / via a Shortcuts
+  automation.
 - **Simulator only.** Physical iOS devices return `supported: false`,
   `capability: "unsupported"`, and a specific error: iOS exposes **no public
   API** to enable/disable Focus or Do Not Disturb (only the read-only Focus

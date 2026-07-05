@@ -3,6 +3,7 @@ import type { BootedDevice } from "../../../src/models";
 import { DeviceState } from "../../../src/features/utility/DeviceState";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const androidDevice: BootedDevice = {
   name: "Pixel",
@@ -27,6 +28,20 @@ const ios18Simulator: BootedDevice = {
   iosVersion: "18.6",
 };
 
+const IOS_SIMULATOR_DND_GET_COMMAND =
+  "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.donotdisturb.enabled";
+const IOS_SIMULATOR_DND_SET_ON_COMMAND =
+  "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled";
+const IOS_SIMULATOR_DND_SET_OFF_COMMAND =
+  "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 0 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled";
+const IOS_DND_INDEPENDENT_READBACK_SETTLE_MS = 500;
+
+function autoAdvanceTimer(): FakeTimer {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  return timer;
+}
+
 describe("DeviceState", () => {
   test("reads Android Do Not Disturb from zen_mode", async () => {
     const adbFactory = new FakeAdbClientFactory();
@@ -49,7 +64,7 @@ describe("DeviceState", () => {
   test("reads iOS <18 simulator Do Not Disturb from the legacy notifyutil key", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.donotdisturb.enabled",
+      IOS_SIMULATOR_DND_GET_COMMAND,
       "com.apple.donotdisturb.enabled 1\n"
     );
 
@@ -105,12 +120,17 @@ describe("DeviceState", () => {
 
   test("sets iOS <18 simulator Do Not Disturb on with notifyutil best-effort commands", async () => {
     const simctl = new FakeSimCtlClient();
+    const timer = autoAdvanceTimer();
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+      IOS_SIMULATOR_DND_SET_ON_COMMAND,
+      "com.apple.donotdisturb.enabled 1\n"
+    );
+    simctl.setCommandResult(
+      IOS_SIMULATOR_DND_GET_COMMAND,
       "com.apple.donotdisturb.enabled 1\n"
     );
 
-    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const deviceState = new DeviceState(iosSimulator, { simctl, timer });
     const result = await deviceState.setState({
       doNotDisturb: { enabled: true },
     });
@@ -127,22 +147,74 @@ describe("DeviceState", () => {
       verified: true,
     });
     expect(result.doNotDisturb?.warning).toBeUndefined();
+    expect(timer.getSleepHistory()).toEqual([IOS_DND_INDEPENDENT_READBACK_SETTLE_MS]);
     expect(simctl.getMethodCalls("executeCommand")).toEqual([
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+        command: IOS_SIMULATOR_DND_SET_ON_COMMAND,
         timeoutMs: 5000,
+      },
+      {
+        command: IOS_SIMULATOR_DND_GET_COMMAND,
+        timeoutMs: undefined,
+      },
+    ]);
+  });
+
+  test("reports unsupported when an independent iOS simulator DND readback reverts", async () => {
+    const simctl = new FakeSimCtlClient();
+    const timer = autoAdvanceTimer();
+    simctl.setCommandResult(
+      IOS_SIMULATOR_DND_SET_ON_COMMAND,
+      "com.apple.donotdisturb.enabled 1\n"
+    );
+    simctl.setCommandResult(
+      IOS_SIMULATOR_DND_GET_COMMAND,
+      "com.apple.donotdisturb.enabled 0\n"
+    );
+
+    const deviceState = new DeviceState(iosSimulator, { simctl, timer });
+    const result = await deviceState.setState({
+      doNotDisturb: { enabled: true },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      enabled: false,
+      mode: "off",
+      requestedMode: "none",
+      verified: false,
+      bestEffort: true,
+    });
+    expect(result.error).toContain("independent notifyutil readback");
+    expect(result.error).toContain("donotdisturbd");
+    expect(timer.getSleepHistory()).toEqual([IOS_DND_INDEPENDENT_READBACK_SETTLE_MS]);
+    expect(simctl.getMethodCalls("executeCommand")).toEqual([
+      {
+        command: IOS_SIMULATOR_DND_SET_ON_COMMAND,
+        timeoutMs: 5000,
+      },
+      {
+        command: IOS_SIMULATOR_DND_GET_COMMAND,
+        timeoutMs: undefined,
       },
     ]);
   });
 
   test("sets iOS <18 simulator Do Not Disturb off with notifyutil best-effort commands", async () => {
     const simctl = new FakeSimCtlClient();
+    const timer = autoAdvanceTimer();
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 0 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+      IOS_SIMULATOR_DND_SET_OFF_COMMAND,
+      "com.apple.donotdisturb.enabled 0\n"
+    );
+    simctl.setCommandResult(
+      IOS_SIMULATOR_DND_GET_COMMAND,
       "com.apple.donotdisturb.enabled 0\n"
     );
 
-    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const deviceState = new DeviceState(iosSimulator, { simctl, timer });
     const result = await deviceState.setState({
       doNotDisturb: { enabled: false },
     });
@@ -161,20 +233,29 @@ describe("DeviceState", () => {
     expect(result.doNotDisturb?.warning).toBeUndefined();
     expect(simctl.getMethodCalls("executeCommand")).toEqual([
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 0 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+        command: IOS_SIMULATOR_DND_SET_OFF_COMMAND,
         timeoutMs: 5000,
+      },
+      {
+        command: IOS_SIMULATOR_DND_GET_COMMAND,
+        timeoutMs: undefined,
       },
     ]);
   });
 
   test("sets iOS simulator Do Not Disturb with a temporary notifyutil registration", async () => {
     const simctl = new FakeSimCtlClient();
+    const timer = autoAdvanceTimer();
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+      IOS_SIMULATOR_DND_SET_ON_COMMAND,
       "com.apple.donotdisturb.enabled 1\ncom.apple.donotdisturb.enabled\n"
     );
+    simctl.setCommandResult(
+      IOS_SIMULATOR_DND_GET_COMMAND,
+      "com.apple.donotdisturb.enabled 1\n"
+    );
 
-    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const deviceState = new DeviceState(iosSimulator, { simctl, timer });
     const result = await deviceState.setState({
       doNotDisturb: { enabled: true },
     });
@@ -191,13 +272,18 @@ describe("DeviceState", () => {
 
   test("reports honest downgrade for iOS simulator priority/alarms (no silent tier claim)", async () => {
     const simctl = new FakeSimCtlClient();
+    const timer = autoAdvanceTimer();
     // notifyutil reads back enabled, but the requested *tier* cannot be applied.
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+      IOS_SIMULATOR_DND_SET_ON_COMMAND,
+      "com.apple.donotdisturb.enabled 1\n"
+    );
+    simctl.setCommandResult(
+      IOS_SIMULATOR_DND_GET_COMMAND,
       "com.apple.donotdisturb.enabled 1\n"
     );
 
-    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const deviceState = new DeviceState(iosSimulator, { simctl, timer });
     const result = await deviceState.setState({
       doNotDisturb: { mode: "priority" },
     });
@@ -219,30 +305,41 @@ describe("DeviceState", () => {
     // We still posted the binary toggle (a DND state was applied, just not the tier).
     expect(simctl.getMethodCalls("executeCommand")).toEqual([
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+        command: IOS_SIMULATOR_DND_SET_ON_COMMAND,
         timeoutMs: 5000,
+      },
+      {
+        command: IOS_SIMULATOR_DND_GET_COMMAND,
+        timeoutMs: undefined,
       },
     ]);
   });
 
-  test("surfaces both the downgrade and a failed binary readback for iOS priority/alarms", async () => {
+  test("reports unsupported when priority/alarms DND fails independent binary readback", async () => {
     const simctl = new FakeSimCtlClient();
-    // notifyutil reads back DISABLED even though we requested an enabled tier:
+    const timer = autoAdvanceTimer();
+    // Fresh notifyutil reads back DISABLED even though we requested an enabled tier:
     // the binary toggle itself did not verify, on top of the tier downgrade.
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+      IOS_SIMULATOR_DND_SET_ON_COMMAND,
+      "com.apple.donotdisturb.enabled 1\n"
+    );
+    simctl.setCommandResult(
+      IOS_SIMULATOR_DND_GET_COMMAND,
       "com.apple.donotdisturb.enabled 0\n"
     );
 
-    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const deviceState = new DeviceState(iosSimulator, { simctl, timer });
     const result = await deviceState.setState({
       doNotDisturb: { mode: "alarms" },
     });
 
     expect(result.success).toBe(false);
     expect(result.doNotDisturb).toMatchObject({
-      supported: true,
-      capability: "binary",
+      supported: false,
+      capability: "unsupported",
+      enabled: false,
+      mode: "off",
       requestedMode: "alarms",
       verified: false,
       bestEffort: true,
@@ -251,20 +348,18 @@ describe("DeviceState", () => {
     // mode; the reported mode reflects what the readback observed (off).
     expect(result.doNotDisturb?.appliedMode).toBeUndefined();
     expect(result.doNotDisturb?.mode).toBe("off");
-    // The warning must NOT claim plain DND was applied — the readback failed.
-    expect(result.doNotDisturb?.warning).toContain("alarms");
-    expect(result.doNotDisturb?.warning).toContain("did not read back");
-    expect(result.doNotDisturb?.warning).not.toContain("applied as plain DND");
+    expect(result.doNotDisturb?.error).toContain("independent notifyutil readback");
+    expect(result.doNotDisturb?.warning).toBeUndefined();
   });
 
   test("surfaces simctl errors without throwing out of setState", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandError(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+      IOS_SIMULATOR_DND_SET_ON_COMMAND,
       new Error("simctl spawn failed")
     );
 
-    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const deviceState = new DeviceState(iosSimulator, { simctl, timer: autoAdvanceTimer() });
     const result = await deviceState.setState({
       doNotDisturb: { enabled: true },
     });
@@ -426,8 +521,12 @@ describe("DeviceState", () => {
       "spawn AAAAAAAA-1111-2222-3333-444444444444 notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
       "com.apple.donotdisturb.enabled 1\n"
     );
+    simctl.setCommandResult(
+      "spawn AAAAAAAA-1111-2222-3333-444444444444 notifyutil -g com.apple.donotdisturb.enabled",
+      "com.apple.donotdisturb.enabled 1\n"
+    );
 
-    const deviceState = new DeviceState(bareSimulator, { simctl });
+    const deviceState = new DeviceState(bareSimulator, { simctl, timer: autoAdvanceTimer() });
     const result = await deviceState.setState({
       doNotDisturb: { enabled: true },
     });
@@ -441,6 +540,40 @@ describe("DeviceState", () => {
     });
     const commands = simctl.getMethodCalls("executeCommand").map(c => c.command as string);
     expect(commands.some(c => c.includes("notifyutil"))).toBe(true);
+  });
+
+  test("does not claim unknown-runtime iOS DND off is verified when readback is already disabled", async () => {
+    const bareSimulator: BootedDevice = {
+      name: "iPhone",
+      platform: "ios",
+      deviceId: "AAAAAAAA-1111-2222-3333-444444444444",
+    };
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      "spawn AAAAAAAA-1111-2222-3333-444444444444 notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 0 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+      "com.apple.donotdisturb.enabled 0\n"
+    );
+    simctl.setCommandResult(
+      "spawn AAAAAAAA-1111-2222-3333-444444444444 notifyutil -g com.apple.donotdisturb.enabled",
+      "com.apple.donotdisturb.enabled 0\n"
+    );
+
+    const deviceState = new DeviceState(bareSimulator, { simctl, timer: autoAdvanceTimer() });
+    const result = await deviceState.setState({
+      doNotDisturb: { enabled: false },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      enabled: false,
+      mode: "off",
+      requestedMode: "off",
+      verified: false,
+      bestEffort: true,
+    });
+    expect(result.error).toContain("does not prove");
   });
 
   test("reports physical iOS as unsupported with a precise no-public-API error", async () => {

@@ -5,6 +5,8 @@ import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import { logger } from "../../utils/logger";
+import type { Timer } from "../../utils/SystemTimer";
+import { defaultTimer } from "../../utils/SystemTimer";
 import {
   IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
   iosNotifyutilGetCommand,
@@ -71,9 +73,11 @@ interface IosSimulatorClient {
 export interface DeviceStateDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorClient | null;
+  timer?: Timer;
 }
 
 const IOS_DND_NOTIFICATION = "com.apple.donotdisturb.enabled";
+const IOS_DND_INDEPENDENT_READBACK_SETTLE_MS = 500;
 
 /**
  * Physical iOS devices expose no public API to enable/disable Focus or Do Not
@@ -87,7 +91,7 @@ const IOS_PHYSICAL_DND_UNSUPPORTED_ERROR =
   + "enable/disable Focus or Do Not Disturb (only the read-only Focus Filter API). "
   + "Use an iOS Simulator for DND automation, or trigger DND manually / via a Shortcuts automation on device.";
 
-/** iOS major version at/after which the legacy binary-DND notification is dead. */
+/** Last iOS major version where the legacy binary-DND notification is expected to work. */
 const IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR = 17;
 
 /**
@@ -99,8 +103,9 @@ const IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR = 17;
  * while an unmanaged notify key (e.g. BiometricKit's) set the same way persists.
  * So the legacy key neither reflects nor controls the real Focus state — a write
  * cannot verify and a read is a confident falsehood (always `0`). Apple ships no
- * public API to read or set Focus/DND, so on iOS 18+ simulators both the read and
- * write paths honestly report unsupported instead of trusting the dead key.
+ * public API to read or set Focus/DND. The version check is only a fast-path:
+ * legacy writes that are attempted must still prove persistence with an
+ * independent fresh-process readback before reporting success.
  */
 const IOS18_SIM_DND_UNSUPPORTED_ERROR =
   "Do Not Disturb cannot be reliably read or set on an iOS 18+ simulator: iOS 18 moved Do Not "
@@ -184,30 +189,37 @@ function iosDndStateFromNotifyutilOutput(raw: string): DoNotDisturbState {
   };
 }
 
+function iosDndUnsupportedReadbackResult(
+  state: DoNotDisturbState,
+  requestedMode: DoNotDisturbMode,
+  requestedEnabled: boolean,
+  reason: string
+): DoNotDisturbState {
+  const observed = state.enabled === undefined ? "unknown" : (state.enabled ? "enabled" : "disabled");
+  const requested = requestedEnabled ? "enabled" : "disabled";
+  return {
+    ...state,
+    supported: false,
+    capability: "unsupported",
+    requestedMode,
+    verified: false,
+    bestEffort: true,
+    error: `iOS simulator Do Not Disturb write did not persist: independent notifyutil readback observed ${observed} after requesting ${requested}. ${reason}`,
+  };
+}
+
 /**
- * Builds the honest warning for an iOS simulator DND write. The two failure
- * axes are independent and must both be surfaced:
- * - `downgraded`: a `priority`/`alarms` tier was requested but only plain binary
- *   DND is available.
- * - `!stateMatches`: the binary `notifyutil -g` readback did not confirm the
- *   requested enabled state — so we cannot even assert plain DND was applied.
+ * Builds the honest warning for an iOS simulator DND write when the binary
+ * state verified, but the requested priority/alarms tier cannot be represented.
  */
 function iosDndSetWarning(
   requestedMode: DoNotDisturbMode,
-  downgraded: boolean,
-  stateMatches: boolean
+  downgraded: boolean
 ): string | undefined {
-  const readbackFailed =
-    "the binary DND toggle did not verify: notifyutil did not read back the requested state.";
   if (downgraded) {
     const tier = `iOS DND is binary on the simulator; requested "${requestedMode}" has no per-mode/priority/alarms `
       + "fidelity (no public Focus API)";
-    return stateMatches
-      ? `${tier}, so it was applied as plain DND.`
-      : `${tier}, and ${readbackFailed}`;
-  }
-  if (!stateMatches) {
-    return `iOS simulator Do Not Disturb notification was posted, but ${readbackFailed}`;
+    return `${tier}, so it was applied as plain DND.`;
   }
   return undefined;
 }
@@ -226,10 +238,13 @@ export class DeviceState {
 
   private simctl: IosSimulatorClient | null;
 
+  private timer: Timer;
+
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl ?? null;
+    this.timer = dependencies.timer ?? defaultTimer;
   }
 
   async getState(): Promise<DeviceStateResult> {
@@ -424,13 +439,11 @@ export class DeviceState {
 
     const simctl = this.simctl ?? new SimCtlClient(this.device);
 
-    // iOS 18+ simulators: the legacy binary-DND notification is dead (DND moved to
-    // donotdisturbd, which owns the key and immediately resets it to its
-    // authoritative value — so a posted toggle is overwritten and can never
-    // verify). Report unsupported and issue no misleading notifyutil write,
-    // mirroring the physical-device early return. iOS <18 (and unknown) keep the
-    // legacy best-effort path below.
+    // Known iOS 18+ simulators skip the legacy probe as a fast-path optimization:
+    // the key is owned/reset by donotdisturbd there. Unknown and older runtimes
+    // still attempt the legacy path, then prove behavior with a fresh readback.
     const iosMajor = await this.resolveSimulatorIosMajorVersion(simctl);
+    const versionKnown = iosMajor !== null;
     if (iosMajor !== null && iosMajor > IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR) {
       return {
         supported: false,
@@ -441,7 +454,7 @@ export class DeviceState {
       };
     }
 
-    // Simulator (iOS <18): the only lever is the binary `com.apple.donotdisturb.enabled`
+    // Simulator legacy path: the only lever is the binary `com.apple.donotdisturb.enabled`
     // Darwin notification. `notifyutil -s` is a no-op unless the key has a
     // registration, so set/read/post must happen in one registered invocation.
     // There is no per-mode (priority/alarms) Darwin notification analogous to
@@ -458,14 +471,46 @@ export class DeviceState {
         iosNotifyutilRegisteredSetCommand(this.device.deviceId, IOS_DND_NOTIFICATION, value),
         IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS
       );
-      const state = iosDndStateFromNotifyutilOutput(writeResult.stdout ?? "");
+      const writeStderr = writeResult.stderr?.trim();
+      if (writeStderr) {
+        return {
+          supported: true,
+          capability: "binary",
+          requestedMode,
+          method: "ios_simulator_notifyutil",
+          bestEffort: true,
+          error: `notifyutil failed: ${writeStderr}`,
+        };
+      }
+
+      await this.timer.sleep(IOS_DND_INDEPENDENT_READBACK_SETTLE_MS);
+      const readbackResult = await simctl.executeCommand(
+        iosNotifyutilGetCommand(this.device.deviceId, IOS_DND_NOTIFICATION)
+      );
+      const state = iosDndStateFromNotifyutilOutput(readbackResult.stdout ?? "");
       const stateMatches = state.enabled === requestedEnabled;
+      if (!stateMatches) {
+        return iosDndUnsupportedReadbackResult(
+          state,
+          requestedMode,
+          requestedEnabled,
+          "The runtime may reset the legacy com.apple.donotdisturb.enabled notification via donotdisturbd."
+        );
+      }
+      if (!requestedEnabled && !versionKnown) {
+        return iosDndUnsupportedReadbackResult(
+          state,
+          requestedMode,
+          requestedEnabled,
+          "The simulator iOS version is unknown, and an off request reading back disabled does not prove the legacy DND notification can enable DND."
+        );
+      }
       // For priority/alarms we applied *a* DND state but NOT the requested tier,
       // so verified is intentionally false: setState() will then report
       // success:false, surfacing the unfulfillable request instead of hiding it.
       const verified = stateMatches && !downgraded;
 
-      const warning = iosDndSetWarning(requestedMode, downgraded, stateMatches);
+      const warning = iosDndSetWarning(requestedMode, downgraded);
 
       // Only assert an applied mode when the binary readback confirmed the
       // requested enabled state. If it did not, we cannot claim plain DND was

@@ -1,0 +1,139 @@
+# `--actions-diff-observe` — real-device diff-format sign-off
+
+Closes the acceptance item carried by **#3026 / #2761** that a unit test alone
+cannot satisfy:
+
+> Diff output format signed off on first real output before finalizing.
+
+Tracked by **#3051**. The merged plumbing (`--actions-diff-observe`, PR #3034)
+emits, for a non-observe action on an unchanged screen, only the *diff* of the
+post-action observation against the previous one:
+
+```
+{ isDiff: true, added, removed, changed, fields }
+```
+
+- `added` / `removed`: `{ key, attributes }` — the full node attributes, so a
+  new/gone node is reconstructable without the baseline.
+- `changed`: `{ key, changes: { <attr>: { from, to } } }` — a key-matched node
+  whose non-key attributes changed.
+- `fields`: changed top-level scalars + the Element mirror fields
+  (`focusedElement` / `accessibilityFocusedElement` / `awaitedElement`, #3052),
+  each `{ from, to }`.
+
+Impl: `src/features/observe/output/ObserveResultOutput.ts` (`diffObserveResult`),
+`src/server/finalizeToolResponse.ts`.
+
+## Method
+
+The shared MCP daemon runs the **main** build with the flag **off**, so a live
+end-to-end `--actions-diff-observe` daemon run can't exercise this branch's diff
+code. Instead the diff code was driven against **genuine emulator captures** of
+the AutoMobile Playground app (`dev.jasonpearson.automobile.playground`,
+`Medium_Phone_API_35`) through the same
+`sanitizeObserveResult → diffObserveResult` path `finalizeToolResponse` uses.
+
+Captured pairs (committed under `test/fixtures/observe/diff/`, post-sanitize form,
+diff-irrelevant heavy fields removed):
+
+| Pair | Interaction |
+|------|-------------|
+| `text-input-empty` → `text-input-typed` | focus a field + type `SignOff3051` (keyboard-stable) |
+| `scroll-before` → `scroll-after` | ~250px content scroll of a stably-identified list |
+
+Pinned as executable assertions in
+`test/features/observe/output/diffObserveRealDevice.test.ts`.
+
+## Findings
+
+### 1. Shape revision required: volatile `extras` metadata flooded `changed`
+
+The raw diff was **not** agent-consumable. On the text-entry pair the diff had
+**85 `changed` entries — 83 of them pure churn** in the `extras` node attribute,
+a bag of `AccessibilityNodeInfo` SDK metadata:
+
+- `androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY` —
+  an empty `"[]"` that appears/disappears on capture-timing races.
+- `android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL` — a
+  traversal-order index that shifts whenever the tree changes.
+- `AccessibilityNodeInfo.roleDescription` — intermittently present.
+
+These churn between two captures of the *same* screen and are not actionable UI
+deltas, so they buried the two real changes.
+
+The wire serializer (`stringifyToolResponse`, `src/utils/toolUtils.ts`) strips
+any key literally named `extras`, so on the **text** representation the 83 churn
+entries land as empty-`changes` husks (`{ key, changes: {} }`) — still 85
+entries burying the 2 real ones — while `structuredContent` (set directly, not
+run through that serializer) carries the full `extras` objects. So the flood is
+real in both representations; stripping at serialize-time does not fix it.
+
+**Fix (this PR):** `DIFF_IGNORED_ATTRS = { "extras" }` — `extras` is excluded
+from the per-node *changed* comparison, so the phantom entries are never emitted
+at all (no empty husks, no `structuredContent` bloat). `added`/`removed` still
+carry the full node (incl. `extras`) for reconstruction, `extras` is never part
+of the node identity key, and the top-level `fields` diff is untouched. Result
+on the same real pair: **85 → 2 `changed`** entries, both genuinely actionable.
+
+### 2. AC#1 (agent-consumable) — PASS (after fix)
+
+The text-entry diff is a legible handful: `added=1, removed=3, changed=2` plus a
+`focusedElement` field change. Every entry has a readable key; the new
+`EditText` carries its typed text in `added`, reconstructable without the tree.
+
+### 3. AC#2 (`changed` fires with `{from,to}`) — PASS
+
+- The `focusedElement` mirror reports the newly-focused field with the typed
+  value on the `to` side (`text: "SignOff3051"`), `node` subtree stripped.
+- Node `changed` entries are clean `{from,to}` on actionable attributes
+  (`content-desc`, `bounds`).
+
+> Caveat — **Compose toggle state is not surfaced.** Tapping the Playground
+> `Switch` / `CheckBox` returned success but produced **no** hierarchy delta:
+> their state rides in a *static* `content-desc` ("Switch is off") and no
+> `checked`/`selected`/`stateDescription` attribute is extracted. So the
+> classic `checked: false→true` `changed` (well-covered by the synthetic tests)
+> did **not** reproduce on this app. This is a **capture-layer** limitation
+> (what CtrlProxy extracts for Compose toggles), not a diff-format defect, and is
+> orthogonal to the flag. The `focused` state change *is* surfaced, so AC#2's
+> "focused" example holds.
+
+### 4. AC#3 (scroll cascade) — content identity helps, motivates stable IDs
+
+On a ~250px scroll, content identity (#3053, default on) re-paired **9 shifted
+rows** carrying stable `resource-id`s into compact **bounds-only `changed`**
+deltas instead of remove+add. Churn dropped from **65** (positional-only) to
+**56**. Rows *without* a stable id still churn as add/remove — the concrete
+motivation for the stable-node-identity follow-up (**#3107**), not a blocker.
+
+### 5. AC#4 (byte/token reduction) — PASS for localized, bounded for scroll
+
+Measured with the production `stringifyToolResponse` formatter + cl100k_base:
+
+| Pair | diff / full (bytes) | diff / full (tokens) |
+|------|--------------------:|---------------------:|
+| Text entry (localized) | **1.8%** | **4.4%** |
+| Scroll (~250px) | 28.7% | 64.0% |
+
+The localized case comfortably meets the fixture's `<10%` target (98% byte
+reduction), matching the synthetic `android-home.json` measurement. A **scroll is
+a real but much smaller win** — it shifts/enters/leaves many rows, so its diff is
+a large fraction of the full observation. Still a reduction, never an inflation.
+
+## Recommendation
+
+**Sign off the diff shape** `{ isDiff, added, removed, changed, fields }` for
+general use **with the `extras`-exclusion fix landed**, on this evidence:
+
+- The format is agent-consumable and self-describing for localized actions
+  (tap/type/focus), with ~95–98% output reduction on real device output.
+- The flag remains **off by default**; its clearest wins are localized-change
+  interaction loops. Scroll-heavy loops benefit less until stable node identity
+  (#3107) collapses more of the cascade.
+
+### Follow-ups
+
+- **#3107** — adopt/wire stable node identity to shrink scroll diffs.
+- Capture-layer: surface Compose toggle state (`checked`/`selected`/
+  `stateDescription`) in the extracted hierarchy so state toggles diff as
+  `changed` on real Compose apps (filed separately).

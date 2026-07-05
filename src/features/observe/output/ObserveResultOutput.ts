@@ -524,6 +524,28 @@ function elementValuesEqual(a: unknown, b: unknown): boolean {
   return stableStringify(a, true) === stableStringify(b, true);
 }
 
+/**
+ * Node attributes excluded from the *changed* comparison (issue #3051 — the
+ * real-device diff-format sign-off). The real-device run
+ * (`docs/design-docs/plat/android/actions-diff-observe-signoff.md`) found `extras`
+ * — a bag of `AccessibilityNodeInfo` SDK metadata
+ * (`AccessibilityNodeInfoCompat.SPANS_START_KEY`,
+ * `EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL`, `AccessibilityNodeInfo.roleDescription`) —
+ * churns nondeterministically between two captures of the *same* screen: the
+ * traversal-order index shifts whenever the tree changes, and empty span arrays
+ * (`"[]"`) appear/disappear on capture-timing races. Left in, it flooded a real
+ * text-entry diff with 83 phantom `changed` entries out of 85, burying the
+ * genuinely-actionable deltas and defeating the point of `--actions-diff-observe`.
+ *
+ * Scope is deliberately narrow: this only suppresses `extras` from the per-node
+ * *changed* delta. A node that is `added`/`removed` still carries its full
+ * attribute set (including `extras`) so a consumer can reconstruct it without the
+ * baseline, and the top-level `fields` diff is untouched. `extras` is never part
+ * of the node identity key either, so this changes only what a matched node
+ * *reports*, never how nodes are paired.
+ */
+export const DIFF_IGNORED_ATTRS: ReadonlySet<string> = new Set(["extras"]);
+
 /** Per-attribute diff of two attribute maps (union of keys). */
 function diffAttributes(
   from: Record<string, unknown>,
@@ -531,6 +553,11 @@ function diffAttributes(
 ): Record<string, { from?: unknown; to?: unknown }> {
   const changes: Record<string, { from?: unknown; to?: unknown }> = {};
   for (const key of new Set([...Object.keys(from), ...Object.keys(to)])) {
+    // Volatile a11y metadata (`extras`) churns between same-screen captures and is
+    // not an actionable UI delta — never report it as a change (#3051).
+    if (DIFF_IGNORED_ATTRS.has(key)) {
+      continue;
+    }
     // `bounds` is compared through `boundsKey` so an object-shaped baseline and a
     // compacted tuple next (identical geometry) are not a spurious change.
     const equal = key === "bounds"

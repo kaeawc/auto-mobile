@@ -34,6 +34,24 @@ export function loadAndroidHomeObserve(): { raw: string; observe: ObserveResult 
   return { raw, observe: JSON.parse(raw) as ObserveResult };
 }
 
+/**
+ * Real-device before/after observation pairs captured for the `--actions-diff-observe`
+ * sign-off (issue #3051; see
+ * `docs/design-docs/plat/android/actions-diff-observe-signoff.md`). Each file is a
+ * genuine emulator capture of the AutoMobile Playground app, in the *post-sanitize*
+ * form `finalizeToolResponse` diffs (`sanitizeObserveResult(obs, {dropElements:true})`),
+ * with diff-irrelevant heavy fields (`elements`, `performanceAudit`, `perfTiming`,
+ * `backStack`) removed to keep the fixtures lean — the diff reads none of them, so
+ * their absence cannot change any diff outcome. Load a pair and feed directly to
+ * `diffObserveResult` (no re-sanitize needed).
+ */
+export const DIFF_FIXTURE_DIR = join(import.meta.dir, "diff");
+
+/** Parse one committed diff-sign-off fixture into an `ObserveResult`. */
+export function loadDiffFixture(name: string): ObserveResult {
+  return JSON.parse(readFileSync(join(DIFF_FIXTURE_DIR, `${name}.json`), "utf8")) as ObserveResult;
+}
+
 /** UTF-8 byte length and cl100k_base token count of a value serialized exactly
  *  the way the observe tool emits it: `stringifyToolResponse` — pretty-printed
  *  (2-space) with `extras` keys stripped, the production formatter used by

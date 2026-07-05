@@ -284,14 +284,14 @@ done < <(
 )
 
 for path in "${skill_paths[@]}"; do
-  if ! printf '%s\n' "${agents_entries[@]-}" | grep -Fxq "$path"; then
+  if ! grep -Fxq "$path" <<< "$(printf '%s\n' "${agents_entries[@]-}")"; then
     echo "[ERROR] AGENTS.md: missing skill entry for ${path}" >&2
     errors=1
   fi
 done
 
 for path in "${agents_entries[@]}"; do
-  if ! printf '%s\n' "${skill_paths[@]-}" | grep -Fxq "$path"; then
+  if ! grep -Fxq "$path" <<< "$(printf '%s\n' "${skill_paths[@]-}")"; then
     echo "[ERROR] AGENTS.md: references non-local or missing skill ${path}" >&2
     errors=1
   fi

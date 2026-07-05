@@ -13,6 +13,7 @@ describe("parseOutputReductionFlags", () => {
       toolResultsNoStructuredContent: false,
       actionsDiffObserve: false,
       actionsNoObserve: false,
+      toolResultsCompactJson: false,
     });
   });
 

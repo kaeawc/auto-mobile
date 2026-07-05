@@ -13,6 +13,7 @@ export interface OutputReductionFlags {
   toolResultsNoStructuredContent: boolean;
   actionsDiffObserve: boolean;
   actionsNoObserve: boolean;
+  toolResultsCompactJson: boolean;
 }
 
 export type OutputReductionFlagField = keyof OutputReductionFlags;
@@ -66,6 +67,13 @@ export const OUTPUT_REDUCTION_FLAG_SPECS: OutputReductionFlagSpec[] = [
     featureFlagKey: "actions-no-observe",
     label: "--actions-no-observe",
   },
+  {
+    field: "toolResultsCompactJson",
+    cli: "--tool-results-compact-json",
+    env: "AUTOMOBILE_TOOL_RESULTS_COMPACT_JSON",
+    featureFlagKey: "tool-results-compact-json",
+    label: "--tool-results-compact-json",
+  },
 ];
 
 /**
@@ -88,6 +96,7 @@ export function parseOutputReductionFlags(
     toolResultsNoStructuredContent: false,
     actionsDiffObserve: false,
     actionsNoObserve: false,
+    toolResultsCompactJson: false,
   };
   for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
     flags[spec.field] = resolve(spec);

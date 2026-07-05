@@ -212,6 +212,9 @@ export class Daemon {
     if (options.actionsNoObserve) {
       serverConfig.setActionsNoObserveEnabled(true);
     }
+    if (options.toolResultsCompactJson) {
+      serverConfig.setToolResultsCompactJsonEnabled(true);
+    }
   }
 
   /**

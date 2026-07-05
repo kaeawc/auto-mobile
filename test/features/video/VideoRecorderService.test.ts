@@ -131,6 +131,24 @@ describe("VideoRecorderService", () => {
       expect(result.outputName).toBe("my-video");
     });
 
+    test("names dir + file after outputName with a recordingId suffix for uniqueness", async () => {
+      const result = await service.startRecording({ outputName: "MIA-T3083" });
+      const expectedDir = path.join(archiveRoot, "MIA-T3083-rec-1");
+      expect(await pathExists(expectedDir)).toBe(true);
+      expect(result.outputPath.startsWith(expectedDir + path.sep)).toBe(true);
+      expect(path.basename(result.outputPath)).toContain("MIA-T3083-rec-1");
+    });
+
+    test("falls back to recordingId dir when no outputName is given", async () => {
+      const result = await service.startRecording();
+      expect(result.outputPath.startsWith(path.join(archiveRoot, "rec-1") + path.sep)).toBe(true);
+    });
+
+    test("sanitizes unsafe characters in outputName for the path", async () => {
+      const result = await service.startRecording({ outputName: "case A/B!" });
+      expect(result.outputPath).toContain("case-A-B-rec-1");
+    });
+
     test("generates unique ids for multiple recordings", async () => {
       const r1 = await service.startRecording();
       const r2 = await service.startRecording();

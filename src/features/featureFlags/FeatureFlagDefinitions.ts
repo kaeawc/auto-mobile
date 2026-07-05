@@ -15,7 +15,8 @@ export type FeatureFlagKey =
   | "observe-result-compact"
   | "tool-results-no-structured-content"
   | "actions-diff-observe"
-  | "actions-no-observe";
+  | "actions-no-observe"
+  | "tool-results-compact-json";
 
 export type FeatureFlagConfig = Record<string, unknown>;
 
@@ -144,6 +145,12 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     key: "actions-no-observe",
     label: "Actions: no observe",
     description: "Skip returning the post-action observation entirely to reduce output size.",
+    defaultValue: false,
+  },
+  {
+    key: "tool-results-compact-json",
+    label: "Tool results: compact JSON",
+    description: "Serialize tool results as compact (non-pretty-printed) JSON — same data, ~35% fewer characters.",
     defaultValue: false,
   },
 ];

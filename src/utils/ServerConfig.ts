@@ -40,6 +40,7 @@ class ServerConfig {
   private _toolResultsNoStructuredContent: boolean = false;
   private _actionsDiffObserve: boolean = false;
   private _actionsNoObserve: boolean = false;
+  private _toolResultsCompactJson: boolean = false;
 
   private constructor() {}
 
@@ -250,6 +251,14 @@ class ServerConfig {
 
   isActionsNoObserveEnabled(): boolean {
     return this._actionsNoObserve;
+  }
+
+  setToolResultsCompactJsonEnabled(enabled: boolean): void {
+    this._toolResultsCompactJson = enabled;
+  }
+
+  isToolResultsCompactJsonEnabled(): boolean {
+    return this._toolResultsCompactJson;
   }
 
 }

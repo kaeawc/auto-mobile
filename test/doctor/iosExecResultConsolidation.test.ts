@@ -19,7 +19,10 @@ describe("ios doctor createExecResult consolidation (#3200)", () => {
   });
 
   it("declares no local createExecResult factory", () => {
-    expect(source).not.toMatch(/\bconst\s+createExecResult\s*=/);
+    // Catch every local (re)declaration form, not just `const` — a `let`, `var`,
+    // or `function createExecResult` would otherwise slip the guard.
+    expect(source).not.toMatch(/\b(?:const|let|var)\s+createExecResult\s*=/);
+    expect(source).not.toMatch(/\bfunction\s+createExecResult\s*\(/);
   });
 
   it("does not re-inline Buffer→string coercion for exec stdout/stderr", () => {

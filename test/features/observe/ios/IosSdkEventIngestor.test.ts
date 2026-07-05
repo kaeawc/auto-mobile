@@ -227,6 +227,31 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect(Object.prototype.hasOwnProperty.call(recorder.storage[0].event, "previousValue")).toBe(false);
   });
 
+  test("storage_changed reads the SDK-diffed changeType (add) from the payload", async () => {
+    // The snapshot-diff SDK build emits a real add/modify/remove changeType; it
+    // must be read directly (not defaulted to "modify").
+    await ingestor.recordSdkEvent(event("storage_changed", {
+      suiteName: "defaults", key: "k", newValue: "v", valueType: "string", changeType: "add",
+    }), "com.app");
+    expect(recorder.storage[0].event).toMatchObject({
+      fileName: "defaults", key: "k", value: "v", valueType: "string", changeType: "add",
+    });
+  });
+
+  test("storage_changed reads changeType remove, and defaults to modify when the wire omits it", async () => {
+    await ingestor.recordSdkEvent(event("storage_changed", {
+      suiteName: "defaults", key: "gone", newValue: null, valueType: "string", changeType: "remove",
+    }), "com.app");
+    expect(recorder.storage[0].event).toMatchObject({
+      fileName: "defaults", key: "gone", value: null, valueType: "string", changeType: "remove",
+    });
+
+    await ingestor.recordSdkEvent(event("storage_changed", { suiteName: "defaults", key: "k" }), "com.app");
+    expect(recorder.storage[1].event).toMatchObject({
+      fileName: "defaults", key: "k", value: null, valueType: null, changeType: "modify",
+    });
+  });
+
   test("unknown event types fall back to a log event", async () => {
     await ingestor.recordSdkEvent(event("totally_new_type", { foo: "bar" }), "com.app");
     expect(recorder.logs[0].event).toMatchObject({ tag: "UnknownEvent", filterName: "custom" });

@@ -3,8 +3,15 @@ import SQLite3
 import XCTest
 
 final class UserDefaultsInspectorTests: XCTestCase {
+    private var diffBuffer: SdkEventBuffer?
+
     override func tearDown() {
         UserDefaultsInspector.shared.reset()
+        diffBuffer?.shutdown()
+        diffBuffer = nil
+        // Diff tests toggle the global SDK flag; restore its default so later
+        // suites aren't left with the SDK disabled.
+        AutoMobileSDK.shared.setEnabled(true)
         super.tearDown()
     }
 
@@ -46,6 +53,152 @@ final class UserDefaultsInspectorTests: XCTestCase {
 
         fakeDriver.clear(suiteName: nil)
         XCTAssertTrue(fakeDriver.getValues(suiteName: nil).isEmpty)
+    }
+
+    // MARK: - Change Diffing
+
+    /// Wire up an enabled inspector over a fake driver and a real callback-backed
+    /// buffer, seed the baseline snapshot, and return the pieces a diff test needs.
+    private func makeDiffHarness(
+        seed: [(key: String, value: String, type: KeyValueType)] = []
+    ) -> (driver: FakeUserDefaultsDriver, buffer: SdkEventBuffer, events: () -> [SdkStorageChangedEvent]) {
+        AutoMobileSDK.shared.setEnabled(true)
+
+        let fakeDriver = FakeUserDefaultsDriver()
+        for entry in seed {
+            fakeDriver.setValue(suiteName: nil, key: entry.key, value: entry.value, type: entry.type)
+        }
+
+        let captured = CapturedEvents()
+        let buffer = SdkEventBuffer { events in
+            captured.append(events.compactMap { $0 as? SdkStorageChangedEvent })
+        }
+        buffer.start()
+        diffBuffer = buffer
+
+        let inspector = UserDefaultsInspector.shared
+        inspector.initialize(buffer: buffer)
+        inspector.setDriver(fakeDriver)
+        inspector.setEnabled(true)
+        // Seed the baseline so pre-existing keys aren't reported as spurious adds.
+        inspector.captureBaseline(suiteName: nil)
+
+        return (fakeDriver, buffer, {
+            buffer.flush()
+            return captured.all
+        })
+    }
+
+    func testDiffEmitsAddForNewKey() {
+        let harness = makeDiffHarness()
+
+        harness.driver.setValue(suiteName: nil, key: "theme", value: "dark", type: .string)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        let events = harness.events()
+        XCTAssertEqual(events.count, 1)
+        let event = events[0]
+        XCTAssertEqual(event.key, "theme")
+        XCTAssertEqual(event.newValue, "dark")
+        XCTAssertEqual(event.valueType, "string")
+        XCTAssertEqual(event.changeType, "add")
+    }
+
+    func testDiffEmitsModifyForChangedValue() {
+        let harness = makeDiffHarness(seed: [(key: "count", value: "1", type: .int)])
+
+        harness.driver.setValue(suiteName: nil, key: "count", value: "2", type: .int)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        let events = harness.events()
+        XCTAssertEqual(events.count, 1)
+        let event = events[0]
+        XCTAssertEqual(event.key, "count")
+        XCTAssertEqual(event.newValue, "2")
+        XCTAssertEqual(event.valueType, "int")
+        XCTAssertEqual(event.changeType, "modify")
+    }
+
+    func testDiffEmitsRemoveForDeletedKey() {
+        let harness = makeDiffHarness(seed: [(key: "session", value: "abc", type: .string)])
+
+        harness.driver.removeValue(suiteName: nil, key: "session")
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        let events = harness.events()
+        XCTAssertEqual(events.count, 1)
+        let event = events[0]
+        XCTAssertEqual(event.key, "session")
+        XCTAssertNil(event.newValue)
+        XCTAssertEqual(event.valueType, "string")
+        XCTAssertEqual(event.changeType, "remove")
+    }
+
+    func testDiffEmitsNothingWhenNoValueChanged() {
+        let harness = makeDiffHarness(seed: [(key: "stable", value: "x", type: .string)])
+
+        // Re-set the same value: didChangeNotification can fire without any
+        // observable value change, and that must not emit an event.
+        harness.driver.setValue(suiteName: nil, key: "stable", value: "x", type: .string)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        XCTAssertTrue(harness.events().isEmpty)
+    }
+
+    func testDiffEmitsMultipleChangesWithMonotonicSequence() {
+        let harness = makeDiffHarness(seed: [(key: "keep", value: "1", type: .int)])
+
+        harness.driver.setValue(suiteName: nil, key: "alpha", value: "a", type: .string)
+        harness.driver.setValue(suiteName: nil, key: "keep", value: "2", type: .int)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        let events = harness.events().sorted { ($0.key ?? "") < ($1.key ?? "") }
+        XCTAssertEqual(events.compactMap { $0.key }, ["alpha", "keep"])
+        XCTAssertEqual(events.map { $0.changeType }, ["add", "modify"])
+        // Distinct, monotonically-increasing sequence numbers per emitted event.
+        XCTAssertEqual(Set(events.map { $0.sequenceNumber }).count, 2)
+        XCTAssertLessThan(events[0].sequenceNumber, events[1].sequenceNumber)
+    }
+
+    func testDiffDoesNotEmitPreExistingKeysOnFirstChange() {
+        // Baseline already contains "existing"; only the newly-added key changes.
+        let harness = makeDiffHarness(seed: [(key: "existing", value: "old", type: .string)])
+
+        harness.driver.setValue(suiteName: nil, key: "fresh", value: "new", type: .string)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        let events = harness.events()
+        XCTAssertEqual(events.compactMap { $0.key }, ["fresh"])
+        XCTAssertEqual(events.first?.changeType, "add")
+    }
+
+    func testDiffEmitsNothingWhenSdkDisabled() {
+        let harness = makeDiffHarness()
+        AutoMobileSDK.shared.setEnabled(false)
+
+        harness.driver.setValue(suiteName: nil, key: "theme", value: "dark", type: .string)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        XCTAssertTrue(harness.events().isEmpty)
+        AutoMobileSDK.shared.setEnabled(true)
+    }
+}
+
+/// Thread-safe collector for events delivered on the buffer's flush queue.
+private final class CapturedEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [SdkStorageChangedEvent] = []
+
+    var all: [SdkStorageChangedEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
+    }
+
+    func append(_ newEvents: [SdkStorageChangedEvent]) {
+        lock.lock()
+        defer { lock.unlock() }
+        events.append(contentsOf: newEvents)
     }
 }
 

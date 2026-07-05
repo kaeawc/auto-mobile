@@ -450,6 +450,10 @@ public struct SdkStorageChangedEvent: SdkEvent {
     /// TS telemetry ingest can skip its per-insert previous-value lookup (#3000).
     public let previousValue: String?
     public let valueType: String
+    /// The kind of change this event records: "add", "modify", or "remove".
+    /// Mirrors Android's storage `changeType` so the desktop telemetry consumer
+    /// can render added/removed values instead of always treating iOS as "modify".
+    public let changeType: String
     public let sequenceNumber: Int64
 
     public init(
@@ -459,6 +463,7 @@ public struct SdkStorageChangedEvent: SdkEvent {
         newValue: String?,
         previousValue: String? = nil,
         valueType: String,
+        changeType: String = "modify",
         sequenceNumber: Int64
     ) {
         self.timestamp = timestamp
@@ -467,6 +472,7 @@ public struct SdkStorageChangedEvent: SdkEvent {
         self.newValue = newValue
         self.previousValue = previousValue
         self.valueType = valueType
+        self.changeType = changeType
         self.sequenceNumber = sequenceNumber
     }
 }

@@ -250,19 +250,19 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
             break;
           case "storage_changed":
             // The iOS SDK's SdkStorageChangedEvent serializes as suiteName/key/newValue/
-            // valueType/sequenceNumber (ios/auto-mobile-sdk/.../SdkEvent.swift). It carries
-            // no `value` and no `operation`, and the recorder REQUIRES valueType + changeType
-            // (issue #3001). Map: suiteName→fileName, newValue→value, pass valueType through,
-            // and derive changeType. KVO can't distinguish set vs remove so the SDK emits no
-            // operation — default to "modify" (matching the Android call site) while honoring
-            // an explicit `operation` if a future SDK build adds one.
+            // valueType/changeType/sequenceNumber (ios/auto-mobile-sdk/.../SdkEvent.swift).
+            // It carries no `value` and no `operation`; the recorder REQUIRES valueType +
+            // changeType (issue #3001). Map: suiteName→fileName, newValue→value, pass
+            // valueType through, and use the SDK-diffed changeType (add/modify/remove).
+            // Older SDK builds emitted no change kind — fall back to `operation` then
+            // "modify" for wire compatibility.
             await recorder.recordStorageEvent({
               timestamp: ts, applicationId,
               fileName: (p.suiteName as string) ?? "",
               key: (p.key as string) ?? null,
               value: (p.newValue as string) ?? (p.value as string) ?? null,
               valueType: (p.valueType as string) ?? null,
-              changeType: (p.operation as string) ?? "modify",
+              changeType: (p.changeType as string) ?? (p.operation as string) ?? "modify",
               // Thread the runner-supplied prior value ONLY when the payload carries
               // it, so the repository's `previousValue !== undefined` guard falls
               // through to the auto-lookup for legacy runners that omit it (#3000).

@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
 import { Database, MemoryBaseline, NewMemoryBaseline, MemoryBaselineUpdate } from "../../db/types";
 import { logger } from "../../utils/logger";
@@ -187,14 +187,26 @@ export class MemoryBaselineManager {
     try {
       const cutoffDate = getCutoffDate(daysOld);
 
+      // Normalize BOTH sides through `datetime(...)` before comparing, exactly
+      // as BaselineManager.cleanupOldBaselines (#2937) and
+      // ThresholdManager.cleanupExpiredThresholds do. A raw string `<` compares
+      // `last_updated` and the ISO-8601 cutoff lexically, which is only sound
+      // while every stored value is ISO. If a defaulted `last_updated` writer
+      // ever lands, the column can hold SQLite's `YYYY-MM-DD HH:MM:SS` form
+      // (no `T`), and a bare space sorts before `T` — so a same-day-but-newer
+      // row would sort before the ISO cutoff and be wrongly deleted (#3157).
+      // `executeTakeFirst().numDeletedRows` is the actual deleted-row count;
+      // `execute()` returns a single DeleteResult per statement, so its
+      // `.length` is always 1 and would log "Cleaned up 1" even for no-ops.
       const deleted = await this.db
         .deleteFrom("memory_baselines")
-        .where("last_updated", "<", cutoffDate)
-        .execute();
+        .where(sql`datetime(last_updated)`, "<", sql`datetime(${cutoffDate})`)
+        .executeTakeFirst();
 
-      if (deleted.length > 0) {
+      const deletedCount = Number(deleted.numDeletedRows) || 0;
+      if (deletedCount > 0) {
         logger.info(
-          `[MemoryBaselineManager] Cleaned up ${deleted.length} stale baselines older than ${daysOld} days`
+          `[MemoryBaselineManager] Cleaned up ${deletedCount} stale baselines older than ${daysOld} days`
         );
       }
     } catch (error) {

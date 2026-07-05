@@ -154,6 +154,7 @@ export class BunSqliteConnectionState {
   async rollbackTransaction(owner: symbol): Promise<void> {
     try {
       await this.executeQuery(CompiledQuery.raw("rollback"), owner);
+      this.#clearStatementCache();
     } finally {
       this.#clearTransactionOwner(owner);
     }

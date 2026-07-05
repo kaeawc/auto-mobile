@@ -347,6 +347,27 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     expect(db.preparedFor("select * from foo")[1].finalized).toBe(false);
   });
 
+  test("clears cached statements after rollback", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    await state.beginTransaction(owner);
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+    const cachedSelect = db.preparedFor("select * from foo")[0];
+
+    await state.rollbackTransaction(owner);
+    const rollbackStatement = db.preparedFor("rollback")[0];
+
+    expect(cachedSelect.finalized).toBe(true);
+    expect(rollbackStatement.finalized).toBe(true);
+
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+
+    expect(db.preparedFor("select * from foo")).toHaveLength(2);
+    expect(db.preparedFor("select * from foo")[1].finalized).toBe(false);
+  });
+
   test("preserves SELECT, RETURNING, and write result shapes", async () => {
     const db = new FakeDatabase();
     const state = makeState(db);

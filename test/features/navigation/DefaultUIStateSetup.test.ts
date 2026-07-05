@@ -171,6 +171,10 @@ describe("DefaultUIStateSetup", () => {
       expect(capturedArgs).toBeDefined();
       expect(capturedArgs!.direction).toBe("down");
       expect(capturedArgs!.platform).toBe("android");
+      // Must force a full-screen swipe: with the default (autoTarget true) and no
+      // lookFor/container, swipeOn targets a scrollable child and would scroll the
+      // sheet's inner list instead of dragging the sheet down to dismiss it.
+      expect(capturedArgs!.autoTarget).toBe(false);
       // The old dead-code path passed a bogus `action: "swipe"` shape that the
       // `swipeOn` schema does not accept — the fixed call must not carry it.
       expect(capturedArgs!.action).toBeUndefined();

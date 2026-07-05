@@ -365,11 +365,17 @@ export class DefaultUIStateSetup implements UIStateSetup {
         // back-button fallback below (issue #3106).
         const swipeTool = ToolRegistry.getTool("swipeOn");
         if (swipeTool) {
-          // Swipe down to dismiss the bottom sheet. `swipeOn` takes `direction`
-          // (no `action` field). Internal setup swipe (#3087): no diff/strip, no
+          // Swipe down from mid-screen to drag the sheet down and dismiss it.
+          // `swipeOn` takes `direction` (no `action` field). `autoTarget: false`
+          // is essential here: with the default (true) and no lookFor/container,
+          // swipeOn targets a scrollable child and would scroll the sheet's inner
+          // list instead of dragging the sheet itself down (SwipeOn.execute). We
+          // want the full-screen downward swipe (executeScreenSwipe) that a
+          // dismissal needs. Internal setup swipe (#3087): no diff/strip, no
           // baseline advance.
           await swipeTool.handler(markInternalToolCall({
             direction: "down",
+            autoTarget: false,
             platform
           }));
           await this.sleep(200);

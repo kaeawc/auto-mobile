@@ -144,6 +144,29 @@ final class RemindersPlanContentTests: XCTestCase {
         )
     }
 
+    /// The retry policy is shared by `RemindersIntegrationBase`; subclasses keep only their
+    /// issue-specific rationale comments instead of duplicating the env/default implementation.
+    func testRemindersRetryCountIsSharedByBaseClass() throws {
+        let source = try loadRemindersIntegrationTestSource()
+
+        XCTAssertTrue(
+            classBody(named: "RemindersIntegrationBase", in: source).contains("override var retryCount"),
+            "RemindersIntegrationBase must own the shared retryCount override"
+        )
+        XCTAssertTrue(
+            classBody(named: "RemindersIntegrationBase", in: source).contains("var defaultRetryCount"),
+            "RemindersIntegrationBase must expose the shared defaultRetryCount hook"
+        )
+        XCTAssertFalse(
+            classBody(named: "RemindersLaunchPlanTests", in: source).contains("override var retryCount"),
+            "RemindersLaunchPlanTests should inherit the shared retryCount behavior"
+        )
+        XCTAssertFalse(
+            classBody(named: "RemindersAddPlanTests", in: source).contains("override var retryCount"),
+            "RemindersAddPlanTests should inherit the shared retryCount behavior"
+        )
+    }
+
     /// Regression guard preserving acceptance criterion 2 (#2998): the retry only masks a *transient*
     /// bring-up flake, so the launch plan must keep its bounded `observe`/`waitFor` guard — a genuinely
     /// broken observe still times out on every attempt and fails, instead of hanging or silently
@@ -333,4 +356,38 @@ private enum PlanStepSequence {
         let value = trimmed.dropFirst("- tool:".count).trimmingCharacters(in: .whitespaces)
         return value.isEmpty ? nil : value
     }
+}
+
+private func loadRemindersIntegrationTestSource() throws -> String {
+    let currentFile = URL(fileURLWithPath: #filePath)
+    let sourceURL = currentFile.deletingLastPathComponent()
+        .appendingPathComponent("RemindersIntegrationTests.swift")
+    return try String(contentsOf: sourceURL, encoding: .utf8)
+}
+
+private func classBody(named className: String, in source: String) -> String {
+    guard let declarationRange = source.range(of: "class \(className)")
+        ?? source.range(of: "final class \(className)")
+    else {
+        return ""
+    }
+    guard let openingBrace = source[declarationRange.upperBound...].firstIndex(of: "{") else {
+        return ""
+    }
+
+    var depth = 0
+    var index = openingBrace
+    while index < source.endIndex {
+        let character = source[index]
+        if character == "{" {
+            depth += 1
+        } else if character == "}" {
+            depth -= 1
+            if depth == 0 {
+                return String(source[source.index(after: openingBrace)..<index])
+            }
+        }
+        index = source.index(after: index)
+    }
+    return ""
 }

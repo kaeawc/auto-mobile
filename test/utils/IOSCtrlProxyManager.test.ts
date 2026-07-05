@@ -596,6 +596,43 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses().length).toBe(2);
     });
 
+    test("ignores stale local iproxy exit or error after a newer tunnel is tracked", async function() {
+      for (const staleEvent of ["exit", "error"] as const) {
+        const eventTimer = new FakeTimer();
+        const eventExecutor = new FakeProcessExecutor();
+        eventExecutor.setCommandResponse("idevice_id -l", createExecResult(`${physicalDevice.deviceId}\n`, ""));
+        eventExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+        const oldProcess = new FakeChildProcess();
+        oldProcess.pid = 1111;
+        const newProcess = new FakeChildProcess();
+        newProcess.pid = 2222;
+        eventExecutor.setNextSpawnProcess(oldProcess);
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          physicalDevice,
+          eventTimer,
+          undefined,
+          eventExecutor
+        );
+
+        await (manager as unknown as { startIproxyTunnel: () => Promise<void> }).startIproxyTunnel();
+        await (manager as unknown as { stopIproxyTunnel: () => Promise<void> }).stopIproxyTunnel();
+        eventExecutor.setNextSpawnProcess(newProcess);
+        await (manager as unknown as { startIproxyTunnel: () => Promise<void> }).startIproxyTunnel();
+
+        if (staleEvent === "exit") {
+          oldProcess.emit("exit", 0, null);
+        } else {
+          oldProcess.emit("error", new Error("old tunnel failed after replacement"));
+        }
+        for (let i = 0; i < 5; i++) {await Promise.resolve();}
+
+        expect((manager as unknown as { iproxyProcessId: number | null }).iproxyProcessId).toBe(2222);
+        expect((manager as unknown as { iproxyProcess: FakeChildProcess | null }).iproxyProcess).toBe(newProcess);
+        expect(eventTimer.getPendingTimeoutCount()).toBe(0);
+        expect(eventExecutor.getSpawnedProcesses().length).toBe(2);
+      }
+    });
+
     test("host-control iproxy skips ports that are busy on the host", async function() {
       const { runner, iproxyStarts } = createHostControlRunner();
       const checker = new FakeHostPortAvailabilityChecker(new Set([8765]));

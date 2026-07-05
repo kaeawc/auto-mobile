@@ -176,6 +176,12 @@ class WebSocketServer(
                       }
                     }
                   }
+                } catch (e: CancellationException) {
+                  // Read loop is a coroutine: on scope shutdown, `incoming` / the inline
+                  // `handleClientMessage` throw cancellation. Let it unwind (after `finally`)
+                  // instead of logging a connection error and re-swallowing the rethrow
+                  // handleClientMessage already performs (#3130).
+                  throw e
                 } catch (e: Exception) {
                   Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
                 } finally {

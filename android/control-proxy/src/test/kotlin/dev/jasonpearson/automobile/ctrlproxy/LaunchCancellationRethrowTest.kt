@@ -33,12 +33,16 @@ import org.junit.Test
  *   (issue #3104) instead.
  * - `packageReceiver` and `screenStateReceiver` likewise launch (or call) with no inner catch.
  *
- * The broad-catch-*inside*-a-launch shape this scanner enforces against was found at three
+ * The broad-catch-*inside*-a-coroutine shape this scanner enforces against was found at three
  * [CtrlProxy] sites (`commandReceiver`, the interaction-event broadcaster, the highlight-response
- * launch) and two [WebSocketServer] sites (`broadcastToClients`' send loop, the `stop()` close
- * launch) — all fixed. The scanning logic is factored into [LaunchCancellationScanner] (a pure
- * function over source text) so the enforcement contract is unit-tested against synthetic good/bad
- * snippets; the real-file assertions then prove the live sources comply.
+ * launch) and three [WebSocketServer] sites (`broadcastToClients`' send loop, the `stop()` close
+ * launch, and the `webSocket("/ws")` read-loop handler whose outer catch re-swallowed the
+ * cancellation `handleClientMessage` rethrows) — all fixed. The scanner covers
+ * `serviceScope.launch` / `scope.launch` builders, Ktor `webSocket { … }` route handlers, and named
+ * `suspend` helpers (`broadcastToClients`) whose broad catch is not lexically inside a launch. The
+ * scanning logic is factored into [LaunchCancellationScanner] (a pure function over source text) so
+ * the enforcement contract is unit-tested against synthetic good/bad snippets; the real-file
+ * assertions then prove the live sources comply.
  *
  * Known limitation (tracked as a follow-up): [LaunchCancellationScanner] treats a broad catch whose
  * body contains *any* `throw` as fully re-surfacing cancellation, so a *conditional* rethrow
@@ -53,30 +57,34 @@ class LaunchCancellationRethrowTest {
   // ---------------------------------------------------------------------------
 
   @Test
-  fun `no launch block in control-proxy swallows CancellationException`() {
-    for (name in SCANNED_SOURCES) {
-      val result = LaunchCancellationScanner.scan(locateSource(name).readText())
+  fun `no coroutine body in control-proxy swallows CancellationException`() {
+    for (src in SCANNED_SOURCES) {
+      val result =
+        LaunchCancellationScanner.scan(locateSource(src.fileName).readText(), src.guardedSuspendFns)
       assertTrue(
-        "Every `serviceScope.launch`/`scope.launch { try { … } catch (e: Exception) }` must " +
-          "rethrow `CancellationException` before the generic catch so cooperative cancellation " +
-          "unwinds cleanly (issue #3130). Offenders in $name:\n" +
-          result.violations.joinToString("\n") { "  - $name:${it.line}" },
+        "Every `serviceScope.launch`/`scope.launch`/`webSocket { … }` coroutine body (and the " +
+          "guarded suspend helpers ${src.guardedSuspendFns}) must rethrow `CancellationException` " +
+          "before the generic catch so cooperative cancellation unwinds cleanly (issue #3130). " +
+          "Offenders in ${src.fileName}:\n" +
+          result.violations.joinToString("\n") { "  - ${src.fileName}:${it.line}" },
         result.violations.isEmpty(),
       )
     }
   }
 
   @Test
-  fun `scanner actually matches the control-proxy launch blocks`() {
+  fun `scanner actually matches the control-proxy coroutine bodies`() {
     // Guards against a scanner that silently matches nothing (a broken regex would make the
     // "no violations" assertion vacuously pass). CtrlProxy + WebSocketServer launch many
-    // coroutines;
-    // assert a conservative lower bound on the combined count so the check stays meaningful.
+    // coroutines; assert a conservative lower bound on the combined count so it stays meaningful.
     val total = SCANNED_SOURCES.sumOf {
-      LaunchCancellationScanner.scan(locateSource(it).readText()).launchBlocks
+      LaunchCancellationScanner.scan(locateSource(it.fileName).readText(), it.guardedSuspendFns)
+        .launchBlocks
     }
 
-    assertTrue("expected the scanner to match many launch blocks, found $total", total >= 15)
+    // Conservative floor: guards against a broken regex (→ 0) without being brittle to how many
+    // launch sites the sources happen to have as they are refactored.
+    assertTrue("expected the scanner to match many coroutine bodies, found $total", total >= 10)
   }
 
   // ---------------------------------------------------------------------------
@@ -473,14 +481,159 @@ class LaunchCancellationRethrowTest {
     )
   }
 
+  @Test
+  fun `flags a webSocket route handler whose outer catch swallows cancellation`() {
+    // The Ktor read loop is a coroutine; an outer `catch (e: Exception)` re-swallows the
+    // cancellation an inline suspend call rethrows (the #3130 review finding at
+    // WebSocketServer:171).
+    val src =
+      """
+      class Fake {
+        fun start() {
+          routing {
+            webSocket("/ws") {
+              try {
+                for (frame in incoming) {
+                  handleClientMessage(frame.readText())
+                }
+              } catch (e: Exception) {
+                Log.e(TAG, "Error in WebSocket connection", e)
+              } finally {
+                cleanup()
+              }
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
+    assertEquals(1, result.violations.size)
+    assertEquals(1, result.launchBlocks)
+  }
+
+  @Test
+  fun `does not flag a webSocket handler that rethrows cancellation`() {
+    val src =
+      """
+      class Fake {
+        fun start() {
+          webSocket("/ws") {
+            try {
+              loop()
+            } catch (e: CancellationException) {
+              throw e
+            } catch (e: Exception) {
+              Log.e(TAG, "err", e)
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
+    assertTrue(result.violations.isEmpty())
+    assertEquals(1, result.launchBlocks)
+  }
+
+  @Test
+  fun `does not match webSocketServer field reads or the WebSockets plugin`() {
+    // `\bwebSocket\b` must not fire on `webSocketServer.broadcast(...)` (no word boundary after
+    // "webSocket") or the capitalized `WebSockets` plugin.
+    val src =
+      """
+      class Fake {
+        fun go() {
+          install(WebSockets)
+          webSocketServer.broadcast(payload)
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
+    assertEquals(0, result.launchBlocks)
+    assertTrue(result.violations.isEmpty())
+  }
+
+  @Test
+  fun `flags a guarded suspend fn whose broad catch swallows cancellation`() {
+    // A named suspend helper (the `broadcastToClients` shape) whose broad catch wraps a suspend
+    // send
+    // but does not sit inside a launch block — passed in via guardedSuspendFns.
+    val src =
+      """
+      class Fake {
+        private suspend fun broadcastToClients(message: String) {
+          connections.forEach { connection ->
+            try {
+              connection.send(Frame.Text(message))
+            } catch (e: Exception) {
+              deadConnections.add(connection)
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result =
+      LaunchCancellationScanner.scan(src, guardedSuspendFns = listOf("broadcastToClients"))
+
+    assertEquals(1, result.violations.size)
+    assertEquals(1, result.launchBlocks)
+  }
+
+  @Test
+  fun `does not flag a guarded suspend fn that rethrows cancellation`() {
+    val src =
+      """
+      class Fake {
+        private suspend fun broadcastToClients(message: String) {
+          connections.forEach { connection ->
+            try {
+              connection.send(Frame.Text(message))
+            } catch (e: CancellationException) {
+              throw e
+            } catch (e: Exception) {
+              deadConnections.add(connection)
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result =
+      LaunchCancellationScanner.scan(src, guardedSuspendFns = listOf("broadcastToClients"))
+
+    assertTrue(result.violations.isEmpty())
+    assertEquals(1, result.launchBlocks)
+  }
+
   // ---------------------------------------------------------------------------
   // Source location
   // ---------------------------------------------------------------------------
 
   private companion object {
-    /** Control-proxy sources scanned by the real-file assertions. */
-    val SCANNED_SOURCES = listOf("CtrlProxy.kt", "WebSocketServer.kt")
+    /**
+     * Control-proxy sources scanned by the real-file assertions, each with the named `suspend fun`s
+     * that must also comply even though they are not launch/webSocket blocks (their broad catch
+     * wraps a suspend call reached from a coroutine).
+     */
+    val SCANNED_SOURCES =
+      listOf(
+        ScannedSource("CtrlProxy.kt", guardedSuspendFns = emptyList()),
+        ScannedSource("WebSocketServer.kt", guardedSuspendFns = listOf("broadcastToClients")),
+      )
   }
+
+  private data class ScannedSource(val fileName: String, val guardedSuspendFns: List<String>)
 
   private fun locateSource(fileName: String): File {
     val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
@@ -513,41 +666,50 @@ class LaunchCancellationRethrowTest {
 
 /**
  * Pure, Android-free source scanner for [LaunchCancellationRethrowTest]. Reads Kotlin source as
- * text and reports every `serviceScope.launch { … }` / `scope.launch { … }` block that catches the
- * broad `Exception`/`Throwable` supertype without rethrowing
- * [kotlinx.coroutines.CancellationException] in the *same* `try` statement. Test-only (lives in the
- * test source set) — ships no scanning code in the app. Reuses [KotlinSourceScan] for literal
- * masking and structural brace matching.
+ * text and reports every **coroutine body** that catches the broad `Exception`/`Throwable`
+ * supertype without rethrowing [kotlinx.coroutines.CancellationException] in the *same* `try`
+ * statement. Test-only (lives in the test source set) — ships no scanning code in the app. Reuses
+ * [KotlinSourceScan] for literal masking and structural brace matching.
+ *
+ * Coroutine bodies scanned:
+ * - `serviceScope.launch { … }` / `scope.launch { … }` builders (optionally with a dispatcher
+ *   argument, `launch(Dispatchers.IO) { … }`).
+ * - Ktor `webSocket(…) { … }` route handlers — the read loop is itself a coroutine whose outer
+ *   catch can re-swallow a cancellation that an inline suspend call (`handleClientMessage`)
+ *   rethrows (issue #3130 review follow-up).
+ * - Named suspend helpers passed in [scan]'s `guardedSuspendFns` (e.g. `broadcastToClients`), whose
+ *   broad catch wraps a suspend call (`connection.send(...)`) but does not sit inside a launch
+ *   body.
  *
  * Precision note: the cancellation-rethrow must sit in the **same `try/catch` chain** as the broad
- * catch, not merely somewhere earlier in the launch body. A body-level check would let a guarded
- * `try` launder a *second*, unrelated `try { … } catch (Exception) { … }` that swallows — the exact
- * shape a future edit to `commandReceiver` would take. Catch clauses are grouped into chains by
- * adjacency (only whitespace between one catch's `}` and the next `catch`), which is how Kotlin
- * binds consecutive `catch` clauses to one `try`.
+ * catch, not merely somewhere earlier in the body. A body-level check would let a guarded `try`
+ * launder a *second*, unrelated `try { … } catch (Exception) { … }` that swallows — the exact shape
+ * a future edit to `commandReceiver` would take. Catch clauses are grouped into chains by adjacency
+ * (only whitespace between one catch's `}` and the next `catch`), which is how Kotlin binds
+ * consecutive `catch` clauses to one `try`.
  */
 object LaunchCancellationScanner {
 
   data class Violation(val line: Int)
 
   data class ScanResult(
-    /** Count of `serviceScope.launch { … }` / `scope.launch { … }` blocks that were matched. */
+    /** Count of coroutine bodies (launch/webSocket/guarded-suspend) that were matched. */
     val launchBlocks: Int,
     val violations: List<Violation>,
   )
 
-  // The coroutine launch forms in scope: `serviceScope.launch` and the WebSocketServer
-  // `scope.launch`,
-  // with an optional dispatcher argument (`serviceScope.launch(Dispatchers.IO) { … }`). The `{` is
-  // located structurally after any balanced argument list, so nested parens don't fool the match.
-  private val LAUNCH = Regex("""\b(?:serviceScope|scope)\.launch\b""")
+  // Coroutine-body openers: `serviceScope.launch` / `scope.launch` builders and Ktor `webSocket`
+  // route handlers. The opening `{` is located structurally after any balanced argument list
+  // (`(Dispatchers.IO)`, `("/ws")`), so nested parens don't fool the match. `\bwebSocket\b` matches
+  // the lowercase route-builder call, not the `WebSockets` plugin or a `webSocketServer` field.
+  private val COROUTINE_BUILDER = Regex("""\b(?:serviceScope|scope)\.launch\b|\bwebSocket\b""")
   // Any single-type catch clause; group 1 captures the (possibly qualified) exception type.
   private val ANY_CATCH = Regex("""catch\s*\(\s*\w+\s*:\s*([\w.]+)\s*\)""")
   // `throw` is word-bounded so a `throwable` local doesn't read as a rethrow.
   private val RETHROW = Regex("""\bthrow\b""")
 
   private data class CatchClause(
-    /** Offset (within the launch body) of the `catch` keyword. */
+    /** Offset (within the coroutine body) of the `catch` keyword. */
     val start: Int,
     /** Offset just past the catch block's closing `}` (or `start` if it has no block). */
     val blockEnd: Int,
@@ -556,19 +718,37 @@ object LaunchCancellationScanner {
     val rethrows: Boolean,
   )
 
-  fun scan(source: String): ScanResult {
-    // Mask string/char literals and comments so braces inside them can't mis-slice launch bodies.
+  /**
+   * Scan [source]. [guardedSuspendFns] names `suspend fun`s whose bodies must also comply even
+   * though they are not launch/webSocket blocks (their broad catch wraps a suspend call reached
+   * from a coroutine — e.g. `broadcastToClients`).
+   */
+  fun scan(source: String, guardedSuspendFns: List<String> = emptyList()): ScanResult {
+    // Mask string/char literals and comments so braces inside them can't mis-slice bodies.
     val code = KotlinSourceScan.maskLiteralsAndComments(source)
 
     val violationLines = sortedSetOf<Int>()
     var launchBlocks = 0
 
-    for (m in LAUNCH.findAll(code)) {
-      val blockOpen = launchBlockOpen(code, m.range.last + 1) ?: continue
+    for (m in COROUTINE_BUILDER.findAll(code)) {
+      val blockOpen = trailingLambdaOpen(code, m.range.last + 1) ?: continue
       launchBlocks++
       val blockClose = KotlinSourceScan.matchBrace(code, blockOpen)
       val body = code.substring(blockOpen, blockClose)
+      for (offset in swallowingCatchOffsets(body)) {
+        violationLines.add(KotlinSourceScan.lineOf(source, blockOpen + offset))
+      }
+    }
 
+    for (name in guardedSuspendFns) {
+      val decl = Regex("""(?:private\s+)?suspend\s+fun\s+${Regex.escape(name)}\s*\(""").find(code)
+      if (decl == null) fail("guarded suspend fun `$name` not found in source")
+      val sigEnd = KotlinSourceScan.matchParen(code, decl!!.range.last)
+      val blockOpen = code.indexOf('{', sigEnd)
+      if (blockOpen < 0) continue
+      launchBlocks++
+      val blockClose = KotlinSourceScan.matchBrace(code, blockOpen)
+      val body = code.substring(blockOpen, blockClose)
       for (offset in swallowingCatchOffsets(body)) {
         violationLines.add(KotlinSourceScan.lineOf(source, blockOpen + offset))
       }
@@ -578,11 +758,11 @@ object LaunchCancellationScanner {
   }
 
   /**
-   * Given the offset just past a `.launch` token, return the offset of the block's opening `{`,
-   * skipping an optional balanced argument list (`(Dispatchers.IO)`). Returns null if what follows
-   * is not a trailing-lambda launch (e.g. `launchIn(...)` — no `{`).
+   * Given the offset just past a coroutine-builder token, return the offset of the block's opening
+   * `{`, skipping an optional balanced argument list (`(Dispatchers.IO)`, `("/ws")`). Returns null
+   * if what follows is not a trailing-lambda call (e.g. `launchIn(...)` — no `{`).
    */
-  private fun launchBlockOpen(code: String, afterToken: Int): Int? {
+  private fun trailingLambdaOpen(code: String, afterToken: Int): Int? {
     var i = afterToken
     while (i < code.length && code[i].isWhitespace()) i++
     if (i < code.length && code[i] == '(') i = KotlinSourceScan.matchParen(code, i)

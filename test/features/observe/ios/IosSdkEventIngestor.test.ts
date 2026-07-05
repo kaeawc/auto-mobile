@@ -141,11 +141,65 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect((recorder.logs[0].event as { message: string }).message).toContain("sku");
   });
 
-  test("storage_changed routes to recordStorageEvent (fileName from suiteName)", async () => {
+  test("storage_changed maps the real iOS SDK wire shape to the recorder contract", async () => {
+    // The iOS SDK emits SdkStorageChangedEvent → JSON keys suiteName/key/newValue/valueType/
+    // sequenceNumber (see ios/auto-mobile-sdk/.../SdkEvent.swift). It carries no `operation`
+    // and no `value` field. The recorder REQUIRES valueType + changeType (issue #3001).
     await ingestor.recordSdkEvent(event("storage_changed", {
-      suiteName: "defaults", key: "k", value: "v", operation: "write",
+      suiteName: "defaults", key: "k", newValue: "v", valueType: "string", sequenceNumber: 7,
     }), "com.app");
-    expect(recorder.storage[0].event).toMatchObject({ fileName: "defaults", key: "k", value: "v" });
+    const stored = recorder.storage[0].event;
+    expect(stored).toMatchObject({
+      applicationId: "com.app",
+      fileName: "defaults",
+      key: "k",
+      value: "v",
+      valueType: "string",
+      changeType: "modify",
+      timestamp: 1000,
+    });
+    // Required-by-contract fields must be present (not undefined/NULL on the wire).
+    expect(stored.valueType).toBe("string");
+    expect(stored.changeType).toBe("modify");
+    // The undeclared `operation` field must not leak into the recorder input.
+    expect("operation" in stored).toBe(false);
+  });
+
+  test("storage_changed sources value from newValue, not a `value` field", async () => {
+    // Regression guard: the old call site read p.value (which the wire never sends),
+    // so the recorded value was always dropped. It must read newValue.
+    await ingestor.recordSdkEvent(event("storage_changed", {
+      suiteName: "s", key: "k", newValue: "the-real-value", valueType: "string", sequenceNumber: 1,
+    }), "com.app");
+    expect(recorder.storage[0].event.value).toBe("the-real-value");
+  });
+
+  test("storage_changed defaults valueType/value/changeType when the wire omits them", async () => {
+    // KVO-driven emissions carry newValue: null and valueType: "unknown"; a fully-sparse
+    // payload must still satisfy the required recorder fields with safe defaults.
+    await ingestor.recordSdkEvent(event("storage_changed", { suiteName: "s", key: "k" }), null);
+    const stored = recorder.storage[0].event;
+    expect(stored).toMatchObject({ fileName: "s", key: "k", value: null, valueType: null, changeType: "modify" });
+  });
+
+  test("storage_changed passes the wire valueType through unchanged (real KVO shape)", async () => {
+    // The KVO emit path sends valueType: "unknown" with newValue: null; that literal must
+    // reach the recorder untouched (the ?? null fallback only applies when it is absent).
+    await ingestor.recordSdkEvent(event("storage_changed", {
+      suiteName: "s", key: "k", newValue: null, valueType: "unknown", sequenceNumber: 3,
+    }), "com.app");
+    const stored = recorder.storage[0].event;
+    expect(stored.valueType).toBe("unknown");
+    expect(stored.value).toBeNull();
+    expect(stored.changeType).toBe("modify");
+  });
+
+  test("storage_changed honors an explicit operation as the changeType (forward-compat)", async () => {
+    // If a future SDK build adds an `operation` discriminator, map it to changeType.
+    await ingestor.recordSdkEvent(event("storage_changed", {
+      suiteName: "s", key: "k", newValue: null, valueType: "unknown", operation: "delete",
+    }), "com.app");
+    expect(recorder.storage[0].event.changeType).toBe("delete");
   });
 
   test("unknown event types fall back to a log event", async () => {

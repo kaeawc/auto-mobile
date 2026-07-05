@@ -242,10 +242,20 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
             });
             break;
           case "storage_changed":
+            // The iOS SDK's SdkStorageChangedEvent serializes as suiteName/key/newValue/
+            // valueType/sequenceNumber (ios/auto-mobile-sdk/.../SdkEvent.swift). It carries
+            // no `value` and no `operation`, and the recorder REQUIRES valueType + changeType
+            // (issue #3001). Map: suiteName→fileName, newValue→value, pass valueType through,
+            // and derive changeType. KVO can't distinguish set vs remove so the SDK emits no
+            // operation — default to "modify" (matching the Android call site) while honoring
+            // an explicit `operation` if a future SDK build adds one.
             await recorder.recordStorageEvent({
               timestamp: ts, applicationId,
-              fileName: (p.suiteName as string) ?? "", key: (p.key as string) ?? "",
-              value: (p.value as string) ?? "", operation: (p.operation as string) ?? "write",
+              fileName: (p.suiteName as string) ?? "",
+              key: (p.key as string) ?? null,
+              value: (p.newValue as string) ?? (p.value as string) ?? null,
+              valueType: (p.valueType as string) ?? null,
+              changeType: (p.operation as string) ?? "modify",
             });
             break;
           default:

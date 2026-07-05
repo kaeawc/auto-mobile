@@ -984,7 +984,7 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
-  fun `detectContentHiddenRegions ignores large Compose descendants with text content`() {
+  fun `detectContentHiddenRegions reports large Compose descendants with sparse child text content`() {
     val textChild =
       elementWithBounds(
         bounds = bounds(32, 500, 400, 560),
@@ -995,6 +995,98 @@ class ViewHierarchyExtractorTest {
         bounds = bounds(0, 368, 1440, 2752),
         actions = listOf("accessibility_focus"),
         children = listOf(textChild),
+      )
+    val composeRoot =
+      elementWithBounds(
+        className = "androidx.compose.ui.platform.ComposeView",
+        bounds = bounds(0, 0, 1440, 3000),
+        children = listOf(contentRegion),
+      )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
+
+    assertEquals(1, regions.size)
+    assertEquals(bounds(0, 368, 1440, 2752), regions[0].bounds)
+  }
+
+  @Test
+  fun `detectContentHiddenRegions reports large Compose descendants with sparse child content description`() {
+    val iconButton =
+      elementWithBounds(
+        bounds = bounds(32, 500, 112, 580),
+        contentDesc = "Open navigation drawer",
+      )
+    val contentRegion =
+      elementWithBounds(
+        bounds = bounds(0, 368, 1440, 2752),
+        actions = listOf("accessibility_focus"),
+        children = listOf(iconButton),
+      )
+    val composeRoot =
+      elementWithBounds(
+        className = "androidx.compose.ui.platform.ComposeView",
+        bounds = bounds(0, 0, 1440, 3000),
+        children = listOf(contentRegion),
+      )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
+
+    assertEquals(1, regions.size)
+    assertEquals(bounds(0, 368, 1440, 2752), regions[0].bounds)
+  }
+
+  @Test
+  fun `detectContentHiddenRegions ignores large Compose descendants with substantial child text coverage`() {
+    val visibleContent =
+      elementWithBounds(
+        bounds = bounds(0, 368, 1440, 1200),
+        text = "Visible conversation content",
+      )
+    val contentRegion =
+      elementWithBounds(
+        bounds = bounds(0, 368, 1440, 2752),
+        actions = listOf("accessibility_focus"),
+        children = listOf(visibleContent),
+      )
+    val composeRoot =
+      elementWithBounds(
+        className = "androidx.compose.ui.platform.ComposeView",
+        bounds = bounds(0, 0, 1440, 3000),
+        children = listOf(contentRegion),
+      )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
+
+    assertTrue(regions.isEmpty())
+  }
+
+  @Test
+  fun `detectContentHiddenRegions ignores large Compose descendants with text on candidate boundary`() {
+    val contentRegion =
+      elementWithBounds(
+        bounds = bounds(0, 368, 1440, 2752),
+        text = "Conversation list",
+        actions = listOf("accessibility_focus"),
+      )
+    val composeRoot =
+      elementWithBounds(
+        className = "androidx.compose.ui.platform.ComposeView",
+        bounds = bounds(0, 0, 1440, 3000),
+        children = listOf(contentRegion),
+      )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
+
+    assertTrue(regions.isEmpty())
+  }
+
+  @Test
+  fun `detectContentHiddenRegions ignores large Compose descendants with content description on candidate boundary`() {
+    val contentRegion =
+      elementWithBounds(
+        bounds = bounds(0, 368, 1440, 2752),
+        contentDesc = "Conversation list",
+        actions = listOf("accessibility_focus"),
       )
     val composeRoot =
       elementWithBounds(
@@ -1072,6 +1164,7 @@ class ViewHierarchyExtractorTest {
     bounds: ElementBounds? = null,
     className: String? = null,
     text: String? = null,
+    contentDesc: String? = null,
     actions: List<String>? = null,
     children: List<UIElementInfo> = emptyList(),
   ): UIElementInfo {
@@ -1086,6 +1179,7 @@ class ViewHierarchyExtractorTest {
       bounds = bounds,
       className = className,
       text = text,
+      contentDesc = contentDesc,
       actions = actions,
       node = node,
     )

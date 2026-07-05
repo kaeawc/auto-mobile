@@ -475,6 +475,31 @@ public struct SdkStorageChangedEvent: SdkEvent {
         self.changeType = changeType
         self.sequenceNumber = sequenceNumber
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType, timestamp, suiteName, key, newValue, previousValue, valueType, changeType, sequenceNumber
+    }
+
+    // Custom decode so events persisted by an older SDK build (before
+    // `changeType`/`previousValue` existed) still load — `EventPersistence
+    // .loadPending()` decodes `SdkStorageChangedEvent`, and Swift's synthesized
+    // `Decodable` would reject the missing keys and silently drop the event.
+    // Legacy payloads default `changeType` to "modify" (the prior implicit
+    // behavior) and leave `previousValue` nil.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let type = try container.decodeIfPresent(SdkEventType.self, forKey: .eventType) {
+            eventType = type
+        }
+        timestamp = try container.decode(Int64.self, forKey: .timestamp)
+        suiteName = try container.decodeIfPresent(String.self, forKey: .suiteName)
+        key = try container.decodeIfPresent(String.self, forKey: .key)
+        newValue = try container.decodeIfPresent(String.self, forKey: .newValue)
+        previousValue = try container.decodeIfPresent(String.self, forKey: .previousValue)
+        valueType = try container.decode(String.self, forKey: .valueType)
+        changeType = try container.decodeIfPresent(String.self, forKey: .changeType) ?? "modify"
+        sequenceNumber = try container.decode(Int64.self, forKey: .sequenceNumber)
+    }
 }
 
 /// Batch of events for efficient transmission.

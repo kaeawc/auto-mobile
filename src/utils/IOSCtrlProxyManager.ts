@@ -1407,14 +1407,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
-   * Check if the tracked CtrlProxy process is alive AND still the real CtrlProxy.
-   * Used by startInternal() to skip spawning when the process is merely slow.
-   *
-   * We require both a PID liveness check AND a health endpoint response so that
-   * a stale xcTestProcessId that has been PID-reused by a different process does
-   * not produce a false "alive" result and cause setup() to silently skip restart.
-   */
-  /**
    * Whether the runner process WE spawned is alive at the OS level, regardless of
    * whether its health endpoint is up yet. Unlike {@link isCtrlProxyProcessAlive}
    * this does NOT require a health response, so a runner still initializing counts
@@ -1484,6 +1476,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return IOSCtrlProxyManager.DEFAULT_HEALTH_POLL_MAX_ATTEMPTS;
   }
 
+  /**
+   * Check if the tracked CtrlProxy process is alive AND still the real CtrlProxy.
+   * Used by startInternal() to skip spawning when the process is merely slow.
+   *
+   * We require both a PID liveness check AND a health endpoint response so that
+   * a stale xcTestProcessId that has been PID-reused by a different process does
+   * not produce a false "alive" result and cause setup() to silently skip restart.
+   */
   private async isCtrlProxyProcessAlive(): Promise<boolean> {
     if (!this.xcTestProcessId) {
       return false;
@@ -1943,7 +1943,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   /**
    * Check if the tracked iproxy process is alive.
-   * Used by startIproxyMonitoring() so it only restarts the tunnel when the
+   * Used by the iproxy supervisor so it only restarts the tunnel when the
    * process actually died, not when CtrlProxy is temporarily slow.
    */
   private async isIproxyProcessAlive(): Promise<boolean> {
@@ -2319,6 +2319,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     this.captureIproxyOutput(child);
 
     child.on("exit", () => {
+      if (this.iproxyProcess !== child) {
+        return;
+      }
       if (!this.isStopping) {
         logger.warn("[IOSCtrlProxy] iproxy exited unexpectedly");
         this.iproxySupervisor.processExited();
@@ -2326,6 +2329,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     });
 
     child.on("error", error => {
+      if (this.iproxyProcess !== child) {
+        return;
+      }
       if (!this.isStopping) {
         logger.warn(`[IOSCtrlProxy] iproxy error: ${error.message}`);
         this.iproxySupervisor.processExited();

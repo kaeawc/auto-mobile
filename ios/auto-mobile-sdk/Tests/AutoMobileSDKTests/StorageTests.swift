@@ -236,6 +236,38 @@ final class UserDefaultsInspectorTests: XCTestCase {
         inspector.stopListening()
     }
 
+    /// `startListening` must seed the baseline before it starts observing, so the
+    /// first notification diffs against the suite's existing contents rather than
+    /// an empty snapshot (which would report every pre-existing key as an "add").
+    func testStartListeningSeedsBaselineSoPreexistingKeysAreNotEmitted() {
+        AutoMobileSDK.shared.setEnabled(true)
+        let fakeDriver = FakeUserDefaultsDriver()
+        fakeDriver.setValue(suiteName: nil, key: "a", value: "1", type: .string)
+        fakeDriver.setValue(suiteName: nil, key: "b", value: "2", type: .string)
+
+        let captured = CapturedEvents()
+        let buffer = SdkEventBuffer { events in
+            captured.append(events.compactMap { $0 as? SdkStorageChangedEvent })
+        }
+        buffer.start()
+        diffBuffer = buffer
+
+        let inspector = UserDefaultsInspector.shared
+        inspector.initialize(buffer: buffer)
+        inspector.setDriver(fakeDriver)
+        inspector.setEnabled(true)
+        inspector.startListening(suiteName: nil)
+
+        // A notification with no change since startListening must emit nothing —
+        // the pre-existing keys were captured into the baseline before observing.
+        NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: UserDefaults.standard)
+
+        buffer.flush()
+        XCTAssertTrue(captured.all.isEmpty)
+
+        inspector.stopListening()
+    }
+
     func testDiffEmitsModifyWhenOnlyTypeChanges() {
         // Same string representation ("1"), but Int -> String is a real change.
         let harness = makeDiffHarness(seed: [(key: "flag", value: "1", type: .int)])

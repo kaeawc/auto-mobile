@@ -88,6 +88,15 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
         guard let defaults = suiteName != nil ? defaults : UserDefaults.standard else { return }
 
+        // Seed the baseline BEFORE registering the observer. If a write on
+        // another thread raced observer installation, the notification could
+        // enter `handleDidChange` with no snapshot yet and diff against `[:]`,
+        // reporting every pre-existing key as a spurious "add". Seeding first
+        // closes that window; a write in the (now inverted) gap between seeding
+        // and registration is simply picked up as a normal change on the next
+        // notification rather than a burst of phantom adds.
+        captureBaseline(suiteName: suiteName)
+
         let observer = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: defaults,
@@ -99,11 +108,6 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         lock.lock()
         kvoObserver = observer
         lock.unlock()
-
-        // Seed the baseline snapshot with the suite's current contents so the
-        // first change diffs against real state — otherwise every pre-existing
-        // key would be reported as a spurious "add" on the next notification.
-        captureBaseline(suiteName: suiteName)
     }
 
     /// Stop listening for changes.

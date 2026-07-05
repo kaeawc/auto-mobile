@@ -41,6 +41,7 @@ add_check "lychee" "\"$PROJECT_ROOT/scripts/lychee/validate_lychee.sh\"" "docs,l
 add_check "dependabot" "\"$PROJECT_ROOT/scripts/validate_dependabot.sh\"" "config,yaml" "Validate Dependabot config"
 add_check "debug-tags" "\"$PROJECT_ROOT/scripts/validate-no-debug-log-tags.sh\"" "lint" "Reject stray [*-DEBUG] log tags in src/"
 add_check "datetime-now-literal" "\"$PROJECT_ROOT/scripts/validate-no-datetime-now-literal.sh\"" "lint" "Reject string-literal SQL time-expression defaults in migrations"
+add_check "desktop-core-unified" "\"$PROJECT_ROOT/scripts/android/validate-no-desktop-core-unified.sh\"" "lint,android" "Reject abandoned desktop-core unified socket-client package"
 
 print_usage() {
   cat <<'EOF'

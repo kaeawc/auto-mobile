@@ -197,8 +197,9 @@ public protocol GesturePerforming {
     /// Reset privacy authorizations for the given app back to the not-determined
     /// ("ask next time") state via `XCUIApplication.resetAuthorizationStatus(for:)`.
     /// Each entry in `resources` is an AutoMobile permission name mapped to an
-    /// `XCUIProtectedResource`; an unmapped name throws so the caller can surface a
-    /// per-permission failure. Works on physical devices, not just simulators. (#2491)
+    /// `XCUIProtectedResource`; `all` expands to every resettable resource, while
+    /// an unmapped name throws so the caller can surface a per-permission failure.
+    /// Works on physical devices, not just simulators. (#2491/#3133)
     func resetAuthorizations(bundleId: String, resources: [String]) throws
 }
 

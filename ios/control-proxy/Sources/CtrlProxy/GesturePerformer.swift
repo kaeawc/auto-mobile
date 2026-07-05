@@ -62,6 +62,44 @@ public class GesturePerformer: GesturePerforming {
         }
     }
 
+    static let allResettablePrivacyResourceNames = [
+        "camera",
+        "photos",
+        "microphone",
+        "contacts",
+        "location",
+        "calendar",
+        "reminders",
+        "media-library",
+    ]
+
+    private static let resettablePrivacyResourceAliases = Set(
+        allResettablePrivacyResourceNames + [
+            "photos-add",
+            "contacts-limited",
+            "location-always",
+        ]
+    )
+
+    static func canonicalPrivacyResourceName(for name: String) -> String {
+        switch name {
+        case "photos-add": return "photos"
+        case "contacts-limited": return "contacts"
+        case "location-always": return "location"
+        default: return name
+        }
+    }
+
+    static func expandedPrivacyResourceNames(for name: String) -> [String]? {
+        if name == "all" {
+            return allResettablePrivacyResourceNames
+        }
+        if resettablePrivacyResourceAliases.contains(name) {
+            return [name]
+        }
+        return nil
+    }
+
     #if canImport(XCTest) && os(iOS)
         private weak var application: XCUIApplication?
         /// Strong reference to keep the application alive when set via updateApplication.
@@ -1289,6 +1327,8 @@ public class GesturePerformer: GesturePerforming {
         /// not just simulators — the whole point of #2491. An AutoMobile permission
         /// with no `XCUIProtectedResource` equivalent (e.g. `siri`, `motion`) throws
         /// `invalidParameter` so the caller reports it as a per-permission failure.
+        /// The aggregate `all` keyword expands to every unique resettable
+        /// `XCUIProtectedResource` value before calling XCTest.
         public func resetAuthorizations(bundleId: String, resources: [String]) throws {
             // Throws on the first unmapped resource, so a mixed batch applies the
             // resets before it and then fails as a whole. The TS client sends one
@@ -1296,11 +1336,22 @@ public class GesturePerformer: GesturePerforming {
             // this only matters for a hypothetical multi-resource single request.
             try runOnMainThread {
                 let app = XCUIApplication(bundleIdentifier: bundleId)
+                var resetResourceNames = Set<String>()
                 for raw in resources {
-                    guard let resource = Self.protectedResource(for: raw) else {
+                    guard let resettableResourceNames = Self.expandedPrivacyResourceNames(for: raw) else {
                         throw CommandError.invalidParameter("permission", raw)
                     }
-                    app.resetAuthorizationStatus(for: resource)
+                    for resettableResourceName in resettableResourceNames {
+                        let canonicalResourceName = Self.canonicalPrivacyResourceName(for: resettableResourceName)
+                        if resetResourceNames.contains(canonicalResourceName) {
+                            continue
+                        }
+                        guard let resource = Self.protectedResource(for: resettableResourceName) else {
+                            throw CommandError.invalidParameter("permission", resettableResourceName)
+                        }
+                        resetResourceNames.insert(canonicalResourceName)
+                        app.resetAuthorizationStatus(for: resource)
+                    }
                 }
             }
         }

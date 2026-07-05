@@ -457,7 +457,7 @@
               },
               "permissions": {
                 "type": "array",
-                "description": "Runtime permissions or simulator privacy services to change",
+                "description": "Runtime permissions or simulator privacy services to change; iOS physical reset accepts 'all'",
                 "minItems": 1,
                 "items": {
                   "type": "string",
@@ -1182,7 +1182,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Runtime permissions or simulator privacy services to change"
+          "description": "Runtime permissions or simulator privacy services to change; iOS physical reset accepts 'all'"
         },
         "userId": {
           "type": "integer",

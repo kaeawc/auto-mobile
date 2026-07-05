@@ -142,7 +142,8 @@ public struct RequestLaunchApp: Decodable {
 /// Reset privacy authorizations (camera/photos/etc.) for an app back to
 /// not-determined via `XCUIApplication.resetAuthorizationStatus(for:)`. `bundleId`
 /// and `permissions` are decode-required so their absence is rejected at the wire
-/// boundary rather than silently no-op'ing. See issue #2491.
+/// boundary rather than silently no-op'ing. `permissions=["all"]` expands on the
+/// runner to every resettable resource. See issues #2491 and #3133.
 public struct RequestResetPermissions: Decodable {
     public var requestId: String?
     public var bundleId: String

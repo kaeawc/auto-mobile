@@ -8,6 +8,49 @@ import {
   type IosSimulatorPermissionMutationResult,
 } from "./IosSimulatorPermissions";
 
+const IOS_PHYSICAL_RESET_ALL_PERMISSIONS = [
+  "camera",
+  "photos",
+  "microphone",
+  "contacts",
+  "location",
+  "calendar",
+  "reminders",
+  "media-library",
+];
+
+const IOS_PHYSICAL_RESET_CANONICAL_PERMISSION = new Map<string, string>([
+  ["photos-add", "photos"],
+  ["contacts-limited", "contacts"],
+  ["location-always", "location"],
+]);
+
+function canonicalIosPhysicalResetPermission(permission: string): string {
+  return IOS_PHYSICAL_RESET_CANONICAL_PERMISSION.get(permission) ?? permission;
+}
+
+function expandIosPhysicalResetPermissions(permissions: string[]): string[] {
+  const expanded: string[] = [];
+  const seen = new Set<string>();
+
+  for (const permission of permissions) {
+    const permissionsToAdd = permission === "all"
+      ? IOS_PHYSICAL_RESET_ALL_PERMISSIONS
+      : [permission];
+
+    for (const expandedPermission of permissionsToAdd) {
+      const canonicalPermission = canonicalIosPhysicalResetPermission(expandedPermission);
+      if (seen.has(canonicalPermission)) {
+        continue;
+      }
+      seen.add(canonicalPermission);
+      expanded.push(expandedPermission);
+    }
+  }
+
+  return expanded;
+}
+
 /**
  * Reset privacy authorizations on a *physical* iOS device through the CtrlProxy
  * XCUITest runner. The concrete client sends one `request_reset_permissions` per
@@ -55,7 +98,9 @@ export class IosPhysicalPermissions {
       return this.mutationFailure(action, normalizedAppId, "appId must be a non-empty iOS bundle identifier");
     }
 
-    if (normalizedPermissions.length === 0) {
+    const permissionsToReset = expandIosPhysicalResetPermissions(normalizedPermissions);
+
+    if (permissionsToReset.length === 0) {
       return {
         success: true,
         appId: normalizedAppId,
@@ -68,7 +113,7 @@ export class IosPhysicalPermissions {
       };
     }
 
-    const results = await this.client.resetAuthorizations(normalizedAppId, normalizedPermissions);
+    const results = await this.client.resetAuthorizations(normalizedAppId, permissionsToReset);
     const failedCount = results.filter(result => !result.success).length;
 
     return {

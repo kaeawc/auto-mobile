@@ -1422,6 +1422,27 @@ final class CommandHandlerTests: XCTestCase {
 
     // MARK: - Reset Permissions Tests
 
+    func testResetPermissionsAllExpandsToEveryResettablePrivacyResource() {
+        XCTAssertEqual(
+            GesturePerformer.expandedPrivacyResourceNames(for: "all"),
+            [
+                "camera",
+                "photos",
+                "microphone",
+                "contacts",
+                "location",
+                "calendar",
+                "reminders",
+                "media-library",
+            ]
+        )
+        XCTAssertEqual(GesturePerformer.expandedPrivacyResourceNames(for: "photos-add"), ["photos-add"])
+        XCTAssertEqual(GesturePerformer.canonicalPrivacyResourceName(for: "photos-add"), "photos")
+        XCTAssertEqual(GesturePerformer.canonicalPrivacyResourceName(for: "contacts-limited"), "contacts")
+        XCTAssertEqual(GesturePerformer.canonicalPrivacyResourceName(for: "location-always"), "location")
+        XCTAssertNil(GesturePerformer.expandedPrivacyResourceNames(for: "siri"))
+    }
+
     func testResetPermissionsForwardsResourcesToGesturePerformer() {
         let request = WebSocketRequest.resetPermissions(RequestResetPermissions(
             requestId: "reset-1",

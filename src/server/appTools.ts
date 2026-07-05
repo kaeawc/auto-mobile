@@ -71,12 +71,12 @@ export const setAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSche
       .optional()
       .describe(
         "Permission action; defaults to grant. Android supports grant; iOS simulators " +
-        "support grant/revoke/reset; iOS physical devices support reset only."
+        "support grant/revoke/reset; iOS physical devices support reset only, including permissions=['all']."
       ),
     permissions: z
       .array(z.string().min(1))
       .optional()
-      .describe("Runtime permissions or simulator privacy services to change"),
+      .describe("Runtime permissions or simulator privacy services to change; iOS physical reset accepts 'all'"),
     userId: z
       .number()
       .int()
@@ -334,7 +334,7 @@ export function registerAppTools(
   ToolRegistry.registerDeviceAware(
     "setAppPermissions",
     "Grant, revoke, reset, or configure app permissions on Android devices, iOS simulators " +
-    "(grant/revoke/reset), and iOS physical devices (reset only)",
+    "(grant/revoke/reset), and iOS physical devices (reset only, permissions=['all'] supported)",
     setAppPermissionsSchema,
     setAppPermissionsHandler
   );

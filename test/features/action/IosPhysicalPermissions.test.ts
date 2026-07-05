@@ -37,6 +37,83 @@ class FakePhysicalPrivacyClient implements IosPhysicalPrivacyClient {
 }
 
 describe("IosPhysicalPermissions", () => {
+  test("reset expands all to every physical iOS resettable resource", async () => {
+    const client = new FakePhysicalPrivacyClient();
+    const permissions = new IosPhysicalPermissions(physicalDevice, client);
+
+    const result = await permissions.setPermissions("reset", "com.example.app", [" all "]);
+
+    const expanded = [
+      "camera",
+      "photos",
+      "microphone",
+      "contacts",
+      "location",
+      "calendar",
+      "reminders",
+      "media-library",
+    ];
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(expanded.length);
+    expect(result.failedCount).toBe(0);
+    expect(result.results.map(r => r.permission)).toEqual(expanded);
+    expect(client.calls).toEqual([{ appId: "com.example.app", permissions: expanded }]);
+  });
+
+  test("reset deduplicates explicit resources already covered by all", async () => {
+    const client = new FakePhysicalPrivacyClient();
+    const permissions = new IosPhysicalPermissions(physicalDevice, client);
+
+    const result = await permissions.setPermissions("reset", "com.example.app", [
+      "camera",
+      "all",
+      "photos",
+      "photos-add",
+      "contacts-limited",
+      "location-always",
+    ]);
+
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(8);
+    expect(result.results.map(r => r.permission)).toEqual([
+      "camera",
+      "photos",
+      "microphone",
+      "contacts",
+      "location",
+      "calendar",
+      "reminders",
+      "media-library",
+    ]);
+    expect(client.calls).toEqual([
+      {
+        appId: "com.example.app",
+        permissions: [
+          "camera",
+          "photos",
+          "microphone",
+          "contacts",
+          "location",
+          "calendar",
+          "reminders",
+          "media-library",
+        ],
+      },
+    ]);
+  });
+
+  test("reset preserves the first requested alias when deduplicating aliases", async () => {
+    const client = new FakePhysicalPrivacyClient();
+    const permissions = new IosPhysicalPermissions(physicalDevice, client);
+
+    const result = await permissions.setPermissions("reset", "com.example.app", ["photos-add", "photos"]);
+
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(1);
+    expect(result.results.map(r => r.permission)).toEqual(["photos-add"]);
+    expect(client.calls).toEqual([{ appId: "com.example.app", permissions: ["photos-add"] }]);
+  });
+
   test("reset delegates to the client and reports per-permission success", async () => {
     const client = new FakePhysicalPrivacyClient();
     const permissions = new IosPhysicalPermissions(physicalDevice, client);

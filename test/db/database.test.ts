@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
+import { mkdtempSync, rmSync } from "fs";
 import { Kysely } from "kysely";
+import { join } from "path";
+import { tmpdir } from "os";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import {
   configureSqliteDatabase,
@@ -38,6 +41,7 @@ describe("configureSqliteDatabase", () => {
     expect(db.statements).toEqual([
       `PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`,
       "PRAGMA journal_mode = WAL;",
+      "PRAGMA synchronous = NORMAL;",
       "PRAGMA foreign_keys = ON;",
     ]);
   });
@@ -54,6 +58,28 @@ describe("configureSqliteDatabase", () => {
       expect(result?.timeout).toBe(5_000);
     } finally {
       sqliteDb.close();
+    }
+  });
+
+  test("sets synchronous NORMAL after enabling WAL on Bun SQLite databases", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "auto-mobile-sqlite-"));
+    const sqliteDb = new BunDatabase(join(tempDir, "test.db"));
+
+    try {
+      configureSqliteDatabase(sqliteDb);
+
+      const journalMode = sqliteDb
+        .query<{ journal_mode: string }, []>("PRAGMA journal_mode;")
+        .get();
+      expect(journalMode?.journal_mode).toBe("wal");
+
+      const synchronous = sqliteDb
+        .query<{ synchronous: number }, []>("PRAGMA synchronous;")
+        .get();
+      expect(synchronous?.synchronous).toBe(1);
+    } finally {
+      sqliteDb.close();
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 });

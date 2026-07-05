@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
   <!-- Package visibility for Android 11+ to access ContentProviders in other apps -->
   <!-- This permission allows the accessibility service to query any installed package -->
   <!-- Required for storage inspection to work with any app that has the AutoMobile SDK -->
-  <!-- Note: This is appropriate for a debugging/development tool like AutoMobile -->
-  <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+  <!-- Note: This is appropriate for a debugging/development tool like AutoMobile. -->
+  <!-- CtrlProxy is sideloaded via adb for device automation and is never distributed -->
+  <!-- through Google Play, so the Play policy behind QueryAllPackagesPermission does -->
+  <!-- not apply. A <queries> allowlist is impossible: target apps are arbitrary. -->
+  <uses-permission
+      android:name="android.permission.QUERY_ALL_PACKAGES"
+      tools:ignore="QueryAllPackagesPermission" />
   <uses-permission android:name="dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL" />
 
   <!-- Permissions required for accessibility service -->

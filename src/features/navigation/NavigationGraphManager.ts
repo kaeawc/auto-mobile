@@ -354,23 +354,15 @@ export class NavigationGraphManager implements NavigationGraphService {
     const recentToolCall = this.findCorrelatedToolCall(timestamp);
     const currentModalStack = recentToolCall?.uiState?.modalStack;
 
-    // Enforce the shared-connection precondition BEFORE reserving the connection:
-    // the transaction below is opened on the navigation connection and the coverage
-    // repo is enlisted onto that same `trx`, so a coverage repo bound to a DIFFERENT
-    // connection would split writes and defeat the rollback. Holds by construction in
-    // production (both default to the getDatabase() singleton); see assertSharedConnection.
-    this.assertSharedConnection();
-
-    // Persist the whole graph write atomically. Every read and write inside the
-    // callback runs on `trx` (via withExecutor) — a stray singleton query here
-    // would deadlock the daemon's only connection (bunSqliteDialect). Keep the body
-    // to DB statements only: telemetry push, notifications, screenshot capture and
-    // in-memory field assignments stay OUTSIDE so the exclusive connection is not
-    // held across non-DB IO, and so they never run when the transaction rolls back.
-    const node = await this.repository.runInTransaction(async trx => {
-      const repository = this.repository.withExecutor(trx);
-      const testCoverageRepository = this.testCoverageRepository.withExecutor(trx);
-
+    // Persist the whole graph write atomically across BOTH repos via the shared helper,
+    // which owns the assertSharedConnection() precondition and the bind-both-repos
+    // preamble (#3075). Every read and write inside the callback runs on the transaction
+    // (via withExecutor) — a stray singleton query here would deadlock the daemon's only
+    // connection (bunSqliteDialect). Keep the body to DB statements only: telemetry push,
+    // notifications, screenshot capture and in-memory field assignments stay OUTSIDE so
+    // the exclusive connection is not held across non-DB IO, and so they never run when
+    // the transaction rolls back.
+    const node = await this.runBothReposInTransaction(async (repository, testCoverageRepository) => {
       // Get or create node and update visit count
       const n = await repository.getOrCreateNode(appId, screenName, timestamp);
 
@@ -486,9 +478,51 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
+   * Run a graph write that spans BOTH the navigation and test-coverage repositories
+   * inside a single transaction, owning the shared-connection precondition so no
+   * caller can forget it (#3075). This is the one place the assert + bind-both-repos
+   * preamble lives, so a future third both-repos writer inherits the guard for free
+   * (the exact failure mode #2968/#2980 guard against).
+   *
+   * It (1) asserts assertSharedConnection() once, (2) opens a transaction on the
+   * navigation connection, and (3) enlists both repos onto that same `trx` via
+   * withExecutor before invoking `fn` with the two bound repos. Every read and write
+   * inside `fn` runs on `trx` — a stray singleton query would deadlock the daemon's
+   * only connection (bunSqliteDialect).
+   *
+   * Callers keep in-memory field updates, notifyGraphUpdated and telemetry OUTSIDE
+   * `fn` (post-commit): this helper owns only the DB-atomic preamble, matching the
+   * convention that side effects never run inside the transaction or on rollback.
+   *
+   * Not for the single-repo writers: promoteSuggestion enlists only the navigation
+   * repo and deliberately carries no coverage binding or shared-connection assertion,
+   * so it stays on its own runInTransaction path.
+   */
+  private async runBothReposInTransaction<T>(
+    fn: (
+      navigationRepository: NavigationRepository,
+      testCoverageRepository: TestCoverageRepository
+    ) => Promise<T>
+  ): Promise<T> {
+    // Enforce the shared-connection precondition BEFORE reserving the connection: the
+    // transaction is opened on the navigation connection and the coverage repo is
+    // enlisted onto that same `trx`, so a coverage repo bound to a DIFFERENT connection
+    // would split writes and defeat the rollback. Holds by construction in production
+    // (both default to the getDatabase() singleton); see assertSharedConnection.
+    this.assertSharedConnection();
+
+    return this.repository.runInTransaction(async trx => {
+      const navigationRepository = this.repository.withExecutor(trx);
+      const testCoverageRepository = this.testCoverageRepository.withExecutor(trx);
+      return fn(navigationRepository, testCoverageRepository);
+    });
+  }
+
+  /**
    * Assert that the navigation and test-coverage repositories resolve to the same
-   * underlying connection — the precondition for recordNavigationEvent's single
-   * transaction to cover both repos' writes atomically.
+   * underlying connection — the precondition for the two-repo graph writes' single
+   * transaction to cover both repos' writes atomically. Invoked from
+   * runBothReposInTransaction, which is the sole owner of this precondition.
    *
    * Both default to the getDatabase() singleton, so this holds by construction in
    * production; the guard exists so a mistakenly foreign-bound coverage repo
@@ -499,8 +533,8 @@ export class NavigationGraphManager implements NavigationGraphService {
     if (this.repository.resolveConnection() !== this.testCoverageRepository.resolveConnection()) {
       throw new ActionableError(
         "NavigationGraphManager: the navigation and test-coverage repositories resolve to " +
-        "different database connections. recordNavigationEvent opens one transaction on the " +
-        "navigation connection and enlists coverage writes onto it; a foreign-bound coverage " +
+        "different database connections. The two-repo graph writes open one transaction on the " +
+        "navigation connection and enlist coverage writes onto it; a foreign-bound coverage " +
         "repo would split writes across connections and silently defeat the rollback guarantee. " +
         "Both repositories must share the same connection (both default to the getDatabase() singleton)."
       );
@@ -535,19 +569,15 @@ export class NavigationGraphManager implements NavigationGraphService {
     if (existingNode) {
       const appId = this.currentAppId;
 
-      // Persist the counter writes atomically: updateNodeVisit + coverage recordNodeVisit +
-      // touchApp span two repos on the shared connection. Enlist both onto one `trx` via
-      // withExecutor so a mid-sequence throw (e.g. the coverage recordNodeVisit) rolls back the node-visit
-      // increment too, instead of leaving the graph partially applied. Assert the shared-connection
-      // precondition first (the coverage repo is enlisted onto the navigation `trx`). In-memory
-      // field updates and notifyGraphUpdated stay OUTSIDE so they never run on rollback and the
-      // exclusive connection is not held across non-DB work.
-      this.assertSharedConnection();
-
-      await this.repository.runInTransaction(async trx => {
-        const repository = this.repository.withExecutor(trx);
-        const testCoverageRepository = this.testCoverageRepository.withExecutor(trx);
-
+      // Persist the counter writes atomically across BOTH repos via the shared helper,
+      // which owns the assertSharedConnection() precondition and the bind-both-repos
+      // preamble (#3075): updateNodeVisit + coverage recordNodeVisit + touchApp span two
+      // repos on the shared connection, so a mid-sequence throw (e.g. the coverage
+      // recordNodeVisit) rolls back the node-visit increment too instead of leaving the
+      // graph partially applied. In-memory field updates and notifyGraphUpdated stay
+      // OUTSIDE so they never run on rollback and the exclusive connection is not held
+      // across non-DB work.
+      await this.runBothReposInTransaction(async (repository, testCoverageRepository) => {
         // Update the existing node's visit count and last_seen_at
         await repository.updateNodeVisit(existingNode.id, timestamp);
 

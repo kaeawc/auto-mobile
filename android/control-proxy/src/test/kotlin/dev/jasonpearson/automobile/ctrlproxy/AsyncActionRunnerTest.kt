@@ -105,6 +105,24 @@ class AsyncActionRunnerTest {
   }
 
   @Test
+  fun `tags the launched coroutine with a RequestIdContext so the scope guard can correlate`() =
+    runTest {
+      var recovered: String? = "sentinel"
+      val runner = AsyncActionRunner(scope = this, broadcastResponse = {}, logError = { _, _ -> })
+
+      // The correlation id must be present on the launched coroutine's context so that a throwable
+      // AsyncActionRunner does not catch (an Error/AssertionError) still escapes with the id
+      // attached
+      // for ServiceScopeGuard to recover.
+      runner.launch(requestId = "req-async", action = "screenshot") {
+        recovered = coroutineContext[RequestIdContext]?.requestId
+      }
+      advanceUntilIdle()
+
+      assertEquals("req-async", recovered)
+    }
+
+  @Test
   fun `swallows a failure raised while broadcasting the error frame`() = runTest {
     val logged = mutableListOf<String>()
     val runner =

@@ -124,6 +124,70 @@ class ServiceScopeGuardTest {
   }
 
   @Test
+  fun `a failing fallback broadcast on the guarded scope does not spin into a loop`() = runTest {
+    // Production wires `emitScope = { serviceScope }`, i.e. the fallback broadcast is re-launched
+    // on
+    // the *same* scope that carries the guard. If the guard's inner catch ever stopped swallowing,
+    // the failing re-broadcast would escape back into this handler and loop forever. Point
+    // emitScope
+    // at the guarded scope (as production does) and make the broadcast throw — the log count must
+    // stay bounded, proving the loop is closed by the inner catch, not merely by a handler-free
+    // scope.
+    val logged = mutableListOf<String>()
+    var guardedScope: CoroutineScope? = null
+    val guard =
+      ServiceScopeGuard(
+        emitScope = { guardedScope!! },
+        broadcastResponse = { throw RuntimeException("socket closed") },
+        logError = { message, _ -> logged.add(message) },
+      )
+    val scope =
+      CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler) + guard.handler)
+    guardedScope = scope
+
+    scope.launch(RequestIdContext("req-loop")) { throw RuntimeException("original failure") }
+    advanceUntilIdle()
+
+    // Exactly two logs: the original uncaught failure and the single failed re-broadcast. A
+    // re-entrant loop would produce an unbounded (or hanging) count.
+    assertEquals("re-entrancy must be closed: $logged", 2, logged.size)
+  }
+
+  @Test
+  fun `correlates an Error that escapes AsyncActionRunner through to the guard`() = runTest {
+    // AsyncActionRunner catches Exception but not a bare Throwable (Error/AssertionError). Such a
+    // throw escapes its launch and lands in the scope guard — and because AsyncActionRunner tags
+    // the
+    // coroutine with RequestIdContext, the guard recovers the correlation id rather than emitting a
+    // null-id (daemon-no-op) frame. This is the end-to-end proof the two seams compose.
+    val broadcasts = mutableListOf<WebSocketResponse>()
+    var guardedScope: CoroutineScope? = null
+    val guard =
+      ServiceScopeGuard(
+        emitScope = { guardedScope!! },
+        broadcastResponse = { broadcasts.add(it) },
+        logError = { _, _ -> },
+      )
+    val scope =
+      CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler) + guard.handler)
+    guardedScope = scope
+    val runner =
+      AsyncActionRunner(
+        scope = scope,
+        broadcastResponse = { broadcasts.add(it) },
+        logError = { _, _ -> },
+      )
+
+    runner.launch(requestId = "req-err", action = "screenshot") {
+      throw AssertionError("assertion tripped")
+    }
+    advanceUntilIdle()
+
+    val error = broadcasts.single() as ErrorResponse
+    assertEquals("the escaped Error must be correlated by the guard", "req-err", error.requestId)
+  }
+
+  @Test
   fun `RequestIdContext exposes its correlation id via the context key`() = runTest {
     var recovered: String? = "sentinel"
     val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))

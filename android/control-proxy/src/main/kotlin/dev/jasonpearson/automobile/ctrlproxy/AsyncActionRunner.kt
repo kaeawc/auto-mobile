@@ -53,32 +53,39 @@ class AsyncActionRunner(
     requestId: String?,
     action: String,
     block: suspend CoroutineScope.() -> Unit,
-  ): Job = scope.launch {
-    try {
-      block()
-    } catch (e: CancellationException) {
-      // Cooperative cancellation means the service scope is shutting down — never convert it into
-      // a client-facing error frame; let it propagate so the coroutine unwinds cleanly.
-      throw e
-    } catch (e: Exception) {
-      val cause = e.message ?: e::class.simpleName ?: "unknown error"
-      logError("Async action '$action' failed (requestId=$requestId)", e)
+  ): Job =
+    // Tag the launched coroutine with [RequestIdContext] so that a throwable this handler does
+    // *not*
+    // catch — a non-[Exception] [Throwable] such as an [Error]/[AssertionError] — still escapes
+    // with
+    // the correlation id attached, letting the scope-level [ServiceScopeGuard] emit a *correlated*
+    // error frame instead of a null-id one. The common `Exception` case is handled below directly.
+    scope.launch(RequestIdContext(requestId)) {
       try {
-        broadcastResponse(
-          ErrorResponse(requestId = requestId, error = "Action '$action' failed: $cause")
-        )
-      } catch (broadcastError: CancellationException) {
-        throw broadcastError
-      } catch (broadcastError: Exception) {
-        // A failure while reporting the error must not escape and crash the launch (which would
-        // defeat the whole point). Log and swallow — the client will fall back to its timeout.
-        logError(
-          "Failed to broadcast async error for action '$action' (requestId=$requestId)",
-          broadcastError,
-        )
+        block()
+      } catch (e: CancellationException) {
+        // Cooperative cancellation means the service scope is shutting down — never convert it into
+        // a client-facing error frame; let it propagate so the coroutine unwinds cleanly.
+        throw e
+      } catch (e: Exception) {
+        val cause = e.message ?: e::class.simpleName ?: "unknown error"
+        logError("Async action '$action' failed (requestId=$requestId)", e)
+        try {
+          broadcastResponse(
+            ErrorResponse(requestId = requestId, error = "Action '$action' failed: $cause")
+          )
+        } catch (broadcastError: CancellationException) {
+          throw broadcastError
+        } catch (broadcastError: Exception) {
+          // A failure while reporting the error must not escape and crash the launch (which would
+          // defeat the whole point). Log and swallow — the client will fall back to its timeout.
+          logError(
+            "Failed to broadcast async error for action '$action' (requestId=$requestId)",
+            broadcastError,
+          )
+        }
       }
     }
-  }
 
   companion object {
     private const val TAG = "AsyncActionRunner"

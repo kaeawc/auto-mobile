@@ -8,8 +8,7 @@ import { NavigationEdge, UIState } from "./NavigationGraphManager";
 import { ModalState, ScrollPosition } from "../../utils/interfaces/NavigationGraph";
 import { UIStateExtractor } from "./UIStateExtractor";
 import { RealObserveScreen } from "../observe/ObserveScreen";
-import { asToolEnvelope, getStructuredField } from "../../utils/toolUtils";
-import { SwipeOnToolPayload } from "../../models";
+import { getStructuredField } from "../../utils/toolUtils";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
 
@@ -124,7 +123,8 @@ export class DefaultUIStateSetup implements UIStateSetup {
     );
 
     try {
-      // Get the swipeOn tool from the registry
+      // Resolve swipeOn first so a missing tool degrades gracefully (return null)
+      // rather than throwing out of the `callInternalTyped` seam below.
       const swipeOnTool = ToolRegistry.getTool("swipeOn");
       if (!swipeOnTool) {
         logger.warn(`[UI_STATE_SETUP] swipeOn tool not found, skipping scroll setup`);
@@ -161,22 +161,23 @@ export class DefaultUIStateSetup implements UIStateSetup {
         swipeOnArgs.speed = scrollPosition.speed;
       }
 
-      // Execute swipeOn with lookFor. Marked internal (#3087) so that under
-      // `--actions-diff-observe` this setup scroll neither diffs its observation
-      // nor advances the agent-facing diff baseline — the `found` read below still
-      // sees the full (unstripped) result.
-      // Typed envelope (issue #2932): `swipeOnTool.handler` is declared
-      // `Promise<any>` at the registry boundary, so narrow to the concrete
-      // `SwipeOnToolPayload` envelope via `asToolEnvelope` (it names the
-      // unchecked `any`→typed crossing). `found` lives under `structuredContent`
+      // Execute swipeOn with lookFor via the internal-call seam (#3108), which
+      // marks the call internal (#3087) so that under `--actions-diff-observe`
+      // this setup scroll neither diffs its observation nor advances the
+      // agent-facing diff baseline — the `found` read below still sees the full
+      // (unstripped) result.
+      // Typed envelope (issues #2932 / #3222): `callInternalTyped` threads the
+      // concrete `SwipeOnToolPayload` type through the registry seam and validates
+      // the shape at runtime, so `result` is `StructuredToolResponse<…> | undefined`
+      // with no unchecked cast. `found` lives under `structuredContent`
       // (createStructuredToolResponse hoists only `success`/`error`); a raw
-      // `result?.found` off the envelope was always undefined, leaving this
-      // success branch dead so setup logged the "could not find" warning even on
-      // a successful scroll (issue #2897; same class as the toolRegistry
+      // `result?.found` off the envelope was always undefined, leaving this success
+      // branch dead so setup logged the "could not find" warning even on a
+      // successful scroll (issue #2897; same class as the toolRegistry
       // scroll-position and #2758 lastHierarchy fixes). With `result` typed,
-      // `result.found` is now a compile error and the `getStructuredField` keys
-      // are checked against the payload.
-      const result = asToolEnvelope<SwipeOnToolPayload>(await ToolRegistry.callInternal(swipeOnTool, swipeOnArgs));
+      // `result.found` is a compile error and the `getStructuredField` keys are
+      // checked against the payload.
+      const result = await ToolRegistry.callInternalTyped("swipeOn", swipeOnArgs);
 
       if (getStructuredField(result, "success") && getStructuredField(result, "found")) {
         logger.info(`[UI_STATE_SETUP] Successfully scrolled to target element`);

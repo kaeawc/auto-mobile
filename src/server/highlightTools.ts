@@ -378,12 +378,5 @@ export function registerHighlightTools(dependencies: HighlightToolDependencies =
     }
   };
 
-  ToolRegistry.registerDeviceAware(
-    "highlight",
-    "Draw a visual highlight around a UI element.",
-    highlightSchema,
-    highlightHandler,
-    false,
-    false
-  );
+  ToolRegistry.registerDeviceAware("highlight", "Draw a visual highlight around a UI element.", highlightSchema, highlightHandler);
 }

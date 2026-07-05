@@ -67,11 +67,5 @@ export function registerBiometricTools() {
   };
 
   // Register the tool
-  ToolRegistry.registerDeviceAware(
-    "biometricAuth",
-    "Simulate biometric auth: Android emulator/SDK hook or iOS Simulator.",
-    biometricAuthSchema,
-    biometricAuthHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("biometricAuth", "Simulate biometric auth: Android emulator/SDK hook or iOS Simulator.", biometricAuthSchema, biometricAuthHandler, { supportsProgress: true });
 }

@@ -317,16 +317,6 @@ export function registerVideoRecordingTools(): void {
     );
   };
 
-  ToolRegistry.registerDeviceAware(
-    "videoRecording",
-    "Start or stop device video recording.",
-    videoRecordingSchema,
-    videoRecordingHandler,
-    false,
-    false,
-    {
-      shouldEnsureDevice: args => !(args.action === "stop" && args.recordingId),
-      nonDeviceHandler: videoRecordingNonDeviceHandler,
-    }
-  );
+  ToolRegistry.registerDeviceAware("videoRecording", "Start or stop device video recording.", videoRecordingSchema, videoRecordingHandler, { shouldEnsureDevice: args => !(args.action === "stop" && args.recordingId),
+    nonDeviceHandler: videoRecordingNonDeviceHandler, });
 }

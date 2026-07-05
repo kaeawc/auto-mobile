@@ -12,6 +12,10 @@ export interface RegisteredTool {
   requiresDevice?: boolean;
 }
 
+export interface ToolRegistrationOptions {
+  supportsProgress?: boolean;
+}
+
 /**
  * Interface for tool registry
  */
@@ -35,7 +39,7 @@ export interface ToolRegistry {
    * @param description - Description of the tool
    * @param schema - The schema for tool parameters
    * @param handler - The handler function for the tool
-   * @param supportsProgress - Whether the tool supports progress callbacks
+   * @param options - Tool registration options
    * @returns void
    */
   registerTool(
@@ -43,7 +47,7 @@ export interface ToolRegistry {
     description: string,
     schema: any,
     handler: (args: any) => Promise<any>,
-    supportsProgress?: boolean
+    options?: ToolRegistrationOptions
   ): void;
 }
 
@@ -80,8 +84,8 @@ export class DefaultToolRegistry implements ToolRegistry {
     description: string,
     schema: any,
     handler: (args: any) => Promise<any>,
-    supportsProgress?: boolean
+    options?: ToolRegistrationOptions
   ): void {
-    ToolRegistryImpl.register(name, description, schema, handler, supportsProgress);
+    ToolRegistryImpl.register(name, description, schema, handler, options);
   }
 }

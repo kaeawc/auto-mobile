@@ -306,12 +306,5 @@ export function registerObserveTools() {
     observeHandler
   );
 
-  ToolRegistry.registerDeviceAware(
-    "identifyInteractions",
-    "Suggest likely interactions",
-    identifyInteractionsSchema,
-    identifyInteractionsHandler,
-    false,
-    true
-  );
+  ToolRegistry.registerDeviceAware("identifyInteractions", "Suggest likely interactions", identifyInteractionsSchema, identifyInteractionsHandler, { debugOnly: true });
 }

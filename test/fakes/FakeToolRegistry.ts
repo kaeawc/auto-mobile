@@ -2,7 +2,7 @@
  * Fake implementation of ToolRegistry for testing
  * Allows registering and retrieving tools in memory
  */
-import { ToolRegistry, RegisteredTool } from "../../src/utils/server/ToolRegistry";
+import { ToolRegistry, RegisteredTool, ToolRegistrationOptions } from "../../src/utils/server/ToolRegistry";
 
 export class FakeToolRegistry implements ToolRegistry {
   private tools: Map<string, RegisteredTool> = new Map();
@@ -13,21 +13,21 @@ export class FakeToolRegistry implements ToolRegistry {
    * @param description - Description of the tool
    * @param schema - The schema for tool parameters
    * @param handler - The handler function for the tool
-   * @param supportsProgress - Whether the tool supports progress callbacks
+   * @param options - Tool registration options
    */
   registerTool(
     name: string,
     description: string,
     schema: any,
     handler: (args: any) => Promise<any>,
-    supportsProgress: boolean = false
+    options: ToolRegistrationOptions = {}
   ): void {
     this.tools.set(name, {
       name,
       description,
       schema,
       handler,
-      supportsProgress,
+      supportsProgress: options.supportsProgress ?? false,
       requiresDevice: false
     });
   }

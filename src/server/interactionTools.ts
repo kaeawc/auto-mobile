@@ -942,151 +942,41 @@ export function registerInteractionTools() {
   };
 
   // Register with the tool registry
-  ToolRegistry.registerDeviceAware(
-    "clearText",
-    "Clear text from focused input",
-    clearTextSchema,
-    clearTextHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("clearText", "Clear text from focused input", clearTextSchema, clearTextHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "selectAllText",
-    "Select all text in focused input",
-    selectAllTextSchema,
-    selectAllTextHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("selectAllText", "Select all text in focused input", selectAllTextSchema, selectAllTextHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "pressButton",
-    "Press device or navigation button",
-    pressButtonSchema,
-    pressButtonHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("pressButton", "Press device or navigation button", pressButtonSchema, pressButtonHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "systemTray",
-    "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
-    systemTraySchema,
-    systemTrayHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("systemTray", "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)", systemTraySchema, systemTrayHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "inputText",
-    "Input text. The optional mode field is Android-only and ignored on iOS.",
-    inputTextSchema,
-    inputTextHandler,
-    false // Does not support progress notifications
-  );
+  ToolRegistry.registerDeviceAware("inputText", "Input text. The optional mode field is Android-only and ignored on iOS.", inputTextSchema, inputTextHandler);
 
-  ToolRegistry.registerDeviceAware(
-    "openLink",
-    "Open URL in browser",
-    openLinkSchema,
-    openLinkHandler,
-    false // Does not support progress notifications
-  );
+  ToolRegistry.registerDeviceAware("openLink", "Open URL in browser", openLinkSchema, openLinkHandler);
 
-  ToolRegistry.registerDeviceAware(
-    "tapOn",
-    "Tap an element by text/content-desc or resource-id; use sibling for adjacent controls.",
-    tapOnSchema,
-    tapOnHandler,
-    true,
-    false,
-    { outputSchema: tapOnResultSchema }
-  );
+  ToolRegistry.registerDeviceAware("tapOn", "Tap an element by text/content-desc or resource-id; use sibling for adjacent controls.", tapOnSchema, tapOnHandler, { supportsProgress: true, outputSchema: tapOnResultSchema });
 
-  ToolRegistry.registerDeviceAware(
-    "tapAny",
-    "Tap any clickable element; scope with container or scrollableContainer.",
-    tapAnySchema,
-    tapAnyHandler,
-    true
-  );
+  ToolRegistry.registerDeviceAware("tapAny", "Tap any clickable element; scope with container or scrollableContainer.", tapAnySchema, tapAnyHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "dragAndDrop",
-    "Drag and drop element",
-    dragAndDropSchema,
-    dragAndDropHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("dragAndDrop", "Drag and drop element", dragAndDropSchema, dragAndDropHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "swipeOn",
-    "Swipe/scroll on screen or elements",
-    swipeOnSchema,
-    swipeOnHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("swipeOn", "Swipe/scroll on screen or elements", swipeOnSchema, swipeOnHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "pinchOn",
-    "Pinch to zoom",
-    pinchOnSchema,
-    pinchOnHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("pinchOn", "Pinch to zoom", pinchOnSchema, pinchOnHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "shake",
-    "Shake device; iOS Simulator only.",
-    shakeSchema,
-    shakeHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("shake", "Shake device; iOS Simulator only.", shakeSchema, shakeHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "imeAction",
-    "Perform IME action",
-    imeActionSchema,
-    imeActionHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("imeAction", "Perform IME action", imeActionSchema, imeActionHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "keyboard",
-    "Open, close, or detect the on-screen keyboard",
-    keyboardSchema,
-    keyboardHandler,
-    false // Does not support progress notifications
-  );
+  ToolRegistry.registerDeviceAware("keyboard", "Open, close, or detect the on-screen keyboard", keyboardSchema, keyboardHandler);
 
-  ToolRegistry.registerDeviceAware(
-    "recentApps",
-    "Open recent apps",
-    recentAppsSchema,
-    recentAppsHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("recentApps", "Open recent apps", recentAppsSchema, recentAppsHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware(
-    "homeScreen",
-    "Go to home screen",
-    homeScreenSchema,
-    homeScreenHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("homeScreen", "Go to home screen", homeScreenSchema, homeScreenHandler, { supportsProgress: true });
 
   // Register the new rotate tool
-  ToolRegistry.registerDeviceAware(
-    "rotate",
-    "Rotate device orientation",
-    rotateSchema,
-    rotateHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.registerDeviceAware("rotate", "Rotate device orientation", rotateSchema, rotateHandler, { supportsProgress: true });
 
   // Register the clipboard tool
-  ToolRegistry.registerDeviceAware(
-    "clipboard",
-    "Clipboard operations (copy/paste/clear/get)",
-    clipboardSchema,
-    clipboardHandler,
-    false // Does not support progress notifications
-  );
+  ToolRegistry.registerDeviceAware("clipboard", "Clipboard operations (copy/paste/clear/get)", clipboardSchema, clipboardHandler);
 }

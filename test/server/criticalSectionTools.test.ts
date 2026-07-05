@@ -222,21 +222,13 @@ describe("criticalSection tool", () => {
 
     const executionLog: string[] = [];
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    ToolRegistry.registerDeviceAware(
-      "mockPlanExecutableHiddenStep",
-      "Mock hidden plan-executable step",
-      z.object({
-        device: z.string(),
-        value: z.string(),
-      }),
-      async (_device, params: { device: string; value: string }) => {
-        executionLog.push(`${params.device}:${params.value}`);
-        return { success: true };
-      },
-      false,
-      true,
-      { planExecutable: true }
-    );
+    ToolRegistry.registerDeviceAware("mockPlanExecutableHiddenStep", "Mock hidden plan-executable step", z.object({
+      device: z.string(),
+      value: z.string(),
+    }), async (_device, params: { device: string; value: string }) => {
+      executionLog.push(`${params.device}:${params.value}`);
+      return { success: true };
+    }, { debugOnly: true, planExecutable: true });
 
     expect(ToolRegistry.getTool("mockPlanExecutableHiddenStep")).toBeUndefined();
     expect(ToolRegistry.getToolForPlan("mockPlanExecutableHiddenStep")).toBeDefined();
@@ -285,14 +277,7 @@ describe("criticalSection tool", () => {
       name: "Test Device Hidden Debug Tool",
     };
 
-    ToolRegistry.registerDeviceAware(
-      "mockDebugOnlyHiddenStep",
-      "Mock debug-only hidden step",
-      z.object({ device: z.string() }),
-      async () => ({ success: true }),
-      false,
-      true
-    );
+    ToolRegistry.registerDeviceAware("mockDebugOnlyHiddenStep", "Mock debug-only hidden step", z.object({ device: z.string() }), async () => ({ success: true }), { debugOnly: true });
 
     expect(ToolRegistry.getTool("mockDebugOnlyHiddenStep")).toBeUndefined();
     expect(ToolRegistry.getToolForPlan("mockDebugOnlyHiddenStep")).toBeUndefined();
@@ -325,21 +310,13 @@ describe("criticalSection tool", () => {
 
     const executionLog: string[] = [];
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    ToolRegistry.registerDeviceAware(
-      "mockEmbeddedPlanExecutableStep",
-      "Mock embedded plan-executable step",
-      z.object({
-        device: z.string(),
-        value: z.string(),
-      }),
-      async (_device, params: { device: string; value: string }) => {
-        executionLog.push(`${params.device}:${params.value}`);
-        return { success: true };
-      },
-      false,
-      false,
-      { embeddedSdkOnly: true, planExecutable: true }
-    );
+    ToolRegistry.registerDeviceAware("mockEmbeddedPlanExecutableStep", "Mock embedded plan-executable step", z.object({
+      device: z.string(),
+      value: z.string(),
+    }), async (_device, params: { device: string; value: string }) => {
+      executionLog.push(`${params.device}:${params.value}`);
+      return { success: true };
+    }, { embeddedSdkOnly: true, planExecutable: true });
 
     expect(ToolRegistry.getTool("mockEmbeddedPlanExecutableStep")).toBeUndefined();
     expect(ToolRegistry.getToolForPlan("mockEmbeddedPlanExecutableStep")).toBeDefined();

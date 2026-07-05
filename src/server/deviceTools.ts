@@ -540,13 +540,7 @@ export function registerDeviceTools() {
     listDevicesHandler
   );
 
-  ToolRegistry.register(
-    "startDevice",
-    "Start device",
-    startDeviceSchema,
-    startDeviceHandler,
-    true // Supports progress notifications
-  );
+  ToolRegistry.register("startDevice", "Start device", startDeviceSchema, startDeviceHandler, { supportsProgress: true });
 
   ToolRegistry.register(
     "killDevice",

@@ -175,15 +175,7 @@ export function registerDatabaseTools() {
   };
 
   // Register the sqlQuery tool
-  ToolRegistry.registerDeviceAware(
-    "sqlQuery",
-    "Execute SQL on app SQLite database.",
-    sqlQuerySchema,
-    sqlQueryHandler,
-    false,
-    false,
-    { embeddedSdkOnly: true }
-  );
+  ToolRegistry.registerDeviceAware("sqlQuery", "Execute SQL on app SQLite database.", sqlQuerySchema, sqlQueryHandler, { embeddedSdkOnly: true });
 }
 
 /**

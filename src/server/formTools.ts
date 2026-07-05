@@ -66,52 +66,44 @@ const setUIStateResultSchema = z.object({
  */
 export function registerFormTools(): void {
   // setUIState tool
-  ToolRegistry.registerDeviceAware(
-    "setUIState",
-    "Set multiple form fields by desired state.",
-    addDeviceTargetingToSchema(setUIStateSchema),
-    async (
-      device: BootedDevice,
-      args: z.infer<typeof setUIStateSchema>,
-      progress?: ProgressCallback,
-      signal?: AbortSignal
-    ) => {
-      const adb = device.platform === "android" ? defaultAdbClientFactory.create(device) : null;
-      const setUIState = new SetUIState(device, adb);
+  ToolRegistry.registerDeviceAware("setUIState", "Set multiple form fields by desired state.", addDeviceTargetingToSchema(setUIStateSchema), async (
+    device: BootedDevice,
+    args: z.infer<typeof setUIStateSchema>,
+    progress?: ProgressCallback,
+    signal?: AbortSignal
+  ) => {
+    const adb = device.platform === "android" ? defaultAdbClientFactory.create(device) : null;
+    const setUIState = new SetUIState(device, adb);
 
-      const result = await setUIState.execute(
-        {
-          fields: args.fields.map(f => ({
-            selector: {
-              text: f.selector.text,
-              elementId: f.selector.elementId
-            },
-            value: f.value,
-            selected: f.selected
-          })),
-          scrollDirection: args.scrollDirection
-        },
-        progress,
-        signal
-      );
-
-      return createStructuredToolResponse({
-        success: result.success,
-        fields: result.fields.map(f => ({
-          selector: f.selector,
-          success: f.success,
-          attempts: f.attempts,
-          verified: f.verified,
-          error: f.error,
-          fieldType: f.fieldType,
-          skipped: f.skipped
+    const result = await setUIState.execute(
+      {
+        fields: args.fields.map(f => ({
+          selector: {
+            text: f.selector.text,
+            elementId: f.selector.elementId
+          },
+          value: f.value,
+          selected: f.selected
         })),
-        totalAttempts: result.totalAttempts,
-        error: result.error
-      });
-    },
-    true, // supportsProgress
-    true, // debugOnly
-    { outputSchema: setUIStateResultSchema, planExecutable: true }
-  );
+        scrollDirection: args.scrollDirection
+      },
+      progress,
+      signal
+    );
+
+    return createStructuredToolResponse({
+      success: result.success,
+      fields: result.fields.map(f => ({
+        selector: f.selector,
+        success: f.success,
+        attempts: f.attempts,
+        verified: f.verified,
+        error: f.error,
+        fieldType: f.fieldType,
+        skipped: f.skipped
+      })),
+      totalAttempts: result.totalAttempts,
+      error: result.error
+    });
+  }, { supportsProgress: true, debugOnly: true, outputSchema: setUIStateResultSchema, planExecutable: true });
 }

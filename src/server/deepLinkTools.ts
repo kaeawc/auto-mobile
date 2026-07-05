@@ -43,11 +43,5 @@ export function registerDeepLinkTools() {
   };
 
   // Register with the tool registry
-  ToolRegistry.registerDeviceAware(
-    "getDeepLinks",
-    "Query app deep links",
-    getDeepLinksSchema,
-    getDeepLinksHandler,
-    false // Does not support progress notifications
-  );
+  ToolRegistry.registerDeviceAware("getDeepLinks", "Query app deep links", getDeepLinksSchema, getDeepLinksHandler);
 }

@@ -114,21 +114,7 @@ export function registerDebugTools() {
   };
 
   // Register tools with the tool registry
-  ToolRegistry.registerDeviceAware(
-    "debugSearch",
-    "Debug element search operations. Shows all matching elements, which one would be selected, and near-misses that almost matched. Use this to understand why an element isn't being found or why the wrong element is being selected.",
-    debugSearchSchema,
-    debugSearchHandler,
-    false,
-    true
-  );
+  ToolRegistry.registerDeviceAware("debugSearch", "Debug element search operations. Shows all matching elements, which one would be selected, and near-misses that almost matched. Use this to understand why an element isn't being found or why the wrong element is being selected.", debugSearchSchema, debugSearchHandler, { debugOnly: true });
 
-  ToolRegistry.registerDeviceAware(
-    "bugReport",
-    "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, logcat, window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.",
-    bugReportSchema,
-    bugReportHandler,
-    false,
-    true
-  );
+  ToolRegistry.registerDeviceAware("bugReport", "Generate a comprehensive bug report for debugging AutoMobile interactions. Captures screen state, view hierarchy, logcat, window info, and screenshot. The report is saved to a file for sharing with AutoMobile developers.", bugReportSchema, bugReportHandler, { debugOnly: true });
 }

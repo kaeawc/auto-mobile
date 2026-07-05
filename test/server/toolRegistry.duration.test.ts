@@ -30,23 +30,13 @@ describe("ToolRegistry tool call duration recording", () => {
   });
 
   test("records elapsed duration for a completed tool call", async () => {
-    ToolRegistry.registerDeviceAware(
-      "durationProbe",
-      "Measures tool call duration",
-      z.object({
-        sessionUuid: z.string().optional(),
-      }),
-      async () => ({ success: true }),
-      false,
-      false,
-      {
-        shouldEnsureDevice: () => false,
-        nonDeviceHandler: async () => {
-          timer.advanceTime(37);
-          return { success: true };
-        },
-      }
-    );
+    ToolRegistry.registerDeviceAware("durationProbe", "Measures tool call duration", z.object({
+      sessionUuid: z.string().optional(),
+    }), async () => ({ success: true }), { shouldEnsureDevice: () => false,
+      nonDeviceHandler: async () => {
+        timer.advanceTime(37);
+        return { success: true };
+      }, });
 
     const tool = ToolRegistry.getTool("durationProbe");
     expect(tool).toBeDefined();
@@ -64,21 +54,11 @@ describe("ToolRegistry tool call duration recording", () => {
   });
 
   test("records elapsed duration when a tool call throws", async () => {
-    ToolRegistry.registerDeviceAware(
-      "durationFailureProbe",
-      "Measures failed tool call duration",
-      z.object({}),
-      async () => ({ success: true }),
-      false,
-      false,
-      {
-        shouldEnsureDevice: () => false,
-        nonDeviceHandler: async () => {
-          timer.advanceTime(19);
-          throw new Error("probe failed");
-        },
-      }
-    );
+    ToolRegistry.registerDeviceAware("durationFailureProbe", "Measures failed tool call duration", z.object({}), async () => ({ success: true }), { shouldEnsureDevice: () => false,
+      nonDeviceHandler: async () => {
+        timer.advanceTime(19);
+        throw new Error("probe failed");
+      }, });
 
     const tool = ToolRegistry.getTool("durationFailureProbe");
     expect(tool).toBeDefined();
@@ -106,21 +86,11 @@ describe("ToolRegistry tool call duration recording", () => {
       },
     };
 
-    ToolRegistry.registerDeviceAware(
-      "durationAwaitProbe",
-      "Waits for duration recording",
-      z.object({}),
-      async () => ({ success: true }),
-      false,
-      false,
-      {
-        shouldEnsureDevice: () => false,
-        nonDeviceHandler: async () => {
-          timer.advanceTime(11);
-          return { success: true };
-        },
-      }
-    );
+    ToolRegistry.registerDeviceAware("durationAwaitProbe", "Waits for duration recording", z.object({}), async () => ({ success: true }), { shouldEnsureDevice: () => false,
+      nonDeviceHandler: async () => {
+        timer.advanceTime(11);
+        return { success: true };
+      }, });
 
     const tool = ToolRegistry.getTool("durationAwaitProbe");
     expect(tool).toBeDefined();
@@ -131,8 +101,9 @@ describe("ToolRegistry tool call duration recording", () => {
       return result;
     });
 
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let i = 0; i < 10 && !recordStarted; i++) {
+      await Promise.resolve();
+    }
 
     expect(recordStarted).toBe(true);
     expect(records).toEqual([

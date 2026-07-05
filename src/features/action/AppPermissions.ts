@@ -317,6 +317,20 @@ export class AppPermissions {
   }
 
   private async getIosPermissions(appId: string, input: GetAppPermissionsInput): Promise<GetAppPermissionsResult> {
+    // Physical iOS devices expose no readable TCC store, so permission state
+    // cannot be queried; mirror the set path's simulator/physical split and
+    // surface a physical-aware failure instead of the simulator-only message.
+    if (!isIosSimulatorUdid(this.device.deviceId)) {
+      return {
+        success: false,
+        appId: appId.trim(),
+        deviceId: this.device.deviceId,
+        platform: "ios",
+        permissions: [],
+        error: "iOS permission state queries are not available on physical devices (no readable TCC store); use setAppPermissions with action=reset to re-arm the system prompt",
+      };
+    }
+
     const iosPermissions = new IosSimulatorPermissions(this.device, this.simctl, this.tccReader);
     const result = await iosPermissions.getPermissions(appId, normalizePermissions(input.permissions));
 

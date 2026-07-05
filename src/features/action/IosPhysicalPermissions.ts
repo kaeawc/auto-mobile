@@ -19,6 +19,16 @@ const IOS_PHYSICAL_RESET_ALL_PERMISSIONS = [
   "media-library",
 ];
 
+const IOS_PHYSICAL_RESET_CANONICAL_PERMISSION = new Map<string, string>([
+  ["photos-add", "photos"],
+  ["contacts-limited", "contacts"],
+  ["location-always", "location"],
+]);
+
+function canonicalIosPhysicalResetPermission(permission: string): string {
+  return IOS_PHYSICAL_RESET_CANONICAL_PERMISSION.get(permission) ?? permission;
+}
+
 function expandIosPhysicalResetPermissions(permissions: string[]): string[] {
   const expanded: string[] = [];
   const seen = new Set<string>();
@@ -29,10 +39,11 @@ function expandIosPhysicalResetPermissions(permissions: string[]): string[] {
       : [permission];
 
     for (const expandedPermission of permissionsToAdd) {
-      if (seen.has(expandedPermission)) {
+      const canonicalPermission = canonicalIosPhysicalResetPermission(expandedPermission);
+      if (seen.has(canonicalPermission)) {
         continue;
       }
-      seen.add(expandedPermission);
+      seen.add(canonicalPermission);
       expanded.push(expandedPermission);
     }
   }

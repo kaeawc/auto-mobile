@@ -170,6 +170,45 @@ describe("AppPermissions", () => {
     ]);
   });
 
+  test("reports physical iOS all reset as per-resource operations", async () => {
+    const iosPhysicalClient = new RecordingPhysicalPrivacyClient();
+    const permissions = new AppPermissions(iosPhysical, { iosPhysicalClient });
+
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "reset",
+      permissions: ["all"],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(8);
+    expect(result.failedCount).toBe(0);
+    expect(result.operations.map(operation => operation.operationId)).toEqual([
+      "ios_xcuitest_reset:reset:camera",
+      "ios_xcuitest_reset:reset:photos",
+      "ios_xcuitest_reset:reset:microphone",
+      "ios_xcuitest_reset:reset:contacts",
+      "ios_xcuitest_reset:reset:location",
+      "ios_xcuitest_reset:reset:calendar",
+      "ios_xcuitest_reset:reset:reminders",
+      "ios_xcuitest_reset:reset:media-library",
+    ]);
+    expect(iosPhysicalClient.calls).toEqual([
+      {
+        appId: "com.example.app",
+        permissions: [
+          "camera",
+          "photos",
+          "microphone",
+          "contacts",
+          "location",
+          "calendar",
+          "reminders",
+          "media-library",
+        ],
+      },
+    ]);
+  });
+
   test("rejects grant on a physical iOS device with a reset-only failure", async () => {
     const iosPhysicalClient = new RecordingPhysicalPrivacyClient();
     const permissions = new AppPermissions(iosPhysical, { iosPhysicalClient });

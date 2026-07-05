@@ -5,9 +5,15 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { registerVideoRecordingTools } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { resetVideoRecordingManagerDependencies } from "../../src/server/videoRecordingManager";
+import {
+  resetVideoRecordingManagerDependencies,
+  setVideoRecordingManagerDependencies,
+} from "../../src/server/videoRecordingManager";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { createTestDatabase } from "../db/testDbHelper";
+import { VideoRecordingRepository } from "../../src/db/videoRecordingRepository";
+import { VideoRecordingConfigRepository } from "../../src/db/videoRecordingConfigRepository";
 
 const execFileAsync = promisify(execFile);
 const RUN_INTEGRATION = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_INTEGRATION === "1";
@@ -104,6 +110,23 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
     }
 
     serverConfig.setSkipCtrlProxyDownload(true);
+
+    // Inject an in-memory test DB through the manager's DI seam so the real
+    // videoRecording start/stop handlers never resolve the default file-backed
+    // getDatabase() (~/.auto-mobile/auto-mobile.db). The bun-test preload
+    // (test/setup/unitTestDbGuard.ts) arms AUTOMOBILE_UNIT_TEST_DB_GUARD, which
+    // makes that resolution throw "Unit test resolved the real file-backed
+    // database ..." (issues #3067/#3082, root cause of #3109). createTestDatabase()
+    // opens a fresh migrated `:memory:` bun:sqlite connection that never routes
+    // through resolveDbPath(), so the guard is never reached. TRADEOFF: this test
+    // now exercises an in-memory DB instead of the real file-backed one the daemon
+    // uses at runtime (see the PR body).
+    const testDb = await createTestDatabase();
+    await setVideoRecordingManagerDependencies({
+      recordingRepository: new VideoRecordingRepository(testDb),
+      configRepository: new VideoRecordingConfigRepository(testDb),
+    });
+
     const tool = ToolRegistry.getTool("videoRecording");
     expect(tool).toBeDefined();
 

@@ -1,6 +1,7 @@
 import type { Kysely } from "kysely";
 import type { Database } from "./types";
 import { getDatabase } from "./database";
+import { logger } from "../utils/logger";
 
 export interface RecordNetworkEventInput {
   deviceId: string | null;
@@ -170,34 +171,38 @@ export async function getNetworkEvents(
   return rows.map(mapRow);
 }
 
-async function cleanupIfNeeded(db?: Kysely<Database>): Promise<void> {
+export async function cleanupIfNeeded(
+  db?: Kysely<Database>,
+  maxRows: number = RETENTION_MAX_ROWS
+): Promise<void> {
   if (cleanupInProgress) {return;}
   cleanupInProgress = true;
   try {
     const d = getDb(db);
-    const count = await d
+    // Amortized retention (#2799): probe the (maxRows+1)-th newest row directly
+    // via an indexed backward walk on idx_network_events_timestamp instead of a
+    // full-table count(*) on every insert. If the probe returns a row the table
+    // is over cap and everything strictly older is pruned — byte-identical to the
+    // previous count-gated path, minus the hot-path scan.
+    const cutoff = await d
       .selectFrom("network_events")
-      .select(d.fn.countAll().as("count"))
-      .executeTakeFirstOrThrow();
+      .select("timestamp")
+      .orderBy("timestamp", "desc")
+      .offset(maxRows)
+      .limit(1)
+      .executeTakeFirst();
 
-    if (Number(count.count) > RETENTION_MAX_ROWS) {
-      const cutoff = await d
-        .selectFrom("network_events")
-        .select("timestamp")
-        .orderBy("timestamp", "desc")
-        .offset(RETENTION_MAX_ROWS)
-        .limit(1)
-        .executeTakeFirst();
-
-      if (cutoff) {
-        await d
-          .deleteFrom("network_events")
-          .where("timestamp", "<", cutoff.timestamp)
-          .execute();
-      }
+    if (cutoff) {
+      await d
+        .deleteFrom("network_events")
+        .where("timestamp", "<", cutoff.timestamp)
+        .execute();
     }
-  } catch {
-    // best-effort cleanup
+  } catch (error) {
+    // Best-effort retention cleanup: a failure must not surface to the telemetry
+    // write path, but log so it leaves a trace (CLAUDE.md error-handling
+    // convention — no bare swallow).
+    logger.warn(`network_events retention cleanup failed: ${error}`, error);
   } finally {
     cleanupInProgress = false;
   }

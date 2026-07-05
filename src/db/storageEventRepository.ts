@@ -113,31 +113,32 @@ export async function getStorageEvents(
   }));
 }
 
-async function cleanupIfNeeded(db?: Kysely<Database>): Promise<void> {
+export async function cleanupIfNeeded(
+  db?: Kysely<Database>,
+  maxRows: number = RETENTION_MAX_ROWS
+): Promise<void> {
   if (cleanupInProgress) {return;}
   cleanupInProgress = true;
   try {
     const d = getDb(db);
-    const count = await d
+    // Amortized retention (#2799): probe the (maxRows+1)-th newest row directly
+    // via an indexed backward walk on idx_storage_events_timestamp instead of a
+    // full-table count(*) on every insert. If the probe returns a row the table
+    // is over cap and everything strictly older is pruned — byte-identical to the
+    // previous count-gated path, minus the hot-path scan.
+    const cutoff = await d
       .selectFrom("storage_events")
-      .select(d.fn.countAll().as("count"))
-      .executeTakeFirstOrThrow();
+      .select("timestamp")
+      .orderBy("timestamp", "desc")
+      .offset(maxRows)
+      .limit(1)
+      .executeTakeFirst();
 
-    if (Number(count.count) > RETENTION_MAX_ROWS) {
-      const cutoff = await d
-        .selectFrom("storage_events")
-        .select("timestamp")
-        .orderBy("timestamp", "desc")
-        .offset(RETENTION_MAX_ROWS)
-        .limit(1)
-        .executeTakeFirst();
-
-      if (cutoff) {
-        await d
-          .deleteFrom("storage_events")
-          .where("timestamp", "<", cutoff.timestamp)
-          .execute();
-      }
+    if (cutoff) {
+      await d
+        .deleteFrom("storage_events")
+        .where("timestamp", "<", cutoff.timestamp)
+        .execute();
     }
   } catch (error) {
     // Best-effort retention cleanup: a failure must not surface to the telemetry

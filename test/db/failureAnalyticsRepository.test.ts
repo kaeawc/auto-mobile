@@ -1,8 +1,15 @@
 import { beforeEach, afterEach, describe, expect, test } from "bun:test";
+import { Database as BunDatabase } from "bun:sqlite";
 import type { Kysely } from "kysely";
+import { Kysely as KyselyRuntime } from "kysely";
 import type { Database } from "../../src/db/types";
-import { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsRepository";
+import {
+  FailureAnalyticsRepository,
+  mergeScreenBreakdownRows,
+} from "../../src/db/failureAnalyticsRepository";
 import type { RecordFailureInput } from "../../src/db/failureAnalyticsRepository";
+import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
+import { runMigrations } from "../../src/db/migrator";
 import { createTestDatabase } from "./testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -242,6 +249,160 @@ describe("FailureAnalyticsRepository", () => {
       expect(group.deviceBreakdown[0].deviceModel).toBe("Pixel 7");
       expect(group.versionBreakdown).toHaveLength(1);
       expect(group.versionBreakdown[0].version).toBe("1.0.0");
+    });
+
+    test("fetches aggregated group details with a bounded query count and preserves per-group top-N", async () => {
+      const instrumented = await createInstrumentedTestDatabase();
+      const instrumentedRepo = new FailureAnalyticsRepository(timer, instrumented.db, () => new FakeDbWriteBarrier());
+      try {
+        await seedFailureGroup(instrumented.db, {
+          id: "group-high-volume",
+          signature: "high-volume",
+          title: "High volume",
+          lastOccurrence: 2000,
+          totalCount: 8,
+        });
+        await seedFailureGroup(instrumented.db, {
+          id: "group-quiet",
+          signature: "quiet",
+          title: "Quiet group",
+          lastOccurrence: 1500,
+          totalCount: 1,
+        });
+
+        for (let i = 0; i < 8; i++) {
+          await seedFailureOccurrence(instrumented.db, {
+            id: `high-occ-${i}`,
+            groupId: "group-high-volume",
+            timestamp: 1000 + i,
+            deviceModel: i % 2 === 0 ? "Pixel A" : "Pixel B",
+            appVersion: `1.0.${i % 2}`,
+            screenAtFailure: i % 2 === 0 ? "Home" : "Settings",
+            screensVisited: ["Launch", "Home", `Step${i}`],
+            capturePath: `/captures/high-${i}.png`,
+          });
+        }
+        await seedFailureOccurrence(instrumented.db, {
+          id: "quiet-occ-0",
+          groupId: "group-quiet",
+          timestamp: 1400,
+          deviceModel: "Pixel Quiet",
+          appVersion: "2.0.0",
+          screenAtFailure: "QuietScreen",
+          screensVisited: ["QuietScreen"],
+          capturePath: "/captures/quiet.png",
+        });
+
+        instrumented.resetQueryCount();
+        const groups = await instrumentedRepo.getFailureGroups({ limit: 2 });
+
+        expect(groups.map(group => group.id)).toEqual(["group-high-volume", "group-quiet"]);
+        expect(instrumented.queryCount()).toBeLessThanOrEqual(10);
+
+        const highVolume = groups[0];
+        expect(highVolume.sampleOccurrences.map(occ => occ.id)).toEqual([
+          "high-occ-7",
+          "high-occ-6",
+          "high-occ-5",
+          "high-occ-4",
+          "high-occ-3",
+          "high-occ-2",
+        ]);
+        expect(highVolume.recentCaptures.map(capture => capture.path)).toEqual([
+          "/captures/high-7.png",
+          "/captures/high-6.png",
+          "/captures/high-5.png",
+          "/captures/high-4.png",
+          "/captures/high-3.png",
+        ]);
+        expect(highVolume.deviceBreakdown.map(row => row.deviceModel)).toEqual(["Pixel A", "Pixel B"]);
+
+        const quiet = groups[1];
+        expect(quiet.sampleOccurrences.map(occ => occ.id)).toEqual(["quiet-occ-0"]);
+        expect(quiet.recentCaptures.map(capture => capture.path)).toEqual(["/captures/quiet.png"]);
+      } finally {
+        await instrumented.db.destroy();
+      }
+    });
+
+    test("chunks more than SQLite's conservative bound-parameter limit without dropping groups", async () => {
+      const instrumented = await createInstrumentedTestDatabase();
+      const instrumentedRepo = new FailureAnalyticsRepository(timer, instrumented.db, () => new FakeDbWriteBarrier());
+      try {
+        for (let i = 0; i < 1005; i++) {
+          await seedFailureGroup(instrumented.db, {
+            id: `chunk-group-${i.toString().padStart(4, "0")}`,
+            signature: `chunk-sig-${i}`,
+            title: `Chunk group ${i}`,
+            lastOccurrence: 5000 - i,
+            totalCount: [997, 998, 999, 1000].includes(i) ? 1 : 0,
+          });
+        }
+        for (const i of [997, 998, 999, 1000]) {
+          await seedFailureOccurrence(instrumented.db, {
+            id: `chunk-occ-${i}`,
+            groupId: `chunk-group-${i.toString().padStart(4, "0")}`,
+            timestamp: 5000 - i,
+            deviceModel: `Pixel ${i}`,
+            appVersion: `9.${i}.0`,
+            screenAtFailure: `Screen ${i}`,
+            screensVisited: [`Launch ${i}`, `Screen ${i}`],
+            capturePath: `/captures/chunk-${i}.png`,
+          });
+        }
+
+        instrumented.resetQueryCount();
+        const groups = await instrumentedRepo.getFailureGroups({ limit: 1005 });
+
+        expect(groups).toHaveLength(1005);
+        expect(groups[0].id).toBe("chunk-group-0000");
+        expect(groups[1004].id).toBe("chunk-group-1004");
+        for (const i of [997, 998, 999, 1000]) {
+          const group = groups.find(item => item.id === `chunk-group-${i.toString().padStart(4, "0")}`);
+          expect(group?.deviceBreakdown[0]).toMatchObject({ deviceModel: `Pixel ${i}`, count: 1 });
+          expect(group?.versionBreakdown[0]).toMatchObject({ version: `9.${i}.0`, count: 1 });
+          expect(group?.screenBreakdown.map(screen => screen.screenName)).toEqual([`Screen ${i}`, `Launch ${i}`]);
+          expect(group?.recentCaptures[0].path).toBe(`/captures/chunk-${i}.png`);
+          expect(group?.sampleOccurrences[0]).toMatchObject({
+            id: `chunk-occ-${i}`,
+            screensVisited: [`Launch ${i}`, `Screen ${i}`],
+            capturePath: `/captures/chunk-${i}.png`,
+          });
+        }
+      } finally {
+        await instrumented.db.destroy();
+      }
+    });
+  });
+
+  describe("mergeScreenBreakdownRows", () => {
+    test("preserves failure rows, caps visit-only additions, and handles overlap", () => {
+      const rows = mergeScreenBreakdownRows(
+        [
+          { screenName: "Checkout", failureCount: 2 },
+          { screenName: "Settings", failureCount: 1 },
+        ],
+        [
+          { screenName: "Checkout", visitCount: 10 },
+          { screenName: "A", visitCount: 1 },
+          { screenName: "B", visitCount: 9 },
+          { screenName: "C", visitCount: 8 },
+          { screenName: "D", visitCount: 7 },
+          { screenName: "E", visitCount: 6 },
+          { screenName: "F", visitCount: 5 },
+          { screenName: "Settings", visitCount: 3 },
+        ]
+      );
+
+      expect(rows.map(row => row.screenName)).toEqual(["Checkout", "B", "C", "D", "E", "F", "Settings"]);
+      expect(rows.find(row => row.screenName === "Checkout")).toEqual({
+        screenName: "Checkout",
+        visitCount: 10,
+        failureCount: 2,
+        visitPercentage: (10 / 49) * 100,
+      });
+      expect(rows.some(row => row.screenName === "A")).toBe(false);
+      expect(rows.find(row => row.screenName === "Settings")?.failureCount).toBe(1);
     });
   });
 
@@ -552,3 +713,113 @@ describe("FailureAnalyticsRepository", () => {
     });
   });
 });
+
+async function createInstrumentedTestDatabase(): Promise<{
+  db: Kysely<Database>;
+  queryCount: () => number;
+  resetQueryCount: () => void;
+}> {
+  const bunDb = new BunDatabase(":memory:");
+  let count = 0;
+  const db = new KyselyRuntime<Database>({
+    dialect: new BunSqliteDialect({
+      database: bunDb,
+      beforeQuery: async () => {
+        count++;
+      },
+    }),
+  });
+  await runMigrations(db as Kysely<unknown>);
+  return {
+    db,
+    queryCount: () => count,
+    resetQueryCount: () => {
+      count = 0;
+    },
+  };
+}
+
+async function seedFailureGroup(
+  db: Kysely<Database>,
+  input: {
+    id: string;
+    signature: string;
+    title: string;
+    lastOccurrence: number;
+    totalCount: number;
+  }
+): Promise<void> {
+  await db
+    .insertInto("failure_groups")
+    .values({
+      id: input.id,
+      type: "crash",
+      signature: input.signature,
+      title: input.title,
+      message: input.title,
+      severity: "high",
+      first_occurrence: input.lastOccurrence,
+      last_occurrence: input.lastOccurrence,
+      total_count: input.totalCount,
+      unique_sessions: input.totalCount,
+      stack_trace_json: null,
+      tool_call_info_json: null,
+      updated_at: new Date(input.lastOccurrence).toISOString(),
+    })
+    .execute();
+}
+
+async function seedFailureOccurrence(
+  db: Kysely<Database>,
+  input: {
+    id: string;
+    groupId: string;
+    timestamp: number;
+    deviceModel: string;
+    appVersion: string;
+    screenAtFailure: string;
+    screensVisited: string[];
+    capturePath: string;
+  }
+): Promise<void> {
+  await db
+    .insertInto("failure_occurrences")
+    .values({
+      id: input.id,
+      group_id: input.groupId,
+      timestamp: input.timestamp,
+      device_id: null,
+      device_model: input.deviceModel,
+      os: "Android 14",
+      app_version: input.appVersion,
+      session_id: `session-${input.id}`,
+      screen_at_failure: input.screenAtFailure,
+      test_name: `test-${input.groupId}`,
+      test_execution_id: null,
+      error_code: null,
+      duration_ms: null,
+      tool_args_json: null,
+    })
+    .execute();
+
+  await db
+    .insertInto("failure_occurrence_screens")
+    .values(input.screensVisited.map((screenName, index) => ({
+      occurrence_id: input.id,
+      screen_name: screenName,
+      visit_order: index,
+    })))
+    .execute();
+
+  await db
+    .insertInto("failure_captures")
+    .values({
+      id: `capture-${input.id}`,
+      occurrence_id: input.id,
+      type: "screenshot",
+      path: input.capturePath,
+      timestamp: input.timestamp,
+      device_model: input.deviceModel,
+    })
+    .execute();
+}

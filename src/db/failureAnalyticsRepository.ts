@@ -11,6 +11,7 @@ import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
+import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
 import type {
   FailureType,
   FailureSeverity,
@@ -28,6 +29,57 @@ import type {
 
 const RETENTION_MAX_ROWS = 10_000;
 let cleanupInProgress = false;
+
+interface FailureScreenCountRow {
+  screenName: string;
+  failureCount: number;
+}
+
+interface VisitScreenCountRow {
+  screenName: string;
+  visitCount: number;
+}
+
+export function mergeScreenBreakdownRows(
+  failureScreens: readonly FailureScreenCountRow[],
+  visitedScreens: readonly VisitScreenCountRow[]
+): ScreenBreakdown[] {
+  const visitMap = new Map(visitedScreens.map(screen => [screen.screenName, screen.visitCount]));
+  const totalVisits = visitedScreens.reduce((sum, screen) => sum + screen.visitCount, 0);
+
+  const result: ScreenBreakdown[] = [];
+  const processedScreens = new Set<string>();
+
+  for (const row of failureScreens) {
+    const visitCount = visitMap.get(row.screenName) ?? 0;
+    result.push({
+      screenName: row.screenName,
+      visitCount,
+      failureCount: row.failureCount,
+      visitPercentage: totalVisits > 0 ? (visitCount / totalVisits) * 100 : 0,
+    });
+    processedScreens.add(row.screenName);
+  }
+
+  const visitOnlyScreens = visitedScreens
+    .filter(screen => !processedScreens.has(screen.screenName))
+    .sort((a, b) => b.visitCount - a.visitCount || a.screenName.localeCompare(b.screenName))
+    .slice(0, 5);
+
+  for (const screen of visitOnlyScreens) {
+    result.push({
+      screenName: screen.screenName,
+      visitCount: screen.visitCount,
+      failureCount: 0,
+      visitPercentage: totalVisits > 0 ? (screen.visitCount / totalVisits) * 100 : 0,
+    });
+  }
+
+  return result
+    .map((screen, index) => ({ screen, index }))
+    .sort((a, b) => b.screen.visitCount - a.screen.visitCount || a.index - b.index)
+    .map(({ screen }) => screen);
+}
 
 // Types for recording failures
 
@@ -337,26 +389,30 @@ export class FailureAnalyticsRepository {
       .offset(offset)
       .execute();
 
-    const result: FailureGroup[] = [];
+    const groupIds = groups.map(group => group.id);
+    if (groupIds.length === 0) {
+      return [];
+    }
 
-    for (const group of groups) {
-      const [
-        deviceBreakdown,
-        versionBreakdown,
-        screenBreakdown,
-        affectedTests,
-        recentCaptures,
-        sampleOccurrences,
-      ] = await Promise.all([
-        this.getDeviceBreakdown(group.id),
-        this.getVersionBreakdown(group.id),
-        this.getScreenBreakdown(group.id),
-        this.getAffectedTests(group.id),
-        this.getRecentCaptures(group.id, 5),
-        this.getSampleOccurrences(group.id, 6),
-      ]);
+    const [
+      deviceBreakdowns,
+      versionBreakdowns,
+      screenBreakdowns,
+      affectedTestsByGroup,
+      recentCapturesByGroup,
+      sampleOccurrencesByGroup,
+    ] = await Promise.all([
+      this.getDeviceBreakdowns(groupIds),
+      this.getVersionBreakdowns(groupIds),
+      this.getScreenBreakdowns(groupIds),
+      this.getAffectedTestsByGroup(groupIds),
+      this.getRecentCapturesByGroup(groupIds, 5),
+      this.getSampleOccurrencesByGroup(groupIds, 6),
+    ]);
 
-      result.push({
+    return groups.map(group => {
+      const screenBreakdown = screenBreakdowns.get(group.id) ?? [];
+      return {
         id: group.id,
         type: group.type as FailureType,
         signature: group.signature,
@@ -367,8 +423,8 @@ export class FailureAnalyticsRepository {
         totalCount: group.total_count,
         uniqueSessions: group.unique_sessions,
         severity: group.severity as FailureSeverity,
-        deviceBreakdown,
-        versionBreakdown,
+        deviceBreakdown: deviceBreakdowns.get(group.id) ?? [],
+        versionBreakdown: versionBreakdowns.get(group.id) ?? [],
         screenBreakdown,
         failureScreens: this.computeFailureScreens(screenBreakdown),
         stackTraceElements: group.stack_trace_json
@@ -377,13 +433,11 @@ export class FailureAnalyticsRepository {
         toolCallInfo: group.tool_call_info_json
           ? (JSON.parse(group.tool_call_info_json) as AggregatedToolCallInfo)
           : null,
-        affectedTests,
-        recentCaptures,
-        sampleOccurrences,
-      });
-    }
-
-    return result;
+        affectedTests: affectedTestsByGroup.get(group.id) ?? {},
+        recentCaptures: recentCapturesByGroup.get(group.id) ?? [],
+        sampleOccurrences: sampleOccurrencesByGroup.get(group.id) ?? [],
+      };
+    });
   }
 
   /**
@@ -578,203 +632,388 @@ export class FailureAnalyticsRepository {
 
   // Private helper methods
 
-  private async getDeviceBreakdown(groupId: string): Promise<DeviceBreakdown[]> {
+  private async getDeviceBreakdowns(groupIds: string[]): Promise<Map<string, DeviceBreakdown[]>> {
     const db = this.getDb();
+    const buckets = new Map<string, Array<{
+      deviceModel: string;
+      os: string;
+      count: number;
+    }>>();
 
-    const rows = await db
-      .selectFrom("failure_occurrences")
-      .select(["device_model", "os"])
-      .select(eb => eb.fn.count<number>("id").as("count"))
-      .where("group_id", "=", groupId)
-      .groupBy(["device_model", "os"])
-      .orderBy("count", "desc")
-      .limit(10)
-      .execute();
+    for (const chunk of chunkBySqliteParameterLimit(groupIds)) {
+      const rows = await sql<{
+        groupId: string;
+        deviceModel: string;
+        os: string;
+        occurrenceCount: number;
+      }>`
+        SELECT groupId, deviceModel, os, occurrenceCount
+        FROM (
+          SELECT
+            group_id AS groupId,
+            device_model AS deviceModel,
+            os,
+            COUNT(id) AS occurrenceCount,
+            ROW_NUMBER() OVER (
+              PARTITION BY group_id
+              ORDER BY COUNT(id) DESC, device_model ASC, os ASC
+            ) AS rn
+          FROM failure_occurrences
+          WHERE group_id IN (${sql.join(chunk)})
+          GROUP BY group_id, device_model, os
+        )
+        WHERE rn <= 10
+        ORDER BY groupId ASC, occurrenceCount DESC, deviceModel ASC, os ASC
+      `.execute(db);
 
-    const total = rows.reduce((sum, r) => sum + Number(r.count), 0);
-
-    return rows.map(row => ({
-      deviceModel: row.device_model,
-      os: row.os,
-      count: Number(row.count),
-      percentage: total > 0 ? (Number(row.count) / total) * 100 : 0,
-    }));
-  }
-
-  private async getVersionBreakdown(groupId: string): Promise<VersionBreakdown[]> {
-    const db = this.getDb();
-
-    const rows = await db
-      .selectFrom("failure_occurrences")
-      .select("app_version")
-      .select(eb => eb.fn.count<number>("id").as("count"))
-      .where("group_id", "=", groupId)
-      .groupBy("app_version")
-      .orderBy("count", "desc")
-      .limit(10)
-      .execute();
-
-    const total = rows.reduce((sum, r) => sum + Number(r.count), 0);
-
-    return rows.map(row => ({
-      version: row.app_version,
-      count: Number(row.count),
-      percentage: total > 0 ? (Number(row.count) / total) * 100 : 0,
-    }));
-  }
-
-  private async getScreenBreakdown(groupId: string): Promise<ScreenBreakdown[]> {
-    const db = this.getDb();
-
-    // Get failure counts per screen
-    const failureScreens = await db
-      .selectFrom("failure_occurrences")
-      .select("screen_at_failure")
-      .select(eb => eb.fn.count<number>("id").as("failure_count"))
-      .where("group_id", "=", groupId)
-      .where("screen_at_failure", "is not", null)
-      .groupBy("screen_at_failure")
-      .execute();
-
-    // Get visit counts from screens visited
-    const visitedScreens = await db
-      .selectFrom("failure_occurrence_screens")
-      .innerJoin(
-        "failure_occurrences",
-        "failure_occurrence_screens.occurrence_id",
-        "failure_occurrences.id"
-      )
-      .select("screen_name")
-      .select(eb => eb.fn.count<number>("failure_occurrence_screens.id").as("visit_count"))
-      .where("failure_occurrences.group_id", "=", groupId)
-      .groupBy("screen_name")
-      .execute();
-
-    const visitMap = new Map(visitedScreens.map(s => [s.screen_name, Number(s.visit_count)]));
-    const totalVisits = Array.from(visitMap.values()).reduce((sum, c) => sum + c, 0);
-
-    const result: ScreenBreakdown[] = [];
-    const processedScreens = new Set<string>();
-
-    // Add screens where failures occurred
-    for (const row of failureScreens) {
-      const screenName = row.screen_at_failure!;
-      const visitCount = visitMap.get(screenName) ?? 0;
-      result.push({
-        screenName,
-        visitCount,
-        failureCount: Number(row.failure_count),
-        visitPercentage: totalVisits > 0 ? (visitCount / totalVisits) * 100 : 0,
-      });
-      processedScreens.add(screenName);
-    }
-
-    // Add visited screens without failures (limit to top 5)
-    let addedVisitOnly = 0;
-    for (const screen of visitedScreens) {
-      if (!processedScreens.has(screen.screen_name) && addedVisitOnly < 5) {
-        result.push({
-          screenName: screen.screen_name,
-          visitCount: Number(screen.visit_count),
-          failureCount: 0,
-          visitPercentage: totalVisits > 0 ? (Number(screen.visit_count) / totalVisits) * 100 : 0,
+      for (const row of rows.rows) {
+        appendToBucket(buckets, row.groupId, {
+          deviceModel: row.deviceModel,
+          os: row.os,
+          count: Number(row.occurrenceCount),
         });
-        addedVisitOnly++;
       }
     }
 
-    return result.sort((a, b) => b.visitCount - a.visitCount);
-  }
-
-  private async getAffectedTests(groupId: string): Promise<Record<string, number>> {
-    const db = this.getDb();
-
-    const rows = await db
-      .selectFrom("failure_occurrences")
-      .select("test_name")
-      .select(eb => eb.fn.count<number>("id").as("count"))
-      .where("group_id", "=", groupId)
-      .where("test_name", "is not", null)
-      .groupBy("test_name")
-      .execute();
-
-    const result: Record<string, number> = {};
-    for (const row of rows) {
-      if (row.test_name) {
-        result[row.test_name] = Number(row.count);
-      }
+    const result = new Map<string, DeviceBreakdown[]>();
+    for (const [groupId, rows] of buckets) {
+      const sorted = rows
+        .sort((a, b) => b.count - a.count || a.deviceModel.localeCompare(b.deviceModel) || a.os.localeCompare(b.os))
+        .slice(0, 10);
+      const total = sorted.reduce((sum, row) => sum + row.count, 0);
+      result.set(groupId, sorted.map(row => ({
+        deviceModel: row.deviceModel,
+        os: row.os,
+        count: row.count,
+        percentage: total > 0 ? (row.count / total) * 100 : 0,
+      })));
     }
     return result;
   }
 
-  private async getRecentCaptures(groupId: string, limit: number): Promise<FailureCapture[]> {
+  private async getVersionBreakdowns(groupIds: string[]): Promise<Map<string, VersionBreakdown[]>> {
     const db = this.getDb();
+    const buckets = new Map<string, Array<{ version: string; count: number }>>();
 
-    const rows = await db
-      .selectFrom("failure_captures")
-      .innerJoin("failure_occurrences", "failure_captures.occurrence_id", "failure_occurrences.id")
-      .select([
-        "failure_captures.id",
-        "failure_captures.type",
-        "failure_captures.path",
-        "failure_captures.timestamp",
-        "failure_captures.device_model",
-      ])
-      .where("failure_occurrences.group_id", "=", groupId)
-      .orderBy("failure_captures.timestamp", "desc")
-      .limit(limit)
-      .execute();
+    for (const chunk of chunkBySqliteParameterLimit(groupIds)) {
+      const rows = await sql<{
+        groupId: string;
+        version: string;
+        occurrenceCount: number;
+      }>`
+        SELECT groupId, version, occurrenceCount
+        FROM (
+          SELECT
+            group_id AS groupId,
+            app_version AS version,
+            COUNT(id) AS occurrenceCount,
+            ROW_NUMBER() OVER (
+              PARTITION BY group_id
+              ORDER BY COUNT(id) DESC, app_version ASC
+            ) AS rn
+          FROM failure_occurrences
+          WHERE group_id IN (${sql.join(chunk)})
+          GROUP BY group_id, app_version
+        )
+        WHERE rn <= 10
+        ORDER BY groupId ASC, occurrenceCount DESC, version ASC
+      `.execute(db);
 
-    return rows.map(row => ({
-      id: row.id,
-      type: row.type as "screenshot" | "video",
-      path: row.path,
-      timestamp: row.timestamp,
-      deviceModel: row.device_model,
-    }));
+      for (const row of rows.rows) {
+        appendToBucket(buckets, row.groupId, {
+          version: row.version,
+          count: Number(row.occurrenceCount),
+        });
+      }
+    }
+
+    const result = new Map<string, VersionBreakdown[]>();
+    for (const [groupId, rows] of buckets) {
+      const sorted = rows
+        .sort((a, b) => b.count - a.count || a.version.localeCompare(b.version))
+        .slice(0, 10);
+      const total = sorted.reduce((sum, row) => sum + row.count, 0);
+      result.set(groupId, sorted.map(row => ({
+        version: row.version,
+        count: row.count,
+        percentage: total > 0 ? (row.count / total) * 100 : 0,
+      })));
+    }
+    return result;
   }
 
-  private async getSampleOccurrences(groupId: string, limit: number): Promise<FailureOccurrence[]> {
+  private async getScreenBreakdowns(groupIds: string[]): Promise<Map<string, ScreenBreakdown[]>> {
     const db = this.getDb();
+    const failureScreensByGroup = new Map<string, FailureScreenCountRow[]>();
+    const visitedScreensByGroup = new Map<string, VisitScreenCountRow[]>();
 
-    const rows = await db
-      .selectFrom("failure_occurrences")
-      .selectAll()
-      .where("group_id", "=", groupId)
-      .orderBy("timestamp", "desc")
-      .limit(limit)
-      .execute();
+    for (const chunk of chunkBySqliteParameterLimit(groupIds)) {
+      const failureRows = await sql<{
+        groupId: string;
+        screenName: string;
+        failureCount: number;
+      }>`
+        SELECT
+          group_id AS groupId,
+          screen_at_failure AS screenName,
+          COUNT(id) AS failureCount
+        FROM failure_occurrences
+        WHERE group_id IN (${sql.join(chunk)})
+          AND screen_at_failure IS NOT NULL
+        GROUP BY group_id, screen_at_failure
+        ORDER BY group_id ASC, screen_at_failure ASC
+      `.execute(db);
 
-    const result: FailureOccurrence[] = [];
+      const visitRows = await sql<{
+        groupId: string;
+        screenName: string;
+        visitCount: number;
+      }>`
+        SELECT
+          failure_occurrences.group_id AS groupId,
+          failure_occurrence_screens.screen_name AS screenName,
+          COUNT(failure_occurrence_screens.id) AS visitCount
+        FROM failure_occurrence_screens
+        INNER JOIN failure_occurrences
+          ON failure_occurrence_screens.occurrence_id = failure_occurrences.id
+        WHERE failure_occurrences.group_id IN (${sql.join(chunk)})
+        GROUP BY failure_occurrences.group_id, failure_occurrence_screens.screen_name
+        ORDER BY failure_occurrences.group_id ASC, failure_occurrence_screens.screen_name ASC
+      `.execute(db);
 
-    for (const row of rows) {
-      // Get screens visited
-      const screens = await db
-        .selectFrom("failure_occurrence_screens")
-        .select("screen_name")
-        .where("occurrence_id", "=", row.id)
-        .orderBy("visit_order", "asc")
-        .execute();
+      for (const row of failureRows.rows) {
+        appendToBucket(failureScreensByGroup, row.groupId, {
+          screenName: row.screenName,
+          failureCount: Number(row.failureCount),
+        });
+      }
+      for (const row of visitRows.rows) {
+        appendToBucket(visitedScreensByGroup, row.groupId, {
+          screenName: row.screenName,
+          visitCount: Number(row.visitCount),
+        });
+      }
+    }
 
-      // Get capture if any
-      const capture = await db
-        .selectFrom("failure_captures")
-        .select(["path", "type"])
-        .where("occurrence_id", "=", row.id)
-        .executeTakeFirst();
+    const result = new Map<string, ScreenBreakdown[]>();
+    for (const groupId of groupIds) {
+      result.set(
+        groupId,
+        mergeScreenBreakdownRows(
+          failureScreensByGroup.get(groupId) ?? [],
+          visitedScreensByGroup.get(groupId) ?? []
+        )
+      );
+    }
+    return result;
+  }
 
-      result.push({
+  private async getAffectedTestsByGroup(groupIds: string[]): Promise<Map<string, Record<string, number>>> {
+    const db = this.getDb();
+    const result = new Map<string, Record<string, number>>();
+
+    for (const chunk of chunkBySqliteParameterLimit(groupIds)) {
+      const rows = await sql<{
+        groupId: string;
+        testName: string;
+        occurrenceCount: number;
+      }>`
+        SELECT
+          group_id AS groupId,
+          test_name AS testName,
+          COUNT(id) AS occurrenceCount
+        FROM failure_occurrences
+        WHERE group_id IN (${sql.join(chunk)})
+          AND test_name IS NOT NULL
+        GROUP BY group_id, test_name
+        ORDER BY group_id ASC, test_name ASC
+      `.execute(db);
+
+      for (const row of rows.rows) {
+        const tests = result.get(row.groupId) ?? {};
+        tests[row.testName] = Number(row.occurrenceCount);
+        result.set(row.groupId, tests);
+      }
+    }
+
+    return result;
+  }
+
+  private async getRecentCapturesByGroup(
+    groupIds: string[],
+    limit: number
+  ): Promise<Map<string, FailureCapture[]>> {
+    const db = this.getDb();
+    const result = new Map<string, FailureCapture[]>();
+
+    for (const chunk of chunkBySqliteParameterLimit(groupIds, 1)) {
+      const rows = await sql<{
+        groupId: string;
+        id: string;
+        type: "screenshot" | "video";
+        path: string;
+        timestamp: number;
+        deviceModel: string;
+      }>`
+        SELECT groupId, id, type, path, timestamp, deviceModel
+        FROM (
+          SELECT
+            failure_occurrences.group_id AS groupId,
+            failure_captures.id,
+            failure_captures.type,
+            failure_captures.path,
+            failure_captures.timestamp,
+            failure_captures.device_model AS deviceModel,
+            ROW_NUMBER() OVER (
+              PARTITION BY failure_occurrences.group_id
+              ORDER BY failure_captures.timestamp DESC, failure_captures.id ASC
+            ) AS rn
+          FROM failure_captures
+          INNER JOIN failure_occurrences
+            ON failure_captures.occurrence_id = failure_occurrences.id
+          WHERE failure_occurrences.group_id IN (${sql.join(chunk)})
+        )
+        WHERE rn <= ${limit}
+        ORDER BY groupId ASC, timestamp DESC, id ASC
+      `.execute(db);
+
+      for (const row of rows.rows) {
+        appendToBucket(result, row.groupId, {
+          id: row.id,
+          type: row.type,
+          path: row.path,
+          timestamp: row.timestamp,
+          deviceModel: row.deviceModel,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  private async getSampleOccurrencesByGroup(
+    groupIds: string[],
+    limit: number
+  ): Promise<Map<string, FailureOccurrence[]>> {
+    const db = this.getDb();
+    const occurrenceRows: Array<{
+      id: string;
+      groupId: string;
+      timestamp: number;
+      deviceModel: string;
+      os: string;
+      appVersion: string;
+      sessionId: string;
+      screenAtFailure: string | null;
+      testName: string | null;
+    }> = [];
+
+    for (const chunk of chunkBySqliteParameterLimit(groupIds, 1)) {
+      const rows = await sql<{
+        id: string;
+        groupId: string;
+        timestamp: number;
+        deviceModel: string;
+        os: string;
+        appVersion: string;
+        sessionId: string;
+        screenAtFailure: string | null;
+        testName: string | null;
+      }>`
+        SELECT
+          id,
+          groupId,
+          timestamp,
+          deviceModel,
+          os,
+          appVersion,
+          sessionId,
+          screenAtFailure,
+          testName
+        FROM (
+          SELECT
+            id,
+            group_id AS groupId,
+            timestamp,
+            device_model AS deviceModel,
+            os,
+            app_version AS appVersion,
+            session_id AS sessionId,
+            screen_at_failure AS screenAtFailure,
+            test_name AS testName,
+            ROW_NUMBER() OVER (
+              PARTITION BY group_id
+              ORDER BY timestamp DESC, id ASC
+            ) AS rn
+          FROM failure_occurrences
+          WHERE group_id IN (${sql.join(chunk)})
+        )
+        WHERE rn <= ${limit}
+        ORDER BY groupId ASC, timestamp DESC, id ASC
+      `.execute(db);
+
+      occurrenceRows.push(...rows.rows);
+    }
+
+    const occurrenceIds = occurrenceRows.map(row => row.id);
+    const screensByOccurrence = new Map<string, string[]>();
+    const captureByOccurrence = new Map<string, { path: string; type: "screenshot" | "video" }>();
+
+    for (const chunk of chunkBySqliteParameterLimit(occurrenceIds)) {
+      const screenRows = await sql<{
+        occurrenceId: string;
+        screenName: string;
+      }>`
+        SELECT
+          occurrence_id AS occurrenceId,
+          screen_name AS screenName
+        FROM failure_occurrence_screens
+        WHERE occurrence_id IN (${sql.join(chunk)})
+        ORDER BY occurrence_id ASC, visit_order ASC
+      `.execute(db);
+
+      const captureRows = await sql<{
+        occurrenceId: string;
+        path: string;
+        type: "screenshot" | "video";
+      }>`
+        SELECT
+          occurrence_id AS occurrenceId,
+          path,
+          type
+        FROM failure_captures
+        WHERE occurrence_id IN (${sql.join(chunk)})
+        ORDER BY occurrence_id ASC, timestamp DESC, id ASC
+      `.execute(db);
+
+      for (const row of screenRows.rows) {
+        appendToBucket(screensByOccurrence, row.occurrenceId, row.screenName);
+      }
+      for (const row of captureRows.rows) {
+        if (!captureByOccurrence.has(row.occurrenceId)) {
+          captureByOccurrence.set(row.occurrenceId, {
+            path: row.path,
+            type: row.type,
+          });
+        }
+      }
+    }
+
+    const result = new Map<string, FailureOccurrence[]>();
+    for (const row of occurrenceRows) {
+      const capture = captureByOccurrence.get(row.id);
+      appendToBucket(result, row.groupId, {
         id: row.id,
         timestamp: row.timestamp,
-        deviceModel: row.device_model,
+        deviceModel: row.deviceModel,
         os: row.os,
-        appVersion: row.app_version,
-        sessionId: row.session_id,
-        screenAtFailure: row.screen_at_failure,
-        screensVisited: screens.map(s => s.screen_name),
-        testName: row.test_name,
+        appVersion: row.appVersion,
+        sessionId: row.sessionId,
+        screenAtFailure: row.screenAtFailure,
+        screensVisited: screensByOccurrence.get(row.id) ?? [],
+        testName: row.testName,
         capturePath: capture?.path ?? null,
-        captureType: capture ? (capture.type as "screenshot" | "video") : null,
+        captureType: capture?.type ?? null,
       });
     }
 

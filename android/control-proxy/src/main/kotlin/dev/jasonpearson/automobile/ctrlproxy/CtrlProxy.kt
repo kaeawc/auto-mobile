@@ -114,13 +114,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Emits a correlated `type:"error"` frame when *any* raw `serviceScope.launch { … }` throws
-   * uncaught — closing the raw-launch half of the silent-hang gap by construction (issue #3104).
-   * Its [ServiceScopeGuard.handler] is installed on [serviceScope] below. `emitScope` resolves
-   * [serviceScope] lazily to break the scope↔handler construction cycle (the handler re-launches
-   * its fallback broadcast on the same scope); the broadcast sink resolves [webSocketServer] lazily
-   * because it is `lateinit` (assigned in [onServiceConnected]). See [AsyncActionRunner] /
-   * [ResultBroadcaster] for the sibling seams on the dispatch and result-send paths.
+   * Emits a `type:"error"` frame when a `serviceScope.launch { … }` throws uncaught. Correlation is
+   * recovered from [RequestIdContext], which request-correlated raw launches attach through
+   * [launchRequestScope]. Its [ServiceScopeGuard.handler] is installed on [serviceScope] below.
+   * `emitScope` resolves [serviceScope] lazily to break the scope↔handler construction cycle (the
+   * handler re-launches its fallback broadcast on the same scope); the broadcast sink resolves
+   * [webSocketServer] lazily because it is `lateinit` (assigned in [onServiceConnected]). See
+   * [AsyncActionRunner] / [ResultBroadcaster] for the sibling seams on the dispatch and result-send
+   * paths.
    */
   private val serviceScopeGuard: ServiceScopeGuard =
     ServiceScopeGuard(
@@ -135,6 +136,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private val serviceScope: CoroutineScope =
     CoroutineScope(Dispatchers.IO + SupervisorJob() + serviceScopeGuard.handler)
+
+  /**
+   * Launches request-correlated raw work with [RequestIdContext] attached so [serviceScopeGuard]
+   * can emit a correlated error frame if the launch throws before a guarded result helper runs.
+   */
+  private fun launchRequestScope(
+    requestId: String?,
+    block: suspend CoroutineScope.() -> Unit,
+  ): Job = serviceScope.launch(context = RequestIdContext(requestId), block = block)
 
   /**
    * Wraps fire-and-forget action launches so a throw inside the launched coroutine broadcasts a
@@ -2258,7 +2268,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             TAG,
             "Swipe completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
-          serviceScope.launch {
+          launchRequestScope(requestId) {
             broadcastSwipeResult(
               requestId,
               true,
@@ -2269,7 +2279,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
         } else {
           Log.w(TAG, "Swipe failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          serviceScope.launch {
+          launchRequestScope(requestId) {
             broadcastSwipeResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
           }
         }
@@ -2278,7 +2288,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.end() // end performSwipe block
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing swipe", e)
-      serviceScope.launch {
+      launchRequestScope(requestId) {
         broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
       }
     }
@@ -2430,7 +2440,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             TAG,
             "Drag completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
-          serviceScope.launch {
+          launchRequestScope(requestId) {
             broadcastDragResult(
               requestId,
               true,
@@ -2441,7 +2451,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
         } else {
           Log.w(TAG, "Drag failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          serviceScope.launch {
+          launchRequestScope(requestId) {
             broadcastDragResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
           }
         }
@@ -2450,7 +2460,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.end() // end performDrag block
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing drag", e)
-      serviceScope.launch {
+      launchRequestScope(requestId) {
         broadcastDragResult(requestId, false, e.message, errorTime - startTime, null)
       }
     }
@@ -2509,12 +2519,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             TAG,
             "Tap completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
-          serviceScope.launch {
+          launchRequestScope(requestId) {
             broadcastTapCoordinatesResult(requestId, true, null, outcome.totalTimeMs)
           }
         } else {
           Log.w(TAG, "Tap failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          serviceScope.launch {
+          launchRequestScope(requestId) {
             broadcastTapCoordinatesResult(requestId, false, outcome.error, outcome.totalTimeMs)
           }
         }
@@ -2523,7 +2533,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.end() // end performTapCoordinates block
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing tap", e)
-      serviceScope.launch {
+      launchRequestScope(requestId) {
         broadcastTapCoordinatesResult(requestId, false, e.message, errorTime - startTime)
       }
     }
@@ -2595,7 +2605,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             TAG,
             "Two-finger swipe completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
-          serviceScope.launch {
+          launchRequestScope(requestId) {
             broadcastSwipeResult(
               requestId,
               true,
@@ -2606,7 +2616,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
         } else {
           Log.w(TAG, "Two-finger swipe failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          serviceScope.launch {
+          launchRequestScope(requestId) {
             broadcastSwipeResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
           }
         }
@@ -2615,7 +2625,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.end() // end performTwoFingerSwipe block
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing two-finger swipe", e)
-      serviceScope.launch {
+      launchRequestScope(requestId) {
         broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
       }
     }
@@ -2673,7 +2683,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             TAG,
             "Pinch completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
-          serviceScope.launch {
+          launchRequestScope(requestId) {
             broadcastPinchResult(
               requestId,
               true,
@@ -2684,7 +2694,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
         } else {
           Log.w(TAG, "Pinch failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          serviceScope.launch {
+          launchRequestScope(requestId) {
             broadcastPinchResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
           }
         }
@@ -2693,7 +2703,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.end()
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing pinch", e)
-      serviceScope.launch {
+      launchRequestScope(requestId) {
         broadcastPinchResult(requestId, false, e.message, errorTime - startTime, null)
       }
     }
@@ -2735,7 +2745,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             "No focused editable node found"
           }
         Log.w(TAG, error)
-        serviceScope.launch {
+        launchRequestScope(requestId) {
           broadcastSetTextResult(requestId, false, error, errorTime - startTime)
         }
         return
@@ -2839,7 +2849,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val errorTime = System.currentTimeMillis()
         val error = "No focused editable node found for IME action"
         Log.w(TAG, error)
-        serviceScope.launch {
+        launchRequestScope(requestId) {
           broadcastImeActionResult(requestId, action, false, error, errorTime - startTime)
         }
         return
@@ -3057,7 +3067,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val errorTime = System.currentTimeMillis()
         val error = "resource-id is required for accessibility actions"
         Log.w(TAG, error)
-        serviceScope.launch {
+        launchRequestScope(requestId) {
           broadcastActionResult(requestId, action, false, error, errorTime - startTime)
         }
         return
@@ -3073,7 +3083,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val errorTime = System.currentTimeMillis()
         val error = "Element not found with resource-id: $resourceId"
         Log.w(TAG, error)
-        serviceScope.launch {
+        launchRequestScope(requestId) {
           broadcastActionResult(requestId, action, false, error, errorTime - startTime)
         }
         return
@@ -5240,7 +5250,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         perfProvider.end()
         val totalTime = System.currentTimeMillis() - startTime
         Log.d(TAG, "No accessibility focus found")
-        serviceScope.launch { broadcastCurrentFocusResult(requestId, null, totalTime) }
+        launchRequestScope(requestId) { broadcastCurrentFocusResult(requestId, null, totalTime) }
         return
       }
 
@@ -5254,12 +5264,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val totalTime = System.currentTimeMillis() - startTime
       Log.d(TAG, "Current focus extracted in ${totalTime}ms")
 
-      serviceScope.launch { broadcastCurrentFocusResult(requestId, focusedElement, totalTime) }
+      launchRequestScope(requestId) {
+        broadcastCurrentFocusResult(requestId, focusedElement, totalTime)
+      }
     } catch (e: Exception) {
       perfProvider.end()
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error getting current focus", e)
-      serviceScope.launch {
+      launchRequestScope(requestId) {
         broadcastCurrentFocusError(requestId, e.message, errorTime - startTime)
       }
     }
@@ -5285,7 +5297,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         perfProvider.end()
         val totalTime = System.currentTimeMillis() - startTime
         Log.w(TAG, "No windows or root node available for traversal order extraction")
-        serviceScope.launch {
+        launchRequestScope(requestId) {
           broadcastTraversalOrderError(requestId, "No windows available", totalTime)
         }
         return
@@ -5311,12 +5323,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         "Traversal order extracted: ${traversalResult.elements.size} elements in ${totalTime}ms",
       )
 
-      serviceScope.launch { broadcastTraversalOrderResult(requestId, traversalResult, totalTime) }
+      launchRequestScope(requestId) {
+        broadcastTraversalOrderResult(requestId, traversalResult, totalTime)
+      }
     } catch (e: Exception) {
       perfProvider.end()
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error getting traversal order", e)
-      serviceScope.launch {
+      launchRequestScope(requestId) {
         broadcastTraversalOrderError(requestId, e.message, errorTime - startTime)
       }
     }
@@ -5327,10 +5341,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     highlightId: String?,
     shape: HighlightShape?,
   ) {
-    serviceScope.launch {
+    launchRequestScope(requestId) {
       if (!::overlayDrawer.isInitialized) {
         broadcastHighlightResponse(requestId, false, "Overlay drawer not initialized")
-        return@launch
+        return@launchRequestScope
       }
 
       val result =

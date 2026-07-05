@@ -1259,21 +1259,26 @@ public interface dev.jasonpearson.automobile.sdk.storage.OnPreferenceChangeListe
 Compiled from "KeyValueModels.kt"
 public final class dev.jasonpearson.automobile.sdk.storage.PreferenceChange {
   public static final int $stable;
-  public dev.jasonpearson.automobile.sdk.storage.PreferenceChange(java.lang.String, java.lang.String, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType, long, long);
+  public dev.jasonpearson.automobile.sdk.storage.PreferenceChange(java.lang.String, java.lang.String, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType, long, long, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType);
+  public dev.jasonpearson.automobile.sdk.storage.PreferenceChange(java.lang.String, java.lang.String, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType, long, long, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final java.lang.String getFileName();
   public final java.lang.String getKey();
   public final java.lang.Object getNewValue();
   public final dev.jasonpearson.automobile.sdk.storage.KeyValueType getType();
   public final long getTimestamp();
   public final long getSequenceNumber();
+  public final java.lang.Object getPreviousValue();
+  public final dev.jasonpearson.automobile.sdk.storage.KeyValueType getPreviousValueType();
   public final java.lang.String component1();
   public final java.lang.String component2();
   public final java.lang.Object component3();
   public final dev.jasonpearson.automobile.sdk.storage.KeyValueType component4();
   public final long component5();
   public final long component6();
-  public final dev.jasonpearson.automobile.sdk.storage.PreferenceChange copy(java.lang.String, java.lang.String, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType, long, long);
-  public static dev.jasonpearson.automobile.sdk.storage.PreferenceChange copy$default(dev.jasonpearson.automobile.sdk.storage.PreferenceChange, java.lang.String, java.lang.String, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType, long, long, int, java.lang.Object);
+  public final java.lang.Object component7();
+  public final dev.jasonpearson.automobile.sdk.storage.KeyValueType component8();
+  public final dev.jasonpearson.automobile.sdk.storage.PreferenceChange copy(java.lang.String, java.lang.String, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType, long, long, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType);
+  public static dev.jasonpearson.automobile.sdk.storage.PreferenceChange copy$default(dev.jasonpearson.automobile.sdk.storage.PreferenceChange, java.lang.String, java.lang.String, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType, long, long, java.lang.Object, dev.jasonpearson.automobile.sdk.storage.KeyValueType, int, java.lang.Object);
   public java.lang.String toString();
   public int hashCode();
   public boolean equals(java.lang.Object);

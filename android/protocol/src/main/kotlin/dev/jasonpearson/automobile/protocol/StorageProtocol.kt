@@ -223,6 +223,19 @@ data class StorageChangeEvent(
   val timestamp: Long,
   /** Monotonically increasing sequence number for ordering changes. */
   val sequenceNumber: Long,
+  /**
+   * JSON-encoded value BEFORE the change (null if there was no prior value). The SDK captures this
+   * from a per-file snapshot so the TS telemetry ingest can skip its per-insert previous-value
+   * lookup (#3000). Defaults to null so payloads from older SDKs that omit the field still
+   * deserialize.
+   */
+  val previousValue: String? = null,
+  /**
+   * Type name of [previousValue] (STRING, INT, …), which may differ from [type] on a remove or
+   * type-changing write. Consumers quote [previousValue] by THIS type so it stays valid JSON on the
+   * wire even when [type] is UNKNOWN (#3000). Null for older SDKs / no prior value.
+   */
+  val previousValueType: String? = null,
 )
 
 // =============================================================================

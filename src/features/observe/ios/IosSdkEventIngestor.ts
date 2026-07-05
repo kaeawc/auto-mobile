@@ -263,6 +263,11 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
               value: (p.newValue as string) ?? (p.value as string) ?? null,
               valueType: (p.valueType as string) ?? null,
               changeType: (p.operation as string) ?? "modify",
+              // Thread the runner-supplied prior value ONLY when the payload carries
+              // it, so the repository's `previousValue !== undefined` guard falls
+              // through to the auto-lookup for legacy runners that omit it (#3000).
+              // An explicit null ("no prior value") is honored verbatim.
+              ...("previousValue" in p ? { previousValue: (p.previousValue as string | null) } : {}),
             });
             break;
           default:

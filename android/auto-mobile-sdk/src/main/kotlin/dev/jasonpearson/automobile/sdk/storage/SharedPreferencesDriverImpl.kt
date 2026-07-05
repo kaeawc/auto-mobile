@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.net.Uri
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
 
@@ -33,6 +34,15 @@ internal class SharedPreferencesDriverImpl(
 
   /** Per-file change queues for push-based notifications. */
   private val changeQueues = mutableMapOf<String, CopyOnWriteArrayList<PreferenceChange>>()
+
+  /**
+   * Per-file snapshot of the last-known values, keyed by preference key. Seeded on [startListening]
+   * and updated after each change so the change listener — which fires only AFTER the value is
+   * already committed — can report the value that was present BEFORE the change (#3000). Backed by
+   * [ConcurrentHashMap] because the SharedPreferences listener may fire off arbitrary threads; it
+   * cannot store null, so an absent key naturally means "no prior value".
+   */
+  private val valueSnapshots = mutableMapOf<String, ConcurrentHashMap<String, Any?>>()
 
   /** Monotonically increasing sequence counter for ordering changes. */
   private val sequenceCounter = AtomicLong(0)
@@ -94,6 +104,13 @@ internal class SharedPreferencesDriverImpl(
     changeQueues.getOrPut(fileName) { CopyOnWriteArrayList() }
 
     val prefs = context.getSharedPreferences(fileName, Context.MODE_PRIVATE)
+
+    // Seed the previous-value snapshot with the file's current contents so the first
+    // change for a key reports its true prior value rather than null (#3000).
+    val snapshot = ConcurrentHashMap<String, Any?>()
+    prefs.all.forEach { (k, v) -> if (v != null) snapshot[k] = v }
+    valueSnapshots[fileName] = snapshot
+
     val sharedPrefsListener =
       SharedPreferences.OnSharedPreferenceChangeListener { sharedPrefs, key ->
         // Capture the new value
@@ -102,9 +119,33 @@ internal class SharedPreferencesDriverImpl(
         val timestamp = System.currentTimeMillis()
         val sequence = sequenceCounter.incrementAndGet()
 
+        // Derive the prior value from the snapshot taken before this change. A
+        // null key means the whole file was cleared (API 30+), so there is no
+        // single prior value to report (#3000). Capture its own type so it stays
+        // valid JSON on the wire even when the new value's type is UNKNOWN.
+        val previousValue = if (key != null) snapshot[key] else null
+        val previousValueType = detectType(previousValue)
+
         // Queue the change
-        val change = PreferenceChange(fileName, key, newValue, type, timestamp, sequence)
+        val change =
+          PreferenceChange(
+            fileName,
+            key,
+            newValue,
+            type,
+            timestamp,
+            sequence,
+            previousValue,
+            previousValueType,
+          )
         changeQueues[fileName]?.add(change)
+
+        // Advance the snapshot to reflect the new state for the next change.
+        if (key != null) {
+          if (newValue != null) snapshot[key] = newValue else snapshot.remove(key)
+        } else {
+          snapshot.clear()
+        }
 
         // Notify registered listeners
         listeners.forEach { it.onPreferenceChanged(fileName, key) }
@@ -130,6 +171,7 @@ internal class SharedPreferencesDriverImpl(
       prefs.unregisterOnSharedPreferenceChangeListener(listener)
     }
     changeQueues.remove(fileName)
+    valueSnapshots.remove(fileName)
   }
 
   /** Stops listening on all preferences files. */

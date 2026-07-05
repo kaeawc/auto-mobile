@@ -565,6 +565,8 @@ class StorageSubscriptionManager(private val context: Context) {
                   type = change.type,
                   timestamp = change.timestamp,
                   sequenceNumber = change.sequenceNumber,
+                  previousValue = change.previousValue,
+                  previousValueType = change.previousValueType,
                 )
 
               _changeEvents.tryEmit(event)

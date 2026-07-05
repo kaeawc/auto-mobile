@@ -5945,29 +5945,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
-      val message = buildString {
-        append("""{"type":"storage_changed","timestamp":${System.currentTimeMillis()}""")
-        append(""","packageName":${jsonCompact.encodeToString(event.packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(event.fileName)}""")
-        if (event.key != null) {
-          append(""","key":${jsonCompact.encodeToString(event.key)}""")
-        } else {
-          append(""","key":null""")
-        }
-        if (event.value != null) {
-          // STRING values need JSON encoding (quotes + escaping), other types are already valid
-          // JSON
-          val jsonValue =
-            if (event.type == "STRING") jsonCompact.encodeToString(event.value) else event.value
-          append(""","value":$jsonValue""")
-        } else {
-          append(""","value":null""")
-        }
-        append(""","valueType":${jsonCompact.encodeToString(event.type)}""")
-        append(""","eventTimestamp":${event.timestamp}""")
-        append(""","sequenceNumber":${event.sequenceNumber}""")
-        append("}")
-      }
+      // Build the wire payload via the extracted, unit-tested encoder. It emits the
+      // prior value so the TS telemetry ingest can skip its per-insert previous-value
+      // lookup (#3000), quoting it by its OWN type so a removed/type-changed STRING
+      // stays valid JSON. An absent prior value is emitted as JSON null.
+      val message =
+        dev.jasonpearson.automobile.ctrlproxy.storage.buildStorageChangedMessage(
+          event,
+          System.currentTimeMillis(),
+          jsonCompact,
+        )
       webSocketServer.broadcast(message)
       Log.d(TAG, "Broadcasted storage change to ${webSocketServer.getConnectionCount()} clients")
     } catch (e: Exception) {

@@ -201,7 +201,7 @@ public class CommandHandler: CommandHandling {
             }
         } catch {
             return WebSocketResponse.error(
-                type: responseType(for: request.typeString),
+                type: request.requestType.responseType.rawValue,
                 requestId: request.requestId,
                 error: error.localizedDescription,
                 totalTimeMs: totalTimeMs(from: startTime)
@@ -1444,85 +1444,6 @@ public class CommandHandler: CommandHandling {
     private func totalTimeMs(from startTime: Date) -> Int64 {
         return Int64(Date().timeIntervalSince(startTime) * 1000)
     }
-
-    private func responseType(for requestType: String) -> String {
-        switch requestType {
-        case RequestType.requestHierarchy.rawValue,
-             RequestType.requestHierarchyIfStale.rawValue:
-            return ResponseType.hierarchyUpdate.rawValue
-        case RequestType.requestScreenshot.rawValue:
-            return ResponseType.screenshot.rawValue
-        case RequestType.requestTapCoordinates.rawValue:
-            return ResponseType.tapCoordinatesResult.rawValue
-        case RequestType.requestSwipe.rawValue:
-            return ResponseType.swipeResult.rawValue
-        case RequestType.requestTwoFingerSwipe.rawValue,
-             RequestType.requestMultiFingerSwipe.rawValue:
-            return ResponseType.multiFingerSwipeResult.rawValue
-        case RequestType.requestDrag.rawValue:
-            return ResponseType.dragResult.rawValue
-        case RequestType.requestPinch.rawValue:
-            return ResponseType.pinchResult.rawValue
-        case RequestType.requestSetText.rawValue:
-            return ResponseType.setTextResult.rawValue
-        case RequestType.requestClearText.rawValue:
-            return ResponseType.clearTextResult.rawValue
-        case RequestType.requestImeAction.rawValue:
-            return ResponseType.imeActionResult.rawValue
-        case RequestType.requestSelectAll.rawValue:
-            return ResponseType.selectAllResult.rawValue
-        case RequestType.requestKeyboard.rawValue:
-            return ResponseType.keyboardResult.rawValue
-        case RequestType.requestPressButton.rawValue:
-            return ResponseType.pressButtonResult.rawValue
-        case RequestType.requestPressHome.rawValue:
-            return ResponseType.pressHomeResult.rawValue
-        case RequestType.requestPressBack.rawValue:
-            return ResponseType.pressBackResult.rawValue
-        case RequestType.requestShake.rawValue:
-            return ResponseType.shakeResult.rawValue
-        case RequestType.requestRecentApps.rawValue:
-            return ResponseType.recentAppsResult.rawValue
-        case RequestType.requestAction.rawValue:
-            return ResponseType.actionResult.rawValue
-        case RequestType.requestLaunchApp.rawValue:
-            return ResponseType.launchAppResult.rawValue
-        case RequestType.requestResetPermissions.rawValue:
-            return ResponseType.resetPermissionsResult.rawValue
-        case RequestType.requestRotate.rawValue:
-            return ResponseType.rotateResult.rawValue
-        case RequestType.requestClipboard.rawValue:
-            return ResponseType.clipboardResult.rawValue
-        case RequestType.getVoiceOverState.rawValue:
-            return ResponseType.voiceOverStateResult.rawValue
-        case RequestType.listPreferenceFiles.rawValue:
-            return ResponseType.preferenceFiles.rawValue
-        case RequestType.getPreferences.rawValue:
-            return ResponseType.preferences.rawValue
-        case RequestType.getPreference.rawValue:
-            return ResponseType.getPreferenceResult.rawValue
-        case RequestType.setPreference.rawValue:
-            return ResponseType.setPreferenceResult.rawValue
-        case RequestType.removePreference.rawValue:
-            return ResponseType.removePreferenceResult.rawValue
-        case RequestType.clearPreferences.rawValue:
-            return ResponseType.clearPreferencesResult.rawValue
-        case RequestType.setNetworkMockRules.rawValue:
-            return ResponseType.setNetworkMockRulesResult.rawValue
-        case RequestType.executeSql.rawValue:
-            return ResponseType.executeSqlResult.rawValue
-        case RequestType.listDatabases.rawValue:
-            return ResponseType.listDatabasesResult.rawValue
-        case RequestType.listTables.rawValue:
-            return ResponseType.listTablesResult.rawValue
-        case RequestType.getTableData.rawValue:
-            return ResponseType.tableDataResult.rawValue
-        case RequestType.getTableStructure.rawValue:
-            return ResponseType.tableStructureResult.rawValue
-        default:
-            return "error"
-        }
-    }
 }
 
 // MARK: - Errors
@@ -1531,9 +1452,7 @@ public enum CommandError: LocalizedError {
     case unknownCommand(String)
     case missingParameter(String)
     case invalidParameter(String, String)
-    case elementNotFound(String)
     case executionFailed(String)
-    case notSupported(String)
 
     public var errorDescription: String? {
         switch self {
@@ -1545,12 +1464,8 @@ public enum CommandError: LocalizedError {
             return "Missing required parameter: \(param)"
         case let .invalidParameter(param, value):
             return "Invalid value '\(value)' for parameter '\(param)'"
-        case let .elementNotFound(id):
-            return "Element not found: \(id)"
         case let .executionFailed(reason):
             return "Command execution failed: \(reason)"
-        case let .notSupported(feature):
-            return "Feature not supported: \(feature)"
         }
     }
 }

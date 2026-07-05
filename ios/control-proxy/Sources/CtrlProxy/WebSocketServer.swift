@@ -420,7 +420,9 @@ public class WebSocketServer: WebSocketServing {
     }
 
     /// Best-effort extraction of requestId from raw JSON data for error correlation.
-    private static func extractRequestId(from data: Data) -> String? {
+    /// Internal (not `private`) so `WebSocketServerTests` can pin the decode-failure
+    /// catch path via `@testable` (issue #2859 part 4).
+    static func extractRequestId(from data: Data) -> String? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }

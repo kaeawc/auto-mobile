@@ -252,6 +252,53 @@ public struct RequestGetTableStructure: Decodable {
     public var table: String?
 }
 
+// MARK: - Command payload protocol
+
+/// Fields common to every typed command payload. Today that is just the
+/// client-supplied correlation id; conforming all payloads lets
+/// `WebSocketRequest` extract the payload once (see `payload`) and read shared
+/// fields off it — instead of a per-command accessor arm for each field — so a
+/// future common field (e.g. a deadline) comes for free (issue #2859 part 3).
+///
+/// Every payload struct already declares `var requestId: String?`, so these
+/// conformances are marker-only. Grouping them here (rather than inline on each
+/// struct) keeps the payload declarations focused on their command's fields and
+/// makes the "these are all command payloads" invariant scannable in one place;
+/// omitting one fails to compile at the `payload` switch below.
+public protocol CommandPayload {
+    var requestId: String? { get }
+}
+
+extension RequestEnvelope: CommandPayload {}
+extension RequestHierarchy: CommandPayload {}
+extension RequestTapCoordinates: CommandPayload {}
+extension RequestSwipe: CommandPayload {}
+extension RequestMultiFingerSwipe: CommandPayload {}
+extension RequestDrag: CommandPayload {}
+extension RequestPinch: CommandPayload {}
+extension RequestSetText: CommandPayload {}
+extension RequestClearText: CommandPayload {}
+extension RequestImeAction: CommandPayload {}
+extension RequestKeyboard: CommandPayload {}
+extension RequestPressButton: CommandPayload {}
+extension RequestAction: CommandPayload {}
+extension RequestLaunchApp: CommandPayload {}
+extension RequestResetPermissions: CommandPayload {}
+extension RequestRotate: CommandPayload {}
+extension RequestClipboard: CommandPayload {}
+extension RequestAddHighlight: CommandPayload {}
+extension RequestGetPreferences: CommandPayload {}
+extension RequestGetPreference: CommandPayload {}
+extension RequestSetPreference: CommandPayload {}
+extension RequestRemovePreference: CommandPayload {}
+extension RequestClearPreferences: CommandPayload {}
+extension RequestSetNetworkMockRules: CommandPayload {}
+extension RequestExecuteSql: CommandPayload {}
+extension RequestListDatabases: CommandPayload {}
+extension RequestListTables: CommandPayload {}
+extension RequestGetTableData: CommandPayload {}
+extension RequestGetTableStructure: CommandPayload {}
+
 // MARK: - Typed request envelope
 
 /// Typed WebSocket request from the automation client. Each case carries only
@@ -458,11 +505,14 @@ public enum WebSocketRequest: Decodable {
         requestType.rawValue
     }
 
-    /// The client-supplied correlation id, if any.
-    public var requestId: String? {
+    /// This command's payload, as the shared `CommandPayload` protocol. A single
+    /// exhaustive `switch` feeds every common-field accessor (see `requestId`), so
+    /// a new command adds exactly one arm here rather than one arm per shared
+    /// field (issue #2859 part 3).
+    public var payload: CommandPayload {
         switch self {
         case let .requestHierarchy(payload), let .requestHierarchyIfStale(payload):
-            return payload.requestId
+            return payload
         case let .requestScreenshot(payload),
              let .selectAll(payload),
              let .pressHome(payload),
@@ -473,36 +523,41 @@ public enum WebSocketRequest: Decodable {
              let .getTraversalOrder(payload),
              let .getVoiceOverState(payload),
              let .listPreferenceFiles(payload):
-            return payload.requestId
-        case let .tapCoordinates(payload): return payload.requestId
-        case let .swipe(payload): return payload.requestId
+            return payload
+        case let .tapCoordinates(payload): return payload
+        case let .swipe(payload): return payload
         case let .twoFingerSwipe(payload), let .multiFingerSwipe(payload):
-            return payload.requestId
-        case let .drag(payload): return payload.requestId
-        case let .pinch(payload): return payload.requestId
-        case let .setText(payload): return payload.requestId
-        case let .clearText(payload): return payload.requestId
-        case let .imeAction(payload): return payload.requestId
-        case let .keyboard(payload): return payload.requestId
-        case let .pressButton(payload): return payload.requestId
-        case let .action(payload): return payload.requestId
-        case let .launchApp(payload): return payload.requestId
-        case let .resetPermissions(payload): return payload.requestId
-        case let .rotate(payload): return payload.requestId
-        case let .clipboard(payload): return payload.requestId
-        case let .addHighlight(payload): return payload.requestId
-        case let .getPreferences(payload): return payload.requestId
-        case let .getPreference(payload): return payload.requestId
-        case let .setPreference(payload): return payload.requestId
-        case let .removePreference(payload): return payload.requestId
-        case let .clearPreferences(payload): return payload.requestId
-        case let .setNetworkMockRules(payload): return payload.requestId
-        case let .executeSql(payload): return payload.requestId
-        case let .listDatabases(payload): return payload.requestId
-        case let .listTables(payload): return payload.requestId
-        case let .getTableData(payload): return payload.requestId
-        case let .getTableStructure(payload): return payload.requestId
+            return payload
+        case let .drag(payload): return payload
+        case let .pinch(payload): return payload
+        case let .setText(payload): return payload
+        case let .clearText(payload): return payload
+        case let .imeAction(payload): return payload
+        case let .keyboard(payload): return payload
+        case let .pressButton(payload): return payload
+        case let .action(payload): return payload
+        case let .launchApp(payload): return payload
+        case let .resetPermissions(payload): return payload
+        case let .rotate(payload): return payload
+        case let .clipboard(payload): return payload
+        case let .addHighlight(payload): return payload
+        case let .getPreferences(payload): return payload
+        case let .getPreference(payload): return payload
+        case let .setPreference(payload): return payload
+        case let .removePreference(payload): return payload
+        case let .clearPreferences(payload): return payload
+        case let .setNetworkMockRules(payload): return payload
+        case let .executeSql(payload): return payload
+        case let .listDatabases(payload): return payload
+        case let .listTables(payload): return payload
+        case let .getTableData(payload): return payload
+        case let .getTableStructure(payload): return payload
         }
+    }
+
+    /// The client-supplied correlation id, if any.
+    public var requestId: String? {
+        payload.requestId
     }
 }
 
@@ -1477,4 +1532,62 @@ public enum ResponseType: String {
     case listTablesResult = "list_tables_result"
     case tableDataResult = "table_data_result"
     case tableStructureResult = "table_structure_result"
+}
+
+// MARK: - Request → Response type mapping
+
+extension RequestType {
+    /// The `ResponseType` this command's result carries — including on the error
+    /// path, where `CommandHandler.handle`'s catch tags the structured error with
+    /// the command's own result type so the client can correlate the failure to
+    /// the command it sent.
+    ///
+    /// This is a compiler-enforced, exhaustive `switch` with **no `default`**
+    /// (issue #2859 part 2): it replaces the former stringly-typed
+    /// `responseType(for:) -> String` table whose `default:"error"` fallback
+    /// silently dropped `getCurrentFocus` / `getTraversalOrder` / `addHighlight`
+    /// to `"error"`. Adding a `RequestType` case now fails to compile until it is
+    /// mapped here.
+    public var responseType: ResponseType {
+        switch self {
+        case .requestHierarchy, .requestHierarchyIfStale: return .hierarchyUpdate
+        case .requestScreenshot: return .screenshot
+        case .requestTapCoordinates: return .tapCoordinatesResult
+        case .requestSwipe: return .swipeResult
+        case .requestTwoFingerSwipe, .requestMultiFingerSwipe: return .multiFingerSwipeResult
+        case .requestDrag: return .dragResult
+        case .requestPinch: return .pinchResult
+        case .requestSetText: return .setTextResult
+        case .requestClearText: return .clearTextResult
+        case .requestImeAction: return .imeActionResult
+        case .requestSelectAll: return .selectAllResult
+        case .requestKeyboard: return .keyboardResult
+        case .requestPressButton: return .pressButtonResult
+        case .requestPressHome: return .pressHomeResult
+        case .requestPressBack: return .pressBackResult
+        case .requestShake: return .shakeResult
+        case .requestRecentApps: return .recentAppsResult
+        case .requestAction: return .actionResult
+        case .requestLaunchApp: return .launchAppResult
+        case .requestResetPermissions: return .resetPermissionsResult
+        case .requestRotate: return .rotateResult
+        case .requestClipboard: return .clipboardResult
+        case .getCurrentFocus: return .currentFocusResult
+        case .getTraversalOrder: return .traversalOrderResult
+        case .addHighlight: return .highlightResponse
+        case .getVoiceOverState: return .voiceOverStateResult
+        case .listPreferenceFiles: return .preferenceFiles
+        case .getPreferences: return .preferences
+        case .getPreference: return .getPreferenceResult
+        case .setPreference: return .setPreferenceResult
+        case .removePreference: return .removePreferenceResult
+        case .clearPreferences: return .clearPreferencesResult
+        case .setNetworkMockRules: return .setNetworkMockRulesResult
+        case .executeSql: return .executeSqlResult
+        case .listDatabases: return .listDatabasesResult
+        case .listTables: return .listTablesResult
+        case .getTableData: return .tableDataResult
+        case .getTableStructure: return .tableStructureResult
+        }
+    }
 }

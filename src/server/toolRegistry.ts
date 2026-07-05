@@ -927,16 +927,30 @@ class ToolRegistryClass {
     const compactBounds = serverConfig.isObserveResultCompactEnabled();
     return this.getAllTools(options).map(tool => {
       const outputSchema = toolHasOutputSchema(tool) && !suppressOutputSchema
-        ? advertiseBoundsForCompact(flattenTopLevelUnion(toJSONSchema(tool.outputSchema)), compactBounds)
+        ? advertiseBoundsForCompact(
+          flattenTopLevelUnion(toJSONSchema(tool.outputSchema)),
+          compactBounds
+        ) as Record<string, unknown>
         : undefined;
 
-      return {
+      const definition: {
+        name: string;
+        description: string;
+        inputSchema: Record<string, unknown>;
+        outputSchema?: Record<string, unknown>;
+        _meta?: { "anthropic/alwaysLoad": boolean };
+      } = {
         name: tool.name,
         description: tool.description,
         inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)),
-        ...(outputSchema && { outputSchema }),
-        ...(alwaysLoad && { _meta: { "anthropic/alwaysLoad": true } })
       };
+      if (outputSchema) {
+        definition.outputSchema = outputSchema;
+      }
+      if (alwaysLoad) {
+        definition._meta = { "anthropic/alwaysLoad": true };
+      }
+      return definition;
     });
   }
 

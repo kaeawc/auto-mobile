@@ -60,8 +60,6 @@ src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
 src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
 src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
 src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
-src/doctor/checks/ios.ts: error TS2322: Type 'IOSCtrlProxyClient | null' is not assignable to type 'IosObserveRoundTripClient | null'.
-src/doctor/checks/ios.ts: error TS2322: Type 'IOSCtrlProxyClient' is not assignable to type 'IosObserveRoundTripClient'.
 src/doctor/checks/ios.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 src/doctor/checks/ios.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 src/doctor/index.ts: error TS2367: This comparison appears to be unintentional because the types 'false | undefined' and 'true' have no overlap.
@@ -90,7 +88,6 @@ src/features/action/LaunchApp.ts: error TS2322: Type 'unknown' is not assignable
 src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
-src/features/action/LaunchApp.ts: error TS2339: Property 'packageName' does not exist on type 'CtrlProxyHierarchy'.
 src/features/action/OpenURL.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 src/features/action/RestoreSnapshot.ts: error TS2304: Cannot find name 'timeoutHandle'.
 src/features/action/RestoreSnapshot.ts: error TS2304: Cannot find name 'timeoutHandle'.
@@ -205,39 +202,11 @@ src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2367: This compa
 src/features/observe/android/CtrlProxyHierarchy.ts: error TS2554: Expected 0 arguments, but got 1.
 src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type 'null | undefined' is not assignable to type 'NormalizedHighlightBounds | undefined'.
 src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type '{ bounds: NormalizedHighlightBounds | undefined; type: "box"; style?: HighlightStyle | null; }' is not assignable to type 'HighlightShape'.
-src/features/observe/android/index.ts: error TS2305: Module '"./types"' has no exported member 'AndroidHitTestResult'.
 src/features/observe/audits/AccessibilityAuditor.ts: error TS2345: Argument of type 'Hierarchy' is not assignable to parameter of type 'ViewHierarchyNode'.
 src/features/observe/collectors/DeviceStateCollector.ts: error TS2554: Expected 0 arguments, but got 1.
 src/features/observe/ios/CtrlProxyGestures.ts: error TS2345: Argument of type '{ idPrefix: string; responseType: string; messageType: string; params: { x1: number; y1: number; x2: number; y2: number; fingerCount: number; duration: number; offset: number | undefined; }; timeoutMs: number; perf: PerformanceTracker | undefined; notConnectedMessage: string; errorLabel: string; }' is not assignable to parameter of type 'SendCommandOptions<GestureTimingResult>'.
 src/features/observe/ios/CtrlProxyGestures.ts: error TS2459: Module '"./types"' declares 'GestureTimingResult' locally, but it is not exported.
-src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2305: Module '"./types"' has no exported member 'CachedHierarchy'.
-src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2305: Module '"./types"' has no exported member 'XCTestHierarchy'.
-src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2322: Type 'CtrlProxyReconnectStatus | null | undefined' is not assignable to type 'CtrlProxyReconnectStatus | undefined'.
-src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'Record<string, string>'.
-src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'Record<string, string>'.
-src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'Record<string, string>'.
-src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'Record<string, string>'.
-src/features/observe/ios/CtrlProxyHierarchy.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'Record<string, string>'.
 src/features/observe/ios/CtrlProxyHighlights.ts: error TS2322: Type '{ bounds: { x: number; y: number; width: number; height: number; sourceWidth: number | null | undefined; sourceHeight: number | null | undefined; } | null | undefined; type: "box"; style?: HighlightStyle | null; }' is not assignable to type 'HighlightShape'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2322: Type '(Record<string, unknown> | Record<string, unknown>[])[]' is not assignable to type 'Record<string, unknown> | Record<string, unknown>[]'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'error' does not exist on type 'CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'error' does not exist on type 'CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'hierarchy' does not exist on type 'CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'hierarchy' does not exist on type 'CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'packageName' does not exist on type 'CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'packageName' does not exist on type 'CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2339: Property 'updatedAt' does not exist on type 'CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2345: Argument of type 'import("src/features/observe/ios/types").CtrlProxyHierarchy' is not assignable to parameter of type 'import("src/features/observe/ios/CtrlProxyHierarchy").CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2345: Argument of type 'import("src/features/observe/ios/types").CtrlProxyHierarchy' is not assignable to parameter of type 'import("src/features/observe/ios/CtrlProxyHierarchy").CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2345: Argument of type 'import("src/features/observe/ios/types").CtrlProxyHierarchy' is not assignable to parameter of type 'import("src/features/observe/ios/CtrlProxyHierarchy").CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2345: Argument of type 'import("src/features/observe/ios/types").CtrlProxyHierarchy' is not assignable to parameter of type 'import("src/features/observe/ios/CtrlProxyHierarchy").CtrlProxyHierarchy'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2420: Class 'NoOpIOSCtrlProxyManager' incorrectly implements interface 'CtrlProxyIosManager'.
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2739: Type '{ fps: number; frameTimeMs: number; jankFrames: number; droppedFrames: number; memoryUsageMb: number; cpuUsagePercent: number; touchLatencyMs: number | null; timeToInteractiveMs: number | null; screenName: string | null; isResponsive: boolean; }' is missing the following properties from type 'PerformanceStreamData': recompositionCount, recompositionRate
-src/features/observe/ios/IOSCtrlProxyClient.ts: error TS2741: Property 'resetSetupState' is missing in type 'NoOpIOSCtrlProxyManager' but required in type 'CtrlProxyIosManager'.
-src/features/observe/ios/index.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
-src/features/observe/ios/index.ts: error TS2300: Duplicate identifier 'CtrlProxyHierarchy'.
 src/features/performance/PerformanceAudit.ts: error TS2551: Property 'refreshRateHz' does not exist on type 'DeviceCapabilities'. Did you mean 'refreshRate'?
 src/features/performance/PerformanceMonitor.ts: error TS2345: Argument of type 'PerformanceDataPusher' is not assignable to parameter of type 'PerformancePushSocketServer'.
 src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
@@ -343,11 +312,6 @@ src/server/highlightTools.ts: error TS2339: Property 'strict' does not exist on 
 src/server/highlightTools.ts: error TS2503: Cannot find namespace 'z'.
 src/server/highlightTools.ts: error TS7006: Parameter 'ctx' implicitly has an 'any' type.
 src/server/highlightTools.ts: error TS7006: Parameter 'value' implicitly has an 'any' type.
-src/server/index.ts: error TS18046: 'error' is of type 'unknown'.
-src/server/index.ts: error TS2305: Module '"zod"' has no exported member 'ZodError'.
-src/server/index.ts: error TS2305: Module '"zod"' has no exported member 'ZodIssue'.
-src/server/index.ts: error TS7006: Parameter 'unionIssue' implicitly has an 'any' type.
-src/server/index.ts: error TS7006: Parameter 'unionIssues' implicitly has an 'any' type.
 src/server/interactionTools.ts: error TS18048: 'freshness.actualTimestamp' is possibly 'undefined'.
 src/server/interactionTools.ts: error TS18048: 'freshness.requestedAfter' is possibly 'undefined'.
 src/server/interactionTools.ts: error TS18048: 'searchStats' is possibly 'undefined'.
@@ -427,10 +391,6 @@ src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
 src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
 src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
 src/server/preferenceTools.ts: error TS2503: Cannot find namespace 'z'.
-src/server/resourceRegistry.ts: error TS2305: Module '"@modelcontextprotocol/sdk/types.js"' has no exported member 'Resource'.
-src/server/resourceRegistry.ts: error TS2305: Module '"@modelcontextprotocol/sdk/types.js"' has no exported member 'ResourceTemplate'.
-src/server/resourceRegistry.ts: error TS2305: Module '"@modelcontextprotocol/sdk/types.js"' has no exported member 'SubscribeRequestSchema'.
-src/server/resourceRegistry.ts: error TS2305: Module '"@modelcontextprotocol/sdk/types.js"' has no exported member 'UnsubscribeRequestSchema'.
 src/server/snapshotTools.ts: error TS2339: Property 'discriminatedUnion' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
 src/server/snapshotTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
 src/server/snapshotTools.ts: error TS2339: Property 'literal' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
@@ -498,8 +458,6 @@ src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not e
 src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'passthrough' does not exist on type 'ZodSchema'.
 src/server/toolOutputSchemas.ts: error TS2339: Property 'tuple' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
-src/server/toolRegistry.ts: error TS2305: Module '"zod"' has no exported member 'toJSONSchema'.
-src/server/toolRegistry.ts: error TS2698: Spread types may only be created from object types.
 src/server/toolSchemaHelpers.ts: error TS2339: Property 'preprocess' does not exist on type '{ object: (schema: Record<string, any>) => ZodSchema; string: () => ZodSchema; number: () => ZodSchema; boolean: () => ZodSchema; enum: (values: string[]) => ZodSchema; array: (schema: ZodSchema) => ZodSchema; record: (schema: ZodSchema) => ZodSchema; union: (schemas: ZodSchema[]) => ZodSchema; any: () => ZodSchema; }'.
 src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
 src/server/toolSchemaHelpers.ts: error TS2503: Cannot find namespace 'z'.
@@ -559,6 +517,5 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 src/utils/mcpVersion.ts: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
-src/utils/plan/PlanExecutor.ts: error TS2305: Module '"zod"' has no exported member 'ZodError'.
 src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
 src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("node_modules/ajv/dist/ajv").Ajv' is not assignable to parameter of type 'import("node_modules/ajv-formats/node_modules/ajv/dist/core").default'.

@@ -93,6 +93,7 @@ class NoOpIOSCtrlProxyManager implements CtrlProxyIosManager {
   setAutoRestart(): void {}
   isAutoRestartEnabled(): boolean { return false; }
   async forceRestart(): Promise<void> {}
+  resetSetupState(): void {}
 }
 
 const noOpServiceManagerFactory: ServiceManagerFactory = () => new NoOpIOSCtrlProxyManager();
@@ -100,7 +101,7 @@ const noOpServiceManagerFactory: ServiceManagerFactory = () => new NoOpIOSCtrlPr
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
 import { CtrlProxyText } from "./CtrlProxyText";
-import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
+import { CtrlProxyHierarchy as CtrlProxyHierarchyDelegate } from "./CtrlProxyHierarchy";
 import { CtrlProxyScreenshot } from "./CtrlProxyScreenshot";
 import { CtrlProxyNavigation } from "./CtrlProxyNavigation";
 import { CtrlProxyClipboard } from "./CtrlProxyClipboard";
@@ -118,7 +119,7 @@ import type {
   DelegateContext,
   HierarchyDelegateContext,
   CtrlProxyNode,
-  CtrlProxyHierarchy,
+  XCTestHierarchy,
   CtrlProxyHierarchyResponse,
   CtrlProxyScreenshotResult,
   CtrlProxySwipeResult,
@@ -167,7 +168,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number
-  ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null>;
+  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null>;
   requestAddHighlight(
     id: string,
     shape: HighlightShape,
@@ -180,9 +181,9 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number
-  ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null>;
+  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null>;
 
-  convertToViewHierarchyResult(hierarchy: CtrlProxyHierarchy): ViewHierarchyResult;
+  convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult;
 
   requestSwipe(
     x1: number, y1: number, x2: number, y2: number,
@@ -294,7 +295,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
 
   clearCache(): void;
 
-  onPushUpdate(callback: (hierarchy: CtrlProxyHierarchy) => void): () => void;
+  onPushUpdate(callback: (hierarchy: XCTestHierarchy) => void): () => void;
 }
 
 /**
@@ -339,7 +340,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private readonly hierarchyObservationStreamSuppressions: Map<string, NodeJS.Timeout> = new Map();
 
   // Push update callbacks
-  private onPushUpdateCallbacks: Set<(hierarchy: CtrlProxyHierarchy) => void> = new Set();
+  private onPushUpdateCallbacks: Set<(hierarchy: XCTestHierarchy) => void> = new Set();
   private supportedCommands: Set<string> | null = null;
 
   // Track last foreground bundle for performance monitoring
@@ -352,7 +353,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Delegate instances (lazy initialized)
   private _gestures: CtrlProxyGestures | null = null;
   private _text: CtrlProxyText | null = null;
-  private _hierarchy: CtrlProxyHierarchy | null = null;
+  private _hierarchy: CtrlProxyHierarchyDelegate | null = null;
   private _screenshot: CtrlProxyScreenshot | null = null;
   private _navigation: CtrlProxyNavigation | null = null;
   private _clipboard: CtrlProxyClipboard | null = null;
@@ -684,9 +685,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return this._text;
   }
 
-  private get hierarchy(): CtrlProxyHierarchy {
+  private get hierarchy(): CtrlProxyHierarchyDelegate {
     if (!this._hierarchy) {
-      this._hierarchy = new CtrlProxyHierarchy(this.createHierarchyDelegateContext());
+      this._hierarchy = new CtrlProxyHierarchyDelegate(this.createHierarchyDelegateContext());
     }
     return this._hierarchy;
   }
@@ -1075,6 +1076,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       timeToInteractiveMs: snapshot.ttiMs ?? null,
       screenName: snapshot.screenName ?? null,
       isResponsive: (snapshot.fps ?? 0) >= 50, // Consider responsive if FPS >= 50
+      recompositionCount: null,
+      recompositionRate: null,
     };
 
     try {
@@ -1117,7 +1120,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs: number = 5000
-  ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
+  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
   }
 
@@ -1126,11 +1129,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs: number = 5000
-  ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
+  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, true);
   }
 
-  convertToViewHierarchyResult(hierarchy: CtrlProxyHierarchy): ViewHierarchyResult {
+  convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult {
     return this.hierarchy.convertToViewHierarchyResult(hierarchy);
   }
 
@@ -1459,14 +1462,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Push Update Callbacks
   // ===========================================================================
 
-  public onPushUpdate(callback: (hierarchy: CtrlProxyHierarchy) => void): () => void {
+  public onPushUpdate(callback: (hierarchy: XCTestHierarchy) => void): () => void {
     this.onPushUpdateCallbacks.add(callback);
     return () => {
       this.onPushUpdateCallbacks.delete(callback);
     };
   }
 
-  private notifyPushUpdateListeners(hierarchy: CtrlProxyHierarchy): void {
+  private notifyPushUpdateListeners(hierarchy: XCTestHierarchy): void {
     for (const callback of this.onPushUpdateCallbacks) {
       try {
         callback(hierarchy);
@@ -1634,7 +1637,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private handleHierarchyUpdateForNavigation(
-    hierarchy: CtrlProxyHierarchy,
+    hierarchy: XCTestHierarchy,
     perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[]
   ): void {
     if (!hierarchy.hierarchy) {
@@ -1671,7 +1674,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.getHierarchyNavigationDetector().onHierarchyUpdate(convertedHierarchy, metrics);
   }
 
-  private convertHierarchyForNavigation(hierarchy: CtrlProxyHierarchy): AccessibilityHierarchy {
+  private convertHierarchyForNavigation(hierarchy: XCTestHierarchy): AccessibilityHierarchy {
     return {
       updatedAt: hierarchy.updatedAt,
       packageName: hierarchy.packageName,
@@ -1683,7 +1686,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     node: CtrlProxyNode | CtrlProxyNode[]
   ): Record<string, unknown> | Record<string, unknown>[] {
     if (Array.isArray(node)) {
-      return node.map(child => this.convertNodeForNavigation(child));
+      return node.flatMap(child => {
+        const converted = this.convertNodeForNavigation(child);
+        return Array.isArray(converted) ? converted : [converted];
+      });
     }
 
     const converted: Record<string, unknown> = {};

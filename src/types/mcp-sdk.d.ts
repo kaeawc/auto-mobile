@@ -32,12 +32,28 @@ declare module "@modelcontextprotocol/sdk/server/stdio.js" {
 }
 
 declare module "@modelcontextprotocol/sdk/types.js" {
+  export interface Resource {
+    uri: string;
+    name: string;
+    description?: string;
+    mimeType?: string;
+  }
+
+  export interface ResourceTemplate {
+    uriTemplate: string;
+    name: string;
+    description?: string;
+    mimeType?: string;
+  }
+
   export const CallToolRequestSchema: any;
   export const ListToolsRequestSchema: any;
   export const GetResourceRequestSchema: any;
   export const ListResourcesRequestSchema: any;
   export const ReadResourceRequestSchema: any;
   export const ListResourceTemplatesRequestSchema: any;
+  export const SubscribeRequestSchema: any;
+  export const UnsubscribeRequestSchema: any;
 }
 
 declare module "@modelcontextprotocol/sdk/types" {
@@ -54,6 +70,19 @@ declare module "@modelcontextprotocol/sdk/types" {
 }
 
 declare module "zod" {
+  export interface ZodIssue {
+    code: string;
+    path: Array<string | number>;
+    message: string;
+    expected?: string;
+    received?: string;
+    errors?: ZodIssue[][];
+  }
+
+  export class ZodError extends Error {
+    issues: ZodIssue[];
+  }
+
   export interface ZodSchema {
     optional: () => ZodSchema;
     describe: (description: string) => ZodSchema;
@@ -61,6 +90,8 @@ declare module "zod" {
     min: (value: number) => ZodSchema;
     max: (value: number) => ZodSchema;
   }
+
+  export function toJSONSchema(schema: ZodSchema): Record<string, unknown>;
 
   export const z: {
     object: (schema: Record<string, any>) => ZodSchema;

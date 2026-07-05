@@ -25,7 +25,8 @@ export { CtrlProxyDatabase } from "./CtrlProxyDatabase";
 export type {
   // Node and hierarchy types
   CtrlProxyNode,
-  CtrlProxyHierarchy,
+  XCTestHierarchy,
+  CtrlProxyHierarchyShape,
   CtrlProxyHierarchyResponse,
   CtrlProxyPerfTiming,
   CtrlProxyCachedHierarchy,

@@ -66,7 +66,7 @@ export interface CtrlProxyNode {
 /**
  * Interface for iOS view hierarchy (matching Android format)
  */
-export interface CtrlProxyHierarchy {
+export interface XCTestHierarchy {
   updatedAt: number;
   packageName: string;
   hierarchy: CtrlProxyNode;
@@ -79,6 +79,9 @@ export interface CtrlProxyHierarchy {
   screenHeight?: number;
   error?: string;
 }
+
+export type CtrlProxyHierarchyShape = XCTestHierarchy;
+export type CtrlProxyHierarchy = XCTestHierarchy;
 
 /**
  * iOS-side performance timing data.
@@ -111,7 +114,7 @@ export interface WebSocketMessage {
   requestId?: string;
   id?: number;
   supportedCommands?: string[];
-  data?: CtrlProxyHierarchy;
+  data?: XCTestHierarchy;
   performanceData?: CtrlProxyPerformanceSnapshot;
   format?: string;
   success?: boolean;
@@ -227,17 +230,19 @@ export type CtrlProxyHighlightResult = HighlightOperationResult;
  * Interface for cached hierarchy with metadata
  */
 export interface CtrlProxyCachedHierarchy {
-  hierarchy: CtrlProxyHierarchy;
+  hierarchy: XCTestHierarchy;
   receivedAt: number;
   fresh: boolean;
   perfTiming?: CtrlProxyPerfTiming;
 }
 
+export type CachedHierarchy = CtrlProxyCachedHierarchy;
+
 /**
  * Interface for hierarchy response with freshness indicator
  */
 export interface CtrlProxyHierarchyResponse {
-  hierarchy: CtrlProxyHierarchy | null;
+  hierarchy: XCTestHierarchy | null;
   fresh: boolean;
   updatedAt?: number;
   perfTiming?: CtrlProxyPerfTiming;

@@ -327,6 +327,26 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     expect(db.preparedStatements.every(statement => statement.finalized)).toBe(true);
   });
 
+  test("clears cached statements after successful schema-changing SQL", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+    const cachedSelect = db.preparedFor("select * from foo")[0];
+
+    await state.executeQuery(rawQuery("alter table foo add column name text"), owner);
+    const alterStatement = db.preparedFor("alter table foo add column name text")[0];
+
+    expect(cachedSelect.finalized).toBe(true);
+    expect(alterStatement.finalized).toBe(true);
+
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+
+    expect(db.preparedFor("select * from foo")).toHaveLength(2);
+    expect(db.preparedFor("select * from foo")[1].finalized).toBe(false);
+  });
+
   test("preserves SELECT, RETURNING, and write result shapes", async () => {
     const db = new FakeDatabase();
     const state = makeState(db);

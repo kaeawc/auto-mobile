@@ -182,7 +182,8 @@ export class BunSqliteConnectionState {
         }
         const db = this.#getDatabase();
 
-        const stmt = this.#getStatement(db, sql);
+        const schemaChanging = this.#isSchemaChangingSql(sql);
+        const stmt = schemaChanging ? db.prepare(sql) : this.#getStatement(db, sql);
 
         // Check if this is a SELECT query or query with RETURNING clause
         const sqlLower = sql.trim().toLowerCase();
@@ -192,24 +193,38 @@ export class BunSqliteConnectionState {
         // word char, so `\breturning\b` correctly rejects `returning_items`.
         const hasReturning = /\breturning\b/.test(sqlLower);
 
-        if (isSelect || hasReturning) {
-          // For SELECT queries or queries with RETURNING, return all rows
-          const rows = stmt.all(...(parameters as any[])) as R[];
-          return {
-            rows,
-            numAffectedRows: hasReturning ? BigInt(rows.length) : undefined,
-          };
-        } else {
-          // For INSERT/UPDATE/DELETE queries without RETURNING, execute and return changes
-          const result = stmt.run(...(parameters as any[]));
-          return {
-            rows: [],
-            numAffectedRows: BigInt(result.changes),
-            insertId:
-              result.lastInsertRowid !== undefined
-                ? BigInt(result.lastInsertRowid)
-                : undefined,
-          };
+        try {
+          if (isSelect || hasReturning) {
+            // For SELECT queries or queries with RETURNING, return all rows
+            const rows = stmt.all(...(parameters as any[])) as R[];
+            const result = {
+              rows,
+              numAffectedRows: hasReturning ? BigInt(rows.length) : undefined,
+            };
+            if (schemaChanging) {
+              this.#clearStatementCache();
+            }
+            return result;
+          } else {
+            // For INSERT/UPDATE/DELETE queries without RETURNING, execute and return changes
+            const writeResult = stmt.run(...(parameters as any[]));
+            const result = {
+              rows: [],
+              numAffectedRows: BigInt(writeResult.changes),
+              insertId:
+                writeResult.lastInsertRowid !== undefined
+                  ? BigInt(writeResult.lastInsertRowid)
+                  : undefined,
+            };
+            if (schemaChanging) {
+              this.#clearStatementCache();
+            }
+            return result;
+          }
+        } finally {
+          if (schemaChanging) {
+            stmt.finalize();
+          }
         }
       } catch (error) {
         // BigInt-safe: Kysely can bind BigInt params, and a bare
@@ -280,6 +295,10 @@ export class BunSqliteConnectionState {
       }
     }
     return statement;
+  }
+
+  #isSchemaChangingSql(sql: string): boolean {
+    return /^(?:create|alter|drop)\b/i.test(sql.trim());
   }
 
   #clearStatementCache(): void {

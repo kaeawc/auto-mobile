@@ -917,6 +917,9 @@ public class ElementLocator: ElementLocating {
             // Only promote children (flatten hierarchy) if this is a bounds-only wrapper AND not interactive
             if isBoundsOnlyWrapper && !isInteractive {
                 if let children = optimizedChildren {
+                    if ElementLocator.containsOnlyUnprotectedScrollBarNoise(children) {
+                        return []
+                    }
                     // Promote children - flatten this wrapper node
                     return children
                 }
@@ -1364,7 +1367,11 @@ public class ElementLocator: ElementLocating {
         else {
             return false
         }
-        return children.allSatisfy { isScrollBarNoise($0) && !isActionable($0) }
+        return containsOnlyUnprotectedScrollBarNoise(children)
+    }
+
+    private static func containsOnlyUnprotectedScrollBarNoise(_ children: [UIElementInfo]) -> Bool {
+        return !children.isEmpty && children.allSatisfy { isScrollBarNoise($0) && !isActionable($0) }
     }
 
     private static func dedupeNoiseKey(_ element: UIElementInfo) -> String? {

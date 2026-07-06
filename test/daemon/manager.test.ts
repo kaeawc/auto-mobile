@@ -6,12 +6,14 @@ import { tmpdir } from "node:os";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+  createDefaultDaemonProcessFinder,
   daemonBuildIdentityStatusLines,
   DaemonManager,
   parseDaemonProcessTable,
   PsDaemonProcessFinder,
   resolveDaemonLaunchCommand,
-  runDaemonCommand
+  runDaemonCommand,
+  WindowsDaemonProcessFinder,
 } from "../../src/daemon/manager";
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import type { DaemonStatus } from "../../src/daemon/types";
@@ -245,6 +247,81 @@ describe("Daemon manager process detection", () => {
     expect(DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES).toBeGreaterThan(1024 * 1024);
   });
 
+  test("parses daemon processes from Windows PowerShell JSON output", () => {
+    const finder = new WindowsDaemonProcessFinder(() => JSON.stringify([
+      {
+        ProcessId: 10,
+        ParentProcessId: 1,
+        CommandLine: "C:\\\\Windows\\\\System32\\\\cmd.exe /c unrelated --daemon-mode",
+      },
+      {
+        ProcessId: 20,
+        ParentProcessId: 1,
+        CommandLine: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      },
+      {
+        ProcessId: 21,
+        ParentProcessId: 20,
+        CommandLine: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\dist\\\\src\\\\index.js --daemon-mode",
+      },
+      {
+        ProcessId: 22,
+        ParentProcessId: 1,
+        CommandLine: null,
+      },
+    ]));
+
+    expect(finder.findDaemonProcesses()).toEqual([
+      {
+        pid: 20,
+        ppid: 1,
+        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      },
+      {
+        pid: 21,
+        ppid: 20,
+        command: "C:\\\\Program Files\\\\nodejs\\\\node.exe C:\\\\repo\\\\dist\\\\src\\\\index.js --daemon-mode",
+      },
+    ]);
+  });
+
+  test("uses a Windows-native process table command with the expanded buffer", () => {
+    const calls: Array<{
+      command: string;
+      options: { encoding: "utf-8"; maxBuffer: number };
+    }> = [];
+    const finder = new WindowsDaemonProcessFinder((command, options) => {
+      calls.push({ command, options });
+      return JSON.stringify({
+        ProcessId: 30,
+        ParentProcessId: 1,
+        CommandLine: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      });
+    });
+
+    expect(finder.findDaemonProcesses()).toEqual([
+      {
+        pid: 30,
+        ppid: 1,
+        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      },
+    ]);
+    expect(calls).toEqual([
+      {
+        command: "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress\"",
+        options: {
+          encoding: "utf-8",
+          maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+        },
+      },
+    ]);
+  });
+
+  test("selects Windows process detection by platform", () => {
+    expect(createDefaultDaemonProcessFinder("win32")).toBeInstanceOf(WindowsDaemonProcessFinder);
+    expect(createDefaultDaemonProcessFinder("linux")).toBeInstanceOf(PsDaemonProcessFinder);
+  });
+
   function managerWithProcesses(
     records: DaemonProcessRecord[],
     options: { livePids?: Set<number>; pidFilePath?: string } = {}
@@ -286,6 +363,33 @@ describe("Daemon manager process detection", () => {
     ]);
 
     expect(manager.findAllDaemonProcesses()).toEqual([101]);
+  });
+
+  test("reports Windows shell-launched daemons once using the long-lived child PID", () => {
+    const manager = managerWithProcesses([
+      {
+        pid: 100,
+        ppid: 1,
+        command: `C:\\\\Windows\\\\System32\\\\cmd.exe /d /s /c "${process.execPath} C:\\\\repo\\\\dist\\\\src\\\\index.js --daemon-mode"`,
+      },
+      {
+        pid: 101,
+        ppid: 100,
+        command: `${process.execPath} C:\\\\repo\\\\dist\\\\src\\\\index.js --daemon-mode`,
+      },
+      {
+        pid: 200,
+        ppid: 1,
+        command: `C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe -NoProfile -Command "${process.execPath} C:\\\\repo\\\\dist\\\\src\\\\index.js --daemon-mode"`,
+      },
+      {
+        pid: 201,
+        ppid: 200,
+        command: `${process.execPath} C:\\\\repo\\\\dist\\\\src\\\\index.js --daemon-mode`,
+      },
+    ]);
+
+    expect(manager.findAllDaemonProcesses()).toEqual([101, 201]);
   });
 
   test("does not report the current daemon's shell wrapper as another daemon", () => {

@@ -9,6 +9,7 @@ import { DefaultProcessExecutor, type ProcessExecutor } from "../../ProcessExecu
 
 const LIBWEBP_VERSION = "1.6.0";
 const WEBP_DOWNLOAD_BASE_URL = "https://storage.googleapis.com/downloads.webmproject.org/releases/webp";
+const archiveProvisioningByPath = new Map<string, Promise<void>>();
 
 type WebpBinary = "cwebp" | "dwebp";
 
@@ -45,7 +46,6 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private readonly env: NodeJS.ProcessEnv;
   private readonly fileDownloader: FileDownloader;
   private readonly processExecutor: ProcessExecutor;
-  private readonly provisioningByArchive = new Map<string, Promise<void>>();
 
   constructor(options: WebpBinaryResolverOptions = {}) {
     this.projectRoot = options.projectRoot ?? defaultProjectRoot();
@@ -150,18 +150,19 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   }
 
   private async provisionArchiveOnce(archive: WebpArchiveInfo): Promise<void> {
-    const key = `${this.platform}-${this.arch}-${archive.archiveName}`;
-    const existing = this.provisioningByArchive.get(key);
+    const archivePath = path.resolve(this.cacheDir, archive.archiveName);
+    const existing = archiveProvisioningByPath.get(archivePath);
     if (existing) {
       await existing;
       return;
     }
 
     const provision = this.provisionArchive(archive).catch(error => {
-      this.provisioningByArchive.delete(key);
       throw error;
+    }).finally(() => {
+      archiveProvisioningByPath.delete(archivePath);
     });
-    this.provisioningByArchive.set(key, provision);
+    archiveProvisioningByPath.set(archivePath, provision);
     await provision;
   }
 

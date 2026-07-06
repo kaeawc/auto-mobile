@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import type { FileDownloader } from "../../../../src/utils/FileDownloader";
 import { WebpBinaryResolver } from "../../../../src/utils/image/webp/WebpBinaryResolver";
+import { defaultTimer } from "../../../../src/utils/SystemTimer";
 import { FakeFileDownloader } from "../../../fakes/FakeFileDownloader";
 import { FakeProcessExecutor } from "../../../fakes/FakeProcessExecutor";
 
@@ -24,9 +25,13 @@ async function writeExecutable(filePath: string): Promise<void> {
 
 class CountingFileDownloader implements FileDownloader {
   readonly downloadedUrls: string[] = [];
+  delayMs = 0;
 
   async download(url: string, destination: string): Promise<void> {
     this.downloadedUrls.push(url);
+    if (this.delayMs > 0) {
+      await new Promise(resolve => defaultTimer.setTimeout(resolve, this.delayMs));
+    }
     await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.writeFile(destination, "fake archive");
   }
@@ -150,6 +155,40 @@ describe("WebpBinaryResolver", () => {
       cwebp: path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"),
       dwebp: path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "dwebp")
     });
+    expect(downloader.downloadedUrls).toHaveLength(1);
+    expect(extractionCount).toBe(1);
+  });
+
+  test("shares off-platform archive provisioning across resolver instances", async () => {
+    const root = await makeTempDir();
+    const cacheDir = path.join(root, "cache");
+    const downloader = new CountingFileDownloader();
+    downloader.delayMs = 1;
+    const processExecutor = new FakeProcessExecutor();
+    let extractionCount = 0;
+    processExecutor.setCommandHandler("tar -xzf", async () => {
+      extractionCount += 1;
+      await writeExecutable(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"));
+      return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
+    });
+
+    const resolverOptions = {
+      projectRoot: root,
+      cacheDir,
+      platform: "darwin" as const,
+      arch: "arm64" as const,
+      env: { PATH: "" },
+      fileDownloader: downloader,
+      processExecutor
+    };
+
+    const [first, second] = await Promise.all([
+      new WebpBinaryResolver(resolverOptions).resolveCwebp(),
+      new WebpBinaryResolver(resolverOptions).resolveCwebp()
+    ]);
+
+    expect(first).toBe(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"));
+    expect(second).toBe(first);
     expect(downloader.downloadedUrls).toHaveLength(1);
     expect(extractionCount).toBe(1);
   });

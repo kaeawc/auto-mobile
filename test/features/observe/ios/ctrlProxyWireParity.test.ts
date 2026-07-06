@@ -25,10 +25,12 @@ import {
   IOS_KNOWN_REQUEST_TYPE_SET,
 } from "../../../../src/features/observe/ios/ctrlProxyRequestTypes";
 import { IOS_RUNNER_FEATURE_COMMANDS } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { deriveIosSharedEmitFiles, scanFile } from "./ctrlProxyWireScan";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 const IOS_OBSERVE_DIR = resolve(REPO_ROOT, "src/features/observe/ios");
 const SHARED_OBSERVE_DIR = resolve(REPO_ROOT, "src/features/observe/shared");
+const IOS_CLIENT_ENTRY = resolve(IOS_OBSERVE_DIR, "IOSCtrlProxyClient.ts");
 const MODELS_SWIFT = resolve(REPO_ROOT, "ios/control-proxy/Sources/CtrlProxy/Models.swift");
 
 /**
@@ -82,9 +84,14 @@ const SWIFT_REQUEST_TYPES = [
 /**
  * Response-payload discriminators that share the `type:` JSON key with outbound
  * requests but are *inbound* shapes, not wire commands. `CtrlProxyDatabase.executeSQL`
- * classifies its result as `{ type: "mutation" }` / `{ type: "query" }`. They must be
- * excluded from the emit scan; a new non-request `type:` literal that is not listed
- * here will (correctly) fail the subset assertion and force a decision.
+ * classifies its result as `{ type: "mutation" }` / `{ type: "query" }`.
+ *
+ * The AST scanner scopes emit detection to the `JSON.stringify(...)` / `sendCommand(...)`
+ * sinks, so these result-classifier objects are no longer picked up at all — this
+ * denylist is now defense-in-depth: if a future refactor DID serialize a `{ type }`
+ * result over the wire, the literal would still be excluded here rather than tripping
+ * the subset assertion. A genuinely-new non-request literal not listed here will
+ * (correctly) fail the subset assertion and force a decision.
  */
 const NON_REQUEST_TYPE_LITERALS = new Set(["mutation", "query"]);
 
@@ -95,80 +102,42 @@ const EXCLUDED_IOS_FILES = new Set([
   "types.ts",
 ]);
 
-/**
- * Shared delegates the iOS text + gesture paths route through. These files serve BOTH
- * platforms, so every command they emit must be valid on the iOS runner too — an
- * Android-only command added to a shared delegate would (correctly) fail this guard.
- * The list is hardcoded because iOS routes through exactly these two today; a new
- * shared delegate the iOS client adopts must be added here (tracked follow-up: derive
- * this from the iOS import graph so a missed delegate can't silently go unscanned).
- */
-const SHARED_EMIT_FILES = ["SharedTextDelegate.ts", "SharedGestureDelegate.ts"];
-
-function iosEmitSourceFiles(): string[] {
-  const iosFiles = readdirSync(IOS_OBSERVE_DIR)
-    .filter(f => f.endsWith(".ts") && !f.endsWith(".test.ts") && !EXCLUDED_IOS_FILES.has(f))
-    .map(f => resolve(IOS_OBSERVE_DIR, f));
-  const sharedFiles = SHARED_EMIT_FILES.map(f => resolve(SHARED_OBSERVE_DIR, f));
-  return [...iosFiles, ...sharedFiles];
-}
-
 // A wire command discriminator: lowercase snake_case, may contain digits (e.g. a
 // hypothetical `request_swipe_v2`). Must match the Swift-side rawValue class so a
 // digit-bearing command can't slip past either side of the guard.
 const COMMAND_TOKEN = "[a-z][a-z0-9_]*";
 
 /**
- * Extract every command `type` string a source file can put on the wire.
- *
- * This is a textual scan, not a full parse, so it recognizes only *literal* command
- * discriminators in three syntactic shapes (below). It deliberately cannot follow a
- * value hoisted into a `const` or built from a template — see `guardAgainstDynamicCommandTypes`,
- * which fails loudly on the template case, and the tracked follow-up for a structural
- * (AST/lint) replacement.
+ * The iOS emit source files: every non-test `.ts` in the iOS observe dir (minus inbound
+ * decode/registry files) plus the shared delegates DERIVED from the iOS client's
+ * transitive import graph (issue #2955). A new shared delegate the iOS client routes
+ * through is discovered automatically, so it cannot silently go unscanned — no hardcoded
+ * `SHARED_EMIT_FILES` allowlist to fall out of date.
  */
-function extractEmittedTypes(source: string): Set<string> {
-  const found = new Set<string>();
-
-  // 1. `messageType: "..."` — the shared sendCommand discriminator (never anything else).
-  for (const m of source.matchAll(new RegExp(`messageType:\\s*"(${COMMAND_TOKEN})"`, "g"))) {
-    found.add(m[1]);
-  }
-  // 2a. A string literal directly after the `type:` JSON key, tolerating a line break
-  //     between key and value (`type:\n  "get_preferences"`). `messageType:`/
-  //     `responseType:` (capital T) are not matched by \btype:.
-  for (const m of source.matchAll(new RegExp(`\\btype:\\s*"(${COMMAND_TOKEN})"`, "g"))) {
-    found.add(m[1]);
-  }
-  // 2b. Any string literal on a line carrying the `type:` key — catches the hierarchy
-  //     ternary (`type: cond ? "request_hierarchy" : "request_hierarchy_if_stale"`).
-  for (const line of source.split("\n")) {
-    if (!/\btype:/.test(line)) { continue; }
-    for (const m of line.matchAll(new RegExp(`"(${COMMAND_TOKEN})"`, "g"))) {
-      found.add(m[1]);
-    }
-  }
-  // 3. `CtrlProxyDatabase.request(<T>)("execute_sql", ...)` first-arg sends.
-  for (const m of source.matchAll(new RegExp(`\\.request<[^>]*>\\(\\s*"(${COMMAND_TOKEN})"`, "g"))) {
-    found.add(m[1]);
-  }
-
-  for (const denied of NON_REQUEST_TYPE_LITERALS) {
-    found.delete(denied);
-  }
-  return found;
+function iosEmitSourceFiles(): string[] {
+  const iosFiles = readdirSync(IOS_OBSERVE_DIR)
+    .filter(f => f.endsWith(".ts") && !f.endsWith(".test.ts") && !EXCLUDED_IOS_FILES.has(f))
+    .map(f => resolve(IOS_OBSERVE_DIR, f));
+  const sharedFiles = deriveIosSharedEmitFiles(IOS_CLIENT_ENTRY, SHARED_OBSERVE_DIR);
+  return [...iosFiles, ...sharedFiles];
 }
 
 /**
- * The scan only understands *literal* command strings. A template-literal discriminator
- * (`` type: `request_${kind}` ``) would evade it entirely, silently dropping coverage.
- * Rather than parse it, forbid it in the scanned files so the scan's assumption is
- * enforced: a build using a dynamic command `type` must be made statically analyzable
- * (or this guard updated deliberately). Ternaries-of-literals and `{ type }` shorthand
- * (a variable, covered by rule 3) are intentionally allowed.
+ * Extract every command `type`/`messageType` string a source file can put on the wire,
+ * using the TypeScript AST (issue #2955). Unlike the retired textual scan, this follows
+ * const-hoisted and parameter-forwarded discriminators to their literal (see
+ * `ctrlProxyWireScan.ts`). An emit site whose discriminator is NOT statically decidable
+ * (template literal, opaque expression) is returned in `unresolved` so the guard fails
+ * loudly rather than dropping coverage — the structural analog of the old template guard.
  */
-function findDynamicCommandTypes(source: string): string[] {
-  return [...source.matchAll(/\b(?:messageType|type):\s*`/g)].map(m => m[0]);
+function extractEmittedTypes(file: string, source: string): { emitted: Set<string>; unresolved: string[] } {
+  const result = scanFile(file, source);
+  const emitted = new Set(result.emitted.map(e => e.type));
+  for (const denied of NON_REQUEST_TYPE_LITERALS) {
+    emitted.delete(denied);
+  }
+  const unresolved = result.unresolved.map(u => `${u.file}:${u.line} ${u.text}`);
+  return { emitted, unresolved };
 }
 
 function readSwiftRequestTypeRawValues(): string[] {
@@ -208,18 +177,33 @@ describe("iOS control-proxy — RequestType contract coverage", () => {
 describe("iOS control-proxy — emitted commands are a subset of the runner contract", () => {
   const files = iosEmitSourceFiles();
   const allEmitted = new Set<string>();
+  const allUnresolved: string[] = [];
   for (const file of files) {
-    for (const type of extractEmittedTypes(readFileSync(file, "utf8"))) {
+    const { emitted, unresolved } = extractEmittedTypes(file, readFileSync(file, "utf8"));
+    for (const type of emitted) {
       allEmitted.add(type);
     }
+    allUnresolved.push(...unresolved);
   }
 
+  test("the shared-delegate scan set is derived from the iOS import graph", () => {
+    // Regression guard for #2955 gap 2: the shared files must be discovered via the
+    // import graph, not a hardcoded allowlist. The two delegates the client routes
+    // through today must both appear; a new one would appear automatically.
+    const shared = deriveIosSharedEmitFiles(IOS_CLIENT_ENTRY, SHARED_OBSERVE_DIR).map(f =>
+      f.slice(SHARED_OBSERVE_DIR.length + 1)
+    );
+    expect(shared).toContain("SharedTextDelegate.ts");
+    expect(shared).toContain("SharedGestureDelegate.ts");
+  });
+
   test("the scan actually finds emit sites (guards against a broken scanner)", () => {
-    // Anchors that must always be present, spanning all three emit patterns.
+    // Anchors that must always be present, spanning every resolvable emit shape.
     expect(allEmitted.has("request_tap_coordinates")).toBe(true); // messageType via shared delegate
     expect(allEmitted.has("get_preferences")).toBe(true); // type: object literal
-    expect(allEmitted.has("request_hierarchy")).toBe(true); // type: ternary
-    expect(allEmitted.has("execute_sql")).toBe(true); // .request(...) first arg
+    expect(allEmitted.has("request_hierarchy")).toBe(true); // type: ternary of literals
+    expect(allEmitted.has("request_hierarchy_if_stale")).toBe(true); // ternary other branch
+    expect(allEmitted.has("execute_sql")).toBe(true); // parameter-forwarded { type } shorthand
     expect(allEmitted.size).toBeGreaterThan(20);
   });
 
@@ -230,13 +214,12 @@ describe("iOS control-proxy — emitted commands are a subset of the runner cont
     expect(unknown).toEqual([]);
   });
 
-  test("no scanned file builds a command type from a template literal", () => {
-    // The literal scan can't follow `` type: `request_${kind}` `` and would silently
-    // drop coverage for it. Forbid the pattern so the scan's assumption stays valid.
-    const offenders = files.flatMap(file =>
-      findDynamicCommandTypes(readFileSync(file, "utf8")).map(hit => `${file}: ${hit}`)
-    );
-    expect(offenders).toEqual([]);
+  test("no scanned emit site has a statically-unresolvable command type", () => {
+    // The AST scanner resolves literals, ternaries-of-literals, const-hoisted and
+    // parameter-forwarded discriminators. Anything it CANNOT decide (a template literal,
+    // an opaque call) would silently drop coverage — fail loudly and force it to be made
+    // statically analyzable, the structural successor to the old template-literal guard.
+    expect(allUnresolved).toEqual([]);
   });
 
   test("IOS_RUNNER_FEATURE_COMMANDS is a subset of the known RequestType set", () => {

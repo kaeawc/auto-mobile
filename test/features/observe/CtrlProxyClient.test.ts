@@ -18,6 +18,7 @@ import type { DeviceConnectionLostNotifier } from "../../../src/features/observe
 import { PortManager } from "../../../src/utils/PortManager";
 import { installInMemoryNavManager } from "../../helpers/navigationTestHarness";
 import type { HierarchySyncDiagnostics } from "../../../src/features/observe/android/types";
+import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { logger } from "../../../src/utils/logger";
 
 describe("AndroidCtrlProxyClient", function() {
@@ -1792,6 +1793,255 @@ describe("AndroidCtrlProxyClient", function() {
         expect(terminalWarn).toContain(runnerText);
       } finally {
         logger.warn = originalWarn;
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("verifyServiceReady deterministic runner-error short-circuit (issue #3097)", function() {
+    // Follow-up to #3062. That surfaced the runner's structured error text to verifyServiceReady
+    // via diagnostics, but the method still retried to exhaustion even when every attempt failed
+    // with the SAME deterministic runner handler error. #3097 short-circuits the retry loop once
+    // byte-identical runner error text repeats on 2 consecutive attempts, while still granting one
+    // retry after the FIRST error (bring-up failures can be transient) and resetting the streak
+    // when a plain timeout intervenes (mixed signals are not evidence of determinism).
+
+    const sentHierarchyRequests = (socket: CapturingWebSocket): any[] =>
+      socket.sentMessages
+        .map(m => {
+          try { return JSON.parse(m); } catch { return null; }
+        })
+        .filter(m => m && m.type === "request_hierarchy");
+
+    // Advance fake time in small steps (firing retry-delay sleeps and wait intervals) until the
+    // Nth request_hierarchy frame has been sent — i.e. until the retry loop reaches attempt N.
+    const advanceUntilHierarchyRequests = async (
+      socket: CapturingWebSocket,
+      timer: FakeTimer,
+      minCount: number,
+      stepMs: number = 250
+    ): Promise<any[]> => {
+      for (let i = 0; i < 40; i++) {
+        const msgs = sentHierarchyRequests(socket);
+        if (msgs.length >= minCount) {
+          return msgs;
+        }
+        timer.advanceTime(stepMs);
+        await flushPromises();
+      }
+      return sentHierarchyRequests(socket);
+    };
+
+    const simulateRunnerError = (
+      socket: CapturingWebSocket,
+      timer: FakeTimer,
+      requestId: string,
+      errorText: string
+    ): void => {
+      socket.simulateMessage(JSON.stringify({
+        type: "error",
+        requestId,
+        success: false,
+        error: errorText,
+        timestamp: timer.now()
+      }));
+    };
+
+    const createShortCircuitTestClient = (): {
+      testClient: AndroidCtrlProxyClient;
+      getSocket: () => CapturingWebSocket | null;
+      timer: FakeTimer;
+    } => {
+      const timer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        timer,
+        undefined,
+        // Retry delays must run on the SAME fake timer so the test controls them.
+        new DefaultRetryExecutor(timer)
+      );
+      return { testClient, getSocket, timer };
+    };
+
+    const captureWarns = (): { warnMessages: string[]; restore: () => void } => {
+      const warnMessages: string[] = [];
+      const originalWarn = logger.warn;
+      logger.warn = (message: string) => {
+        warnMessages.push(message);
+      };
+      return { warnMessages, restore: () => { logger.warn = originalWarn; } };
+    };
+
+    test("identical runner error on 2 consecutive attempts short-circuits the remaining retries", async function() {
+      const { testClient, getSocket, timer } = createShortCircuitTestClient();
+      const { warnMessages, restore } = captureWarns();
+
+      try {
+        testClient.invalidateCache();
+        const verifyPromise = testClient.verifyServiceReady(5, 500, 10000);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        const runnerText = "request_hierarchy handler failed: view hierarchy extraction threw";
+
+        // Attempt 1: correlated runner error.
+        let msgs = await advanceUntilHierarchyRequests(socket, timer, 1);
+        expect(msgs.length).toBe(1);
+        simulateRunnerError(socket, timer, msgs[0].requestId, runnerText);
+        await flushPromises();
+
+        // Attempt 2: byte-identical runner error -> streak of 2 -> stop.
+        msgs = await advanceUntilHierarchyRequests(socket, timer, 2);
+        expect(msgs.length).toBe(2);
+        simulateRunnerError(socket, timer, msgs[1].requestId, runnerText);
+
+        const ready = await timer.resolvePromise(verifyPromise);
+
+        expect(ready).toBe(false);
+        // Short-circuited after 2 attempts: attempts 3-5 never sent a request.
+        expect(sentHierarchyRequests(socket).length).toBe(2);
+        const terminalWarn = warnMessages.find(m => m.includes("Service not ready"));
+        expect(terminalWarn).toBeDefined();
+        expect(terminalWarn).toContain("short-circuited");
+        expect(terminalWarn).toContain("2/5 verification attempts");
+        expect(terminalWarn).toContain(runnerText);
+      } finally {
+        restore();
+        await testClient.close();
+      }
+    });
+
+    test("a transient runner error on the first attempt still recovers on the retry", async function() {
+      // The regression guard for the startup path this method exists to verify: ONE handler
+      // error during bring-up must not conclude "deterministic" — the retry still runs and a
+      // successful push flips the verification to ready.
+      const { testClient, getSocket, timer } = createShortCircuitTestClient();
+      const { warnMessages, restore } = captureWarns();
+
+      try {
+        testClient.invalidateCache();
+        const verifyPromise = testClient.verifyServiceReady(5, 500, 10000);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        // Attempt 1: correlated runner error (transient bring-up failure).
+        let msgs = await advanceUntilHierarchyRequests(socket, timer, 1);
+        expect(msgs.length).toBe(1);
+        simulateRunnerError(socket, timer, msgs[0].requestId, "request_hierarchy handler failed: service still starting");
+        await flushPromises();
+
+        // Attempt 2: the service came up; deliver a fresh hierarchy push.
+        msgs = await advanceUntilHierarchyRequests(socket, timer, 2);
+        expect(msgs.length).toBe(2);
+        socket.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: timer.now(),
+          data: {
+            updatedAt: timer.now(),
+            packageName: "com.example.app",
+            hierarchy: { text: "Service recovered" }
+          }
+        }));
+
+        const ready = await timer.resolvePromise(verifyPromise);
+
+        expect(ready).toBe(true);
+        expect(warnMessages.find(m => m.includes("Service not ready"))).toBeUndefined();
+      } finally {
+        restore();
+        await testClient.close();
+      }
+    });
+
+    test("differing runner error texts never short-circuit (full retry budget)", async function() {
+      const { testClient, getSocket, timer } = createShortCircuitTestClient();
+      const { warnMessages, restore } = captureWarns();
+
+      try {
+        testClient.invalidateCache();
+        const verifyPromise = testClient.verifyServiceReady(3, 500, 10000);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          const msgs = await advanceUntilHierarchyRequests(socket, timer, attempt);
+          expect(msgs.length).toBe(attempt);
+          simulateRunnerError(socket, timer, msgs[attempt - 1].requestId, `handler failed: distinct cause ${attempt}`);
+          await flushPromises();
+        }
+
+        const ready = await timer.resolvePromise(verifyPromise);
+
+        expect(ready).toBe(false);
+        // All 3 attempts ran: varying error text is not treated as deterministic.
+        expect(sentHierarchyRequests(socket).length).toBe(3);
+        const terminalWarn = warnMessages.find(m => m.includes("Service not ready"));
+        expect(terminalWarn).toBeDefined();
+        expect(terminalWarn).not.toContain("short-circuited");
+        expect(terminalWarn).toContain("after 3 verification attempts");
+        expect(terminalWarn).toContain("distinct cause 3");
+      } finally {
+        restore();
+        await testClient.close();
+      }
+    });
+
+    test("a plain timeout between identical runner errors resets the streak", async function() {
+      // error X -> timeout -> error X -> error X with maxAttempts=5: the timeout on attempt 2
+      // breaks the streak, so the short-circuit lands after attempt 4 (streak rebuilt on 3+4),
+      // not after attempt 3 (which a no-reset implementation would produce).
+      const { testClient, getSocket, timer } = createShortCircuitTestClient();
+      const { warnMessages, restore } = captureWarns();
+
+      try {
+        testClient.invalidateCache();
+        // timeoutMs=1000 keeps the timed-out attempt below the 2000ms stale-nudge threshold.
+        const verifyPromise = testClient.verifyServiceReady(5, 500, 1000);
+
+        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        const runnerText = "request_hierarchy handler failed: view hierarchy extraction threw";
+
+        // Attempt 1: runner error X.
+        let msgs = await advanceUntilHierarchyRequests(socket, timer, 1);
+        expect(msgs.length).toBe(1);
+        simulateRunnerError(socket, timer, msgs[0].requestId, runnerText);
+        await flushPromises();
+
+        // Attempt 2: never answered -> plain timeout (advanceUntil... drives past the 1000ms
+        // window while waiting for attempt 3's request). Streak resets.
+        // Attempts 3 and 4: runner error X again -> streak rebuilt to 2 -> stop before attempt 5.
+        msgs = await advanceUntilHierarchyRequests(socket, timer, 3);
+        expect(msgs.length).toBe(3);
+        simulateRunnerError(socket, timer, msgs[2].requestId, runnerText);
+        await flushPromises();
+
+        msgs = await advanceUntilHierarchyRequests(socket, timer, 4);
+        expect(msgs.length).toBe(4);
+        simulateRunnerError(socket, timer, msgs[3].requestId, runnerText);
+
+        const ready = await timer.resolvePromise(verifyPromise);
+
+        expect(ready).toBe(false);
+        // 4 attempts, not 3 (timeout reset the streak) and not 5 (short-circuit stopped attempt 5).
+        expect(sentHierarchyRequests(socket).length).toBe(4);
+        const terminalWarn = warnMessages.find(m => m.includes("Service not ready"));
+        expect(terminalWarn).toBeDefined();
+        expect(terminalWarn).toContain("short-circuited");
+        expect(terminalWarn).toContain("4/5 verification attempts");
+      } finally {
+        restore();
         await testClient.close();
       }
     });

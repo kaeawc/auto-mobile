@@ -1028,7 +1028,15 @@ jobs:
       - name: "Run Bun MCP startup smoke"
         run: bun run test:startup:bun
 
+      # The smoke exercises @jimp/wasm-webp (Emscripten WASM). Bun's JSC Wasm
+      # OSR tier intermittently miscompiles Emscripten modules on Linux x64
+      # (oven-sh/bun#26366), surfacing as "access to a null reference
+      # (evaluating 'cppInvokerFunc.apply(...)')" in the embind glue. Disable
+      # the OSR tier for this step only; semantics are unchanged, JSC falls
+      # back to its other Wasm tiers. See issue #3189.
       - name: "Run Bun image runtime smoke"
+        env:
+          BUN_JSC_useWasmOSR: "0"
         run: bun run test:image:bun
 
       - name: "Run Tests with Coverage"

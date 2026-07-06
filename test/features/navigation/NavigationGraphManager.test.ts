@@ -1413,6 +1413,93 @@ describe("NavigationGraphManager - shared two-repo transaction helper (#3075)", 
 });
 
 /**
+ * Extract the body of every `runBothReposInTransaction(async (...) => { ... })`
+ * arrow callback from the given source, by brace-matching from the callback's
+ * opening `{` to its matching `}`. Returning the *spans* (not a whole-file
+ * substring match) is what keeps the side-effect guard from false-positiving on
+ * the legitimate post-commit side effects that already sit OUTSIDE these
+ * callbacks (issue #3129). A naive whole-file scan for `this.notifyGraphUpdated(`
+ * would flag the correct code.
+ */
+function extractRunBothReposCallbackBodies(source: string): string[] {
+  const bodies: string[] = [];
+  // Match up through the arrow's opening brace of the callback: allow an optional
+  // `async`, an arbitrary parameter list, and the `=> {` that opens the body.
+  const opener = /runBothReposInTransaction\s*(?:<[^>]*>)?\s*\(\s*async\s*\([^)]*\)\s*=>\s*\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = opener.exec(source)) !== null) {
+    // Start scanning at the `{` that opened the callback body.
+    let depth = 1;
+    let i = match.index + match[0].length;
+    for (; i < source.length && depth > 0; i++) {
+      const ch = source[i];
+      if (ch === "{") {
+        depth++;
+      } else if (ch === "}") {
+        depth--;
+      }
+    }
+    // `i` now points just past the matching `}`; body excludes both braces.
+    bodies.push(source.slice(match.index + match[0].length, i - 1));
+  }
+  return bodies;
+}
+
+describe("NavigationGraphManager - side-effects-outside-fn guard (#3129)", () => {
+  const managerSource = readFileSync(
+    join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
+    "utf8"
+  );
+
+  // Known post-commit side effects that MUST stay OUTSIDE the transaction callback
+  // (never on rollback, never holding the exclusive connection across non-DB IO).
+  // See the helper docstring + both call-site comments in NavigationGraphManager.ts.
+  const FORBIDDEN_SIDE_EFFECTS = [
+    "this.notifyGraphUpdated(",
+    "TelemetryRecorder",
+    "this.activeNavigation =",
+    "this.currentScreen ="
+  ];
+
+  test("the source has exactly two helper callbacks to scan", () => {
+    // Sanity check the extractor tracks the two known call sites; if a third both-repos
+    // writer is added, this line surfaces it so its callback is scanned too.
+    const bodies = extractRunBothReposCallbackBodies(managerSource);
+    expect(bodies.length).toBe(2);
+  });
+
+  test("no known side-effect call appears inside any runBothReposInTransaction callback", () => {
+    const bodies = extractRunBothReposCallbackBodies(managerSource);
+    for (const body of bodies) {
+      for (const sideEffect of FORBIDDEN_SIDE_EFFECTS) {
+        expect(body).not.toContain(sideEffect);
+      }
+    }
+  });
+
+  test("TDD teeth: the guard fires when a side effect is placed inside a callback", () => {
+    // Simulate a future author writing `this.notifyGraphUpdated()` inside a callback body.
+    const bodies = extractRunBothReposCallbackBodies(managerSource);
+    expect(bodies.length).toBeGreaterThan(0);
+    const mutated = bodies[0] + "\n        this.notifyGraphUpdated();\n";
+    const tripped = FORBIDDEN_SIDE_EFFECTS.some(s => mutated.includes(s));
+    expect(tripped).toBe(true);
+  });
+
+  test("the extractor isolates the callback body from surrounding post-commit code", () => {
+    // The real post-commit `this.notifyGraphUpdated()` / `this.currentScreen =` calls sit
+    // OUTSIDE the callbacks in the file; if the brace-matcher over-ran past the closing `}`
+    // it would swallow them and the side-effect test would false-positive. Assert those
+    // legitimate calls exist in the file but NOT in any extracted body.
+    expect(managerSource).toContain("this.notifyGraphUpdated();");
+    const bodies = extractRunBothReposCallbackBodies(managerSource);
+    for (const body of bodies) {
+      expect(body).not.toContain("this.notifyGraphUpdated();");
+    }
+  });
+});
+
+/**
  * A TestCoverageRepository that throws on recordNodeVisit to simulate a
  * mid-sequence write failure inside recordHierarchyNavigation's Case-1
  * transaction. Overrides withExecutor so the throw survives the manager

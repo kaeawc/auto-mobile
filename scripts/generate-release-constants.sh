@@ -96,6 +96,44 @@ prepend_registry_entry() {
   mv "$next_file" "$file"
 }
 
+update_registry_field() {
+  local file="$1"
+  local version="$2"
+  local field="$3"
+  local value="$4"
+
+  python3 - "$file" "$version" "$field" "$value" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+version = sys.argv[2]
+field = sys.argv[3]
+value = sys.argv[4]
+text = path.read_text()
+
+if version == "__FIRST__":
+    match = re.search(r'(\{\n\s+version: "[^"]+",\n.*?\n\s+\})', text, re.S)
+else:
+    match = re.search(r'(\{\n\s+version: "' + re.escape(version) + r'",\n.*?\n\s+\})', text, re.S)
+
+if not match:
+    sys.stderr.write(f"failed to locate release registry entry for {version}\n")
+    sys.exit(1)
+
+entry = match.group(1)
+field_re = re.compile(r'(^\s+' + re.escape(field) + r': ")[^"]*(",?$)', re.M)
+if field_re.search(entry):
+    updated_entry = field_re.sub(r'\g<1>' + value + r'\2', entry, count=1)
+else:
+    ipa_re = re.compile(r'(^\s+ipaSha256: "[^"]+",\n)', re.M)
+    updated_entry = ipa_re.sub(r'\1    ' + field + f': "{value}",\n', entry, count=1)
+
+path.write_text(text[:match.start(1)] + updated_entry + text[match.end(1):])
+PY
+}
+
 if [ -n "$release_version" ]; then
   # Mode: add new registry entry (requires all three)
   if [ -z "$apk_checksum" ] || [ -z "$ios_checksum" ]; then
@@ -105,16 +143,17 @@ if [ -n "$release_version" ]; then
 
   if grep -q "version: \"${release_version}\"" "$constants_path"; then
     # Version already registered — do NOT duplicate the entry, but fall through
-    # to the scalar-constant updates below (app hash / runner sha). The release
+    # to the per-entry runner-sha update below. The release
     # job re-runs this after prepare-release already added the entry; skipping
-    # entirely would leave IOS_CTRL_PROXY_RUNNER_SHA256 empty (verification
-    # disabled) whenever prepare-release predates the runner-sha wiring.
+    # entirely would leave runnerSha256 empty (verification disabled) whenever
+    # prepare-release predates the runner-sha wiring.
     echo "INFO: Version ${release_version} already in registry — refreshing scalar constants only"
   else
     new_entry="  {
     version: \"${release_version}\",
     apkSha256: \"${apk_checksum}\",
     ipaSha256: \"${ios_checksum}\",
+    runnerSha256: \"${ios_runner_sha256}\",
   },"
 
     # Prepend new entry after the opening bracket of RELEASE_CHECKSUM_REGISTRY
@@ -127,7 +166,7 @@ if [ -n "$release_version" ]; then
       for ((i = 0; i < excess; i++)); do
         last_version_line=$(grep -n 'version: "' "$tmp_file" | tail -1 | cut -d: -f1)
         start_line=$((last_version_line - 1))
-        end_line=$((last_version_line + 3))
+        end_line=$((last_version_line + 4))
         sed_inplace "${start_line},${end_line}d" "$tmp_file"
       done
     fi
@@ -153,6 +192,10 @@ else
     fi
   fi
 
+  if [ -n "$ios_runner_sha256" ]; then
+    update_registry_field "$tmp_file" "__FIRST__" "runnerSha256" "$ios_runner_sha256"
+  fi
+
   echo "Updated release constants:"
   if [ -n "$apk_checksum" ]; then
     echo "   APK checksum (registry[0]): ${apk_checksum}"
@@ -169,7 +212,9 @@ if [ -n "$ios_app_hash" ]; then
 fi
 
 if [ -n "$ios_runner_sha256" ]; then
-  sed_inplace_extended "s/^export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \".*\";/export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \"${ios_runner_sha256}\";/" "$tmp_file"
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "runnerSha256" "$ios_runner_sha256"
+  fi
   echo "   iOS runner SHA256: ${ios_runner_sha256}"
 fi
 

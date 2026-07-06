@@ -55,10 +55,10 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "${registry}",
     apkSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     ipaSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    runnerSha256: "${runner}",
   },
 ];
 export const IOS_CTRL_PROXY_APP_HASH: string = "";
-export const IOS_CTRL_PROXY_RUNNER_SHA256: string = "${runner}";
 EOF
 }
 
@@ -178,14 +178,14 @@ PY
   write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" ""
   run_gate "$VERSION"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"IOS_CTRL_PROXY_RUNNER_SHA256"* ]]
+  [[ "$output" == *"registry[0].runnerSha256"* ]]
 }
 
 @test "fails when runner sha256 is malformed" {
   write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "not-a-valid-sha"
   run_gate "$VERSION"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"IOS_CTRL_PROXY_RUNNER_SHA256"* ]]
+  [[ "$output" == *"registry[0].runnerSha256"* ]]
 }
 
 @test "binds recorded runner sha to the runner inside the IPA (match passes)" {

@@ -38,17 +38,18 @@ import org.junit.Test
  * launch) and three [WebSocketServer] sites (`broadcastToClients`' send loop, the `stop()` close
  * launch, and the `webSocket("/ws")` read-loop handler whose outer catch re-swallowed the
  * cancellation `handleClientMessage` rethrows) — all fixed. The scanner covers
- * `serviceScope.launch` / `scope.launch` builders, Ktor `webSocket { … }` route handlers, and named
- * `suspend` helpers (`broadcastToClients`) whose broad catch is not lexically inside a launch. The
- * scanning logic is factored into [LaunchCancellationScanner] (a pure function over source text) so
- * the enforcement contract is unit-tested against synthetic good/bad snippets; the real-file
- * assertions then prove the live sources comply.
+ * `serviceScope.launch` / `scope.launch` builders, Ktor `webSocket { … }` route handlers, and —
+ * since issue #3191 — **every** named `suspend fun` in the scanned files, auto-discovered rather
+ * than manually curated (a new suspend helper is scanned by default; `exemptSuspendFns` is the
+ * explicit opt-out for a broad catch that provably wraps only synchronous code). The scanning logic
+ * is factored into [LaunchCancellationScanner] (a pure function over source text) so the
+ * enforcement contract is unit-tested against synthetic good/bad snippets; the real-file assertions
+ * then prove the live sources comply.
  *
- * Known limitation (tracked as a follow-up): [LaunchCancellationScanner] treats a broad catch whose
- * body contains *any* `throw` as fully re-surfacing cancellation, so a *conditional* rethrow
- * (`catch (e: Exception) { if (fatal) throw e else log(e) }`) is not flagged even though it
- * swallows cancellation on the non-throwing branch. No such shape exists in the scanned sources
- * today.
+ * A broad catch counts as re-surfacing cancellation only when its **last top-level statement is a
+ * `throw`** (issue #3192): `cleanup(); throw wrap(e)` complies, while a *conditional* rethrow
+ * (`catch (e: Exception) { if (fatal) throw e else log(e) }`) is flagged because the non-throwing
+ * branch still swallows the cancellation.
  */
 class LaunchCancellationRethrowTest {
 
@@ -60,11 +61,13 @@ class LaunchCancellationRethrowTest {
   fun `no coroutine body in control-proxy swallows CancellationException`() {
     for (src in SCANNED_SOURCES) {
       val result =
-        LaunchCancellationScanner.scan(locateSource(src.fileName).readText(), src.guardedSuspendFns)
+        LaunchCancellationScanner.scan(locateSource(src.fileName).readText(), src.exemptSuspendFns)
       assertTrue(
-        "Every `serviceScope.launch`/`scope.launch`/`webSocket { … }` coroutine body (and the " +
-          "guarded suspend helpers ${src.guardedSuspendFns}) must rethrow `CancellationException` " +
-          "before the generic catch so cooperative cancellation unwinds cleanly (issue #3130). " +
+        "Every `serviceScope.launch`/`scope.launch`/`webSocket { … }` coroutine body and every " +
+          "auto-discovered `suspend fun` must rethrow `CancellationException` before the generic " +
+          "catch so cooperative cancellation unwinds cleanly (issues #3130/#3191). Add a `catch " +
+          "(e: CancellationException) { throw e }` clause, or — only if the broad catch provably " +
+          "wraps synchronous code — an `exemptSuspendFns` entry with a justification. " +
           "Offenders in ${src.fileName}:\n" +
           result.violations.joinToString("\n") { "  - ${src.fileName}:${it.line}" },
         result.violations.isEmpty(),
@@ -78,13 +81,15 @@ class LaunchCancellationRethrowTest {
     // "no violations" assertion vacuously pass). CtrlProxy + WebSocketServer launch many
     // coroutines; assert a conservative lower bound on the combined count so it stays meaningful.
     val total = SCANNED_SOURCES.sumOf {
-      LaunchCancellationScanner.scan(locateSource(it.fileName).readText(), it.guardedSuspendFns)
+      LaunchCancellationScanner.scan(locateSource(it.fileName).readText(), it.exemptSuspendFns)
         .launchBlocks
     }
 
     // Conservative floor: guards against a broken regex (→ 0) without being brittle to how many
-    // launch sites the sources happen to have as they are refactored.
-    assertTrue("expected the scanner to match many coroutine bodies, found $total", total >= 10)
+    // launch sites the sources happen to have as they are refactored. The floor is high enough
+    // (40) that it can only be met when suspend-fn auto-discovery (#3191) works too — CtrlProxy
+    // alone declares ~50 suspend helpers, while launch/webSocket blocks number ~15.
+    assertTrue("expected the scanner to match many coroutine bodies, found $total", total >= 40)
   }
 
   // ---------------------------------------------------------------------------
@@ -452,11 +457,10 @@ class LaunchCancellationRethrowTest {
   }
 
   @Test
-  fun `KNOWN LIMITATION - a conditionally-rethrowing broad catch is not flagged`() {
-    // Pins the documented limitation (see class KDoc): the scanner treats any `throw` in the broad
-    // catch body as full re-surfacing, so a conditional rethrow that still swallows cancellation on
-    // its non-throwing branch is NOT flagged. No such shape exists in the scanned sources today;
-    // this test records the behavior so a future tightening is a deliberate, visible change.
+  fun `flags a conditionally-rethrowing broad catch - the non-throwing branch swallows`() {
+    // Formerly a KNOWN-LIMITATION false-negative: any `throw` in the broad catch body used to
+    // count as full re-surfacing. Tightened by #3192 — a conditional rethrow still swallows the
+    // cancellation on its non-throwing branch, so it is now flagged.
     val src =
       """
       class Fake {
@@ -475,10 +479,166 @@ class LaunchCancellationRethrowTest {
 
     val result = LaunchCancellationScanner.scan(src)
 
+    assertEquals("conditional rethrow must be flagged (#3192)", 1, result.violations.size)
+  }
+
+  @Test
+  fun `flags a broad catch whose only throw is nested in a when branch`() {
+    val src =
+      """
+      class Fake {
+        fun dispatch() {
+          serviceScope.launch {
+            try {
+              work()
+            } catch (e: Exception) {
+              when (e) {
+                is IllegalStateException -> throw e
+                else -> Log.e(TAG, "swallowed", e)
+              }
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
+    assertEquals(1, result.violations.size)
+  }
+
+  @Test
+  fun `does not flag a broad catch that cleans up then rethrows unconditionally`() {
+    // `cleanup(); throw wrap(e)` always exits via the throw — the legitimate shape #3192 weighed
+    // the tightening against. Only the LAST top-level statement must be a throw.
+    val src =
+      """
+      class Fake {
+        fun dispatch() {
+          serviceScope.launch {
+            try {
+              work()
+            } catch (e: Exception) {
+              cleanup()
+              throw wrap(e)
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
     assertTrue(
-      "documented false-negative: conditional rethrow not flagged",
+      "cleanup-then-rethrow must not be flagged: ${result.violations}",
       result.violations.isEmpty(),
     )
+  }
+
+  @Test
+  fun `does not flag a broad catch whose final throw has multi-line arguments`() {
+    // The throw's argument list spans lines; nested-group blanking must collapse it into a single
+    // top-level statement instead of mistaking the trailing `)` for the last statement.
+    val src =
+      """
+      class Fake {
+        fun dispatch() {
+          serviceScope.launch {
+            try {
+              work()
+            } catch (e: Exception) {
+              Log.e(TAG, "context", e)
+              throw IllegalStateException(
+                "wrapped",
+                e,
+              )
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
+    assertTrue(result.violations.isEmpty())
+  }
+
+  @Test
+  fun `flags a broad catch whose final throw is bypassed by an early top-level return`() {
+    // `if (retry) return` exits the catch without throwing, so the trailing `throw e` is not an
+    // unconditional rethrow — the return branch still swallows the cancellation.
+    val src =
+      """
+      class Fake {
+        fun dispatch() {
+          serviceScope.launch {
+            try {
+              work()
+            } catch (e: Exception) {
+              if (retry) return
+              throw e
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
+    assertEquals(1, result.violations.size)
+  }
+
+  @Test
+  fun `flags a broad catch whose only throw is inside a nested lambda`() {
+    // A throw deferred into a lambda does not re-surface the cancellation on this path.
+    val src =
+      """
+      class Fake {
+        fun dispatch() {
+          serviceScope.launch {
+            try {
+              work()
+            } catch (e: Exception) {
+              handler.post { throw e }
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
+    assertEquals(1, result.violations.size)
+  }
+
+  @Test
+  fun `a CancellationException catch that only conditionally rethrows does not guard the chain`() {
+    val src =
+      """
+      class Fake {
+        fun dispatch() {
+          serviceScope.launch {
+            try {
+              work()
+            } catch (e: CancellationException) {
+              if (stopping) throw e
+            } catch (e: Exception) {
+              Log.e(TAG, "swallowed", e)
+            }
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
+    assertEquals(1, result.violations.size)
   }
 
   @Test
@@ -562,10 +722,10 @@ class LaunchCancellationRethrowTest {
   }
 
   @Test
-  fun `flags a guarded suspend fn whose broad catch swallows cancellation`() {
+  fun `auto-discovers a suspend fn whose broad catch swallows cancellation`() {
     // A named suspend helper (the `broadcastToClients` shape) whose broad catch wraps a suspend
-    // send
-    // but does not sit inside a launch block — passed in via guardedSuspendFns.
+    // send but does not sit inside a launch block. Since #3191 no curated list is needed — every
+    // `suspend fun` in the source is discovered and scanned by default.
     val src =
       """
       class Fake {
@@ -582,15 +742,35 @@ class LaunchCancellationRethrowTest {
       """
         .trimIndent()
 
-    val result =
-      LaunchCancellationScanner.scan(src, guardedSuspendFns = listOf("broadcastToClients"))
+    val result = LaunchCancellationScanner.scan(src)
 
     assertEquals(1, result.violations.size)
     assertEquals(1, result.launchBlocks)
   }
 
   @Test
-  fun `does not flag a guarded suspend fn that rethrows cancellation`() {
+  fun `auto-discovers a suspend extension fn declared with extra modifiers`() {
+    // `suspend inline fun`, generics, and a dotted extension receiver must not evade discovery.
+    val src =
+      """
+      internal suspend inline fun <T> Session.sendAll(frames: List<T>) {
+        try {
+          frames.forEach { send(it) }
+        } catch (e: Exception) {
+          Log.e(TAG, "swallowed", e)
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
+    assertEquals(1, result.violations.size)
+    assertEquals(1, result.launchBlocks)
+  }
+
+  @Test
+  fun `does not flag a suspend fn that rethrows cancellation`() {
     val src =
       """
       class Fake {
@@ -609,11 +789,83 @@ class LaunchCancellationRethrowTest {
       """
         .trimIndent()
 
-    val result =
-      LaunchCancellationScanner.scan(src, guardedSuspendFns = listOf("broadcastToClients"))
+    val result = LaunchCancellationScanner.scan(src)
 
     assertTrue(result.violations.isEmpty())
     assertEquals(1, result.launchBlocks)
+  }
+
+  @Test
+  fun `an exempted suspend fn is skipped - the explicit opt-out`() {
+    val src =
+      """
+      class Fake {
+        private suspend fun parseOnly(message: String) {
+          try {
+            decode(message)
+          } catch (e: Exception) {
+            Log.w(TAG, "bad payload", e)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src, exemptSuspendFns = listOf("parseOnly"))
+
+    assertTrue("exempted fn must not be flagged: ${result.violations}", result.violations.isEmpty())
+    assertEquals("exempted fn is not counted as a scanned body", 0, result.launchBlocks)
+  }
+
+  @Test
+  fun `a stale exemptSuspendFns entry fails loudly`() {
+    // An opt-out for a fn that no longer exists must not rot silently — it would mask a rename
+    // that reintroduces the swallow under a new name.
+    val src =
+      """
+      class Fake {
+        private suspend fun stillHere(message: String) {
+          send(message)
+        }
+      }
+      """
+        .trimIndent()
+
+    val stale = listOf("renamedAway")
+    val thrown = runCatching { LaunchCancellationScanner.scan(src, stale) }.exceptionOrNull()
+
+    assertTrue(
+      "expected an AssertionError naming the stale entry, got $thrown",
+      thrown is AssertionError && thrown.message!!.contains("renamedAway"),
+    )
+  }
+
+  @Test
+  fun `skips a bodyless suspend fun declaration without mis-slicing the next block`() {
+    // An interface/abstract declaration has no body; the discovery pass must not brace-match into
+    // the following declaration's block (which here contains a swallow that is NOT in a coroutine).
+    val src =
+      """
+      interface Handler {
+        suspend fun handleMessage(request: Request): Response?
+      }
+
+      class Impl {
+        fun notACoroutine() {
+          try {
+            work()
+          } catch (e: Exception) {
+            Log.e(TAG, "sync-only, out of scope", e)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    val result = LaunchCancellationScanner.scan(src)
+
+    assertEquals(0, result.launchBlocks)
+    assertTrue(result.violations.isEmpty())
   }
 
   // ---------------------------------------------------------------------------
@@ -622,18 +874,19 @@ class LaunchCancellationRethrowTest {
 
   private companion object {
     /**
-     * Control-proxy sources scanned by the real-file assertions, each with the named `suspend fun`s
-     * that must also comply even though they are not launch/webSocket blocks (their broad catch
-     * wraps a suspend call reached from a coroutine).
+     * Control-proxy sources scanned by the real-file assertions. Every named `suspend fun` in these
+     * files is auto-discovered and scanned (issue #3191); `exemptSuspendFns` is the explicit
+     * opt-out for a fn whose broad catch provably wraps only synchronous code. Keep it empty unless
+     * a rethrow clause is genuinely wrong — a stale entry fails the scan loudly.
      */
     val SCANNED_SOURCES =
       listOf(
-        ScannedSource("CtrlProxy.kt", guardedSuspendFns = emptyList()),
-        ScannedSource("WebSocketServer.kt", guardedSuspendFns = listOf("broadcastToClients")),
+        ScannedSource("CtrlProxy.kt", exemptSuspendFns = emptyList()),
+        ScannedSource("WebSocketServer.kt", exemptSuspendFns = emptyList()),
       )
   }
 
-  private data class ScannedSource(val fileName: String, val guardedSuspendFns: List<String>)
+  private data class ScannedSource(val fileName: String, val exemptSuspendFns: List<String>)
 
   private fun locateSource(fileName: String): File {
     val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
@@ -677,9 +930,11 @@ class LaunchCancellationRethrowTest {
  * - Ktor `webSocket(…) { … }` route handlers — the read loop is itself a coroutine whose outer
  *   catch can re-swallow a cancellation that an inline suspend call (`handleClientMessage`)
  *   rethrows (issue #3130 review follow-up).
- * - Named suspend helpers passed in [scan]'s `guardedSuspendFns` (e.g. `broadcastToClients`), whose
- *   broad catch wraps a suspend call (`connection.send(...)`) but does not sit inside a launch
- *   body.
+ * - Every named `suspend fun` in the source, **auto-discovered** (issue #3191) — a broad catch in a
+ *   suspend body can swallow the cancellation of whatever coroutine calls it (the
+ *   `broadcastToClients` shape). Text cannot prove the catch's `try` wraps a suspend call, so the
+ *   rule is opt-out: a fn whose broad catch provably wraps only synchronous code may be named in
+ *   [scan]'s `exemptSuspendFns`; a stale exemption fails loudly.
  *
  * Precision note: the cancellation-rethrow must sit in the **same `try/catch` chain** as the broad
  * catch, not merely somewhere earlier in the body. A body-level check would let a guarded `try`
@@ -687,6 +942,13 @@ class LaunchCancellationRethrowTest {
  * a future edit to `commandReceiver` would take. Catch clauses are grouped into chains by adjacency
  * (only whitespace between one catch's `}` and the next `catch`), which is how Kotlin binds
  * consecutive `catch` clauses to one `try`.
+ *
+ * Rethrow tightness (issue #3192): a catch body re-surfaces cancellation only when its **last
+ * top-level statement is a `throw`** and no earlier top-level statement is a
+ * `return`/`break`/`continue` that could bypass it. `cleanup(); throw wrap(e)` complies; `if
+ * (fatal) throw e else log(e)`, a throw nested in a `when` branch or lambda, and `if (retry)
+ * return` before a final throw do not. Nested `{…}`/`(…)` groups are blanked before statement
+ * splitting so multi-line arguments and lambda bodies cannot fool the check.
  */
 object LaunchCancellationScanner {
 
@@ -705,8 +967,16 @@ object LaunchCancellationScanner {
   private val COROUTINE_BUILDER = Regex("""\b(?:serviceScope|scope)\.launch\b|\bwebSocket\b""")
   // Any single-type catch clause; group 1 captures the (possibly qualified) exception type.
   private val ANY_CATCH = Regex("""catch\s*\(\s*\w+\s*:\s*([\w.]+)\s*\)""")
+  // Named `suspend fun` declaration. Modifiers before `suspend` are irrelevant to the match;
+  // modifiers between (`suspend inline fun`), simple generics (`fun <T> f(`), and a dotted
+  // extension receiver (`fun Foo.bar(`) are tolerated so such fns can't evade discovery. Group 1
+  // captures the fn name, and the trailing `\(` anchors matchParen on the parameter list.
+  private val SUSPEND_FN_DECL =
+    Regex("""\bsuspend\s+(?:\w+\s+)*fun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?(\w+)\s*\(""")
   // `throw` is word-bounded so a `throwable` local doesn't read as a rethrow.
-  private val RETHROW = Regex("""\bthrow\b""")
+  private val RETHROW_STATEMENT = Regex("""^throw\b""")
+  // A top-level statement that exits the catch without throwing bypasses a later final throw.
+  private val EARLY_EXIT = Regex("""\breturn\b|\bbreak\b|\bcontinue\b""")
 
   private data class CatchClause(
     /** Offset (within the coroutine body) of the `catch` keyword. */
@@ -719,11 +989,15 @@ object LaunchCancellationScanner {
   )
 
   /**
-   * Scan [source]. [guardedSuspendFns] names `suspend fun`s whose bodies must also comply even
-   * though they are not launch/webSocket blocks (their broad catch wraps a suspend call reached
-   * from a coroutine — e.g. `broadcastToClients`).
+   * Scan [source]. Every named `suspend fun` in the source is auto-discovered and scanned
+   * (issue #3191) unless named in [exemptSuspendFns] — the explicit opt-out for a fn whose broad
+   * catch provably wraps only synchronous code. An exemption naming a fn that no longer exists
+   * fails loudly so the list cannot rot.
+   *
+   * A launch/webSocket block nested inside a suspend fn is scanned under both passes; violation
+   * lines are deduplicated, [launchBlocks][ScanResult.launchBlocks] counts both bodies.
    */
-  fun scan(source: String, guardedSuspendFns: List<String> = emptyList()): ScanResult {
+  fun scan(source: String, exemptSuspendFns: List<String> = emptyList()): ScanResult {
     // Mask string/char literals and comments so braces inside them can't mis-slice bodies.
     val code = KotlinSourceScan.maskLiteralsAndComments(source)
 
@@ -740,12 +1014,13 @@ object LaunchCancellationScanner {
       }
     }
 
-    for (name in guardedSuspendFns) {
-      val decl = Regex("""(?:private\s+)?suspend\s+fun\s+${Regex.escape(name)}\s*\(""").find(code)
-      if (decl == null) fail("guarded suspend fun `$name` not found in source")
-      val sigEnd = KotlinSourceScan.matchParen(code, decl!!.range.last)
-      val blockOpen = code.indexOf('{', sigEnd)
-      if (blockOpen < 0) continue
+    val discovered = mutableSetOf<String>()
+    for (decl in SUSPEND_FN_DECL.findAll(code)) {
+      val name = decl.groupValues[1]
+      discovered.add(name)
+      if (name in exemptSuspendFns) continue
+      val sigEnd = KotlinSourceScan.matchParen(code, decl.range.last)
+      val blockOpen = suspendFnBodyOpen(code, sigEnd) ?: continue
       launchBlocks++
       val blockClose = KotlinSourceScan.matchBrace(code, blockOpen)
       val body = code.substring(blockOpen, blockClose)
@@ -753,8 +1028,28 @@ object LaunchCancellationScanner {
         violationLines.add(KotlinSourceScan.lineOf(source, blockOpen + offset))
       }
     }
+    val stale = exemptSuspendFns.filterNot { it in discovered }
+    if (stale.isNotEmpty()) {
+      fail("stale exemptSuspendFns entries not declared in source: $stale")
+    }
 
     return ScanResult(launchBlocks, violationLines.map { Violation(it) })
+  }
+
+  /**
+   * Offset of the body's opening `{` for a suspend fn whose parameter list ends just before
+   * [sigEnd], or null for a bodyless declaration (interface/abstract or a brace-less expression
+   * body) — the next `{` in the file would belong to a *different* declaration and must not be
+   * mis-sliced. The text between the signature and a genuine body brace is only the return type
+   * and/or an `=` expression prefix, so running into a `}` or another `fun` keyword means there is
+   * no body.
+   */
+  private fun suspendFnBodyOpen(code: String, sigEnd: Int): Int? {
+    val blockOpen = code.indexOf('{', sigEnd)
+    if (blockOpen < 0) return null
+    val between = code.substring(sigEnd, blockOpen)
+    if (between.contains('}') || Regex("""\bfun\b""").containsMatchIn(between)) return null
+    return blockOpen
   }
 
   /**
@@ -781,7 +1076,7 @@ object LaunchCancellationScanner {
         .map { m ->
           val open = body.indexOf('{', m.range.last)
           val end = if (open < 0) m.range.last else KotlinSourceScan.matchBrace(body, open)
-          val rethrows = open >= 0 && RETHROW.containsMatchIn(body.substring(open, end))
+          val rethrows = open >= 0 && endsWithUnconditionalThrow(body.substring(open + 1, end - 1))
           CatchClause(m.range.first, end, m.groupValues[1].substringAfterLast('.'), rethrows)
         }
         .toList()
@@ -806,5 +1101,58 @@ object LaunchCancellationScanner {
       if (!guarded) offsets.add(c.start)
     }
     return offsets
+  }
+
+  /**
+   * True when the LAST top-level statement of [blockInner] (a catch block's contents, already
+   * literal/comment-masked) is a `throw` and no earlier top-level statement can exit without
+   * throwing — the tightened "re-surfaces cancellation" rule of issue #3192. A `throw` nested in a
+   * conditional branch, `when` arm, or lambda, a throw followed by a non-throwing statement, and a
+   * final throw bypassed by an earlier top-level `return`/`break`/`continue` all leave a path that
+   * swallows, so none of them count. (A `return` nested inside a braced branch is blanked away and
+   * not seen — the heuristic stays lexical.)
+   */
+  private fun endsWithUnconditionalThrow(blockInner: String): Boolean {
+    val flat = blankNestedGroups(blockInner)
+    val stmts = flat.split('\n', ';').map { it.trim() }.filter { it.isNotEmpty() }
+    val last = stmts.lastOrNull() ?: return false
+    if (!RETHROW_STATEMENT.containsMatchIn(last)) return false
+    return stmts.dropLast(1).none { EARLY_EXIT.containsMatchIn(it) }
+  }
+
+  /**
+   * Blank the contents of nested `{…}` and `(…)` groups — including their newlines — so top-level
+   * statement splitting is not fooled by multi-line call arguments (`throw Wrap(\n "x",\n e,\n)`)
+   * or lambda bodies (`handler.post { throw e }`). The outermost delimiters are kept so the result
+   * still reads as one statement per top-level line.
+   */
+  private fun blankNestedGroups(s: String): String {
+    val out = StringBuilder(s.length)
+    var brace = 0
+    var paren = 0
+    for (c in s) {
+      when {
+        c == '{' -> {
+          out.append(if (brace == 0 && paren == 0) '{' else ' ')
+          brace++
+        }
+        c == '}' -> {
+          brace--
+          out.append(if (brace == 0 && paren == 0) '}' else ' ')
+        }
+        brace > 0 -> out.append(' ')
+        c == '(' -> {
+          out.append(if (paren == 0) '(' else ' ')
+          paren++
+        }
+        c == ')' -> {
+          paren--
+          out.append(if (paren == 0) ')' else ' ')
+        }
+        paren > 0 -> out.append(' ')
+        else -> out.append(c)
+      }
+    }
+    return out.toString()
   }
 }

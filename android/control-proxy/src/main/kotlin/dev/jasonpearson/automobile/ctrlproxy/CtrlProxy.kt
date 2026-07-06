@@ -1553,6 +1553,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
       webSocketServer.broadcast(message)
       Log.d(TAG, "Broadcasted package event to ${webSocketServer.getConnectionCount()} clients")
+    } catch (e: CancellationException) {
+      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting package event", e)
     }
@@ -2070,6 +2073,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted hierarchy update to ${webSocketServer.getConnectionCount()} clients (sync=$sync)",
       )
+    } catch (e: CancellationException) {
+      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting hierarchy update", e)
     }
@@ -2176,6 +2182,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
 
         base64String
+      } catch (e: CancellationException) {
+        // The awaiting caller is being cancelled — rethrow instead of converting the cancellation
+        // into a null screenshot (#3191).
+        throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error taking screenshot", e)
         null
@@ -4991,6 +5001,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted navigation event to ${webSocketServer.getConnectionCount()} clients: ${event.destination}",
       )
+    } catch (e: CancellationException) {
+      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting navigation event", e)
     }
@@ -5044,6 +5057,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted handled exception to ${webSocketServer.getConnectionCount()} clients: $exceptionClass",
       )
+    } catch (e: CancellationException) {
+      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting handled exception event", e)
     }
@@ -5097,6 +5113,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted crash to ${webSocketServer.getConnectionCount()} clients: $exceptionClass on thread $threadName",
       )
+    } catch (e: CancellationException) {
+      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting crash event", e)
     }
@@ -5150,6 +5169,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted ANR to ${webSocketServer.getConnectionCount()} clients: pid=$pid process=$processName",
       )
+    } catch (e: CancellationException) {
+      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting ANR event", e)
     }
@@ -5232,6 +5254,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
 
       response?.let { webSocketServer.broadcast(it) }
+    } catch (e: CancellationException) {
+      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting SDK event", e)
     }
@@ -6000,6 +6025,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
       webSocketServer.broadcast(message)
       Log.d(TAG, "Broadcasted storage change to ${webSocketServer.getConnectionCount()} clients")
+    } catch (e: CancellationException) {
+      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting storage change", e)
     }

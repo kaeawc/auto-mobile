@@ -368,6 +368,10 @@ class WebSocketServer(
   private suspend fun sendToClient(connection: DefaultWebSocketSession, message: String) {
     try {
       connection.send(Frame.Text(message))
+    } catch (e: CancellationException) {
+      // Cooperative cancellation means `scope` is shutting down, not that the connection is
+      // dead — rethrow so the caller unwinds instead of mis-marking a live connection (#3191).
+      throw e
     } catch (e: Exception) {
       Log.w(TAG, "Failed to send to originating connection, marking as dead", e)
       synchronized(connections) {
@@ -434,6 +438,11 @@ class WebSocketServer(
     val request =
       try {
         protocolJson.decodeFromString<ProtocolRequest>(message)
+      } catch (e: CancellationException) {
+        // `decodeFromString` is synchronous, so cooperative cancellation cannot arise here today;
+        // rethrow anyway so this fn stays compliant with the auto-discovered suspend-fn scan
+        // (#3191) if this try ever grows a suspend call.
+        throw e
       } catch (e: Exception) {
         // Surface a structured error (correlated by best-effort requestId) rather than swallowing
         // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See

@@ -1944,8 +1944,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               }
             sendResult(success = true, data = message)
           } else {
-            sendResult(success = false, error = "Failed to extract hierarchy")
-            broadcastHierarchyExtractError(uuid, "Failed to extract hierarchy")
+            sendResult(success = false, error = HierarchyExtractErrorFrames.NULL_HIERARCHY_ERROR)
+            broadcastHierarchyExtractFrame(HierarchyExtractErrorFrames.nullResultFrame(uuid))
           }
         } catch (e: CancellationException) {
           // Cooperative cancellation (service scope shutting down) must never be converted into an
@@ -1955,7 +1955,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           val cause = e.message ?: e::class.simpleName ?: "unknown error"
           Log.e(TAG, "Error extracting hierarchy for uuid=$uuid", e)
           sendResult(success = false, error = cause)
-          broadcastHierarchyExtractError(uuid, "Hierarchy extraction failed: $cause")
+          broadcastHierarchyExtractFrame(HierarchyExtractErrorFrames.thrownFrame(uuid, e))
         }
       }
     }
@@ -2005,8 +2005,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Emit a correlated WebSocket `type:"error"` frame for a failed `EXTRACT_HIERARCHY` broadcast,
-   * keyed by the broadcast's `sync_` [requestId] uuid.
+   * Emit the correlated WebSocket `type:"error"` [frame] for a failed `EXTRACT_HIERARCHY`
+   * broadcast, keyed by the broadcast's `sync_` `requestId` uuid. A null [frame] (blank/absent
+   * uuid, or a cancellation the caller rethrows — see [HierarchyExtractErrorFrames]) is a no-op.
    *
    * The daemon's ADB-broadcast hierarchy fallback awaits that uuid in `waitForFreshData` over this
    * same WebSocket (the response channel the success-path `hierarchy_update` push also travels on).
@@ -2018,10 +2019,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Routed through [ResultBroadcaster.guard] so a throw while *sending* this frame degrades to the
    * daemon's timeout rather than escaping the receiver coroutine (issue #3045 / #3085).
    */
-  private suspend fun broadcastHierarchyExtractError(requestId: String?, error: String) {
-    resultBroadcaster.guard(requestId, "hierarchy_extract_error") {
+  private suspend fun broadcastHierarchyExtractFrame(frame: ErrorResponse?) {
+    // A null frame means there was nothing to correlate (blank/absent uuid, or a cooperative
+    // cancellation that must propagate); HierarchyExtractErrorFrames already made that decision, so
+    // there is no WebSocket frame to send here. See issue #3131.
+    if (frame == null) return
+    resultBroadcaster.guard(frame.requestId, "hierarchy_extract_error") {
       if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-        webSocketServer.broadcast(ErrorResponse(requestId = requestId, error = error))
+        webSocketServer.broadcast(frame)
       }
     }
   }

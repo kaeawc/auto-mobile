@@ -546,7 +546,12 @@ export function getMigrationsPromiseForTest(): Promise<void> | null {
  *   Every shared-barrier consumer resolves `getDbWriteBarrier()` at use-time (per
  *   write), so this identity swap reaches all of them — the former
  *   construction-captured consumers were converted to per-write resolution in
- *   #2912, leaving no reopen exception. It stays a sibling call here rather than a
+ *   #2912, leaving no reopen exception. The swap short-circuits only writes that
+ *   resolve the still-draining barrier; a use-time write firing *after* the reset
+ *   (`AndroidCtrlProxyClient.markInstalledAppsStale()`) resolves the fresh,
+ *   non-draining barrier and is not short-circuited — it is bounded instead by the
+ *   synchronous reset→`process.exit(0)` window plus its own `try/catch` (#2912
+ *   sub-item 2). It stays a sibling call here rather than a
  *   field on `MigrationLifecycleState` because it is an identity swap in a
  *   separate, already-encapsulated module (`dbWriteBarrier.ts`), not part of the
  *   migration/path state machine.

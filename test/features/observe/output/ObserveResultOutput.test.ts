@@ -8,6 +8,7 @@ import {
 import {
   loadAndroidHomeObserve,
   loadAndroidRawTrimCandidatesObserve,
+  loadIosRemindersNoiseObservePair,
   measureValue,
 } from "../../../fixtures/observe/observeFixture";
 
@@ -667,6 +668,52 @@ describe("sanitizeObserveResult", () => {
       expect(node.clickable).toBeUndefined();
       expect(node.text).toBeUndefined();
       expect(out.elements).toBeUndefined();
+    });
+  });
+
+  describe("iOS XCTest/UIKit cleanup fixture (#3317)", () => {
+    function nodeText(node: ViewHierarchyNode): string | undefined {
+      return (node as unknown as Record<string, unknown>).text as string | undefined;
+    }
+
+    function nodeClass(node: ViewHierarchyNode): string | undefined {
+      return ((node as unknown as Record<string, unknown>).class
+        ?? (node as unknown as Record<string, unknown>).className) as string | undefined;
+    }
+
+    test("Reminders compact observe is smaller after structural-noise cleanup", () => {
+      const { before, after } = loadIosRemindersNoiseObservePair();
+
+      const beforeCompact = sanitizeObserveResult(before, COMPACT);
+      const afterCompact = sanitizeObserveResult(after, COMPACT);
+
+      expect(measureValue(afterCompact).bytes).toBeLessThan(measureValue(beforeCompact).bytes);
+      expect(measureValue(afterCompact).tokens).toBeLessThan(measureValue(beforeCompact).tokens);
+    });
+
+    test("Reminders cleanup preserves actionable buttons, text fields, toolbar controls, and list cells", () => {
+      const { after } = loadIosRemindersNoiseObservePair();
+      const nodes = allHierarchyNodes(after);
+
+      expect(nodes.some(node => nodeText(node) === "New Reminder")).toBe(true);
+      expect(nodes.some(node => nodeClass(node) === "UITextField" && nodeText(node) === "Title")).toBe(true);
+      expect(nodes.some(node => nodeText(node) === "Details")).toBe(true);
+      expect(nodes.some(node => nodeText(node) === "Today")).toBe(true);
+      expect(nodes.some(node => nodeClass(node) === "UITableViewCell" && nodeText(node) === "Buy milk")).toBe(true);
+    });
+
+    test("Playground-style iOS hierarchy remains navigable after cleanup", () => {
+      const { after } = loadIosRemindersNoiseObservePair();
+      const nodes = allHierarchyNodes(after);
+      const actionable = nodes.filter(node => {
+        const attrs = node as unknown as Record<string, unknown>;
+        return attrs.clickable === "true" || attrs.scrollable === "true" || attrs.actions !== undefined;
+      });
+
+      expect(actionable.map(nodeText)).toContain("New Reminder");
+      expect(actionable.map(nodeText)).toContain("Done");
+      expect(actionable.some(node => nodeClass(node) === "UITextField")).toBe(true);
+      expect(nodes.some(node => nodeText(node)?.includes("scroll bar"))).toBe(false);
     });
   });
 

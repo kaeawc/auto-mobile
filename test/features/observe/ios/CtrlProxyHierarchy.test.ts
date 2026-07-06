@@ -16,6 +16,18 @@ function findFirstNodeWith(
   return null;
 }
 
+function countNodesWith(
+  node: any,
+  predicate: (attrs: Record<string, string>) => boolean
+): number {
+  if (!node) {return 0;}
+  const current = node.$ && predicate(node.$) ? 1 : 0;
+  return current + (node.node ?? []).reduce(
+    (count: number, child: any) => count + countNodesWith(child, predicate),
+    0
+  );
+}
+
 function makeHierarchy(root: CtrlProxyNode): any {
   return {
     updatedAt: 0,
@@ -101,5 +113,502 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     expect(label).not.toBeNull();
     expect(label.$["value"]).toBeUndefined();
     expect(label.$["text"]).toBe("Static label");
+  });
+
+  test("collapses structural wrappers whose only content is a generated view-id", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UIWindow",
+          viewId: "5513e3ea-bba6-d754-02c1-c34c7365c6fa",
+          bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+          node: [
+            {
+              className: "UIView",
+              viewId: "54b54709-d08c-3814-4e4f-c66bf50820d8",
+              bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+              node: [
+                {
+                  className: "UIButton",
+                  text: "New Reminder",
+                  role: "button",
+                  clickable: "true",
+                  bounds: { left: 16, top: 806, right: 166, bottom: 830 },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+
+    expect(countNodesWith(result.hierarchy.node, attrs => attrs["class"] === "UIWindow")).toBe(0);
+    expect(countNodesWith(result.hierarchy.node, attrs => attrs["class"] === "UIView")).toBe(0);
+    expect(findFirstNodeWith(result.hierarchy.node, attrs => attrs["text"] === "New Reminder")).not.toBeNull();
+  });
+
+  test("preserves structural wrapper with a non-generated view-id", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UIView",
+          viewId: "custom-container-id",
+          bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+          node: [
+            {
+              className: "UILabel",
+              text: "Child",
+              bounds: { left: 20, top: 20, right: 120, bottom: 44 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const wrapper = findFirstNodeWith(
+      result.hierarchy.node,
+      attrs => attrs["view-id"] === "custom-container-id"
+    );
+
+    expect(wrapper).not.toBeNull();
+    expect(wrapper.$["class"]).toBe("UIView");
+  });
+
+  test("preserves accessibility-focused structural wrapper", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UIView",
+          accessibilityFocused: "true",
+          bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+          node: [
+            {
+              className: "UILabel",
+              text: "Child",
+              bounds: { left: 20, top: 20, right: 120, bottom: 44 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const wrapper = findFirstNodeWith(
+      result.hierarchy.node,
+      attrs => attrs["class"] === "UIView" && attrs["accessibility-focused"] === "true"
+    );
+
+    expect(wrapper).not.toBeNull();
+    expect(wrapper.node).toHaveLength(1);
+  });
+
+  test("omits false accessibility-focused attribute", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UILabel",
+          text: "Child",
+          accessibilityFocused: "false",
+          bounds: { left: 20, top: 20, right: 120, bottom: 44 },
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const label = findFirstNodeWith(result.hierarchy.node, attrs => attrs["text"] === "Child");
+
+    expect(label).not.toBeNull();
+    expect(label.$["accessibility-focused"]).toBeUndefined();
+  });
+
+  test("dedupes exact duplicate Dictate noise leaves", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UISearchBar",
+          text: "Search",
+          bounds: { left: 16, top: 101, right: 386, bottom: 137 },
+          node: [
+            {
+              className: "UIButton",
+              text: "Dictate",
+              resourceId: "Dictate",
+              role: "button",
+              clickable: "true",
+              bounds: { left: 360, top: 108, right: 378, bottom: 130 },
+            },
+            {
+              className: "UIButton",
+              text: "Dictate",
+              resourceId: "Dictate",
+              role: "button",
+              clickable: "true",
+              bounds: { left: 360, top: 108, right: 378, bottom: 130 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+
+    expect(countNodesWith(result.hierarchy.node, attrs => attrs["text"] === "Dictate")).toBe(1);
+  });
+
+  test("preserves focused duplicate Dictate noise leaf", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UISearchBar",
+          text: "Search",
+          bounds: { left: 16, top: 101, right: 386, bottom: 137 },
+          node: [
+            {
+              className: "UIButton",
+              text: "Dictate",
+              resourceId: "Dictate",
+              role: "button",
+              clickable: "true",
+              bounds: { left: 360, top: 108, right: 378, bottom: 130 },
+            },
+            {
+              className: "UIButton",
+              text: "Dictate",
+              resourceId: "Dictate",
+              role: "button",
+              clickable: "true",
+              focused: "true",
+              bounds: { left: 360, top: 108, right: 378, bottom: 130 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+
+    expect(countNodesWith(result.hierarchy.node, attrs => attrs["text"] === "Dictate")).toBe(2);
+    expect(findFirstNodeWith(
+      result.hierarchy.node,
+      attrs => attrs["text"] === "Dictate" && attrs["focused"] === "true"
+    )).not.toBeNull();
+  });
+
+  test("preserves accessibility-focused duplicate Dictate noise leaf", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UISearchBar",
+          text: "Search",
+          bounds: { left: 16, top: 101, right: 386, bottom: 137 },
+          node: [
+            {
+              className: "UIButton",
+              text: "Dictate",
+              resourceId: "Dictate",
+              role: "button",
+              clickable: "true",
+              bounds: { left: 360, top: 108, right: 378, bottom: 130 },
+            },
+            {
+              className: "UIButton",
+              text: "Dictate",
+              resourceId: "Dictate",
+              role: "button",
+              clickable: "true",
+              accessibilityFocused: "true",
+              bounds: { left: 360, top: 108, right: 378, bottom: 130 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+
+    expect(countNodesWith(result.hierarchy.node, attrs => attrs["text"] === "Dictate")).toBe(2);
+    expect(findFirstNodeWith(
+      result.hierarchy.node,
+      attrs => attrs["text"] === "Dictate" && attrs["accessibility-focused"] === "true"
+    )).not.toBeNull();
+  });
+
+  test("dedupes exact duplicate action-sheet scrollbar leaves", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UIScrollView",
+          scrollable: "true",
+          bounds: { left: 8, top: 718, right: 394, bottom: 775 },
+          node: [
+            {
+              className: "UIButton",
+              text: "Discard Changes",
+              role: "button",
+              clickable: "true",
+              bounds: { left: 8, top: 718, right: 394, bottom: 775 },
+            },
+            {
+              className: "UIView",
+              text: "Vertical scroll bar, 1 page",
+              bounds: { left: 361, top: 718, right: 391, bottom: 775 },
+            },
+            {
+              className: "UIView",
+              text: "Vertical scroll bar, 1 page",
+              bounds: { left: 361, top: 718, right: 391, bottom: 775 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+
+    expect(countNodesWith(
+      result.hierarchy.node,
+      attrs => attrs["text"] === "Vertical scroll bar, 1 page"
+    )).toBe(1);
+    expect(findFirstNodeWith(result.hierarchy.node, attrs => attrs["text"] === "Discard Changes")).not.toBeNull();
+  });
+
+  test("preserves role and custom actions", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UITextField",
+          text: "Title",
+          role: "textbox",
+          actions: ["set_text", "clear_text"],
+          bounds: { left: 16, top: 120, right: 386, bottom: 166 },
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const field = findFirstNodeWith(result.hierarchy.node, attrs => attrs["text"] === "Title");
+
+    expect(field).not.toBeNull();
+    expect(field.$["role"]).toBe("textbox");
+    expect(field.$["actions"]).toEqual(["set_text", "clear_text"]);
+  });
+
+  test("drops redundant static text child when actionable parent already has the same text", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UIButton",
+          text: "New Reminder",
+          role: "button",
+          clickable: "true",
+          bounds: { left: 16, top: 806, right: 166, bottom: 830 },
+          node: [
+            {
+              className: "UILabel",
+              text: "New Reminder",
+              role: "text",
+              bounds: { left: 51, top: 808, right: 166, bottom: 828 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const button = findFirstNodeWith(result.hierarchy.node, attrs => attrs["class"] === "UIButton");
+
+    expect(button).not.toBeNull();
+    expect(button.$["text"]).toBe("New Reminder");
+    expect(button.node).toBeUndefined();
+  });
+
+  test("preserves duplicate static text child when it has standalone metadata", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UIButton",
+          text: "New Reminder",
+          role: "button",
+          clickable: "true",
+          bounds: { left: 16, top: 806, right: 166, bottom: 830 },
+          node: [
+            {
+              className: "UILabel",
+              text: "New Reminder",
+              role: "text",
+              resourceId: "button-title-label",
+              actions: ["custom_action"],
+              bounds: { left: 51, top: 808, right: 166, bottom: 828 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const label = findFirstNodeWith(
+      result.hierarchy.node,
+      attrs => attrs["resource-id"] === "button-title-label"
+    );
+
+    expect(label).not.toBeNull();
+    expect(label.$["actions"]).toEqual(["custom_action"]);
+  });
+
+  test("preserves duplicate static text child when it has direct interaction properties", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UIButton",
+          text: "Options",
+          role: "button",
+          clickable: "true",
+          bounds: { left: 16, top: 120, right: 166, bottom: 166 },
+          node: [
+            {
+              className: "UILabel",
+              text: "Options",
+              role: "text",
+              longClickable: "true",
+              bounds: { left: 51, top: 128, right: 140, bottom: 150 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const label = findFirstNodeWith(
+      result.hierarchy.node,
+      attrs => attrs["class"] === "UILabel" && attrs["text"] === "Options"
+    );
+
+    expect(label).not.toBeNull();
+    expect(label.$["long-clickable"]).toBe("true");
+  });
+
+  test("drops redundant static text child whose only metadata is a generated view-id", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UIButton",
+          text: "Options",
+          role: "button",
+          clickable: "true",
+          bounds: { left: 16, top: 120, right: 166, bottom: 166 },
+          node: [
+            {
+              className: "UILabel",
+              text: "Options",
+              role: "text",
+              viewId: "5513e3ea-bba6-d754-02c1-c34c7365c6fa",
+              bounds: { left: 51, top: 128, right: 140, bottom: 150 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const button = findFirstNodeWith(result.hierarchy.node, attrs => attrs["class"] === "UIButton");
+
+    expect(button).not.toBeNull();
+    expect(button.node).toBeUndefined();
+  });
+
+  test("preserves focused static text child when link parent already has the same text", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UILink",
+          text: "Privacy",
+          role: "link",
+          clickable: "true",
+          bounds: { left: 239, top: 710, right: 285, bottom: 727 },
+          node: [
+            {
+              className: "UILabel",
+              text: "Privacy",
+              role: "text",
+              focused: "true",
+              bounds: { left: 239, top: 710, right: 285, bottom: 727 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const link = findFirstNodeWith(result.hierarchy.node, attrs => attrs["class"] === "UILink");
+
+    expect(link).not.toBeNull();
+    expect(link.$["text"]).toBe("Privacy");
+    expect(link.node).toHaveLength(1);
+    expect(link.node?.[0]?.$["class"]).toBe("UILabel");
+    expect(link.node?.[0]?.$["focused"]).toBe("true");
+  });
+
+  test("preserves accessibility-focused static text child when parent already has the same text", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UIButton",
+          text: "Continue",
+          role: "button",
+          clickable: "true",
+          bounds: { left: 20, top: 700, right: 370, bottom: 744 },
+          node: [
+            {
+              className: "UILabel",
+              text: "Continue",
+              role: "text",
+              accessibilityFocused: "true",
+              bounds: { left: 44, top: 710, right: 346, bottom: 734 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const button = findFirstNodeWith(result.hierarchy.node, attrs => attrs["class"] === "UIButton");
+
+    expect(button).not.toBeNull();
+    expect(button.node).toHaveLength(1);
+    expect(button.node?.[0]?.$["class"]).toBe("UILabel");
+    expect(button.node?.[0]?.$["accessibility-focused"]).toBe("true");
   });
 });

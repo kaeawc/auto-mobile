@@ -223,6 +223,138 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(result[0].className, "UIView")
     }
 
+    // MARK: - XCTest/UIKit structural noise cleanup (#3317)
+
+    func testCleanup_dedupesDuplicateScrollBarsWithTextAndBounds() {
+        let bounds = ElementBounds(left: 383, top: 156, right: 390, bottom: 742)
+        let first = UIElementInfo(text: "Vertical scroll bar, 1 page", className: "UIView", bounds: bounds)
+        let duplicate = UIElementInfo(text: "Vertical scroll bar, 1 page", className: "UIView", bounds: bounds)
+        let reminder = UIElementInfo(text: "Groceries", className: "UITableViewCell", bounds: ElementBounds(left: 0, top: 156, right: 393, bottom: 200))
+
+        let result = ElementLocator.cleanupXCTestUIKitNoise(
+            parent: UIElementInfo(className: "UITableView", scrollable: "true"),
+            children: [first, duplicate, reminder]
+        )
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result.filter { $0.text == "Vertical scroll bar, 1 page" }.count, 1)
+        XCTAssertEqual(result[1].text, "Groceries")
+    }
+
+    func testCleanup_removesLabelChildDuplicatingActionableParentText() {
+        let duplicateLabel = UIElementInfo(text: "New Reminder", className: "UILabel", bounds: ElementBounds(left: 16, top: 786, right: 201, bottom: 823), role: "text")
+        let icon = UIElementInfo(resourceId: "plus", className: "UIImageView", bounds: ElementBounds(left: 16, top: 790, right: 36, bottom: 810))
+
+        let result = ElementLocator.cleanupXCTestUIKitNoise(
+            parent: UIElementInfo(text: "New Reminder", className: "UIButton", clickable: "true"),
+            children: [duplicateLabel, icon]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].resourceId, "plus")
+    }
+
+    func testCleanup_removesStructuralWrapperContainingOnlyScrollbarNoise() {
+        let scrollBar = UIElementInfo(text: "Horizontal scroll bar, 1 page", className: "UIView", bounds: ElementBounds(left: 30, top: 830, right: 363, bottom: 837))
+        let wrapper = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 786, right: 393, bottom: 852), node: [scrollBar])
+        let toolbarButton = UIElementInfo(text: "Lists", className: "UIButton", bounds: ElementBounds(left: 300, top: 786, right: 370, bottom: 823), clickable: "true")
+
+        let result = ElementLocator.cleanupXCTestUIKitNoise(
+            parent: UIElementInfo(className: "UIView"),
+            children: [wrapper, toolbarButton]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].text, "Lists")
+    }
+
+    func testCleanup_dedupesRepeatedKeyboardAccessoryAndDictationNodes() {
+        let bounds = ElementBounds(left: 0, top: 720, right: 393, bottom: 760)
+        let first = UIElementInfo(text: "dictation", className: "UIButton", bounds: bounds, clickable: "true", role: "button")
+        let duplicate = UIElementInfo(text: "dictation", className: "UIButton", bounds: bounds, clickable: "true", role: "button")
+        let done = UIElementInfo(text: "Done", className: "UIButton", bounds: ElementBounds(left: 335, top: 720, right: 383, bottom: 760), clickable: "true")
+
+        let result = ElementLocator.cleanupXCTestUIKitNoise(
+            parent: UIElementInfo(className: "UIKeyboard"),
+            children: [first, duplicate, done]
+        )
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result.filter { $0.text == "dictation" }.count, 1)
+        XCTAssertEqual(result[1].text, "Done")
+    }
+
+    func testCleanup_preservesKeyboardAccessoryNodesWithDistinctResourceIds() {
+        let bounds = ElementBounds(left: 0, top: 720, right: 393, bottom: 760)
+        let first = UIElementInfo(text: "dictation", resourceId: "dictation-primary", className: "UIButton", bounds: bounds, clickable: "true", role: "button")
+        let second = UIElementInfo(text: "dictation", resourceId: "dictation-secondary", className: "UIButton", bounds: bounds, clickable: "true", role: "button")
+
+        let result = ElementLocator.cleanupXCTestUIKitNoise(
+            parent: UIElementInfo(className: "UIKeyboard"),
+            children: [first, second]
+        )
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].resourceId, "dictation-primary")
+        XCTAssertEqual(result[1].resourceId, "dictation-secondary")
+    }
+
+    func testCleanup_preservesActionableControlEvenWhenTextDuplicatesParent() {
+        let childButton = UIElementInfo(text: "New Reminder", resourceId: "new_reminder_child", className: "UIButton", clickable: "true")
+        let result = ElementLocator.cleanupXCTestUIKitNoise(
+            parent: UIElementInfo(text: "New Reminder", className: "UIButton", clickable: "true"),
+            children: [childButton]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].resourceId, "new_reminder_child")
+        XCTAssertEqual(result[0].clickable, "true")
+    }
+
+    func testCleanup_preservesLongClickableNodeThatLooksLikeDuplicateNoise() {
+        let bounds = ElementBounds(left: 12, top: 120, right: 380, bottom: 164)
+        let first = UIElementInfo(text: "More", className: "UIView", bounds: bounds, longClickable: "true")
+        let second = UIElementInfo(text: "More", className: "UIView", bounds: bounds, longClickable: "true")
+
+        let result = ElementLocator.cleanupXCTestUIKitNoise(
+            parent: UIElementInfo(className: "UIView"),
+            children: [first, second]
+        )
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].longClickable, "true")
+        XCTAssertEqual(result[1].longClickable, "true")
+    }
+
+    func testCleanup_preservesRoleBearingContainerAroundScrollBarText() {
+        let scrollBar = UIElementInfo(text: "Vertical scroll bar, 1 page", className: "UIView", bounds: ElementBounds(left: 383, top: 156, right: 390, bottom: 704))
+        let container = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 120, right: 393, bottom: 720), role: "listitem", node: [scrollBar])
+
+        let result = ElementLocator.cleanupXCTestUIKitNoise(
+            parent: UIElementInfo(className: "UIView"),
+            children: [container]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].role, "listitem")
+        XCTAssertEqual(result[0].node?.first?.text, "Vertical scroll bar, 1 page")
+    }
+
+    func testCleanup_preservesSdkOrCustomActionMetadata() {
+        let bounds = ElementBounds(left: 0, top: 720, right: 393, bottom: 760)
+        let withActions = UIElementInfo(text: "dictation", className: "UIButton", bounds: bounds, actions: ["custom_action"])
+        let withExtras = UIElementInfo(text: "dictation", className: "UIButton", bounds: bounds, extras: ["sdk.gestureRecognizers": "UILongPressGestureRecognizer"])
+
+        let result = ElementLocator.cleanupXCTestUIKitNoise(
+            parent: UIElementInfo(className: "UIKeyboard"),
+            children: [withActions, withExtras]
+        )
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].actions, ["custom_action"])
+        XCTAssertEqual(result[1].extras?["sdk.gestureRecognizers"], "UILongPressGestureRecognizer")
+    }
+
     func testDedup_sameType_differentBounds_kept() {
         let a = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
         let b = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 50, right: 100, bottom: 100))

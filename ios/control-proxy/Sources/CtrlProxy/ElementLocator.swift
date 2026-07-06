@@ -879,7 +879,8 @@ public class ElementLocator: ElementLocating {
                 let optimized = children.flatMap { child in
                     optimizeHierarchy(child, isRoot: false)
                 }
-                optimizedChildren = optimized.isEmpty ? nil : optimized
+                let cleaned = ElementLocator.cleanupXCTestUIKitNoise(parent: element, children: optimized)
+                optimizedChildren = cleaned.isEmpty ? nil : cleaned
             }
 
             // Root element is always kept
@@ -1292,5 +1293,136 @@ public class ElementLocator: ElementLocating {
             result.append(child)
         }
         return result
+    }
+
+    /// Collapse common XCTest/UIKit hierarchy noise that survives the generic
+    /// structural wrapper pass. The rules are intentionally conservative:
+    /// discard duplicated labels/scroll bars/accessory nodes only when the node
+    /// is non-actionable, while preserving tappable controls, text inputs, ids,
+    /// focus/selection state, and meaningful descendants.
+    static func cleanupXCTestUIKitNoise(parent: UIElementInfo, children: [UIElementInfo]) -> [UIElementInfo] {
+        var seenNoiseKeys: Set<String> = []
+        var result: [UIElementInfo] = []
+
+        for child in children {
+            if isDuplicateLabel(child, of: parent) {
+                continue
+            }
+            if isStructuralWrapperWithOnlyScrollBarNoise(child) {
+                continue
+            }
+            if let key = dedupeNoiseKey(child) {
+                if seenNoiseKeys.contains(key) {
+                    continue
+                }
+                seenNoiseKeys.insert(key)
+            }
+            result.append(child)
+        }
+
+        return result
+    }
+
+    private static func isDuplicateLabel(_ child: UIElementInfo, of parent: UIElementInfo) -> Bool {
+        guard let parentText = parent.text,
+              let childText = child.text,
+              parentText == childText,
+              child.className == "UILabel",
+              isActionableContainer(parent),
+              !isActionable(child)
+        else {
+            return false
+        }
+        return true
+    }
+
+    private static func isActionableContainer(_ element: UIElementInfo) -> Bool {
+        return element.clickable == "true"
+            || element.role == "button"
+            || element.role == "listitem"
+            || element.className == "UIButton"
+            || element.className == "UITableViewCell"
+            || element.className == "UICollectionViewCell"
+    }
+
+    private static func isActionable(_ element: UIElementInfo) -> Bool {
+        return element.clickable == "true"
+            || element.resourceId != nil
+            || hasProtectedMetadata(element)
+    }
+
+    private static func isStructuralWrapperWithOnlyScrollBarNoise(_ element: UIElementInfo) -> Bool {
+        guard element.className == "UIView",
+              !isActionable(element),
+              element.text == nil,
+              element.value == nil,
+              element.contentDesc == nil,
+              element.resourceId == nil,
+              element.hintText == nil,
+              let children = element.node,
+              !children.isEmpty
+        else {
+            return false
+        }
+        return children.allSatisfy { isScrollBarNoise($0) && !isActionable($0) }
+    }
+
+    private static func dedupeNoiseKey(_ element: UIElementInfo) -> String? {
+        guard element.node?.isEmpty ?? true else {
+            return nil
+        }
+
+        if isScrollBarNoise(element) && !isActionable(element) {
+            return "\(element.className ?? "")|\(normalizedText(element.text))|\(boundsKey(element.bounds))|\(element.resourceId ?? "")"
+        }
+        if isKeyboardAccessoryNoise(element) && !hasProtectedMetadata(element) {
+            return "\(element.className ?? "")|\(normalizedText(element.text))|\(boundsKey(element.bounds))|\(element.resourceId ?? "")"
+        }
+        return nil
+    }
+
+    private static func hasProtectedMetadata(_ element: UIElementInfo) -> Bool {
+        return element.longClickable == "true"
+            || element.focused == "true"
+            || element.accessibilityFocused == "true"
+            || element.selected == "true"
+            || element.checkable == "true"
+            || element.checked == "true"
+            || element.scrollable == "true"
+            || element.testTag != nil
+            || hasProtectedRoleMetadata(element)
+            || element.stateDescription != nil
+            || element.errorMessage != nil
+            || element.hintText != nil
+            || element.extras?.isEmpty == false
+            || element.actions?.isEmpty == false
+            || textInputClassNames.contains(element.className ?? "")
+    }
+
+    private static func hasProtectedRoleMetadata(_ element: UIElementInfo) -> Bool {
+        guard let role = element.role else {
+            return false
+        }
+        return role != "text" && role != "button"
+    }
+
+    private static func isScrollBarNoise(_ element: UIElementInfo) -> Bool {
+        return normalizedText(element.text).contains("scroll bar")
+    }
+
+    private static func isKeyboardAccessoryNoise(_ element: UIElementInfo) -> Bool {
+        let text = normalizedText(element.text)
+        return text == "dictation" || text == "dictate"
+    }
+
+    private static func normalizedText(_ text: String?) -> String {
+        return text?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    }
+
+    private static func boundsKey(_ bounds: ElementBounds?) -> String {
+        guard let bounds = bounds else {
+            return "nobounds"
+        }
+        return "\(bounds.left),\(bounds.top),\(bounds.right),\(bounds.bottom)"
     }
 }

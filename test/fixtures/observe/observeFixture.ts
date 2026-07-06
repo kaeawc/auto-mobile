@@ -56,6 +56,29 @@ export function loadIosFractionalObserve(): ObserveResult {
 }
 
 /**
+ * Representative iOS Reminders observe pair for XCTest/UIKit structural-noise
+ * cleanup (#3317). The `before` fixture preserves duplicated UIKit/XCTest noise
+ * around Reminders rows, toolbar buttons, scroll bars, and keyboard accessory
+ * controls; the `after` fixture is the same hierarchy after CtrlProxy cleanup.
+ */
+export const IOS_REMINDERS_NOISE_BEFORE_FIXTURE_PATH = join(
+  import.meta.dir,
+  "ios-reminders-xctest-noise-before.json"
+);
+export const IOS_REMINDERS_NOISE_AFTER_FIXTURE_PATH = join(
+  import.meta.dir,
+  "ios-reminders-xctest-noise-after.json"
+);
+
+/** Load the Reminders XCTest/UIKit noise before/after pair for #3317 size tests. */
+export function loadIosRemindersNoiseObservePair(): { before: ObserveResult; after: ObserveResult } {
+  return {
+    before: JSON.parse(readFileSync(IOS_REMINDERS_NOISE_BEFORE_FIXTURE_PATH, "utf8")) as ObserveResult,
+    after: JSON.parse(readFileSync(IOS_REMINDERS_NOISE_AFTER_FIXTURE_PATH, "utf8")) as ObserveResult,
+  };
+}
+
+/**
  * Excerpt from a real Android uiautomator hierarchy capture of the Playground
  * app. It intentionally preserves the Android direct-attribute runtime shape
  * that reaches output trimming before `cleanNodeProperties` removes default

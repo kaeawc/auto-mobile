@@ -144,7 +144,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly builder: IOSCtrlProxyBuilder;
   private readonly processExecutor: ProcessExecutor;
   private readonly signingManager: XcodeSigningManager;
-  private readonly appInspector: DeviceAppManager;
+  private readonly deviceAppManager: DeviceAppManager;
   private readonly hostControl: HostControlCtrlProxyIOSRunner;
   private readonly hostPortAvailabilityChecker: HostPortAvailabilityChecker;
   private readonly healthClient: IOSCtrlProxyHealthClient;
@@ -222,7 +222,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     builder?: IOSCtrlProxyBuilder,
     processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
     signingManager: XcodeSigningManager = new XcodeSigningManager(),
-    appInspector: DeviceAppManager = new DeviceAppManager(),
+    deviceAppManager: DeviceAppManager = new DeviceAppManager(),
     hostControlRunner?: HostControlCtrlProxyIOSRunner,
     hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker()
   ) {
@@ -232,7 +232,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     this.builder = builder || IOSCtrlProxyBuilder.getInstance();
     this.processExecutor = processExecutor;
     this.signingManager = signingManager;
-    this.appInspector = appInspector;
+    this.deviceAppManager = deviceAppManager;
     this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
     this.hostControl = hostControlRunner || {
       shouldUseHostControl,
@@ -334,7 +334,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     builder: IOSCtrlProxyBuilder | undefined,
     processExecutor: ProcessExecutor,
     signingManager?: XcodeSigningManager,
-    appInspector?: DeviceAppManager,
+    deviceAppManager?: DeviceAppManager,
     hostControlRunner?: HostControlCtrlProxyIOSRunner,
     hostPortAvailabilityChecker?: HostPortAvailabilityChecker
   ): IOSCtrlProxyManager {
@@ -344,7 +344,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       builder,
       processExecutor,
       signingManager,
-      appInspector,
+      deviceAppManager,
       hostControlRunner,
       hostPortAvailabilityChecker
     );
@@ -926,7 +926,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private async uninstallLegacyAppIfPresent(): Promise<void> {
     try {
       const simulator = this.isSimulator();
-      const isInstalled = await this.appInspector.getInstalledAppBundleHash(
+      const isInstalled = await this.deviceAppManager.getInstalledAppBundleHash(
         this.device.deviceId,
         IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
         simulator
@@ -935,7 +935,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return;
       }
       logger.info(`[IOSCtrlProxy] Found legacy app ${IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID}, uninstalling`);
-      await this.appInspector.uninstallApp(
+      await this.deviceAppManager.uninstallApp(
         this.device.deviceId,
         IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
         simulator
@@ -2079,7 +2079,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
 
-    const deviceHash = await this.appInspector.getInstalledAppBundleHash(
+    const deviceHash = await this.deviceAppManager.getInstalledAppBundleHash(
       this.device.deviceId,
       IOSCtrlProxyManager.APP_BUNDLE_ID,
       simulator
@@ -2095,7 +2095,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         expectedHash
       });
       try {
-        await this.appInspector.uninstallApp(this.device.deviceId, IOSCtrlProxyManager.APP_BUNDLE_ID, simulator);
+        await this.deviceAppManager.uninstallApp(this.device.deviceId, IOSCtrlProxyManager.APP_BUNDLE_ID, simulator);
         logger.info("[IOSCtrlProxy] Uninstalled CtrlProxy app to force reinstall");
       } catch (error) {
         logger.warn(`[IOSCtrlProxy] Failed to uninstall CtrlProxy app: ${error instanceof Error ? error.message : String(error)}`);

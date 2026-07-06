@@ -821,7 +821,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       if (Build.VERSION.SDK_INT >= 30) {
         stateDescription = node.stateDescription?.toString()
       }
-      val hintText: String? = node.hintText?.toString()
+      // AccessibilityNodeInfo.getHintText requires API 26 (minSdk is 24)
+      val hintText: String? = if (Build.VERSION.SDK_INT >= 26) node.hintText?.toString() else null
       val errorMessage: String? = node.error?.toString()
       if (Build.VERSION.SDK_INT >= 28) {
         tooltipText = node.tooltipText?.toString()
@@ -1809,7 +1810,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       if (Build.VERSION.SDK_INT >= 30) {
         stateDescription = focusedNode.stateDescription?.toString()
       }
-      val hintText: String? = focusedNode.hintText?.toString()
+      // AccessibilityNodeInfo.getHintText requires API 26 (minSdk is 24)
+      val hintText: String? =
+        if (Build.VERSION.SDK_INT >= 26) focusedNode.hintText?.toString() else null
       val errorMessage: String? = focusedNode.error?.toString()
       var tooltipText: String? = null
       var paneTitle: String? = null

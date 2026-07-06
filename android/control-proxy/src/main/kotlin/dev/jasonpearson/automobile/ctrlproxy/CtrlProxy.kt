@@ -2340,7 +2340,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val endX = x2.toFloat()
       val endY = y2.toFloat()
 
-      if (pressDurationMs > 0) {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        // Pre-API-26 GestureDescription has no stroke continuation (the willContinue
+        // StrokeDescription constructor is API 26+), so press/drag/hold cannot be
+        // chained as one continuous touch. Approximate with a single stroke covering
+        // the combined duration. Previously this path threw NoSuchMethodError.
+        val totalDurationMs = maxOf(1L, pressDurationMs + dragDurationMs + holdDurationMs)
+        val dragPath =
+          Path().apply {
+            moveTo(startX, startY)
+            lineTo(endX, endY)
+          }
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(dragPath, 0, totalDurationMs))
+        Log.d(
+          TAG,
+          "Legacy (<API 26) single-stroke drag: ($startX, $startY) -> ($endX, $endY), duration=${totalDurationMs}ms",
+        )
+      } else if (pressDurationMs > 0) {
         // Phase 1: Press and hold at start position
         // Use zero-length path (moveTo + lineTo same point) for stationary touch
         val pressPath =

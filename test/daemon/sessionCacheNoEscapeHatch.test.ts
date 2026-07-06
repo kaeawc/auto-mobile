@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -61,6 +61,76 @@ describe("SessionCacheData has no untyped escape hatch (issue #2973)", () => {
       // And the specific unchecked casts the issue called out are gone.
       expect(source, `${rel} must not cast to KeepScreenAwakeState out of the bag`)
         .not.toMatch(/as\s+KeepScreenAwakeState\s*\|\s*undefined/);
+    }
+  });
+
+  // -- Setter-bypass guard (issue #3219, follow-up to #2973) -----------------
+  //
+  // Now that the well-known slots are typed, the only remaining hole #2973 called
+  // out as "optional/interim" is that `updateSessionCache` is public, so a caller
+  // *could* write `keepScreenAwake` / `deviceLabels` directly rather than going
+  // through `setKeepScreenAwake` / `setDeviceLabels`. Every such write is already
+  // TS-type-checked (so the #2917 type-drift class can't slip through), but the
+  // convention is "force through the setter". This source scan enforces it in
+  // production code only — tests may still write the slots directly through the
+  // public, compile-checked `updateSessionCache`.
+
+  // Slots that have dedicated setters and must be written only via them in `src/`.
+  const SETTER_ONLY_SLOTS = ["keepScreenAwake", "deviceLabels"] as const;
+
+  // Recursively list every `.ts` file under `src/`, skipping declaration files.
+  function listSrcTsFiles(): string[] {
+    const root = join(process.cwd(), "src");
+    const out: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const abs = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(abs);
+        } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
+          out.push(abs);
+        }
+      }
+    };
+    walk(root);
+    return out;
+  }
+
+  test("EC8: production code writes setter-only slots only via SessionManager setters", () => {
+    const sessionManagerAbs = join(process.cwd(), SESSION_MANAGER);
+    // `sessionManager.ts` is where the setters and `updateSessionCache` live, so
+    // it is (by design) the one place that writes the slots directly.
+    const files = listSrcTsFiles().filter(abs => abs !== sessionManagerAbs);
+
+    // A single `updateSessionCache( … )` call, argument list captured (non-greedy,
+    // no nested braces) so we can look for a typed-slot key inside it. Anchoring on
+    // the call site avoids false positives from Zod schemas / request DTOs that
+    // happen to have a `keepScreenAwake:` field of their own.
+    const UPDATE_CALL = /updateSessionCache\s*\(([^)]*\{[^{}]*\}[^)]*)\)/g;
+
+    for (const abs of files) {
+      const source = readFileSync(abs, "utf8");
+      const rel = abs.slice(process.cwd().length + 1);
+      for (const slot of SETTER_ONLY_SLOTS) {
+        const setter = `set${slot[0].toUpperCase()}${slot.slice(1)}`;
+
+        // 1. No direct member-assignment to the slot, e.g. `session.cacheData.deviceLabels = …`
+        //    (the `[^=]` lookahead lets `===`/`==` comparisons through).
+        expect(
+          source,
+          `${rel} must not assign .${slot} directly — use SessionManager.${setter}()`
+        ).not.toMatch(new RegExp(`\\.${slot}\\s*=[^=]`));
+
+        // 2. No `updateSessionCache(id, { keepScreenAwake | deviceLabels })` bypass —
+        //    scan only inside the call's argument list so unrelated object literals
+        //    (schemas, request objects) don't trip the guard.
+        for (const call of source.matchAll(UPDATE_CALL)) {
+          expect(
+            call[1].match(new RegExp(`\\b${slot}\\s*[:,}]`)),
+            `${rel} must not pass { ${slot} } to updateSessionCache — use SessionManager.${setter}()`
+          ).toBeNull();
+        }
+      }
     }
   });
 });

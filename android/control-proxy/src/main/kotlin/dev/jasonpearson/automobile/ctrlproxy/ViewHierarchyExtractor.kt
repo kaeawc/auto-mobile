@@ -38,6 +38,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     private const val MIN_HIDDEN_REGION_SCREEN_AREA = 0.25
     private const val MAX_VISIBLE_CHILD_COVERAGE = 0.25
 
+    // androidx AccessibilityNodeInfoCompat stashes the state description in the node's extras
+    // bundle under this key on API < 30, where the direct getter is unavailable. Compose relies
+    // on this shim to expose toggleable/selectable state (issue #3139).
+    private const val STATE_DESCRIPTION_EXTRA_KEY =
+      "androidx.view.accessibility.AccessibilityNodeInfoCompat.STATE_DESCRIPTION_KEY"
+
     private val GENERIC_CLASS_NAMES =
       setOf(
         "android.view.View",
@@ -801,7 +807,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
 
       // Extract extra semantics fields
-      var stateDescription: String? = null
       var text: String? = null
       var textSize: Float? = null
       var textColor: String? = null
@@ -817,10 +822,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       val extrasMap = extractExtras(node)
       val testTag = extractTestTag(extrasMap)
 
-      // Check direct APIs if available
-      if (Build.VERSION.SDK_INT >= 30) {
-        stateDescription = node.stateDescription?.toString()
-      }
+      // Check direct APIs if available (API 30+) with an extras fallback for Compose on API < 30
+      val stateDescription: String? = extractStateDescription(node, extrasMap)
       // AccessibilityNodeInfo.getHintText requires API 26 (minSdk is 24)
       val hintText: String? = if (Build.VERSION.SDK_INT >= 26) node.hintText?.toString() else null
       val errorMessage: String? = node.error?.toString()
@@ -1092,6 +1095,38 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       emptyList()
     }
   }
+
+  /**
+   * Resolve the accessibility state description for a node.
+   *
+   * Jetpack Compose surfaces toggleable/selectable state (Switch, CheckBox, RadioButton,
+   * `Modifier.toggleable`/`selectable`) as an accessibility state description ("On"/"Off",
+   * "Checked"/"Unchecked"). When Compose sets a state description it deliberately does NOT set
+   * [AccessibilityNodeInfo.isChecked] (to avoid double-announcement in TalkBack), so the toggle
+   * flip is invisible unless the state description is captured (issue #3139).
+   *
+   * On API 30+ the value is available via the direct getter. On API 24-29 the androidx
+   * accessibility compat shim stores it in the node's extras bundle under
+   * [STATE_DESCRIPTION_EXTRA_KEY], so fall back to reading it there.
+   */
+  private fun extractStateDescription(
+    node: AccessibilityNodeInfo,
+    extras: Map<String, String>?,
+  ): String? {
+    if (Build.VERSION.SDK_INT >= 30) {
+      node.stateDescription?.toString()?.let {
+        if (it.isNotBlank()) return it
+      }
+    }
+    return stateDescriptionFromExtras(extras)
+  }
+
+  /**
+   * Pure extras-bundle fallback for the accessibility state description (see
+   * [extractStateDescription]). Exposed for unit testing without a live [AccessibilityNodeInfo].
+   */
+  internal fun stateDescriptionFromExtras(extras: Map<String, String>?): String? =
+    extras?.get(STATE_DESCRIPTION_EXTRA_KEY)?.takeIf { it.isNotBlank() }
 
   private fun extractExtras(node: AccessibilityNodeInfo): Map<String, String>? {
     val extras = node.extras ?: return null
@@ -1813,10 +1848,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       val extrasMap = extractExtras(focusedNode)
       val testTag = extractTestTag(extrasMap)
 
-      var stateDescription: String? = null
-      if (Build.VERSION.SDK_INT >= 30) {
-        stateDescription = focusedNode.stateDescription?.toString()
-      }
+      val stateDescription: String? = extractStateDescription(focusedNode, extrasMap)
       // AccessibilityNodeInfo.getHintText requires API 26 (minSdk is 24)
       val hintText: String? =
         if (Build.VERSION.SDK_INT >= 26) focusedNode.hintText?.toString() else null

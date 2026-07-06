@@ -318,6 +318,33 @@ class ViewHierarchyExtractorTest {
     assertEquals(mapOf("custom-property" to "custom-value"), element.extras)
   }
 
+  // MARK: - Compose toggle state description (issue #3139)
+
+  private val stateDescriptionExtraKey =
+    "androidx.view.accessibility.AccessibilityNodeInfoCompat.STATE_DESCRIPTION_KEY"
+
+  @Test
+  fun `stateDescriptionFromExtras reads androidx compat key`() {
+    assertEquals(
+      "On",
+      extractor.stateDescriptionFromExtras(mapOf(stateDescriptionExtraKey to "On")),
+    )
+    assertEquals(
+      "Checked",
+      extractor.stateDescriptionFromExtras(
+        mapOf("other" to "x", stateDescriptionExtraKey to "Checked")
+      ),
+    )
+  }
+
+  @Test
+  fun `stateDescriptionFromExtras returns null when key absent, blank, or extras null`() {
+    assertNull(extractor.stateDescriptionFromExtras(null))
+    assertNull(extractor.stateDescriptionFromExtras(emptyMap()))
+    assertNull(extractor.stateDescriptionFromExtras(mapOf("unrelated" to "value")))
+    assertNull(extractor.stateDescriptionFromExtras(mapOf(stateDescriptionExtraKey to "   ")))
+  }
+
   @Test
   fun `semantic fields are serialized to JSON correctly`() {
     val element =

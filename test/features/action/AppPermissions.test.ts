@@ -179,32 +179,33 @@ describe("AppPermissions", () => {
       permissions: ["all", "photos-add", "contacts-limited", "location-always"],
     });
 
+    const expandedResources = [
+      "camera",
+      "photos",
+      "microphone",
+      "contacts",
+      "location",
+      "calendar",
+      "reminders",
+      "media-library",
+      "homekit",
+      "focus",
+      "local-network",
+      "bluetooth",
+      "keyboard-network",
+      "health",
+      "user-tracking",
+    ];
     expect(result.success).toBe(true);
-    expect(result.changedCount).toBe(8);
+    expect(result.changedCount).toBe(expandedResources.length);
     expect(result.failedCount).toBe(0);
-    expect(result.operations.map(operation => operation.operationId)).toEqual([
-      "ios_xcuitest_reset:reset:camera",
-      "ios_xcuitest_reset:reset:photos",
-      "ios_xcuitest_reset:reset:microphone",
-      "ios_xcuitest_reset:reset:contacts",
-      "ios_xcuitest_reset:reset:location",
-      "ios_xcuitest_reset:reset:calendar",
-      "ios_xcuitest_reset:reset:reminders",
-      "ios_xcuitest_reset:reset:media-library",
-    ]);
+    expect(result.operations.map(operation => operation.operationId)).toEqual(
+      expandedResources.map(resource => `ios_xcuitest_reset:reset:${resource}`)
+    );
     expect(iosPhysicalClient.calls).toEqual([
       {
         appId: "com.example.app",
-        permissions: [
-          "camera",
-          "photos",
-          "microphone",
-          "contacts",
-          "location",
-          "calendar",
-          "reminders",
-          "media-library",
-        ],
+        permissions: expandedResources,
       },
     ]);
   });

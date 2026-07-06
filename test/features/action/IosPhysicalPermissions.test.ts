@@ -52,6 +52,13 @@ describe("IosPhysicalPermissions", () => {
       "calendar",
       "reminders",
       "media-library",
+      "homekit",
+      "focus",
+      "local-network",
+      "bluetooth",
+      "keyboard-network",
+      "health",
+      "user-tracking",
     ];
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(expanded.length);
@@ -73,9 +80,7 @@ describe("IosPhysicalPermissions", () => {
       "location-always",
     ]);
 
-    expect(result.success).toBe(true);
-    expect(result.changedCount).toBe(8);
-    expect(result.results.map(r => r.permission)).toEqual([
+    const expanded = [
       "camera",
       "photos",
       "microphone",
@@ -84,20 +89,21 @@ describe("IosPhysicalPermissions", () => {
       "calendar",
       "reminders",
       "media-library",
-    ]);
+      "homekit",
+      "focus",
+      "local-network",
+      "bluetooth",
+      "keyboard-network",
+      "health",
+      "user-tracking",
+    ];
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(expanded.length);
+    expect(result.results.map(r => r.permission)).toEqual(expanded);
     expect(client.calls).toEqual([
       {
         appId: "com.example.app",
-        permissions: [
-          "camera",
-          "photos",
-          "microphone",
-          "contacts",
-          "location",
-          "calendar",
-          "reminders",
-          "media-library",
-        ],
+        permissions: expanded,
       },
     ]);
   });
@@ -129,6 +135,27 @@ describe("IosPhysicalPermissions", () => {
     expect(result.failedCount).toBe(0);
     expect(result.results.map(r => r.permission)).toEqual(["camera", "photos"]);
     expect(client.calls).toEqual([{ appId: "com.example.app", permissions: ["camera", "photos"] }]);
+  });
+
+  test("reset supports the newly added XCUIProtectedResource names explicitly", async () => {
+    const client = new FakePhysicalPrivacyClient();
+    const permissions = new IosPhysicalPermissions(physicalDevice, client);
+
+    const newlySupported = [
+      "homekit",
+      "focus",
+      "local-network",
+      "bluetooth",
+      "keyboard-network",
+      "health",
+      "user-tracking",
+    ];
+    const result = await permissions.setPermissions("reset", "com.example.app", newlySupported);
+
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(newlySupported.length);
+    expect(result.results.map(r => r.permission)).toEqual(newlySupported);
+    expect(client.calls).toEqual([{ appId: "com.example.app", permissions: newlySupported }]);
   });
 
   test("reset aggregates partial failure (e.g. unmapped resource) honestly", async () => {

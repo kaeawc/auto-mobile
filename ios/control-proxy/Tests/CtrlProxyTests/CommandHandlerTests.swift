@@ -1434,8 +1434,24 @@ final class CommandHandlerTests: XCTestCase {
                 "calendar",
                 "reminders",
                 "media-library",
+                "homekit",
+                "focus",
+                "local-network",
+                "bluetooth",
+                "keyboard-network",
+                "health",
+                "user-tracking",
             ]
         )
+        // Each newly added XCUIProtectedResource name is a recognized (aliasable)
+        // reset resource, so it expands to itself rather than returning nil.
+        for name in ["homekit", "focus", "local-network", "bluetooth", "keyboard-network", "health", "user-tracking"] {
+            XCTAssertEqual(
+                GesturePerformer.expandedPrivacyResourceNames(for: name),
+                [name],
+                "\(name) should be a recognized resettable resource"
+            )
+        }
         XCTAssertEqual(GesturePerformer.expandedPrivacyResourceNames(for: "photos-add"), ["photos-add"])
         XCTAssertEqual(GesturePerformer.canonicalPrivacyResourceName(for: "photos-add"), "photos")
         XCTAssertEqual(GesturePerformer.canonicalPrivacyResourceName(for: "contacts-limited"), "contacts")

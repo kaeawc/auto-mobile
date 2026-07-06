@@ -28,6 +28,10 @@ import {
   type PlistValue
 } from "./ios-cmdline-tools/XctestrunPlist";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import {
+  SKIP_CTRL_PROXY_DOWNLOAD_ENV,
+  isTruthyEnvValue,
+} from "./ctrlProxyDownloadControl";
 
 /**
  * Result of CtrlProxy download/install
@@ -360,9 +364,8 @@ export class IOSCtrlProxyBuilder {
    * Check if a download/extract is needed
    */
   public async needsRebuild(platform?: IOSCtrlProxyPlatform): Promise<boolean> {
-    if (process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD === "true" ||
-        process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD === "1") {
-      logger.info("[IOSCtrlProxyBuilder] Download skipped via AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD");
+    if (isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
+      logger.info(`[IOSCtrlProxyBuilder] Download skipped via ${SKIP_CTRL_PROXY_DOWNLOAD_ENV}`);
       return false;
     }
 
@@ -426,13 +429,12 @@ export class IOSCtrlProxyBuilder {
   ): Promise<CtrlProxyIosBuildResult> {
     perf.serial("xcTestServiceDownload");
 
-    if (process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD === "true" ||
-        process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD === "1") {
+    if (isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
       perf.end();
       return {
         success: false,
         message: "CtrlProxy download skipped",
-        error: "AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD is set"
+        error: `${SKIP_CTRL_PROXY_DOWNLOAD_ENV} is set`
       };
     }
 
@@ -493,12 +495,6 @@ export class IOSCtrlProxyBuilder {
 
     if (IOSCtrlProxyBuilder.prefetchPromise !== null) {
       logger.info("[IOSCtrlProxyBuilder] Prefetch already initiated, skipping");
-      return;
-    }
-
-    if (process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD === "true" ||
-        process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD === "1") {
-      logger.info("[IOSCtrlProxyBuilder] Prefetch skipped via environment variable");
       return;
     }
 

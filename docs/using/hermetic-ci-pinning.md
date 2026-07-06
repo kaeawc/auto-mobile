@@ -107,9 +107,9 @@ mirror can only serve unverified assets if you deliberately opt out of verificat
    export AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH=/opt/automobile/control-proxy.ipa
    ```
    The daemon copies (and extracts) this local bundle directly — no network fetch, no
-   Xcode build. **Do not also set `AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD=1`**: that flag
+   Xcode build. **Do not also set `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=1`**: that flag
    short-circuits `needsRebuild()` and returns *before* the vendored IPA is consumed, so
-   on a fresh host CtrlProxy would never be installed. Use `AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD=1`
+   on a fresh host CtrlProxy would never be installed. Use `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=1`
    only when the extracted xctestrun artifacts are *already* present on the host.
    Alternatively, set `AUTOMOBILE_ASSET_BASE_URL` to your mirror for a checksummed
    download of a registry-known version (leave the IPA path unset).

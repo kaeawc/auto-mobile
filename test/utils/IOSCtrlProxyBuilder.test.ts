@@ -10,7 +10,7 @@ import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
 describe("IOSCtrlProxyBuilder", function() {
   let originalProjectRoot: string | undefined;
   let originalDerivedDataPath: string | undefined;
-  let originalSkipBuild: string | undefined;
+  let originalSkipDownload: string | undefined;
   let originalCacheDir: string | undefined;
   let originalIpaPath: string | undefined;
   let originalBundlePath: string | undefined;
@@ -21,7 +21,7 @@ describe("IOSCtrlProxyBuilder", function() {
     // Save original environment
     originalProjectRoot = process.env.AUTOMOBILE_PROJECT_ROOT;
     originalDerivedDataPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA;
-    originalSkipBuild = process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD;
+    originalSkipDownload = process.env.AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD;
     originalCacheDir = process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR;
     originalIpaPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH;
     originalBundlePath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
@@ -48,10 +48,10 @@ describe("IOSCtrlProxyBuilder", function() {
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA = originalDerivedDataPath;
     }
 
-    if (originalSkipBuild === undefined) {
-      delete process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD;
+    if (originalSkipDownload === undefined) {
+      delete process.env.AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD;
     } else {
-      process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD = originalSkipBuild;
+      process.env.AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD = originalSkipDownload;
     }
 
     if (originalCacheDir === undefined) {
@@ -182,8 +182,8 @@ describe("IOSCtrlProxyBuilder", function() {
   });
 
   describe("needsRebuild", function() {
-    test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD is true", async function() {
-      process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD = "true";
+    test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD is true", async function() {
+      process.env.AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD = "true";
 
       // Reset instances to pick up new env
       IOSCtrlProxyBuilder.resetInstances();
@@ -194,8 +194,8 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result).toBe(false);
     });
 
-    test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD is 1", async function() {
-      process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD = "1";
+    test("should return false when AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD is 1", async function() {
+      process.env.AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD = "1";
 
       // Reset instances to pick up new env
       IOSCtrlProxyBuilder.resetInstances();

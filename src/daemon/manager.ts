@@ -7,6 +7,7 @@ import { releaseVersion } from "../utils/mcpVersion";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
+import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
 import { ActionableError } from "../models";
 import {
   PID_FILE_PATH,
@@ -953,8 +954,10 @@ export class DaemonManager implements DaemonManagerLike {
   }
 }
 
-export function parseDaemonArgs(args: string[]): DaemonOptions {
-  const options: DaemonOptions = {};
+export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process.env): DaemonOptions {
+  const options: DaemonOptions = shouldSkipCtrlProxyDownload(args, env)
+    ? { skipCtrlProxyDownload: true }
+    : {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") {
       options.port = parseInt(args[i + 1], 10);

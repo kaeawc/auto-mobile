@@ -357,7 +357,10 @@ public class CommandHandler: CommandHandling {
     /// arrive over the wire today. This guard is defense-in-depth for the
     /// non-wire path — a caller constructing a request directly, or a computed
     /// coordinate (division, `hypot`, normalized offset) that yields a non-finite
-    /// `Double`. Throwing `CommandError.invalidParameter` makes `handle`'s catch
+    /// `Double`. Non-coordinate gesture inputs that feed the path math (pinch
+    /// `rotationDegrees`, multi-finger `offset` spacing) get the same guard
+    /// (#2991, mirroring Android #2964). Throwing
+    /// `CommandError.invalidParameter` makes `handle`'s catch
     /// return a clean, actionable per-command error response (see #2909's thesis
     /// that the runner must never surface an opaque failure for unusual input)
     /// rather than the silent no-op XCUITest would produce.
@@ -414,6 +417,10 @@ public class CommandHandler: CommandHandling {
         let fingerCount = request.fingerCount ?? 2
         let duration = request.duration ?? 300
         let fingerSpacing = request.offset ?? 25
+        // Android leaves `offset` unguarded because it is an `Int` (cannot be
+        // non-finite). On iOS `offset` is a `Double?` feeding the per-finger
+        // spacing geometry, so the same defense-in-depth guard applies (#2991).
+        try requireFinite(fingerSpacing, field: "offset")
 
         try gesturePerformer.multiFingerSwipe(
             startX: request.x1,
@@ -461,6 +468,12 @@ public class CommandHandler: CommandHandling {
         try requireFinite(request.centerY, field: "centerY")
         try requireFinite(request.distanceStart, field: "distanceStart")
         try requireFinite(request.distanceEnd, field: "distanceEnd")
+        // `rotationDegrees` is a `Float?` (not a coordinate) but still flows into
+        // the gesture-path math (degrees → radians → cos/sin), so a computed
+        // non-finite rotation is guarded too — mirroring Android #2964 / PR #2984
+        // (#2991). `Double(Float.nan/±infinity)` stays non-finite, so widening
+        // before the check loses nothing.
+        try requireFinite(Double(request.rotationDegrees ?? 0), field: "rotationDegrees")
         let path = try gesturePerformer.pinch(
             centerX: request.centerX,
             centerY: request.centerY,

@@ -8,7 +8,7 @@ import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorDevice } from "./IosSimulatorPermissions";
 import {
   IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
-  iosNotifyutilRegisteredSetCommand,
+  iosNotifyutilRegisteredSetReadPostCommand,
   parseNotifyutilState
 } from "../../utils/ios-cmdline-tools/notifyutil";
 
@@ -207,7 +207,7 @@ export class BiometricAuth extends BaseVisualChange {
     try {
       // Ensure biometry is enrolled before attempting a match.
       const enrollmentResult = await simctl.executeCommand(
-        iosNotifyutilRegisteredSetCommand(udid, keys.enrollment, "1"),
+        iosNotifyutilRegisteredSetReadPostCommand(udid, keys.enrollment, "1"),
         IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS
       );
       if (enrollmentResult.stderr && enrollmentResult.stderr.trim().length > 0) {

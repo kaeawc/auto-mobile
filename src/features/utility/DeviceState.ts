@@ -10,7 +10,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import {
   IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
   iosNotifyutilGetCommand,
-  iosNotifyutilRegisteredSetCommand,
+  iosNotifyutilRegisteredSetReadPostCommand,
   parseNotifyutilState
 } from "../../utils/ios-cmdline-tools/notifyutil";
 import {
@@ -455,8 +455,10 @@ export class DeviceState {
     }
 
     // Simulator legacy path: the only lever is the binary `com.apple.donotdisturb.enabled`
-    // Darwin notification. `notifyutil -s` is a no-op unless the key has a
-    // registration, so set/read/post must happen in one registered invocation.
+    // Darwin notification. The set command self-registers so keys without some
+    // other live owner are still writable in-process, but that same-invocation
+    // set/read/post is not authoritative: donotdisturbd can reclaim the key
+    // immediately, so success depends on the independent fresh-process readback below.
     // There is no per-mode (priority/alarms) Darwin notification analogous to
     // Android's `zen_mode` integer, so `priority`/`alarms` requests are applied
     // as plain DND ("none") and reported honestly rather than silently claiming
@@ -468,7 +470,7 @@ export class DeviceState {
     try {
       const value = requestedEnabled ? "1" : "0";
       const writeResult = await simctl.executeCommand(
-        iosNotifyutilRegisteredSetCommand(this.device.deviceId, IOS_DND_NOTIFICATION, value),
+        iosNotifyutilRegisteredSetReadPostCommand(this.device.deviceId, IOS_DND_NOTIFICATION, value),
         IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS
       );
       const writeStderr = writeResult.stderr?.trim();

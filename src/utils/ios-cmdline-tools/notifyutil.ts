@@ -15,7 +15,7 @@ export function iosNotifyutilGetCommand(deviceId: string, key: string): string {
   return `spawn ${deviceId} notifyutil -g ${key}`;
 }
 
-export function iosNotifyutilRegisteredSetCommand(
+export function iosNotifyutilRegisteredSetReadPostCommand(
   deviceId: string,
   key: string,
   value: "0" | "1"

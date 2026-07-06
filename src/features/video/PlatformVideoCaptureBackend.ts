@@ -10,6 +10,14 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
+import {
+  createExitTracker,
+  getFileSize,
+  PROCESS_EXIT_TIMEOUT_MS,
+  waitForExit,
+  waitForSpawn,
+  type ProcessExitState,
+} from "../../utils/ChildProcessTracker";
 import type {
   RecordingHandle,
   RecordingResult,
@@ -17,13 +25,6 @@ import type {
   VideoCaptureConfig,
 } from "./VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
-const PROCESS_EXIT_TIMEOUT_MS = 5000;
-
-interface ProcessExitState {
-  exitCode?: number | null;
-  signal?: NodeJS.Signals | null;
-  endedAt?: string;
-}
 
 interface AndroidBackendHandle {
   kind: "android";
@@ -48,79 +49,6 @@ interface IosBackendHandle {
 }
 
 type BackendHandle = AndroidBackendHandle | IosBackendHandle;
-
-function createExitTracker(
-  process: ChildProcessWithoutNullStreams,
-  stderr: string[]
-): { exitState: ProcessExitState; exitPromise: Promise<void> } {
-  const exitState: ProcessExitState = {};
-  let resolvePromise: (() => void) | null = null;
-  let rejectPromise: ((error: Error) => void) | null = null;
-
-  const exitPromise = new Promise<void>((resolve, reject) => {
-    resolvePromise = resolve;
-    rejectPromise = reject;
-  });
-
-  process.once("error", error => {
-    rejectPromise?.(error instanceof Error ? error : new Error(String(error)));
-  });
-
-  process.once("exit", (code, signal) => {
-    exitState.exitCode = code;
-    exitState.signal = signal;
-    exitState.endedAt = new Date().toISOString();
-    resolvePromise?.();
-  });
-
-  process.stderr.on("data", chunk => {
-    stderr.push(chunk.toString());
-  });
-
-  if (process.exitCode !== null) {
-    exitState.exitCode = process.exitCode;
-    exitState.signal = process.signalCode;
-    exitState.endedAt = new Date().toISOString();
-    resolvePromise?.();
-  }
-
-  return { exitState, exitPromise };
-}
-
-async function waitForExit(
-  process: ChildProcessWithoutNullStreams,
-  exitPromise: Promise<void>
-): Promise<void> {
-  if (process.exitCode !== null) {
-    await exitPromise;
-    return;
-  }
-
-  if (process.killed) {
-    await exitPromise;
-    return;
-  }
-
-  process.kill("SIGINT");
-
-  let timeoutId: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<void>(resolve => {
-    timeoutId = defaultTimer.setTimeout(() => {
-      if (process.exitCode === null) {
-        process.kill("SIGKILL");
-      }
-      resolve();
-    }, PROCESS_EXIT_TIMEOUT_MS);
-  });
-
-  await Promise.race([exitPromise, timeoutPromise]);
-
-  if (timeoutId) {
-    clearTimeout(timeoutId);
-  }
-
-  await exitPromise;
-}
 
 function clampBitrateKbps(config: VideoCaptureConfig): number {
   const maxBitrateKbps = Math.max(0, Math.floor(config.maxThroughputMbps * 1000));
@@ -213,7 +141,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
       await this.timer.sleep(1000);
     } else {
-      await waitForExit(backendHandle.process, backendHandle.exitPromise);
+      await waitForExit(backendHandle.process, backendHandle.exitPromise, {
+        timeoutMs: PROCESS_EXIT_TIMEOUT_MS,
+      });
       logger.info(
         `[VideoCapture] Process exited with code: ${backendHandle.exitState.exitCode}, signal: ${backendHandle.exitState.signal}`
       );
@@ -259,7 +189,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       await this.finalizeIosRecording(backendHandle);
     }
 
-    const sizeBytes = await this.getFileSize(handle.outputPath);
+    const sizeBytes = await getFileSize(handle.outputPath);
     logger.info(`[VideoCapture] Final file size: ${sizeBytes} bytes at ${handle.outputPath}`);
 
     const codec = "h264";
@@ -328,7 +258,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     const process = spawn(adbPath, args, { stdio: ["ignore", "pipe", "pipe"] });
 
     try {
-      await this.waitForSpawn(process);
+      await waitForSpawn(process);
     } catch (error) {
       throw new ActionableError(`Failed to start Android recording: ${error}`);
     }
@@ -387,7 +317,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     const process = spawn("xcrun", args, { stdio: ["ignore", "pipe", "pipe"] });
 
     try {
-      await this.waitForSpawn(process);
+      await waitForSpawn(process);
     } catch (error) {
       throw new ActionableError(`Failed to start iOS recording: ${error}`);
     }
@@ -445,22 +375,6 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     } catch (error) {
       logger.warn(`[VideoCapture] Failed to scale iOS recording: ${error}`);
       await this.replaceOutputFile(handle.rawOutputPath, handle.outputPath);
-    }
-  }
-
-  private async waitForSpawn(process: ChildProcessWithoutNullStreams): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      process.once("spawn", () => resolve());
-      process.once("error", error => reject(error));
-    });
-  }
-
-  private async getFileSize(filePath: string): Promise<number | undefined> {
-    try {
-      const stats = await fsPromises.stat(filePath);
-      return stats.size;
-    } catch {
-      return undefined;
     }
   }
 

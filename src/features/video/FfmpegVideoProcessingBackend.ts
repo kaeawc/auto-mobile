@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn } from "node:child_process";
 import { platform } from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -14,6 +14,16 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
+import {
+  getFileSize,
+  PROCESS_EXIT_TIMEOUT_MS,
+  trackProcess,
+  waitForExit,
+  waitForSpawn,
+  type ProcessExitState,
+  type ProcessTracker,
+  type StoppableProcess,
+} from "../../utils/ChildProcessTracker";
 import type {
   RecordingHandle,
   RecordingResult,
@@ -21,7 +31,8 @@ import type {
   VideoCaptureConfig,
 } from "./VideoRecorderService";
 
-export const PROCESS_EXIT_TIMEOUT_MS = 5000;
+export { PROCESS_EXIT_TIMEOUT_MS, waitForExit };
+export type { ProcessTracker, StoppableProcess };
 // `xcrun simctl io ... recordVideo` only writes the MP4/MOV moov atom after it
 // receives SIGINT. If we SIGKILL it before the flush finishes the on-disk file is
 // truncated (often 0 bytes), and the downstream ffmpeg `-c copy` remux fails with
@@ -44,19 +55,6 @@ const IOS_RECORDING_START_MESSAGES = [
   "Recording started",
   "Defaulting to display:",
 ];
-
-interface ProcessExitState {
-  exitCode?: number | null;
-  signal?: NodeJS.Signals | null;
-  endedAt?: string;
-}
-
-export interface ProcessTracker {
-  process: ChildProcessWithoutNullStreams;
-  exitState: ProcessExitState;
-  exitPromise: Promise<void>;
-  stderr: string[];
-}
 
 interface HardwareAccelInfo {
   encoder: string;
@@ -86,104 +84,6 @@ interface FfmpegBackendHandle {
   ffmpegTracker?: ProcessTracker;
   capturePath?: string;
   config: VideoCaptureConfig;
-}
-
-function createExitTracker(
-  process: ChildProcessWithoutNullStreams,
-  stderr: string[]
-): { exitState: ProcessExitState; exitPromise: Promise<void> } {
-  const exitState: ProcessExitState = {};
-  let resolvePromise: (() => void) | null = null;
-  let rejectPromise: ((error: Error) => void) | null = null;
-
-  const exitPromise = new Promise<void>((resolve, reject) => {
-    resolvePromise = resolve;
-    rejectPromise = reject;
-  });
-
-  process.once("error", error => {
-    rejectPromise?.(error instanceof Error ? error : new Error(String(error)));
-  });
-
-  process.once("exit", (code, signal) => {
-    exitState.exitCode = code;
-    exitState.signal = signal;
-    exitState.endedAt = new Date().toISOString();
-    resolvePromise?.();
-  });
-
-  process.stderr.on("data", chunk => {
-    stderr.push(chunk.toString());
-  });
-
-  if (process.exitCode !== null) {
-    exitState.exitCode = process.exitCode;
-    exitState.signal = process.signalCode;
-    exitState.endedAt = new Date().toISOString();
-    resolvePromise?.();
-  }
-
-  return { exitState, exitPromise };
-}
-
-function trackProcess(process: ChildProcessWithoutNullStreams): ProcessTracker {
-  const stderr: string[] = [];
-  const { exitState, exitPromise } = createExitTracker(process, stderr);
-  return { process, exitState, exitPromise, stderr };
-}
-
-/**
- * Minimal child-process surface needed to gracefully stop a recording. Narrowed
- * from `ChildProcessWithoutNullStreams` so the SIGINT→SIGKILL escalation can be
- * unit-tested with a fake process instead of a real spawn.
- */
-export interface StoppableProcess {
-  exitCode: number | null;
-  killed: boolean;
-  kill(signal?: NodeJS.Signals | number): boolean;
-}
-
-/**
- * Stop a capture process by sending SIGINT first (which lets `simctl`/`screenrecord`
- * flush and finalize the file), then escalating to SIGKILL only if the process has
- * not exited within `timeoutMs`. Callers that record formats requiring a trailing
- * moov-atom flush (iOS simctl) should pass a generous `timeoutMs`.
- */
-export async function waitForExit(
-  process: StoppableProcess,
-  exitPromise: Promise<void>,
-  timeoutMs: number = PROCESS_EXIT_TIMEOUT_MS,
-  timer: Timer = defaultTimer
-): Promise<void> {
-  if (process.exitCode !== null) {
-    await exitPromise;
-    return;
-  }
-
-  if (process.killed) {
-    await exitPromise;
-    return;
-  }
-
-  process.kill("SIGINT");
-
-  let timeoutId: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<void>(resolve => {
-    timeoutId = timer.setTimeout(() => {
-      if (process.exitCode === null) {
-        process.kill("SIGKILL");
-      }
-      resolve();
-    }, timeoutMs);
-  });
-
-  await Promise.race([exitPromise, timeoutPromise]);
-
-  if (timeoutId) {
-    timer.clearTimeout(timeoutId);
-  }
-
-  await exitPromise;
 }
 
 /**
@@ -269,35 +169,6 @@ export async function waitForRecordingFileReady(
 
     await timer.sleep(backoff.delayForAttempt(attempt));
   }
-}
-
-async function waitForProcessCompletion(
-  process: ChildProcessWithoutNullStreams,
-  exitPromise: Promise<void>,
-  timeoutMs: number
-): Promise<void> {
-  if (process.exitCode !== null || process.killed) {
-    await exitPromise;
-    return;
-  }
-
-  let timeoutId: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<void>(resolve => {
-    timeoutId = defaultTimer.setTimeout(() => {
-      if (process.exitCode === null) {
-        process.kill("SIGKILL");
-      }
-      resolve();
-    }, timeoutMs);
-  });
-
-  await Promise.race([exitPromise, timeoutPromise]);
-
-  if (timeoutId) {
-    clearTimeout(timeoutId);
-  }
-
-  await exitPromise;
 }
 
 function stderrMessages(messages: string | string[]): string[] {
@@ -420,12 +291,12 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       await waitForExit(
         backendHandle.captureTracker.process,
         backendHandle.captureTracker.exitPromise,
-        IOS_RECORDING_STOP_TIMEOUT_MS
+        { timeoutMs: IOS_RECORDING_STOP_TIMEOUT_MS }
       );
       await this.postProcessRecording(backendHandle);
     }
 
-    const sizeBytes = await this.getFileSize(handle.outputPath);
+    const sizeBytes = await getFileSize(handle.outputPath);
     const codec = "h264";
 
     this.logProcessWarnings("capture", backendHandle.captureTracker);
@@ -477,7 +348,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     });
 
     try {
-      await this.waitForSpawn(captureProcess);
+      await waitForSpawn(captureProcess);
       logger.info(`[FfmpegVideo] screenrecord process spawned`);
     } catch (error) {
       logger.error(`[FfmpegVideo] Failed to spawn screenrecord: ${error}`);
@@ -497,7 +368,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     logger.info(`[FfmpegVideo] Piped screenrecord stdout to ffmpeg stdin`);
 
     try {
-      await this.waitForSpawn(ffmpegProcess);
+      await waitForSpawn(ffmpegProcess);
       logger.info(`[FfmpegVideo] ffmpeg process spawned`);
     } catch (error) {
       logger.error(`[FfmpegVideo] Failed to spawn ffmpeg: ${error}`);
@@ -550,7 +421,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     const captureProcess = spawn("xcrun", args, { stdio: ["ignore", "pipe", "pipe"] });
 
     try {
-      await this.waitForSpawn(captureProcess);
+      await waitForSpawn(captureProcess);
     } catch (error) {
       throw new ActionableError(`Failed to start iOS recording: ${error}`);
     }
@@ -644,7 +515,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     });
 
     try {
-      await this.waitForSpawn(ffmpegProcess);
+      await waitForSpawn(ffmpegProcess);
     } catch (error) {
       throw new ActionableError(`Failed to start FFmpeg post-processing: ${error}`);
     }
@@ -652,10 +523,10 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     const ffmpegTracker = trackProcess(ffmpegProcess);
     backendHandle.ffmpegTracker = ffmpegTracker;
 
-    await waitForProcessCompletion(
+    await waitForExit(
       ffmpegProcess,
       ffmpegTracker.exitPromise,
-      FFMPEG_POST_PROCESS_TIMEOUT_MS
+      { timeoutMs: FFMPEG_POST_PROCESS_TIMEOUT_MS, signal: null }
     );
 
     if (isFailedExitState(ffmpegTracker.exitState)) {
@@ -914,22 +785,6 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     });
   }
 
-  private async waitForSpawn(process: ChildProcessWithoutNullStreams): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      process.once("spawn", () => resolve());
-      process.once("error", error => reject(error));
-    });
-  }
-
-  private async getFileSize(filePath: string): Promise<number | undefined> {
-    try {
-      const stats = await fsPromises.stat(filePath);
-      return stats.size;
-    } catch {
-      return undefined;
-    }
-  }
-
   private async assertFfmpegOutputReady(
     outputPath: string,
     args: string[],
@@ -947,7 +802,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       );
     }
 
-    const sizeBytes = await this.getFileSize(outputPath);
+    const sizeBytes = await getFileSize(outputPath);
     if (!sizeBytes || sizeBytes <= 0) {
       throw new ActionableError(
         this.buildFfmpegFailureMessage(

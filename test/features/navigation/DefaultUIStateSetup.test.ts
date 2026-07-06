@@ -183,6 +183,55 @@ describe("DefaultUIStateSetup", () => {
       expect(capturedArgs![INTERNAL_NO_DIFF_PARAM]).toBe(true);
     });
 
+    // Build a minimal view hierarchy that UIStateExtractor classifies as a
+    // `bottomsheet` modal with the given windowId: a flat node whose `class`
+    // contains "sheet" (classifyModalType) and an explicit `window-id`
+    // (getWindowId). No `windows` array => collectModalStack runs on the
+    // top-level hierarchy traversal.
+    const bottomSheetHierarchy = (windowId: number): ObserveResult => ({
+      viewHierarchy: {
+        hierarchy: { "class": "BottomSheetDialog", "window-id": String(windowId) },
+      },
+    } as unknown as ObserveResult);
+
+    test("falls through to the back button when the swipe leaves the bottom sheet present (#3125)", async () => {
+      ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
+        createStructuredToolResponse({ success: true })
+      );
+
+      // Stateful observe provider: the first post-swipe observation still
+      // contains the bottomsheet's windowId (swipe did NOT dismiss it), forcing
+      // the code past the swipe dismissal check into the back-button fallback;
+      // the second (post-back) observation has a null hierarchy => the sheet is
+      // gone, so the back-button path reports dismissal.
+      let observeCalls = 0;
+      const statefulObserve = (): ObserveScreenLike => ({
+        execute: async () => {
+          observeCalls++;
+          return observeCalls === 1
+            ? bottomSheetHierarchy(42)
+            : ({ viewHierarchy: null } as unknown as ObserveResult);
+        },
+      });
+
+      const setup = makeSetup(statefulObserve);
+      const dismissed = await (
+        setup as unknown as {
+          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
+        }
+      ).dismissTopModal(bottomSheet, "android");
+
+      expect(dismissed).toBe(true);
+      // The swipe ran but did not dismiss (windowId still present on observe #1),
+      // so both post-swipe and post-back observations were consulted.
+      expect(observeCalls).toBe(2);
+      // The back-button fallback fired via the ADB keyevent seam — the
+      // AndroidCtrlProxy accessibility path is not connected in a unit context
+      // (requestGlobalAction fast-fails), so pressBack falls through to ADB.
+      const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
+      expect(fakeAdb.wasCommandExecuted("shell input keyevent 4")).toBe(true);
+    });
+
     test("does not mistakenly resolve a tool registered under the old name `swipe`", async () => {
       let legacySwipeCalls = 0;
       // Register ONLY the wrong name. With the bug this would be the tool the

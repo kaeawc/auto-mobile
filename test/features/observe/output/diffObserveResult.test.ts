@@ -10,6 +10,7 @@ import {
 } from "../../../../src/features/observe/output/ObserveResultOutput";
 import {
   loadAndroidHomeObserve,
+  loadIosRemindersNoiseObservePair,
   measureValue,
 } from "../../../fixtures/observe/observeFixture";
 
@@ -40,6 +41,24 @@ function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): Obs
     },
     ...extra,
   } as ObserveResult;
+}
+
+function iosObs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): ObserveResult {
+  return obs(node, {
+    activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
+    viewHierarchy: {
+      packageName: "com.apple.reminders",
+      hierarchy: { node: node as any },
+    },
+    screenIdentity: {
+      platform: "ios",
+      source: "heuristic",
+      confidence: "high",
+      key: "bundle=com.apple.reminders|nav=Reminders",
+      components: { bundleId: "com.apple.reminders", navigationTitle: "Reminders" },
+    },
+    ...extra,
+  } as ObserveResult);
 }
 
 describe("diffObserveResult", () => {
@@ -830,6 +849,142 @@ describe("diffObserveResult", () => {
     expect(diff.changed).toEqual([]);
     expect(diff.added.map(n => n.attributes["resource-id"])).toEqual(["fresh"]);
     expect(diff.removed.map(n => n.attributes["resource-id"])).toEqual(["gone"]);
+  });
+});
+
+describe("diffObserveResult — conservative iOS stable identity (#3318)", () => {
+  test("iOS text input edits emit one `changed` entry instead of remove+add", () => {
+    const baseline = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "",
+      "value": "",
+      "focused": "true",
+    });
+    const next = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+      "value": "Buy milk",
+      "focused": "true",
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.text).toEqual({ from: "", to: "Buy milk" });
+    expect(diff.changed[0].changes.value).toEqual({ from: "", to: "Buy milk" });
+  });
+
+  test("iOS UIKit text fields emitted by the runner also re-pair text/value edits", () => {
+    const baseline = iosObs({
+      "view-id": "title-field",
+      "class": "UITextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "",
+      "value": "",
+    });
+    const next = iosObs({
+      "view-id": "title-field",
+      "class": "UITextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+      "value": "Buy milk",
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.text).toEqual({ from: "", to: "Buy milk" });
+    expect(diff.changed[0].changes.value).toEqual({ from: "", to: "Buy milk" });
+  });
+
+  test("contentIdentity:false disables the iOS editable-control repair path", () => {
+    const baseline = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "",
+      "value": "",
+    });
+    const next = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+      "value": "Buy milk",
+    });
+
+    const diff = diffObserveResult(baseline, next, { contentIdentity: false });
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+  });
+
+  test("iOS focus and selection remain changed attributes, not identity", () => {
+    const baseline = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+      "focused": "false",
+      "selected": "false",
+    });
+    const next = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+      "focused": "true",
+      "selected": "true",
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.focused).toEqual({ from: "false", to: "true" });
+    expect(diff.changed[0].changes.selected).toEqual({ from: "false", to: "true" });
+  });
+
+  test("iOS reused list cell identifiers do not false-merge different logical rows", () => {
+    const row = (label: string, top: number) => ({
+      "resource-id": "ReusableCell",
+      "className": "XCUIElementTypeCell",
+      "bounds": { left: 0, top, right: 390, bottom: top + 44 },
+      "text": label,
+      "value": label,
+    });
+    const baseline = iosObs({
+      "resource-id": "ReminderList",
+      "className": "XCUIElementTypeTable",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [row("Old row", 100)],
+    });
+    const next = iosObs({
+      "resource-id": "ReminderList",
+      "className": "XCUIElementTypeTable",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [row("Different row", 100)],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+  });
+
+  test("real iOS fixture churn stays neutral with iOS identity enabled", () => {
+    const { before, after } = loadIosRemindersNoiseObservePair();
+    const withIdentity = diffObserveResult(before, after);
+    const positional = diffObserveResult(before, after, { contentIdentity: false });
+    const churn = (diff: typeof withIdentity) => diff.added.length + diff.removed.length + diff.changed.length;
+
+    expect(churn(withIdentity)).toBeLessThanOrEqual(churn(positional));
   });
 });
 

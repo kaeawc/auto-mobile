@@ -365,6 +365,11 @@ export interface DiffObserveConfig {
    * identity) never re-pairs. Purely additive — it only re-pairs nodes positional
    * matching already left unpaired, so cross-subtree collisions stay disambiguated
    * by the path key. Set `false` for exact positional-only behavior.
+   *
+   * iOS adds one narrower repair pass under this same gate: editable controls
+   * (`XCUIElementTypeTextField` / `TextView` / `SearchField`) with a stable
+   * accessibility identifier and quantized screen region may re-pair across
+   * text/value edits. Reused table/collection cell classes opt out.
    */
   contentIdentity?: boolean;
 }
@@ -723,6 +728,120 @@ function repairByContentIdentity(
   };
 }
 
+function isIosObservation(obs: ObserveResult): boolean {
+  if (obs.screenIdentity?.platform === "ios") {
+    return true;
+  }
+  const appId = obs.activeWindow?.appId ?? obs.viewHierarchy?.packageName ?? "";
+  return appId.startsWith("com.apple.") || appId.endsWith(".ios");
+}
+
+function stringAttr(attrs: Record<string, unknown>, key: string): string {
+  const value = attrs[key];
+  return typeof value === "string" ? value : "";
+}
+
+function quantizedBoundsKey(bounds: unknown): string {
+  const parts = boundsKey(bounds).split(",").map(part => Number(part));
+  if (parts.length !== 4 || parts.some(part => !Number.isFinite(part))) {
+    return "";
+  }
+  return parts.map(part => Math.round(part / 8)).join(",");
+}
+
+function isIosEditableClass(className: string): boolean {
+  return className === "XCUIElementTypeTextField"
+    || className === "XCUIElementTypeSecureTextField"
+    || className === "XCUIElementTypeTextView"
+    || className === "XCUIElementTypeSearchField"
+    || className === "UITextField"
+    || className === "UISecureTextField"
+    || className === "UITextView"
+    || className === "UISearchBar";
+}
+
+function isIosListCellClass(className: string): boolean {
+  return className === "XCUIElementTypeCell"
+    || className === "XCUIElementTypeTable"
+    || className === "XCUIElementTypeCollectionView";
+}
+
+/**
+ * Conservative iOS identity for in-place editable controls (#3318). UIKit /
+ * SwiftUI wrappers commonly churn text/value/focus while preserving an
+ * accessibility identifier and screen region; pairing those as `changed` makes
+ * text entry readable. Reused table/collection cell identifiers deliberately
+ * opt out because a lone reused id can describe a different logical row.
+ */
+function iosStableIdentityKey(attrs: Record<string, unknown>): string | null {
+  const className = stringAttr(attrs, "className") || stringAttr(attrs, "class");
+  if (isIosListCellClass(className) || !isIosEditableClass(className)) {
+    return null;
+  }
+  const stableId = stringAttr(attrs, "resource-id")
+    || stringAttr(attrs, "view-id")
+    || stringAttr(attrs, "accessibilityIdentifier");
+  if (stableId === "") {
+    return null;
+  }
+  const boundsRegion = quantizedBoundsKey(attrs.bounds);
+  if (boundsRegion === "") {
+    return null;
+  }
+  return [stableId, className, boundsRegion].join(" ");
+}
+
+function indexByIosStableKey(nodes: ObserveDiffNode[]): Map<string, number[]> {
+  const byKey = new Map<string, number[]>();
+  nodes.forEach((node, index) => {
+    const key = iosStableIdentityKey(node.attributes);
+    if (key === null) {
+      return;
+    }
+    const bucket = byKey.get(key);
+    if (bucket) {
+      bucket.push(index);
+    } else {
+      byKey.set(key, [index]);
+    }
+  });
+  return byKey;
+}
+
+function repairByIosStableIdentity(
+  added: ObserveDiffNode[],
+  removed: ObserveDiffNode[],
+  changed: ObserveDiffNodeChange[]
+): { added: ObserveDiffNode[]; removed: ObserveDiffNode[] } {
+  const addedByKey = indexByIosStableKey(added);
+  const removedByKey = indexByIosStableKey(removed);
+  const consumedAdded = new Set<number>();
+  const consumedRemoved = new Set<number>();
+
+  for (const [key, addedIndices] of addedByKey) {
+    const removedIndices = removedByKey.get(key);
+    if (!removedIndices || addedIndices.length !== 1 || removedIndices.length !== 1) {
+      continue;
+    }
+    const addedNode = added[addedIndices[0]];
+    const removedNode = removed[removedIndices[0]];
+    consumedAdded.add(addedIndices[0]);
+    consumedRemoved.add(removedIndices[0]);
+    const attrChanges = diffAttributes(removedNode.attributes, addedNode.attributes);
+    if (Object.keys(attrChanges).length > 0) {
+      changed.push({ key: addedNode.key, fromKey: removedNode.key, changes: attrChanges });
+    }
+  }
+
+  if (consumedAdded.size === 0 && consumedRemoved.size === 0) {
+    return { added, removed };
+  }
+  return {
+    added: added.filter((_, index) => !consumedAdded.has(index)),
+    removed: removed.filter((_, index) => !consumedRemoved.has(index)),
+  };
+}
+
 /** Group flattened nodes by their positional `pathKey`, preserving encounter order. */
 function groupByKey(nodes: FlatObserveNode[]): Map<string, FlatObserveNode[]> {
   const map = new Map<string, FlatObserveNode[]>();
@@ -820,6 +939,11 @@ export function diffObserveResult(
     const repaired = repairByContentIdentity(added, removed, changed);
     finalAdded = repaired.added;
     finalRemoved = repaired.removed;
+    if (isIosObservation(baseline) && isIosObservation(next)) {
+      const iosRepaired = repairByIosStableIdentity(finalAdded, finalRemoved, changed);
+      finalAdded = iosRepaired.added;
+      finalRemoved = iosRepaired.removed;
+    }
   }
 
   const diff: ObserveDiff = { isDiff: true, added: finalAdded, removed: finalRemoved, changed };

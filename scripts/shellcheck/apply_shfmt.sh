@@ -3,6 +3,13 @@
 INSTALL_SHFMT_WHEN_MISSING=${INSTALL_SHFMT_WHEN_MISSING:-false}
 ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-true}
 
+# Shared git file-selection + install-when-missing helpers (issue #2823).
+# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
+
+# Per-tool file regex for the shared collectors (issue #2823).
+SHELL_FILE_REGEX='^.*\.sh$'
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -21,29 +28,8 @@ echo "PROJECT_ROOT: $PROJECT_ROOT"
 # Check for required commands and install missing commands if allowed
 echo -e "${YELLOW}Checking for required commands...${NC}"
 
-# Check if shfmt is installed
-if ! command_exists shfmt; then
-  echo -e "${RED}shfmt is not installed${NC}"
-  if [[ "${INSTALL_SHFMT_WHEN_MISSING}" == "true" ]]; then
-    echo -e "${YELLOW}Installing shfmt...${NC}"
-    if [[ -f "$PROJECT_ROOT/scripts/shellcheck/install_shfmt.sh" ]]; then
-      if ! bash "$PROJECT_ROOT/scripts/shellcheck/install_shfmt.sh"; then
-        echo -e "${RED}Failed to install shfmt${NC}"
-        exit 1
-      fi
-    else
-      echo -e "${RED}shfmt installation script not found${NC}"
-      exit 1
-    fi
-  else
-    echo -e "${RED}shfmt is required. Set INSTALL_SHFMT_WHEN_MISSING=true to auto-install or install manually${NC}"
-    exit 1
-  fi
-fi
-
-# Verify shfmt is available
-if ! command_exists shfmt; then
-  echo -e "${RED}shfmt is still not available after installation attempt${NC}"
+# Check if shfmt is installed (install-when-missing gate + re-verify).
+if ! ensure_tool shfmt "$PROJECT_ROOT/scripts/shellcheck/install_shfmt.sh" "${INSTALL_SHFMT_WHEN_MISSING}"; then
   exit 1
 fi
 
@@ -75,25 +61,6 @@ find_all_shell_files() {
     | uniq
 }
 
-# Function to get touched/staged files
-get_touched_files() {
-  {
-    # Get staged files
-    git diff --cached --name-only --diff-filter=ACMR | while read -r file; do
-      if [[ "$file" =~ ^.*\.sh$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-        echo "$PROJECT_ROOT/$file"
-      fi
-    done
-
-    # Get modified but not staged files
-    git diff --name-only --diff-filter=ACMR | while read -r file; do
-      if [[ "$file" =~ ^.*\.sh$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-        echo "$PROJECT_ROOT/$file"
-      fi
-    done
-  } | sort | uniq
-}
-
 # Determine which files to process
 declare -a files_to_process
 errors=""
@@ -102,7 +69,7 @@ if [[ "${ONLY_TOUCHED_FILES}" == "true" ]]; then
   echo -e "${YELLOW}Processing only touched/staged files${NC}"
 
   # Get list of changed files
-  touched_files=$(get_touched_files)
+  touched_files=$(collect_touched_files "$PROJECT_ROOT" "$SHELL_FILE_REGEX")
   while IFS= read -r file; do
     [[ -n "$file" ]] && files_to_process+=("$file")
   done <<< "$touched_files"

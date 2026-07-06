@@ -10,6 +10,10 @@ ONLY_CHANGED_SINCE_SHA=${ONLY_CHANGED_SINCE_SHA:-""}
 # shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
+# Shared git file-selection + install-when-missing helpers (issue #2823).
+# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -26,29 +30,8 @@ PROJECT_ROOT="$(pwd)"
 # Check for required commands and install missing commands if allowed
 echo -e "${YELLOW}Checking for required commands...${NC}"
 
-# Check if ktfmt is installed
-if ! command_exists ktfmt; then
-    echo -e "${RED}ktfmt is not installed${NC}"
-    if [[ "${INSTALL_KTFMT_WHEN_MISSING}" == "true" ]]; then
-        echo -e "${YELLOW}Installing ktfmt...${NC}"
-        if [[ -f "$PROJECT_ROOT/scripts/ktfmt/install_ktfmt.sh" ]]; then
-            if ! bash "$PROJECT_ROOT/scripts/ktfmt/install_ktfmt.sh"; then
-                echo -e "${RED}Failed to install ktfmt${NC}"
-                exit 1
-            fi
-        else
-            echo -e "${RED}ktfmt installation script not found${NC}"
-            exit 1
-        fi
-    else
-        echo -e "${RED}ktfmt is required. Set INSTALL_KTFMT_WHEN_MISSING=true to auto-install or install manually${NC}"
-        exit 1
-    fi
-fi
-
-# Verify ktfmt is available
-if ! command_exists ktfmt; then
-    echo -e "${RED}ktfmt is still not available after installation attempt${NC}"
+# Check if ktfmt is installed (install-when-missing gate + re-verify).
+if ! ensure_tool ktfmt "$PROJECT_ROOT/scripts/ktfmt/install_ktfmt.sh" "${INSTALL_KTFMT_WHEN_MISSING}"; then
     exit 1
 fi
 
@@ -96,51 +79,8 @@ find_all_kotlin_files() {
         | sort | uniq
 }
 
-# Function to get changed files since SHA
-get_changed_files_since_sha() {
-    local sha="$1"
-    local changed_files
-
-    # Verify SHA exists
-    if ! git rev-parse --verify "$sha" >/dev/null 2>&1; then
-        echo -e "${RED}SHA '$sha' does not exist in the repository${NC}" >&2
-        return 1
-    fi
-
-    # Get list of changed files since SHA
-    if ! changed_files="$(git diff --name-only "$sha"...HEAD)"; then
-        return 1
-    fi
-
-    printf '%s\n' "$changed_files" | while read -r file; do
-        if [[ "$file" =~ ^.*\.(kt|kts)$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-            echo "$PROJECT_ROOT/$file"
-        fi
-    done | sort | uniq
-}
-
-# Function to get touched/staged files
-get_touched_files() {
-    local staged_files
-    local modified_files
-
-    if ! staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"; then
-        return 1
-    fi
-
-    if ! modified_files="$(git diff --name-only --diff-filter=ACMR)"; then
-        return 1
-    fi
-
-    {
-        printf '%s\n' "$staged_files"
-        printf '%s\n' "$modified_files"
-    } | while read -r file; do
-        if [[ "$file" =~ ^.*\.(kt|kts)$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-            echo "$PROJECT_ROOT/$file"
-        fi
-    done | sort | uniq
-}
+# Per-tool file regex for the shared collectors (issue #2823).
+KOTLIN_FILE_REGEX='^.*\.(kt|kts)$'
 
 # Determine which files to process
 declare -a files_to_process
@@ -160,10 +100,10 @@ load_files_to_process() {
 
     if ! case "$mode" in
         changed)
-            get_changed_files_since_sha "$@" > "$file_list"
+            collect_changed_since_sha "$PROJECT_ROOT" "$1" "$KOTLIN_FILE_REGEX" > "$file_list"
             ;;
         touched)
-            get_touched_files > "$file_list"
+            collect_touched_files "$PROJECT_ROOT" "$KOTLIN_FILE_REGEX" > "$file_list"
             ;;
         all)
             find_all_kotlin_files > "$file_list"
@@ -192,7 +132,7 @@ load_files_to_process() {
 
 # If a base SHA was requested but does not resolve in this checkout (base branch
 # force-pushed/rebased, or its commit was never fetched), fall back to a
-# full-tree check instead of silently passing. get_changed_files_since_sha also
+# full-tree check instead of silently passing. collect_changed_since_sha also
 # guards the SHA, and load_files_to_process checks producer failures in the main
 # shell, but this up-front branch preserves the intended CI behavior: scoped
 # mode degrades to a full-tree validation when a fetched base is unavailable.

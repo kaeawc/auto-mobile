@@ -4,6 +4,10 @@ INSTALL_SWIFTFORMAT_WHEN_MISSING=${INSTALL_SWIFTFORMAT_WHEN_MISSING:-false}
 ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-false}
 ONLY_CHANGED_SINCE_SHA=${ONLY_CHANGED_SINCE_SHA:-""}
 
+# Shared git file-selection + install-when-missing helpers (issue #2823).
+# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -17,32 +21,14 @@ command_exists() {
 
 PROJECT_ROOT="$(pwd)"
 
+# Per-tool file regex for the shared collectors (issue #2823).
+SWIFT_FILE_REGEX='^ios/.*\.swift$'
+
 # Check for required commands and install missing commands if allowed
 echo -e "${YELLOW}Checking for required commands...${NC}"
 
-# Check if swiftformat is installed
-if ! command_exists swiftformat; then
-    echo -e "${RED}swiftformat is not installed${NC}"
-    if [[ "${INSTALL_SWIFTFORMAT_WHEN_MISSING}" == "true" ]]; then
-        echo -e "${YELLOW}Installing swiftformat...${NC}"
-        if [[ -f "$PROJECT_ROOT/scripts/swiftformat/install_swiftformat.sh" ]]; then
-            if ! bash "$PROJECT_ROOT/scripts/swiftformat/install_swiftformat.sh"; then
-                echo -e "${RED}Failed to install swiftformat${NC}"
-                exit 1
-            fi
-        else
-            echo -e "${RED}swiftformat installation script not found${NC}"
-            exit 1
-        fi
-    else
-        echo -e "${RED}swiftformat is required. Set INSTALL_SWIFTFORMAT_WHEN_MISSING=true to auto-install or install manually${NC}"
-        exit 1
-    fi
-fi
-
-# Verify swiftformat is available
-if ! command_exists swiftformat; then
-    echo -e "${RED}swiftformat is still not available after installation attempt${NC}"
+# Check if swiftformat is installed (install-when-missing gate + re-verify).
+if ! ensure_tool swiftformat "$PROJECT_ROOT/scripts/swiftformat/install_swiftformat.sh" "${INSTALL_SWIFTFORMAT_WHEN_MISSING}"; then
     exit 1
 fi
 
@@ -74,43 +60,6 @@ find_all_swift_files() {
         2>/dev/null | sort | uniq
 }
 
-# Function to get changed files since SHA
-get_changed_files_since_sha() {
-    local sha="$1"
-
-    # Verify SHA exists
-    if ! git rev-parse --verify "$sha" >/dev/null 2>&1; then
-        echo -e "${RED}SHA '$sha' does not exist in the repository${NC}" >&2
-        exit 1
-    fi
-
-    # Get list of changed files since SHA
-    git diff --name-only "$sha"...HEAD | while read -r file; do
-        if [[ "$file" =~ ^ios/.*\.swift$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-            echo "$PROJECT_ROOT/$file"
-        fi
-    done | sort | uniq
-}
-
-# Function to get touched/staged files
-get_touched_files() {
-    {
-        # Get staged files
-        git diff --cached --name-only --diff-filter=ACMR | while read -r file; do
-            if [[ "$file" =~ ^ios/.*\.swift$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-                echo "$PROJECT_ROOT/$file"
-            fi
-        done
-
-        # Get modified but not staged files
-        git diff --name-only --diff-filter=ACMR | while read -r file; do
-            if [[ "$file" =~ ^ios/.*\.swift$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-                echo "$PROJECT_ROOT/$file"
-            fi
-        done
-    } | sort | uniq
-}
-
 # Determine which files to process
 declare -a files_to_process
 
@@ -118,13 +67,13 @@ if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]]; then
     echo -e "${YELLOW}Processing files changed since SHA: $ONLY_CHANGED_SINCE_SHA${NC}"
     while IFS= read -r file; do
         [[ -n "$file" ]] && files_to_process+=("$file")
-    done < <(get_changed_files_since_sha "$ONLY_CHANGED_SINCE_SHA")
+    done < <(collect_changed_since_sha "$PROJECT_ROOT" "$ONLY_CHANGED_SINCE_SHA" "$SWIFT_FILE_REGEX")
 
 elif [[ "${ONLY_TOUCHED_FILES}" == "true" ]]; then
     echo -e "${YELLOW}Processing only touched/staged files${NC}"
     while IFS= read -r file; do
         [[ -n "$file" ]] && files_to_process+=("$file")
-    done < <(get_touched_files)
+    done < <(collect_touched_files "$PROJECT_ROOT" "$SWIFT_FILE_REGEX")
 
 else
     echo -e "${YELLOW}Processing all Swift files in ios/ directory${NC}"

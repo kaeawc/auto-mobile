@@ -429,14 +429,16 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
     func getValues(suiteName: String?) -> [KeyValuePair] {
         guard let defaults = resolveDefaults(suiteName: suiteName) else { return [] }
         return defaults.dictionaryRepresentation().map { key, value in
-            KeyValuePair(key: key, value: "\(value)", type: typeOf(value))
+            let type = typeOf(value)
+            return KeyValuePair(key: key, value: Self.encode(value, as: type), type: type)
         }.sorted { $0.key < $1.key }
     }
 
     func getValue(suiteName: String?, key: String) -> KeyValuePair? {
         guard let defaults = resolveDefaults(suiteName: suiteName) else { return nil }
         guard let value = defaults.object(forKey: key) else { return nil }
-        return KeyValuePair(key: key, value: "\(value)", type: typeOf(value))
+        let type = typeOf(value)
+        return KeyValuePair(key: key, value: Self.encode(value, as: type), type: type)
     }
 
     func setValue(suiteName: String?, key: String, value: Any?, type: KeyValueType) {
@@ -460,6 +462,55 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
             defaults.removeObject(forKey: key)
         }
         #endif
+    }
+
+    /// ISO-8601 formatter with fractional seconds, so `Date` values round-trip
+    /// to sub-second precision. `.withInternetDateTime` alone truncates to whole
+    /// seconds; adding `.withFractionalSeconds` preserves the stored instant.
+    private static let iso8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    /// Encode a UserDefaults value into a recoverable string for telemetry.
+    ///
+    /// Scalars (`string`/`int`/`double`/`bool`) keep their historic Swift
+    /// interpolation. Complex types use a documented, round-trippable encoding
+    /// so a downstream consumer can decode by `valueType`:
+    /// - `date` → ISO-8601 with fractional seconds
+    /// - `data` → base64
+    /// - `array` / `dictionary` → JSON via `JSONSerialization`
+    ///
+    /// `array`/`dictionary` fall back to interpolation only when the collection
+    /// holds non-JSON-native leaves (e.g. a nested `Data`/`Date`), which
+    /// `JSONSerialization` cannot represent; the historic lossy form is strictly
+    /// better than dropping the value.
+    static func encode(_ value: Any, as type: KeyValueType) -> String {
+        switch type {
+        case .date:
+            if let date = value as? Date {
+                return iso8601.string(from: date)
+            }
+            return "\(value)"
+        case .data:
+            if let data = value as? Data {
+                return data.base64EncodedString()
+            }
+            return "\(value)"
+        case .array, .dictionary:
+            // `.sortedKeys` makes dictionary encoding deterministic: the snapshot
+            // diff compares encoded strings, and an unchanged dictionary re-read
+            // with unstable key order would otherwise surface as a phantom modify.
+            if JSONSerialization.isValidJSONObject(value),
+               let json = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+               let string = String(data: json, encoding: .utf8) {
+                return string
+            }
+            return "\(value)"
+        case .string, .int, .double, .bool, .unknown:
+            return "\(value)"
+        }
     }
 
     private func typeOf(_ value: Any) -> KeyValueType {

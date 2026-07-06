@@ -27,8 +27,11 @@ import { importFreshDatabaseModule, restoreEnv, snapshotEnv } from "./freshDatab
  * the DB in the same process after that drain (config reload, DB path switch,
  * restart-without-exit) without also cold-starting the barrier, the reopened DB
  * would silently skip every tracked best-effort write. `closeDatabase()` now
- * clears the barrier via `resetDbWriteBarrier()` so the cold-start contract is
- * fully true.
+ * clears the barrier via `resetDbWriteBarrier()` so the cold-start contract holds
+ * for consumers that resolve `getDbWriteBarrier()` at use-time; the three
+ * construction-captured consumers (`TelemetryRecorder`, `FailureAnalyticsRepository`,
+ * `SessionManager`) pin the barrier at construction and never observe the identity
+ * swap, and remain the documented reopen exception (#2912).
  *
  * These assertions are about `getDbWriteBarrier()` **identity** and
  * `isDraining()` across the `getDatabase()`/`closeDatabase()` lifecycle — they

@@ -220,7 +220,13 @@ export function getDbWriteBarrier(): DbWriteBarrier {
  * {@link beginDrain}), the swap reaches all of them: in the drain→close window a
  * late write still resolves the *previous*, still-draining barrier and
  * short-circuits (the #2792 safety margin); only after this reset does a new
- * write resolve the fresh non-draining barrier. Kept as an identity swap rather
+ * write resolve the fresh non-draining barrier. Note the short-circuit protects
+ * only writes that resolve the still-draining barrier: a use-time consumer firing
+ * *after* the reset (e.g. `AndroidCtrlProxyClient.markInstalledAppsStale()`,
+ * fire-and-forget from `onConnectionClosed()`) resolves the fresh, non-draining
+ * barrier and is NOT short-circuited — it attempts a write against the just-closed
+ * connection, protected only by the synchronous reset→`process.exit(0)` window
+ * plus its own `try/catch` (#2912 sub-item 2), not by this swap. Kept as an identity swap rather
  * than an in-place `#draining` clear because, with all consumers per-write, the
  * two are behaviorally equivalent — so in-place reset (issue option (b)) would
  * only grow the {@link DbWriteBarrier} interface with a `reset()` for no benefit

@@ -28,6 +28,11 @@ import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
 import { getMcpServerVersion } from "./utils/mcpVersion";
 import {
+  SKIP_CTRL_PROXY_DOWNLOAD_ENV,
+  SKIP_CTRL_PROXY_DOWNLOAD_FLAG,
+  shouldSkipCtrlProxyDownload,
+} from "./utils/ctrlProxyDownloadControl";
+import {
   installProcessLifecycleHandlers,
   setFatalProcessHandler,
   setProcessShutdownHandler,
@@ -157,7 +162,7 @@ function parseArgs(log: ParseLogger): {
   let a11yUseBaseline = false;
   const predictiveUi = args.includes("--predictive") || args.includes("--predictive-ui");
   const rawElementSearch = args.includes("--raw-element-search");
-  const skipCtrlProxyDownload = args.includes("--skip-ctrl-proxy-download") || args.includes("--skip-accessibility-download");
+  const skipCtrlProxyDownload = shouldSkipCtrlProxyDownload(args);
   const embeddedSdk = args.includes("--embedded-sdk");
   const networkMockable = args.includes("--network-mockable");
   const dismissKeyboardAfterInput = args.includes("--dismiss-keyboard-after-input");
@@ -464,7 +469,7 @@ async function main() {
     serverConfig.setNetworkMockableEnabled(networkMockable);
     serverConfig.setDismissKeyboardAfterInputEnabled(dismissKeyboardAfterInput);
     if (skipCtrlProxyDownload) {
-      logger.info("CtrlProxy APK download disabled (--skip-ctrl-proxy-download)");
+      logger.info(`CtrlProxy downloads disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`);
     } else {
       // Start prefetching the accessibility service APK in the background
       // This runs asynchronously and will be ready when first device connects
@@ -475,7 +480,11 @@ async function main() {
     // the build prefetch asynchronously so it can be ready for first use.
     if (process.platform === "darwin") {
       await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup();
-      IOSCtrlProxyBuilder.prefetchBuild();
+      if (skipCtrlProxyDownload) {
+        logger.info(`CtrlProxy iOS prefetch disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`);
+      } else {
+        IOSCtrlProxyBuilder.prefetchBuild();
+      }
     }
 
     const featureFlagService = FeatureFlagService.getInstance();

@@ -230,6 +230,7 @@ If the version is incompatible, it surfaces a warning/error advising you to reru
 - `AUTOMOBILE_CTRL_PROXY_APK_PATH`: Override APK source with a local file path.
 - `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM`: Skip checksum validation (development mode).
 - `AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK` (deprecated): Legacy alias for skipping checksum validation.
+- `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`: Skip Android and iOS CtrlProxy downloads/prefetches when set to `1` or `true`.
 - `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED`: Explicitly skip version check if the service is already installed.
 - `AUTOMOBILE_ACCESSIBILITY_TOGGLE_METHOD`: Not supported; settings-based toggling is the only automated path.
 

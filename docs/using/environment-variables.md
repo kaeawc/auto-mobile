@@ -70,4 +70,5 @@ here for discoverability; most are diagnostic or for advanced testing.
 | `AUTOMOBILE_DEBUG_PERF` | Enables performance/timing debug output. |
 | `AUTOMOBILE_CTRL_PROXY_APK_PATH` | Overrides the path to the Android CtrlProxy APK (for testing a locally-built runner). |
 | `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH` | Overrides the path to the iOS CtrlProxy bundle (for testing a locally-built runner). |
+| `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD` | Skips Android and iOS CtrlProxy downloads/prefetches when set to `1` or `true`. |
 | `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED` | Skips the accessibility service download when it is already installed. |

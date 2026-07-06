@@ -242,7 +242,7 @@ reload_mcp_daemon() {
     # Run daemon restart in background with timeout to prevent hanging
     local daemon_log="${PROJECT_ROOT}/scratch/daemon-restart.log"
     if [[ "${should_skip_ios_build}" == "true" ]]; then
-      AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD=true \
+      AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true \
         auto-mobile --daemon restart --debug --debug-perf > "${daemon_log}" 2>&1 &
     else
       auto-mobile --daemon restart --debug --debug-perf > "${daemon_log}" 2>&1 &

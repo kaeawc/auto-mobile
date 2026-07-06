@@ -10,6 +10,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ViewHierarchyQueryOptions } from "../../models";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
+import { cleanupIosXCTestHierarchy } from "./ios/cleanupIosHierarchy";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
@@ -151,8 +152,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * Convert XCTestHierarchy to ViewHierarchyResult format
    */
   private convertXCTestHierarchy(hierarchy: any, updatedAt?: number, ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"]): ViewHierarchyResult {
+    const cleanedHierarchy = cleanupIosXCTestHierarchy(hierarchy);
     const result = {
-      ...hierarchy,
+      ...cleanedHierarchy,
       updatedAt: updatedAt ?? hierarchy.updatedAt ?? this.timer.now()
     };
     if (ctrlProxyReconnect) {

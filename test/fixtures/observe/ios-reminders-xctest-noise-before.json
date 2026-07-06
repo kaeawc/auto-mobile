@@ -1,0 +1,244 @@
+{
+  "updatedAt": 1751840000000,
+  "screenSize": {
+    "width": 1179,
+    "height": 2556
+  },
+  "viewHierarchy": {
+    "hierarchy": {
+      "bounds": {
+        "right": 393,
+        "bottom": 852
+      },
+      "node": {
+        "class": "XCUIApplication",
+        "view-id": "root",
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 393,
+          "bottom": 852
+        },
+        "node": [
+          {
+            "class": "UINavigationBar",
+            "text": "Reminders",
+            "view-id": "nav",
+            "bounds": {
+              "left": 0,
+              "top": 59,
+              "right": 393,
+              "bottom": 104
+            },
+            "node": [
+              {
+                "class": "UILabel",
+                "text": "Reminders",
+                "bounds": {
+                  "left": 20,
+                  "top": 68,
+                  "right": 168,
+                  "bottom": 95
+                }
+              }
+            ]
+          },
+          {
+            "class": "UITableView",
+            "scrollable": "true",
+            "view-id": "list",
+            "bounds": {
+              "left": 0,
+              "top": 120,
+              "right": 393,
+              "bottom": 720
+            },
+            "node": [
+              {
+                "class": "UITableViewCell",
+                "text": "Buy milk",
+                "clickable": "true",
+                "view-id": "reminder-buy-milk",
+                "bounds": {
+                  "left": 0,
+                  "top": 156,
+                  "right": 393,
+                  "bottom": 204
+                },
+                "node": [
+                  {
+                    "class": "UILabel",
+                    "text": "Buy milk",
+                    "bounds": {
+                      "left": 56,
+                      "top": 168,
+                      "right": 142,
+                      "bottom": 192
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "UIView",
+                "bounds": {
+                  "left": 383,
+                  "top": 156,
+                  "right": 390,
+                  "bottom": 704
+                },
+                "node": [
+                  {
+                    "class": "UIView",
+                    "text": "Vertical scroll bar, 1 page",
+                    "bounds": {
+                      "left": 383,
+                      "top": 156,
+                      "right": 390,
+                      "bottom": 704
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "UIView",
+                "text": "Vertical scroll bar, 1 page",
+                "bounds": {
+                  "left": 383,
+                  "top": 156,
+                  "right": 390,
+                  "bottom": 704
+                }
+              }
+            ]
+          },
+          {
+            "class": "UITextField",
+            "text": "Title",
+            "value": "Buy milk",
+            "focused": "true",
+            "actions": [
+              "set_text",
+              "clear_text"
+            ],
+            "view-id": "title-field",
+            "bounds": {
+              "left": 16,
+              "top": 728,
+              "right": 377,
+              "bottom": 772
+            }
+          },
+          {
+            "class": "UIToolbar",
+            "bounds": {
+              "left": 0,
+              "top": 772,
+              "right": 393,
+              "bottom": 852
+            },
+            "node": [
+              {
+                "class": "UIButton",
+                "text": "New Reminder",
+                "clickable": "true",
+                "view-id": "new-reminder",
+                "bounds": {
+                  "left": 16,
+                  "top": 786,
+                  "right": 201,
+                  "bottom": 823
+                },
+                "node": [
+                  {
+                    "class": "UILabel",
+                    "text": "New Reminder",
+                    "bounds": {
+                      "left": 48,
+                      "top": 792,
+                      "right": 190,
+                      "bottom": 817
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "UIButton",
+                "text": "Details",
+                "clickable": "true",
+                "bounds": {
+                  "left": 220,
+                  "top": 786,
+                  "right": 286,
+                  "bottom": 823
+                }
+              },
+              {
+                "class": "UIButton",
+                "text": "Today",
+                "clickable": "true",
+                "bounds": {
+                  "left": 300,
+                  "top": 786,
+                  "right": 370,
+                  "bottom": 823
+                }
+              }
+            ]
+          },
+          {
+            "class": "UIKeyboard",
+            "bounds": {
+              "left": 0,
+              "top": 620,
+              "right": 393,
+              "bottom": 852
+            },
+            "node": [
+              {
+                "class": "UIButton",
+                "text": "dictation",
+                "bounds": {
+                  "left": 16,
+                  "top": 804,
+                  "right": 64,
+                  "bottom": 848
+                }
+              },
+              {
+                "class": "UIButton",
+                "text": "dictation",
+                "bounds": {
+                  "left": 16,
+                  "top": 804,
+                  "right": 64,
+                  "bottom": 848
+                }
+              },
+              {
+                "class": "UIButton",
+                "text": "Done",
+                "clickable": "true",
+                "bounds": {
+                  "left": 330,
+                  "top": 804,
+                  "right": 380,
+                  "bottom": 848
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "packageName": "com.apple.reminders",
+    "screenScale": 3,
+    "screenWidth": 393,
+    "screenHeight": 852
+  },
+  "elements": {
+    "clickable": [],
+    "scrollable": [],
+    "text": [],
+    "media": []
+  }
+}

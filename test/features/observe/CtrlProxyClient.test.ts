@@ -599,6 +599,134 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("skips the hierarchy-navigation detector for an SDK app after a navigation_event (#3068)", async function() {
+      // Pins the sdkNavigationAppIds skip MECHANISM (layer 1), independent of the
+      // NavigationGraphManager early-return (layer 2) that also protects the SDK
+      // screen name. A navigation_event registers the app in sdkNavigationAppIds;
+      // shouldUseHierarchyNavigation then returns false, so handleHierarchyUpdate
+      // must NOT feed the following hierarchy_update to the detector. Spying on the
+      // public detector's onHierarchyUpdate (rather than a private field) keeps the
+      // test off internal state while still catching a regression of the skip.
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer
+      );
+
+      // Eagerly construct the detector via the public getter so the spy is in
+      // place before any hierarchy_update arrives.
+      const detector = testClient.getHierarchyNavigationDetector();
+      const onHierarchyUpdateSpy = spyOn(detector, "onHierarchyUpdate");
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "navigation_event",
+          event: {
+            destination: "SdkHome",
+            source: "SdkStart",
+            arguments: {},
+            metadata: {},
+            timestamp: testTimer.now(),
+            sequenceNumber: 1,
+            applicationId: "com.example.sdk",
+          }
+        }));
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: testTimer.now(),
+            packageName: "com.example.sdk",
+            hierarchy: {
+              "text": "SDK Home",
+              "resource-id": "com.example.sdk:id/home",
+            }
+          }
+        }));
+
+        await resultPromise;
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
+
+        // The SDK app was registered by the navigation_event, so the following
+        // hierarchy_update must be routed AROUND the detector.
+        expect(onHierarchyUpdateSpy).not.toHaveBeenCalled();
+      } finally {
+        onHierarchyUpdateSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
+    test("feeds the hierarchy-navigation detector for a non-SDK app hierarchy_update (#3068)", async function() {
+      // Negative control for the skip above: without a navigation_event the app is
+      // NOT in sdkNavigationAppIds, so shouldUseHierarchyNavigation returns true and
+      // the detector IS invoked. This proves the assertion above discriminates the
+      // skip rather than always passing.
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer
+      );
+
+      const detector = testClient.getHierarchyNavigationDetector();
+      const onHierarchyUpdateSpy = spyOn(detector, "onHierarchyUpdate");
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: testTimer.now(),
+            packageName: "com.example.noneofthesdk",
+            hierarchy: {
+              "text": "Regular Home",
+              "resource-id": "com.example.noneofthesdk:id/home",
+            }
+          }
+        }));
+
+        await resultPromise;
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
+
+        expect(onHierarchyUpdateSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        onHierarchyUpdateSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
     test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function() {
       NavigationGraphManager.resetInstance();
       resetDbWriteBarrier();

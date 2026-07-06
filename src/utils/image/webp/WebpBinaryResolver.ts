@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { constants as fsConstants, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -73,7 +73,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private async resolveBinary(binary: WebpBinary, envVar: string): Promise<string> {
     const override = this.env[envVar]?.trim();
     if (override) {
-      if (await isExecutableFile(override)) {
+      if (await isExecutableFile(override, this.platform)) {
         return override;
       }
       throw new ActionableError(`${envVar} points to '${override}', but that ${binary} binary is not executable or does not exist.`);
@@ -111,7 +111,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       }
       for (const name of candidateBinaryNames(binary, this.platform)) {
         const candidate = path.join(entry, name);
-        if (await isExecutableFile(candidate)) {
+        if (await isExecutableFile(candidate, this.platform)) {
           return candidate;
         }
       }
@@ -125,7 +125,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     }
 
     const candidate = path.join(this.projectRoot, "vendor", "libwebp", "win32-x64", `${binary}.exe`);
-    return await isExecutableFile(candidate) ? candidate : null;
+    return await isExecutableFile(candidate, this.platform) ? candidate : null;
   }
 
   private async findOrDownloadOffPlatformBinary(binary: WebpBinary): Promise<string | null> {
@@ -135,14 +135,14 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     }
 
     const binaryPath = path.join(this.cacheDir, archive.directoryName, "bin", executableName(binary, this.platform));
-    if (await isExecutableFile(binaryPath)) {
+    if (await isExecutableFile(binaryPath, this.platform)) {
       return binaryPath;
     }
 
     await this.provisionArchiveOnce(archive);
     await fs.chmod(binaryPath, 0o755).catch(() => undefined);
 
-    if (await isExecutableFile(binaryPath)) {
+    if (await isExecutableFile(binaryPath, this.platform)) {
       return binaryPath;
     }
 
@@ -214,10 +214,17 @@ function envVarFor(binary: WebpBinary): string {
   return binary === "cwebp" ? "AUTOMOBILE_CWEBP_PATH" : "AUTOMOBILE_DWEBP_PATH";
 }
 
-async function isExecutableFile(filePath: string): Promise<boolean> {
+async function isExecutableFile(filePath: string, platform: NodeJS.Platform): Promise<boolean> {
   try {
     const stat = await fs.stat(filePath);
-    return stat.isFile();
+    if (!stat.isFile()) {
+      return false;
+    }
+    if (platform === "win32") {
+      return true;
+    }
+    await fs.access(filePath, fsConstants.X_OK);
+    return true;
   } catch {
     return false;
   }

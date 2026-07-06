@@ -23,6 +23,12 @@ async function writeExecutable(filePath: string): Promise<void> {
   await fs.chmod(filePath, 0o755);
 }
 
+async function writeNonExecutable(filePath: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, "fake");
+  await fs.chmod(filePath, 0o644);
+}
+
 class CountingFileDownloader implements FileDownloader {
   readonly downloadedUrls: string[] = [];
   delayMs = 0;
@@ -80,6 +86,47 @@ describe("WebpBinaryResolver", () => {
     });
 
     await expect(resolver.resolveCwebp()).resolves.toBe(pathCwebp);
+  });
+
+  test("skips non-executable PATH candidates on POSIX platforms", async () => {
+    const root = await makeTempDir();
+    const firstPathDir = path.join(root, "first-bin");
+    const secondPathDir = path.join(root, "second-bin");
+    const nonExecutableCwebp = path.join(firstPathDir, "cwebp");
+    const executableCwebp = path.join(secondPathDir, "cwebp");
+    await writeNonExecutable(nonExecutableCwebp);
+    await writeExecutable(executableCwebp);
+
+    const resolver = new WebpBinaryResolver({
+      projectRoot: root,
+      platform: "darwin",
+      arch: "arm64",
+      env: { PATH: `${firstPathDir}:${secondPathDir}` }
+    });
+
+    await expect(resolver.resolveCwebp()).resolves.toBe(executableCwebp);
+  });
+
+  test("rejects non-executable environment overrides on POSIX platforms", async () => {
+    const root = await makeTempDir();
+    const cwebp = path.join(root, "override", "cwebp");
+    await writeNonExecutable(cwebp);
+
+    const resolver = new WebpBinaryResolver({
+      projectRoot: root,
+      platform: "darwin",
+      arch: "arm64",
+      env: {
+        AUTOMOBILE_CWEBP_PATH: cwebp,
+        PATH: ""
+      }
+    });
+
+    const thrown = await resolver.resolveCwebp().catch(error => error);
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect(thrown.message).toContain("AUTOMOBILE_CWEBP_PATH");
+    expect(thrown.message).toContain("not executable");
   });
 
   test("falls back to the bundled Windows copy", async () => {

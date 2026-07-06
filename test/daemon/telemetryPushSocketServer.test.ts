@@ -4,6 +4,7 @@ import {
   TelemetryPushSocketServer,
   boundBackfillEventText,
 } from "../../src/daemon/telemetryPushSocketServer";
+import { boundStructuredField } from "../../src/utils/truncateBodyText";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
@@ -122,6 +123,96 @@ describe("boundBackfillEventText", () => {
     const msg = (bounded.data as { message: string }).message;
     expect(msg.length).toBe(10_239);
     expect(msg.isWellFormed()).toBe(true);
+  });
+
+  it("replaces an oversized os details object with a valid-JSON marker", () => {
+    const bigDetails = { blob: "x".repeat(50_000) };
+    const event: TelemetryEvent = {
+      category: "os",
+      timestamp: 1,
+      deviceId: null,
+      data: { category: "lifecycle", kind: "foreground", details: bigDetails },
+    };
+    const bounded = boundBackfillEventText(event);
+    const details = (bounded.data as { details: unknown }).details as {
+      _truncated: boolean; bytes: number;
+    };
+    expect(details._truncated).toBe(true);
+    expect(details.bytes).toBe(JSON.stringify(bigDetails).length);
+    // Result must round-trip through JSON.parse (dashboard contract).
+    expect(() => JSON.parse(JSON.stringify(bounded.data))).not.toThrow();
+  });
+
+  it("leaves a small os details object untouched", () => {
+    const details = { screen: "Home", extra: 1 };
+    const event: TelemetryEvent = {
+      category: "os",
+      timestamp: 1,
+      deviceId: null,
+      data: { category: "lifecycle", kind: "foreground", details },
+    };
+    const bounded = boundBackfillEventText(event);
+    expect((bounded.data as { details: unknown }).details).toBe(details);
+  });
+
+  it("replaces an oversized layout detailsJson raw string with a marker", () => {
+    const raw = JSON.stringify({ frames: "y".repeat(50_000) });
+    const event: TelemetryEvent = {
+      category: "layout",
+      timestamp: 1,
+      deviceId: null,
+      data: { composableId: "c", detailsJson: raw },
+    };
+    const bounded = boundBackfillEventText(event);
+    const dj = (bounded.data as { detailsJson: unknown }).detailsJson as {
+      _truncated: boolean; bytes: number;
+    };
+    expect(dj._truncated).toBe(true);
+    expect(dj.bytes).toBe(raw.length);
+  });
+
+  it("leaves a small layout detailsJson string untouched", () => {
+    const raw = JSON.stringify({ ok: true });
+    const event: TelemetryEvent = {
+      category: "layout",
+      timestamp: 1,
+      deviceId: null,
+      data: { composableId: "c", detailsJson: raw },
+    };
+    const bounded = boundBackfillEventText(event);
+    expect((bounded.data as { detailsJson: unknown }).detailsJson).toBe(raw);
+  });
+});
+
+describe("boundStructuredField", () => {
+  it("passes null/undefined through unchanged", () => {
+    expect(boundStructuredField(null, false)).toBe(null);
+    expect(boundStructuredField(undefined, false)).toBe(undefined);
+  });
+
+  it("keeps a within-budget stack trace array unchanged", () => {
+    const frames = [{ className: "A", line: 1 }, { className: "B", line: 2 }];
+    expect(boundStructuredField(frames, false)).toBe(frames);
+  });
+
+  it("replaces an oversized stack trace array with a valid marker", () => {
+    const frames = Array.from({ length: 5_000 }, (_, i) => ({
+      className: `com.example.Very.Long.Class.Name.${i}`,
+      method: "doSomethingExpensive",
+      line: i,
+    }));
+    const bounded = boundStructuredField(frames, false) as {
+      _truncated: boolean; bytes: number;
+    };
+    expect(bounded._truncated).toBe(true);
+    expect(bounded.bytes).toBe(JSON.stringify(frames).length);
+    expect(() => JSON.parse(JSON.stringify(bounded))).not.toThrow();
+  });
+
+  it("measures raw JSON strings by their own length when isJsonString", () => {
+    const raw = "z".repeat(20_000);
+    const bounded = boundStructuredField(raw, true) as { bytes: number };
+    expect(bounded.bytes).toBe(20_000);
   });
 });
 

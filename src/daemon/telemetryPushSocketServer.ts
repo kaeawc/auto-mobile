@@ -13,7 +13,7 @@ import { getDatabase } from "../db/database";
 import type { Database } from "../db/types";
 import type { Kysely } from "kysely";
 import { TELEMETRY_PUSH_SOCKET_CONFIG } from "./daemonFiles";
-import { truncateBodyText } from "../utils/truncateBodyText";
+import { truncateBodyText, boundStructuredField } from "../utils/truncateBodyText";
 
 /**
  * Opaque plain-text fields that the backfill fans out (limit=100) and that can
@@ -21,8 +21,9 @@ import { truncateBodyText } from "../utils/truncateBodyText";
  * (#2801). Network bodies are already capped upstream in the repository
  * `mapRow`; this bounds the remaining plain-text columns at the backfill
  * boundary so the DB read contract for those repos is unchanged. Only opaque
- * text is listed — structured JSON columns (os `details`, layout `detailsJson`,
- * failure blobs) would be corrupted by a blind slice and are tracked in #3182.
+ * text is listed here; structured-JSON columns that would be corrupted by a
+ * blind slice are bounded separately via BOUNDED_BACKFILL_STRUCTURED_FIELDS
+ * (#3182).
  */
 const BOUNDED_BACKFILL_TEXT_FIELDS: Record<string, readonly string[]> = {
   log: ["message"],
@@ -30,23 +31,51 @@ const BOUNDED_BACKFILL_TEXT_FIELDS: Record<string, readonly string[]> = {
 };
 
 /**
- * Cap known large plain-text fields on a backfilled telemetry event to
- * BODY_TRUNCATION_LIMIT, returning a shallow copy when anything changed so the
- * caller's source rows are not mutated. Surrogate-safe (see truncateBodyText).
+ * Structured-JSON fields the backfill fans out (limit=100) that can also
+ * balloon a single subscribe. Slicing these mid-value would emit invalid JSON
+ * (#3182), so they are bounded by total serialized size and replaced wholesale
+ * with a small `{ _truncated, bytes }` marker when over budget — the result
+ * stays valid JSON. `isJsonString` marks fields that arrive already serialized
+ * (layout `detailsJson`) versus parsed objects/arrays (os `details`; failure
+ * `stackTrace` is bounded at its push site since it is composed there).
+ */
+const BOUNDED_BACKFILL_STRUCTURED_FIELDS: Record<
+  string,
+  readonly { field: string; isJsonString: boolean }[]
+> = {
+  os: [{ field: "details", isJsonString: false }],
+  layout: [{ field: "detailsJson", isJsonString: true }],
+};
+
+/**
+ * Cap known large fields on a backfilled telemetry event, returning a shallow
+ * copy when anything changed so the caller's source rows are not mutated. Plain
+ * text is capped to BODY_TRUNCATION_LIMIT (surrogate-safe, see truncateBodyText);
+ * structured-JSON fields are bounded by serialized size and replaced with a
+ * valid-JSON truncation marker when over budget (see boundStructuredField).
  */
 export function boundBackfillEventText(event: TelemetryEvent): TelemetryEvent {
-  const fields = BOUNDED_BACKFILL_TEXT_FIELDS[event.category];
-  if (!fields || event.data === null || typeof event.data !== "object") {
+  const textFields = BOUNDED_BACKFILL_TEXT_FIELDS[event.category];
+  const structuredFields = BOUNDED_BACKFILL_STRUCTURED_FIELDS[event.category];
+  if ((!textFields && !structuredFields) || event.data === null || typeof event.data !== "object") {
     return event;
   }
   const data = event.data as Record<string, unknown>;
   let bounded: Record<string, unknown> | null = null;
-  for (const field of fields) {
+  for (const field of textFields ?? []) {
     const value = data[field];
     if (typeof value !== "string") {
       continue;
     }
     const capped = truncateBodyText(value);
+    if (capped !== value) {
+      bounded = bounded ?? { ...data };
+      bounded[field] = capped;
+    }
+  }
+  for (const { field, isJsonString } of structuredFields ?? []) {
+    const value = data[field];
+    const capped = boundStructuredField(value, isJsonString);
     if (capped !== value) {
       bounded = bounded ?? { ...data };
       bounded[field] = capped;
@@ -223,6 +252,11 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
             } catch { /* ignore parse errors */ }
           }
 
+          // Bound the parsed stack trace by serialized size so a multi-hundred-KB
+          // frame array does not ship raw ×100 (#3182). exceptionType is read
+          // above before bounding, so the marker never loses that summary.
+          const boundedStackTrace = boundStructuredField(stackTrace, false);
+
           events.push({
             category: failureType,
             timestamp: r.timestamp,
@@ -231,7 +265,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
             data: {
               type: r.type, occurrenceId: r.occurrenceId, groupId: r.groupId,
               severity: r.severity, title: r.title, exceptionType,
-              screen: r.screen, timestamp: r.timestamp, stackTrace,
+              screen: r.screen, timestamp: r.timestamp, stackTrace: boundedStackTrace,
             },
           });
         }

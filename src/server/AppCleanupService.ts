@@ -4,7 +4,7 @@ import { ClearAppDataIos } from "../features/action/ClearAppDataIos";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { Logger, logger } from "../utils/logger";
 
-interface AppCleanupConfig {
+export interface AppCleanupConfig {
   appId: string;
   clearAppData?: boolean;
 }

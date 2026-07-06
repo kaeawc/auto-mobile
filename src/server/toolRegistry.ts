@@ -118,7 +118,7 @@ interface ExecutionTargetResolver {
   resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext>;
 }
 
-interface AuditRunnerInput {
+export interface AuditRunnerInput {
   name: string;
   args: any;
   device: BootedDevice;
@@ -157,7 +157,7 @@ interface AfterToolCallHandler {
   handle(input: AfterToolCallInput): Promise<AfterToolCallResult>;
 }
 
-interface PlanLifecycleInput {
+export interface PlanLifecycleInput {
   name: string;
   args: any;
   baseSessionUuid: string | undefined;
@@ -427,7 +427,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   }
 }
 
-class DefaultAuditRunner implements AuditRunner {
+// Exported for focused unit coverage (issue #3208). Production wires this via
+// the ToolRegistry constructor; tests instantiate it directly to exercise the
+// memory-audit wrapping decision and foreground-package lookup without a device.
+export class DefaultAuditRunner implements AuditRunner {
   async run(input: AuditRunnerInput): Promise<any> {
     const { name, args, device, handler, progress, signal } = input;
     if (!serverConfig.isMemPerfAuditEnabled() || device.platform !== "android") {
@@ -611,7 +614,10 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
   }
 }
 
-class DefaultPlanLifecycleManager implements PlanLifecycleManager {
+// Exported for focused unit coverage (issue #3208). Production wires this via
+// the ToolRegistry constructor; tests instantiate it directly to exercise
+// executePlan cleanup and the auto-release guard without a live daemon session.
+export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
   async afterExecution(input: PlanLifecycleInput): Promise<void> {
     const { name, args, baseSessionUuid, cleanupService, device, sessionUuid, shouldResolveDevice } = input;
     if (device && name === "executePlan" && args?.cleanupAppId) {

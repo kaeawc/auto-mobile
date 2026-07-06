@@ -316,9 +316,11 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     backupFilePath: string,
     timeoutMs: number = 30000
   ): Promise<{ success: boolean; timedOut: boolean }> {
+    // Declared outside try so the catch block can clear a pending timeout.
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
     try {
       // Execute restore with timeout using timer
-      let timeoutHandle: NodeJS.Timeout | null = null;
       let timedOut = false;
 
       const result = await Promise.race([

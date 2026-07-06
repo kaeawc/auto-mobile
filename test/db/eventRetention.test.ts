@@ -7,10 +7,10 @@ import { runMigrations } from "../../src/db/migrator";
 import { logger } from "../../src/utils/logger";
 import { pruneEventTableByCount, type EventRetentionState, type EventTableName } from "../../src/db/eventRetention";
 import { recordNetworkEvent, cleanupIfNeeded as cleanupNetwork } from "../../src/db/networkEventRepository";
-import { recordLogEvent, cleanupIfNeeded as cleanupLog } from "../../src/db/logEventRepository";
-import { recordOsEvent } from "../../src/db/osEventRepository";
-import { recordNavigationEvent } from "../../src/db/navigationEventRepository";
-import { recordLayoutEvent } from "../../src/db/layoutEventRepository";
+import { recordLogEvent, recordLogEvents, cleanupIfNeeded as cleanupLog } from "../../src/db/logEventRepository";
+import { recordOsEvent, recordOsEvents } from "../../src/db/osEventRepository";
+import { recordNavigationEvent, recordNavigationEvents } from "../../src/db/navigationEventRepository";
+import { recordLayoutEvent, recordLayoutEvents } from "../../src/db/layoutEventRepository";
 import { recordStorageEvent } from "../../src/db/storageEventRepository";
 
 /**
@@ -144,6 +144,43 @@ describe("event repository retention (#2799)", () => {
     }
   });
 
+  describe("batched multi-row INSERT (#3138)", () => {
+    const BATCH_REPOS = [
+      { name: "log", table: "log_events" as EventTableName, record: recordLogEvents, make: REPOS[1].make },
+      { name: "os", table: "os_events" as EventTableName, record: recordOsEvents, make: REPOS[2].make },
+      { name: "navigation", table: "navigation_events" as EventTableName, record: recordNavigationEvents, make: REPOS[3].make },
+      { name: "layout", table: "layout_events" as EventTableName, record: recordLayoutEvents, make: REPOS[4].make },
+    ];
+
+    for (const repo of BATCH_REPOS) {
+      test(`${repo.name}: writes all rows in one INSERT statement`, async () => {
+        const { db, sqls } = await createInstrumentedTestDatabase();
+        try {
+          sqls.length = 0;
+          await repo.record([repo.make(1), repo.make(2), repo.make(3)], db);
+          const inserts = sqls.filter(s => s.toLowerCase().includes(`insert into "${repo.table}"`));
+          expect(inserts).toHaveLength(1);
+
+          const rows = await db.selectFrom(repo.table as any).select("timestamp").orderBy("timestamp", "asc").execute();
+          expect(rows.map((r: any) => Number(r.timestamp))).toEqual([1, 2, 3]);
+        } finally {
+          await db.destroy();
+        }
+      });
+
+      test(`${repo.name}: empty batch is a no-op`, async () => {
+        const { db, sqls } = await createInstrumentedTestDatabase();
+        try {
+          sqls.length = 0;
+          await repo.record([], db);
+          expect(sqls.filter(s => s.toLowerCase().includes("insert into"))).toHaveLength(0);
+        } finally {
+          await db.destroy();
+        }
+      });
+    }
+  });
+
   for (const repo of REPOS) {
     describe(repo.name, () => {
       test("amortizes: count(*) gate runs at most once per checkInterval", async () => {
@@ -203,6 +240,27 @@ describe("event repository retention (#2799)", () => {
 
           const rows = await db.selectFrom(repo.table as any).select("timestamp").execute();
           expect(rows).toHaveLength(3);
+        } finally {
+          await db.destroy();
+        }
+      });
+
+      test("batch amortization counter advances by whole batch size (#3138)", async () => {
+        const { db, sqls } = await createInstrumentedTestDatabase();
+        try {
+          const interval = 5;
+          const state = createRetentionState();
+          sqls.length = 0;
+          // A single call reporting `inserted: interval` must immediately arm the
+          // gate — a batched INSERT of N rows counts as N, not 1.
+          await pruneEventTableByCount(db, repo.table, state, 1000, interval, interval);
+          expect(countOccurrences(sqls, "count(")).toBe(1);
+
+          // And a call reporting fewer than the interval does NOT fire the gate.
+          sqls.length = 0;
+          const state2 = createRetentionState();
+          await pruneEventTableByCount(db, repo.table, state2, 1000, interval, interval - 1);
+          expect(countOccurrences(sqls, "count(")).toBe(0);
         } finally {
           await db.destroy();
         }

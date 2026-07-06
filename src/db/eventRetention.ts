@@ -23,11 +23,16 @@ export async function pruneEventTableByCount(
   table: EventTableName,
   state: EventRetentionState,
   maxRows: number = RETENTION_MAX_ROWS,
-  checkInterval: number = CLEANUP_CHECK_INTERVAL
+  checkInterval: number = CLEANUP_CHECK_INTERVAL,
+  // Number of rows just inserted. A batched multi-row INSERT (#3138) advances
+  // the amortization counter by the whole batch so retention still fires roughly
+  // every `checkInterval` rows rather than every `checkInterval` batches.
+  inserted: number = 1
 ): Promise<void> {
   // The counter is bumped synchronously on every call, so retention still fires
   // deterministically every N inserts without putting a scan on the hot path.
-  if (++state.insertsSinceCleanup < checkInterval) {
+  state.insertsSinceCleanup += inserted;
+  if (state.insertsSinceCleanup < checkInterval) {
     return;
   }
   state.insertsSinceCleanup = 0;

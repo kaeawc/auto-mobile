@@ -56,6 +56,24 @@ export function loadIosFractionalObserve(): ObserveResult {
 }
 
 /**
+ * Excerpt from a real Android uiautomator hierarchy capture of the Playground
+ * app. It intentionally preserves the Android direct-attribute runtime shape
+ * that reaches output trimming before `cleanNodeProperties` removes default
+ * values: default-false booleans, default-true `enabled`, and empty strings.
+ * Each node still includes an empty `$` bag so it remains compatible with the
+ * declared `ViewHierarchyNode` contract.
+ */
+export const ANDROID_RAW_TRIM_CANDIDATES_FIXTURE_PATH = join(
+  import.meta.dir,
+  "android-playground-raw-trim-candidates.json"
+);
+
+/** Load the raw Android trim-candidate fixture as a parsed `ObserveResult`. */
+export function loadAndroidRawTrimCandidatesObserve(): ObserveResult {
+  return JSON.parse(readFileSync(ANDROID_RAW_TRIM_CANDIDATES_FIXTURE_PATH, "utf8")) as ObserveResult;
+}
+
+/**
  * Real-device before/after observation pairs captured for the `--actions-diff-observe`
  * sign-off (issue #3051; see
  * `docs/design-docs/plat/android/actions-diff-observe-signoff.md`). Each file is a

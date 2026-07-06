@@ -156,6 +156,63 @@ describe("ObserveScreen", function() {
         resetObserveCacheStore();
       }
     });
+
+    test("should populate iOS heuristic screen identity from the view hierarchy", async function() {
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy({
+        packageName: "com.apple.reminders",
+        updatedAt: 123,
+        screenScale: 3,
+        screenWidth: 402,
+        screenHeight: 874,
+        hierarchy: {
+          node: {
+            $: { class: "XCUIApplication" },
+            node: [
+              {
+                $: { class: "UINavigationBar", text: "New Reminder" },
+                node: [
+                  { $: { class: "_UINavigationBarTitleControl", text: "New Reminder" } },
+                ],
+              },
+              {
+                $: {
+                  "class": "UITextField",
+                  "text": "Title",
+                  "resource-id": "Quick Entry Title Field",
+                  "focused": "true",
+                },
+              },
+            ],
+          },
+        },
+      } as any);
+
+      try {
+        const screen = new RealObserveScreen(
+          { deviceId: "ios-test-device", name: "iPhone", platform: "ios" },
+          new FakeAdbClientFactory(fakeAdb),
+          {
+            viewHierarchy,
+            cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+            performanceAuditor: { run: async () => undefined } as any,
+            accessibilityAuditor: { run: async () => undefined } as any,
+            accessibilityStateDetector: { run: async () => undefined } as any,
+          }
+        );
+
+        const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+        expect(result.screenIdentity?.platform).toBe("ios");
+        expect(result.screenIdentity?.source).toBe("heuristic");
+        expect(result.screenIdentity?.confidence).toBe("high");
+        expect(result.screenIdentity?.components.bundleId).toBe("com.apple.reminders");
+        expect(result.screenIdentity?.components.navigationTitle).toBe("New Reminder");
+        expect(result.screenIdentity?.components.focusedElementId).toBe("Quick Entry Title Field");
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
   });
 
   describe("Unit Tests for Focused Element Functionality", function() {

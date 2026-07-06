@@ -42,6 +42,7 @@ import {
   HierarchyPlatformValidator,
   RealHierarchyPlatformValidator
 } from "./HierarchyPlatformValidator";
+import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -527,6 +528,8 @@ export class RealObserveScreen implements ObserveScreen {
             layoutSeqSum: 0
           };
         }
+
+        result.screenIdentity = deriveIosScreenIdentity(result.viewHierarchy);
 
         perf.end();
         break;

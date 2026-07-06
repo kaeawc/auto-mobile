@@ -98,6 +98,7 @@ export function discardHierarchyDerivedData(result: ObserveResult): void {
   result.notificationPermissionDetected = undefined;
   result.predictions = undefined;
   result.activeWindow = undefined;
+  result.screenIdentity = undefined;
 
   // Screen metrics copied from the rejected hierarchy — reset to base defaults.
   result.screenSize = { width: 0, height: 0 };

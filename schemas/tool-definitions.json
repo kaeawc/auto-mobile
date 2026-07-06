@@ -3487,6 +3487,71 @@
           },
           "additionalProperties": {}
         },
+        "screenIdentity": {
+          "type": "object",
+          "properties": {
+            "platform": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "heuristic",
+                "sdk"
+              ]
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            "key": {
+              "type": "string"
+            },
+            "components": {
+              "type": "object",
+              "properties": {
+                "bundleId": {
+                  "type": "string"
+                },
+                "navigationTitle": {
+                  "type": "string"
+                },
+                "selectedTab": {
+                  "type": "string"
+                },
+                "modalClass": {
+                  "type": "string"
+                },
+                "modalTitle": {
+                  "type": "string"
+                },
+                "focusedElementId": {
+                  "type": "string"
+                },
+                "keyboardVisible": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "platform",
+            "source",
+            "confidence",
+            "key",
+            "components"
+          ],
+          "additionalProperties": {}
+        },
         "elements": {
           "type": "object",
           "properties": {
@@ -7035,6 +7100,71 @@
                   "type": "string"
                 }
               },
+              "additionalProperties": {}
+            },
+            "screenIdentity": {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "ios",
+                    "android"
+                  ]
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "heuristic",
+                    "sdk"
+                  ]
+                },
+                "confidence": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low"
+                  ]
+                },
+                "key": {
+                  "type": "string"
+                },
+                "components": {
+                  "type": "object",
+                  "properties": {
+                    "bundleId": {
+                      "type": "string"
+                    },
+                    "navigationTitle": {
+                      "type": "string"
+                    },
+                    "selectedTab": {
+                      "type": "string"
+                    },
+                    "modalClass": {
+                      "type": "string"
+                    },
+                    "modalTitle": {
+                      "type": "string"
+                    },
+                    "focusedElementId": {
+                      "type": "string"
+                    },
+                    "keyboardVisible": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "platform",
+                "source",
+                "confidence",
+                "key",
+                "components"
+              ],
               "additionalProperties": {}
             }
           },

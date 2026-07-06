@@ -233,6 +233,12 @@ export class Daemon {
     logger.info("Starting AutoMobile daemon...");
     this.setupShutdownHandlers();
 
+    // Publish the owned DB path in the PID file BEFORE opening the DB so the
+    // direct-mode DB-ownership guard can tell a same-file collision from an
+    // isolated-path launch during our own multi-second startup window, instead
+    // of failing closed on an unknown path. Issue #2871.
+    await this.writeEarlyOwnerRecord();
+
     await this.initializeDatabase();
 
     // Find an available port
@@ -638,6 +644,57 @@ export class Daemon {
   }
 
   /**
+   * Persist a PID-file record to disk (creating the directory as needed).
+   * Shared by the early owner record and the final complete write.
+   */
+  private async persistPidFileData(pidData: PidFileData): Promise<void> {
+    await mkdir(dirname(PID_FILE_PATH), { recursive: true });
+    await writeFile(PID_FILE_PATH, JSON.stringify(pidData, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+    this.pidFileWritten = true;
+  }
+
+  /**
+   * Publish this daemon's owned DB path in the PID file BEFORE the DB is opened.
+   *
+   * `Daemon.start()` opens and migrates the shared SQLite file (via
+   * {@link initializeDatabase}) seconds before the full PID file is written (that
+   * only happens after port selection and device discovery). Between those points
+   * the daemon is live and visible to `ps`, but its `dbPath` is not yet recorded —
+   * so the direct-mode DB-ownership guard (see {@link import("./directModeGuard")})
+   * would see an owner with an unknown path and fail CLOSED, transiently refusing a
+   * concurrent direct-mode launch even when it targets an ISOLATED `AUTOMOBILE_DB_PATH`.
+   *
+   * Recording the resolved `dbPath` (knowable via {@link getDatabasePath} WITHOUT
+   * opening the DB) before {@link initializeDatabase} closes that window: any daemon
+   * that has opened the DB now always exposes a resolvable `dbPath`, so a same-file
+   * launch is still refused while an isolated-path launch is allowed. The remaining
+   * TOCTOU (a daemon opening the DB immediately after the guard's check) is covered
+   * by the migration cross-process lock (#2794). Issue #2871.
+   *
+   * The record is minimal by design (pid, dbPath, socketPath, startedAt, version).
+   * Consumers that gate on daemon readiness — `status()`/`waitForReady()` — key on
+   * the socket file plus `verifyDaemonConnection`, not on the PID file's `port`, so
+   * a partial record written before the socket exists cannot make the daemon look
+   * ready early. {@link writePidFile} overwrites it with the complete record.
+   */
+  private async writeEarlyOwnerRecord(): Promise<void> {
+    const pidData: PidFileData = {
+      pid: process.pid,
+      socketPath: SOCKET_PATH,
+      port: this.port,
+      dbPath: getDatabasePath(),
+      startedAt: this.timer.now(),
+      version: DAEMON_VERSION,
+      options: this.options,
+    };
+    await this.persistPidFileData(pidData);
+    logger.info(`Early daemon owner record written to ${PID_FILE_PATH} (dbPath ${pidData.dbPath})`);
+  }
+
+  /**
    * Write PID file with daemon metadata
    */
   private async writePidFile(): Promise<void> {
@@ -655,12 +712,7 @@ export class Daemon {
       options: this.options,
     };
 
-    await mkdir(dirname(PID_FILE_PATH), { recursive: true });
-    await writeFile(PID_FILE_PATH, JSON.stringify(pidData, null, 2), {
-      encoding: "utf-8",
-      mode: 0o600,
-    });
-    this.pidFileWritten = true;
+    await this.persistPidFileData(pidData);
     logger.info(`PID file written to ${PID_FILE_PATH}`);
   }
 

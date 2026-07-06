@@ -258,6 +258,36 @@ describe("createDefaultDirectModeGuardDeps", () => {
     expect(deps.findLiveDaemonDbOwners()).toEqual([]);
   });
 
+  test("mid-startup daemon (early owner record) + isolated path → ALLOWED (#2871)", () => {
+    // #2871: Daemon.start() now publishes its resolved dbPath in the PID file
+    // (writeEarlyOwnerRecord) BEFORE opening the DB. So during the multi-second
+    // startup window the live daemon's dbPath is already resolvable, and a
+    // concurrent direct-mode launch targeting an ISOLATED path is no longer
+    // refused — it correctly resolves to a different-file (escape hatch).
+    const daemonDb = join("/home/tester/.auto-mobile", "auto-mobile.db");
+    const isolatedDb = "/home/tester/bench/isolated.db";
+    const deps = createDefaultDirectModeGuardDeps({
+      manager: { findLiveDaemonProcesses: () => [1000] },
+      // Early record: live pid 1000 already has its dbPath published pre-DB-open.
+      readPidFileData: () => pidData({ pid: 1000, dbPath: daemonDb }),
+      resolveDbPath: () => isolatedDb,
+    });
+    expect(deps.findLiveDaemonDbOwners()).toEqual([{ pid: 1000, dbPath: daemonDb }]);
+    expect(() => assertDirectModeDbOwnership(deps)).not.toThrow();
+  });
+
+  test("mid-startup daemon (early owner record) + SAME path → REFUSED (#2795 preserved)", () => {
+    // The complement: with the early record, a same-file direct-mode launch is
+    // still refused throughout startup — no regression to #2795's core guarantee.
+    const daemonDb = join("/home/tester/.auto-mobile", "auto-mobile.db");
+    const deps = createDefaultDirectModeGuardDeps({
+      manager: { findLiveDaemonProcesses: () => [1000] },
+      readPidFileData: () => pidData({ pid: 1000, dbPath: daemonDb }),
+      resolveDbPath: () => daemonDb,
+    });
+    expect(() => assertDirectModeDbOwnership(deps)).toThrow(ActionableError);
+  });
+
   test("end-to-end: default deps refuse a live default-path daemon (EC1)", () => {
     const dbPath = join("/home/tester/.auto-mobile", "auto-mobile.db");
     const deps = createDefaultDirectModeGuardDeps({

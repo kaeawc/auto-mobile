@@ -6,11 +6,13 @@ import { ActionableError } from "../../../../src/models/ActionableError";
 import type { FileDownloader } from "../../../../src/utils/FileDownloader";
 import { WebpBinaryResolver } from "../../../../src/utils/image/webp/WebpBinaryResolver";
 import { defaultTimer } from "../../../../src/utils/SystemTimer";
+import { FakeChecksumCalculator } from "../../../fakes/FakeChecksumCalculator";
 import { FakeFileDownloader } from "../../../fakes/FakeFileDownloader";
 import { FakeProcessExecutor } from "../../../fakes/FakeProcessExecutor";
 
 const tempDirs: string[] = [];
 const hostSupportsPosixExecuteBits = process.platform !== "win32";
+const MAC_ARM64_ARCHIVE_SHA256 = "bc6bf84cc70f3f8574fba797d1e4a7dea4feebe9fa4be919f202413ea2b3b8f2";
 
 async function makeTempDir(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-webp-resolver-"));
@@ -42,6 +44,12 @@ class CountingFileDownloader implements FileDownloader {
     await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.writeFile(destination, "fake archive");
   }
+}
+
+function fakeArchiveChecksumCalculator(checksum = MAC_ARM64_ARCHIVE_SHA256): FakeChecksumCalculator {
+  const checksumCalculator = new FakeChecksumCalculator();
+  checksumCalculator.checksum = checksum;
+  return checksumCalculator;
 }
 
 afterEach(async () => {
@@ -150,6 +158,7 @@ describe("WebpBinaryResolver", () => {
     const cacheDir = path.join(root, "cache");
     const downloader = new FakeFileDownloader();
     const processExecutor = new FakeProcessExecutor();
+    const checksumCalculator = fakeArchiveChecksumCalculator();
     processExecutor.setCommandHandler("tar -xzf", async () => {
       await writeExecutable(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"));
       return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
@@ -162,7 +171,8 @@ describe("WebpBinaryResolver", () => {
       arch: "arm64",
       env: { PATH: "" },
       fileDownloader: downloader,
-      processExecutor
+      processExecutor,
+      checksumCalculator
     });
 
     const resolved = await resolver.resolveCwebp();
@@ -171,7 +181,34 @@ describe("WebpBinaryResolver", () => {
     expect(downloader.downloadedUrls).toEqual([
       "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0-mac-arm64.tar.gz"
     ]);
+    expect(checksumCalculator.computedFiles).toEqual([path.join(cacheDir, "libwebp-1.6.0-mac-arm64.tar.gz")]);
     expect(processExecutor.wasCommandExecuted("tar -xzf")).toBe(true);
+  });
+
+  test("rejects downloaded archives with mismatched SHA-256 before extraction", async () => {
+    const root = await makeTempDir();
+    const cacheDir = path.join(root, "cache");
+    const downloader = new FakeFileDownloader();
+    const processExecutor = new FakeProcessExecutor();
+    const checksumCalculator = fakeArchiveChecksumCalculator("0".repeat(64));
+
+    const resolver = new WebpBinaryResolver({
+      projectRoot: root,
+      cacheDir,
+      platform: "darwin",
+      arch: "arm64",
+      env: { PATH: "" },
+      fileDownloader: downloader,
+      processExecutor,
+      checksumCalculator
+    });
+
+    const thrown = await resolver.resolveCwebp().catch(error => error);
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect(thrown.message).toContain("checksum verification failed");
+    expect(checksumCalculator.computedFiles).toEqual([path.join(cacheDir, "libwebp-1.6.0-mac-arm64.tar.gz")]);
+    expect(processExecutor.wasCommandExecuted("tar -xzf")).toBe(false);
   });
 
   test("provisions the shared off-platform archive once when resolving both binaries", async () => {
@@ -179,6 +216,7 @@ describe("WebpBinaryResolver", () => {
     const cacheDir = path.join(root, "cache");
     const downloader = new CountingFileDownloader();
     const processExecutor = new FakeProcessExecutor();
+    const checksumCalculator = fakeArchiveChecksumCalculator();
     let extractionCount = 0;
     processExecutor.setCommandHandler("tar -xzf", async () => {
       extractionCount += 1;
@@ -194,7 +232,8 @@ describe("WebpBinaryResolver", () => {
       arch: "arm64",
       env: { PATH: "" },
       fileDownloader: downloader,
-      processExecutor
+      processExecutor,
+      checksumCalculator
     });
 
     const resolved = await resolver.resolve();
@@ -204,6 +243,7 @@ describe("WebpBinaryResolver", () => {
       dwebp: path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "dwebp")
     });
     expect(downloader.downloadedUrls).toHaveLength(1);
+    expect(checksumCalculator.computedFiles).toEqual([path.join(cacheDir, "libwebp-1.6.0-mac-arm64.tar.gz")]);
     expect(extractionCount).toBe(1);
   });
 
@@ -213,6 +253,7 @@ describe("WebpBinaryResolver", () => {
     const downloader = new CountingFileDownloader();
     downloader.delayMs = 1;
     const processExecutor = new FakeProcessExecutor();
+    const checksumCalculator = fakeArchiveChecksumCalculator();
     let extractionCount = 0;
     processExecutor.setCommandHandler("tar -xzf", async () => {
       extractionCount += 1;
@@ -227,7 +268,8 @@ describe("WebpBinaryResolver", () => {
       arch: "arm64" as const,
       env: { PATH: "" },
       fileDownloader: downloader,
-      processExecutor
+      processExecutor,
+      checksumCalculator
     };
 
     const [first, second] = await Promise.all([
@@ -238,6 +280,7 @@ describe("WebpBinaryResolver", () => {
     expect(first).toBe(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"));
     expect(second).toBe(first);
     expect(downloader.downloadedUrls).toHaveLength(1);
+    expect(checksumCalculator.computedFiles).toEqual([path.join(cacheDir, "libwebp-1.6.0-mac-arm64.tar.gz")]);
     expect(extractionCount).toBe(1);
   });
 

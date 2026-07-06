@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import process from "node:process";
 import { ActionableError } from "../../../models/ActionableError";
+import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../ChecksumCalculator";
 import { DefaultFileDownloader, type FileDownloader } from "../../FileDownloader";
 import { DefaultProcessExecutor, type ProcessExecutor } from "../../ProcessExecutor";
 
@@ -16,6 +17,7 @@ type WebpBinary = "cwebp" | "dwebp";
 interface WebpArchiveInfo {
   archiveName: string;
   directoryName: string;
+  sha256: string;
 }
 
 export interface WebpBinaryResolverOptions {
@@ -26,6 +28,7 @@ export interface WebpBinaryResolverOptions {
   env?: NodeJS.ProcessEnv;
   fileDownloader?: FileDownloader;
   processExecutor?: ProcessExecutor;
+  checksumCalculator?: ChecksumCalculator;
 }
 
 export interface ResolvedWebpBinaries {
@@ -46,6 +49,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private readonly env: NodeJS.ProcessEnv;
   private readonly fileDownloader: FileDownloader;
   private readonly processExecutor: ProcessExecutor;
+  private readonly checksumCalculator: ChecksumCalculator;
 
   constructor(options: WebpBinaryResolverOptions = {}) {
     this.projectRoot = options.projectRoot ?? defaultProjectRoot();
@@ -55,6 +59,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     this.env = options.env ?? process.env;
     this.fileDownloader = options.fileDownloader ?? new DefaultFileDownloader();
     this.processExecutor = options.processExecutor ?? new DefaultProcessExecutor();
+    this.checksumCalculator = options.checksumCalculator ?? new DefaultChecksumCalculator();
   }
 
   async resolve(): Promise<ResolvedWebpBinaries> {
@@ -170,7 +175,30 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     await fs.mkdir(this.cacheDir, { recursive: true });
     const archivePath = path.join(this.cacheDir, archive.archiveName);
     await this.fileDownloader.download(`${WEBP_DOWNLOAD_BASE_URL}/${archive.archiveName}`, archivePath);
+    await this.verifyArchiveChecksum(archive, archivePath);
     await this.processExecutor.exec(`tar -xzf ${shellQuote(archivePath)} -C ${shellQuote(this.cacheDir)}`);
+  }
+
+  private async verifyArchiveChecksum(archive: WebpArchiveInfo, archivePath: string): Promise<void> {
+    let actualChecksum: string;
+    try {
+      const result = await this.checksumCalculator.computeFileSha256(archivePath);
+      actualChecksum = result.checksum.toLowerCase();
+    } catch (error) {
+      throw new ActionableError(
+        `Unable to verify downloaded libwebp archive ${archive.archiveName}: ${errorMessage(error)}. ` +
+        "Set AUTOMOBILE_CWEBP_PATH and AUTOMOBILE_DWEBP_PATH to trusted binaries, or retry the download."
+      );
+    }
+
+    const expectedChecksum = archive.sha256.toLowerCase();
+    if (actualChecksum !== expectedChecksum) {
+      throw new ActionableError(
+        `Downloaded libwebp archive checksum verification failed for ${archive.archiveName}. ` +
+        `Expected SHA-256 ${expectedChecksum}, got ${actualChecksum}. ` +
+        "Set AUTOMOBILE_CWEBP_PATH and AUTOMOBILE_DWEBP_PATH to trusted binaries, or retry the download."
+      );
+    }
   }
 }
 
@@ -188,25 +216,26 @@ function pathListDelimiter(platform: NodeJS.Platform): string {
 
 function archiveInfoFor(platform: NodeJS.Platform, arch: NodeJS.Architecture): WebpArchiveInfo | null {
   if (platform === "darwin" && arch === "arm64") {
-    return archiveInfo("mac-arm64");
+    return archiveInfo("mac-arm64", "bc6bf84cc70f3f8574fba797d1e4a7dea4feebe9fa4be919f202413ea2b3b8f2");
   }
   if (platform === "darwin" && arch === "x64") {
-    return archiveInfo("mac-x86-64");
+    return archiveInfo("mac-x86-64", "f112dd83b420ab2a4b27d46610d9827ddf4200216023281de378647ecca31c2a");
   }
   if (platform === "linux" && arch === "arm64") {
-    return archiveInfo("linux-aarch64");
+    return archiveInfo("linux-aarch64", "69f5eebe203e0f3942fe37986209a1725741be19c152950a4283b376c95ec798");
   }
   if (platform === "linux" && arch === "x64") {
-    return archiveInfo("linux-x86-64");
+    return archiveInfo("linux-x86-64", "1c5ffab71efecefa0e3c23516c3a3a1dccb45cc310ae1095c6f14ae268e38067");
   }
   return null;
 }
 
-function archiveInfo(platformToken: string): WebpArchiveInfo {
+function archiveInfo(platformToken: string, sha256: string): WebpArchiveInfo {
   const directoryName = `libwebp-${LIBWEBP_VERSION}-${platformToken}`;
   return {
     directoryName,
-    archiveName: `${directoryName}.tar.gz`
+    archiveName: `${directoryName}.tar.gz`,
+    sha256
   };
 }
 
@@ -232,6 +261,10 @@ async function isExecutableFile(filePath: string, platform: NodeJS.Platform): Pr
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function defaultProjectRoot(): string {

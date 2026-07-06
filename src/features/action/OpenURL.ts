@@ -2,6 +2,7 @@ import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, OpenURLResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { toActionableError } from "../../models/ActionableError";
 import { DeviceAppManager, DeviceUrlLauncher } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
@@ -123,7 +124,7 @@ export class OpenURL extends BaseVisualChange {
         return {
           success: false,
           url: trimmedUrl,
-          error: `Failed to launch app: ${error}`
+          error: toActionableError(error, "Failed to launch app").message
         };
       }
     }
@@ -208,7 +209,7 @@ export class OpenURL extends BaseVisualChange {
       return {
         success: false,
         url,
-        error: String(error)
+        error: toActionableError(error, `Failed to open URL on iOS simulator ${this.device.deviceId}`).message
       };
     }
   }
@@ -257,7 +258,7 @@ export class OpenURL extends BaseVisualChange {
       return {
         success: false,
         url,
-        error: String(error)
+        error: toActionableError(error, "Failed to open URL on physical iOS device").message
       };
     }
   }

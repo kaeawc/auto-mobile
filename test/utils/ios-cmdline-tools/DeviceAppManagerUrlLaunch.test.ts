@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
+import { ActionableError } from "../../../src/models/ActionableError";
 import type { ExecResult } from "../../../src/models";
 
 const execResult = (stdout = ""): ExecResult => ({
@@ -109,30 +110,41 @@ describe("DeviceAppManager.launchWithPayloadUrl", () => {
     expect(commands[0]).toContain("--payload-url 'https://x/'\\''; rm -rf /'");
   });
 
-  test("throws an explicit macOS error on a non-darwin host", async () => {
+  test("throws an explicit macOS ActionableError on a non-darwin host", async () => {
     const { inspector, commands } = makeInspector({ platform: () => "linux" });
     await expect(
       inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
     ).rejects.toThrow(/macOS/);
+    await expect(
+      inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
+    ).rejects.toBeInstanceOf(ActionableError);
     expect(commands).toHaveLength(0);
   });
 
-  test("throws an explicit host-control error under Docker host control", async () => {
+  test("throws an explicit host-control ActionableError under Docker host control", async () => {
     const { inspector, commands } = makeInspector({
       hostControl: { shouldUseHostControl: () => true, isRunningInDocker: () => true },
     });
     await expect(
       inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
     ).rejects.toThrow(/host control/i);
+    await expect(
+      inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
+    ).rejects.toBeInstanceOf(ActionableError);
     expect(commands).toHaveLength(0);
   });
 
-  test("propagates an underlying devicectl exec failure", async () => {
+  test("wraps an underlying devicectl exec failure in an ActionableError with context", async () => {
     const { inspector } = makeInspector({
       exec: async () => { throw new Error("device locked"); },
     });
-    await expect(
-      inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
-    ).rejects.toThrow(/device locked/);
+    const thrown = await inspector
+      .launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
+      .then(() => { throw new Error("expected reject"); }, (e: unknown) => e);
+    expect(thrown).toBeInstanceOf(ActionableError);
+    // Underlying diagnostic preserved …
+    expect((thrown as Error).message).toContain("device locked");
+    // … plus actionable context (which app/what failed).
+    expect((thrown as Error).message).toContain("com.apple.mobilesafari");
   });
 });

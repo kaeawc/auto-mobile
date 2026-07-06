@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.protocol.ErrorResponse
+import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
@@ -393,6 +395,20 @@ class WebSocketServer(
     sendToClient(connection, message)
   }
 
+  /**
+   * True when [request]'s normal completion echoes its `requestId` back over the wire so the owner
+   * mapping recorded for it can later be cleared. Hierarchy requests are uncorrelated on success
+   * (no requestId reaches the action layer or the `hierarchy_update` frame, and the stale-skip path
+   * emits nothing), so recording them would leak until disconnect — see [handleClientMessage]
+   * and #3190.
+   */
+  private fun recordsRequestOwner(request: ProtocolRequest): Boolean =
+    when (request) {
+      is RequestHierarchy,
+      is RequestHierarchyIfStale -> false
+      else -> true
+    }
+
   private fun forgetRequestConnectionForRawMessage(message: String) {
     forgetRequestConnection(extractRequestId(message))
   }
@@ -459,8 +475,20 @@ class WebSocketServer(
       }
 
     Log.d(TAG, "Received ${request::class.simpleName} (requestId: ${request.requestId})")
-    request.requestId?.let { requestId ->
-      synchronized(connections) { requestConnections[requestId] = connection }
+    // Only record owner mappings for request types whose normal completion carries the same
+    // requestId back over the wire (raw or typed responses that clear the entry via
+    // `forgetRequestConnection`). Hierarchy requests are the exception: the action layer never
+    // receives their requestId, the success `hierarchy_update` frame has no requestId, and the
+    // stale-skip path emits no frame at all — so a recorded owner would never be cleared until the
+    // WebSocket disconnects, recreating the long-lived-session leak and leaving a stale id
+    // available
+    // for later same-id error misrouting (#3190, follow-up to #3159). Their correlated error path
+    // (a handler throw) still targets the originating connection directly via `sendErrorResponse`,
+    // not this map, so skipping the record preserves PR #3159's targeted delivery.
+    if (recordsRequestOwner(request)) {
+      request.requestId?.let { requestId ->
+        synchronized(connections) { requestConnections[requestId] = connection }
+      }
     }
     // Dispatch inline on the WebSocket read loop (already a coroutine) rather than launching into
     // `scope`, so commands execute in wire order: a synchronous command such as

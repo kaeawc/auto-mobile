@@ -1203,4 +1203,115 @@ class WebSocketServerIntegrationTest {
       asyncServer.stop()
     }
   }
+
+  @Test
+  fun `uncorrelated hierarchy success does not leave stale request owner`() = runBlocking {
+    // Issue #3190 (follow-up to #3159): a request_hierarchy carrying a requestId completes with an
+    // uncorrelated success — the action broadcasts a `hierarchy_update` frame that has NO requestId
+    // (production: CtrlProxy.kt broadcasts via HierarchyDebouncer without threading the requestId
+    // through). Because that frame cannot clear an owner entry, the server must NOT record one in
+    // the first place. This test proves a later same-id ErrorResponse is broadcast to ALL clients
+    // rather than being misrouted only to the original requester's connection.
+    lateinit var hierarchyServer: WebSocketServer
+    hierarchyServer =
+      WebSocketServer(
+        port = 0,
+        scope = testScope,
+        messageHandler =
+          CtrlProxyMessageHandler(
+            object : NoOpCtrlProxyActions() {
+              override fun requestHierarchy(disableAllFiltering: Boolean) {
+                // Mirror production: success broadcasts a hierarchy_update with no requestId.
+                testScope.launch {
+                  hierarchyServer.broadcast("""{"type":"hierarchy_update","hierarchy":{}}""")
+                }
+              }
+            }
+          ),
+      )
+    hierarchyServer.start()
+    try {
+      val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+      val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
+      val ownerReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val sendOwnerMessage = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val ownerReceivedUpdate = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderReceivedUpdate = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val sendLateError = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+      val ownerClient = HttpClient(CIO) { install(WebSockets) }
+      val bystanderClient = HttpClient(CIO) { install(WebSockets) }
+      ownerClient.use { owner ->
+        bystanderClient.use { bystander ->
+          val ownerJob = launch {
+            owner.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = hierarchyServer.getActualPort() ?: error("Server not running"),
+              path = "/ws",
+            ) {
+              incoming.receive() // Connection message
+              ownerReady.complete(Unit)
+              sendOwnerMessage.await()
+              send(Frame.Text("""{"type":"request_hierarchy","requestId":"req-hierarchy"}"""))
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerReceivedUpdate.complete(Unit)
+              sendLateError.await()
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+            }
+          }
+
+          val bystanderJob = launch {
+            bystander.webSocket(
+              method = HttpMethod.Get,
+              host = "localhost",
+              port = hierarchyServer.getActualPort() ?: error("Server not running"),
+              path = "/ws",
+            ) {
+              incoming.receive() // Connection message
+              bystanderReady.complete(Unit)
+              sendOwnerMessage.await()
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
+              bystanderReceivedUpdate.complete(Unit)
+              sendLateError.await()
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
+            }
+          }
+
+          ownerReady.await()
+          bystanderReady.await()
+          sendOwnerMessage.complete(Unit)
+          ownerReceivedUpdate.await()
+          bystanderReceivedUpdate.await()
+          hierarchyServer.broadcast(
+            ErrorResponse(requestId = "req-hierarchy", error = "late correlated failure")
+          )
+          sendLateError.complete(Unit)
+          ownerJob.join()
+          bystanderJob.join()
+
+          assertEquals("""{"type":"hierarchy_update","hierarchy":{}}""", ownerMessages[0])
+          assertEquals("""{"type":"hierarchy_update","hierarchy":{}}""", bystanderMessages[0])
+          val ownerError = json.parseToJsonElement(ownerMessages[1]).jsonObject
+          val bystanderError = json.parseToJsonElement(bystanderMessages[1]).jsonObject
+          assertEquals("error", ownerError["type"]?.jsonPrimitive?.content)
+          assertEquals("req-hierarchy", ownerError["requestId"]?.jsonPrimitive?.content)
+          assertEquals(
+            "an uncorrelated hierarchy success must not record owner mapping, so a later same-id " +
+              "error broadcasts to all clients instead of being targeted to the original requester",
+            "error",
+            bystanderError["type"]?.jsonPrimitive?.content,
+          )
+          assertEquals("req-hierarchy", bystanderError["requestId"]?.jsonPrimitive?.content)
+        }
+      }
+    } finally {
+      hierarchyServer.stop()
+    }
+  }
 }

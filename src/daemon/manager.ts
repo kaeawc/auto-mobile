@@ -991,6 +991,7 @@ export class DaemonManager implements DaemonManagerLike {
         dbPath: pidData.dbPath,
         startedAt: pidData.startedAt,
         version: pidData.version,
+        assetVersion: pidData.assetVersion,
         entryScript: pidData.entryScript,
         buildId: pidData.buildId,
         options: pidData.options,

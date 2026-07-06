@@ -30,13 +30,14 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
   let isAvailableSpy: ReturnType<typeof spyOn>;
   let fakeTimer: FakeTimer;
 
-  function writePidFile(fields: { version?: string; startedAt?: number }): void {
+  function writePidFile(fields: { version?: string; startedAt?: number; assetVersion?: string }): void {
     const data: PidFileData = {
       pid: process.pid,
       socketPath: join(tempDir, "test.sock"),
       port: 0,
       startedAt: fields.startedAt ?? 1,
       version: fields.version ?? "",
+      assetVersion: fields.assetVersion,
     };
     writeFileSync(pidFilePath, JSON.stringify(data));
   }
@@ -144,6 +145,85 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
     }
   });
 
+  test("real PID file with mismatched explicit asset pin fails without attaching", async () => {
+    writePidFile({ version: CLIENT_VERSION, assetVersion: "0.0.18", startedAt: 1 });
+    const previousVersion = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "0.0.39";
+    const tracked = makeTracked();
+    const fakeClient = new FakeDaemonClient();
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: tracked,
+      autoStartDaemon: true,
+      timer: fakeTimer,
+      clientVersion: CLIENT_VERSION,
+    });
+    try {
+      await expect(proxy.listTools()).rejects.toThrow(/AUTOMOBILE_VERSION.*0\.0\.39.*0\.0\.18/);
+      expect(tracked.restartCalled).toBe(false);
+      expect(fakeClient.isConnected()).toBe(false);
+    } finally {
+      if (previousVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = previousVersion;
+      }
+      await proxy.close();
+    }
+  });
+
+  test("real PID file with explicit asset pin and missing daemon stamp fails without attaching", async () => {
+    writePidFile({ version: CLIENT_VERSION, startedAt: 1 });
+    const previousVersion = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "0.0.39";
+    const tracked = makeTracked();
+    const fakeClient = new FakeDaemonClient();
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: tracked,
+      autoStartDaemon: true,
+      timer: fakeTimer,
+      clientVersion: CLIENT_VERSION,
+    });
+    try {
+      await expect(proxy.listTools()).rejects.toThrow(/AUTOMOBILE_VERSION.*0\.0\.39.*unknown/);
+      expect(tracked.restartCalled).toBe(false);
+      expect(fakeClient.isConnected()).toBe(false);
+    } finally {
+      if (previousVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = previousVersion;
+      }
+      await proxy.close();
+    }
+  });
+
+  test("real PID file with matching explicit asset pin does not block reuse", async () => {
+    writePidFile({ version: CLIENT_VERSION, assetVersion: "0.0.18", startedAt: 1 });
+    const previousVersion = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    const tracked = makeTracked();
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => new FakeDaemonClient(),
+      daemonManager: tracked,
+      autoStartDaemon: true,
+      timer: fakeTimer,
+      clientVersion: CLIENT_VERSION,
+    });
+    try {
+      await proxy.listTools();
+      expect(tracked.restartCalled).toBe(false);
+    } finally {
+      if (previousVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = previousVersion;
+      }
+      await proxy.close();
+    }
+  });
+
   test("real PID file with older version inside cooldown window fails without attaching", async () => {
     writePidFile({
       version: "0.0.1",
@@ -219,6 +299,15 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
 
     expect(status.running).toBe(true);
     expect(status.sockets).toEqual(sockets);
+  });
+
+  test("real PID file exposes stamped asset version through status", async () => {
+    writePidFile({ version: CLIENT_VERSION, assetVersion: "0.0.18", startedAt: 1 });
+
+    const status = await realManager.status();
+
+    expect(status.running).toBe(true);
+    expect(status.assetVersion).toBe("0.0.18");
   });
 
   test("PID file pointing at a dead PID is treated as not running, no restart attempted", async () => {

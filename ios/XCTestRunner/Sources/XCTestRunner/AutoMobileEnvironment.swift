@@ -101,6 +101,7 @@ public enum DaemonStartupResult: Equatable {
     case launchFailed
     case readinessTimeout
     case versionSkew
+    case assetVersionSkew
 
     public var isReady: Bool { self == .ready }
 
@@ -121,6 +122,9 @@ public enum DaemonStartupResult: Equatable {
         case .versionSkew:
             return "Failed to start AutoMobile Daemon: a different-version daemon owns the socket and could "
                 + "not be reconciled with this runner."
+        case .assetVersionSkew:
+            return "Failed to start AutoMobile Daemon: the shared daemon was started with a different "
+                + "AUTOMOBILE_VERSION pin than this runner. Restart the daemon from this runner's environment."
         }
     }
 }
@@ -140,6 +144,7 @@ public enum DaemonManager {
         public let socketPath: String?
         public let startedAt: Int64?
         public let version: String?
+        public let assetVersion: String?
         public let entryScript: String?
         public let buildId: String?
     }
@@ -271,6 +276,18 @@ public enum DaemonManager {
         return version
     }
 
+    /// The daemon's recorded CtrlProxy asset version from its PID file, trimmed, or nil.
+    static func readDaemonAssetVersionFromPidFile() -> String? {
+        guard let data = FileManager.default.contents(atPath: pidFilePath),
+              let pidData = try? JSONDecoder().decode(PidFileData.self, from: data),
+              let assetVersion = pidData.assetVersion?.trimmingCharacters(in: .whitespaces),
+              !assetVersion.isEmpty
+        else {
+            return nil
+        }
+        return assetVersion
+    }
+
     /// The daemon's recorded entry-script path from its PID file, trimmed, or nil when absent.
     static func readDaemonEntryScriptFromPidFile() -> String? {
         guard let data = FileManager.default.contents(atPath: pidFilePath),
@@ -355,6 +372,42 @@ public enum DaemonManager {
         return releaseVersion(daemonVersion) != releaseVersion(client)
     }
 
+    static func resolveCallerAssetVersionPin(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        guard let pinned = environment["AUTOMOBILE_VERSION"]?.trimmingCharacters(in: .whitespaces),
+              !pinned.isEmpty,
+              pinned.lowercased() != "latest",
+              pinned.lowercased() != "unknown"
+        else {
+            return nil
+        }
+        return pinned
+    }
+
+    static func requiresAssetVersionPinFailure(
+        daemonAssetVersion: String?,
+        callerPinnedVersion: String?
+    ) -> Bool {
+        let daemon = daemonAssetVersion?.trimmingCharacters(in: .whitespaces) ?? ""
+        guard let caller = callerPinnedVersion?.trimmingCharacters(in: .whitespaces),
+              !caller.isEmpty,
+              caller.lowercased() != "latest",
+              caller.lowercased() != "unknown"
+        else {
+            return false
+        }
+        return daemon != caller
+    }
+
+    static func requiresImmediateAssetVersionPinFailure(
+        assetVersionSkew: Bool,
+        versionSkew: Bool,
+        buildSkew: Bool
+    ) -> Bool {
+        assetVersionSkew && !versionSkew && !buildSkew
+    }
+
     public static func ensureDaemonRunning(repoRoot: String? = nil, timeoutSeconds: TimeInterval = 15) -> Bool {
         return ensureDaemonRunningResult(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds).isReady
     }
@@ -376,11 +429,24 @@ public enum DaemonManager {
                 daemonVersion: readDaemonVersionFromPidFile(),
                 clientVersion: AutoMobileVersion.current
             )
-            if versionSkew || requiresRepoRootBuildSkew(
+            let buildSkew = requiresRepoRootBuildSkew(
                 daemonBuildId: readDaemonBuildIdFromPidFile(),
                 daemonEntryScript: readDaemonEntryScriptFromPidFile(),
                 repoRoot: repoRoot
+            )
+            let assetVersionSkew = requiresAssetVersionPinFailure(
+                daemonAssetVersion: readDaemonAssetVersionFromPidFile(),
+                callerPinnedVersion: resolveCallerAssetVersionPin()
+            )
+            if requiresImmediateAssetVersionPinFailure(
+                assetVersionSkew: assetVersionSkew,
+                versionSkew: versionSkew,
+                buildSkew: buildSkew
             ) {
+                PerfTimer.log("ensureDaemonRunning: daemon AUTOMOBILE_VERSION pin mismatch")
+                return .assetVersionSkew
+            }
+            if versionSkew || buildSkew || assetVersionSkew {
                 PerfTimer.log("ensureDaemonRunning: daemon version/build skew, restarting")
                 if let failure = startupFailure(for: runDaemonSubcommand("restart", repoRoot: repoRoot)) {
                     PerfTimer.log("ensureDaemonRunning: restartDaemon failed - \(failure)")
@@ -422,8 +488,17 @@ public enum DaemonManager {
             daemonBuildId: readDaemonBuildIdFromPidFile(),
             daemonEntryScript: readDaemonEntryScriptFromPidFile(),
             repoRoot: repoRoot
+        ) || requiresAssetVersionPinFailure(
+            daemonAssetVersion: readDaemonAssetVersionFromPidFile(),
+            callerPinnedVersion: resolveCallerAssetVersionPin()
         ) {
             PerfTimer.log("ensureDaemonRunning: daemon still differs from runner after launch")
+            if requiresAssetVersionPinFailure(
+                daemonAssetVersion: readDaemonAssetVersionFromPidFile(),
+                callerPinnedVersion: resolveCallerAssetVersionPin()
+            ) {
+                return .assetVersionSkew
+            }
             return .versionSkew
         }
         return .ready

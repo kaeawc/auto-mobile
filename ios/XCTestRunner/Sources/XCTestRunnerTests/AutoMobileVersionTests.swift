@@ -41,6 +41,64 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertFalse(DaemonManager.requiresVersionSkewRestart(daemonVersion: "0.0.40", clientVersion: ""))
     }
 
+    func testRequiresAssetVersionPinFailureOnlyForExplicitMismatchedPins() {
+        XCTAssertTrue(DaemonManager.requiresAssetVersionPinFailure(
+            daemonAssetVersion: "0.0.18",
+            callerPinnedVersion: "0.0.39"
+        ))
+        XCTAssertFalse(DaemonManager.requiresAssetVersionPinFailure(
+            daemonAssetVersion: "0.0.18",
+            callerPinnedVersion: "0.0.18"
+        ))
+        XCTAssertFalse(DaemonManager.requiresAssetVersionPinFailure(
+            daemonAssetVersion: "0.0.18",
+            callerPinnedVersion: nil
+        ))
+        XCTAssertFalse(DaemonManager.requiresAssetVersionPinFailure(
+            daemonAssetVersion: "0.0.18",
+            callerPinnedVersion: ""
+        ))
+        XCTAssertFalse(DaemonManager.requiresAssetVersionPinFailure(
+            daemonAssetVersion: "0.0.18",
+            callerPinnedVersion: "latest"
+        ))
+        XCTAssertTrue(DaemonManager.requiresAssetVersionPinFailure(
+            daemonAssetVersion: nil,
+            callerPinnedVersion: "0.0.18"
+        ))
+        XCTAssertTrue(DaemonManager.requiresAssetVersionPinFailure(
+            daemonAssetVersion: "",
+            callerPinnedVersion: "0.0.18"
+        ))
+        XCTAssertTrue(DaemonManager.requiresAssetVersionPinFailure(
+            daemonAssetVersion: "  ",
+            callerPinnedVersion: "0.0.18"
+        ))
+    }
+
+    func testRequiresImmediateAssetVersionPinFailurePreservesRestartableSkewPaths() {
+        XCTAssertTrue(DaemonManager.requiresImmediateAssetVersionPinFailure(
+            assetVersionSkew: true,
+            versionSkew: false,
+            buildSkew: false
+        ))
+        XCTAssertFalse(DaemonManager.requiresImmediateAssetVersionPinFailure(
+            assetVersionSkew: true,
+            versionSkew: true,
+            buildSkew: false
+        ))
+        XCTAssertFalse(DaemonManager.requiresImmediateAssetVersionPinFailure(
+            assetVersionSkew: true,
+            versionSkew: false,
+            buildSkew: true
+        ))
+        XCTAssertFalse(DaemonManager.requiresImmediateAssetVersionPinFailure(
+            assetVersionSkew: false,
+            versionSkew: false,
+            buildSkew: false
+        ))
+    }
+
     func testResolveRepoRootDaemonEntryScript() throws {
         XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(nil))
         XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(""))

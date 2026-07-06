@@ -117,7 +117,12 @@ export class SessionManager {
     deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
     // Resolve the shared barrier per write, not once at construction, so a
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
-    // seen instead of a pinned drained instance (issue #2912).
+    // seen instead of a pinned drained instance (issue #2912). Because the barrier
+    // is resolved per-write here, a same-process daemon restart (tests only) that
+    // re-creates writer singletons needs no reconstruction of this SessionManager:
+    // closeDatabase() -> resetDbWriteBarrier() cold-starts the barrier and the next
+    // track() call picks it up. There is currently no in-process reopen path in
+    // production; revisit this note if one is added (issue #3154, follow-up to #2885).
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
     // Seam for keep-awake restore (issue #2973): defaults to the real manager;
     // tests inject a fake to assert the typed slot's payload reaches `restore`.
@@ -299,6 +304,12 @@ export class SessionManager {
 
     const deviceId = session.assignedDevice;
     this.removeSession(sessionId);
+    // Intentionally NOT barrier-tracked: releaseSession is awaited by its caller
+    // (explicit release), so this write is caller-tied, not fire-and-forget. Only
+    // the lazy-expiry / cleanup-expired markReleased calls above are fire-and-forget
+    // and therefore barrier-tracked. The cleanup/disconnect timers are cleared before
+    // the shutdown drain (#2792/#2912), so awaited writes have small exposure. Do not
+    // wrap this in the DbWriteBarrier (#2885) — that would be a non-bug fix.
     await this.deviceSessionRepository.markReleased(sessionId, "released", this.timer.now(), "explicit-release");
 
     // Notify release callbacks for centralized cleanup
@@ -623,6 +634,11 @@ export class SessionManager {
     }
   }
 
+  // Intentionally NOT barrier-tracked: this write is `await`ed by its caller
+  // (createSession), so it is caller-tied, not fire-and-forget. The DbWriteBarrier
+  // (issue #2885) only drains fire-and-forget writers at graceful shutdown; an
+  // awaited write is already sequenced by its caller and must not be wrapped in
+  // `track()`. Do not "fix" this by adding a barrier — that would be a non-bug fix.
   private async persistSession(session: Session): Promise<void> {
     await this.deviceSessionRepository.upsertActiveSession({
       sessionUuid: session.sessionId,
@@ -638,6 +654,11 @@ export class SessionManager {
     });
   }
 
+  // Intentionally NOT barrier-tracked when reached via the awaited path
+  // (getOrCreateSession -> `await recordSessionActivity`): that path is caller-tied,
+  // not fire-and-forget, so the DbWriteBarrier deliberately does not cover it. The
+  // fire-and-forget callers above wrap this in `getBarrier().track(...)`; the awaited
+  // caller must not. See #2885 — do not wrap the awaited call in `track()`.
   private async recordSessionActivity(session: Session): Promise<void> {
     await this.deviceSessionRepository.recordActivity(session.sessionId, {
       lastUsedAtMs: session.lastUsedAt,

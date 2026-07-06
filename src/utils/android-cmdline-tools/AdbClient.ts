@@ -35,6 +35,11 @@ function getAdbPathCache(): TTLCache<string, string> {
   return adbPathCache;
 }
 
+export function resetAdbClientCaches(): void {
+  deviceListCache = null;
+  adbPathCache = null;
+}
+
 
 // Enhance the standard execFileAsync result to implement the ExecResult interface
 const execFileAsync: ExecFileAsync = async (
@@ -674,9 +679,14 @@ export class AdbClient implements AdbExecutor {
 
     const devices = lines
       .filter(line => line.trim().length > 0)
-      .map(line => {
+      .flatMap(line => {
         const parts = line.split("\t");
-        return { name: parts[0], platform: "android", deviceId: parts[0] } as BootedDevice;
+        const deviceId = parts[0]?.trim();
+        const state = parts[1]?.trim();
+        if (!deviceId || state !== "device") {
+          return [];
+        }
+        return [{ name: deviceId, platform: "android", deviceId } as BootedDevice];
       });
 
     // Cache the result

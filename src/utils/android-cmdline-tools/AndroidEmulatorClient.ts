@@ -70,9 +70,10 @@ interface AndroidEmulator {
    * @param avdName - The AVD name to wait for
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 120000 = 2 minutes)
    * @param childProcess - Optional child process to monitor for early exit
+   * @param targetDeviceId - Optional adb device id to require when waiting for an already-running device
    * @returns Promise that resolves with device ID when emulator is ready
    */
-  waitForEmulatorReady(avdName: string, timeoutMs?: number, childProcess?: ChildProcess | null): Promise<BootedDevice>;
+  waitForEmulatorReady(avdName: string, timeoutMs?: number, childProcess?: ChildProcess | null, targetDeviceId?: string): Promise<BootedDevice>;
 }
 
 /**
@@ -1147,7 +1148,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 120000 = 2 minutes)
    * @returns Promise that resolves with device ID when emulator is ready
    */
-  async waitForEmulatorReady(avdName: string, timeoutMs: number = 120000, childProcess?: ChildProcess | null): Promise<BootedDevice> {
+  async waitForEmulatorReady(
+    avdName: string,
+    timeoutMs: number = 120000,
+    childProcess?: ChildProcess | null,
+    targetDeviceId?: string,
+  ): Promise<BootedDevice> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
 
@@ -1225,12 +1231,22 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           if (runningEmulators.length > 0) {
             logger.debug(`Found ${runningEmulators.length} running emulators: ${runningEmulators.map(e => `${e.name}(${e.deviceId})`).join(", ")}`);
 
-            // Look for emulator by name first
-            let emulator = runningEmulators.find(emu => emu.name === avdName);
-            logger.debug(`Exact name match for '${avdName}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+            // Prefer an exact deviceId when startDevice already selected a running device.
+            let emulator = targetDeviceId
+              ? runningEmulators.find(emu => emu.deviceId === targetDeviceId)
+              : undefined;
+            if (targetDeviceId) {
+              logger.debug(`Exact deviceId match for '${targetDeviceId}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+            }
+
+            // Look for emulator by name next.
+            if (!emulator) {
+              emulator = runningEmulators.find(emu => emu.name === avdName);
+              logger.debug(`Exact name match for '${avdName}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+            }
 
             // If not found by exact name, try to find any local emulator
-            if (!emulator) {
+            if (!emulator && !targetDeviceId) {
               emulator = runningEmulators.find(emu => emu.source === "local");
               if (emulator) {
                 logger.debug(`Found local emulator with deviceId ${emulator.deviceId}, but name mismatch. Expected: ${avdName}, Found: ${emulator.name}`);
@@ -1242,23 +1258,41 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             if (emulator && emulator.deviceId) {
               logger.debug(`Target emulator found: ${emulator.name} (${emulator.deviceId}) - starting readiness checks`);
 
-              // Check if the device is online and ready
-              // Run device state and package manager checks in parallel for faster detection
-              logger.debug(`[PARALLEL] Running device state and package manager checks for ${emulator.deviceId}...`);
+              // Check if the device is online and ready.
+              // Run ADB state, package manager, and boot-complete checks in parallel for faster detection.
+              logger.debug(`[PARALLEL] Running device state, package manager, and boot-complete checks for ${emulator.deviceId}...`);
               const adb = this.adbFactory.create(emulator);
               try {
                 perf.startOperation("adbParallelChecks");
-                const [deviceStateResult, packageManagerResult] = await Promise.allSettled([
+                const [
+                  deviceStateResult,
+                  packageManagerResult,
+                  sysBootCompletedResult,
+                  bootAnimationResult,
+                ] = await Promise.allSettled([
                   adb.executeCommand("get-state"),
-                  adb.executeCommand("shell pm list packages")
+                  adb.executeCommand("shell pm list packages"),
+                  adb.executeCommand("shell getprop sys.boot_completed"),
+                  adb.executeCommand("shell getprop init.svc.bootanim"),
                 ]);
                 perf.endOperation("adbParallelChecks");
 
                 // Check device state result
-                if (deviceStateResult.status !== "fulfilled" || packageManagerResult.status !== "fulfilled") {
-                  logger.debug(`[PARALLEL] Checks not yet complete: deviceStatus: ${deviceStateResult.status}, packageManager: ${packageManagerResult.status}`);
+                if (
+                  deviceStateResult.status !== "fulfilled" ||
+                  packageManagerResult.status !== "fulfilled" ||
+                  sysBootCompletedResult.status !== "fulfilled" ||
+                  bootAnimationResult.status !== "fulfilled"
+                ) {
+                  logger.debug(
+                    `[PARALLEL] Checks not yet complete: deviceStatus: ${deviceStateResult.status}, ` +
+                    `packageManager: ${packageManagerResult.status}, ` +
+                    `sysBootCompleted: ${sysBootCompletedResult.status}, bootAnimation: ${bootAnimationResult.status}`,
+                  );
                 } else {
                   const stateOutput = deviceStateResult.value.stdout.trim();
+                  const sysBootCompleted = sysBootCompletedResult.value.stdout.trim();
+                  const bootAnimationState = bootAnimationResult.value.stdout.trim();
                   logger.debug(`[PARALLEL] Package manager command completed for ${emulator.deviceId} - output: ${packageManagerResult.value.stdout.length} bytes`);
                   if (!stateOutput.includes("device")) {
                     logger.debug(`[PARALLEL] ❌ Device state check failed for ${emulator.deviceId}: state="${stateOutput}"`);
@@ -1266,9 +1300,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
                     logger.debug(`[PARALLEL] ❌ Package manager returned no packages for ${emulator.deviceId} (${packageManagerResult.value.stdout.length} bytes output)`);
                   } else if (packageManagerResult.value.stderr || packageManagerResult.value.stderr.includes("Failure")) {
                     logger.debug(`[PARALLEL] ❌ Package manager returned failure for ${emulator.deviceId}: ${packageManagerResult.value.stderr}`);
+                  } else if (sysBootCompleted !== "1") {
+                    logger.debug(`[PARALLEL] ❌ sys.boot_completed is not set for ${emulator.deviceId}: "${sysBootCompleted}"`);
+                  } else if (bootAnimationState && bootAnimationState !== "stopped") {
+                    logger.debug(`[PARALLEL] ❌ boot animation is still active for ${emulator.deviceId}: "${bootAnimationState}"`);
                   } else {
                     logger.debug(`[PARALLEL] ✅ Device state check passed for ${emulator.deviceId}`);
                     logger.debug(`[PARALLEL] ✅ Package manager is responsive for ${emulator.deviceId} - emulator is ready!`);
+                    logger.debug(`[PARALLEL] ✅ Android boot-complete signals are ready for ${emulator.deviceId}`);
                     logger.debug(`[PARALLEL] ✅ No package manager errors detected - marking emulator as ready`);
                     foundDeviceId = emulator.deviceId;
                     return;

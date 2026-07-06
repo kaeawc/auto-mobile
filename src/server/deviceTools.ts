@@ -203,7 +203,8 @@ export function registerDeviceTools() {
         perf.endOperation("directLookup");
 
         if (found) {
-          return await buildBootedResponse(found, "booted", perf, args);
+          const readyDevice = await waitForAlreadyRunningDevice(found, deviceUtils, perf, args);
+          return await buildBootedResponse(readyDevice, "booted", perf, args);
         }
 
         // Check images — need to boot
@@ -248,7 +249,8 @@ export function registerDeviceTools() {
           if (progress) {
             await progress(100, 100, "Found matching running device");
           }
-          return await buildBootedResponse(match, "booted", perf, args);
+          const readyDevice = await waitForAlreadyRunningDevice(match, deviceUtils, perf, args);
+          return await buildBootedResponse(readyDevice, "booted", perf, args);
         }
       }
 
@@ -263,8 +265,9 @@ export function registerDeviceTools() {
           const booted = await deviceUtils.getBootedDevices(args.platform);
           const running = booted.find(d => d.name === imageMatch.name || d.deviceId === imageMatch.deviceId);
           if (running) {
+            const readyDevice = await waitForAlreadyRunningDevice(running, deviceUtils, perf, args);
             return await buildBootedResponse(
-              { ...running, osVersion: imageMatch.osVersion, formFactor: imageMatch.formFactor, screenWidth: imageMatch.screenWidth, screenHeight: imageMatch.screenHeight },
+              { ...readyDevice, osVersion: imageMatch.osVersion, formFactor: imageMatch.formFactor, screenWidth: imageMatch.screenWidth, screenHeight: imageMatch.screenHeight },
               "booted",
               perf,
               args,
@@ -292,6 +295,21 @@ export function registerDeviceTools() {
       throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
     }
   };
+
+  async function waitForAlreadyRunningDevice(
+    device: BootedDevice,
+    deviceUtils: PlatformDeviceManager,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    args: StartDeviceArgs,
+  ): Promise<BootedDevice> {
+    perf.startOperation("waitForReady");
+    const readyDevice = await deviceUtils.waitForDeviceReady(
+      { ...device, isRunning: true },
+      args.timeoutMs,
+    );
+    perf.endOperation("waitForReady");
+    return { ...device, ...readyDevice };
+  }
 
   async function bootAndRespond(
     image: DeviceInfo,

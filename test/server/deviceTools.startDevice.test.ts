@@ -99,6 +99,19 @@ describe("startDevice handler", () => {
     expect(typeof result.sessionId).toBe("string");
   });
 
+  it("waits for readiness before returning a matched booted device", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    const result = await callStartDevice({ platform: "android", timeoutMs: 42_000 });
+
+    expect(result.deviceId).toBe("emulator-5554");
+    expect(result.source).toBe("booted");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      "waitForDeviceReady:Pixel_7_API_34:42000",
+    );
+  });
+
   it("falls through to image when no booted device matches", async () => {
     fakeDeviceUtils.setBootedDevices("android", []);
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
@@ -122,6 +135,22 @@ describe("startDevice handler", () => {
 
     expect(result.deviceId).toBe("emulator-5554");
     expect(result.source).toBe("booted");
+  });
+
+  it("waits for readiness before returning a direct deviceId match", async () => {
+    fakeDeviceUtils.setBootedDevices("ios", [iosDevice]);
+
+    const result = await callStartDevice({
+      platform: "ios",
+      deviceId: "ABCD-1234",
+      timeoutMs: 30_000,
+    });
+
+    expect(result.deviceId).toBe("ABCD-1234");
+    expect(result.source).toBe("booted");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      "waitForDeviceReady:iPhone 15:30000",
+    );
   });
 
   it("boots image when deviceId matches an image name", async () => {
@@ -169,6 +198,30 @@ describe("startDevice handler", () => {
 
     expect(result.source).toBe("cold-boot");
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
+  });
+
+  it("waits for readiness before returning a matched running image", async () => {
+    const runningImage: DeviceInfo = {
+      ...androidImage,
+      deviceId: "emulator-5554",
+      isRunning: true,
+    };
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeDeviceUtils.setDeviceImages("android", [runningImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(runningImage);
+
+    const result = await callStartDevice({
+      platform: "android",
+      preferRunning: false,
+      timeoutMs: 15_000,
+    });
+
+    expect(result.deviceId).toBe("emulator-5554");
+    expect(result.source).toBe("booted");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      "waitForDeviceReady:Pixel_7_API_34:15000",
+    );
   });
 
   it("returns structured metadata with screen size", async () => {

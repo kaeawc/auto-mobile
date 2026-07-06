@@ -17,6 +17,53 @@ class TestAdbClientFactory implements AdbClientFactory {
   }
 }
 
+class DeviceScopedAdbExecutor extends FakeAdbExecutor {
+  constructor(
+    private readonly device: BootedDevice | null,
+    private readonly devices: BootedDevice[],
+    private readonly commandLog: string[],
+  ) {
+    super();
+  }
+
+  async getBootedAndroidDevices(): Promise<BootedDevice[]> {
+    return this.devices;
+  }
+
+  async executeCommand(command: string): Promise<ExecResult> {
+    this.commandLog.push(`${this.device?.deviceId ?? "global"}:${command}`);
+    if (command === "emu avd name") {
+      return createExecResult("");
+    }
+    if (command === "shell getprop ro.product.model") {
+      return createExecResult("");
+    }
+    if (command === "get-state") {
+      return createExecResult("device\n");
+    }
+    if (command === "shell pm list packages") {
+      return createExecResult("package:android\n");
+    }
+    if (command === "shell getprop sys.boot_completed") {
+      return createExecResult("1\n");
+    }
+    if (command === "shell getprop init.svc.bootanim") {
+      return createExecResult("stopped\n");
+    }
+    return createExecResult("");
+  }
+}
+
+class DeviceScopedAdbClientFactory implements AdbClientFactory {
+  readonly commandLog: string[] = [];
+
+  constructor(private readonly devices: BootedDevice[]) {}
+
+  create(device?: BootedDevice | null): AdbExecutor {
+    return new DeviceScopedAdbExecutor(device ?? null, this.devices, this.commandLog);
+  }
+}
+
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
   stderr,
@@ -285,5 +332,56 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     } catch (error: any) {
       expect(error.message).toContain("failed to become ready within 100ms");
     }
+  });
+
+  test("waits for Android boot-complete signals before reporting readiness", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setDevices([{
+      name: "Pixel_9_Pro",
+      platform: "android",
+      deviceId: "emulator-5554",
+      source: "local",
+    }]);
+    fakeAdb.setCommandResponse("get-state", createExecResult("device\n"));
+    fakeAdb.setCommandResponse("shell pm list packages", createExecResult("package:android\n"));
+    fakeAdb.setCommandResponseSequence("shell getprop sys.boot_completed", [
+      createExecResult("0\n"),
+      createExecResult("1\n"),
+    ]);
+    fakeAdb.setCommandResponse("shell getprop init.svc.bootanim", createExecResult("stopped\n"));
+
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
+
+    const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000);
+
+    expect(result.deviceId).toBe("emulator-5554");
+    expect(fakeAdb.wasCommandExecuted("shell getprop sys.boot_completed")).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("shell getprop init.svc.bootanim")).toBe(true);
+    expect(
+      fakeAdb.getExecutedCommands()
+        .filter(command => command.includes("shell getprop sys.boot_completed")),
+    ).toHaveLength(2);
+  });
+
+  test("targets the selected emulator deviceId during already-running readiness waits", async () => {
+    fakeTimer.enableAutoAdvance();
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554" },
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const result = await client.waitForEmulatorReady(
+      "Pixel_9_Pro",
+      5_000,
+      null,
+      "emulator-5556",
+    );
+
+    expect(result.deviceId).toBe("emulator-5556");
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5556:get-state"))).toBe(true);
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5554:get-state"))).toBe(false);
   });
 });

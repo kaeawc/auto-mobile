@@ -66,6 +66,28 @@ function stripComments(source: string): string {
 }
 
 /**
+ * Assert the carved-out golden-table region contains no string-literal delimiters (Item 2, issue
+ * #3021). Today no string literal exists inside either platform's `let vectors` / `listOf(...)`
+ * region — assertion-message strings live OUTSIDE it. A future edit that placed a digit-bearing
+ * string literal inside the region (e.g. an inline label like `"row 1"`) could corrupt number
+ * extraction. The `NUMBERS_PER_ROW` alignment check usually fails closed, but a label with the
+ * "right" number of digits could slip through and silently mis-parse. Rather than attempt correct
+ * language-aware string stripping (Swift interpolation `\( )`, Kotlin `$`, escapes — brittle to get
+ * right for two languages), fail LOUDLY with a targeted message so the ambiguity is fixed at the
+ * source. Comments have already been stripped, so a `"` here is genuinely inside the literal.
+ */
+export function assertNoStringLiterals(region: string, label: string): void {
+  const quote = region.match(/["']/);
+  if (quote) {
+    throw new Error(
+      `${label}: golden-table region contains a string-literal delimiter (${quote[0]}) at index ` +
+        `${quote.index}. The parser extracts numbers positionally and cannot safely handle string ` +
+        `literals inside the table; move any label/message strings outside the 'vectors' literal.`,
+    );
+  }
+}
+
+/**
  * Return the balanced substring that starts at the first `open` delimiter at or after `fromIndex`
  * and ends at its matching `close` delimiter (inclusive). Used to carve out just the golden table
  * literal from a larger test function body.
@@ -158,6 +180,9 @@ export function parseGoldenTable(
     open,
     close,
   );
+  // Item 2 (#3021): fail loudly if a string literal ever appears inside the table region so a
+  // digit-bearing label can never silently corrupt positional number extraction.
+  assertNoStringLiterals(region, filePath);
   const numbers = extractNumbers(region);
   return rowsFromNumbers(numbers, filePath);
 }
@@ -180,6 +205,43 @@ export function loadCanonicalVectors(): GoldenVector[] {
     throw new Error(`${CANONICAL_JSON_PATH}: missing non-empty "vectors" array`);
   }
   return parsed.vectors;
+}
+
+/**
+ * Reference TypeScript port of the pinch endpoint geometry (Item 1, issue #3021). Mirrors, opcode
+ * for opcode, `PinchGeometry.kt` `computePinchPoints` (Android) and `computePinchPoints` (iOS): the
+ * two fingers sit on a diameter through the center — one at `angle`, the other at `angle + PI`. The
+ * start axis is horizontal (angle 0); the end axis is rotated by `rotationDegrees`. Radius is half
+ * the finger distance.
+ *
+ * This turns the canonical JSON from a THIRD hand-maintained copy into a genuinely *derived* source:
+ * a test recomputes every row's `expected` endpoints from its inputs and asserts they match, so a
+ * bad hand-edit to the JSON's expected values is caught at the root (not just cross-checked against
+ * two equally-hand-maintained platform tables). The platform inline tables remain verified-against
+ * the JSON (they keep their hand-authored design-rationale comments; regenerating them in place
+ * would be lossy — see issue #3021 Item 1 discussion).
+ */
+export function referencePinchEndpoints(
+  centerX: number,
+  centerY: number,
+  distanceStart: number,
+  distanceEnd: number,
+  rotationDegrees: number,
+): Array<[number, number]> {
+  const startRadius = distanceStart / 2;
+  const endRadius = distanceEnd / 2;
+  const startAngle = 0;
+  const endAngle = (rotationDegrees * Math.PI) / 180;
+  const pointAt = (radius: number, angleRad: number): [number, number] => [
+    centerX + radius * Math.cos(angleRad),
+    centerY + radius * Math.sin(angleRad),
+  ];
+  return [
+    pointAt(startRadius, startAngle),
+    pointAt(startRadius, Math.PI + startAngle),
+    pointAt(endRadius, endAngle),
+    pointAt(endRadius, Math.PI + endAngle),
+  ];
 }
 
 /** Deterministic order-independent point sort — mirrors the Swift/Kotlin `sortedPoints` helpers so

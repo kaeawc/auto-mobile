@@ -15,11 +15,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import {
+  assertNoStringLiterals,
   diffGoldenTables,
   KOTLIN_TEST_PATH,
   loadCanonicalVectors,
   parseKotlinGoldenTable,
   parseSwiftGoldenTable,
+  referencePinchEndpoints,
   SWIFT_TEST_PATH,
   type GoldenVector,
 } from "./pinchGoldenVectors";
@@ -102,6 +104,65 @@ describe("pinch golden vector parity (issue #2997)", function() {
     expect(swiftSource).toContain("XCTAssertEqual");
     expect(kotlinSource).toContain("computePinchPoints(");
     expect(kotlinSource).toContain("assertEquals");
+  });
+
+  test("Item 1 (#3021): every canonical row's expected endpoints are DERIVABLE from its inputs", function() {
+    // Makes the JSON a derived source, not a third hand-copy: recompute each row's four endpoints
+    // from (center, distances, rotation) via the reference port of the platform math and assert they
+    // match the committed `expected` set (order-independent, same tolerance as the runtime loops).
+    for (let i = 0; i < canonical.length; i++) {
+      const row = canonical[i];
+      const computed = referencePinchEndpoints(
+        row.centerX,
+        row.centerY,
+        row.distanceStart,
+        row.distanceEnd,
+        row.rotationDegrees,
+      );
+      const diffs = diffGoldenTables(
+        [{ ...row, expected: computed }],
+        [row],
+      );
+      expect(diffs).toEqual([]);
+    }
+  });
+
+  test("Item 1 (#3021): the reference math catches a corrupted expected value in the source", function() {
+    // Negative control: if a row's expected endpoint were mis-typed, the derivation check must trip.
+    const row = canonical[0];
+    const computed = referencePinchEndpoints(
+      row.centerX,
+      row.centerY,
+      row.distanceStart,
+      row.distanceEnd,
+      row.rotationDegrees,
+    );
+    const corrupted: GoldenVector = {
+      ...row,
+      expected: [
+        [row.expected[0][0] + 7, row.expected[0][1]],
+        ...row.expected.slice(1),
+      ] as GoldenVector["expected"],
+    };
+    expect(diffGoldenTables([{ ...row, expected: computed }], [corrupted]).length)
+      .toBeGreaterThan(0);
+  });
+
+  test("Item 2 (#3021): current platform golden regions contain no string literals", function() {
+    // The live guard: parsing already runs assertNoStringLiterals; assert it passes for today's
+    // tables (both parsed above without throwing) and that the checker is wired.
+    expect(swift.length).toBeGreaterThan(0);
+    expect(kotlin.length).toBeGreaterThan(0);
+  });
+
+  test("Item 2 (#3021): a string literal inside the table region fails loudly", function() {
+    // A digit-bearing inline label like `"row 1"` inside the literal would corrupt positional number
+    // extraction; the checker must throw a targeted error rather than silently mis-parse.
+    expect(() => assertNoStringLiterals('60, 200, "row 1", 140', "fake.kt")).toThrow(
+      /string-literal delimiter/,
+    );
+    // A clean numeric region passes.
+    expect(() => assertNoStringLiterals("60, 200, 140, 200", "fake.kt")).not.toThrow();
   });
 
   test("the guard ignores finger-label ordering differences (no false drift)", function() {

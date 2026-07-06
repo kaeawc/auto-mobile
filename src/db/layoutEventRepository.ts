@@ -24,29 +24,46 @@ function getDb(db?: Kysely<Database>): Kysely<Database> {
   return db ?? (getDatabase() as unknown as Kysely<Database>);
 }
 
+function toLayoutRow(input: RecordLayoutEventInput) {
+  return {
+    device_id: input.deviceId,
+    timestamp: input.timestamp,
+    application_id: input.applicationId,
+    session_id: input.sessionId,
+    sub_type: input.subType,
+    composable_name: input.composableName,
+    composable_id: input.composableId,
+    recomposition_count: input.recompositionCount,
+    duration_ms: input.durationMs,
+    likely_cause: input.likelyCause,
+    details_json: input.detailsJson,
+    screen_name: input.screenName ?? null,
+  };
+}
+
 export async function recordLayoutEvent(
   input: RecordLayoutEventInput,
   db?: Kysely<Database>
 ): Promise<void> {
-  await getDb(db)
-    .insertInto("layout_events")
-    .values({
-      device_id: input.deviceId,
-      timestamp: input.timestamp,
-      application_id: input.applicationId,
-      session_id: input.sessionId,
-      sub_type: input.subType,
-      composable_name: input.composableName,
-      composable_id: input.composableId,
-      recomposition_count: input.recompositionCount,
-      duration_ms: input.durationMs,
-      likely_cause: input.likelyCause,
-      details_json: input.detailsJson,
-      screen_name: input.screenName ?? null,
-    })
-    .execute();
+  await getDb(db).insertInto("layout_events").values(toLayoutRow(input)).execute();
 
   cleanupIfNeeded(db);
+}
+
+/**
+ * Batched multi-row INSERT for coalesced layout telemetry (issue #3138).
+ * One auto-commit for the whole batch, then a single retention pass.
+ */
+export async function recordLayoutEvents(
+  inputs: RecordLayoutEventInput[],
+  db?: Kysely<Database>
+): Promise<void> {
+  if (inputs.length === 0) {
+    return;
+  }
+  await getDb(db).insertInto("layout_events").values(inputs.map(toLayoutRow)).execute();
+
+  cleanupIfNeeded(db, undefined, undefined, inputs.length);
 }
 
 export async function getLayoutEvents(
@@ -84,7 +101,8 @@ export async function getLayoutEvents(
 export async function cleanupIfNeeded(
   db?: Kysely<Database>,
   maxRows?: number,
-  checkInterval?: number
+  checkInterval?: number,
+  inserted?: number
 ): Promise<void> {
-  await pruneEventTableByCount(db, "layout_events", retentionState, maxRows, checkInterval);
+  await pruneEventTableByCount(db, "layout_events", retentionState, maxRows, checkInterval, inserted);
 }

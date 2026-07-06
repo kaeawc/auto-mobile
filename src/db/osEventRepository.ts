@@ -19,24 +19,41 @@ function getDb(db?: Kysely<Database>): Kysely<Database> {
   return db ?? (getDatabase() as unknown as Kysely<Database>);
 }
 
+function toOsRow(input: RecordOsEventInput) {
+  return {
+    device_id: input.deviceId,
+    timestamp: input.timestamp,
+    application_id: input.applicationId,
+    session_id: input.sessionId,
+    category: input.category,
+    kind: input.kind,
+    details_json: input.details ? JSON.stringify(input.details) : null,
+  };
+}
+
 export async function recordOsEvent(
   input: RecordOsEventInput,
   db?: Kysely<Database>
 ): Promise<void> {
-  await getDb(db)
-    .insertInto("os_events")
-    .values({
-      device_id: input.deviceId,
-      timestamp: input.timestamp,
-      application_id: input.applicationId,
-      session_id: input.sessionId,
-      category: input.category,
-      kind: input.kind,
-      details_json: input.details ? JSON.stringify(input.details) : null,
-    })
-    .execute();
+  await getDb(db).insertInto("os_events").values(toOsRow(input)).execute();
 
   cleanupIfNeeded(db);
+}
+
+/**
+ * Batched multi-row INSERT for coalesced OS telemetry (issue #3138).
+ * One auto-commit for the whole batch, then a single retention pass.
+ */
+export async function recordOsEvents(
+  inputs: RecordOsEventInput[],
+  db?: Kysely<Database>
+): Promise<void> {
+  if (inputs.length === 0) {
+    return;
+  }
+  await getDb(db).insertInto("os_events").values(inputs.map(toOsRow)).execute();
+
+  cleanupIfNeeded(db, undefined, undefined, inputs.length);
 }
 
 export async function getOsEvents(
@@ -72,7 +89,8 @@ export async function getOsEvents(
 export async function cleanupIfNeeded(
   db?: Kysely<Database>,
   maxRows?: number,
-  checkInterval?: number
+  checkInterval?: number,
+  inserted?: number
 ): Promise<void> {
-  await pruneEventTableByCount(db, "os_events", retentionState, maxRows, checkInterval);
+  await pruneEventTableByCount(db, "os_events", retentionState, maxRows, checkInterval, inserted);
 }

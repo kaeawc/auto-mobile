@@ -20,25 +20,42 @@ function getDb(db?: Kysely<Database>): Kysely<Database> {
   return db ?? (getDatabase() as unknown as Kysely<Database>);
 }
 
+function toNavigationRow(input: RecordNavigationEventInput) {
+  return {
+    device_id: input.deviceId,
+    timestamp: input.timestamp,
+    application_id: input.applicationId,
+    session_id: input.sessionId,
+    destination: input.destination,
+    source: input.source,
+    arguments_json: input.arguments ? JSON.stringify(input.arguments) : null,
+    metadata_json: input.metadata ? JSON.stringify(input.metadata) : null,
+  };
+}
+
 export async function recordNavigationEvent(
   input: RecordNavigationEventInput,
   db?: Kysely<Database>
 ): Promise<void> {
-  await getDb(db)
-    .insertInto("navigation_events")
-    .values({
-      device_id: input.deviceId,
-      timestamp: input.timestamp,
-      application_id: input.applicationId,
-      session_id: input.sessionId,
-      destination: input.destination,
-      source: input.source,
-      arguments_json: input.arguments ? JSON.stringify(input.arguments) : null,
-      metadata_json: input.metadata ? JSON.stringify(input.metadata) : null,
-    })
-    .execute();
+  await getDb(db).insertInto("navigation_events").values(toNavigationRow(input)).execute();
 
   cleanupIfNeeded(db);
+}
+
+/**
+ * Batched multi-row INSERT for coalesced navigation telemetry (issue #3138).
+ * One auto-commit for the whole batch, then a single retention pass.
+ */
+export async function recordNavigationEvents(
+  inputs: RecordNavigationEventInput[],
+  db?: Kysely<Database>
+): Promise<void> {
+  if (inputs.length === 0) {
+    return;
+  }
+  await getDb(db).insertInto("navigation_events").values(inputs.map(toNavigationRow)).execute();
+
+  cleanupIfNeeded(db, undefined, undefined, inputs.length);
 }
 
 export async function getNavigationEvents(
@@ -72,7 +89,8 @@ export async function getNavigationEvents(
 export async function cleanupIfNeeded(
   db?: Kysely<Database>,
   maxRows?: number,
-  checkInterval?: number
+  checkInterval?: number,
+  inserted?: number
 ): Promise<void> {
-  await pruneEventTableByCount(db, "navigation_events", retentionState, maxRows, checkInterval);
+  await pruneEventTableByCount(db, "navigation_events", retentionState, maxRows, checkInterval, inserted);
 }

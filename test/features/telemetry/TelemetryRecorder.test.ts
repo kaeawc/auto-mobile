@@ -14,6 +14,10 @@ import type { RecordStorageEventInput } from "../../../src/db/storageEventReposi
 import type { RecordLayoutEventInput } from "../../../src/db/layoutEventRepository";
 import { InMemoryDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import {
+  TelemetryEventBuffer,
+  type BatchTelemetryRepository,
+} from "../../../src/features/telemetry/TelemetryEventBuffer";
 
 class FakeRepository implements TelemetryRepository {
   networkEvents: RecordNetworkEventInput[] = [];
@@ -541,6 +545,67 @@ describe("TelemetryRecorder", () => {
     const data = pushTarget.pushedEvents[0].data as any;
     expect(data.requestHeaders).toEqual({ "Content-Type": "application/json" });
     expect(data.responseBody).toBe('{"id":1}');
+  });
+
+  describe("batched ingestion (issue #3138)", () => {
+    class FakeBatchRepo implements BatchTelemetryRepository {
+      logBatches: RecordLogEventInput[][] = [];
+      osBatches: RecordOsEventInput[][] = [];
+      navBatches: RecordNavigationEventInput[][] = [];
+      layoutBatches: RecordLayoutEventInput[][] = [];
+      async recordLogEvents(i: RecordLogEventInput[]): Promise<void> { this.logBatches.push(i); }
+      async recordOsEvents(i: RecordOsEventInput[]): Promise<void> { this.osBatches.push(i); }
+      async recordNavigationEvents(i: RecordNavigationEventInput[]): Promise<void> { this.navBatches.push(i); }
+      async recordLayoutEvents(i: RecordLayoutEventInput[]): Promise<void> { this.layoutBatches.push(i); }
+    }
+
+    it("routes log/os/nav/layout through the buffer and coalesces into one batch per kind", async () => {
+      const batchRepo = new FakeBatchRepo();
+      const timer = new FakeTimer();
+      const buffer = new TelemetryEventBuffer(batchRepo, timer, { maxBufferedRows: 1000 });
+      const bufferedRecorder = new TelemetryRecorder(repo, () => pushTarget, undefined, buffer);
+      bufferedRecorder.setContext("d1", "s1");
+
+      await bufferedRecorder.recordLogEvent({ timestamp: 1, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f" });
+      await bufferedRecorder.recordLogEvent({ timestamp: 2, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f" });
+      await bufferedRecorder.recordOsEvent({ timestamp: 3, applicationId: null, category: "c", kind: "k", details: null });
+
+      // Not written per-row, and the non-batch repo path is bypassed entirely.
+      expect(batchRepo.logBatches).toHaveLength(0);
+      expect(repo.logEvents).toHaveLength(0);
+      // But still pushed to the socket immediately (live dashboard unaffected).
+      expect(pushTarget.pushedEvents.map(e => e.category)).toEqual(["log", "log", "os"]);
+
+      await bufferedRecorder.flushBuffer();
+
+      expect(batchRepo.logBatches).toHaveLength(1);
+      expect(batchRepo.logBatches[0]).toHaveLength(2);
+      expect(batchRepo.logBatches[0][0].deviceId).toBe("d1");
+      expect(batchRepo.osBatches[0]).toHaveLength(1);
+    });
+
+    it("leaves network and storage on the per-row path even when buffering", async () => {
+      const batchRepo = new FakeBatchRepo();
+      const buffer = new TelemetryEventBuffer(batchRepo, new FakeTimer(), { maxBufferedRows: 1000 });
+      const bufferedRecorder = new TelemetryRecorder(repo, () => pushTarget, undefined, buffer);
+
+      await bufferedRecorder.recordNetworkEvent({
+        timestamp: 1, applicationId: null, url: "u", method: "GET",
+        statusCode: 200, durationMs: 0, requestBodySize: 0, responseBodySize: 0,
+        protocol: null, host: null, path: null, error: null,
+      });
+      await bufferedRecorder.recordStorageEvent({
+        timestamp: 2, applicationId: null, fileName: "p.xml", key: "k", value: "v", valueType: null, changeType: "put",
+      });
+
+      // Written synchronously through the per-row repository, not the buffer.
+      expect(repo.networkEvents).toHaveLength(1);
+      expect(repo.storageEvents).toHaveLength(1);
+    });
+
+    it("flushBuffer is a no-op when batching is disabled", async () => {
+      await expect(recorder.flushBuffer()).resolves.toBeUndefined();
+    });
   });
 
   describe("shutdown draining (issue #2792)", () => {

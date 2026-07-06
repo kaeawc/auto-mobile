@@ -20,25 +20,43 @@ function getDb(db?: Kysely<Database>): Kysely<Database> {
   return db ?? (getDatabase() as unknown as Kysely<Database>);
 }
 
+function toLogRow(input: RecordLogEventInput) {
+  return {
+    device_id: input.deviceId,
+    timestamp: input.timestamp,
+    application_id: input.applicationId,
+    session_id: input.sessionId,
+    level: input.level,
+    tag: input.tag,
+    message: input.message,
+    filter_name: input.filterName,
+  };
+}
+
 export async function recordLogEvent(
   input: RecordLogEventInput,
   db?: Kysely<Database>
 ): Promise<void> {
-  await getDb(db)
-    .insertInto("log_events")
-    .values({
-      device_id: input.deviceId,
-      timestamp: input.timestamp,
-      application_id: input.applicationId,
-      session_id: input.sessionId,
-      level: input.level,
-      tag: input.tag,
-      message: input.message,
-      filter_name: input.filterName,
-    })
-    .execute();
+  await getDb(db).insertInto("log_events").values(toLogRow(input)).execute();
 
   cleanupIfNeeded(db);
+}
+
+/**
+ * Batched multi-row INSERT for coalesced log telemetry (issue #3138).
+ * Emits a single `INSERT ... VALUES (...),(...)` — one auto-commit for the whole
+ * batch instead of one per row — then runs retention once for the batch.
+ */
+export async function recordLogEvents(
+  inputs: RecordLogEventInput[],
+  db?: Kysely<Database>
+): Promise<void> {
+  if (inputs.length === 0) {
+    return;
+  }
+  await getDb(db).insertInto("log_events").values(inputs.map(toLogRow)).execute();
+
+  cleanupIfNeeded(db, undefined, undefined, inputs.length);
 }
 
 export async function getLogEvents(
@@ -75,7 +93,8 @@ export async function getLogEvents(
 export async function cleanupIfNeeded(
   db?: Kysely<Database>,
   maxRows?: number,
-  checkInterval?: number
+  checkInterval?: number,
+  inserted?: number
 ): Promise<void> {
-  await pruneEventTableByCount(db, "log_events", retentionState, maxRows, checkInterval);
+  await pruneEventTableByCount(db, "log_events", retentionState, maxRows, checkInterval, inserted);
 }

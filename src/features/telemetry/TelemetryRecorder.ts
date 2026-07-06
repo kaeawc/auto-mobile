@@ -8,6 +8,7 @@ import { recordStorageEvent, type RecordStorageEventInput } from "../../db/stora
 import { recordLayoutEvent, type RecordLayoutEventInput } from "../../db/layoutEventRepository";
 import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../../db/dbWriteBarrier";
+import type { TelemetryEventBuffer } from "./TelemetryEventBuffer";
 
 export type TelemetryCategory =
   | "network" | "log" | "os" | "navigation"
@@ -51,6 +52,12 @@ export class TelemetryRecorder {
   private readonly repository: TelemetryRepository;
   private readonly getPushTarget: () => TelemetryPushTarget | null;
   private readonly getBarrier: () => DbWriteBarrier;
+  // Optional batched ingestion sink (issue #3138). When present, the homogeneous
+  // void-returning kinds (log/os/navigation/layout) are coalesced into multi-row
+  // INSERTs instead of one auto-commit per row. Network keeps its per-row path
+  // (needs the row id synchronously) and storage keeps its per-row path (per-key
+  // previous-value lookup), so both are intentionally not routed through here.
+  private readonly buffer: TelemetryEventBuffer | null;
 
   constructor(
     repository: TelemetryRepository = defaultRepository,
@@ -59,10 +66,12 @@ export class TelemetryRecorder {
     // same-process DB reopen swaps in a fresh barrier via resetDbWriteBarrier(),
     // and a captured instance would keep the pinned drained one (issue #2912).
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
+    buffer: TelemetryEventBuffer | null = null,
   ) {
     this.repository = repository;
     this.getPushTarget = getPushTarget;
     this.getBarrier = getBarrier;
+    this.buffer = buffer;
   }
 
   static getInstance(): TelemetryRecorder {
@@ -75,6 +84,17 @@ export class TelemetryRecorder {
   /** Reset the singleton (for testing only). */
   static resetInstance(): void {
     TelemetryRecorder.instance = null;
+  }
+
+  /**
+   * Flush any buffered telemetry. No-op when batching is disabled. Callers on the
+   * shutdown path should await this before closeDatabase() so the last batch is
+   * committed rather than lost with the process (issue #3138 durability caveat).
+   */
+  async flushBuffer(): Promise<void> {
+    if (this.buffer) {
+      await this.buffer.flush();
+    }
   }
 
   setContext(deviceId: string | null, sessionId: string | null): void {
@@ -153,10 +173,14 @@ export class TelemetryRecorder {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordLogEventInput = { deviceId, sessionId, ...event };
 
-    try {
-      await this.getBarrier().track(() => this.repository.recordLogEvent(input));
-    } catch (e) {
-      logger.error(`[TelemetryRecorder] Failed to record log event: ${e}`);
+    if (this.buffer) {
+      this.buffer.addLog(input);
+    } else {
+      try {
+        await this.getBarrier().track(() => this.repository.recordLogEvent(input));
+      } catch (e) {
+        logger.error(`[TelemetryRecorder] Failed to record log event: ${e}`);
+      }
     }
 
     this.pushToSocket({ category: "log", timestamp: event.timestamp, deviceId, sessionId, data: event });
@@ -172,10 +196,14 @@ export class TelemetryRecorder {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordOsEventInput = { deviceId, sessionId, ...event };
 
-    try {
-      await this.getBarrier().track(() => this.repository.recordOsEvent(input));
-    } catch (e) {
-      logger.error(`[TelemetryRecorder] Failed to record OS event: ${e}`);
+    if (this.buffer) {
+      this.buffer.addOs(input);
+    } else {
+      try {
+        await this.getBarrier().track(() => this.repository.recordOsEvent(input));
+      } catch (e) {
+        logger.error(`[TelemetryRecorder] Failed to record OS event: ${e}`);
+      }
     }
 
     this.pushToSocket({ category: "os", timestamp: event.timestamp, deviceId, sessionId, data: event });
@@ -194,10 +222,14 @@ export class TelemetryRecorder {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordNavigationEventInput = { deviceId, sessionId, ...event };
 
-    try {
-      await this.getBarrier().track(() => this.repository.recordNavigationEvent(input));
-    } catch (e) {
-      logger.error(`[TelemetryRecorder] Failed to record navigation event: ${e}`);
+    if (this.buffer) {
+      this.buffer.addNavigation(input);
+    } else {
+      try {
+        await this.getBarrier().track(() => this.repository.recordNavigationEvent(input));
+      } catch (e) {
+        logger.error(`[TelemetryRecorder] Failed to record navigation event: ${e}`);
+      }
     }
 
     this.pushToSocket({ category: "navigation", timestamp: event.timestamp, deviceId, sessionId, data: event });
@@ -272,10 +304,14 @@ export class TelemetryRecorder {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordLayoutEventInput = { deviceId, sessionId, ...event };
 
-    try {
-      await this.getBarrier().track(() => this.repository.recordLayoutEvent(input));
-    } catch (e) {
-      logger.error(`[TelemetryRecorder] Failed to record layout event: ${e}`);
+    if (this.buffer) {
+      this.buffer.addLayout(input);
+    } else {
+      try {
+        await this.getBarrier().track(() => this.repository.recordLayoutEvent(input));
+      } catch (e) {
+        logger.error(`[TelemetryRecorder] Failed to record layout event: ${e}`);
+      }
     }
 
     this.pushToSocket({ category: "layout", timestamp: event.timestamp, deviceId, sessionId, data: event });

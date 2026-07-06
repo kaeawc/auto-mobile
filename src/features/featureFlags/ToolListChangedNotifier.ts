@@ -5,9 +5,10 @@
  * into {@link FeatureFlagService} so the notification stays fakeable in unit
  * tests and the feature-flag layer keeps no hard dependency on the MCP server /
  * `ToolRegistry`. The production wiring (in `createMcpServer`) delegates to
- * `ToolRegistry.notifyToolListChanged()`, which owns the server reference and the
- * best-effort emit — mirroring how `ResourceRegistry` emits `resources/list_changed`.
- * See issue #2963.
+ * `ToolRegistry.notifyToolListChanged()`, which owns the live-server set and the
+ * best-effort fan-out (all daemon sessions plus the Unix-socket push to proxy
+ * clients, issue #3223) — mirroring how `ResourceRegistry` emits
+ * `resources/list_changed`. See issue #2963.
  *
  * Contract: implementations are best-effort and MUST NOT throw — a failed
  * notification must never break the flag toggle that triggered it.

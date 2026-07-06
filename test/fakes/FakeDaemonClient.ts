@@ -1,5 +1,6 @@
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { DaemonUnavailableError } from "../../src/daemon/client";
+import type { DaemonNotification } from "../../src/daemon/types";
 
 export interface FakeDaemonClientOptions {
   toolResult?: any;
@@ -15,7 +16,10 @@ export class FakeDaemonClient implements DaemonClientLike {
   private toolResult: any;
   private resourceResult: any;
   private daemonMethodResults: Map<string, any>;
+  private readonly notificationHandlers = new Set<(notification: DaemonNotification) => void>();
+  subscribeToNotificationsCalls = 0;
   shouldFailConnect = false;
+  shouldFailSubscribe = false;
 
   constructor(options: FakeDaemonClientOptions = {}) {
     this.toolResult = options.toolResult ?? { content: [{ type: "text", text: "success" }] };
@@ -51,5 +55,26 @@ export class FakeDaemonClient implements DaemonClientLike {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  onNotification(handler: (notification: DaemonNotification) => void): () => void {
+    this.notificationHandlers.add(handler);
+    return () => {
+      this.notificationHandlers.delete(handler);
+    };
+  }
+
+  async subscribeToNotifications(): Promise<void> {
+    this.subscribeToNotificationsCalls += 1;
+    if (this.shouldFailSubscribe) {
+      throw new Error("Unsupported daemon method: daemon/subscribe-notifications");
+    }
+  }
+
+  /** Test hook: simulate a daemon-pushed notification frame. */
+  emitNotification(method: string): void {
+    for (const handler of this.notificationHandlers) {
+      handler({ type: "daemon_notification", method });
+    }
   }
 }

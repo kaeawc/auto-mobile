@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Resource, ResourceTemplate, ReadResourceRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema, SubscribeRequestSchema, UnsubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
+import { ListChangedBroadcaster } from "./listChangedBroadcast";
 
 // Interface for resource content handlers
 interface ResourceHandler {
@@ -42,7 +43,12 @@ interface RegisteredResourceTemplate {
 class ResourceRegistryClass {
   private resources: Map<string, RegisteredResource> = new Map();
   private templates: Map<string, RegisteredResourceTemplate> = new Map();
-  private server: McpServer | null = null;
+  // Every live MCP server this registry has been registered with. In daemon
+  // mode `registerWithServer` runs once per HTTP session, so notifications must
+  // fan out to ALL live sessions — a single retained server would be
+  // last-writer-wins (issue #3223). Entries are pruned via the underlying
+  // server's onclose hook when a session's transport closes.
+  private servers: Set<McpServer> = new Set();
   private subscriptions: Set<string> = new Set();
 
   // Register a new resource
@@ -159,9 +165,26 @@ class ResourceRegistryClass {
     }));
   }
 
+  // Track a server for notification fan-out and prune it when its session's
+  // transport closes. The underlying Protocol preserves a pre-set `onclose`
+  // (both the transport's and the server's), so chaining here cannot clobber
+  // other lifecycle hooks (e.g. ToolRegistry's identical prune hook).
+  private trackServer(server: McpServer): void {
+    if (this.servers.has(server)) {
+      return;
+    }
+    this.servers.add(server);
+    const underlying = server.server;
+    const existingOnClose = underlying.onclose;
+    underlying.onclose = () => {
+      this.servers.delete(server);
+      existingOnClose?.();
+    };
+  }
+
   // Register all resources with an MCP server
   registerWithServer(server: McpServer): void {
-    this.server = server;
+    this.trackServer(server);
 
     // Set handler for listing resources
     server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
@@ -255,10 +278,6 @@ class ResourceRegistryClass {
 
   // Send resource update notification (only if client is subscribed)
   async notifyResourceUpdated(uri: string): Promise<void> {
-    if (!this.server) {
-      return;
-    }
-
     if (!this.subscriptions.has(uri)) {
       return;
     }
@@ -269,17 +288,21 @@ class ResourceRegistryClass {
       return;
     }
 
-    try {
-      // Send notification to clients that resource has changed
-      await this.server.server.notification({
-        method: "notifications/resources/updated",
-        params: {
-          uri: resource ? resource.uri : uri
-        }
-      });
-    } catch (error) {
-      // Silently ignore notification errors (e.g., when transport is not connected during tests)
-      logger.debug(`[ResourceRegistry] Failed to notify resource update for ${uri}: ${error}`);
+    // Subscriptions are tracked registry-wide, so every live session's server
+    // gets the update (issue #3223) — best-effort per server.
+    for (const server of this.servers) {
+      try {
+        // Send notification to clients that resource has changed
+        await server.server.notification({
+          method: "notifications/resources/updated",
+          params: {
+            uri: resource ? resource.uri : uri
+          }
+        });
+      } catch (error) {
+        // Silently ignore notification errors (e.g., when transport is not connected during tests)
+        logger.debug(`[ResourceRegistry] Failed to notify resource update for ${uri}: ${error}`);
+      }
     }
   }
 
@@ -290,20 +313,30 @@ class ResourceRegistryClass {
     }
   }
 
-  // Send notification that the resource list has changed
+  // Send notification that the resource list has changed. Fans out to every
+  // live session's server (issue #3223), and the ListChangedBroadcaster carries
+  // the event to non-MCP transports — the daemon's Unix socket server pushes it
+  // to connected DaemonMcpProxy clients, which invalidate their resource caches
+  // and re-emit to their own external clients.
   async notifyResourceListChanged(): Promise<void> {
-    if (!this.server) {
-      return;
+    for (const server of this.servers) {
+      try {
+        await server.server.notification({
+          method: "notifications/resources/list_changed",
+          params: {}
+        });
+      } catch (error) {
+        // Best-effort: a failed notification must never break the resource
+        // change that triggered it, nor block sibling sessions.
+        logger.warn(`[ResourceRegistry] Failed to notify resource list change: ${error}`);
+      }
     }
+    ListChangedBroadcaster.emit("resources");
+  }
 
-    try {
-      await this.server.server.notification({
-        method: "notifications/resources/list_changed",
-        params: {}
-      });
-    } catch (error) {
-      logger.warn(`[ResourceRegistry] Failed to notify resource list change: ${error}`);
-    }
+  // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
+  clearServersForTesting(): void {
+    this.servers.clear();
   }
 
   // Clear all registered resources, templates, and subscriptions (for testing)

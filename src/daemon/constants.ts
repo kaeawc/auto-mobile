@@ -130,6 +130,14 @@ export const READINESS_PROBE_BACKOFF_MS = 150;
 export const MCP_STREAMABLE_PATH = "/auto-mobile/streamable";
 
 /**
+ * Control-socket method a client sends to opt in to server-pushed
+ * `DaemonNotification` frames (tools/resources list_changed forwarding,
+ * issue #3223). Opt-in keeps the push invisible to Kotlin/Swift/legacy
+ * clients that only understand request/response frames.
+ */
+export const DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD = "daemon/subscribe-notifications";
+
+/**
  * Whether the daemon enforces the inbound version/build-identity handshake
  * (#2744). Enabled by default; set `AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE=1`
  * (or `AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE=1`) as an escape hatch if a

@@ -4,11 +4,12 @@ import { existsSync, statSync } from "node:fs";
 import { platform } from "node:os";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
-import { DaemonRequest, DaemonResponse } from "./types";
+import { DaemonRequest, DaemonResponse, DaemonNotification, isDaemonNotification } from "./types";
 import {
   SOCKET_PATH,
   CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
+  DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
 } from "./constants";
 import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
 import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
@@ -84,6 +85,7 @@ export class DaemonClient {
   }> = new Map();
   private buffer: string = "";
   private connected: boolean = false;
+  private notificationHandlers: Set<(notification: DaemonNotification) => void> = new Set();
   private recoveryOptions: DaemonClientRecoveryOptions;
   private readonly clientIdentity: { version: string; build: BuildIdentity } | null;
 
@@ -315,13 +317,54 @@ export class DaemonClient {
     for (const line of lines) {
       if (line.trim()) {
         try {
-          const response: DaemonResponse = JSON.parse(line);
-          this.handleResponse(response);
+          const frame: unknown = JSON.parse(line);
+          if (isDaemonNotification(frame)) {
+            this.handleNotification(frame);
+          } else {
+            this.handleResponse(frame as DaemonResponse);
+          }
         } catch (error) {
           logger.error(`Error parsing daemon response: ${error}`);
         }
       }
     }
+  }
+
+  /**
+   * Dispatch a daemon-pushed notification frame (issue #3223) to registered
+   * handlers. Best-effort: a throwing handler is logged and never tears down
+   * the socket or blocks sibling handlers.
+   */
+  private handleNotification(notification: DaemonNotification): void {
+    for (const handler of this.notificationHandlers) {
+      try {
+        handler(notification);
+      } catch (error) {
+        logger.warn(`Daemon notification handler failed for ${notification.method}: ${error}`);
+      }
+    }
+  }
+
+  /**
+   * Register a handler for daemon-pushed notifications. Frames only arrive
+   * after {@link subscribeToNotifications} opts this connection in.
+   * Returns an unsubscribe function.
+   */
+  onNotification(handler: (notification: DaemonNotification) => void): () => void {
+    this.notificationHandlers.add(handler);
+    return () => {
+      this.notificationHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Opt this connection in to server-pushed notifications (tools/resources
+   * list_changed forwarding, issue #3223). Connects first if needed. Callers
+   * own the failure strategy — a daemon that predates the subscription method
+   * returns an error response, which surfaces here as a rejection.
+   */
+  async subscribeToNotifications(): Promise<void> {
+    await this.callDaemonMethod(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD, {});
   }
 
   /**
@@ -485,6 +528,7 @@ export class DaemonClient {
       this.timer.clearTimeout(timeout);
     }
     this.pendingRequests.clear();
+    this.notificationHandlers.clear();
   }
 }
 
@@ -494,6 +538,13 @@ export interface DaemonClientLike {
   callTool(toolName: string, params: Record<string, any>): Promise<any>;
   readResource(uri: string): Promise<any>;
   callDaemonMethod(method: string, params: Record<string, any>): Promise<any>;
+  /**
+   * Optional daemon-push capability (issue #3223). Clients that cannot surface
+   * server-pushed frames omit both members and the proxy skips notification
+   * wiring entirely — so a client must implement both or neither.
+   */
+  onNotification?(handler: (notification: DaemonNotification) => void): () => void;
+  subscribeToNotifications?(): Promise<void>;
 }
 
 export type DaemonClientFactory = () => DaemonClientLike;

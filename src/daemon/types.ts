@@ -44,6 +44,29 @@ export interface DaemonResponse {
 }
 
 /**
+ * Server-pushed notification frame sent from daemon to a subscribed CLI client
+ * over the control socket (issue #3223). Unlike {@link DaemonResponse} it has no
+ * `id` — it does not correlate to a request. Clients discriminate on `type`.
+ * Only sent to sessions that opted in via `daemon/subscribe-notifications`, so
+ * legacy/Kotlin/Swift clients never see an unexpected frame shape.
+ */
+export interface DaemonNotification {
+  type: "daemon_notification";
+  /** MCP notification method, e.g. "notifications/tools/list_changed". */
+  method: string;
+}
+
+/** Discriminates a daemon socket frame as a server-pushed notification. */
+export function isDaemonNotification(frame: unknown): frame is DaemonNotification {
+  return (
+    typeof frame === "object" &&
+    frame !== null &&
+    (frame as { type?: unknown }).type === "daemon_notification" &&
+    typeof (frame as { method?: unknown }).method === "string"
+  );
+}
+
+/**
  * Known Unix-domain sockets exposed by the daemon.
  */
 export type DaemonSocketName =

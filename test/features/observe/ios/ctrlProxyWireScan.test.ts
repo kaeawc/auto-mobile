@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { deriveIosSharedEmitFiles, extractImportSpecifiers, scanFile } from "./ctrlProxyWireScan";
+import { deriveIosSharedEmitFiles, extractImportSpecifiers, scanFile, toPosixPath } from "./ctrlProxyWireScan";
 
 const VIRTUAL = "/virtual/File.ts";
 
@@ -112,6 +112,25 @@ describe("ctrlProxyWireScan.extractImportSpecifiers", () => {
       "../shared/SharedTextDelegate",
       "./types",
     ]);
+  });
+});
+
+describe("ctrlProxyWireScan.toPosixPath — separator-independence guard (issue #2955, Windows CI)", () => {
+  // The import-graph derivation prefix-compares resolved fs paths against the shared
+  // directory. On Windows `path.resolve` yields backslash separators; comparing those
+  // against a forward-slash-joined prefix never matches and silently empties the derived
+  // set. This pins that any backslash-containing path is normalized to forward slashes so
+  // the comparison is OS-agnostic — Windows cannot regress silently.
+  test("normalizes backslash-separated paths to forward slashes", () => {
+    expect(toPosixPath("C:\\repo\\src\\shared\\SharedTextDelegate.ts")).toBe(
+      "C:/repo/src/shared/SharedTextDelegate.ts"
+    );
+  });
+
+  test("leaves already-posix paths unchanged", () => {
+    expect(toPosixPath("/repo/src/shared/SharedTextDelegate.ts")).toBe(
+      "/repo/src/shared/SharedTextDelegate.ts"
+    );
   });
 });
 

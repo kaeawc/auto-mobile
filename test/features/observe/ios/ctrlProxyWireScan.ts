@@ -27,6 +27,21 @@ import { readFileSync } from "fs";
 import { dirname, resolve } from "path";
 import ts from "typescript";
 
+/**
+ * Normalize a filesystem path to forward-slash (posix) separators so that path
+ * comparisons and prefix checks in the import graph are OS-agnostic. On Windows,
+ * `path.resolve` yields backslash separators; comparing those against a
+ * forward-slash-joined prefix (or a forward-slash import-derived key) never
+ * matches, which silently empties the derived emit set (issue #2955, Windows CI).
+ *
+ * Exported so a unit test can pin the separator-independence directly. Unconditionally
+ * rewrites backslashes so the guard is meaningful on posix CI too (a no-op for paths
+ * that already use forward slashes).
+ */
+export function toPosixPath(p: string): string {
+  return p.replaceAll("\\", "/");
+}
+
 /** A resolved command discriminator plus where it was found (for diagnostics). */
 export interface EmittedType {
   readonly type: string;
@@ -360,7 +375,9 @@ function resolveTsModule(fromFile: string, specifier: string): string | null {
 export function deriveIosSharedEmitFiles(entry: string, sharedDir: string): string[] {
   const visited = new Set<string>();
   const sharedHits = new Set<string>();
-  const normalizedSharedDir = resolve(sharedDir);
+  // Compare in posix space so backslash-separated resolved paths on Windows still
+  // prefix-match the shared directory (issue #2955).
+  const normalizedSharedDir = toPosixPath(resolve(sharedDir));
 
   const walk = (file: string): void => {
     if (visited.has(file)) {
@@ -377,9 +394,10 @@ export function deriveIosSharedEmitFiles(entry: string, sharedDir: string): stri
       return;
     }
 
-    if (resolve(file).startsWith(`${normalizedSharedDir}/`)) {
-      const isTest = file.endsWith(".test.ts");
-      const isTypesOnly = file.endsWith("/types.ts");
+    const posixFile = toPosixPath(resolve(file));
+    if (posixFile.startsWith(`${normalizedSharedDir}/`)) {
+      const isTest = posixFile.endsWith(".test.ts");
+      const isTypesOnly = posixFile.endsWith("/types.ts");
       if (!isTest && !isTypesOnly) {
         sharedHits.add(resolve(file));
       }

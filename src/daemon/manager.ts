@@ -1,10 +1,15 @@
 import { spawn as nodeSpawn, execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { open, readFile, unlink } from "node:fs/promises";
+import { open, readFile, rm, unlink } from "node:fs/promises";
 import { existsSync, openSync, closeSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { logger } from "../utils/logger";
 import { releaseVersion } from "../utils/mcpVersion";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
+import {
+  INCOMPLETE_EXTRACTION_CODE,
+  INCOMPLETE_EXTRACTION_EXIT_CODE,
+} from "../db/migrationDependencyIntegrity";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
 import { ActionableError } from "../models";
@@ -152,6 +157,49 @@ const nodeDaemonProcessSpawner: DaemonProcessSpawner = {
   spawn: nodeSpawn,
 };
 
+export interface ExtractionCleaner {
+  removeExtractionForEntryScript(entryScript: string): Promise<boolean>;
+}
+
+function resolveExtractionRootForEntryScript(entryScript: string): string | null {
+  const resolved = resolve(entryScript);
+  const parts = resolved.split(sep);
+  const nodeModulesIndex = parts.lastIndexOf("node_modules");
+  if (nodeModulesIndex <= 0) {
+    return null;
+  }
+
+  const packagePath = parts.slice(nodeModulesIndex + 1, nodeModulesIndex + 3).join("/");
+  if (packagePath !== "@kaeawc/auto-mobile") {
+    return null;
+  }
+
+  const root = parts.slice(0, nodeModulesIndex).join(sep) || sep;
+  if (root === sep) {
+    return null;
+  }
+
+  const tempRoot = resolve(tmpdir());
+  if (!root.startsWith(tempRoot + sep)) {
+    return null;
+  }
+  return root;
+}
+
+const fileSystemExtractionCleaner: ExtractionCleaner = {
+  async removeExtractionForEntryScript(entryScript: string): Promise<boolean> {
+    const extractionRoot = resolveExtractionRootForEntryScript(entryScript);
+    if (!extractionRoot) {
+      return false;
+    }
+
+    await rm(extractionRoot, { recursive: true, force: true });
+    return true;
+  },
+};
+
+type DaemonLaunchCommandResolver = () => DaemonLaunchCommand;
+
 function hasProcessLivenessChecker(value: unknown): value is DaemonProcessLivenessChecker {
   return typeof (value as Partial<DaemonProcessLivenessChecker> | undefined)?.isProcessRunning === "function";
 }
@@ -227,6 +275,8 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly processFinder: DaemonProcessFinder;
   private readonly processSpawner: DaemonProcessSpawner;
   private readonly processLivenessChecker: DaemonProcessLivenessChecker;
+  private readonly extractionCleaner: ExtractionCleaner;
+  private readonly launchCommandResolver: DaemonLaunchCommandResolver;
 
   constructor(
     clientFactory: DaemonClientFactory | undefined = undefined,
@@ -236,7 +286,9 @@ export class DaemonManager implements DaemonManagerLike {
     pidFilePath: string = PID_FILE_PATH,
     socketPath: string = SOCKET_PATH,
     processFinderOrSpawner: DaemonProcessFinder | DaemonProcessSpawner = new PsDaemonProcessFinder(),
-    processSpawner: DaemonProcessSpawner = nodeDaemonProcessSpawner
+    processSpawner: DaemonProcessSpawner = nodeDaemonProcessSpawner,
+    extractionCleaner: ExtractionCleaner = fileSystemExtractionCleaner,
+    launchCommandResolver: DaemonLaunchCommandResolver = () => resolveDaemonLaunchCommand()
   ) {
     this.stateProvider = stateProvider;
     this.timer = timer;
@@ -255,6 +307,8 @@ export class DaemonManager implements DaemonManagerLike {
       this.processSpawner = processFinderOrSpawner;
       this.processLivenessChecker = processFinder;
     }
+    this.extractionCleaner = extractionCleaner;
+    this.launchCommandResolver = launchCommandResolver;
     this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath));
   }
 
@@ -452,7 +506,90 @@ export class DaemonManager implements DaemonManagerLike {
     // Resolve the current binary so the daemon uses the same version.
     // process.argv[1] is the entry script (e.g. dist/src/index.js).
     // Falls back to bunx to avoid requiring a global install.
-    const { command: autoMobileCmd, args } = resolveDaemonLaunchCommand();
+    let { command: autoMobileCmd, args } = this.withDaemonOptions(this.launchCommandResolver(), options);
+
+    // Redirect the detached daemon's stdout/stderr into the STABLE logs dir
+    // (`~/.auto-mobile/logs` by default) rather than an ephemeral
+    // `mkdtemp(tmpdir())` directory. Under bunx the temp tree is reaped while the
+    // daemon keeps this fd open, which previously left the on-disk log unlinked
+    // and post-hoc debugging impossible (issue #2724). The logs dir is created
+    // owner-only (0o700) by ensureSecureTempDirSync, so a fixed, predictable
+    // filename inside it is not exposed to other users.
+    const logsDir = ensureSecureTempDirSync(TEMP_SUBDIRS.LOGS);
+    const logPath = join(logsDir, `daemon-launch-${process.pid}.log`);
+    // Open with restricted permissions (0o600 = owner read/write only).
+    // Truncate per launch so a single manager's bootstrap captures don't grow
+    // unbounded across restarts.
+    const logFd = openSync(logPath, "w", 0o600);
+
+    // Propagate any non-default file paths to the child so its constants module
+    // resolves to the same locations this manager polls.
+    const childEnv = { ...process.env };
+    childEnv[DAEMON_LAUNCH_CWD_ENV] = resolveDaemonLaunchWorkingDirectory();
+    if (this.pidFilePath !== PID_FILE_PATH) {
+      childEnv.AUTOMOBILE_DAEMON_PID_FILE_PATH = this.pidFilePath;
+    }
+    if (this.lockFilePath !== LOCK_FILE_PATH) {
+      childEnv.AUTOMOBILE_DAEMON_LOCK_FILE_PATH = this.lockFilePath;
+    }
+    if (this.socketPath !== SOCKET_PATH) {
+      childEnv.AUTOMOBILE_DAEMON_SOCKET_PATH = this.socketPath;
+    }
+
+    try {
+      let retriedIncompleteExtraction = false;
+      while (true) {
+        const daemonProcess = this.processSpawner.spawn(autoMobileCmd, args, {
+          detached: true,
+          cwd: resolveStableDaemonWorkingDirectory(),
+          stdio: ["ignore", logFd, logFd], // Write stdout/stderr to log file
+          shell: true, // Use shell to resolve command from PATH
+          env: childEnv,
+        });
+
+        // Unref so parent process can exit
+        daemonProcess.unref();
+
+        try {
+          await this.waitForDaemonStartup(daemonProcess, logPath, DAEMON_STARTUP_TIMEOUT_MS);
+          break;
+        } catch (error) {
+          if (!this.isIncompleteExtractionStartupError(error) || retriedIncompleteExtraction) {
+            throw error;
+          }
+
+          retriedIncompleteExtraction = true;
+          const entryScript = args[0];
+          let removed = false;
+          try {
+            removed = entryScript ? await this.extractionCleaner.removeExtractionForEntryScript(entryScript) : false;
+          } catch (cleanupError) {
+            throw new ActionableError(
+              `${this.describeError(error)}\nFailed to remove incomplete extraction before retry: ${this.describeError(cleanupError)}`
+            );
+          }
+          if (!removed) {
+            throw error;
+          }
+          ({ command: autoMobileCmd, args } = this.withDaemonOptions(resolveDaemonLaunchCommand(undefined), options));
+          stderrLog(`Detected incomplete daemon package extraction (${INCOMPLETE_EXTRACTION_CODE}); removed it and retrying once...`);
+        }
+      }
+    } finally {
+      // Close our reference to the log file (daemon process still has it open)
+      closeSync(logFd);
+    }
+
+    const newStatus = await this.status();
+    stderrLog(
+      `Daemon started successfully (PID ${newStatus.pid}, port ${newStatus.port})`
+    );
+    stderrLog(`Socket: ${newStatus.socketPath}`);
+    stderrLog(`Logs: ${logPath}`);
+  }
+
+  private withDaemonOptions(launch: DaemonLaunchCommand, options: DaemonOptions): DaemonLaunchCommand {
+    const args = [...launch.args];
     if (options.port) {
       args.push("--port", options.port.toString());
     }
@@ -537,57 +674,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Output-reduction flags (issue #2756): serialized off the shared specs so
     // they can't drift from the daemon-side parse in parseDaemonArgs.
     args.push(...outputReductionFlagsToArgs(options));
-
-    // Redirect the detached daemon's stdout/stderr into the STABLE logs dir
-    // (`~/.auto-mobile/logs` by default) rather than an ephemeral
-    // `mkdtemp(tmpdir())` directory. Under bunx the temp tree is reaped while the
-    // daemon keeps this fd open, which previously left the on-disk log unlinked
-    // and post-hoc debugging impossible (issue #2724). The logs dir is created
-    // owner-only (0o700) by ensureSecureTempDirSync, so a fixed, predictable
-    // filename inside it is not exposed to other users.
-    const logsDir = ensureSecureTempDirSync(TEMP_SUBDIRS.LOGS);
-    const logPath = join(logsDir, `daemon-launch-${process.pid}.log`);
-    // Open with restricted permissions (0o600 = owner read/write only).
-    // Truncate per launch so a single manager's bootstrap captures don't grow
-    // unbounded across restarts.
-    const logFd = openSync(logPath, "w", 0o600);
-
-    // Propagate any non-default file paths to the child so its constants module
-    // resolves to the same locations this manager polls.
-    const childEnv = { ...process.env };
-    childEnv[DAEMON_LAUNCH_CWD_ENV] = resolveDaemonLaunchWorkingDirectory();
-    if (this.pidFilePath !== PID_FILE_PATH) {
-      childEnv.AUTOMOBILE_DAEMON_PID_FILE_PATH = this.pidFilePath;
-    }
-    if (this.lockFilePath !== LOCK_FILE_PATH) {
-      childEnv.AUTOMOBILE_DAEMON_LOCK_FILE_PATH = this.lockFilePath;
-    }
-    if (this.socketPath !== SOCKET_PATH) {
-      childEnv.AUTOMOBILE_DAEMON_SOCKET_PATH = this.socketPath;
-    }
-
-    const daemonProcess = this.processSpawner.spawn(autoMobileCmd, args, {
-      detached: true,
-      cwd: resolveStableDaemonWorkingDirectory(),
-      stdio: ["ignore", logFd, logFd], // Write stdout/stderr to log file
-      shell: true, // Use shell to resolve command from PATH
-      env: childEnv,
-    });
-
-    // Close our reference to the log file (daemon process still has it open)
-    closeSync(logFd);
-
-    // Unref so parent process can exit
-    daemonProcess.unref();
-
-    await this.waitForDaemonStartup(daemonProcess, logPath, DAEMON_STARTUP_TIMEOUT_MS);
-
-    const newStatus = await this.status();
-    stderrLog(
-      `Daemon started successfully (PID ${newStatus.pid}, port ${newStatus.port})`
-    );
-    stderrLog(`Socket: ${newStatus.socketPath}`);
-    stderrLog(`Logs: ${logPath}`);
+    return { command: launch.command, args };
   }
 
   private async waitForDaemonStartup(
@@ -602,7 +689,11 @@ export class DaemonManager implements DaemonManagerLike {
       const rejectWithContext = (summary: string) => {
         void this.formatDaemonStartupFailure(summary, logPath).then(
           message => {
-            reject(new ActionableError(message));
+            const error = new ActionableError(message);
+            if (this.isIncompleteExtractionStartupSummary(summary)) {
+              (error as { code?: string }).code = INCOMPLETE_EXTRACTION_CODE;
+            }
+            reject(error);
             readinessAbort.abort();
           },
           () => {
@@ -618,6 +709,10 @@ export class DaemonManager implements DaemonManagerLike {
       const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
         const exitCode = code === null ? "unknown" : code.toString();
         const signalDetail = signal ? `, signal ${signal}` : "";
+        if (code === INCOMPLETE_EXTRACTION_EXIT_CODE) {
+          rejectWithContext(this.formatIncompleteExtractionStartupSummary(exitCode, signalDetail));
+          return;
+        }
         rejectWithContext(`Daemon subprocess exited before becoming ready (exit code ${exitCode}${signalDetail})`);
       };
 
@@ -646,6 +741,27 @@ export class DaemonManager implements DaemonManagerLike {
       readinessAbort.abort();
       cleanupProcessListeners();
     }
+  }
+
+  private formatIncompleteExtractionStartupSummary(exitCode: string, signalDetail: string): string {
+    return (
+      `Daemon subprocess exited before becoming ready (exit code ${exitCode}${signalDetail}): ` +
+      `database startup migrations reported an incomplete package extraction (${INCOMPLETE_EXTRACTION_CODE}). ` +
+      "remove the incomplete extraction directory and re-run; a fresh extraction from the healthy shared cache should start normally."
+    );
+  }
+
+  private isIncompleteExtractionStartupSummary(summary: string): boolean {
+    return summary.includes(`exit code ${INCOMPLETE_EXTRACTION_EXIT_CODE}`) &&
+      summary.includes("incomplete package extraction");
+  }
+
+  private isIncompleteExtractionStartupError(error: unknown): boolean {
+    return (error as { code?: unknown } | null | undefined)?.code === INCOMPLETE_EXTRACTION_CODE;
+  }
+
+  private describeError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   private formatRawSpawnError(error: Error): string {

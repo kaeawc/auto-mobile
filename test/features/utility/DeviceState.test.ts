@@ -243,7 +243,7 @@ describe("DeviceState", () => {
     ]);
   });
 
-  test("sets iOS simulator Do Not Disturb with a temporary notifyutil registration", async () => {
+  test("sets iOS simulator Do Not Disturb with a registered notifyutil set/read/post", async () => {
     const simctl = new FakeSimCtlClient();
     const timer = autoAdvanceTimer();
     simctl.setCommandResult(

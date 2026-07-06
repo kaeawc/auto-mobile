@@ -136,8 +136,12 @@ BiometricKit Darwin notifications inside the simulator via
 
 1. **Enroll** — a registered `notifyutil` set/read/post on
    `com.apple.BiometricKit.enrollmentChanged` ensures a biometry is enrolled.
-   The registration is required because `notifyutil -s` has no effect when no
-   process has registered the key.
+   Apple `notifyutil(1)` documents that state values require a current
+   registration; the helper self-registers so enrollment does not depend on
+   BiometricKit already owning the key. Empirical iOS 18.6 simulator checks
+   showed this specific BiometricKit key also persisted without explicit `-1`,
+   but the shared helper keeps the registration for keys without an external
+   owner.
 2. **Match / non-match** — post the key the app's `LAContext` is waiting on:
    - Touch ID: `com.apple.BiometricKit_Sim.fingerTouch.match` / `…nomatch`
    - Face ID: `com.apple.BiometricKit_Sim.pearl.match` / `…nomatch`
@@ -331,12 +335,12 @@ fresh-process readback.
    `com.apple.donotdisturb.enabled` Darwin notification, driven via
    `xcrun simctl spawn <udid> notifyutil`:
    - `notifyutil -1 com.apple.donotdisturb.enabled ...` creates a temporary
-     registration. This is required because `notifyutil -s` has no effect when
-     no process has registered the key.
+     registration so the state variable exists even if no other process already
+     owns the key.
    - `notifyutil -s com.apple.donotdisturb.enabled <0|1>` sets the value while
-     the registration is alive.
-   - `notifyutil -g com.apple.donotdisturb.enabled` reads the registered state in
-     the same invocation.
+     that registration is alive.
+   - `notifyutil -g com.apple.donotdisturb.enabled` reads the state in the same
+     invocation.
    - `notifyutil -p com.apple.donotdisturb.enabled` posts it so observers react.
    - After a short settle, a separate fresh-process
      `notifyutil -g com.apple.donotdisturb.enabled` verifies that the value
@@ -354,9 +358,10 @@ fresh-process readback.
    `appliedMode: "none"`, a structured `warning`, and `verified: false` (so
    `success` is `false`). The tool never claims a tier it cannot deliver.
 4. **Best effort with behavior verification** — results are `bestEffort: true`.
-   The registered set invocation is not authoritative by itself; the setter only
-   reports success when the independent readback observes the requested binary
-   state.
+   The same-invocation registered set/read/post proves only that the command
+   could set state while its registration existed; it is not authoritative by
+   itself. The setter only reports success when the independent readback
+   observes the requested binary state.
 
 ### Limitations
 

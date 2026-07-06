@@ -79,16 +79,10 @@ class JimpImageTransformer {
       throw new Error("WebP quality must be between 1 and 100");
     }
 
-    // The wasm-webp encoder takes libwebp-style numeric flags. Keys are
-    // camelCase (validated by the plugin's zod schema — an unknown key is
-    // silently dropped, and `quality` defaults to 100). In lossless mode
-    // `quality` still controls compression effort/ratio, so pass it through.
-    // near-lossless runs inside lossless mode; sharp used `quality` as the
-    // near-lossless preprocessing level, so mirror that.
     const webpOptions: Record<string, unknown> = options?.lossless
-      ? { lossless: 1, quality }
+      ? { lossless: true, quality }
       : options?.nearLossless
-        ? { lossless: 1, nearLossless: quality }
+        ? { nearLossless: true, quality }
         : { quality };
 
     this.pipeline.encoding = { mime: "image/webp", options: webpOptions };

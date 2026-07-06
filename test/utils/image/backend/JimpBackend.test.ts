@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { JimpBackend } from "../../../../src/utils/image/backend/JimpBackend";
+import { JimpBackend, toJimpWebpOptions } from "../../../../src/utils/image/backend/JimpBackend";
 import type { ImagePipeline } from "../../../../src/utils/image/backend/ImageBackend";
 
 // Build a small, non-uniform source PNG. Solid colors survive any resize kernel
@@ -139,6 +139,12 @@ describe("JimpBackend", () => {
       });
 
       expect(nearLossless.length).not.toBe(lossless.length);
+    });
+
+    test("maps backend-neutral WebP options to wasm-webp libwebp flags", () => {
+      expect(toJimpWebpOptions({ lossless: true, quality: 90 })).toEqual({ lossless: 1, quality: 90 });
+      expect(toJimpWebpOptions({ nearLossless: true, quality: 40 })).toEqual({ lossless: 1, nearLossless: 40 });
+      expect(toJimpWebpOptions({ quality: 60 })).toEqual({ quality: 60 });
     });
 
     test("resize mode:nearest picks source pixels (distinct from default kernel)", async () => {

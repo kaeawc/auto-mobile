@@ -67,19 +67,19 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
       });
     });
 
-    test("webp lossless records libwebp lossless flags", async () => {
+    test("webp lossless records backend-neutral lossless intent", async () => {
       await imageOf().webp({ lossless: true, quality: 90 }).disableCache().toBuffer();
       expect(backend.lastPipeline!.encoding).toEqual({
         mime: "image/webp",
-        options: { lossless: 1, quality: 90 }
+        options: { lossless: true, quality: 90 }
       });
     });
 
-    test("webp nearLossless records nearLossless preprocessing level", async () => {
+    test("webp nearLossless records backend-neutral nearLossless intent", async () => {
       await imageOf().webp({ nearLossless: true, quality: 40 }).disableCache().toBuffer();
       expect(backend.lastPipeline!.encoding).toEqual({
         mime: "image/webp",
-        options: { lossless: 1, nearLossless: 40 }
+        options: { nearLossless: true, quality: 40 }
       });
     });
   });

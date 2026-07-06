@@ -159,6 +159,65 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     expect(result.error).toContain("timed out");
   });
 
+  it("resolves two overlapping swipes independently with no cross-talk (#3048)", async () => {
+    // The pre-#2988 bug was a single shared `pendingSwipeRequestId` field that could only
+    // track one in-flight swipe. RequestManager.generateId is a monotonic counter, so each
+    // request id is unique — assert two overlapping calls settle on their own promises,
+    // even when their results arrive out of order.
+    const { context, sent, timer, requestManager } = createFakeContext();
+    const gestures = new CtrlProxyGestures(context);
+
+    const promiseA = gestures.requestTwoFingerSwipe(1, 2, 3, 4, 300, 100, 5000);
+    await flush();
+    const idA = JSON.parse(sent[sent.length - 1]).requestId as string;
+
+    const promiseB = gestures.requestTwoFingerSwipe(10, 20, 30, 40, 300, 100, 5000);
+    await flush();
+    const idB = JSON.parse(sent[sent.length - 1]).requestId as string;
+
+    // Two distinct in-flight requests, distinct ids.
+    expect(idA).not.toBe(idB);
+    expect(requestManager.getPendingCount()).toBe(2);
+
+    // Resolve out of order: B first, then A, with distinguishable payloads.
+    expect(requestManager.resolve<A11ySwipeResult>(idB, { success: true, totalTimeMs: 222 })).toBe(true);
+    expect(requestManager.resolve<A11ySwipeResult>(idA, { success: true, totalTimeMs: 111 })).toBe(true);
+
+    const [resultA, resultB] = await Promise.all([promiseA, promiseB]);
+    // Each promise settled with ITS OWN result — no cross-talk.
+    expect(resultA.totalTimeMs).toBe(111);
+    expect(resultB.totalTimeMs).toBe(222);
+    expect(timer.getCurrentTime()).toBe(0);
+    expect(requestManager.getPendingCount()).toBe(0);
+  });
+
+  it("fails promptly on a type:\"error\" frame via resolveError (#3048, #2985)", async () => {
+    // A runner-side failure can arrive as a structured error envelope (#2985), which the client
+    // routes through RequestManager.resolveError by requestId. Because two-finger swipes now
+    // register with RequestManager, resolveError must correlate and settle the pending promise
+    // before the timeout, leaving no dangling request.
+    const { context, sent, timer, requestManager } = createFakeContext();
+    const gestures = new CtrlProxyGestures(context);
+
+    const promise = gestures.requestTwoFingerSwipe(0, 0, 100, 100, 300, 100, 5000);
+    await flush();
+
+    const id = JSON.parse(sent[sent.length - 1]).requestId as string;
+    expect(requestManager.getPendingCount()).toBe(1);
+
+    // Deliver a structured error frame BEFORE any timer advance.
+    const handled = requestManager.resolveError(id, "Runner rejected two-finger swipe", 7);
+    expect(handled).toBe(true);
+
+    const result = await promise;
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Runner rejected two-finger swipe");
+    expect(result.totalTimeMs).toBe(7);
+    // Settled by the error frame, not the timeout, and nothing left pending.
+    expect(timer.getCurrentTime()).toBe(0);
+    expect(requestManager.getPendingCount()).toBe(0);
+  });
+
   it("returns Not connected without sending when the connection cannot be established", async () => {
     const { context, sent } = createFakeContext({ ensureConnected: async () => false });
     const gestures = new CtrlProxyGestures(context);

@@ -63,7 +63,7 @@ jobs:
           echo "runner_sha256=$RUNNER_CURRENT" >> $GITHUB_OUTPUT
           echo "Current APK SHA256: ${APK_CURRENT:-(empty)}"
           echo "Current IPA SHA256: ${IPA_CURRENT:-(empty)}"
-          echo "Current runner SHA256: ${RUNNER_CURRENT:-(empty)}"
+          echo "Current iOS runner SHA256: ${RUNNER_CURRENT:-(empty)}"
 
       - name: "Check if updates needed"
         id: check
@@ -103,11 +103,11 @@ jobs:
           # wiring) is backfilled even when the IPA is byte-identical.
           if [ "$NEW_RUNNER" != "$OLD_RUNNER" ]; then
             RUNNER_CHANGED="true"
-            echo "Runner SHA256 changed"
+            echo "iOS runner SHA256 changed"
             echo "  Previous: ${OLD_RUNNER:-(empty)}"
             echo "  New:      $NEW_RUNNER"
           else
-            echo "Runner SHA256 unchanged"
+            echo "iOS runner SHA256 unchanged"
           fi
 
           echo "apk_changed=$APK_CHANGED" >> $GITHUB_OUTPUT
@@ -134,13 +134,22 @@ jobs:
         run: |
           APK_CHANGED="${{ steps.check.outputs.apk_changed }}"
           IPA_CHANGED="${{ steps.check.outputs.ipa_changed }}"
+          RUNNER_CHANGED="${{ steps.check.outputs.runner_changed }}"
 
-          if [ "$APK_CHANGED" = "true" ] && [ "$IPA_CHANGED" = "true" ]; then
-            echo "title=chore: update CtrlProxy APK and CtrlProxy iOS IPA SHA256" >> $GITHUB_OUTPUT
+          if [ "$APK_CHANGED" = "true" ] && [ "$IPA_CHANGED" = "true" ] && [ "$RUNNER_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy APK, iOS IPA, and iOS runner SHA256" >> "$GITHUB_OUTPUT"
+          elif [ "$APK_CHANGED" = "true" ] && [ "$IPA_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy APK and CtrlProxy iOS IPA SHA256" >> "$GITHUB_OUTPUT"
+          elif [ "$APK_CHANGED" = "true" ] && [ "$RUNNER_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy APK and CtrlProxy iOS runner SHA256" >> "$GITHUB_OUTPUT"
+          elif [ "$IPA_CHANGED" = "true" ] && [ "$RUNNER_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy iOS IPA and iOS runner SHA256" >> "$GITHUB_OUTPUT"
           elif [ "$APK_CHANGED" = "true" ]; then
-            echo "title=chore: update CtrlProxy APK SHA256" >> $GITHUB_OUTPUT
+            echo "title=chore: update CtrlProxy APK SHA256" >> "$GITHUB_OUTPUT"
+          elif [ "$RUNNER_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy iOS runner SHA256" >> "$GITHUB_OUTPUT"
           else
-            echo "title=chore: update CtrlProxy iOS IPA SHA256" >> $GITHUB_OUTPUT
+            echo "title=chore: update CtrlProxy iOS IPA SHA256" >> "$GITHUB_OUTPUT"
           fi
 
       - name: "Create PR for SHA256 update"
@@ -154,6 +163,7 @@ jobs:
 
             APK: ${{ steps.current.outputs.apk_sha256 || '(empty)' }} -> ${{ needs.build-control-proxy-apk.outputs.sha256 }}${{ steps.check.outputs.apk_changed == 'true' && ' (changed)' || ' (unchanged)' }}
             IPA: ${{ steps.current.outputs.ipa_sha256 || '(empty)' }} -> ${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}${{ steps.check.outputs.ipa_changed == 'true' && ' (changed)' || ' (unchanged)' }}
+            iOS Runner: ${{ steps.current.outputs.runner_sha256 || '(empty)' }} -> ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}${{ steps.check.outputs.runner_changed == 'true' && ' (changed)' || ' (unchanged)' }}
           title: ${{ steps.pr-title.outputs.title }}
           body: |
             ## Automated Checksum Update
@@ -164,6 +174,7 @@ jobs:
             |----------|----------|-----|---------|
             | **APK** | `${{ steps.current.outputs.apk_sha256 || '(empty)' }}` | `${{ needs.build-control-proxy-apk.outputs.sha256 }}` | ${{ steps.check.outputs.apk_changed == 'true' && '✅ Yes' || 'No' }} |
             | **IPA** | `${{ steps.current.outputs.ipa_sha256 || '(empty)' }}` | `${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}` | ${{ steps.check.outputs.ipa_changed == 'true' && '✅ Yes' || 'No' }} |
+            | **iOS Runner** | `${{ steps.current.outputs.runner_sha256 || '(empty)' }}` | `${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}` | ${{ steps.check.outputs.runner_changed == 'true' && '✅ Yes' || 'No' }} |
 
             ### Why did this happen?
 

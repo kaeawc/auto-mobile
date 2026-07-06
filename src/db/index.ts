@@ -2,6 +2,7 @@
 export {
   getDatabase,
   closeDatabase,
+  awaitInFlightMigrations,
   getDatabasePath,
   ensureMigrations,
   getMigrationsError,

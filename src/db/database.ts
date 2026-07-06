@@ -20,6 +20,8 @@ import {
   isMissingMigrationDependencyError,
 } from "./migrationDependencyIntegrity";
 import { resetDbWriteBarrier } from "./dbWriteBarrier";
+import type { Timer } from "../utils/SystemTimer";
+import { defaultTimer } from "../utils/SystemTimer";
 
 type BunDatabaseConstructor = typeof import("bun:sqlite").Database;
 type BunDatabase = import("bun:sqlite").Database;
@@ -554,6 +556,72 @@ export function getMigrationsPromiseForTest(): Promise<void> | null {
 function resetDbLifecycleState(): void {
   lifecycle.reset();
   resetDbWriteBarrier();
+}
+
+/**
+ * Await any in-flight startup migration (the detached, resolve-never-reject
+ * `.then` chain built in {@link ensureMigrationsStarted}) before the daemon tears
+ * down the app connection, bounded by `timeoutMs`.
+ *
+ * `getDatabase()` kicks `startMigrations()` off on a SEPARATE, detached
+ * `migrationDb` connection. `closeDatabase()` only destroys the app connection and
+ * bumps the generation fence so the detached success/failure handler no-ops — it
+ * never awaits that connection's own writes/checkpoint settling. In steady-state
+ * shutdown this is moot: startup already awaited `ensureMigrations()` before the
+ * daemon served traffic, so migrations are long settled. The one reachable window
+ * is a SIGTERM arriving mid cold-start migration, where the still-open
+ * `migrationDb` connection's writes contend with the closing app connection —
+ * the exact WAL contention #3040 removed from the test, which on Windows can
+ * stall shutdown on `busy_timeout` (issue #3044).
+ *
+ * Calling this before `closeDatabase()` in the daemon shutdown path lets the
+ * migration connection finish (and `startMigrations()` destroy it) first. The
+ * underlying promise never rejects (a failed migration caches into
+ * `migrationsError`), so this never throws; a wedged migration cannot itself hang
+ * shutdown — the timeout wins and shutdown proceeds anyway. No-ops when no run is
+ * in flight.
+ *
+ * @returns true if the migration settled within the budget (or none was in
+ *   flight), false if the timeout won.
+ */
+export async function awaitInFlightMigrations(
+  timeoutMs: number,
+  timer: Timer = defaultTimer
+): Promise<boolean> {
+  return awaitPromiseBounded(lifecycle.migrationsPromise, timeoutMs, timer);
+}
+
+/**
+ * Race a resolve-never-reject promise against a bounded timeout, returning true if
+ * it settled first (or was already null) and false if the timeout won. Extracted
+ * from {@link awaitInFlightMigrations} so the timeout branch is unit-testable with
+ * a caller-supplied in-flight promise + {@link Timer} fake, without having to force
+ * a real cold-start migration to block (issue #3044). The bound timer is always
+ * cleared, so a settled promise leaves no dangling timeout.
+ */
+export async function awaitPromiseBounded(
+  inFlight: Promise<void> | null,
+  timeoutMs: number,
+  timer: Timer = defaultTimer
+): Promise<boolean> {
+  if (!inFlight) {
+    return true;
+  }
+
+  let handle: NodeJS.Timeout | undefined;
+  const timeout = new Promise<boolean>(resolve => {
+    handle = timer.setTimeout(() => resolve(false), timeoutMs);
+  });
+
+  try {
+    // `inFlight` is resolve-never-reject by construction (ensureMigrationsStarted),
+    // so this race never rejects.
+    return await Promise.race([inFlight.then(() => true), timeout]);
+  } finally {
+    if (handle !== undefined) {
+      timer.clearTimeout(handle);
+    }
+  }
 }
 
 /**

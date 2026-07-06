@@ -1,0 +1,474 @@
+{
+  "$comment": [
+    "iOS control-proxy request wire snapshots (issue #2954). One JSON snapshot per command x payload shape",
+    "the TS client can put on the WebSocket wire to the Swift CtrlProxy runner.",
+    "Guarded from BOTH sides:",
+    "  - test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts captures each snapshot LIVE from the",
+    "    real TS builder and asserts deep equality with this file (requestId normalized to a placeholder).",
+    "  - ios/control-proxy/Tests/CtrlProxyTests/RequestSnapshotWireParityTests.swift decodes each snapshot",
+    "    through the real WebSocketRequest wire path and asserts every field lands on a same-named property",
+    "    of the typed Swift payload struct with the same value.",
+    "Do not edit by hand. Regenerate with:",
+    "  AUTOMOBILE_UPDATE_IOS_WIRE_SNAPSHOTS=1 bun test test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts",
+    "then re-run the Swift suite (cd ios/control-proxy && swift test)."
+  ],
+  "snapshots": [
+    {
+      "name": "request_hierarchy",
+      "builder": "CtrlProxyHierarchy.requestHierarchySync (disableAllFiltering=true)",
+      "wire": {
+        "type": "request_hierarchy",
+        "requestId": "fixture-request-id",
+        "disableAllFiltering": true
+      }
+    },
+    {
+      "name": "request_hierarchy_if_stale",
+      "builder": "CtrlProxyHierarchy.requestHierarchySync (disableAllFiltering=false)",
+      "wire": {
+        "type": "request_hierarchy_if_stale",
+        "requestId": "fixture-request-id",
+        "disableAllFiltering": false
+      }
+    },
+    {
+      "name": "request_screenshot",
+      "builder": "CtrlProxyScreenshot.requestScreenshot",
+      "wire": {
+        "type": "request_screenshot",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "request_tap_coordinates",
+      "builder": "SharedGestureDelegate.requestTapCoordinates (via CtrlProxyGestures, roundCoordinates=false)",
+      "wire": {
+        "type": "request_tap_coordinates",
+        "requestId": "fixture-request-id",
+        "x": 120.5,
+        "y": 240.25,
+        "duration": 35
+      }
+    },
+    {
+      "name": "request_swipe",
+      "builder": "SharedGestureDelegate.requestSwipe (via CtrlProxyGestures)",
+      "wire": {
+        "type": "request_swipe",
+        "requestId": "fixture-request-id",
+        "x1": 10.5,
+        "y1": 20.25,
+        "x2": 300.75,
+        "y2": 401.5,
+        "duration": 275
+      }
+    },
+    {
+      "name": "request_drag",
+      "builder": "SharedGestureDelegate.requestDrag (via CtrlProxyGestures)",
+      "wire": {
+        "type": "request_drag",
+        "requestId": "fixture-request-id",
+        "x1": 11.5,
+        "y1": 22.25,
+        "x2": 33.75,
+        "y2": 44.5,
+        "pressDurationMs": 350,
+        "dragDurationMs": 900,
+        "holdDurationMs": 150
+      }
+    },
+    {
+      "name": "request_pinch",
+      "builder": "SharedGestureDelegate.requestPinch (via CtrlProxyGestures)",
+      "wire": {
+        "type": "request_pinch",
+        "requestId": "fixture-request-id",
+        "centerX": 160.5,
+        "centerY": 320.25,
+        "distanceStart": 80.5,
+        "distanceEnd": 200.75,
+        "rotationDegrees": 45.5,
+        "duration": 275
+      }
+    },
+    {
+      "name": "request_multi_finger_swipe",
+      "builder": "CtrlProxyGestures.requestMultiFingerSwipe",
+      "wire": {
+        "type": "request_multi_finger_swipe",
+        "requestId": "fixture-request-id",
+        "x1": 15.5,
+        "y1": 25.25,
+        "x2": 35.75,
+        "y2": 46.5,
+        "fingerCount": 3,
+        "duration": 450,
+        "offset": 24.5
+      }
+    },
+    {
+      "name": "request_set_text",
+      "builder": "SharedTextDelegate.requestSetText (via CtrlProxyText)",
+      "wire": {
+        "type": "request_set_text",
+        "requestId": "fixture-request-id",
+        "text": "hello world",
+        "resourceId": "login_username_field"
+      }
+    },
+    {
+      "name": "request_clear_text",
+      "builder": "CtrlProxyText.requestClearText",
+      "wire": {
+        "type": "request_clear_text",
+        "requestId": "fixture-request-id",
+        "resourceId": "login_username_field"
+      }
+    },
+    {
+      "name": "request_ime_action",
+      "builder": "SharedTextDelegate.requestImeAction (via CtrlProxyText)",
+      "wire": {
+        "type": "request_ime_action",
+        "requestId": "fixture-request-id",
+        "action": "done"
+      }
+    },
+    {
+      "name": "request_select_all",
+      "builder": "SharedTextDelegate.requestSelectAll (via CtrlProxyText)",
+      "wire": {
+        "type": "request_select_all",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "request_keyboard",
+      "builder": "CtrlProxyKeyboard.requestKeyboard",
+      "wire": {
+        "type": "request_keyboard",
+        "requestId": "fixture-request-id",
+        "action": "open"
+      }
+    },
+    {
+      "name": "request_press_button",
+      "builder": "CtrlProxyNavigation.requestPressButton",
+      "wire": {
+        "type": "request_press_button",
+        "requestId": "fixture-request-id",
+        "action": "volume_up"
+      }
+    },
+    {
+      "name": "request_press_home",
+      "builder": "CtrlProxyNavigation.requestPressHome",
+      "wire": {
+        "type": "request_press_home",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "request_press_back",
+      "builder": "CtrlProxyNavigation.requestPressBack",
+      "wire": {
+        "type": "request_press_back",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "request_shake",
+      "builder": "CtrlProxyNavigation.requestShake",
+      "wire": {
+        "type": "request_shake",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "request_recent_apps",
+      "builder": "CtrlProxyNavigation.requestRecentApps",
+      "wire": {
+        "type": "request_recent_apps",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "request_action",
+      "builder": "CtrlProxyVoiceOver.requestAction (resourceId + label lookup)",
+      "wire": {
+        "type": "request_action",
+        "requestId": "fixture-request-id",
+        "action": "scroll_forward",
+        "resourceId": "primary_table",
+        "label": "Primary Table"
+      }
+    },
+    {
+      "name": "request_action_voiceover_activate",
+      "builder": "CtrlProxyVoiceOver.requestVoiceOverActivate (label-only lookup)",
+      "wire": {
+        "type": "request_action",
+        "requestId": "fixture-request-id",
+        "label": "Submit",
+        "action": "activate"
+      }
+    },
+    {
+      "name": "request_action_null_lookup",
+      "builder": "CtrlProxyVoiceOver.requestAction (explicit-null resourceId/label)",
+      "wire": {
+        "type": "request_action",
+        "requestId": "fixture-request-id",
+        "action": "scroll_backward",
+        "resourceId": null,
+        "label": null
+      }
+    },
+    {
+      "name": "request_launch_app",
+      "builder": "CtrlProxyNavigation.requestLaunchApp",
+      "wire": {
+        "type": "request_launch_app",
+        "requestId": "fixture-request-id",
+        "bundleId": "com.example.app",
+        "coldBoot": true
+      }
+    },
+    {
+      "name": "request_rotate",
+      "builder": "CtrlProxyNavigation.requestRotate",
+      "wire": {
+        "type": "request_rotate",
+        "requestId": "fixture-request-id",
+        "orientation": "landscape"
+      }
+    },
+    {
+      "name": "request_clipboard",
+      "builder": "CtrlProxyClipboard.requestClipboard",
+      "wire": {
+        "type": "request_clipboard",
+        "requestId": "fixture-request-id",
+        "action": "copy",
+        "text": "clipboard text"
+      }
+    },
+    {
+      "name": "add_highlight_box",
+      "builder": "CtrlProxyHighlights.requestAddHighlight (box shape; bounds are rounded by the builder)",
+      "wire": {
+        "type": "add_highlight",
+        "requestId": "fixture-request-id",
+        "id": "hl-1",
+        "shape": {
+          "type": "box",
+          "bounds": {
+            "x": 10,
+            "y": 21,
+            "width": 100,
+            "height": 51,
+            "sourceWidth": 390,
+            "sourceHeight": 844
+          },
+          "style": {
+            "strokeColor": "#FF0000",
+            "strokeWidth": 3.5,
+            "dashPattern": [
+              4,
+              2
+            ],
+            "smoothing": "bezier",
+            "tension": 0.5,
+            "capStyle": "round",
+            "joinStyle": "miter"
+          }
+        }
+      }
+    },
+    {
+      "name": "add_highlight_path",
+      "builder": "CtrlProxyHighlights.requestAddHighlight (path shape with points)",
+      "wire": {
+        "type": "add_highlight",
+        "requestId": "fixture-request-id",
+        "id": "hl-2",
+        "shape": {
+          "type": "path",
+          "points": [
+            {
+              "x": 1.5,
+              "y": 2.5
+            },
+            {
+              "x": 3.5,
+              "y": 4.5
+            }
+          ],
+          "bounds": {
+            "x": 1,
+            "y": 2,
+            "width": 10,
+            "height": 12
+          }
+        }
+      }
+    },
+    {
+      "name": "request_reset_permissions",
+      "builder": "CtrlProxyPermissions.requestResetPermissions",
+      "wire": {
+        "type": "request_reset_permissions",
+        "requestId": "fixture-request-id",
+        "bundleId": "com.example.app",
+        "permissions": [
+          "camera",
+          "photos"
+        ]
+      }
+    },
+    {
+      "name": "get_voiceover_state",
+      "builder": "CtrlProxyVoiceOver.requestVoiceOverState",
+      "wire": {
+        "type": "get_voiceover_state",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "list_preference_files",
+      "builder": "CtrlProxyStorage.listPreferenceFiles",
+      "wire": {
+        "type": "list_preference_files",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "get_preferences",
+      "builder": "CtrlProxyStorage.getPreferenceEntries",
+      "wire": {
+        "type": "get_preferences",
+        "requestId": "fixture-request-id",
+        "fileName": "Standard"
+      }
+    },
+    {
+      "name": "get_preference",
+      "builder": "CtrlProxyStorage.getPreference",
+      "wire": {
+        "type": "get_preference",
+        "requestId": "fixture-request-id",
+        "fileName": "Standard",
+        "key": "launch_count"
+      }
+    },
+    {
+      "name": "set_preference",
+      "builder": "CtrlProxyStorage.setPreference",
+      "wire": {
+        "type": "set_preference",
+        "requestId": "fixture-request-id",
+        "fileName": "Standard",
+        "key": "launch_count",
+        "value": "42",
+        "valueType": "INT"
+      }
+    },
+    {
+      "name": "remove_preference",
+      "builder": "CtrlProxyStorage.removePreference",
+      "wire": {
+        "type": "remove_preference",
+        "requestId": "fixture-request-id",
+        "fileName": "Standard",
+        "key": "launch_count"
+      }
+    },
+    {
+      "name": "clear_preferences",
+      "builder": "CtrlProxyStorage.clearPreferenceStore",
+      "wire": {
+        "type": "clear_preferences",
+        "requestId": "fixture-request-id",
+        "fileName": "Standard"
+      }
+    },
+    {
+      "name": "execute_sql",
+      "builder": "CtrlProxyDatabase.executeSQL",
+      "wire": {
+        "type": "execute_sql",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.app",
+        "databasePath": "/Documents/app.sqlite",
+        "query": "SELECT * FROM users"
+      }
+    },
+    {
+      "name": "list_databases",
+      "builder": "CtrlProxyDatabase.listDatabases",
+      "wire": {
+        "type": "list_databases",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.app"
+      }
+    },
+    {
+      "name": "list_tables",
+      "builder": "CtrlProxyDatabase.listTables",
+      "wire": {
+        "type": "list_tables",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.app",
+        "databasePath": "/Documents/app.sqlite"
+      }
+    },
+    {
+      "name": "get_table_data",
+      "builder": "CtrlProxyDatabase.getTableData",
+      "wire": {
+        "type": "get_table_data",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.app",
+        "databasePath": "/Documents/app.sqlite",
+        "table": "users",
+        "limit": 25,
+        "offset": 10
+      }
+    },
+    {
+      "name": "get_table_structure",
+      "builder": "CtrlProxyDatabase.getTableStructure",
+      "wire": {
+        "type": "get_table_structure",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.app",
+        "databasePath": "/Documents/app.sqlite",
+        "table": "users"
+      }
+    },
+    {
+      "name": "set_network_mock_rules",
+      "builder": "IOSCtrlProxyClient.syncNetworkMockRulesToDevice (envelope transcribed; rules built by buildNetworkMockRules)",
+      "wire": {
+        "type": "set_network_mock_rules",
+        "rules": [
+          {
+            "mockId": "mock-1",
+            "host": "api.example.com",
+            "path": "/v1/users",
+            "method": "GET",
+            "limit": 3,
+            "remaining": 3,
+            "statusCode": 200,
+            "responseHeaders": {
+              "X-Mocked": "true"
+            },
+            "responseBody": "{\"users\":[]}",
+            "contentType": "application/json"
+          }
+        ]
+      }
+    }
+  ]
+}

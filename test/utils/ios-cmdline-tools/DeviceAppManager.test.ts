@@ -675,6 +675,80 @@ describe("DeviceAppManager launch (devicectl)", () => {
     expect(result.error).toContain("Application not found");
   });
 
+  const writeDeviceDetailsJson = async (command: string, osVersion: string) => {
+    const jsonPath = parseDevicectlJsonOutputPath(command);
+    if (jsonPath) {
+      await fs.writeFile(jsonPath, JSON.stringify({
+        result: { deviceProperties: { osVersionNumber: osVersion } }
+      }), "utf-8");
+    }
+  };
+
+  test("launchApp returns an explicit 'requires iOS 17+' error on an iOS 16 device without launching", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => {
+      commands.push(command);
+      if (command.includes("device info details")) {
+        await writeDeviceDetailsJson(command, "16.7.1");
+      }
+      return makeExecResult();
+    };
+
+    const inspector = createInspector({ exec });
+    const result = await inspector.launchApp("device-udid", bundleId, { terminateExisting: true });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("requires iOS 17+");
+    expect(result.error).toContain("reports iOS 16");
+    // Version gate short-circuits before the launch shell-out.
+    expect(commands.some(c => c.includes("device process launch"))).toBe(false);
+  });
+
+  test("launchApp proceeds when the iOS version cannot be resolved (unknown => not blocked)", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => {
+      commands.push(command);
+      // No details JSON written => version resolves to null => must not gate.
+      if (command.includes("device process launch")) {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(jsonPath, JSON.stringify({ result: { process: { processIdentifier: 77 } } }), "utf-8");
+        }
+      }
+      return makeExecResult();
+    };
+
+    const inspector = createInspector({ exec });
+    const result = await inspector.launchApp("device-udid", bundleId);
+
+    expect(result.success).toBe(true);
+    expect(result.pid).toBe(77);
+  });
+
+  test("launchApp proceeds on iOS 17 (boundary is satisfied, not gated)", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => {
+      commands.push(command);
+      if (command.includes("device info details")) {
+        await writeDeviceDetailsJson(command, "17.0");
+      }
+      if (command.includes("device process launch")) {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(jsonPath, JSON.stringify({ result: { process: { processIdentifier: 88 } } }), "utf-8");
+        }
+      }
+      return makeExecResult();
+    };
+
+    const inspector = createInspector({ exec });
+    const result = await inspector.launchApp("device-udid", bundleId);
+
+    expect(result.success).toBe(true);
+    expect(result.pid).toBe(88);
+    expect(commands.some(c => c.includes("device process launch"))).toBe(true);
+  });
+
   test("launchApp returns an explicit macOS error on non-darwin without shelling out", async () => {
     const commands: string[] = [];
     const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
@@ -948,6 +1022,65 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     expect(result).toEqual({ wasInstalled: false, wasRunning: false });
     expect(commands.some(c => c.includes("device info processes"))).toBe(false);
     expect(commands.some(c => c.includes("device process terminate"))).toBe(false);
+  });
+
+  const writeTerminateDetailsJson = async (command: string, osVersion: string) => {
+    const jsonPath = parseDevicectlJsonOutputPath(command);
+    if (jsonPath) {
+      await fs.writeFile(jsonPath, JSON.stringify({
+        result: { deviceProperties: { osVersionNumber: osVersion } }
+      }), "utf-8");
+    }
+  };
+
+  test("throws an explicit 'requires iOS 17+' ActionableError on an iOS 16 device without terminating", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => {
+      commands.push(command);
+      if (command.includes("device info details")) {
+        await writeTerminateDetailsJson(command, "16.4");
+      }
+      return makeExecResult();
+    };
+
+    const inspector = createInspector({ exec });
+
+    const thrown = await inspector.terminateApp("device-udid", bundleId).then(
+      () => { throw new Error("expected terminateApp to reject"); },
+      (e: unknown) => e
+    );
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect((thrown as Error).message).toContain("requires iOS 17+");
+    expect((thrown as Error).message).toContain("reports iOS 16");
+    // Version gate short-circuits before any bundle/process resolution or terminate.
+    expect(commands.some(c => c.includes("device info apps"))).toBe(false);
+    expect(commands.some(c => c.includes("device process terminate"))).toBe(false);
+  });
+
+  test("proceeds to terminate when the iOS version cannot be resolved (unknown => not blocked)", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => {
+      commands.push(command);
+      // No details JSON written => version resolves to null => must not gate.
+      if (command.includes("device info apps")) {
+        await writeAppsJson(command, true);
+      }
+      if (command.includes("device info processes")) {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(jsonPath, JSON.stringify({
+            result: { runningProcesses: [{ processIdentifier: 4321, executable: `${bundlePath}/CtrlProxyApp` }] }
+          }), "utf-8");
+        }
+      }
+      return makeExecResult();
+    };
+
+    const inspector = createInspector({ exec });
+    const result = await inspector.terminateApp("device-udid", bundleId);
+
+    expect(result).toEqual({ wasInstalled: true, wasRunning: true });
+    expect(commands.some(c => c.includes("device process terminate"))).toBe(true);
   });
 
   test("throws a clear macOS error on non-darwin without shelling out", async () => {

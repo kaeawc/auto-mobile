@@ -5,6 +5,7 @@ import type { ExecResult } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { hashAppBundle } from "./AppBundleHasher";
 import { isProcessAlreadyGoneError } from "./iosProcessErrors";
+import { iosMajorVersionFromDevicectlDetails } from "./iosVersion";
 import { logger } from "../logger";
 import { isRunningInDocker } from "../dockerEnv";
 import { getDeviceAppBundleHash, installDeviceApp, isHostControlAvailable, shouldUseHostControl, uninstallDeviceApp } from "../hostControlClient";
@@ -68,6 +69,20 @@ const defaultDependencies: DeviceAppManagerDependencies = {
 };
 
 const quoteShell = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+
+/**
+ * Lowest major iOS version whose physical-device process management
+ * (`devicectl device process launch`/`terminate`) is supported. devicectl gained
+ * process management with iOS 17 / Xcode 15; on iOS ≤16 devices the underlying
+ * call fails with a generic tool error, so callers gate on this and surface an
+ * explicit, version-specific message instead. See issue #3056.
+ */
+const MIN_DEVICECTL_PROCESS_IOS_MAJOR = 17;
+
+/** Actionable "requires iOS 17+" message for a physical-device `verb` on an iOS ≤16 device. */
+const requiresIos17Message = (verb: string, bundleId: string, major: number): string =>
+  `${verb} ${bundleId} on a physical iOS device requires iOS ${MIN_DEVICECTL_PROCESS_IOS_MAJOR}+ ` +
+  `(devicectl process management); this device reports iOS ${major}.`;
 
 const parseJsonOutputPath = (command: string): string | null => {
   const match = command.match(/--json-output\s+([^\s]+)/);
@@ -739,6 +754,14 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       return { success: false, error: "Physical device app launch requires macOS" };
     }
 
+    // iOS ≤16 devices lack devicectl process management (#3056): detect the
+    // version first and return the explicit "requires iOS 17+" error rather than
+    // a generic launch failure. Unknown versions (null) proceed to the real call.
+    const major = await this.resolveDeviceMajorIosVersion(deviceUdid);
+    if (major !== null && major < MIN_DEVICECTL_PROCESS_IOS_MAJOR) {
+      return { success: false, error: requiresIos17Message("Launching", bundleId, major) };
+    }
+
     const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-launch-"));
     const jsonPath = join(tempDir, "launch.json");
     try {
@@ -801,6 +824,14 @@ export class DeviceAppManager implements DeviceUrlLauncher {
 
     if (this.deps.platform() !== "darwin") {
       throw new ActionableError("Physical iOS device app termination requires macOS");
+    }
+
+    // iOS ≤16 devices lack devicectl process management (#3056): detect the
+    // version first and throw the explicit "requires iOS 17+" error rather than a
+    // generic devicectl terminate failure. Unknown versions (null) proceed.
+    const major = await this.resolveDeviceMajorIosVersion(deviceUdid);
+    if (major !== null && major < MIN_DEVICECTL_PROCESS_IOS_MAJOR) {
+      throw new ActionableError(requiresIos17Message("Terminating", bundleId, major));
     }
 
     const bundlePath = await this.resolveInstalledBundlePathOnDevice(deviceUdid, bundleId);
@@ -915,6 +946,44 @@ export class DeviceAppManager implements DeviceUrlLauncher {
 
       const raw = await this.deps.readFile(jsonPath);
       return findRunningProcessPid(JSON.parse(raw), bundlePath);
+    } finally {
+      await this.deps.rm(tempDir);
+    }
+  }
+
+  /**
+   * Best-effort resolve the device's major iOS version via
+   * `devicectl device info details --json-output`. Returns null when the version
+   * can't be determined (devicectl failure, unrecognized JSON envelope) so the
+   * version gate stays advisory: an unknown version proceeds to the real call
+   * rather than blocking a possibly-supported device. macOS-only (callers guard
+   * the platform before invoking this).
+   */
+  private async resolveDeviceMajorIosVersion(deviceUdid: string): Promise<number | null> {
+    const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
+    const jsonPath = join(tempDir, "details.json");
+    try {
+      const command = [
+        "xcrun",
+        "devicectl",
+        "device",
+        "info",
+        "details",
+        "--device", deviceUdid,
+        "--json-output", quoteShell(jsonPath),
+        "--quiet"
+      ].join(" ");
+      await this.deps.exec(command);
+      const raw = await this.deps.readFile(jsonPath);
+      return iosMajorVersionFromDevicectlDetails(raw);
+    } catch (error) {
+      // Version detection is a best-effort probe: a failure here must not block a
+      // possibly-supported device, so log-and-continue with an "unknown" (null)
+      // version. The subsequent real devicectl call still surfaces any true error.
+      this.deps.logger.debug(
+        `[DeviceAppManager] Could not resolve iOS version for ${deviceUdid}: ${getErrorMessage(error)}`
+      );
+      return null;
     } finally {
       await this.deps.rm(tempDir);
     }

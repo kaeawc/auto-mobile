@@ -53,3 +53,65 @@ export function iosMajorVersionFromSimctlListDevices(json: string, udid: string)
   }
   return null;
 }
+
+/**
+ * Resolve the major iOS version for a physical device from the JSON emitted by
+ * `devicectl device info details --json-output`. Apple does not formally document
+ * the envelope, so we deep-walk it and accept the several field spellings
+ * observed across Xcode builds: `osVersionNumber` (the plain "18.6" string) is
+ * preferred, then `osVersion`/`productVersion`/`operatingSystemVersion`. Returns
+ * `null` when nothing parses, so callers treat the version as "unknown" (and must
+ * NOT block on an unresolved version) rather than guessing.
+ */
+export function iosMajorVersionFromDevicectlDetails(json: string): number | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (error) {
+    // Malformed/empty devicectl output is a best-effort probe failure: the caller
+    // treats an unresolved version as "unknown" and proceeds without a version gate.
+    logger.debug(`iosMajorVersionFromDevicectlDetails: could not parse devicectl JSON: ${error}`);
+    return null;
+  }
+
+  const versionFields = [
+    "osVersionNumber",
+    "osVersion",
+    "productVersion",
+    "operatingSystemVersion"
+  ];
+
+  const walk = (node: unknown): number | null => {
+    if (!node || typeof node !== "object") {
+      return null;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = walk(item);
+        if (found !== null) {
+          return found;
+        }
+      }
+      return null;
+    }
+    const record = node as Record<string, unknown>;
+    for (const field of versionFields) {
+      const value = record[field];
+      if (typeof value === "string") {
+        const major = parseIosMajorVersion(value);
+        if (major !== null) {
+          return major;
+        }
+      }
+    }
+    for (const value of Object.values(record)) {
+      const found = walk(value);
+      if (found !== null) {
+        return found;
+      }
+    }
+    return null;
+  };
+
+  return walk(parsed);
+}

@@ -48,6 +48,79 @@ shrink-only allowlist). The guard test `test/db/migrationFilenameOrdering.test.t
 scans `src/db/migrations/` and fails on any malformed filename or any **new** prefix
 collision.
 
+## Corrupted-migration recovery
+
+When `migrateToLatest()` throws `corrupted migrations` (an unexecuted migration
+sorts before an already-executed one — see the ordering convention above),
+`src/db/migrator.ts` can attempt an automatic, self-healing recovery instead of
+wedging startup. Recovery is gated by the `AUTOMOBILE_MIGRATION_RECOVERY`
+environment variable (legacy alias: `AUTO_MOBILE_MIGRATION_RECOVERY`).
+
+### `AUTOMOBILE_MIGRATION_RECOVERY` semantics
+
+The gate is **two-tier** — a value can enable the safe rebuild while still
+refusing the destructive reset. This is deliberate: `true` should not silently
+drop a user's data.
+
+| Value | Safe history rebuild | Destructive reset of a **populated** DB |
+| --- | --- | --- |
+| _(unset)_ | ✅ enabled (default) | ❌ refused |
+| `true`, `yes`, `on`, or any other non-falsy value | ✅ enabled | ❌ refused |
+| `1` | ✅ enabled | ✅ allowed (timestamped backup written first) |
+| `0`, `false`, `no`, `off` | ❌ disabled | ❌ refused |
+
+- **Safe rebuild is enabled by default** and by any non-falsy value. The
+  destructive reset requires an **explicit `1`** — merely non-falsy is not
+  enough. So `AUTOMOBILE_MIGRATION_RECOVERY=true` keeps the safe rebuild on but
+  **refuses** to drop a populated database; only `=1` opts into the destructive
+  reset.
+- Values are trimmed and compared case-insensitively; the disabled set is
+  `{0, false, no, off}`.
+
+### Recovery flow
+
+```mermaid
+flowchart TD
+    A["migrateToLatest() throws<br/>'corrupted migrations'"] --> B{"recovery enabled?<br/>(value not in {0,false,no,off})"};
+    B -->|"no"| Z["Log guidance, rethrow<br/>(startup fails)"];
+    B -->|"yes"| C["Snapshot original migration history"];
+    C --> D["Rebuild kysely_migration table<br/>to match on-disk migrations<br/>(prune missing entries)"];
+    D --> E["Re-run migrateToLatest()"];
+    E -->|"success"| OK["✅ Migrations complete"];
+    E -->|"still failing"| F{"any user table populated?"};
+    F -->|"no"| DROP["Drop all tables, replay from scratch"];
+    F -->|"yes"| G["Restore original history<br/>(leave DB as found)"];
+    G --> H{"value === '1'?<br/>(destructive reset opted in)"};
+    H -->|"no"| REFUSE["Refuse: throw ActionableError<br/>data left untouched"];
+    H -->|"yes"| BK{"backup mechanism available?"};
+    BK -->|"no"| REFUSE2["Refuse: no backup to preserve data"];
+    BK -->|"yes"| BACKUP["Write timestamped backup"];
+    BACKUP --> DROP;
+    DROP --> R["Re-run migrateToLatest()"];
+    classDef decision fill:#CC2200,stroke-width:0px,color:white;
+    classDef logic fill:#525FE1,stroke-width:0px,color:white;
+    classDef result stroke-width:0px;
+    class A,Z,OK,REFUSE,REFUSE2 result;
+    class B,F,H,BK decision;
+    class C,D,E,G,DROP,BACKUP,R logic;
+```
+
+Key properties:
+
+- **Safe first.** The rebuild only rewrites the `kysely_migration` bookkeeping
+  table to match the migrations actually on disk; user data is not touched. Most
+  corruption from a pruned/renamed migration is resolved here.
+- **Data is never dropped implicitly.** If the rebuild is insufficient and the
+  database has populated user tables, the original migration history is restored
+  first, so a refusal leaves the database exactly as it was found — no
+  post-refusal wedge once the operator fixes the migration branch.
+- **Destructive reset is doubly guarded.** It runs only when
+  `AUTOMOBILE_MIGRATION_RECOVERY=1` **and** a backup mechanism is available; the
+  timestamped backup is written before any table is dropped.
+- **Preferred fix.** Recovery is a safety net, not a substitute for fixing the
+  underlying migration ordering/name. The refusal message points the operator at
+  the real fix (correct the out-of-order or renamed migration).
+
 ## Resolution rules
 
 The migration directory is resolved in this order:

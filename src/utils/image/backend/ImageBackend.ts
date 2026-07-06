@@ -4,10 +4,9 @@
  * `ImageTransformer` records the caller's resize/crop/encode requests into a
  * declarative `ImagePipeline`, then hands the source buffer + pipeline to an
  * `ImageBackend` for execution. This decouples the fluent transform API from
- * the concrete decoder/encoder (jimp today; sharp + cwebp later — see the
- * "Sharp + CWebP" milestone), so later issues can swap backends without
- * touching call sites. Behavior-preserving: the jimp backend reproduces the
- * exact operations the transformer used to run inline.
+ * the concrete decoder/encoder (sharp on macOS/Linux; jimp on Windows until
+ * the cwebp follow-up lands), so later issues can swap backends without
+ * touching call sites.
  */
 
 /** Basic image metadata surfaced by every backend. */
@@ -43,8 +42,8 @@ export type ImageOperation =
 /**
  * The requested output encoding. `null` (on the pipeline) means "re-encode in
  * the decoded input format", matching the transformer's historical fallback.
- * `options` carries backend-agnostic encoder flags (e.g. the libwebp-style
- * numeric flags the jimp wasm-webp encoder expects).
+ * `options` carries backend-agnostic encoder intent (e.g. quality/lossless
+ * booleans). Concrete backends translate that intent to codec-specific flags.
  */
 export interface ImageEncoding {
   mime: "image/png" | "image/webp";
@@ -67,7 +66,8 @@ export interface RawImage {
 
 /**
  * Executes declarative image pipelines and exposes metadata / raw pixels.
- * Implemented by `JimpBackend` (production) and `FakeImageBackend` (tests).
+ * Implemented by production backends (`SharpBackend`, `JimpBackend`) and
+ * `FakeImageBackend` for tests.
  */
 export interface ImageBackend {
   /** Decode `source`, apply `pipeline.operations`, encode per `pipeline.encoding`. */

@@ -24,9 +24,9 @@ const result = await Bun.build({
   outdir: "./dist/src",
   target: "bun",
   format: "esm",
-  // Keep the jimp ecosystem external so @jimp/wasm-webp resolves its WASM
-  // binary from node_modules at runtime instead of being inlined by the bundler
-  external: ["jimp", "@jimp/*"],
+  // Keep native/asset-backed image dependencies external so sharp's @img
+  // packages and @jimp/wasm-webp resolve their runtime assets from node_modules.
+  external: ["sharp", "@img/sharp-*", "jimp", "@jimp/*"],
   sourcemap: "external",
   minify: true,
   splitting: false,

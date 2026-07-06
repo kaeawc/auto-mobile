@@ -2,31 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { PerceptualHasher } from "../../../src/utils/screenshot/PerceptualHasher";
 import { FakeImageBackend } from "../../fakes/FakeImageBackend";
 
-// Compute the hash the way the pre-seam PerceptualHasher did — via the real jimp
-// resize(8x8, NEAREST)+greyscale+red-channel pipeline — so the backend-routed
-// implementation can be pinned byte-for-byte against jimp (no silent drift).
-//
-// TODO(#3010): this jimp-golden pin is intentional ONLY for the JimpBackend
-// phase. When the sharp backend lands, its resize kernel produces different
-// pHash values by design — retire this byte-identity assertion and replace it
-// with backend-relative checks (A vs A′ similarity, A vs B distinctness).
-async function jimpGoldenHash(buffer: Buffer): Promise<string> {
-  const { Jimp, ResizeStrategy } = await import("jimp");
-  const image = await Jimp.fromBuffer(buffer);
-  image.resize({ w: 8, h: 8, mode: ResizeStrategy.NEAREST_NEIGHBOR }).greyscale();
-  const data = image.bitmap.data;
-  let sum = 0;
-  for (let i = 0; i < 64; i++) {
-    sum += data[i * 4];
-  }
-  const avg = sum / 64;
-  let hash = "";
-  for (let i = 0; i < 64; i++) {
-    hash += data[i * 4] > avg ? "1" : "0";
-  }
-  return hash;
-}
-
 async function gradientPng(width = 24, height = 24): Promise<Buffer> {
   const { Jimp, rgbaToInt } = await import("jimp");
   const image = new Jimp({ width, height, color: 0x000000ff });
@@ -124,16 +99,19 @@ describe("PerceptualHasher", () => {
       expect(similarity).toBeGreaterThan(80);
     });
 
-    test("matches the jimp nearest+greyscale pipeline byte-for-byte (no drift)", async () => {
-      // Non-uniform gradient so the hash exercises both 0 and 1 bits and any
-      // downscale/greyscale rounding divergence would flip a bit.
-      const buffer = await gradientPng(24, 24);
-      const golden = await jimpGoldenHash(buffer);
+    test("backend-relative hashes keep similar images close and distinct images apart", async () => {
+      const base = await gradientPng(24, 24);
+      const similar = await gradientPng(25, 24);
+      const different = await gradientPng(24, 40);
 
-      const hash = await PerceptualHasher.generatePerceptualHash(buffer);
+      const baseHash = await PerceptualHasher.generatePerceptualHash(base);
+      const similarHash = await PerceptualHasher.generatePerceptualHash(similar);
+      const differentHash = await PerceptualHasher.generatePerceptualHash(different);
 
-      expect(hash).toBe(golden);
-      expect(hash).toMatch(/[1]/); // sanity: not an all-zero degenerate hash
+      expect(baseHash).toHaveLength(64);
+      expect(baseHash).toMatch(/[1]/);
+      expect(PerceptualHasher.getPerceptualSimilarity(baseHash, similarHash)).toBeGreaterThan(80);
+      expect(PerceptualHasher.getPerceptualSimilarity(baseHash, differentHash)).toBeLessThan(95);
     });
 
     test("routes decode through backend.rawPixels (no direct jimp dependency)", async () => {

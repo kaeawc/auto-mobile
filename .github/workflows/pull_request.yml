@@ -927,6 +927,10 @@ jobs:
           mkdir -p ci-logs
           turbo run test --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
 
+      - name: "Run Bun image runtime smoke"
+        if: env.RUN_MCP_BUILD_TEST == 'true' && matrix.os == 'macos-latest'
+        run: bun run test:image:bun
+
       - name: "Upload Build/Test Logs"
         if: env.RUN_MCP_BUILD_TEST == 'true' && (failure() || cancelled() || matrix.os == 'windows-latest')
         uses: actions/upload-artifact@v6
@@ -1033,12 +1037,8 @@ jobs:
       - name: "Run Bun MCP startup smoke"
         run: bun run test:startup:bun
 
-      # The smoke exercises @jimp/wasm-webp (Emscripten WASM). Bun's JSC Wasm
-      # OSR tier intermittently miscompiles Emscripten modules on Linux x64
-      # (oven-sh/bun#26366), surfacing as "access to a null reference
-      # (evaluating 'cppInvokerFunc.apply(...)')" in the embind glue. Disable
-      # the OSR tier for this step only; semantics are unchanged, JSC falls
-      # back to its other Wasm tiers. See issue #3189.
+      # Linux uses the sharp backend here. The OSR guard remains until the
+      # Windows cwebp follow-up removes the @jimp/wasm-webp path entirely.
       - name: "Run Bun image runtime smoke"
         env:
           BUN_JSC_useWasmOSR: "0"

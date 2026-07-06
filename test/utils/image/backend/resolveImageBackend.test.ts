@@ -1,6 +1,7 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { resolveImageBackend } from "../../../../src/utils/image/backend/resolveImageBackend";
 import { JimpBackend } from "../../../../src/utils/image/backend/JimpBackend";
+import { SharpBackend } from "../../../../src/utils/image/backend/SharpBackend";
 
 describe("resolveImageBackend", () => {
   const originalPlatform = process.platform;
@@ -11,15 +12,37 @@ describe("resolveImageBackend", () => {
     Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
   });
 
-  test("returns a JimpBackend on the current platform", () => {
-    expect(resolveImageBackend()).toBeInstanceOf(JimpBackend);
+  test("returns a backend on the current platform", () => {
+    const backend = resolveImageBackend();
+    if (process.platform === "darwin" || process.platform === "linux") {
+      expect(backend).toBeInstanceOf(SharpBackend);
+    } else {
+      expect(backend).toBeInstanceOf(JimpBackend);
+    }
   });
 
-  test("returns a JimpBackend on every platform (selection logic lands later)", () => {
-    for (const platform of ["win32", "darwin", "linux"]) {
-      Object.defineProperty(process, "platform", { value: platform, configurable: true });
-      expect(resolveImageBackend()).toBeInstanceOf(JimpBackend);
-    }
+  test("returns JimpBackend on Windows", () => {
+    expect(resolveImageBackend({ platform: "win32" })).toBeInstanceOf(JimpBackend);
+  });
+
+  test("returns SharpBackend on macOS and Linux", () => {
+    expect(resolveImageBackend({ platform: "darwin" })).toBeInstanceOf(SharpBackend);
+    expect(resolveImageBackend({ platform: "linux" })).toBeInstanceOf(SharpBackend);
+  });
+
+  test("falls back to JimpBackend behavior when sharp discovery fails", async () => {
+    const { Jimp, rgbaToInt } = await import("jimp");
+    const source = await new Jimp({ width: 2, height: 2, color: rgbaToInt(1, 2, 3, 255) })
+      .getBuffer("image/png");
+    const backend = resolveImageBackend({
+      platform: "linux",
+      sharpLoader: async () => {
+        throw new Error("sharp unavailable");
+      }
+    });
+
+    expect(backend).toBeInstanceOf(SharpBackend);
+    await expect(backend.metadata(source)).resolves.toMatchObject({ width: 2, height: 2, format: "png" });
   });
 
   test("returns a fresh instance per call", () => {

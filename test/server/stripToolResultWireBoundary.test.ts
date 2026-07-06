@@ -203,15 +203,11 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
   // ---- Real level-gate coverage (issue #3215) ----
   //
   // The logger's file/stdout writes are fire-and-forget async (each performs one
-  // real fs.stat before writing), so sink assertions flush with a bounded
-  // event-loop poll rather than a fixed sleep. This is I/O settling, not
-  // time-based logic, so FakeTimer does not apply; the loop exits on the first
-  // tick the predicate holds (typically 1-2 ticks).
-  const flushSink = async (done: () => boolean): Promise<void> => {
-    for (let i = 0; i < 200 && !done(); i++) {
-      await new Promise<void>(resolve => setImmediate(resolve));
-    }
-  };
+  // real fs.stat before writing). Rather than race that async write with a
+  // real-timer poll (which timed out under concurrent CI load and produced the
+  // intermittent `Received: []` flake tracked in #3256), we await the logger's
+  // own `flush()` barrier — it resolves once the most recent write has settled,
+  // so the sink assertion is deterministic regardless of host load.
 
   // Extract the level and structured fields of omission traces that actually
   // reached the stdout sink for the given probe tool. Anchored to the exact
@@ -244,7 +240,7 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
       // landed. info() passes the INFO gate; the omission trace must not have.
       const SENTINEL = "__sink_flush_sentinel_3215__";
       logger.info(SENTINEL);
-      await flushSink(() => stdoutSpy.mock.calls.some(args => String(args[0] ?? "").includes(SENTINEL)));
+      await logger.flush();
       expect(stdoutSpy.mock.calls.some(args => String(args[0] ?? "").includes(SENTINEL))).toBe(true);
 
       expect(sinkOmissionFields(stdoutSpy.mock.calls, NOSCHEMA_TOOL)).toEqual([]);
@@ -265,7 +261,10 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
       const { client } = fixture.getContext();
       await client.callTool({ name: NOSCHEMA_TOOL, arguments: {} });
 
-      await flushSink(() => sinkOmissionFields(stdoutSpy.mock.calls, NOSCHEMA_TOOL).length > 0);
+      // Deterministic barrier: await the logger's in-flight write instead of
+      // polling with a real-timer loop (the #3256 flake). Once flush() resolves
+      // the DEBUG omission trace has reached the stdout sink.
+      await logger.flush();
       // Structured fields (issue #3216) are asserted by object equality — the
       // sink line carries the exact { tool, reason } payload, exactly once, at
       // DEBUG level specifically.

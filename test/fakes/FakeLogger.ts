@@ -40,6 +40,8 @@ export class FakeLogger implements Logger {
 
   enableStdoutLogging(): void {}
   disableStdoutLogging(): void {}
+  // Writes are synchronous in the fake, so there is nothing in flight to await.
+  async flush(): Promise<void> {}
   close(): void {}
 
   /** Messages emitted at the given level. */

@@ -52,6 +52,14 @@ export interface Logger {
   disableStdoutLogging(): void;
 
   /**
+   * Awaits any in-flight fire-and-forget log writes so callers (chiefly tests)
+   * can deterministically observe a just-emitted line at the sink instead of
+   * racing the async write with a real-timer poll. Resolves once the most
+   * recent write settled; never rejects (write failures are already swallowed).
+   */
+  flush(): Promise<void>;
+
+  /**
    * Closes the log stream
    */
   close(): void;
@@ -106,6 +114,16 @@ let currentLogLevel: LogLevel = LogLevel.INFO;
 
 // Flag to control whether to also log to STDOUT (in addition to files)
 let logToStdout = false;
+
+// Tracks the most recent in-flight write so `flush()` can await it. Writes are
+// fire-and-forget for latency, but tests need a deterministic barrier to observe
+// a just-emitted line at the sink without racing a real-timer poll. Each level
+// method appends its write to this chain; `flush()` awaits the tail. The chain
+// never rejects (write errors are swallowed inside writeToLogFile).
+let lastWrite: Promise<void> = Promise.resolve();
+const trackWrite = (write: Promise<void>): void => {
+  lastWrite = lastWrite.then(() => write);
+};
 
 // Create logs directory if it doesn't exist. Use getTempDir so the location
 // honors TMPDIR and matches the rest of the auto-mobile temp tree (rather than a
@@ -306,9 +324,9 @@ export const logger: Logger = {
    */
   debug(message: string, ...args: any[]): void {
     if (currentLogLevel <= LogLevel.DEBUG) {
-      writeToLogFile("DEBUG", message, args).catch(err => {
+      trackWrite(writeToLogFile("DEBUG", message, args).catch(err => {
         console.error("Failed to write debug log:", err);
-      });
+      }));
     }
   },
 
@@ -317,9 +335,9 @@ export const logger: Logger = {
    */
   info(message: string, ...args: any[]): void {
     if (currentLogLevel <= LogLevel.INFO) {
-      writeToLogFile("INFO", message, args).catch(err => {
+      trackWrite(writeToLogFile("INFO", message, args).catch(err => {
         console.error("Failed to write info log:", err);
-      });
+      }));
     }
   },
 
@@ -328,9 +346,9 @@ export const logger: Logger = {
    */
   warn(message: string, ...args: any[]): void {
     if (currentLogLevel <= LogLevel.WARN) {
-      writeToLogFile("WARN", message, args).catch(err => {
+      trackWrite(writeToLogFile("WARN", message, args).catch(err => {
         console.error("Failed to write warn log:", err);
-      });
+      }));
     }
   },
 
@@ -339,10 +357,17 @@ export const logger: Logger = {
    */
   error(message: string, ...args: any[]): void {
     if (currentLogLevel <= LogLevel.ERROR) {
-      writeToLogFile("ERROR", message, args).catch(err => {
+      trackWrite(writeToLogFile("ERROR", message, args).catch(err => {
         console.error("Failed to write error log:", err);
-      });
+      }));
     }
+  },
+
+  /**
+   * Awaits any in-flight fire-and-forget log writes. See interface docs.
+   */
+  async flush(): Promise<void> {
+    await lastWrite;
   },
 
   /**

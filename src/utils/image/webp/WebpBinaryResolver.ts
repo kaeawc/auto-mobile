@@ -45,6 +45,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private readonly env: NodeJS.ProcessEnv;
   private readonly fileDownloader: FileDownloader;
   private readonly processExecutor: ProcessExecutor;
+  private readonly provisioningByArchive = new Map<string, Promise<void>>();
 
   constructor(options: WebpBinaryResolverOptions = {}) {
     this.projectRoot = options.projectRoot ?? defaultProjectRoot();
@@ -138,10 +139,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       return binaryPath;
     }
 
-    await fs.mkdir(this.cacheDir, { recursive: true });
-    const archivePath = path.join(this.cacheDir, archive.archiveName);
-    await this.fileDownloader.download(`${WEBP_DOWNLOAD_BASE_URL}/${archive.archiveName}`, archivePath);
-    await this.processExecutor.exec(`tar -xzf ${shellQuote(archivePath)} -C ${shellQuote(this.cacheDir)}`);
+    await this.provisionArchiveOnce(archive);
     await fs.chmod(binaryPath, 0o755).catch(() => undefined);
 
     if (await isExecutableFile(binaryPath)) {
@@ -149,6 +147,29 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     }
 
     throw new ActionableError(`Downloaded libwebp archive did not provide ${binary} at ${binaryPath}. Set ${envVarFor(binary)} instead.`);
+  }
+
+  private async provisionArchiveOnce(archive: WebpArchiveInfo): Promise<void> {
+    const key = `${this.platform}-${this.arch}-${archive.archiveName}`;
+    const existing = this.provisioningByArchive.get(key);
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    const provision = this.provisionArchive(archive).catch(error => {
+      this.provisioningByArchive.delete(key);
+      throw error;
+    });
+    this.provisioningByArchive.set(key, provision);
+    await provision;
+  }
+
+  private async provisionArchive(archive: WebpArchiveInfo): Promise<void> {
+    await fs.mkdir(this.cacheDir, { recursive: true });
+    const archivePath = path.join(this.cacheDir, archive.archiveName);
+    await this.fileDownloader.download(`${WEBP_DOWNLOAD_BASE_URL}/${archive.archiveName}`, archivePath);
+    await this.processExecutor.exec(`tar -xzf ${shellQuote(archivePath)} -C ${shellQuote(this.cacheDir)}`);
   }
 }
 

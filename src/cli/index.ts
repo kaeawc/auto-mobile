@@ -169,7 +169,6 @@ async function runDoctorViaDaemon(params: Record<string, any>): Promise<any> {
  */
 async function runDoctorCommand(params: Record<string, any>): Promise<void> {
   const jsonOutput = params.json === true;
-  rejectRemovedDoctorInstallFlags(params);
 
   // Try daemon first
   try {
@@ -331,22 +330,6 @@ export async function runCliCommand(args: string[]): Promise<void> {
       console.error(`Unexpected error: ${error}`);
     }
     process.exit(1);
-  }
-}
-
-export function rejectRemovedDoctorInstallFlags(params: Record<string, any>): void {
-  const removedFlags: string[] = [];
-  if ("installCmdlineTools" in params) {
-    removedFlags.push("--install-cmdline-tools");
-  }
-  if ("installXcodeCommandLineTools" in params) {
-    removedFlags.push("--install-xcode-command-line-tools");
-  }
-  if (removedFlags.length > 0) {
-    throw new ActionableError(
-      `${removedFlags.join(", ")} ${removedFlags.length === 1 ? "was" : "were"} removed. ` +
-      "AutoMobile doctor only reports setup issues and does not install platform tools."
-    );
   }
 }
 

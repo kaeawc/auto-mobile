@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getCliHelpParameterInfo, getCliHelpSchemaShape, rejectRemovedDoctorInstallFlags } from "../../src/cli";
+import { getCliHelpParameterInfo, getCliHelpSchemaShape } from "../../src/cli";
 import { launchAppSchema } from "../../src/server/appTools";
 
 describe("getCliHelpSchemaShape", () => {
@@ -20,23 +20,5 @@ describe("getCliHelpSchemaShape", () => {
       typeName: "boolean",
       description: "Clear app data before launch (default false)",
     });
-  });
-});
-
-describe("rejectRemovedDoctorInstallFlags", () => {
-  test("rejects removed install flags before doctor params reach a daemon", () => {
-    expect(() => rejectRemovedDoctorInstallFlags({
-      android: true,
-      json: true,
-      installCmdlineTools: true,
-      installXcodeCommandLineTools: true,
-    })).toThrow("--install-cmdline-tools, --install-xcode-command-line-tools were removed");
-  });
-
-  test("allows read-only doctor params", () => {
-    expect(() => rejectRemovedDoctorInstallFlags({
-      android: true,
-      json: true,
-    })).not.toThrow();
   });
 });

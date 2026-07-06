@@ -535,7 +535,10 @@ describe("waitForExit - graceful capture stop", function() {
     const timer = new FakeTimer();
     const { process, exitPromise, killSignals, exit } = createFakeProcess();
 
-    const pending = waitForExit(process, exitPromise, IOS_RECORDING_STOP_TIMEOUT_MS, timer);
+    const pending = waitForExit(process, exitPromise, {
+      timeoutMs: IOS_RECORDING_STOP_TIMEOUT_MS,
+      timer,
+    });
 
     // SIGINT is delivered synchronously so simctl can begin flushing the moov atom.
     expect(killSignals).toEqual(["SIGINT"]);
@@ -556,7 +559,10 @@ describe("waitForExit - graceful capture stop", function() {
     const timer = new FakeTimer();
     const { process, exitPromise, killSignals } = createFakeProcess();
 
-    const pending = waitForExit(process, exitPromise, PROCESS_EXIT_TIMEOUT_MS, timer);
+    const pending = waitForExit(process, exitPromise, {
+      timeoutMs: PROCESS_EXIT_TIMEOUT_MS,
+      timer,
+    });
 
     expect(killSignals).toEqual(["SIGINT"]);
 
@@ -580,8 +586,10 @@ describe("waitForExit - graceful capture stop", function() {
     const legacyPending = waitForExit(
       legacy.process,
       legacy.exitPromise,
-      PROCESS_EXIT_TIMEOUT_MS,
-      legacyTimer
+      {
+        timeoutMs: PROCESS_EXIT_TIMEOUT_MS,
+        timer: legacyTimer,
+      }
     );
     legacyTimer.advanceTime(slowFlushMs);
     await legacyPending;
@@ -593,8 +601,10 @@ describe("waitForExit - graceful capture stop", function() {
     const iosPending = waitForExit(
       ios.process,
       ios.exitPromise,
-      IOS_RECORDING_STOP_TIMEOUT_MS,
-      iosTimer
+      {
+        timeoutMs: IOS_RECORDING_STOP_TIMEOUT_MS,
+        timer: iosTimer,
+      }
     );
     iosTimer.advanceTime(slowFlushMs);
     await Promise.resolve();

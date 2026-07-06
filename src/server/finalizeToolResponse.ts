@@ -46,6 +46,29 @@ export interface FinalizeToolResponseContext {
   internal?: boolean;
 }
 
+type ObservationDiffMode = "diff" | "full";
+type ObservationDiffReason =
+  | "diff_emitted"
+  | "missing_baseline"
+  | "screen_changed"
+  | "missing_session"
+  | "unrenderable_hierarchy"
+  | "disabled"
+  | "stripped_by_actions_no_observe";
+
+interface ObservationDiffScreenIdentity {
+  activeWindow?: ObserveResult["activeWindow"];
+  hierarchyPackageName?: string;
+  screenIdentity?: ObserveResult["screenIdentity"];
+}
+
+interface ObservationDiffMetadata {
+  mode: ObservationDiffMode;
+  reason: ObservationDiffReason;
+  fromScreen?: ObservationDiffScreenIdentity;
+  toScreen?: ObservationDiffScreenIdentity;
+}
+
 /**
  * Single post-handler serialization hook (issue #2758). Handlers pre-serialize
  * via `createStructuredToolResponse` into an MCP envelope
@@ -133,19 +156,61 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       // own success detection). Wins over the diff flag: nothing left to diff.
       const stripped = { ...payload };
       delete stripped.observation;
+      stripped.observationDiff = {
+        mode: "full",
+        reason: "stripped_by_actions_no_observe",
+      } satisfies ObservationDiffMetadata;
       sanitizedPayload = stripped;
     } else if (isObserveResult(payload.observation)) {
       const sanitized = sanitizeObserveResult(payload.observation as ObserveResult, cfg);
       let observationOut: unknown = sanitized;
-      if (canDiff && hasRenderableHierarchy(sanitized)) {
+      let observationDiff: ObservationDiffMetadata | undefined;
+      if (ctx.internal) {
+        // Internal envelopes are consumed by in-process tool callers, not agents.
+        // Keep them on the pre-diff/pre-strip shape without agent-facing metadata.
+      } else if (!diffActive) {
+        observationDiff = { mode: "full", reason: "disabled" };
+      } else if (!ctx.sessionUuid || !ctx.baselineStore) {
+        observationDiff = { mode: "full", reason: "missing_session", toScreen: observationScreenIdentity(sanitized) };
+      } else if (!hasRenderableHierarchy(sanitized)) {
+        const baseline = ctx.baselineStore.get(ctx.sessionUuid);
+        observationDiff = {
+          mode: "full",
+          reason: "unrenderable_hierarchy",
+          fromScreen: baseline ? observationScreenIdentity(baseline) : undefined,
+          toScreen: observationScreenIdentity(sanitized),
+        };
+      } else if (canDiff) {
         // Emit a diff vs the baseline when it exists and the screen is unchanged;
         // otherwise fall back to the full observation (cross-screen diffs are
         // meaningless, and there is nothing to diff on the first action). Either
         // way, update the baseline to this observation so the next action diffs
         // against current state.
         const baseline = ctx.baselineStore!.get(ctx.sessionUuid!);
-        if (baseline && hasRenderableHierarchy(baseline) && isSameObservationScreen(baseline, sanitized)) {
+        if (!baseline) {
+          observationDiff = { mode: "full", reason: "missing_baseline", toScreen: observationScreenIdentity(sanitized) };
+        } else if (!hasRenderableHierarchy(baseline)) {
+          observationDiff = {
+            mode: "full",
+            reason: "unrenderable_hierarchy",
+            fromScreen: observationScreenIdentity(baseline),
+            toScreen: observationScreenIdentity(sanitized),
+          };
+        } else if (isSameObservationScreen(baseline, sanitized)) {
           observationOut = diffObserveResult(baseline, sanitized);
+          observationDiff = {
+            mode: "diff",
+            reason: "diff_emitted",
+            fromScreen: observationScreenIdentity(baseline),
+            toScreen: observationScreenIdentity(sanitized),
+          };
+        } else {
+          observationDiff = {
+            mode: "full",
+            reason: "screen_changed",
+            fromScreen: observationScreenIdentity(baseline),
+            toScreen: observationScreenIdentity(sanitized),
+          };
         }
         ctx.baselineStore!.set(ctx.sessionUuid!, sanitized);
       }
@@ -153,6 +218,9 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         ...payload,
         observation: observationOut,
       };
+      if (observationDiff) {
+        sanitizedPayload.observationDiff = observationDiff;
+      }
     }
   }
 
@@ -204,4 +272,18 @@ function isObserveResult(value: unknown): value is ObserveResult {
 
 function hasRenderableHierarchy(observation: ObserveResult): boolean {
   return !!observation.viewHierarchy?.hierarchy;
+}
+
+function observationScreenIdentity(observation: ObserveResult): ObservationDiffScreenIdentity {
+  const identity: ObservationDiffScreenIdentity = {};
+  if (observation.activeWindow) {
+    identity.activeWindow = observation.activeWindow;
+  }
+  if (observation.viewHierarchy?.packageName) {
+    identity.hierarchyPackageName = observation.viewHierarchy.packageName;
+  }
+  if (observation.screenIdentity) {
+    identity.screenIdentity = observation.screenIdentity;
+  }
+  return identity;
 }

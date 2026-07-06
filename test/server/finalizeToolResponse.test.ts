@@ -450,6 +450,17 @@ describe("finalizeToolResponse", () => {
       };
     }
 
+    function expectObservationDiff(
+      finalized: { structuredContent?: unknown; content: Array<{ text: string }> },
+      expected: Record<string, unknown>
+    ): any {
+      const metadata = (finalized.structuredContent as any).observationDiff;
+      expect(metadata).toMatchObject(expected);
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observationDiff).toEqual(metadata);
+      return metadata;
+    }
+
     function iosScreenObserve(
       key: string,
       confidence: "high" | "medium" | "low" = "high"
@@ -492,6 +503,7 @@ describe("finalizeToolResponse", () => {
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "disabled" });
       expect(map.size).toBe(0);
     });
 
@@ -530,6 +542,7 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.changed).toHaveLength(1);
       expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
       expect((finalized.structuredContent as any).success).toBe(true);
+      expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
 
       // Text mirrors the diffed structuredContent exactly.
       const parsed = JSON.parse(finalized.content[0].text);
@@ -564,6 +577,8 @@ describe("finalizeToolResponse", () => {
       const secondObs = (second.structuredContent as any).observation;
       expect(firstObs.isDiff).toBeUndefined();
       expect(secondObs.isDiff).toBeUndefined();
+      expectObservationDiff(first, { mode: "full", reason: "unrenderable_hierarchy" });
+      expectObservationDiff(second, { mode: "full", reason: "unrenderable_hierarchy" });
       expect(firstObs.errors[0].message).toBe("service unavailable");
       expect(secondObs.errors[0].message).toBe("service unavailable");
       expect(firstObs.perfTiming).toBeUndefined();
@@ -572,6 +587,30 @@ describe("finalizeToolResponse", () => {
       expect(map.get("s1")!.viewHierarchy).toBeDefined();
       expect(first.content[0].text).toBe(stringifyToolResponse(first.structuredContent));
       expect(second.content[0].text).toBe(stringifyToolResponse(second.structuredContent));
+    });
+
+    test("falls back to full when the stored baseline has no renderable hierarchy", () => {
+      const { store, map } = makeStore();
+      map.set("s1", {
+        updatedAt: 1,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+        viewHierarchy: { packageName: "com.example" } as any,
+      } as ObserveResult);
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      const metadata = expectObservationDiff(finalized, { mode: "full", reason: "unrenderable_hierarchy" });
+      expect(metadata.fromScreen.activeWindow.appId).toBe("com.example");
+      expect(metadata.toScreen.activeWindow.appId).toBe("com.example");
+      expect(map.get("s1")!.viewHierarchy?.hierarchy).toBeDefined();
     });
 
     test("a non-observe action updates the baseline to its own observation (next diff is against current state)", () => {
@@ -596,8 +635,20 @@ describe("finalizeToolResponse", () => {
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "missing_baseline" });
       // Baseline is now seeded for the next action.
       expect(map.get("s1")).toBeDefined();
+    });
+
+    test("falls back to the full observation when the session baseline store is missing", () => {
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1" }
+      );
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "missing_session" });
     });
 
     test("falls back to full when the screen (app/activity/package) changed", () => {
@@ -615,6 +666,9 @@ describe("finalizeToolResponse", () => {
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
+      const metadata = expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+      expect(metadata.fromScreen.activeWindow.appId).toBe("com.example");
+      expect(metadata.toScreen.activeWindow.appId).toBe("com.other");
     });
 
     test("falls back to full when an iOS screen identity changes under the same app", () => {
@@ -634,6 +688,9 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
       expect(obsSc.screenIdentity.key).toBe("bundle=com.apple.reminders|nav=New Reminder");
+      const metadata = expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+      expect(metadata.fromScreen.screenIdentity.key).toBe("bundle=com.apple.reminders|nav=Reminders");
+      expect(metadata.toScreen.screenIdentity.key).toBe("bundle=com.apple.reminders|nav=New Reminder");
     });
 
     test("emits a diff when high-confidence iOS screen identity stays stable", () => {
@@ -652,6 +709,7 @@ describe("finalizeToolResponse", () => {
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBe(true);
       expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
+      expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
     });
 
     test("preserves app/activity/package fallback when only one iOS identity is present", () => {
@@ -698,6 +756,7 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
       expect(obsSc.screenIdentity.key).toBe("bundle=com.apple.reminders|tab=Search");
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
     });
 
     test("falls back to full and updates baseline when iOS screen identity is low confidence", () => {
@@ -716,6 +775,7 @@ describe("finalizeToolResponse", () => {
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
       expect((map.get("s1")!.viewHierarchy!.hierarchy.node as any).node[0].checked).toBe("true");
     });
 
@@ -728,6 +788,7 @@ describe("finalizeToolResponse", () => {
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "missing_session" });
       expect(map.size).toBe(0);
     });
 
@@ -783,6 +844,7 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.isDiff).toBe(true);
       expect(obsSc.added).toHaveLength(1);
       expect(obsSc.added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
+      expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
     });
   });
 
@@ -811,9 +873,14 @@ describe("finalizeToolResponse", () => {
       const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
 
       expect((finalized.structuredContent as any).observation).toBeUndefined();
+      expect((finalized.structuredContent as any).observationDiff).toEqual({
+        mode: "full",
+        reason: "stripped_by_actions_no_observe",
+      });
       expect((finalized.structuredContent as any).success).toBe(true);
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.observation).toBeUndefined();
+      expect(parsed.observationDiff).toEqual((finalized.structuredContent as any).observationDiff);
       expect(parsed.success).toBe(true);
       expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
     });
@@ -846,6 +913,10 @@ describe("finalizeToolResponse", () => {
       );
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc).toBeUndefined(); // stripped, not a diff
+      expect((finalized.structuredContent as any).observationDiff).toEqual({
+        mode: "full",
+        reason: "stripped_by_actions_no_observe",
+      });
       // Diff moot → baseline never touched.
       expect(map.size).toBe(0);
     });
@@ -914,6 +985,7 @@ describe("finalizeToolResponse", () => {
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined(); // full observation, not a diff
       expect(obsSc.viewHierarchy).toBeDefined();
+      expect((finalized.structuredContent as any).observationDiff).toBeUndefined();
       // A future internal consumer can still read the hierarchy off the envelope.
       expect(obsSc.viewHierarchy.hierarchy.node["resource-id"]).toBe("com.example:id/root");
     });
@@ -946,6 +1018,7 @@ describe("finalizeToolResponse", () => {
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc).toBeDefined();
       expect(obsSc.viewHierarchy).toBeDefined();
+      expect((finalized.structuredContent as any).observationDiff).toBeUndefined();
     });
 
     test("EC2.2: internal call still sanitizes the observation (view-id dedup applies)", () => {

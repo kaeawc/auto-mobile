@@ -21,7 +21,23 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
   const TOOL = "__strip_probe_2899__";
 
   beforeAll(async () => {
-    ToolRegistry.register(TOOL, "probe tool for structuredContent strip", z.object({}).passthrough(), async () => createStructuredToolResponse({ success: true, marker: "probe" }), { outputSchema: z.object({ success: z.boolean(), marker: z.string() }) });
+    ToolRegistry.register(
+      TOOL,
+      "probe tool for structuredContent strip",
+      z.object({}).passthrough(),
+      async () => createStructuredToolResponse({
+        success: true,
+        marker: "probe",
+        observationDiff: { mode: "full", reason: "screen_changed" },
+      }),
+      {
+        outputSchema: z.object({
+          success: z.boolean(),
+          marker: z.string(),
+          observationDiff: z.object({ mode: z.string(), reason: z.string() }),
+        }),
+      }
+    );
     fixture = new McpTestFixture();
     await fixture.setup();
   });
@@ -57,7 +73,9 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
     const res: any = await client.callTool({ name: TOOL, arguments: {} });
     expect(res.structuredContent).toBeUndefined();
     // No data lost: the full payload is still recoverable from content[0].text.
-    expect(JSON.parse(res.content[0].text).marker).toBe("probe");
+    const payload = JSON.parse(res.content[0].text);
+    expect(payload.marker).toBe("probe");
+    expect(payload.observationDiff).toEqual({ mode: "full", reason: "screen_changed" });
   });
 });
 

@@ -70,9 +70,10 @@ interface AndroidEmulator {
    * @param avdName - The AVD name to wait for
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 120000 = 2 minutes)
    * @param childProcess - Optional child process to monitor for early exit
+   * @param targetDeviceId - Optional adb device id to require when waiting for an already-running device
    * @returns Promise that resolves with device ID when emulator is ready
    */
-  waitForEmulatorReady(avdName: string, timeoutMs?: number, childProcess?: ChildProcess | null): Promise<BootedDevice>;
+  waitForEmulatorReady(avdName: string, timeoutMs?: number, childProcess?: ChildProcess | null, targetDeviceId?: string): Promise<BootedDevice>;
 }
 
 /**
@@ -1147,7 +1148,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 120000 = 2 minutes)
    * @returns Promise that resolves with device ID when emulator is ready
    */
-  async waitForEmulatorReady(avdName: string, timeoutMs: number = 120000, childProcess?: ChildProcess | null): Promise<BootedDevice> {
+  async waitForEmulatorReady(
+    avdName: string,
+    timeoutMs: number = 120000,
+    childProcess?: ChildProcess | null,
+    targetDeviceId?: string,
+  ): Promise<BootedDevice> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
 
@@ -1225,12 +1231,22 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           if (runningEmulators.length > 0) {
             logger.debug(`Found ${runningEmulators.length} running emulators: ${runningEmulators.map(e => `${e.name}(${e.deviceId})`).join(", ")}`);
 
-            // Look for emulator by name first
-            let emulator = runningEmulators.find(emu => emu.name === avdName);
-            logger.debug(`Exact name match for '${avdName}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+            // Prefer an exact deviceId when startDevice already selected a running device.
+            let emulator = targetDeviceId
+              ? runningEmulators.find(emu => emu.deviceId === targetDeviceId)
+              : undefined;
+            if (targetDeviceId) {
+              logger.debug(`Exact deviceId match for '${targetDeviceId}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+            }
+
+            // Look for emulator by name next.
+            if (!emulator) {
+              emulator = runningEmulators.find(emu => emu.name === avdName);
+              logger.debug(`Exact name match for '${avdName}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+            }
 
             // If not found by exact name, try to find any local emulator
-            if (!emulator) {
+            if (!emulator && !targetDeviceId) {
               emulator = runningEmulators.find(emu => emu.source === "local");
               if (emulator) {
                 logger.debug(`Found local emulator with deviceId ${emulator.deviceId}, but name mismatch. Expected: ${avdName}, Found: ${emulator.name}`);

@@ -311,7 +311,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   ): Promise<BootedDevice> {
     switch (device.platform) {
       case "android":
-        return this.emulator.waitForEmulatorReady(device.name, timeoutMs, childProcess);
+        return this.emulator.waitForEmulatorReady(device.name, timeoutMs, childProcess, device.deviceId);
       case "ios":
         return this.simctl.waitForSimulatorReady(device.deviceId ?? device.name, timeoutMs);
       default:

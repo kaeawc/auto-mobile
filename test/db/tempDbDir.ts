@@ -97,7 +97,32 @@ function isTransientLockError(error: unknown): boolean {
   return Boolean(code && TRANSIENT_LOCK_CODES.has(code));
 }
 
+/**
+ * Tripwire counter (issue #2949): every DEFAULT give-up — the un-injected path
+ * that fires in real file-backed tests — bumps this. The give-up path is only
+ * expected to fire on Windows (bun:sqlite holds `.db`/`-wal`/`-shm` handles past
+ * `Kysely.destroy()` there). macOS/Linux release handles immediately, so `rm`
+ * should win on the first attempt and this stays `0`. `test/db` asserts it is
+ * `0` on non-`win32` so a future cross-platform handle-leak regression surfaces
+ * instead of being swallowed by a silent `logger.warn`.
+ *
+ * Only the DEFAULT give-up increments it: unit tests that deliberately drive a
+ * give-up inject their own `onGiveUp` spy and must NOT perturb this counter.
+ */
+let defaultGiveUpCount = 0;
+
+/** Total number of default give-ups since the last {@link resetDefaultGiveUpCount}. */
+export function getDefaultGiveUpCount(): number {
+  return defaultGiveUpCount;
+}
+
+/** Reset the tripwire counter (call in a suite `beforeAll`/`afterAll`). */
+export function resetDefaultGiveUpCount(): void {
+  defaultGiveUpCount = 0;
+}
+
 function defaultOnGiveUp(helperName: string, dir: string, error: unknown): void {
+  defaultGiveUpCount += 1;
   const code = (error as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
   // Log-and-continue: the dir is a throwaway temp dir the OS will sweep; a
   // Windows handle livelock is the expected reason and is safe to swallow.

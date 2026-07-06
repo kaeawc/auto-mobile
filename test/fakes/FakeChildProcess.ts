@@ -126,6 +126,7 @@ export class FakeChildProcess extends EventEmitter implements Partial<ChildProce
       this.stdout.push(null); // End stdout stream
       this.stderr.push(null); // End stderr stream
       this.emit("exit", code, signal);
+      this.emit("close", code, signal);
     }, this.exitDelay);
   }
 

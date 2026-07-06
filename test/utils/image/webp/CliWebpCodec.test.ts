@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { CliWebpCodec, isWebpBuffer } from "../../../../src/utils/image/webp/CliWebpCodec";
+import { defaultTimer } from "../../../../src/utils/SystemTimer";
 import { FakeChildProcess } from "../../../fakes/FakeChildProcess";
 import { FakeProcessExecutor } from "../../../fakes/FakeProcessExecutor";
 
@@ -89,6 +90,27 @@ describe("CliWebpCodec", () => {
         args: ["-o", "-", "--", "-"]
       }
     ]);
+  });
+
+  test("waits for stdio close before reading codec stdout", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    const child = new FakeChildProcess();
+    processExecutor.setNextSpawnProcess(child);
+    const codec = new CliWebpCodec(new FakeWebpBinaryResolver(), processExecutor);
+
+    const encodedPromise = codec.encode(Buffer.from("png"));
+    child.simulateSpawn();
+    defaultTimer.setTimeout(() => {
+      child.exitCode = 0;
+      child.emit("exit", 0, null);
+      child.stdout.push(Buffer.from("RIFFxxxxWEBPencoded"));
+      child.stdout.push(null);
+      child.stderr.push(null);
+      child.emit("close", 0, null);
+    }, 0);
+    const encoded = await encodedPromise;
+
+    expect(encoded.toString()).toBe("RIFFxxxxWEBPencoded");
   });
 
   test("rejects decode input that is not WebP", async () => {

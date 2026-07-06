@@ -10,6 +10,7 @@ import { FakeFileDownloader } from "../../../fakes/FakeFileDownloader";
 import { FakeProcessExecutor } from "../../../fakes/FakeProcessExecutor";
 
 const tempDirs: string[] = [];
+const hostSupportsPosixExecuteBits = process.platform !== "win32";
 
 async function makeTempDir(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-webp-resolver-"));
@@ -88,7 +89,7 @@ describe("WebpBinaryResolver", () => {
     await expect(resolver.resolveCwebp()).resolves.toBe(pathCwebp);
   });
 
-  test("skips non-executable PATH candidates on POSIX platforms", async () => {
+  test.skipIf(!hostSupportsPosixExecuteBits)("skips non-executable PATH candidates on POSIX platforms", async () => {
     const root = await makeTempDir();
     const firstPathDir = path.join(root, "first-bin");
     const secondPathDir = path.join(root, "second-bin");
@@ -107,7 +108,7 @@ describe("WebpBinaryResolver", () => {
     await expect(resolver.resolveCwebp()).resolves.toBe(executableCwebp);
   });
 
-  test("rejects non-executable environment overrides on POSIX platforms", async () => {
+  test.skipIf(!hostSupportsPosixExecuteBits)("rejects non-executable environment overrides on POSIX platforms", async () => {
     const root = await makeTempDir();
     const cwebp = path.join(root, "override", "cwebp");
     await writeNonExecutable(cwebp);

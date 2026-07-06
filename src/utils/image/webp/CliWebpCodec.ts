@@ -98,7 +98,7 @@ async function waitForCompletion(
     stdin.once("error", error => {
       reject(actionableProcessError(toolName, envVar, `stdin write failed: ${errorMessage(error)}`));
     });
-    child.once("exit", (code, signal) => {
+    child.once("close", (code, signal) => {
       if (code === 0) {
         resolve();
         return;

@@ -141,8 +141,8 @@ final class RemindersPlanContentTests: XCTestCase {
             restoreEnvironmentValue(originalTimeout, for: timeoutKey)
         }
 
-        assertRemindersTimeoutFitsWorkflowStepCap(RemindersLaunchPlanTests(), expectedTimeoutSeconds: 149)
-        assertRemindersTimeoutFitsWorkflowStepCap(RemindersAddPlanTests(), expectedTimeoutSeconds: 149)
+        assertRemindersTimeoutFitsWorkflowStepCap(RemindersLaunchPlanTests(), expectedTimeoutSeconds: 134)
+        assertRemindersTimeoutFitsWorkflowStepCap(RemindersAddPlanTests(), expectedTimeoutSeconds: 134)
     }
 
     func testExplicitLowerRemindersTimeoutIsPreserved() {
@@ -423,8 +423,9 @@ private func assertRemindersTimeoutFitsWorkflowStepCap(
     let attempts = testCase.retryCount + 1
     let retryDelayBudget = max(0, attempts - 1) * Int(testCase.retryDelaySeconds.rounded(.up))
     let executorTimeoutConsumersPerAttempt = 2
+    let workflowStepReservedOverheadSeconds = 60
     let totalAttemptBudget = Int(testCase.timeoutSeconds.rounded(.up)) * attempts * executorTimeoutConsumersPerAttempt +
-        retryDelayBudget
+        retryDelayBudget + workflowStepReservedOverheadSeconds
 
     XCTAssertLessThan(
         totalAttemptBudget,

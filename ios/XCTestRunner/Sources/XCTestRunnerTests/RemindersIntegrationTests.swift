@@ -3,6 +3,7 @@ import XCTest
 
 class RemindersIntegrationBase: AutoMobileTestCase {
     private let executorTimeoutConsumersPerAttempt = 2
+    private let workflowStepReservedOverheadSeconds: TimeInterval = 60
     private let workflowStepTimeoutSeconds: TimeInterval = 600
 
     override var planBundle: Bundle? {
@@ -16,7 +17,7 @@ class RemindersIntegrationBase: AutoMobileTestCase {
         }
 
         let retryDelayBudget = TimeInterval(attempts - 1) * retryDelaySeconds
-        let remainingStepBudget = workflowStepTimeoutSeconds - retryDelayBudget - 1
+        let remainingStepBudget = workflowStepTimeoutSeconds - workflowStepReservedOverheadSeconds - retryDelayBudget
         let timeoutConsumers = attempts * executorTimeoutConsumersPerAttempt
         let maximumPerAttemptTimeout = max(1, floor(remainingStepBudget / TimeInterval(timeoutConsumers)))
         return min(super.timeoutSeconds, maximumPerAttemptTimeout)

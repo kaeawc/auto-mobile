@@ -80,6 +80,11 @@ final class UserDefaultsInspectorTests: XCTestCase {
         inspector.initialize(buffer: buffer)
         inspector.setDriver(fakeDriver)
         inspector.setEnabled(true)
+        // setEnabled(true) auto-starts a real NotificationCenter observer on the
+        // standard suite. These tests drive handleDidChange directly, so drop the
+        // observer to keep unrelated real-standard-defaults churn in the test
+        // process from racing extra handleDidChange calls into the capture.
+        inspector.stopListening()
         // Seed the baseline so pre-existing keys aren't reported as spurious adds.
         inspector.captureBaseline(suiteName: nil)
 
@@ -266,6 +271,150 @@ final class UserDefaultsInspectorTests: XCTestCase {
         XCTAssertTrue(captured.all.isEmpty)
 
         inspector.stopListening()
+    }
+
+    // MARK: - Auto-start (production trigger, #3193)
+
+    /// The production trigger: `setEnabled(true)` alone must start standard-suite
+    /// listening — no separate `startListening` integration step — so a host that
+    /// only calls `initialize` + `setEnabled(true)` (e.g. PlaygroundApp) produces
+    /// `storage_changed` events end-to-end.
+    func testSetEnabledAutoStartsStandardSuiteListening() {
+        AutoMobileSDK.shared.setEnabled(true)
+        let fakeDriver = FakeUserDefaultsDriver()
+        fakeDriver.setValue(suiteName: nil, key: "existing", value: "old", type: .string)
+
+        let captured = CapturedEvents()
+        let buffer = SdkEventBuffer { events in
+            captured.append(events.compactMap { $0 as? SdkStorageChangedEvent })
+        }
+        buffer.start()
+        diffBuffer = buffer
+
+        let inspector = UserDefaultsInspector.shared
+        inspector.initialize(buffer: buffer)
+        inspector.setDriver(fakeDriver)
+        XCTAssertFalse(inspector.isListening)
+
+        inspector.setEnabled(true)
+        XCTAssertTrue(inspector.isListening)
+
+        // App writes a new key, then the OS posts the change notification.
+        fakeDriver.setValue(suiteName: nil, key: "fresh", value: "new", type: .string)
+        NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: UserDefaults.standard)
+
+        buffer.flush()
+        let events = captured.all
+        // Baseline was seeded at auto-start, so "existing" is not replayed.
+        XCTAssertEqual(events.compactMap { $0.key }, ["fresh"])
+        XCTAssertEqual(events.first?.changeType, "add")
+
+        inspector.stopListening()
+    }
+
+    /// The reverse init order: `setEnabled(true)` before `initialize` cannot
+    /// start listening (no driver to seed the baseline from — diffing against an
+    /// empty snapshot would replay every pre-existing key as an "add"), so
+    /// `initialize` must pick up the deferred auto-start.
+    func testInitializeAutoStartsWhenEnabledBeforeInitialize() {
+        let inspector = UserDefaultsInspector.shared
+        // Hermetic: clear any driver/observer state left by earlier suites so
+        // the pre-initialize assertions below are order-independent.
+        inspector.reset()
+
+        inspector.setEnabled(true)
+        XCTAssertFalse(inspector.isListening)
+
+        inspector.initialize()
+        XCTAssertTrue(inspector.isListening)
+
+        inspector.stopListening()
+    }
+
+    /// A host that explicitly listens on an app-group suite must keep that
+    /// choice: a later `setEnabled(true)` never replaces an already-registered
+    /// observer with the standard-suite one.
+    func testSetEnabledDoesNotReplaceExplicitSuiteListener() {
+        AutoMobileSDK.shared.setEnabled(true)
+        let fakeDriver = FakeUserDefaultsDriver()
+
+        let captured = CapturedEvents()
+        let buffer = SdkEventBuffer { events in
+            captured.append(events.compactMap { $0 as? SdkStorageChangedEvent })
+        }
+        buffer.start()
+        diffBuffer = buffer
+
+        let inspector = UserDefaultsInspector.shared
+        inspector.initialize(buffer: buffer)
+        inspector.setDriver(fakeDriver)
+        inspector.setEnabled(true)
+
+        // Host opts into a specific app-group suite, then re-enables.
+        inspector.startListening(suiteName: "group.app")
+        inspector.setEnabled(true)
+        XCTAssertTrue(inspector.isListening)
+
+        // A standard-suite change + notification must NOT be observed — the
+        // registered observer targets the app-group suite's defaults object,
+        // and no standard-suite observer was re-registered by setEnabled.
+        fakeDriver.setValue(suiteName: nil, key: "fresh", value: "new", type: .string)
+        NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: UserDefaults.standard)
+
+        buffer.flush()
+        XCTAssertTrue(captured.all.isEmpty)
+
+        inspector.stopListening()
+    }
+
+    // MARK: - System-key noise filter (#3193)
+
+    func testIsSystemKeyMatchesKnownPrefixesOnly() {
+        XCTAssertTrue(UserDefaultsInspector.isSystemKey("com.apple.keyboard.preferences"))
+        XCTAssertTrue(UserDefaultsInspector.isSystemKey("AppleLanguages"))
+        XCTAssertTrue(UserDefaultsInspector.isSystemKey("AppleLocale"))
+        XCTAssertTrue(UserDefaultsInspector.isSystemKey("NSLinguisticDataAssetsRequested"))
+
+        XCTAssertFalse(UserDefaultsInspector.isSystemKey("theme"))
+        XCTAssertFalse(UserDefaultsInspector.isSystemKey("com.example.flag"))
+        // Prefix match is case-sensitive: app-style lowercase keys pass through.
+        XCTAssertFalse(UserDefaultsInspector.isSystemKey("apple_pie"))
+        XCTAssertFalse(UserDefaultsInspector.isSystemKey("nsFlag"))
+    }
+
+    /// `NSGlobalDomain` churn (system keys changing without the app touching
+    /// them) must not emit `storage_changed` events; app keys still do.
+    func testDiffIgnoresSystemKeyChanges() {
+        let harness = makeDiffHarness(seed: [
+            (key: "AppleLanguages", value: "(en)", type: .array),
+            (key: "com.apple.metal.deviceStats", value: "1", type: .int),
+        ])
+
+        // System keys modify, remove, and add alongside a single app-key change.
+        harness.driver.setValue(suiteName: nil, key: "AppleLanguages", value: "(fr)", type: .array)
+        harness.driver.removeValue(suiteName: nil, key: "com.apple.metal.deviceStats")
+        harness.driver.setValue(suiteName: nil, key: "NSLanguages", value: "(fr)", type: .array)
+        harness.driver.setValue(suiteName: nil, key: "theme", value: "dark", type: .string)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: nil)
+
+        let events = harness.events()
+        XCTAssertEqual(events.compactMap { $0.key }, ["theme"])
+        XCTAssertEqual(events.first?.changeType, "add")
+    }
+
+    /// `dictionaryRepresentation()` merges `NSGlobalDomain` into every suite's
+    /// search list — named suites included — so the filter applies there too.
+    func testDiffIgnoresSystemKeysInNamedSuites() {
+        let harness = makeDiffHarness()
+        UserDefaultsInspector.shared.captureBaseline(suiteName: "group.app")
+
+        harness.driver.setValue(suiteName: "group.app", key: "AppleLocale", value: "en_US", type: .string)
+        harness.driver.setValue(suiteName: "group.app", key: "count", value: "1", type: .int)
+        UserDefaultsInspector.shared.handleDidChange(suiteName: "group.app")
+
+        let events = harness.events()
+        XCTAssertEqual(events.compactMap { $0.key }, ["count"])
+        XCTAssertEqual(events.first?.suiteName, "group.app")
     }
 
     func testDiffEmitsModifyWhenOnlyTypeChanges() {

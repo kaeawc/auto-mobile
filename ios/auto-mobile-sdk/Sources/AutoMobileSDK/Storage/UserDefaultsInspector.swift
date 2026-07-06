@@ -24,9 +24,16 @@ public final class UserDefaultsInspector: @unchecked Sendable {
 
     func initialize(buffer: SdkEventBuffer? = nil) {
         lock.lock()
-        defer { lock.unlock() }
         _driver = DefaultUserDefaultsDriver()
         self.buffer = buffer
+        let shouldAutoStart = _isEnabled && kvoObserver == nil
+        lock.unlock()
+        // If the host enabled inspection before AutoMobileSDK.initialize ran,
+        // start listening now that a driver exists — see setEnabled(_:) for the
+        // auto-start decision (#3193).
+        if shouldAutoStart {
+            startListening(suiteName: nil)
+        }
     }
 
     /// Whether inspection is enabled.
@@ -37,10 +44,30 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     }
 
     /// Enable or disable inspection.
+    ///
+    /// Enabling auto-starts change listening on the standard suite (decision for
+    /// #3193: auto-start over a desktop command handler or a separate host
+    /// opt-in step, so `storage_changed` telemetry flows with the single
+    /// `setEnabled(true)` call hosts already make). System-managed
+    /// `NSGlobalDomain` keys are filtered out of the diff, see
+    /// ``isSystemKey(_:)``. Hosts that want a specific app-group suite instead
+    /// can call ``startListening(suiteName:)`` first — an already-registered
+    /// observer is never replaced here.
+    ///
+    /// Disabling keeps the observer registered: ``handleDidChange(suiteName:)``
+    /// silently advances the baseline while disabled, so changes made during a
+    /// disabled window are not replayed on re-enable.
     public func setEnabled(_ enabled: Bool) {
         lock.lock()
         _isEnabled = enabled
+        let shouldAutoStart = enabled && _driver != nil && kvoObserver == nil
         lock.unlock()
+        // Auto-start only when a driver exists (initialize ran); otherwise
+        // initialize(buffer:) starts listening once the driver is available,
+        // ensuring the baseline is seeded from a real driver read.
+        if shouldAutoStart {
+            startListening(suiteName: nil)
+        }
     }
 
     /// Get the driver for direct access.
@@ -75,10 +102,11 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     /// changed key, per-key KVO on `UserDefaults` is fragile, and swizzling is
     /// too invasive for a debug-only SDK.
     ///
-    /// Note: for the standard suite (`suiteName == nil`) the driver reads
-    /// `UserDefaults.standard.dictionaryRepresentation()`, which includes
-    /// `NSGlobalDomain` system keys — prefer an app-group suite to avoid
-    /// system-pref churn in the telemetry (see follow-up on noise filtering).
+    /// Note: `dictionaryRepresentation()` merges `NSGlobalDomain` system keys
+    /// (AppleLanguages, keyboard/accessibility toggles, …) into every suite's
+    /// search list, so diff snapshots filter well-known system key prefixes —
+    /// see ``isSystemKey(_:)`` — instead of emitting spurious `storage_changed`
+    /// events for keys the app never touched.
     public func startListening(suiteName: String? = nil) {
         guard isEnabled else { return }
 
@@ -118,6 +146,14 @@ public final class UserDefaultsInspector: @unchecked Sendable {
             kvoObserver = nil
         }
         lock.unlock()
+    }
+
+    /// Whether a change observer is currently registered. Internal so tests can
+    /// assert the auto-start wiring without poking at the observer handle.
+    var isListening: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return kvoObserver != nil
     }
 
     /// Record the current contents of a suite as the baseline for future diffs.
@@ -210,10 +246,28 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         suiteName ?? "\u{0}__standard__"
     }
 
+    /// Prefixes of system-managed defaults keys. `dictionaryRepresentation()`
+    /// merges `NSGlobalDomain` (system prefs: `AppleLanguages`, `AppleLocale`,
+    /// keyboard/accessibility toggles, `NSLinguisticData…`, `com.apple.*`, …)
+    /// into every `UserDefaults` search list, and the OS churns those keys
+    /// without the app touching them. Best-effort by prefix — an app-authored
+    /// key starting with one of these (unconventional) would be filtered too.
+    private static let systemKeyPrefixes = ["com.apple.", "NS", "Apple"]
+
+    /// Whether a defaults key is system-managed noise that must be excluded
+    /// from change telemetry. Internal so tests can pin the prefix set.
+    static func isSystemKey(_ key: String) -> Bool {
+        systemKeyPrefixes.contains { key.hasPrefix($0) }
+    }
+
+    /// Build a diff snapshot, dropping system-managed keys (see
+    /// ``isSystemKey(_:)``). Filtering both the baseline and the current
+    /// snapshot means system keys can never appear as an add, modify, or
+    /// remove. Inspection reads via ``getDriver()`` are unaffected.
     private static func snapshotDict(_ pairs: [KeyValuePair]) -> [String: KeyValuePair] {
         var dict: [String: KeyValuePair] = [:]
         dict.reserveCapacity(pairs.count)
-        for pair in pairs {
+        for pair in pairs where !isSystemKey(pair.key) {
             dict[pair.key] = pair
         }
         return dict

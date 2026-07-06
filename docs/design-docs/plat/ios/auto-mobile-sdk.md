@@ -289,6 +289,17 @@ Debug-time `UserDefaults` inspection (iOS equivalent of Android's `SharedPrefere
 - Write/clear operations are `#if DEBUG` guarded
 - Change listeners via `UserDefaults.didChangeNotification`
 - Emits `SdkStorageChangedEvent` with sequence numbers on changes
+- **Production trigger (decision, #3193):** `setEnabled(true)` auto-starts standard-suite
+  change listening (chosen over an Android-style desktop command handler and over a
+  separate host opt-in step), so `initialize` + `setEnabled(true)` is the complete
+  integration. If `setEnabled(true)` runs before `initialize`, the auto-start is
+  deferred to `initialize` so the diff baseline is seeded from a real driver read.
+  Hosts can still call `startListening(suiteName:)` for a specific app-group suite;
+  a later `setEnabled(true)` never replaces an already-registered observer.
+- **System-key noise filter:** `dictionaryRepresentation()` merges `NSGlobalDomain`
+  into every suite's search list, so diff snapshots drop keys with the well-known
+  system prefixes `com.apple.`, `NS`, and `Apple` — OS-churned prefs never emit
+  `storage_changed` events. Inspection reads via `getDriver()` are unfiltered.
 
 ### DatabaseInspector / SQLiteDatabaseDriver
 

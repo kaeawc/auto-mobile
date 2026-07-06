@@ -24,7 +24,6 @@ import type {
   IosRunnerInspectorHooks
 } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
-import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLogger } from "../fakes/FakeLogger";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
@@ -181,29 +180,6 @@ describe("iOS doctor checks", () => {
       expect(result.message).toContain("requires macOS");
     });
 
-    test("passes when Command Line Tools are already installed via install flag", async () => {
-      const fakeTimer = new FakeTimer();
-      const execCalls: string[] = [];
-
-      const execFile = async () => {
-        execCalls.push("xcode-select --install");
-        await fakeTimer.sleep(0);
-        const error = new Error("Command line tools are already installed.");
-        (error as { stderr?: string }).stderr = "Command line tools are already installed.";
-        throw error;
-      };
-
-      const resultPromise = checkXcodeCommandLineTools(
-        { installXcodeCommandLineTools: true },
-        { ...baseDependencies, execFile }
-      );
-
-      fakeTimer.advanceTime(0);
-      const result = await resultPromise;
-
-      expect(execCalls).toHaveLength(1);
-      expect(result.status).toBe("pass");
-    });
   });
 
   describe("checkXcrunAvailable", () => {

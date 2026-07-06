@@ -957,10 +957,6 @@
         "ios": {
           "description": "Run iOS-specific checks only",
           "type": "boolean"
-        },
-        "installXcodeCommandLineTools": {
-          "description": "Install Xcode Command Line Tools if missing",
-          "type": "boolean"
         }
       },
       "additionalProperties": false

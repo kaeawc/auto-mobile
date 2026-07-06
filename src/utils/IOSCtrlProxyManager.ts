@@ -14,7 +14,11 @@ import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { isRunningInDocker } from "./dockerEnv";
 import { exponentialBackoff } from "./Backoff";
 import { DefaultProcessSupervisor, type ProcessSupervisor } from "./ProcessSupervisor";
-import { createConnection } from "node:net";
+import {
+  TcpHostPortAvailabilityChecker,
+  type HostPortAvailabilityChecker
+} from "./ios/IOSHostPortAvailabilityChecker";
+import { IOSCtrlProxyHealthClient, isValidCtrlProxyPort } from "./ios/IOSCtrlProxyHealthClient";
 import {
   getHostControlHost,
   getCtrlProxyIOSStatus,
@@ -108,37 +112,9 @@ interface ListeningProcess {
   ppid?: number;
 }
 
-export interface HostPortAvailabilityChecker {
-  isAvailable(host: string, port: number): Promise<boolean>;
-}
-
-class TcpHostPortAvailabilityChecker implements HostPortAvailabilityChecker {
-  private static readonly CONNECT_TIMEOUT_MS = 1000;
-
-  public isAvailable(host: string, port: number): Promise<boolean> {
-    return new Promise(resolve => {
-      const socket = createConnection({ host, port });
-      let settled = false;
-
-      const finish = (available: boolean) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        socket.destroy();
-        resolve(available);
-      };
-
-      socket.setTimeout(TcpHostPortAvailabilityChecker.CONNECT_TIMEOUT_MS);
-      socket.once("connect", () => finish(false));
-      socket.once("timeout", () => finish(false));
-      socket.once("error", error => {
-        const code = (error as NodeJS.ErrnoException).code;
-        finish(code === "ECONNREFUSED");
-      });
-    });
-  }
-}
+// Re-exported from the extracted collaborator (issue #3218) so existing
+// consumers/tests keep importing it from this facade module.
+export type { HostPortAvailabilityChecker };
 
 class HostControlServicePortUnavailableError extends Error {
   constructor(host: string, port: number) {
@@ -171,6 +147,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly appInspector: DeviceAppManager;
   private readonly hostControl: HostControlCtrlProxyIOSRunner;
   private readonly hostPortAvailabilityChecker: HostPortAvailabilityChecker;
+  private readonly healthClient: IOSCtrlProxyHealthClient;
   private hostControlAvailability: Promise<boolean> | null = null;
 
   // Singleton instances per device
@@ -272,6 +249,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       stop: params => stopCtrlProxyIOS(params),
       status: params => getCtrlProxyIOSStatus(params)
     };
+    this.healthClient = new IOSCtrlProxyHealthClient(this.processExecutor, this.timer, {
+      useHostControl: () => this.useHostControl(),
+      getHost: () => this.hostControl.getHost(),
+      deviceId: this.device.deviceId,
+    });
     this.processSupervisor = new DefaultProcessSupervisor({
       name: "iOS CtrlProxy XCTest runner",
       timer: this.timer,
@@ -1602,11 +1584,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return null;
   }
 
-  /** Single source of truth for "is this a usable TCP port number". */
-  private static isValidPort(value: unknown): value is number {
-    return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 65535;
-  }
-
   private parseCtrlProxyPortFromProcessArgs(args: string): number | null {
     const match = args.match(/(?:^|\s)(?:SIMCTL_CHILD_)?CTRL_PROXY_IOS_PORT=(\d+)(?:\s|$)/);
     if (!match) {
@@ -1614,7 +1591,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     const port = Number.parseInt(match[1], 10);
-    return IOSCtrlProxyManager.isValidPort(port) ? port : null;
+    return isValidCtrlProxyPort(port) ? port : null;
   }
 
   private async ensureServicePortReadyForLaunch(): Promise<void> {
@@ -2130,12 +2107,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async checkHealthEndpoint(): Promise<boolean> {
-    return this.checkHealthEndpointOnPort(this.servicePort);
-  }
-
-  private async checkHealthEndpointOnPort(port: number): Promise<boolean> {
-    const body = await this.readHealthEndpointBodyOnPort(port);
-    return body !== null && (body.includes("ok") || body.includes("healthy"));
+    return this.healthClient.checkHealthEndpointOnPort(this.servicePort);
   }
 
   /**
@@ -2162,7 +2134,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public async getReportedRunnerPort(): Promise<number | null> {
     const candidatePorts = new Set([this.servicePort, IOSCtrlProxyManager.DEFAULT_PORT]);
     for (const port of candidatePorts) {
-      const reportedPort = await this.readReportedPortFromHealth(port);
+      const reportedPort = await this.healthClient.readReportedPortFromHealth(port);
       if (reportedPort !== null) {
         return reportedPort;
       }
@@ -2170,68 +2142,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return null;
   }
 
-  private async readReportedPortFromHealth(port: number): Promise<number | null> {
-    const body = await this.readHealthEndpointBodyOnPort(port);
-    if (body === null) {
-      return null;
-    }
-    try {
-      const health = JSON.parse(body) as { status?: unknown; deviceId?: unknown; port?: unknown };
-      if (health.status !== "ok") {
-        return null;
-      }
-      // Require a positive device match: a runner answering this port that does
-      // not identify as our device is some other runner and must not be adopted.
-      // A new runner reporting a port always reports its device id; a runner that
-      // omits it is too old to report a port anyway (caught below), so this loses
-      // no genuine coverage while closing the cross-device false-adoption hole.
-      if (health.deviceId !== this.device.deviceId) {
-        return null;
-      }
-      return IOSCtrlProxyManager.isValidPort(health.port) ? health.port : null;
-    } catch {
-      return null;
-    }
-  }
-
   private async checkHealthEndpointOnPortForDevice(port: number, deviceId: string): Promise<boolean> {
-    const body = await this.readHealthEndpointBodyOnPort(port);
-    if (body === null) {
-      return false;
-    }
-
-    try {
-      const health = JSON.parse(body) as { status?: unknown; deviceId?: unknown };
-      return health.status === "ok" && health.deviceId === deviceId;
-    } catch {
-      return false;
-    }
-  }
-
-  private async readHealthEndpointBodyOnPort(port: number): Promise<string | null> {
-    try {
-      const host = this.useHostControl() ? this.hostControl.getHost() : "localhost";
-      if (this.useHostControl()) {
-        const controller = new AbortController();
-        const timeoutId = this.timer.setTimeout(() => controller.abort(), 2000);
-        try {
-          const response = await fetch(`http://${host}:${port}/health`, {
-            signal: controller.signal
-          });
-          return await response.text();
-        } finally {
-          this.timer.clearTimeout(timeoutId);
-        }
-      }
-
-      // Use curl to check the health endpoint locally
-      const { stdout } = await this.processExecutor.exec(
-        `curl -s --max-time 2 http://${host}:${port}/health`
-      );
-      return stdout;
-    } catch {
-      return null;
-    }
+    return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId);
   }
 
   private getIproxyStartTimeoutMs(): number {

@@ -199,7 +199,7 @@ See individual script directories for specialized validation:
 - `xml/` - XML validation and formatting
 
 Root-level validation scripts:
-- `validate_codex_skills.sh` - Validate `skills/*/SKILL.md` metadata, optional `agents/openai.yaml` metadata, `.agents/skills` Codex discovery wrappers, and `AGENTS.md` inventory consistency
+- `validate_codex_skills.sh` - Validate `skills/*/SKILL.md` metadata, optional `agents/openai.yaml` interface metadata (colocated with both the canonical skill and the discoverable `.agents/skills/<name>` wrapper, since Codex reads metadata next to the wrapper it discovers), `.agents/skills` Codex discovery wrappers, and `AGENTS.md` inventory consistency
 - `validate_dependabot.sh` - Validate Dependabot config YAML
 - `validate_mkdocs_nav.sh` - Validate MkDocs nav configuration
 

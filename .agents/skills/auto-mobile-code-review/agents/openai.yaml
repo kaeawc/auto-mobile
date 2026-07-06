@@ -1,0 +1,4 @@
+interface:
+  display_name: "AutoMobile Code Review"
+  short_description: "Verified AutoMobile PR and diff review"
+  default_prompt: "Use $auto-mobile-code-review to review the current branch diff or a specific AutoMobile PR with verified, file:line findings."

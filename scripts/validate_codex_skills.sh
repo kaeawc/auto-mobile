@@ -31,6 +31,42 @@ is_quoted() {
   [[ "$value" == \"*\" || "$value" == \'*\' ]]
 }
 
+# Validate a Codex interface metadata file (agents/openai.yaml).
+# Args: <openai_yaml_path> <skill_name>. Sets `errors=1` on any failure.
+validate_openai_yaml() {
+  local openai_yaml="$1"
+  local skill_name="$2"
+  local openai_rel_path="${openai_yaml#"${PROJECT_ROOT}/"}"
+  local display_name short_description default_prompt
+
+  display_name="$(sed -n 's/^[[:space:]]*display_name:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$openai_yaml" | head -n 1)"
+  short_description="$(sed -n 's/^[[:space:]]*short_description:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$openai_yaml" | head -n 1)"
+  default_prompt="$(sed -n 's/^[[:space:]]*default_prompt:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$openai_yaml" | head -n 1)"
+
+  if ! grep -Eq '^interface:[[:space:]]*$' "$openai_yaml"; then
+    echo "[ERROR] ${openai_rel_path}: missing top-level interface block" >&2
+    errors=1
+  fi
+
+  if [[ -z "$display_name" ]]; then
+    echo "[ERROR] ${openai_rel_path}: missing quoted interface.display_name" >&2
+    errors=1
+  fi
+
+  if [[ -z "$short_description" ]]; then
+    echo "[ERROR] ${openai_rel_path}: missing quoted interface.short_description" >&2
+    errors=1
+  fi
+
+  if [[ -z "$default_prompt" ]]; then
+    echo "[ERROR] ${openai_rel_path}: missing quoted interface.default_prompt" >&2
+    errors=1
+  elif [[ -n "$skill_name" && "$default_prompt" != *"\$${skill_name}"* ]]; then
+    echo "[ERROR] ${openai_rel_path}: default_prompt must mention \$${skill_name}" >&2
+    errors=1
+  fi
+}
+
 skill_files=()
 while IFS= read -r file; do
   skill_files+=("$file")
@@ -103,33 +139,7 @@ for file in "${skill_files[@]}"; do
 
   openai_yaml="$(dirname "$file")/agents/openai.yaml"
   if [[ -f "$openai_yaml" ]]; then
-    openai_rel_path="${openai_yaml#"${PROJECT_ROOT}/"}"
-    display_name="$(sed -n 's/^[[:space:]]*display_name:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$openai_yaml" | head -n 1)"
-    short_description="$(sed -n 's/^[[:space:]]*short_description:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$openai_yaml" | head -n 1)"
-    default_prompt="$(sed -n 's/^[[:space:]]*default_prompt:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$openai_yaml" | head -n 1)"
-
-    if ! grep -Eq '^interface:[[:space:]]*$' "$openai_yaml"; then
-      echo "[ERROR] ${openai_rel_path}: missing top-level interface block" >&2
-      errors=1
-    fi
-
-    if [[ -z "$display_name" ]]; then
-      echo "[ERROR] ${openai_rel_path}: missing quoted interface.display_name" >&2
-      errors=1
-    fi
-
-    if [[ -z "$short_description" ]]; then
-      echo "[ERROR] ${openai_rel_path}: missing quoted interface.short_description" >&2
-      errors=1
-    fi
-
-    if [[ -z "$default_prompt" ]]; then
-      echo "[ERROR] ${openai_rel_path}: missing quoted interface.default_prompt" >&2
-      errors=1
-    elif [[ "$default_prompt" != *"\$${skill_name}"* ]]; then
-      echo "[ERROR] ${openai_rel_path}: default_prompt must mention \$${skill_name}" >&2
-      errors=1
-    fi
+    validate_openai_yaml "$openai_yaml" "$skill_name"
 
     if [[ -n "$skill_name" ]]; then
       skills_with_openai_metadata+=("$skill_name")
@@ -218,6 +228,24 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
     if ! grep -Fq "../../../${canonical_path}" "$file"; then
       echo "[ERROR] ${rel_path}: wrapper must reference ../../../${canonical_path}" >&2
       errors=1
+    fi
+
+    # Codex reads interface metadata next to the discoverable wrapper, not the
+    # canonical source skill. If the canonical skill ships agents/openai.yaml,
+    # the wrapper must colocate an equivalent one so the display name/default
+    # prompt appears for the repo-discovered skill (issue #2901).
+    canonical_openai_yaml="${PROJECT_ROOT}/skills/${dir_name}/agents/openai.yaml"
+    wrapper_openai_yaml="$(dirname "$file")/agents/openai.yaml"
+    if [[ -f "$canonical_openai_yaml" ]]; then
+      if [[ -L "$wrapper_openai_yaml" ]]; then
+        echo "[ERROR] ${wrapper_openai_yaml#"${PROJECT_ROOT}/"}: .agents skill metadata files must not be symlinks" >&2
+        errors=1
+      elif [[ ! -f "$wrapper_openai_yaml" ]]; then
+        echo "[ERROR] ${wrapper_openai_yaml#"${PROJECT_ROOT}/"}: missing Codex interface metadata next to discoverable wrapper" >&2
+        errors=1
+      else
+        validate_openai_yaml "$wrapper_openai_yaml" "$dir_name"
+      fi
     fi
   done
 fi

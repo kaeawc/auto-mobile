@@ -38,7 +38,7 @@ export class CliWebpCodec {
     }
 
     const dwebp = await this.binaryResolver.resolveDwebp();
-    return this.runCodecProcess("dwebp", dwebp, ["-", "-o", "-"], webpBuffer, "AUTOMOBILE_DWEBP_PATH");
+    return this.runCodecProcess("dwebp", dwebp, ["-o", "-", "--", "-"], webpBuffer, "AUTOMOBILE_DWEBP_PATH");
   }
 
   private async runCodecProcess(

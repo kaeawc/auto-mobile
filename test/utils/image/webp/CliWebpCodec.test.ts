@@ -86,7 +86,7 @@ describe("CliWebpCodec", () => {
     expect(processExecutor.getSpawnedProcesses()).toMatchObject([
       {
         command: "/tools/dwebp",
-        args: ["-", "-o", "-"]
+        args: ["-o", "-", "--", "-"]
       }
     ]);
   });

@@ -3,11 +3,11 @@ import XCTest
 
 /// Structural (no-simulator) guards for the bundled `add-reminder.yaml` plan.
 ///
-/// `RemindersAddPlanTests.testAddReminderPlan` was flaky because plan step 5 was a bare
-/// `tapOn text: "Done"` fired immediately after `inputText`; on a slow simulator the "Done"
-/// control isn't present yet and the tap fails with "Element not found" (issue #2811). These tests
-/// encode the determinism invariant — the save tap must be guarded by a preceding `observe`
-/// `waitFor` on the same control — so the plan can't silently regress back to a racy bare tap.
+/// `RemindersAddPlanTests.testAddReminderPlan` was flaky because the plan typed/saved immediately
+/// after tapping `New Reminder`; on a slow simulator the quick-entry sheet or save control may not be
+/// ready yet (issue #2811/#3028). These tests encode the determinism invariant — the title field and
+/// save tap must be guarded by preceding `observe`/`waitFor` steps — so the plan can't silently
+/// regress back to racy bare actions.
 ///
 /// They parse the real bundled resource (not a fixture) and need no booted simulator or daemon,
 /// so they run in the plain `swift test` macOS suite.
@@ -20,54 +20,54 @@ final class RemindersPlanContentTests: XCTestCase {
         return try DefaultPlanLoader().loadPlan(at: "launch-reminders-app.yaml", bundle: Bundle.module)
     }
 
-    /// The save tap must be immediately preceded by an `observe`/`waitFor` guard on "Done", so the
+    /// The save tap must be immediately preceded by an `observe`/`waitFor` guard on "Add", so the
     /// executor polls for the control (and its `awaitTimeout` path fails fast on genuine absence)
     /// instead of racing a bare tap.
-    func testAddReminderPlanWaitsForDoneBeforeTappingIt() throws {
+    func testAddReminderPlanWaitsForAddBeforeTappingIt() throws {
         let steps = PlanStepSequence.parse(try loadAddReminderPlan())
 
-        guard let saveTapIndex = steps.firstIndex(where: { $0.tool == "tapOn" && $0.mentionsDone }) else {
-            XCTFail("Plan is missing the tapOn \"Done\" save step")
+        guard let saveTapIndex = steps.firstIndex(where: { $0.tool == "tapOn" && $0.mentions("Add") }) else {
+            XCTFail("Plan is missing the tapOn \"Add\" save step")
             return
         }
 
         XCTAssertGreaterThan(
             saveTapIndex,
             0,
-            "The tapOn \"Done\" step cannot be the first step; it must follow a wait guard"
+            "The tapOn \"Add\" step cannot be the first step; it must follow a wait guard"
         )
 
         let guardStep = steps[saveTapIndex - 1]
         XCTAssertEqual(
             guardStep.tool,
             "observe",
-            "The step before tapOn \"Done\" must be an observe guard, was \(guardStep.tool)"
+            "The step before tapOn \"Add\" must be an observe guard, was \(guardStep.tool)"
         )
         XCTAssertTrue(
             guardStep.hasWaitFor,
-            "The observe step guarding the \"Done\" tap must use waitFor"
+            "The observe step guarding the \"Add\" tap must use waitFor"
         )
         XCTAssertTrue(
-            guardStep.mentionsDone,
-            "The waitFor guard before the \"Done\" tap must target \"Done\""
+            guardStep.mentions("Add"),
+            "The waitFor guard before the \"Add\" tap must target \"Add\""
         )
     }
 
     /// The guard must be bounded so a genuinely-absent control fails fast instead of hanging for the
     /// whole plan timeout.
-    func testDoneWaitGuardHasBoundedTimeout() throws {
+    func testAddWaitGuardHasBoundedTimeout() throws {
         let steps = PlanStepSequence.parse(try loadAddReminderPlan())
 
-        guard let saveTapIndex = steps.firstIndex(where: { $0.tool == "tapOn" && $0.mentionsDone }),
+        guard let saveTapIndex = steps.firstIndex(where: { $0.tool == "tapOn" && $0.mentions("Add") }),
               saveTapIndex > 0
         else {
-            XCTFail("Plan is missing a guarded tapOn \"Done\" step")
+            XCTFail("Plan is missing a guarded tapOn \"Add\" step")
             return
         }
 
         let guardStep = steps[saveTapIndex - 1]
         guard let timeout = guardStep.waitForTimeoutMs else {
-            XCTFail("The waitFor guard before the \"Done\" tap must declare a timeout")
+            XCTFail("The waitFor guard before the \"Add\" tap must declare a timeout")
             return
         }
         XCTAssertGreaterThan(timeout, 0, "waitFor timeout must be positive")
@@ -78,53 +78,39 @@ final class RemindersPlanContentTests: XCTestCase {
         )
     }
 
-    /// The add-flow test retry-wraps itself (#2811) so the residual cross-iOS-version flake doesn't
-    /// red-flag otherwise-green PRs, while a genuine break still fails on every attempt.
-    func testAddReminderPlanDefaultsToOneRetry() {
+    /// The title field must be visible/focused before `inputText`; otherwise text entry can run while
+    /// the quick-entry sheet is still animating and leave no save control to wait for.
+    func testAddReminderPlanWaitsForTitleFieldBeforeTyping() throws {
+        let steps = PlanStepSequence.parse(try loadAddReminderPlan())
+
+        guard let inputIndex = steps.firstIndex(where: { $0.tool == "inputText" }) else {
+            XCTFail("Plan is missing the inputText title step")
+            return
+        }
+        XCTAssertGreaterThan(inputIndex, 0)
+        let guardStep = steps[inputIndex - 1]
+        XCTAssertEqual(guardStep.tool, "observe", "The title input must follow an observe guard")
+        XCTAssertTrue(guardStep.hasWaitFor, "The title input guard must use waitFor")
+        XCTAssertTrue(guardStep.mentions("Title"), "The title input guard must target the Title field")
+    }
+
+    /// The Reminders tests must run as single-attempt plans by default. CI warms the target app before
+    /// the timed plan step, so retrying here would hide the root-cause fix regressing.
+    func testRemindersPlansDefaultToZeroRetries() {
         // An explicit env override legitimately wins, so only assert the default when unset.
         let env = ProcessInfo.processInfo.environment
         if env["AUTOMOBILE_TEST_RETRY_COUNT"] != nil || env["RETRY_COUNT"] != nil {
             return
         }
-        XCTAssertEqual(RemindersAddPlanTests().retryCount, 1)
-    }
-
-    /// An explicit retry override wins — including 0 to disable retries for CI/local repro runs.
-    func testExplicitZeroRetryOverrideIsHonored() {
-        let key = "AUTOMOBILE_TEST_RETRY_COUNT"
-        let original = ProcessInfo.processInfo.environment[key]
-        setenv(key, "0", 1)
-        defer {
-            if let original = original {
-                setenv(key, original, 1)
-            } else {
-                unsetenv(key)
-            }
-        }
-
+        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 0)
         XCTAssertEqual(RemindersAddPlanTests().retryCount, 0)
     }
 
-    /// The launch-flow test retry-wraps itself (#2998) so a transient cold-bring-up `observe waitFor`
-    /// timeout on a CI simulator doesn't red-flag an otherwise-green PR, while a genuine observe
-    /// regression still fails on every attempt. Mirrors the sibling add-flow retry (#2811).
-    func testLaunchRemindersPlanDefaultsToOneRetry() {
-        // An explicit env override legitimately wins, so only assert the default when unset.
-        let env = ProcessInfo.processInfo.environment
-        if env["AUTOMOBILE_TEST_RETRY_COUNT"] != nil || env["RETRY_COUNT"] != nil {
-            return
-        }
-        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 1)
-    }
-
-    /// An explicit retry override wins for the launch flow too — 0 disables retries so a CI/local
-    /// repro run can force a single attempt and surface the transient timeout deterministically, and a
-    /// non-default value is passed through verbatim. The non-`0` case is load-bearing: it diverges from
-    /// both the base default (`0`) and this class's default (`1`), so it fails if the override is ever
-    /// reverted to the base implementation — whereas a `0`-only assertion would pass either way.
-    func testLaunchRemindersPlanExplicitRetryOverrideIsHonored() {
+    /// An explicit retry override wins — including 0 to disable retries for CI/local repro runs.
+    func testExplicitRetryOverrideIsStillHonored() {
         let key = "AUTOMOBILE_TEST_RETRY_COUNT"
         let original = ProcessInfo.processInfo.environment[key]
+        setenv(key, "0", 1)
         defer {
             if let original = original {
                 setenv(key, original, 1)
@@ -133,45 +119,66 @@ final class RemindersPlanContentTests: XCTestCase {
             }
         }
 
-        setenv(key, "0", 1)
-        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 0, "Explicit 0 must disable retries")
+        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 0)
+        XCTAssertEqual(RemindersAddPlanTests().retryCount, 0)
 
         setenv(key, "3", 1)
-        XCTAssertEqual(
-            RemindersLaunchPlanTests().retryCount,
-            3,
-            "A non-default explicit override must be honored verbatim, proving the override reads env"
-        )
+        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 3)
+        XCTAssertEqual(RemindersAddPlanTests().retryCount, 3)
     }
 
-    /// The retry policy is shared by `RemindersIntegrationBase`; subclasses keep only their
-    /// issue-specific rationale comments instead of duplicating the env/default implementation.
-    func testRemindersRetryCountIsSharedByBaseClass() throws {
+    /// Retry is no longer the stabilization mechanism for Reminders. The integration base should only
+    /// own simulator/daemon readiness; retry behavior comes from `AutoMobileTestCase`.
+    func testRemindersIntegrationBaseDoesNotOverrideRetryCount() throws {
         let source = try loadRemindersIntegrationTestSource()
 
-        XCTAssertTrue(
-            classBody(named: "RemindersIntegrationBase", in: source).contains("override var retryCount"),
-            "RemindersIntegrationBase must own the shared retryCount override"
-        )
-        XCTAssertTrue(
-            classBody(named: "RemindersIntegrationBase", in: source).contains("var defaultRetryCount"),
-            "RemindersIntegrationBase must expose the shared defaultRetryCount hook"
-        )
+        XCTAssertFalse(classBody(named: "RemindersIntegrationBase", in: source).contains("override var retryCount"))
+        XCTAssertFalse(classBody(named: "RemindersIntegrationBase", in: source).contains("var defaultRetryCount"))
         XCTAssertFalse(
             classBody(named: "RemindersLaunchPlanTests", in: source).contains("override var retryCount"),
-            "RemindersLaunchPlanTests should inherit the shared retryCount behavior"
+            "RemindersLaunchPlanTests should inherit AutoMobileTestCase retry behavior"
         )
         XCTAssertFalse(
             classBody(named: "RemindersAddPlanTests", in: source).contains("override var retryCount"),
-            "RemindersAddPlanTests should inherit the shared retryCount behavior"
+            "RemindersAddPlanTests should inherit AutoMobileTestCase retry behavior"
         )
     }
 
-    /// Regression guard preserving acceptance criterion 2 (#2998): the retry only masks a *transient*
-    /// bring-up flake, so the launch plan must keep its bounded `observe`/`waitFor` guard — a genuinely
-    /// broken observe still times out on every attempt and fails, instead of hanging or silently
-    /// passing. The plan must launch Reminders first, gate the launch on a bounded wait, and terminate
-    /// last.
+    /// The CI job must warm Reminders itself before the single-attempt timed plan. Warming only
+    /// CtrlProxy still leaves the first target-app launch/observe on the clock.
+    func testPullRequestWorkflowWarmsTargetAppBeforeRemindersRuns() throws {
+        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
+
+        assertWorkflowWarmsTargetAppBeforeRemindersRun(
+            workflow,
+            warmupStepName: "Warm up Reminders target app (Xcode 26.2)",
+            runStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowWarmsTargetAppBeforeRemindersRun(
+            workflow,
+            warmupStepName: "Warm up Reminders target app (Xcode 26.3)",
+            runStepName: "Run Reminders integration tests (Xcode 26.3)"
+        )
+    }
+
+    func testNightlyWorkflowWarmsTargetAppBeforeRemindersRuns() throws {
+        let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
+
+        assertWorkflowWarmsTargetAppBeforeRemindersRun(
+            workflow,
+            warmupStepName: "Warm up Reminders target app (Xcode 26.2)",
+            runStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowWarmsTargetAppBeforeRemindersRun(
+            workflow,
+            warmupStepName: "Warm up Reminders target app (Xcode 26.3)",
+            runStepName: "Run Reminders integration tests (Xcode 26.3)"
+        )
+    }
+
+    /// Regression guard preserving the flake-vs-regression distinction: warm-up handles target-app
+    /// bring-up before the plan, but the plan must keep its bounded `observe`/`waitFor` guard so a
+    /// genuinely broken observe still fails instead of hanging or silently passing.
     func testLaunchRemindersPlanIsGuardedAndBounded() throws {
         let content = try loadLaunchRemindersPlan()
         let steps = PlanStepSequence.parse(content)
@@ -256,11 +263,11 @@ final class RemindersPlanContentTests: XCTestCase {
         let toolOrder = steps.map { $0.tool }
         let createIndex = steps.firstIndex { $0.tool == "tapOn" && $0.mentions("New Reminder") }
         let typeIndex = toolOrder.firstIndex(of: "inputText")
-        let saveIndex = steps.firstIndex { $0.tool == "tapOn" && $0.mentionsDone }
+        let saveIndex = steps.firstIndex { $0.tool == "tapOn" && $0.mentions("Add") }
 
         XCTAssertNotNil(createIndex, "Plan must still focus a new reminder")
         XCTAssertNotNil(typeIndex, "Plan must still type the reminder title")
-        XCTAssertNotNil(saveIndex, "Plan must still save via the \"Done\" control")
+        XCTAssertNotNil(saveIndex, "Plan must still save via the \"Add\" control")
         if let createIndex = createIndex, let typeIndex = typeIndex, let saveIndex = saveIndex {
             XCTAssertLessThan(createIndex, typeIndex, "Reminder must be focused before typing")
             XCTAssertLessThan(typeIndex, saveIndex, "Title must be typed before saving")
@@ -290,8 +297,6 @@ private struct PlanStep {
             return trimmed.dropFirst("optional:".count).trimmingCharacters(in: .whitespaces) == "true"
         }
     }
-
-    var mentionsDone: Bool { mentions("Done") }
 
     func mentions(_ needle: String) -> Bool {
         body.contains("\"\(needle)\"") || body.contains(needle)
@@ -365,6 +370,17 @@ private func loadRemindersIntegrationTestSource() throws -> String {
     return try String(contentsOf: sourceURL, encoding: .utf8)
 }
 
+private func loadRepositoryFile(_ path: String) throws -> String {
+    let currentFile = URL(fileURLWithPath: #filePath)
+    let repositoryRoot = currentFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    return try String(contentsOf: repositoryRoot.appendingPathComponent(path), encoding: .utf8)
+}
+
 private func classBody(named className: String, in source: String) -> String {
     guard let declarationRange = source.range(of: "class \(className)")
         ?? source.range(of: "final class \(className)")
@@ -390,4 +406,31 @@ private func classBody(named className: String, in source: String) -> String {
         index = source.index(after: index)
     }
     return ""
+}
+
+private func assertWorkflowWarmsTargetAppBeforeRemindersRun(
+    _ workflow: String,
+    warmupStepName: String,
+    runStepName: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    guard let warmupRange = workflow.range(of: #"name: "\#(warmupStepName)""#) else {
+        XCTFail("Workflow is missing step named \(warmupStepName)", file: file, line: line)
+        return
+    }
+    guard let runRange = workflow.range(of: #"name: "\#(runStepName)""#) else {
+        XCTFail("Workflow is missing step named \(runStepName)", file: file, line: line)
+        return
+    }
+
+    XCTAssertLessThan(warmupRange.lowerBound, runRange.lowerBound, "\(warmupStepName) must run before \(runStepName)", file: file, line: line)
+
+    let warmupBlock = workflow[warmupRange.lowerBound..<runRange.lowerBound]
+    XCTAssertTrue(
+        warmupBlock.contains("./scripts/ci/warm-reminders-target-app.sh"),
+        "\(warmupStepName) must invoke the target-app warm-up helper",
+        file: file,
+        line: line
+    )
 }

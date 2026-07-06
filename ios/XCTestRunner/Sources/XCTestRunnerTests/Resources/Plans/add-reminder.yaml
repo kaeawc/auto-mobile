@@ -1,17 +1,15 @@
 ---
 name: add-reminder
 description: Create a basic reminder in the iOS Reminders app (English UI assumed)
-# NOTE: the system Reminders UI varies by iOS version — the "New Reminder" and "Done" control
-# labels below are pinned to the CI simulator's iOS (English). On some iOS versions the save
-# control is labelled "Add" instead of "Done". Cross-version tolerance is tracked in issue #2855.
+# NOTE: the system Reminders UI varies by iOS version — the "New Reminder" and "Add" control
+# labels below are pinned to the CI simulator's iOS (English).
 # Deliberately does NOT clearAppData: on newer iOS a cleared Reminders launches to a home without
 # the "New Reminder" control, which would break this plan.
 platform: ios
 steps:
-  # coldBoot force-terminates + relaunches so a retry (the test retries once, #2811/#2855) starts
-  # from the Reminders home rather than a partial edit screen left by a failed attempt. A warm iOS
-  # launch would resume that stale screen and then time out waiting for "New Reminder". coldBoot
-  # (unlike clearAppData) keeps the app data, so it avoids the empty-home issue noted above.
+  # coldBoot force-terminates + relaunches so the plan starts from the Reminders home rather than a
+  # partial edit screen left by a failed or interrupted local run. coldBoot (unlike clearAppData)
+  # keeps the app data, so it avoids the empty-home issue noted above.
   - tool: launchApp
     appId: com.apple.reminders
     coldBoot: true
@@ -55,21 +53,29 @@ steps:
     action: "tap"
     label: Focus new reminder field
 
+  # Wait for the quick-entry sheet/title field to become focused before typing. The preceding tap can
+  # return as soon as the press is recognized, while the sheet is still animating in.
+  - tool: observe
+    waitFor:
+      text: "Title"
+      timeout: 10000
+    label: Wait for title field
+
   - tool: inputText
     text: "AutoMobile XCTest demo"
     label: Type reminder title
 
-  # Wait for the "Done" save control to render before tapping it. Without this guard the tap races
-  # the keyboard/nav-bar layout and fails with "Element not found with provided text 'Done'"
+  # Wait for the "Add" save control to render before tapping it. Without this guard the tap races
+  # the keyboard/nav-bar layout and fails with "Element not found with provided text 'Add'"
   # (issue #2811). observe waitFor polls until it appears and fails fast via awaitTimeout otherwise.
   - tool: observe
     waitFor:
-      text: "Done"
+      text: "Add"
       timeout: 10000
-    label: Wait for Done control
+    label: Wait for Add control
 
   - tool: tapOn
-    text: "Done"
+    text: "Add"
     action: "tap"
     label: Save reminder
 

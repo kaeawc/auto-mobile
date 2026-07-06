@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import { existsSync, mkdtempSync, rmSync, statSync } from "fs";
+import { mkdtemp } from "fs/promises";
 import { Kysely } from "kysely";
 import { join } from "path";
 import { tmpdir } from "os";
+import { removeTempDbDir } from "./tempDbDir";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import {
   configureSqliteDatabase,
@@ -63,8 +65,13 @@ describe("configureSqliteDatabase", () => {
     }
   });
 
-  test("sets synchronous NORMAL after enabling WAL on Bun SQLite databases", () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "auto-mobile-sqlite-"));
+  test("sets synchronous NORMAL after enabling WAL on Bun SQLite databases", async () => {
+    // WAL mode needs a real file (an in-memory DB reports journal_mode
+    // "memory"), so this test uses a temp dir. Cleanup goes through the shared
+    // bounded helper: bun:sqlite can briefly hold the `.db`/`-wal`/`-shm`
+    // handles past close() on Windows, so a raw `rmSync` flakes with
+    // EBUSY/EPERM/ENOTEMPTY (issues #2916/#3160).
+    const tempDir = await mkdtemp(join(tmpdir(), "auto-mobile-sqlite-"));
     const sqliteDb = new BunDatabase(join(tempDir, "test.db"));
 
     try {
@@ -81,7 +88,7 @@ describe("configureSqliteDatabase", () => {
       expect(synchronous?.synchronous).toBe(1);
     } finally {
       sqliteDb.close();
-      rmSync(tempDir, { recursive: true, force: true });
+      await removeTempDbDir(tempDir);
     }
   });
 

@@ -52,7 +52,10 @@ export interface ExclusiveLockOptions {
    * Only consulted for the same-PID reclaim decision. When omitted, `reclaimOwnPid`
    * behaves exactly as it did before this token existed (any same-PID lock is a
    * reclaimable leak). The PID stays on the first line so daemon liveness reads and
-   * {@link releaseExclusiveLock}'s `parseInt` are unaffected.
+   * {@link releaseExclusiveLock}'s PID compare are unaffected. The positional format
+   * ("line 1 = bare integer PID, line 2 = token") is centralized in the
+   * {@link formatLockContent} / {@link parseLockContent} pair, so a future third
+   * field is added there and cannot silently move the PID off line 1 (#3006).
    *
    * Must be a NON-EMPTY, single-line, whitespace-free token (a UUID satisfies
    * this). The lock body is `trim()`-ed on read to tolerate a trailing newline, so
@@ -61,6 +64,43 @@ export interface ExclusiveLockOptions {
    * from `IdGenerator`; a future caller must uphold the same shape.
    */
   ownerToken?: string;
+}
+
+/**
+ * The parsed contents of a lock file.
+ *
+ * The on-disk format is positional and MUST keep line 1 a bare integer PID so
+ * `parseInt`-based readers (daemon liveness, and historically {@link releaseExclusiveLock})
+ * stay correct; the per-process token, when present, is line 2. This helper pair
+ * ({@link formatLockContent} / {@link parseLockContent}) is the single place that
+ * encodes that contract, so any future third field is added HERE — line 1 stays a
+ * bare integer by construction rather than by every call site remembering to
+ * (issue #3006, follow-up 2).
+ */
+export interface LockContent {
+  /** Owner PID (line 1). `NaN` when the PID line is not a readable integer. */
+  pid: number;
+  /** Per-process-instance token (line 2), or `undefined` when absent. */
+  token: string | undefined;
+}
+
+/**
+ * Serialize a lock file body. PID on line 1 (bare integer, always), token on an
+ * optional line 2. Inverse of {@link parseLockContent}. Centralizes the positional
+ * format so a future field can't silently move the PID off line 1 (#3006).
+ */
+export function formatLockContent(pid: number, ownerToken?: string): string {
+  return ownerToken === undefined ? String(pid) : `${pid}\n${ownerToken}`;
+}
+
+/**
+ * Parse a lock file body (already `trim()`-ed by the caller) into its PID and
+ * optional token. Line 1 is parsed as an integer PID (`NaN` when unreadable); line
+ * 2, if present, is the token. Inverse of {@link formatLockContent} (#3006).
+ */
+export function parseLockContent(content: string): LockContent {
+  const [pidLine, tokenLine] = content.split("\n", 2);
+  return { pid: Number.parseInt(pidLine, 10), token: tokenLine };
 }
 
 /**
@@ -101,9 +141,9 @@ export function tryAcquireExclusiveLock(
   }
 
   // The PID is the first line; a per-process-instance token (if any) is the
-  // second (see `writeExclusiveLockFile`). `parseInt` reads only the PID.
-  const [pidLine, tokenLine] = content.split("\n", 2);
-  const ownerPid = Number.parseInt(pidLine, 10);
+  // second (see `writeExclusiveLockFile`). `parseLockContent` reads only the PID
+  // off line 1, keeping the positional contract in one place (#3006).
+  const { pid: ownerPid, token: tokenLine } = parseLockContent(content);
   if (Number.isNaN(ownerPid)) {
     // Unreadable PID — a writer may still be filling it in; treat as held.
     return false;
@@ -153,8 +193,21 @@ export function tryAcquireExclusiveLock(
  * Release a lock owned by `pid`. Compare-and-delete: the file is removed only if
  * it still holds `pid`, so a reclaim race can't delete a lock that a *different*
  * opener now owns (mirrors `shouldCleanupForExpectedPid` in `daemonFiles.ts`).
+ *
+ * When `ownerToken` is supplied, release is incarnation-aware: it unlinks only if
+ * BOTH the PID and the token match, so it is symmetric with the reclaim decision
+ * in {@link tryAcquireExclusiveLock}. This closes the recycled-PID window where a
+ * process could delete a lock now held by a *different* incarnation that recycled
+ * the same PID and wrote a different token (issue #3006, follow-up 1). A lock file
+ * with NO token line (a pre-token incarnation) is treated as ours on a PID match,
+ * preserving the legacy PID-only behavior. The daemon caller passes no token and
+ * stays PID-only, as before.
  */
-export function releaseExclusiveLock(lockFilePath: string, pid: number = process.pid): void {
+export function releaseExclusiveLock(
+  lockFilePath: string,
+  pid: number = process.pid,
+  ownerToken?: string
+): void {
   let content: string;
   try {
     content = readFileSync(lockFilePath, "utf-8").trim();
@@ -163,8 +216,15 @@ export function releaseExclusiveLock(lockFilePath: string, pid: number = process
     return;
   }
 
-  if (Number.parseInt(content, 10) !== pid) {
+  const { pid: ownerPid, token: lockToken } = parseLockContent(content);
+  if (ownerPid !== pid) {
     // The lock is no longer ours — do not delete another opener's file.
+    return;
+  }
+  // Incarnation check: with a token supplied, a same-PID lock bearing a DIFFERENT
+  // token belongs to another incarnation that recycled our PID — leave it. A lock
+  // with no token line predates tokens and is treated as ours (PID match).
+  if (ownerToken !== undefined && lockToken !== undefined && lockToken !== ownerToken) {
     return;
   }
 
@@ -186,7 +246,7 @@ function writeExclusiveLockFile(lockFilePath: string, pid: number, ownerToken?: 
   try {
     mkdirSync(dirname(lockFilePath), { recursive: true });
     const fd = openSync(lockFilePath, "wx", 0o600);
-    writeFileSync(fd, ownerToken === undefined ? String(pid) : `${pid}\n${ownerToken}`);
+    writeFileSync(fd, formatLockContent(pid, ownerToken));
     closeSync(fd);
     return true;
   } catch {

@@ -17,6 +17,51 @@ export interface RecordStorageEventInput {
   previousValue?: string | null;
 }
 
+/**
+ * The recorder-contract fields whose canonical defaults the shared normalizer
+ * owns. Callers (iOS ingestor, Android wire builder) supply partial, platform-
+ * shaped values; the normalizer folds them into a single canonical vocabulary so
+ * that a `storage_events` row is platform-independent (issue #3173).
+ */
+export type PartialStorageEvent = Omit<
+  RecordStorageEventInput,
+  "valueType" | "changeType"
+> & {
+  valueType?: string | null;
+  changeType?: string | null;
+};
+
+/**
+ * The canonical, lower-cased `value_type` token persisted regardless of source
+ * platform. Absent/blank/`unknown` all collapse to `"unknown"`, so a query,
+ * grouping, or UI filter on `value_type` never sees platform-dependent casing
+ * (`"STRING"` vs `"string"`) or a NULL/`"unknown"` split.
+ */
+export function normalizeValueType(valueType: string | null | undefined): string {
+  const trimmed = valueType?.trim();
+  if (!trimmed) {
+    return "unknown";
+  }
+  return trimmed.toLowerCase();
+}
+
+/**
+ * Fold a platform-shaped partial storage event into the canonical
+ * `RecordStorageEventInput` recorder contract. This is the SINGLE source of the
+ * recorder-contract defaults (`changeType ?? "modify"`, canonical `valueType`),
+ * preventing the wire-shape/contract-mismatch bug class that #3001 exposed and
+ * the cross-platform vocabulary divergence #3173 tracks. Both the iOS and
+ * Android call sites persist through here, so a string change on either platform
+ * yields the same canonical `value_type` token.
+ */
+export function normalizeStorageEvent(input: PartialStorageEvent): RecordStorageEventInput {
+  return {
+    ...input,
+    valueType: normalizeValueType(input.valueType),
+    changeType: input.changeType?.trim() || "modify",
+  };
+}
+
 const retentionState: EventRetentionState = { cleanupInProgress: false, insertsSinceCleanup: 0 };
 
 function getDb(db?: Kysely<Database>): Kysely<Database> {
@@ -24,10 +69,16 @@ function getDb(db?: Kysely<Database>): Kysely<Database> {
 }
 
 export async function recordStorageEvent(
-  input: RecordStorageEventInput,
+  rawInput: RecordStorageEventInput,
   db?: Kysely<Database>
 ): Promise<void> {
   const d = getDb(db);
+
+  // Canonicalize the recorder-contract fields at this single seam so a row's
+  // `value_type`/`change_type` is platform-independent regardless of caller
+  // (issue #3173). Both the iOS ingestor and the Android wire builder persist
+  // through here, so neither can reintroduce divergent casing/defaults.
+  const input = normalizeStorageEvent(rawInput);
 
   // Look up the previous value for this key only when the caller did not supply
   // one. `!== undefined` (not `?? null`) is deliberate: a caller that passes an

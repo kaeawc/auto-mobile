@@ -107,7 +107,12 @@ jobs:
 
             // Check if title matches the automated SHA256 update pattern
             const titleMatches = pr.title === 'chore: update CtrlProxy APK SHA256' ||
-                                 pr.title === 'chore: update CtrlProxy iOS IPA SHA256';
+                                 pr.title === 'chore: update CtrlProxy iOS IPA SHA256' ||
+                                 pr.title === 'chore: update CtrlProxy iOS runner SHA256' ||
+                                 pr.title === 'chore: update CtrlProxy APK and CtrlProxy iOS IPA SHA256' ||
+                                 pr.title === 'chore: update CtrlProxy APK and CtrlProxy iOS runner SHA256' ||
+                                 pr.title === 'chore: update CtrlProxy iOS IPA and iOS runner SHA256' ||
+                                 pr.title === 'chore: update CtrlProxy APK, iOS IPA, and iOS runner SHA256';
 
             // Get list of changed files
             const { data: files } = await github.rest.pulls.listFiles({

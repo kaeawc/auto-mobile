@@ -19,6 +19,22 @@
   grep -q "runner_sha256" ".github/workflows/nightly.yml"
 }
 
+@test "nightly.yml includes runner sha256 in generated PR metadata" {
+  grep -Fq "RUNNER_CHANGED=\"\${{ steps.check.outputs.runner_changed }}\"" ".github/workflows/nightly.yml"
+  grep -q "chore: update CtrlProxy iOS runner SHA256" ".github/workflows/nightly.yml"
+  grep -q "chore: update CtrlProxy APK and CtrlProxy iOS runner SHA256" ".github/workflows/nightly.yml"
+  grep -q "chore: update CtrlProxy iOS IPA and iOS runner SHA256" ".github/workflows/nightly.yml"
+  grep -q "chore: update CtrlProxy APK, iOS IPA, and iOS runner SHA256" ".github/workflows/nightly.yml"
+  grep -Fq "| **iOS Runner** |" ".github/workflows/nightly.yml"
+}
+
+@test "pull_request.yml treats iOS runner checksum PR titles as sha256-only" {
+  grep -q "chore: update CtrlProxy iOS runner SHA256" ".github/workflows/pull_request.yml"
+  grep -q "chore: update CtrlProxy APK and CtrlProxy iOS runner SHA256" ".github/workflows/pull_request.yml"
+  grep -q "chore: update CtrlProxy iOS IPA and iOS runner SHA256" ".github/workflows/pull_request.yml"
+  grep -q "chore: update CtrlProxy APK, iOS IPA, and iOS runner SHA256" ".github/workflows/pull_request.yml"
+}
+
 @test "release.yml runs the release-integrity gate" {
   grep -q "verify-release-integrity.sh" ".github/workflows/release.yml"
 }

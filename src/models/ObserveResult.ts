@@ -54,6 +54,25 @@ export interface Predictions {
   interactableElements: InteractablePrediction[];
 }
 
+export type ScreenIdentitySource = "heuristic" | "sdk";
+export type ScreenIdentityConfidence = "high" | "medium" | "low";
+
+export interface ScreenIdentity {
+  platform: "ios" | "android";
+  source: ScreenIdentitySource;
+  confidence: ScreenIdentityConfidence;
+  key: string;
+  components: {
+    bundleId?: string;
+    navigationTitle?: string;
+    selectedTab?: string;
+    modalClass?: string;
+    modalTitle?: string;
+    focusedElementId?: string;
+    keyboardVisible?: boolean;
+  };
+}
+
 /**
  * Represents the result of observing the device state
  */
@@ -79,6 +98,9 @@ export interface ObserveResult {
 
   /** Active window information */
   activeWindow?: ActiveWindowInfo;
+
+  /** Best-effort stable identity for the currently visible screen. */
+  screenIdentity?: ScreenIdentity;
 
   /**
    * Categorized elements from the view hierarchy

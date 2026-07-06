@@ -214,6 +214,13 @@ describe("discardHierarchyDerivedData", () => {
     intentChooserDetected: true,
     notificationPermissionDetected: true,
     activeWindow: { appId: "com.other.platform", activityName: "", layoutSeqSum: 0 },
+    screenIdentity: {
+      platform: "ios",
+      source: "heuristic",
+      confidence: "medium",
+      key: JSON.stringify([["bundle", "com.other.platform"], ["focus", "stale-id"]]),
+      components: { bundleId: "com.other.platform", focusedElementId: "stale-id" },
+    },
     predictions: { } as never,
   } as unknown as ObserveResult);
 
@@ -231,6 +238,7 @@ describe("discardHierarchyDerivedData", () => {
     expect(result.notificationPermissionDetected).toBeUndefined();
     expect(result.predictions).toBeUndefined();
     expect(result.activeWindow).toBeUndefined();
+    expect(result.screenIdentity).toBeUndefined();
   });
 
   test("resets hierarchy-derived screen metrics to base defaults", () => {
@@ -270,6 +278,13 @@ describe("enforceHierarchyPlatform", () => {
     focusedElement: { "text": "Stale" } as unknown as Element,
     intentChooserDetected: true,
     elements: { clickable: [], scrollable: [], text: [], media: [] },
+    screenIdentity: {
+      platform: "ios",
+      source: "heuristic",
+      confidence: "medium",
+      key: JSON.stringify([["bundle", "com.other.platform"], ["focus", "stale-id"]]),
+      components: { bundleId: "com.other.platform", focusedElementId: "stale-id" },
+    },
   } as unknown as ObserveResult);
 
   test("rejects an opposite-platform hierarchy and scrubs all derived fields", () => {
@@ -289,6 +304,7 @@ describe("enforceHierarchyPlatform", () => {
     expect(result.elements).toBeUndefined();
     expect(result.focusedElement).toBeUndefined();
     expect(result.intentChooserDetected).toBeUndefined();
+    expect(result.screenIdentity).toBeUndefined();
     expect(result.error).toContain("iOS hierarchy for Android device");
   });
 
@@ -305,6 +321,7 @@ describe("enforceHierarchyPlatform", () => {
     expect(result.viewHierarchy).toBeDefined();
     expect(result.elements).toBeDefined();
     expect(result.focusedElement).toBeDefined();
+    expect(result.screenIdentity).toBeDefined();
     expect(result.error).toBeUndefined();
   });
 

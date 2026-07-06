@@ -740,10 +740,16 @@ function groupByKey(nodes: FlatObserveNode[]): Map<string, FlatObserveNode[]> {
 /**
  * Whether two observations describe the same screen. Cross-screen diffs are
  * meaningless (issue #2761), so the finalize hook falls back to a full emit when
- * this is false. Compares the active window app/activity and the hierarchy
- * package name.
+ * this is false. When either side has a derived `screenIdentity`, require the
+ * identities to match; otherwise fall back to active window app/activity and the
+ * hierarchy package name.
  */
 export function isSameObservationScreen(baseline: ObserveResult, next: ObserveResult): boolean {
+  if (baseline.screenIdentity || next.screenIdentity) {
+    return baseline.screenIdentity?.platform === next.screenIdentity?.platform
+      && baseline.screenIdentity?.source === next.screenIdentity?.source
+      && baseline.screenIdentity?.key === next.screenIdentity?.key;
+  }
   if ((baseline.activeWindow?.appId ?? "") !== (next.activeWindow?.appId ?? "")) {
     return false;
   }

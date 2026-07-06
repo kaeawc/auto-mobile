@@ -100,11 +100,28 @@ export const activeWindowSchema = z.object({
   type: z.string().optional()
 }).passthrough();
 
+const screenIdentitySchema = z.object({
+  platform: z.enum(["ios", "android"]),
+  source: z.enum(["heuristic", "sdk"]),
+  confidence: z.enum(["high", "medium", "low"]),
+  key: z.string(),
+  components: z.object({
+    bundleId: z.string().optional(),
+    navigationTitle: z.string().optional(),
+    selectedTab: z.string().optional(),
+    modalClass: z.string().optional(),
+    modalTitle: z.string().optional(),
+    focusedElementId: z.string().optional(),
+    keyboardVisible: z.boolean().optional()
+  }).passthrough()
+}).passthrough();
+
 export const observationSummarySchema = z.object({
   selectedElements: z.array(selectedElementSchema).optional(),
   focusedElement: elementSchema.optional(),
   accessibilityFocusedElement: elementSchema.optional(),
-  activeWindow: activeWindowSchema.optional()
+  activeWindow: activeWindowSchema.optional(),
+  screenIdentity: screenIdentitySchema.optional()
 }).passthrough();
 
 const tapOnSearchUntilSchema = z.object({
@@ -311,6 +328,7 @@ export const observeResultSchema = z.object({
   systemInsets: systemInsetsSchema.optional(),
   viewHierarchy: viewHierarchyResultSchema.optional(),
   activeWindow: activeWindowSchema.optional(),
+  screenIdentity: screenIdentitySchema.optional(),
   elements: observeElementsSchema.optional(),
   selectedElements: z.array(selectedElementSchema).optional(),
   focusedElement: elementSchema.optional(),

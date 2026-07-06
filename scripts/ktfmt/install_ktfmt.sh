@@ -5,34 +5,9 @@
 # shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Detect operating system
-detect_os() {
-    case "$(uname -s)" in
-        Darwin*)
-            echo "macos"
-            ;;
-        Linux*)
-            echo "linux"
-            ;;
-        CYGWIN*|MINGW*|MSYS*)
-            echo "windows"
-            ;;
-        *)
-            echo "unknown"
-            ;;
-    esac
-}
-
-# Check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
+# Shared colors + command_exists + detect_os/detect_arch (issue #2822).
+# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 
 # Note: installed_ktfmt_version() is provided by the sourced ktfmt_version.sh.
 

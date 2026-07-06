@@ -4,63 +4,14 @@ set -euo pipefail
 
 HADOLINT_VERSION="2.12.0" # Change this to the desired version
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Detect operating system
-detect_os() {
-    case "$(uname -s)" in
-        Darwin*)
-            echo "macos"
-            ;;
-        Linux*)
-            echo "linux"
-            ;;
-        CYGWIN*|MINGW*|MSYS*)
-            echo "windows"
-            ;;
-        *)
-            echo "unknown"
-            ;;
-    esac
-}
-
-# Detect architecture
-detect_arch() {
-    case "$(uname -m)" in
-        x86_64|amd64)
-            echo "x86_64"
-            ;;
-        aarch64|arm64)
-            echo "arm64"
-            ;;
-        *)
-            echo "unknown"
-            ;;
-    esac
-}
-
-# Check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
+# Shared colors + command_exists + detect_os/detect_arch (issue #2822).
+# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 
 # Install hadolint on macOS
 install_macos() {
-    echo -e "${YELLOW}Installing hadolint on macOS...${NC}"
-
-    if command_exists brew; then
-        echo -e "${GREEN}Using Homebrew to install hadolint${NC}"
-        brew install hadolint
-        return $?
-    else
-        echo -e "${YELLOW}Homebrew not found. Falling back to manual installation...${NC}"
-        install_manual
-        return $?
-    fi
+    install_via_brew_or_manual "hadolint" "hadolint" install_manual
+    return $?
 }
 
 # Install hadolint on Linux

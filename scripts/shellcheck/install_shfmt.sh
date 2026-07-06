@@ -2,32 +2,14 @@
 
 SHFMT_VERSION="3.10.0" # Change this to the desired version
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Shared colors + command_exists + detect_os (issue #2822).
+# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 
-# Detect operating system
-detect_os() {
-  case "$(uname -s)" in
-    Darwin*)
-      echo "macos"
-      ;;
-    Linux*)
-      echo "linux"
-      ;;
-    CYGWIN* | MINGW* | MSYS*)
-      echo "windows"
-      ;;
-    *)
-      echo "unknown"
-      ;;
-  esac
-}
-
-# Detect architecture
-detect_arch() {
+# shfmt's GitHub release assets use Go's GOARCH tokens (amd64/arm/386), which
+# differ from the shared detect_arch's canonical tokens, so keep a tool-local
+# mapping rather than reusing the shared helper.
+shfmt_release_arch() {
   case "$(uname -m)" in
     x86_64 | amd64)
       echo "amd64"
@@ -45,11 +27,6 @@ detect_arch() {
       echo "unknown"
       ;;
   esac
-}
-
-# Check if command exists
-command_exists() {
-  command -v "$1" > /dev/null 2>&1
 }
 
 # Install shfmt on macOS
@@ -97,7 +74,7 @@ install_windows() {
 install_binary() {
   local os="$1"
   local arch
-  arch=$(detect_arch)
+  arch=$(shfmt_release_arch)
 
   echo -e "${YELLOW}Installing shfmt binary for $os ($arch)...${NC}"
 

@@ -208,7 +208,14 @@ above:
 
 - Capture-layer: emit real stable node identity so scroll diffs collapse the
   id-less/text-less cascade (the residual opacity in §4) — the genuine fix
-  #3107 pointed at, orthogonal to the diff format.
+  #3107 pointed at, orthogonal to the diff format. **Landed as #3228**: the TS
+  ingest (`assignStableViewIds`, `src/features/observe/android/StableNodeIdentity.ts`)
+  rewrites the runner's path-derived UUID `view-id`s into content-derived
+  stable ids (Merkle hash of stable subtree content, ordinal-suffixed for
+  content-identical duplicates), and `view-id` joined `extras` in
+  `DIFF_IGNORED_ATTRS`. On this scroll pair the opaque residuals drop 28 → 4,
+  churn 56 → 40, and the diff share falls to ~26% bytes / ~59% tokens (pinned
+  by `test/features/observe/output/stableIdentityScrollDiff.test.ts`).
 - Capture-layer: surface Compose toggle state (`checked`/`selected`/
   `stateDescription`) in the extracted hierarchy so state toggles diff as
   `changed` on real Compose apps (**#3139**).

@@ -786,6 +786,41 @@ describe("AndroidCtrlProxyClient", function() {
       expect(result.hierarchy.error).toContain("Accessibility hierarchy missing from accessibility service");
     });
 
+    test("rewrites the runner's path-derived UUID view-ids into stable content ids at ingest (#3228)", function() {
+      // The runner emits a positional UUID for id-less nodes; two captures of the
+      // same row at different scroll offsets carry DIFFERENT UUIDs. Ingest must
+      // rewrite them into content-derived ids so the row keeps one identity.
+      const capture = (uuid: string, top: number) => ({
+        updatedAt: 1750934583218,
+        packageName: "com.test.app",
+        hierarchy: {
+          "resource-id": "com.test.app:id/root",
+          "view-id": "com.test.app:id/root",
+          "node": [
+            {
+              "view-id": uuid,
+              "content-desc": "Basic long press card",
+              "bounds": { left: 42, top, right: 1038, bottom: top + 231 }
+            }
+          ]
+        }
+      });
+
+      const before = accessibilityServiceClient.convertToViewHierarchyResult(
+        capture("791e44df-05d9-5e5a-3ea7-c898eedcb939", 1404)
+      );
+      const after = accessibilityServiceClient.convertToViewHierarchyResult(
+        capture("8eb00289-ddfa-18de-7fc7-480b4d13d8cf", 1079)
+      );
+
+      const beforeId = (before.hierarchy.node as any)["view-id"];
+      const afterId = (after.hierarchy.node as any)["view-id"];
+      expect(beforeId).toStartWith("s-");
+      expect(afterId).toBe(beforeId);
+      // Resource-id-backed view-ids pass through untouched.
+      expect(before.hierarchy["view-id"]).toBe("com.test.app:id/root");
+    });
+
   });
 
   describe("getAccessibilityHierarchy", function() {

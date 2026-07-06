@@ -589,8 +589,21 @@ function elementValuesEqual(a: unknown, b: unknown): boolean {
  * consumer can reconstruct it without the baseline, and `extras` is never part of
  * the node identity key — so this changes only what a matched node / mirror
  * *reports*, never how nodes are paired.
+ *
+ * `view-id` (issue #3228): post-trim, a `view-id` is always a *synthetic*
+ * identity — either the capture layer's content-derived stable id
+ * (`assignStableViewIds`, an SHA-256 over the node's stable subtree content) or
+ * a legacy path-derived UUID; a resource-id-backed `view-id` duplicates
+ * `resource-id` and is dropped by `trimHierarchyNodes`. Its value exists to
+ * *pair* nodes (`contentIdentityKey` still reads it), but its own churn is
+ * never an actionable UI delta: a content-derived id changes exactly when some
+ * descendant's content changed — which the child's own diff entry already
+ * reports — so surfacing it on every id-less ancestor of an edited node would
+ * re-flood localized diffs the way `extras` once did. Excluded from the
+ * *changed* comparison only; pairing and `added`/`removed` reconstruction are
+ * unaffected.
  */
-export const DIFF_IGNORED_ATTRS: ReadonlySet<string> = new Set(["extras"]);
+export const DIFF_IGNORED_ATTRS: ReadonlySet<string> = new Set(["extras", "view-id"]);
 
 /** Per-attribute diff of two attribute maps (union of keys). */
 function diffAttributes(
@@ -622,6 +635,11 @@ function diffAttributes(
  * index (the fields a scroll/insert perturbs) so a node keeps this key when it
  * only moves. Returns `null` when the node carries no stable identity at all (all
  * four empty) — an empty key is not identity and must never be used to re-pair.
+ *
+ * For id-less/text-less Android nodes the `view-id` slot is the capture layer's
+ * content-derived stable id (`assignStableViewIds`, issue #3228) — stable across
+ * a scroll and ordinal-suffixed for content-identical duplicates — which is what
+ * lets this key re-pair rows the other three fields cannot describe.
  */
 function contentIdentityKey(attrs: Record<string, unknown>): string | null {
   const resourceId = String(attrs["resource-id"] ?? "");

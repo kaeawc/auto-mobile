@@ -286,4 +286,34 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       expect(error.message).toContain("failed to become ready within 100ms");
     }
   });
+
+  test("waits for Android boot-complete signals before reporting readiness", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setDevices([{
+      name: "Pixel_9_Pro",
+      platform: "android",
+      deviceId: "emulator-5554",
+      source: "local",
+    }]);
+    fakeAdb.setCommandResponse("get-state", createExecResult("device\n"));
+    fakeAdb.setCommandResponse("shell pm list packages", createExecResult("package:android\n"));
+    fakeAdb.setCommandResponseSequence("shell getprop sys.boot_completed", [
+      createExecResult("0\n"),
+      createExecResult("1\n"),
+    ]);
+    fakeAdb.setCommandResponse("shell getprop init.svc.bootanim", createExecResult("stopped\n"));
+
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
+
+    const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000);
+
+    expect(result.deviceId).toBe("emulator-5554");
+    expect(fakeAdb.wasCommandExecuted("shell getprop sys.boot_completed")).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("shell getprop init.svc.bootanim")).toBe(true);
+    expect(
+      fakeAdb.getExecutedCommands()
+        .filter(command => command.includes("shell getprop sys.boot_completed")),
+    ).toHaveLength(2);
+  });
 });

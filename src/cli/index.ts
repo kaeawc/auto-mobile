@@ -169,14 +169,13 @@ async function runDoctorViaDaemon(params: Record<string, any>): Promise<any> {
  */
 async function runDoctorCommand(params: Record<string, any>): Promise<void> {
   const jsonOutput = params.json === true;
-  const { installCmdlineTools, installXcodeCommandLineTools, ...daemonParams } = params;
+  const { installXcodeCommandLineTools, ...daemonParams } = params;
 
-  if (installCmdlineTools === true || installXcodeCommandLineTools === true) {
+  if (installXcodeCommandLineTools === true) {
     const { runDoctor, formatConsoleOutput, formatJsonOutput } = await import("../doctor");
     const report = await runDoctor({
       android: params.android,
       ios: params.ios,
-      installCmdlineTools,
       installXcodeCommandLineTools,
     });
 
@@ -208,7 +207,6 @@ async function runDoctorCommand(params: Record<string, any>): Promise<void> {
   const report = await runDoctor({
     android: params.android,
     ios: params.ios,
-    installCmdlineTools,
     installXcodeCommandLineTools,
   });
 

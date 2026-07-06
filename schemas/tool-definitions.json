@@ -958,10 +958,6 @@
           "description": "Run iOS-specific checks only",
           "type": "boolean"
         },
-        "installCmdlineTools": {
-          "description": "Install missing Android SDK cmdline tools",
-          "type": "boolean"
-        },
         "installXcodeCommandLineTools": {
           "description": "Install Xcode Command Line Tools if missing",
           "type": "boolean"

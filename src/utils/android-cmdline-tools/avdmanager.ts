@@ -143,7 +143,7 @@ function maybeWarnHomebrewSystemImagesMismatch(
     `avdmanager location: ${location.path}`,
     `ANDROID_HOME: ${androidHomeInfo.androidHome}`,
     `System images: ${androidHomeInfo.systemImagesPath}`,
-    "Fix: install cmdline-tools into ANDROID_HOME or run `auto-mobile --cli doctor --install-cmdline-tools`."
+    "Fix: ensure cmdline-tools are present under ANDROID_HOME."
   ].join(" ");
 
   dependencies.logger.warn(warningMessage);

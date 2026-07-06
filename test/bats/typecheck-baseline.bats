@@ -35,7 +35,8 @@ teardown() {
   [ "$status" -eq 0 ]
 
   # Three top-level errors captured; the indented detail and summary are dropped.
-  run grep -c ': error TS' "$TYPECHECK_BASELINE"
+  # Count only signature lines -- `# swap-fp:` comments also contain ": error TS".
+  run bash -c "grep -v '^#' '$TYPECHECK_BASELINE' | grep -c ': error TS'"
   [ "$output" -eq 3 ]
 
   # A provenance header is written so version drift can be detected later.
@@ -55,14 +56,14 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"refusing to grow"* ]]
 
-  # Baseline is left untouched at the original count.
-  run grep -c ': error TS' "$TYPECHECK_BASELINE"
+  # Baseline is left untouched at the original count (signature lines only).
+  run bash -c "grep -v '^#' '$TYPECHECK_BASELINE' | grep -c ': error TS'"
   [ "$output" -eq 3 ]
 
   # --allow-grow lets it through.
   TYPECHECK_TSC_CMD="$more" run bash "$SCRIPT" --update --allow-grow
   [ "$status" -eq 0 ]
-  run grep -c ': error TS' "$TYPECHECK_BASELINE"
+  run bash -c "grep -v '^#' '$TYPECHECK_BASELINE' | grep -c ': error TS'"
   [ "$output" -eq 4 ]
 }
 
@@ -155,4 +156,101 @@ teardown() {
   run bash "$SCRIPT" --bogus
   [ "$status" -eq 2 ]
   [[ "$output" == *"Unknown argument"* ]]
+}
+
+# --- swap-guard (issue #3196, item 1) ---------------------------------------
+
+@test "update writes per-signature swap-fp column fingerprints" {
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+
+  # A swap-fp comment line is recorded for each signature, carrying its columns.
+  grep -q '^# swap-fp: 5 :: src/a.ts: error TS2339:' "$TYPECHECK_BASELINE"
+  grep -q '^# swap-fp: 1 :: src/b.ts: error TS2345:' "$TYPECHECK_BASELINE"
+}
+
+@test "swap-fp comment lines do not corrupt the baseline signature count" {
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" bash "$SCRIPT" --update
+
+  # The success line reports the real signature count (3), not the doubled count
+  # that a naive whole-file `grep -c ': error TS'` (which also hits swap-fp) gives.
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"3 known error(s) in baseline"* ]]
+}
+
+@test "swap ratchet grow-check ignores swap-fp lines" {
+  # Regression guard: prev_count must count only signatures. If swap-fp lines were
+  # counted, current(3) vs inflated prev would misfire the grow-check.
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" bash "$SCRIPT" --update
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"refusing to grow"* ]]
+}
+
+@test "swap-guard warns (non-fatal) when a signature's column set moves" {
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" bash "$SCRIPT" --update
+
+  # Same normalized signature for src/a.ts, but the COLUMN moved 5 -> 88 while the
+  # count stayed at 1: a count-neutral swap the fatal gate cannot see.
+  local swap='printf "%s\n" \
+    "src/a.ts(10,88): error TS2339: Property (x) does not exist on type (Y)." \
+    "src/b.ts(3,1): error TS2345: Argument of type (string) is not assignable to parameter of type (number)." \
+    "src/c.ts(7,2): error TS2769: No overload matches this call." \
+    "Found 3 errors in 3 files."'
+  TYPECHECK_TSC_CMD="$swap" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"swap-guard"* ]]
+  [[ "$output" == *"src/a.ts: error TS2339"* ]]
+  [[ "$output" == *"no new type errors"* ]]
+}
+
+@test "swap-guard stays silent on a pure line shift (column unchanged)" {
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" bash "$SCRIPT" --update
+
+  # Line moved 10 -> 99 but column is still 5: an ordinary edit, not a swap.
+  local shift='printf "%s\n" \
+    "src/a.ts(99,5): error TS2339: Property (x) does not exist on type (Y)." \
+    "src/b.ts(3,1): error TS2345: Argument of type (string) is not assignable to parameter of type (number)." \
+    "src/c.ts(7,2): error TS2769: No overload matches this call." \
+    "Found 3 errors in 3 files."'
+  TYPECHECK_TSC_CMD="$shift" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"swap-guard"* ]]
+}
+
+@test "swap-guard stays silent on a partial fix (count decreased, not a swap)" {
+  # Baseline: src/a.ts has the SAME signature twice, at columns 5 and 42.
+  local dup='printf "%s\n" \
+    "src/a.ts(10,5): error TS2339: Property (x) does not exist on type (Y)." \
+    "src/a.ts(50,42): error TS2339: Property (x) does not exist on type (Y)." \
+    "Found 2 errors."'
+  TYPECHECK_TSC_CMD="$dup" bash "$SCRIPT" --update
+
+  # Fix the column-42 instance: count drops 2 -> 1. The ratchet celebrates this;
+  # it is NOT a swap, so the advisory must stay silent.
+  local partial='printf "%s\n" \
+    "src/a.ts(10,5): error TS2339: Property (x) does not exist on type (Y)." \
+    "Found 1 errors."'
+  TYPECHECK_TSC_CMD="$partial" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"swap-guard"* ]]
+  [[ "$output" == *"1 baseline error(s) no longer occur"* ]]
+}
+
+@test "swap-guard no-ops on a legacy baseline without swap-fp lines" {
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" bash "$SCRIPT" --update
+  # Simulate a baseline committed before the swap-fp field existed.
+  grep -v '^# swap-fp:' "$TYPECHECK_BASELINE" > "$TYPECHECK_BASELINE.tmp"
+  mv "$TYPECHECK_BASELINE.tmp" "$TYPECHECK_BASELINE"
+
+  local swap='printf "%s\n" \
+    "src/a.ts(10,88): error TS2339: Property (x) does not exist on type (Y)." \
+    "src/b.ts(3,1): error TS2345: Argument of type (string) is not assignable to parameter of type (number)." \
+    "src/c.ts(7,2): error TS2769: No overload matches this call." \
+    "Found 3 errors in 3 files."'
+  TYPECHECK_TSC_CMD="$swap" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"swap-guard"* ]]
+  [[ "$output" == *"no new type errors"* ]]
 }

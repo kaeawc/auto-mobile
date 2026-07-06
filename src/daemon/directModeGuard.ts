@@ -48,8 +48,6 @@ export interface DefaultDirectModeGuardDepsOptions {
   manager?: LiveDaemonProcessSource;
   readPidFileData?: (pidFilePath?: string) => PidFileData | null;
   resolveDbPath?: () => string;
-  /** Host platform; injected so tests can exercise the Windows `ps`-absent path. */
-  platform?: NodeJS.Platform;
 }
 
 /**
@@ -162,7 +160,6 @@ export function createDefaultDirectModeGuardDeps(
   const manager = options.manager ?? new DaemonManager();
   const readPidFileData = options.readPidFileData ?? readPidFileDataSync;
   const resolveDbPath = options.resolveDbPath ?? getDatabasePath;
-  const platform = options.platform ?? process.platform;
 
   return {
     resolveDbPath,
@@ -172,21 +169,13 @@ export function createDefaultDirectModeGuardDeps(
         livePids = manager.findLiveDaemonProcesses();
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        if (platform === "win32") {
-          // `ps` is unavailable on Windows, where the daemon manager's own scan
-          // also fails — so direct mode is effectively the only path and a scan
-          // failure is expected, not an anomaly. There is no ps-discoverable
-          // daemon to collide with; fail OPEN so direct mode still starts. #2795
-          logger.warn(
-            `Direct-mode guard: process-table scan unavailable on this platform; ` +
-              `proceeding without a same-DB conflict check. ${detail}`,
-            error
-          );
-          return [];
-        }
-        // On a platform where `ps` should work, an indeterminate scan means we
-        // cannot rule out a live daemon on this DB file. Fail CLOSED — refuse
-        // rather than risk a second writer. #2795
+        logger.warn(
+          `Direct-mode guard: process-table scan failed; refusing direct mode ` +
+            `because same-DB daemon ownership cannot be verified. ${detail}`,
+          error
+        );
+        // An indeterminate scan means we cannot rule out a live daemon on this DB
+        // file. Fail CLOSED — refuse rather than risk a second writer. #2795
         throw new ActionableError(
           `Cannot verify daemon ownership before starting direct mode ` +
             `(--no-proxy/--direct): failed to inspect the process table (${detail}). ` +

@@ -97,14 +97,33 @@ type ProcessTableCommandRunner = (
   options: { encoding: "utf-8"; maxBuffer: number }
 ) => string;
 
+function normalizeProcessCommand(command: string): string {
+  return command.replace(/\\/g, "/").replace(/\/+/g, "/");
+}
+
 function isAutoMobileDaemonCommand(command: string): boolean {
-  return command.includes("--daemon-mode") &&
-    (command.includes("auto-mobile") || command.includes("dist/src/index.js"));
+  const normalizedCommand = normalizeProcessCommand(command);
+  return normalizedCommand.includes("--daemon-mode") &&
+    (normalizedCommand.includes("auto-mobile") || normalizedCommand.includes("dist/src/index.js"));
 }
 
 function isShellCommandWrapper(command: string): boolean {
-  const executable = command.trim().split(/\s+/, 1)[0] ?? "";
-  return /(^|\/)(?:ba|da|z)?sh$/.test(executable) && command.includes(" -c ");
+  const normalizedCommand = normalizeProcessCommand(command);
+  const trimmedCommand = normalizedCommand.trim();
+  const executable = trimmedCommand.startsWith("\"")
+    ? trimmedCommand.slice(1, trimmedCommand.indexOf("\"", 1))
+    : trimmedCommand.split(/\s+/, 1)[0] ?? "";
+
+  if (/(^|\/)(?:ba|da|z)?sh$/.test(executable) && normalizedCommand.includes(" -c ")) {
+    return true;
+  }
+
+  if (/(^|\/)cmd(?:\.exe)?$/i.test(executable) && /(?:^|\s)\/c(?:\s|$)/i.test(normalizedCommand)) {
+    return true;
+  }
+
+  return /(^|\/)(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) &&
+    /(?:^|\s)-(?:command|encodedcommand|c|ec)(?:\s|$)/i.test(normalizedCommand);
 }
 
 export function parseDaemonProcessTable(psOutput: string): DaemonProcessRecord[] {
@@ -130,6 +149,57 @@ export function parseDaemonProcessTable(psOutput: string): DaemonProcessRecord[]
   return records;
 }
 
+interface WindowsProcessTableEntry {
+  ProcessId?: unknown;
+  ParentProcessId?: unknown;
+  CommandLine?: unknown;
+}
+
+function parseWindowsProcessId(value: unknown): number | undefined {
+  if (typeof value !== "number" && typeof value !== "string") {
+    return undefined;
+  }
+
+  const parsed = typeof value === "number" ? value : parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseWindowsProcessTableEntry(entry: WindowsProcessTableEntry): DaemonProcessRecord | undefined {
+  const pid = parseWindowsProcessId(entry.ProcessId);
+  const ppid = parseWindowsProcessId(entry.ParentProcessId);
+  const command = entry.CommandLine;
+
+  if (
+    pid === undefined ||
+    ppid === undefined ||
+    typeof command !== "string" ||
+    !isAutoMobileDaemonCommand(command)
+  ) {
+    return undefined;
+  }
+
+  return { pid, ppid, command };
+}
+
+export function parseWindowsDaemonProcessTable(processTableJson: string): DaemonProcessRecord[] {
+  const parsed: unknown = JSON.parse(processTableJson);
+  const entries = Array.isArray(parsed) ? parsed : [parsed];
+  const records: DaemonProcessRecord[] = [];
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const record = parseWindowsProcessTableEntry(entry);
+    if (record) {
+      records.push(record);
+    }
+  }
+
+  return records;
+}
+
 export interface DaemonProcessLivenessChecker {
   isProcessRunning(pid: number): boolean;
 }
@@ -148,6 +218,31 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
   isProcessRunning(pid: number): boolean {
     return isDaemonProcessRunning(pid);
   }
+}
+
+export class WindowsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
+  constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
+
+  findDaemonProcesses(): DaemonProcessRecord[] {
+    const processTableJson = this.runCommand(
+      "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress\"",
+      {
+        encoding: "utf-8",
+        maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+      }
+    );
+    return parseWindowsDaemonProcessTable(processTableJson);
+  }
+
+  isProcessRunning(pid: number): boolean {
+    return isDaemonProcessRunning(pid);
+  }
+}
+
+export function createDefaultDaemonProcessFinder(
+  platform: NodeJS.Platform = process.platform
+): DaemonProcessFinder & DaemonProcessLivenessChecker {
+  return platform === "win32" ? new WindowsDaemonProcessFinder() : new PsDaemonProcessFinder();
 }
 
 export interface DaemonProcessSpawner {
@@ -286,7 +381,7 @@ export class DaemonManager implements DaemonManagerLike {
     lockFilePath: string = LOCK_FILE_PATH,
     pidFilePath: string = PID_FILE_PATH,
     socketPath: string = SOCKET_PATH,
-    processFinderOrSpawner: DaemonProcessFinder | DaemonProcessSpawner = new PsDaemonProcessFinder(),
+    processFinderOrSpawner: DaemonProcessFinder | DaemonProcessSpawner = createDefaultDaemonProcessFinder(),
     processSpawner: DaemonProcessSpawner = nodeDaemonProcessSpawner,
     extractionCleaner: ExtractionCleaner = fileSystemExtractionCleaner,
     launchCommandResolver: DaemonLaunchCommandResolver = () => resolveDaemonLaunchCommand()
@@ -301,9 +396,9 @@ export class DaemonManager implements DaemonManagerLike {
       this.processSpawner = processSpawner;
       this.processLivenessChecker = hasProcessLivenessChecker(processFinderOrSpawner)
         ? processFinderOrSpawner
-        : new PsDaemonProcessFinder();
+        : createDefaultDaemonProcessFinder();
     } else {
-      const processFinder = new PsDaemonProcessFinder();
+      const processFinder = createDefaultDaemonProcessFinder();
       this.processFinder = processFinder;
       this.processSpawner = processFinderOrSpawner;
       this.processLivenessChecker = processFinder;

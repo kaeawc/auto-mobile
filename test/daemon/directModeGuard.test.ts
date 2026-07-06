@@ -215,21 +215,18 @@ describe("createDefaultDirectModeGuardDeps", () => {
     expect(() => assertDirectModeDbOwnership(deps)).toThrow(ActionableError);
   });
 
-  test("on Windows, an unavailable `ps` fails OPEN so direct mode still starts", () => {
-    // `ps` is absent on Windows (the daemon manager's scan also fails there), so a
-    // scan failure is expected, not evidence of a daemon. #2795
+  test("an indeterminate process scan fails CLOSED (refuses)", () => {
     const deps = createDefaultDirectModeGuardDeps({
-      platform: "win32",
       manager: {
         findLiveDaemonProcesses: () => {
-          throw new Error("'ps' is not recognized as a command");
+          throw new Error("powershell.exe: command failed");
         },
       },
       readPidFileData: () => null,
       resolveDbPath: () => DEFAULT_DB,
     });
-    expect(deps.findLiveDaemonDbOwners()).toEqual([]);
-    expect(() => assertDirectModeDbOwnership(deps)).not.toThrow();
+    expect(() => deps.findLiveDaemonDbOwners()).toThrow(ActionableError);
+    expect(() => assertDirectModeDbOwnership(deps)).toThrow(ActionableError);
   });
 
   test("on non-Windows, an indeterminate `ps` scan fails CLOSED (refuses)", () => {

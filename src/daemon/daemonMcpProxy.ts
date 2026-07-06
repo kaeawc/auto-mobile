@@ -8,6 +8,7 @@ import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,
@@ -102,6 +103,22 @@ export class DaemonBuildMismatchError extends DaemonUnavailableError {
     this.daemonEntryScript = params.daemon.entryScript;
     this.reason = params.reason;
     this.retryAfterMs = params.retryAfterMs;
+  }
+}
+
+export class DaemonAssetVersionMismatchError extends DaemonUnavailableError {
+  readonly clientAssetVersion: string;
+  readonly daemonAssetVersion: string;
+
+  constructor(clientAssetVersion: string, daemonAssetVersion: string) {
+    super(
+      `AutoMobile AUTOMOBILE_VERSION mismatch: caller requested ${clientAssetVersion}, ` +
+      `but the shared daemon was started with ${daemonAssetVersion}. Restart the daemon ` +
+      `from the caller's environment (for example, run auto-mobile --daemon restart) before reusing it.`
+    );
+    this.name = "DaemonAssetVersionMismatchError";
+    this.clientAssetVersion = clientAssetVersion;
+    this.daemonAssetVersion = daemonAssetVersion;
   }
 }
 
@@ -243,6 +260,7 @@ export class DaemonMcpProxy {
   private readonly timer: Pick<Timer, "now">;
   private readonly buildIdentity: BuildIdentity;
   private readonly clientVersion: string;
+  private readonly clientAssetVersion: string | null;
   private connecting: Promise<void> | null = null;
   private connected: boolean = false;
 
@@ -274,6 +292,9 @@ export class DaemonMcpProxy {
     this.timer = config.timer ?? defaultTimer;
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
+    this.clientAssetVersion = isExplicitPin()
+      ? resolveAssetVersion(resolvePinnedVersion())
+      : null;
   }
 
   /**
@@ -312,10 +333,12 @@ export class DaemonMcpProxy {
       logger.info("[DaemonMcpProxy] Daemon not available, starting daemon...");
       await this.startDaemon();
       await this.ensureVersionMatches();
+      await this.ensureAssetVersionPinMatches();
       await this.ensureBuildMatches();
       await this.ensureStartupOptionsMatch();
     } else {
       await this.ensureVersionMatches();
+      await this.ensureAssetVersionPinMatches();
       await this.ensureBuildMatches();
       await this.ensureStartupOptionsMatch();
     }
@@ -502,6 +525,24 @@ export class DaemonMcpProxy {
       detail,
       retryAfterMs,
     });
+  }
+
+  private async ensureAssetVersionPinMatches(): Promise<void> {
+    if (!this.clientAssetVersion) {
+      return;
+    }
+    const status = await this.daemonManager.status();
+    if (!status.running) {
+      return;
+    }
+    const daemonAssetVersion = status.assetVersion?.trim() ?? "";
+    if (daemonAssetVersion === this.clientAssetVersion) {
+      return;
+    }
+    throw new DaemonAssetVersionMismatchError(
+      this.clientAssetVersion,
+      daemonAssetVersion.length > 0 ? daemonAssetVersion : "unknown"
+    );
   }
 
   /**

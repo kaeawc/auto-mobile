@@ -104,6 +104,8 @@ export interface DaemonStatus {
   startedAt?: number;
   /** Daemon version */
   version?: string;
+  /** Concrete CtrlProxy asset version resolved from AUTOMOBILE_VERSION at daemon start */
+  assetVersion?: string;
   /** Absolute path to the daemon's entry script (build identity) */
   entryScript?: string;
   /** Content hash of the daemon's entry script (build identity) */
@@ -134,6 +136,8 @@ export interface PidFileData {
   startedAt: number;
   /** Daemon version */
   version: string;
+  /** Concrete CtrlProxy asset version resolved from AUTOMOBILE_VERSION at daemon start */
+  assetVersion?: string;
   /** Absolute path to the daemon's entry script (build identity) */
   entryScript?: string;
   /** Content hash of the daemon's entry script (build identity) */

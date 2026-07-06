@@ -302,7 +302,7 @@ final class XCTestRunnerTests: XCTestCase {
 
     func testDaemonStartupResultReadyIsTheOnlyReadyCase() {
         XCTAssertTrue(DaemonStartupResult.ready.isReady)
-        for result: DaemonStartupResult in [.executableNotFound, .launchFailed, .readinessTimeout, .versionSkew] {
+        for result: DaemonStartupResult in [.executableNotFound, .launchFailed, .readinessTimeout, .versionSkew, .assetVersionSkew] {
             XCTAssertFalse(result.isReady, "\(result) must not report ready")
         }
     }
@@ -318,6 +318,7 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertTrue(DaemonStartupResult.launchFailed.diagnosticMessage.contains("exited non-zero"))
         XCTAssertTrue(DaemonStartupResult.readinessTimeout.diagnosticMessage.contains("did not"))
         XCTAssertTrue(DaemonStartupResult.versionSkew.diagnosticMessage.contains("different-version"))
+        XCTAssertTrue(DaemonStartupResult.assetVersionSkew.diagnosticMessage.contains("AUTOMOBILE_VERSION"))
 
         // Each failure reason is distinct so a CI log names the specific cause.
         let messages = [
@@ -325,6 +326,7 @@ final class XCTestRunnerTests: XCTestCase {
             DaemonStartupResult.launchFailed,
             DaemonStartupResult.readinessTimeout,
             DaemonStartupResult.versionSkew,
+            DaemonStartupResult.assetVersionSkew,
         ].map { $0.diagnosticMessage }
         XCTAssertEqual(Set(messages).count, messages.count)
     }

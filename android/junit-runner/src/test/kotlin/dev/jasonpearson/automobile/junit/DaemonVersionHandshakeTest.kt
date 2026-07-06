@@ -61,6 +61,62 @@ class DaemonVersionHandshakeTest {
   }
 
   @Test
+  fun `requiresAssetVersionPinFailure is true only for explicit mismatched pins`() {
+    assertTrue(DaemonSocketPaths.requiresAssetVersionPinFailure("0.0.18", "0.0.39"))
+    assertFalse(DaemonSocketPaths.requiresAssetVersionPinFailure("0.0.18", "0.0.18"))
+    assertFalse(DaemonSocketPaths.requiresAssetVersionPinFailure("0.0.18", null))
+    assertFalse(DaemonSocketPaths.requiresAssetVersionPinFailure("0.0.18", ""))
+    assertFalse(DaemonSocketPaths.requiresAssetVersionPinFailure("0.0.18", "latest"))
+    assertTrue(DaemonSocketPaths.requiresAssetVersionPinFailure(null, "0.0.18"))
+    assertTrue(DaemonSocketPaths.requiresAssetVersionPinFailure("", "0.0.18"))
+    assertTrue(DaemonSocketPaths.requiresAssetVersionPinFailure("  ", "0.0.18"))
+  }
+
+  @Test
+  fun `requiresImmediateAssetVersionPinFailure preserves restartable skew paths`() {
+    assertTrue(
+      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+        assetVersionSkew = true,
+        versionSkew = false,
+        buildSkew = false,
+        forceRestart = false,
+      )
+    )
+    assertFalse(
+      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+        assetVersionSkew = true,
+        versionSkew = true,
+        buildSkew = false,
+        forceRestart = false,
+      )
+    )
+    assertFalse(
+      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+        assetVersionSkew = true,
+        versionSkew = false,
+        buildSkew = true,
+        forceRestart = false,
+      )
+    )
+    assertFalse(
+      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+        assetVersionSkew = true,
+        versionSkew = false,
+        buildSkew = false,
+        forceRestart = true,
+      )
+    )
+    assertFalse(
+      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+        assetVersionSkew = false,
+        versionSkew = false,
+        buildSkew = false,
+        forceRestart = false,
+      )
+    )
+  }
+
+  @Test
   fun `readDaemonVersionFromPidFile reads version field`() {
     val pidFile = File.createTempFile("automobile-pid", ".pid")
     try {
@@ -68,6 +124,20 @@ class DaemonVersionHandshakeTest {
       assertEquals(
         "0.0.40+gabc123",
         DaemonSocketPaths.readDaemonVersionFromPidFile(pidFile.absolutePath),
+      )
+    } finally {
+      pidFile.delete()
+    }
+  }
+
+  @Test
+  fun `readDaemonAssetVersionFromPidFile reads assetVersion field`() {
+    val pidFile = File.createTempFile("automobile-pid-asset", ".pid")
+    try {
+      pidFile.writeText("""{"pid":123,"port":3000,"assetVersion":"0.0.18"}""")
+      assertEquals(
+        "0.0.18",
+        DaemonSocketPaths.readDaemonAssetVersionFromPidFile(pidFile.absolutePath),
       )
     } finally {
       pidFile.delete()

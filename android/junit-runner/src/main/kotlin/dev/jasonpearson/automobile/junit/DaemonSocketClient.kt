@@ -90,6 +90,15 @@ internal object DaemonSocketClientManager {
     val socketPath = DaemonSocketPaths.socketPath()
     val forceRestart = DaemonSocketPaths.resolveForceRestart()
     val daemonAvailable = DaemonSocketClient.isAvailable(socketPath)
+    val daemonAssetVersion =
+      DaemonSocketPaths.readDaemonAssetVersionFromPidFile(DaemonSocketPaths.pidFilePath())
+    val callerAssetVersion = DaemonSocketPaths.resolveCallerAssetVersionPin()
+    val assetVersionSkew =
+      daemonAvailable &&
+        DaemonSocketPaths.requiresAssetVersionPinFailure(
+          daemonAssetVersion,
+          callerAssetVersion,
+        )
 
     // A daemon of a different build already owning the shared per-uid socket would
     // silently serve the wrong tool set (#2744). Before reusing it, compare the version
@@ -113,7 +122,21 @@ internal object DaemonSocketClientManager {
           DaemonSocketPaths.resolveClientBuildId(),
           DaemonSocketPaths.resolveLocalDaemonEntryScript(),
         )
-    val skew = versionSkew || buildSkew
+    if (
+      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
+        assetVersionSkew,
+        versionSkew,
+        buildSkew,
+        forceRestart,
+      )
+    ) {
+      throw DaemonUnavailableException(
+        "AutoMobile daemon AUTOMOBILE_VERSION mismatch: the shared daemon was started with " +
+          "${daemonAssetVersion ?: "unknown"}, but this runner requested $callerAssetVersion. " +
+          "Restart the daemon from this runner's environment before reusing it."
+      )
+    }
+    val skew = versionSkew || buildSkew || assetVersionSkew
 
     if (!forceRestart && daemonAvailable && !skew) {
       return
@@ -169,7 +192,12 @@ internal object DaemonSocketClientManager {
         DaemonSocketPaths.resolveClientBuildId(),
         DaemonSocketPaths.resolveLocalDaemonEntryScript(),
       )
-    if (stillVersionSkewed || stillBuildSkewed) {
+    val stillAssetVersionSkewed =
+      DaemonSocketPaths.requiresAssetVersionPinFailure(
+        DaemonSocketPaths.readDaemonAssetVersionFromPidFile(pidFilePath),
+        DaemonSocketPaths.resolveCallerAssetVersionPin(),
+      )
+    if (stillVersionSkewed || stillBuildSkewed || stillAssetVersionSkewed) {
       throw DaemonUnavailableException(
         "AutoMobile daemon still differs from this runner after (re)start; the shared socket is " +
           "served by a different build. Ensure the same @kaeawc/auto-mobile version starts the " +
@@ -524,6 +552,10 @@ internal object DaemonSocketPaths {
   internal fun readDaemonVersionFromPidFile(path: String): String? =
     readPidFileString(path, "version")
 
+  /** Read the daemon's recorded CtrlProxy asset version from its PID file, or null. */
+  internal fun readDaemonAssetVersionFromPidFile(path: String): String? =
+    readPidFileString(path, "assetVersion")
+
   /** Read the daemon's recorded build-identity hash from its PID file, or null. */
   internal fun readDaemonBuildIdFromPidFile(path: String): String? =
     readPidFileString(path, "buildId")
@@ -616,6 +648,35 @@ internal object DaemonSocketPaths {
     val clientBase = releaseVersion(clientVersion?.trim().orEmpty())
     if (daemonBase.isEmpty() || clientBase.isEmpty()) return false
     return daemonBase != clientBase
+  }
+
+  internal fun resolveCallerAssetVersionPin(): String? {
+    val pinned = System.getenv("AUTOMOBILE_VERSION")?.trim().orEmpty()
+    if (pinned.isEmpty() || ignoredPackageVersions.contains(pinned.lowercase())) {
+      return null
+    }
+    return pinned
+  }
+
+  internal fun requiresAssetVersionPinFailure(
+    daemonAssetVersion: String?,
+    callerPinnedVersion: String?,
+  ): Boolean {
+    val daemon = daemonAssetVersion?.trim().orEmpty()
+    val caller = callerPinnedVersion?.trim().orEmpty()
+    if (caller.isEmpty() || ignoredPackageVersions.contains(caller.lowercase())) {
+      return false
+    }
+    return daemon != caller
+  }
+
+  internal fun requiresImmediateAssetVersionPinFailure(
+    assetVersionSkew: Boolean,
+    versionSkew: Boolean,
+    buildSkew: Boolean,
+    forceRestart: Boolean,
+  ): Boolean {
+    return assetVersionSkew && !versionSkew && !buildSkew && !forceRestart
   }
 
   /**

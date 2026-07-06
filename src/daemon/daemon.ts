@@ -78,6 +78,7 @@ import {
   safeProcessCwd,
   resolveStableDaemonWorkingDirectory,
 } from "../utils/workingDirectory";
+import { resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -703,6 +704,7 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.timer.now(),
       version: DAEMON_VERSION,
+      assetVersion: resolveAssetVersion(resolvePinnedVersion()),
       options: this.options,
     };
     await this.persistPidFileData(pidData);
@@ -722,6 +724,7 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.timer.now(),
       version: DAEMON_VERSION,
+      assetVersion: resolveAssetVersion(resolvePinnedVersion()),
       entryScript: buildIdentity.entryScript,
       buildId: buildIdentity.buildId,
       options: this.options,

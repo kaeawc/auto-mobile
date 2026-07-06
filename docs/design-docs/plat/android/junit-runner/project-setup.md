@@ -39,6 +39,17 @@ module whose UI you want to test.
 If you need unreleased features or are iterating on the runner itself, publish the module locally and
 reference it from `mavenLocal()`.
 
+AutoMobile intentionally uses different version strings for local development coordinates and
+runtime/package identity:
+
+- Android Gradle/Maven coordinates use `<version>-SNAPSHOT` in local source builds. This is standard
+  Maven development semantics and lets `mavenLocal()` consumers resolve unpublished changes.
+- The runner jar's `Implementation-Version`, npm package version, plugin metadata, server manifest,
+  and iOS runner version use the plain `<version>` value.
+- Release publishing overrides the Gradle coordinate with the release tag, while the release
+  integrity gate compares the SNAPSHOT-stripped base version against the package and manifest
+  versions.
+
 ```bash
 # Inside the auto-mobile repo
 cd android

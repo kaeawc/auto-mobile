@@ -117,4 +117,22 @@ describe("CliWebpCodec", () => {
     expect(thrown.message).toContain("AUTOMOBILE_CWEBP_PATH");
     expect(thrown.message).toContain("bad webp");
   });
+
+  test("surfaces stdin write failures as actionable errors", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    const child = new FakeChildProcess();
+    child.setStdinError("write EPIPE");
+    processExecutor.setNextSpawnProcess(child);
+    const codec = new CliWebpCodec(new FakeWebpBinaryResolver(), processExecutor);
+
+    const encodedPromise = codec.encode(Buffer.from("png"));
+    child.simulateSpawn();
+    child.simulateExit(1);
+    const thrown = await encodedPromise.catch(error => error);
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect(thrown.message).toContain("cwebp");
+    expect(thrown.message).toContain("AUTOMOBILE_CWEBP_PATH");
+    expect(thrown.message).toContain("write EPIPE");
+  });
 });

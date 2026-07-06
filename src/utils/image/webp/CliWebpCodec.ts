@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import type { Writable } from "node:stream";
 import { ActionableError } from "../../../models/ActionableError";
 import { DefaultProcessExecutor, type ProcessExecutor } from "../../ProcessExecutor";
 import { WebpBinaryResolver, type WebpBinaryProvider } from "./WebpBinaryResolver";
@@ -57,9 +58,14 @@ export class CliWebpCodec {
 
     child.stdout.on("data", data => stdout.push(Buffer.isBuffer(data) ? data : Buffer.from(data)));
     child.stderr.on("data", data => stderr.push(Buffer.isBuffer(data) ? data : Buffer.from(data)));
-    child.stdin.end(input);
+    const completion = waitForCompletion(child, child.stdin, toolName, envVar, stderr);
+    try {
+      child.stdin.end(input);
+    } catch (error) {
+      throw actionableProcessError(toolName, envVar, `stdin write failed: ${errorMessage(error)}`);
+    }
 
-    await waitForExit(child, toolName, envVar, stderr);
+    await completion;
     return Buffer.concat(stdout);
   }
 }
@@ -78,8 +84,9 @@ function buildCwebpOptionArgs(options: CliWebpEncodeOptions): string[] {
   return [];
 }
 
-async function waitForExit(
+async function waitForCompletion(
   child: ChildProcess,
+  stdin: Writable,
   toolName: "cwebp" | "dwebp",
   envVar: string,
   stderr: Buffer[]
@@ -87,6 +94,9 @@ async function waitForExit(
   await new Promise<void>((resolve, reject) => {
     child.once("error", error => {
       reject(actionableProcessError(toolName, envVar, error.message));
+    });
+    stdin.once("error", error => {
+      reject(actionableProcessError(toolName, envVar, `stdin write failed: ${errorMessage(error)}`));
     });
     child.once("exit", (code, signal) => {
       if (code === 0) {
@@ -102,4 +112,8 @@ async function waitForExit(
 
 function actionableProcessError(toolName: "cwebp" | "dwebp", envVar: string, detail: string): ActionableError {
   return new ActionableError(`${toolName} failed (${detail}). Set ${envVar} to a working ${toolName} binary.`);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

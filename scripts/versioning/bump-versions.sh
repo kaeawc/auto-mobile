@@ -122,7 +122,9 @@ PY
 }
 update_server_json_version "server.json" "$new_version" "$dry_run"
 
-# Update VERSION_NAME in android/gradle.properties (single source of truth for Android libraries)
+# Update VERSION_NAME in android/gradle.properties. This is the Android
+# dev/Maven coordinate version, so local source builds intentionally keep the
+# -SNAPSHOT suffix while package/runtime identity surfaces use plain semver.
 update_gradle_properties_version() {
   local path="$1"
   local version="$2"
@@ -196,6 +198,7 @@ while IFS= read -r -d '' gradle_file; do
 done < <(rg -l --null -g 'build.gradle.kts' -e 'versionName\s*=' -e '^version\s*=' android)
 
 if [[ "$dry_run" == true ]]; then
-  echo "Dry run complete. package.json -> ${new_version}"
-  echo "Gradle version -> ${snapshot_version}"
+  echo "Dry run complete."
+  echo "Package/runtime version -> ${new_version}"
+  echo "Android dev/Maven coordinate -> ${snapshot_version}"
 fi

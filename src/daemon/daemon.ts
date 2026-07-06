@@ -26,6 +26,7 @@ import { closeDatabase, getDatabasePath, getDbWriteBarrier } from "../db";
 import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 import { handleFatalDatabaseStartupFailure } from "./daemonStartupGuard";
+import { runStartupPrologue } from "./startupPrologue";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } from "./videoRecordingSocketServer";
 import { startTestRecordingSocketServer, stopTestRecordingSocketServer } from "./testRecordingSocketServer";
@@ -236,10 +237,12 @@ export class Daemon {
     // Publish the owned DB path in the PID file BEFORE opening the DB so the
     // direct-mode DB-ownership guard can tell a same-file collision from an
     // isolated-path launch during our own multi-second startup window, instead
-    // of failing closed on an unknown path. Issue #2871.
-    await this.writeEarlyOwnerRecord();
-
-    await this.initializeDatabase();
+    // of failing closed on an unknown path. The ordering lives behind
+    // runStartupPrologue() so it can be asserted with fakes (issue #2871).
+    await runStartupPrologue({
+      writeEarlyOwnerRecord: () => this.writeEarlyOwnerRecord(),
+      initializeDatabase: () => this.initializeDatabase(),
+    });
 
     // Find an available port
     this.port = await this.findAvailablePort(this.port);

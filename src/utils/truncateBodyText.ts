@@ -46,3 +46,68 @@ export function truncateBodyText(
   }
   return text.slice(0, end);
 }
+
+/**
+ * Maximum retained serialized size for a structured-JSON telemetry field, in
+ * UTF-16 code units (10&nbsp;KB, mirrors {@link BODY_TRUNCATION_LIMIT}).
+ */
+export const STRUCTURED_FIELD_LIMIT = 10_240;
+
+/**
+ * Marker substituted for an oversized structured-JSON field. Blindly slicing a
+ * JSON string (or a stringified object) mid-value produces invalid JSON that
+ * breaks the dashboard's `JSON.parse` (#3182), so an over-budget structured
+ * field is replaced wholesale with this small, always-valid marker instead.
+ */
+export interface TruncatedStructuredMarker {
+  _truncated: true;
+  bytes: number;
+}
+
+/**
+ * Bound a structured-JSON telemetry value (object, array, or an already-
+ * serialized JSON string) by total serialized size. When the value serializes
+ * to more than `limit` UTF-16 code units it is replaced with a
+ * {@link TruncatedStructuredMarker} carrying the original size; otherwise the
+ * original value is returned unchanged. The result is always valid JSON — never
+ * a mid-value slice — so the dashboard can still `JSON.parse` it.
+ *
+ * `isJsonString` selects how the input is measured: raw JSON strings (e.g.
+ * layout `detailsJson`) are measured by their own length, while parsed
+ * objects/arrays (os `details`, failure `stackTrace`) are measured by their
+ * `JSON.stringify` length. `null`/`undefined` pass through untouched.
+ */
+export function boundStructuredField(
+  value: unknown,
+  isJsonString: boolean = false,
+  limit: number = STRUCTURED_FIELD_LIMIT
+): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  let serializedLength: number;
+  if (isJsonString) {
+    if (typeof value !== "string") {
+      return value;
+    }
+    serializedLength = value.length;
+  } else {
+    // A value that cannot be serialized (cycle, BigInt) cannot ship anyway;
+    // treat it as within budget and leave it to the caller's serializer.
+    let serialized: string | undefined;
+    try {
+      serialized = JSON.stringify(value);
+    } catch {
+      return value;
+    }
+    if (serialized === undefined) {
+      return value;
+    }
+    serializedLength = serialized.length;
+  }
+  if (serializedLength <= limit) {
+    return value;
+  }
+  const marker: TruncatedStructuredMarker = { _truncated: true, bytes: serializedLength };
+  return marker;
+}

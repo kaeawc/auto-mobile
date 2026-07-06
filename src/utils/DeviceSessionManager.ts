@@ -78,7 +78,7 @@ class DefaultDeviceClientProvider implements DeviceClientProvider {
   getDeviceUtils(): PlatformDeviceManager {
     if (!this._deviceUtils) {
       this._deviceUtils = new MultiPlatformDeviceManager(
-        this.getAdb() as AdbClient,
+        this.getAdb(),
         this.getSimctl()!,
         this.getAndroidEmulator()!
       );

@@ -76,8 +76,6 @@ src/features/action/BaseVisualChange.ts: error TS2339: Property 'getDeviceTimest
 src/features/action/BaseVisualChange.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 src/features/action/BaseVisualChange.ts: error TS2339: Property 'signal' does not exist on type '{ changeExpected: boolean; tolerancePercent?: number | undefined; queryOptions?: ViewHierarchyQueryOptions | undefined; gfxMetrics?: GfxMetrics | null | undefined; perf?: PerformanceTracker | undefined; actionStartTime?: number | undefined; predictionContext?: PredictionActionContext | undefined; }'.
 src/features/action/BaseVisualChange.ts: error TS2339: Property 'signal' does not exist on type '{ changeExpected: boolean; tolerancePercent?: number | undefined; queryOptions?: ViewHierarchyQueryOptions | undefined; gfxMetrics?: GfxMetrics | null | undefined; perf?: PerformanceTracker | undefined; actionStartTime?: number | undefined; predictionContext?: PredictionActionContext | undefined; }'.
-src/features/action/CaptureSnapshot.ts: error TS2304: Cannot find name 'timeoutHandle'.
-src/features/action/CaptureSnapshot.ts: error TS2304: Cannot find name 'timeoutHandle'.
 src/features/action/InstallApp.ts: error TS2554: Expected 0 arguments, but got 1.
 src/features/action/InstallApp.ts: error TS2554: Expected 0 arguments, but got 1.
 src/features/action/IosSimulatorPermissions.ts: error TS2352: Conversion of type 'TccPermissionRow' to type 'Record<string, string | number | null>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
@@ -87,8 +85,6 @@ src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' 
 src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 src/features/action/OpenURL.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
-src/features/action/RestoreSnapshot.ts: error TS2304: Cannot find name 'timeoutHandle'.
-src/features/action/RestoreSnapshot.ts: error TS2304: Cannot find name 'timeoutHandle'.
 src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
@@ -256,7 +252,6 @@ src/utils/CtrlProxyManager.ts: error TS7006: Parameter 'entry' implicitly has an
 src/utils/CtrlProxyManager.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
 src/utils/DeepLinkManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 src/utils/DeepLinkManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
-src/utils/DeviceSessionManager.ts: error TS2304: Cannot find name 'AdbClient'.
 src/utils/IOSCtrlProxyBundleDownloader.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
 src/utils/ProcessExecutor.ts: error TS2769: No overload matches this call.
 src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.

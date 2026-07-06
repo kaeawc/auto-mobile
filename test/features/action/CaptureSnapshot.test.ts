@@ -536,6 +536,28 @@ describe("CaptureSnapshot", () => {
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0); // Should be cleared after completion
     });
 
+    it("should clear the pending timeout when the backup command throws (regression #2866)", async () => {
+      // Regression guard: timeoutHandle used to be declared inside the try block
+      // but referenced in the catch block, causing a ReferenceError instead of a
+      // graceful failure when adb executeCommand throws mid-backup.
+      const backupFilePath = store.getBackupFilePath("test-throw");
+      fakeAdb.setCommandError(
+        `backup -f "${backupFilePath}" -noapk com.example.app`,
+        new Error("adb connection dropped")
+      );
+
+      const result = await (captureSnapshot as any).performAdbBackup(
+        ["com.example.app"],
+        backupFilePath,
+        30000
+      );
+
+      // Catch path returns a graceful failure, no ReferenceError thrown.
+      expect(result).toEqual({ timedOut: false });
+      // The timeout scheduled before the throw must be cleared to avoid a leak.
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    });
+
     it("should handle backup when file is not created", async () => {
       const snapshotName = "test-snapshot-no-file";
 

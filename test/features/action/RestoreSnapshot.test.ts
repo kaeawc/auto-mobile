@@ -667,6 +667,24 @@ describe("RestoreSnapshot", () => {
   });
 
   describe("app data restore with timeout", () => {
+    it("should clear the pending timeout when the restore command throws (regression #2866)", async () => {
+      // Regression guard: timeoutHandle used to be declared inside the try block
+      // but referenced in the catch block, causing a ReferenceError instead of a
+      // graceful failure when adb executeCommand throws mid-restore.
+      const backupFilePath = "/tmp/backup.ab";
+      fakeAdb.setCommandError(
+        `restore "${backupFilePath}"`,
+        new Error("adb connection dropped")
+      );
+
+      const result = await (restoreSnapshot as any).performAdbRestore(backupFilePath, 30000);
+
+      // Catch path returns a graceful failure, no ReferenceError thrown.
+      expect(result).toEqual({ success: false, timedOut: false });
+      // The timeout scheduled before the throw must be cleared to avoid a leak.
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    });
+
     it("should restore successfully when user confirms within timeout", async () => {
       const snapshotName = "test-snapshot";
 

@@ -559,6 +559,9 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     logger.info(`Starting adb backup for ${packages.length} packages (timeout: ${timeoutMs}ms)`);
     logger.info("Please confirm the backup on your device if prompted");
 
+    // Declared outside try so the catch block can clear a pending timeout.
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
     try {
       // Build adb backup command
       // -f: file path, -noapk: don't backup APK files, -obb: include OBB files
@@ -567,7 +570,6 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       const command = `backup -f "${backupFilePath}" -noapk ${packageList}`;
 
       // Execute backup with timeout using timer
-      let timeoutHandle: NodeJS.Timeout | null = null;
       let timedOut = false;
 
       const result = await Promise.race([

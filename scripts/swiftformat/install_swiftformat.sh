@@ -2,45 +2,16 @@
 
 SWIFTFORMAT_VERSION="0.54.6" # Change this to the desired version
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Detect operating system
-detect_os() {
-    case "$(uname -s)" in
-        Darwin*)
-            echo "macos"
-            ;;
-        Linux*)
-            echo "linux"
-            ;;
-        *)
-            echo "unknown"
-            ;;
-    esac
-}
-
-# Check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
+# Shared colors + command_exists + detect_os/detect_arch (issue #2822).
+# Note: SwiftFormat intentionally ships only macOS/Linux paths; detect_os may
+# return "windows" but main() routes that to the unsupported branch.
+# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 
 # Install SwiftFormat on macOS
 install_macos() {
-    echo -e "${YELLOW}Installing SwiftFormat on macOS...${NC}"
-
-    if command_exists brew; then
-        echo -e "${GREEN}Using Homebrew to install SwiftFormat${NC}"
-        brew install swiftformat
-        return $?
-    else
-        echo -e "${YELLOW}Homebrew not found. Attempting manual installation...${NC}"
-        install_manual
-        return $?
-    fi
+    install_via_brew_or_manual "SwiftFormat" "swiftformat" install_manual
+    return $?
 }
 
 # Install SwiftFormat on Linux

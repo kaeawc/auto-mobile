@@ -2,52 +2,11 @@
 
 LYCHEE_VERSION="0.22.0" # Change this to the desired version
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Detect operating system
-detect_os() {
-    case "$(uname -s)" in
-        Darwin*)
-            echo "macos"
-            ;;
-        Linux*)
-            echo "linux"
-            ;;
-        CYGWIN*|MINGW*|MSYS*)
-            echo "windows"
-            ;;
-        *)
-            echo "unknown"
-            ;;
-    esac
-}
-
-# Detect architecture
-detect_arch() {
-    case "$(uname -m)" in
-        x86_64|amd64)
-            echo "x86_64"
-            ;;
-        aarch64|arm64)
-            echo "aarch64"
-            ;;
-        armv7l)
-            echo "armv7"
-            ;;
-        *)
-            echo "unknown"
-            ;;
-    esac
-}
-
-# Check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
+# Shared colors + command_exists + detect_os/detect_arch (issue #2822).
+# detect_arch echoes the canonical "arm64" token for aarch64/arm64 hosts (the
+# old local copy echoed "aarch64"); the asset-name cases below key off "arm64".
+# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 
 # Install lychee on macOS
 install_macos() {
@@ -163,7 +122,7 @@ install_manual() {
                     echo -e "${YELLOW}No native x86_64 macOS binary. Using arm64 (Rosetta 2 required)${NC}"
                     binary_name="lychee-arm64-macos.tar.gz"
                     ;;
-                aarch64)
+                arm64)
                     binary_name="lychee-arm64-macos.tar.gz"
                     ;;
                 *)
@@ -177,7 +136,7 @@ install_manual() {
                 x86_64)
                     binary_name="lychee-x86_64-unknown-linux-gnu.tar.gz"
                     ;;
-                aarch64)
+                arm64)
                     binary_name="lychee-aarch64-unknown-linux-gnu.tar.gz"
                     ;;
                 armv7)

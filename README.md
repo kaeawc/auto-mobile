@@ -8,8 +8,8 @@
 ![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Platform: Linux](https://img.shields.io/badge/platform-Linux-lightgrey)
 
-![TypeScript tests: 6,581](https://img.shields.io/badge/TypeScript_tests-6%2C581-3178C6)
-![Kotlin tests: 1,407](https://img.shields.io/badge/Kotlin_tests-1%2C407-7F52FF)
+![TypeScript tests: 6,605](https://img.shields.io/badge/TypeScript_tests-6%2C605-3178C6)
+![Kotlin tests: 1,424](https://img.shields.io/badge/Kotlin_tests-1%2C424-7F52FF)
 ![Swift tests: 686](https://img.shields.io/badge/Swift_tests-686-F05138)
 ![Kotlin coverage](https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile/kotlin-coverage-badge.json)
 ![Swift coverage](https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile/swift-coverage-badge.json)
@@ -54,6 +54,16 @@ curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/refs/heads/main/
 ```
 
 or you can read and follow the [step-by-step manual guide](docs/install.md).
+
+### Optional You.com search tool
+
+If you want the MCP server to pull in live web context while investigating apps or reproducing issues, set:
+
+```bash
+export YDC_API_KEY="your-key-here"
+```
+
+This enables the optional `youcomSearch` tool. If the variable is unset, nothing changes for existing users.
 
 ## Documentation
 

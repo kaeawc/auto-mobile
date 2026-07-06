@@ -11,6 +11,91 @@ import { BootedDevice, Platform } from "../models";
 import { addDeviceTargetingToSchema, addSessionUuidToSchema, platformSchema } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
 
+const YDC_SEARCH_URL = "https://ydc-index.io/v1/search";
+const YDC_API_KEY_ENV = "YDC_API_KEY";
+
+const youcomSearchSchema = z.object({
+  query: z.string().min(1).describe("Search query"),
+  count: z.number().int().min(1).max(100).optional().describe("Results per section (1-100)"),
+  freshness: z.string().min(1).optional().describe("Freshness filter, for example day, week, month, year, or YYYY-MM-DDtoYYYY-MM-DD"),
+  offset: z.number().int().min(0).max(9).optional().describe("Pagination offset"),
+  country: z.string().length(2).optional().describe("Country code such as US or GB"),
+  language: z.string().min(2).max(5).optional().describe("Language code such as EN"),
+  safesearch: z.enum(["off", "moderate", "strict"]).optional(),
+  livecrawl: z.enum(["web", "news", "all"]).optional(),
+  livecrawlFormats: z.enum(["html", "markdown"]).optional().describe("Requires livecrawl"),
+  crawlTimeout: z.number().int().min(1).max(60).optional().describe("Live crawl timeout in seconds"),
+});
+
+type YoucomSearchArgs = z.infer<typeof youcomSearchSchema>;
+
+function buildYoucomSearchUrl(args: YoucomSearchArgs): URL {
+  const url = new URL(YDC_SEARCH_URL);
+  url.searchParams.set("query", args.query);
+  if (args.count !== undefined) {
+    url.searchParams.set("count", String(args.count));
+  }
+  if (args.freshness) {
+    url.searchParams.set("freshness", args.freshness);
+  }
+  if (args.offset !== undefined) {
+    url.searchParams.set("offset", String(args.offset));
+  }
+  if (args.country) {
+    url.searchParams.set("country", args.country);
+  }
+  if (args.language) {
+    url.searchParams.set("language", args.language);
+  }
+  if (args.safesearch) {
+    url.searchParams.set("safesearch", args.safesearch);
+  }
+  if (args.livecrawl) {
+    url.searchParams.set("livecrawl", args.livecrawl);
+  }
+  if (args.livecrawlFormats) {
+    url.searchParams.set("livecrawl_formats", args.livecrawlFormats);
+  }
+  if (args.crawlTimeout !== undefined) {
+    url.searchParams.set("crawl_timeout", String(args.crawlTimeout));
+  }
+  return url;
+}
+
+async function runYoucomSearch(args: YoucomSearchArgs) {
+  const apiKey = process.env[YDC_API_KEY_ENV];
+  if (!apiKey) {
+    return createJSONToolResponse({
+      success: false,
+      error: `Set ${YDC_API_KEY_ENV} to enable the optional You.com search tool.`,
+    });
+  }
+
+  const response = await fetch(buildYoucomSearchUrl(args), {
+    headers: { "X-API-Key": apiKey },
+  });
+
+  const bodyText = await response.text();
+  if (!response.ok) {
+    return createJSONToolResponse({
+      success: false,
+      error: `You.com Search API error ${response.status}: ${bodyText}`,
+    });
+  }
+
+  const payload = JSON.parse(bodyText) as {
+    results?: { web?: Array<Record<string, unknown>>; news?: Array<Record<string, unknown>> };
+    metadata?: Record<string, unknown>;
+  };
+
+  return createJSONToolResponse({
+    success: true,
+    query: args.query,
+    results: payload.results ?? {},
+    metadata: payload.metadata ?? {},
+  });
+}
+
 // Schema definitions
 export const setActiveDeviceSchema = addSessionUuidToSchema(z.object({
   deviceId: z.string(),
@@ -72,6 +157,8 @@ export interface ChangeLocalizationArgs {
 export type GetDeviceStateArgs = z.infer<typeof getDeviceStateSchema>;
 
 export type SetDeviceStateArgs = z.infer<typeof setDeviceStateSchema>;
+
+export type YoucomSearchToolArgs = YoucomSearchArgs;
 
 // Register tools
 export function registerUtilityTools() {
@@ -247,6 +334,8 @@ export function registerUtilityTools() {
     });
   };
 
+  const youcomSearchHandler = async (args: YoucomSearchArgs) => runYoucomSearch(args);
+
   // Register with the tool registry
   ToolRegistry.register(
     "setActiveDevice",
@@ -274,5 +363,12 @@ export function registerUtilityTools() {
     "Set device state such as Do Not Disturb.",
     setDeviceStateSchema,
     setDeviceStateHandler
+  );
+
+  ToolRegistry.register(
+    "youcomSearch",
+    "Search the web with the optional You.com Search API",
+    youcomSearchSchema,
+    youcomSearchHandler
   );
 }

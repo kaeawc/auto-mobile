@@ -147,19 +147,11 @@ src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'numb
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
-src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
-src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
-src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
-src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
-src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'string | undefined' is not assignable to type 'string | null'.
-src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2339: Property 'event' does not exist on type 'never'.
-src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2339: Property 'timestamp' does not exist on type 'never'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
-src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2367: This comparison appears to be unintentional because the types '"screenshot" | "hierarchy_update" | "pinch_result" | "tap_coordinates_result" | "swipe_result" | "drag_result" | "set_text_result" | "select_all_result" | "ime_action_result" | ... 36 more ... | "lifecycle_event"' and '"custom_event"' have no overlap.
 src/features/observe/android/CtrlProxyHierarchy.ts: error TS2554: Expected 0 arguments, but got 1.
 src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type 'null | undefined' is not assignable to type 'NormalizedHighlightBounds | undefined'.
 src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type '{ bounds: NormalizedHighlightBounds | undefined; type: "box"; style?: HighlightStyle | null; }' is not assignable to type 'HighlightShape'.

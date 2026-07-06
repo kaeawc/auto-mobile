@@ -49,13 +49,16 @@ import {
   ScreenshotCaptureResult,
   computeChecksum,
 } from "../ScreenshotBackoffScheduler";
-import { getFailureRecorder } from "../../failures/FailureRecorder";
 import {
   normalizeAnr,
   normalizeCrash,
   type SdkAnrPayload,
   type SdkCrashPayload,
 } from "../crash/sdkCrashIngestion";
+import {
+  AndroidSdkEventIngestor,
+  DefaultAndroidSdkEventIngestor,
+} from "./AndroidSdkEventIngestor";
 import { FailureEventRepository } from "../../../db/failureEventRepository";
 import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
 import { serverConfig } from "../../../utils/ServerConfig";
@@ -599,6 +602,20 @@ export interface StorageTelemetryInput {
  * for legacy runners that omit it (#3000). An explicit null ("no prior value")
  * is honored verbatim and also skips the lookup.
  */
+/**
+ * WebSocket message types that carry an SDK telemetry event to be fanned out to
+ * `TelemetryRecorder` via {@link AndroidSdkEventIngestor.recordSdkEvent} (#2764).
+ * These are not part of the typed `WebSocketMessage` union.
+ */
+const SDK_TELEMETRY_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "network_event",
+  "websocket_frame_event",
+  "log_event",
+  "broadcast_event",
+  "lifecycle_event",
+  "custom_event",
+]);
+
 export function storageTelemetryInputFromWire(
   message: WsStorageChangedMessage,
   resolvedTimestamp: number
@@ -887,6 +904,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private readonly crashEventSink: CrashEventSink;
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
 
+  /**
+   * Owns SDK telemetry/crash/ANR ingestion (issue #2764). Lazily built so it can
+   * close over instance methods (`parseStackTrace`, session-bound nav manager);
+   * injectable for tests.
+   */
+  private sdkEventIngestorInstance: AndroidSdkEventIngestor | null = null;
+
   // Logging tag for base class
   protected readonly logTag = "ACCESSIBILITY_SERVICE";
 
@@ -901,9 +925,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     installedAppsRepository?: InstalledAppsStore,
     retryExecutor?: RetryExecutor,
     crashEventSink?: CrashEventSink,
-    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier
+    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
+    sdkEventIngestor?: AndroidSdkEventIngestor
   ) {
     super(timer ?? defaultTimer, webSocketFactory ?? defaultWebSocketFactory, {}, retryExecutor ?? defaultRetryExecutor);
+    this.sdkEventIngestorInstance = sdkEventIngestor ?? null;
     this.device = device;
     this.adb = adb;
     this.installedAppsRepository = installedAppsRepository ?? null;
@@ -955,6 +981,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * The SDK-event ingestor for this client (issue #2764). Built lazily so it can
+   * close over instance methods and the session-bound navigation manager; a
+   * test-injected instance short-circuits construction.
+   */
+  private getSdkEventIngestor(): AndroidSdkEventIngestor {
+    if (!this.sdkEventIngestorInstance) {
+      this.sdkEventIngestorInstance = new DefaultAndroidSdkEventIngestor({
+        deviceId: this.device.deviceId,
+        getNavigationScreenSource: () => this.getNavigationGraphManager(),
+        parseStackTrace: (stackTrace, packageName) => this.parseStackTrace(stackTrace, packageName),
+        now: () => this.timer.now(),
+      });
+    }
+    return this.sdkEventIngestorInstance;
+  }
+
+  /**
    * Reset all instances (for testing)
    */
   public static resetInstances(): void {
@@ -977,7 +1020,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     installedAppsRepository?: InstalledAppsStore,
     retryExecutor?: RetryExecutor,
     crashEventSink?: CrashEventSink,
-    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier
+    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
+    sdkEventIngestor?: AndroidSdkEventIngestor
   ): AndroidCtrlProxyClient {
     return new AndroidCtrlProxyClient(
       device,
@@ -987,7 +1031,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       installedAppsRepository,
       retryExecutor,
       crashEventSink,
-      deviceConnectionLostNotifier
+      deviceConnectionLostNotifier,
+      sdkEventIngestor
     );
   }
 
@@ -2513,118 +2558,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }
       }
 
-      // Handle telemetry events from SDK event batch
-      if (message.type === "network_event") {
-        const event = message.event;
+      // Handle telemetry events from SDK event batch. The fan-out to
+      // TelemetryRecorder is owned by AndroidSdkEventIngestor (issue #2764); the
+      // client only recognizes the wire type and forwards the typed event. These
+      // telemetry messages are not part of the typed WebSocketMessage union, so
+      // compare against a plain string type.
+      const messageType = (message as { type: string }).type;
+      if (SDK_TELEMETRY_EVENT_TYPES.has(messageType)) {
+        const event = (message as { event?: Record<string, unknown> }).event;
         if (event) {
-          const recorder = TelemetryRecorder.getInstance();
-          recorder.setContext(this.device.deviceId, null);
-          await recorder.recordNetworkEvent({
-            timestamp: message.timestamp,
-            applicationId: event.applicationId ?? null,
-            url: event.url,
-            method: event.method,
-            statusCode: event.statusCode ?? 0,
-            durationMs: event.durationMs ?? 0,
-            requestBodySize: event.requestBodySize ?? -1,
-            responseBodySize: event.responseBodySize ?? -1,
-            protocol: event.protocol ?? null,
-            host: event.host ?? null,
-            path: event.path ?? null,
-            error: event.error ?? null,
-            requestHeaders: event.requestHeaders ?? null,
-            responseHeaders: event.responseHeaders ?? null,
-            requestBody: event.requestBody ?? null,
-            responseBody: event.responseBody ?? null,
-            contentType: event.contentType ?? null,
-          });
-        }
-      }
-
-      if (message.type === "websocket_frame_event") {
-        const event = message.event;
-        if (event) {
-          const recorder = TelemetryRecorder.getInstance();
-          recorder.setContext(this.device.deviceId, null);
-          await recorder.recordOsEvent({
-            timestamp: message.timestamp,
-            applicationId: event.applicationId ?? null,
-            category: "websocket_frame",
-            kind: event.frameType ?? "unknown",
-            details: {
-              connectionId: event.connectionId ?? "",
-              url: event.url ?? "",
-              direction: event.direction ?? "",
-              payloadSize: String(event.payloadSize ?? 0),
+          await this.getSdkEventIngestor().recordSdkEvent(
+            {
+              type: messageType,
+              timestamp: message.timestamp ?? this.timer.now(),
+              payload: { event },
             },
-          });
-        }
-      }
-
-      if (message.type === "log_event") {
-        const event = message.event;
-        if (event) {
-          const recorder = TelemetryRecorder.getInstance();
-          recorder.setContext(this.device.deviceId, null);
-          await recorder.recordLogEvent({
-            timestamp: message.timestamp,
-            applicationId: event.applicationId ?? null,
-            level: event.level ?? 0,
-            tag: event.tag ?? "",
-            message: event.message ?? "",
-            filterName: event.filterName ?? "",
-          });
-        }
-      }
-
-      if (message.type === "broadcast_event") {
-        const event = message.event;
-        if (event) {
-          const recorder = TelemetryRecorder.getInstance();
-          recorder.setContext(this.device.deviceId, null);
-          await recorder.recordOsEvent({
-            timestamp: message.timestamp,
-            applicationId: event.applicationId ?? null,
-            category: "broadcast",
-            kind: event.action ?? "unknown",
-            details: event.extraKeys ?? null,
-          });
-        }
-      }
-
-      if (message.type === "lifecycle_event") {
-        const event = message.event;
-        if (event) {
-          const recorder = TelemetryRecorder.getInstance();
-          recorder.setContext(this.device.deviceId, null);
-          await recorder.recordOsEvent({
-            timestamp: message.timestamp,
-            applicationId: event.applicationId ?? null,
-            category: "lifecycle",
-            kind: event.kind ?? "unknown",
-            details: event.details ?? null,
-          });
-        }
-      }
-
-      if (message.type === "custom_event") {
-        const event = message.event;
-        if (event) {
-          const recorder = TelemetryRecorder.getInstance();
-          recorder.setContext(this.device.deviceId, null);
-
-          // Custom events are merged into log events
-          const propsStr = event.properties && Object.keys(event.properties).length > 0
-            ? ` ${JSON.stringify(event.properties)}`
-            : "";
-          await recorder.recordLogEvent({
-            timestamp: message.timestamp,
-            applicationId: event.applicationId ?? null,
-            level: 4, // INFO
-            tag: "CustomEvent",
-            message: `${event.name ?? ""}${propsStr}`,
-            filterName: "custom",
-          });
+            (event.applicationId as string) ?? null
+          );
         }
       }
 
@@ -2645,10 +2595,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           server.pushStorageUpdate(this.device.deviceId, storageEvent);
         }
 
-        // Record to telemetry timeline
-        const recorder = TelemetryRecorder.getInstance();
-        recorder.setContext(this.device.deviceId, null);
-        recorder.recordStorageEvent(storageTelemetryInputFromWire(message, storageEvent.timestamp));
+        // Record to telemetry timeline (fan-out owned by the ingestor, #2764).
+        this.getSdkEventIngestor().recordStorageEvent(
+          storageTelemetryInputFromWire(message, storageEvent.timestamp)
+        );
       }
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error handling WebSocket message: ${error}`);
@@ -2995,39 +2945,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private async handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {
     logger.info(`[CTRL_PROXY] Received handled exception: ${event.exceptionClass} from ${event.packageName}`);
-
-    try {
-      const failureRecorder = getFailureRecorder();
-      const stackTraceElements = this.parseStackTrace(event.stackTrace, event.packageName);
-
-      let currentScreen = event.currentScreen;
-      if (!currentScreen) {
-        try {
-          const navManager = this.getNavigationGraphManager();
-          currentScreen = navManager.getCurrentScreen() ?? undefined;
-        } catch {
-          // Continue without screen
-        }
-      }
-
-      const nonFatalInput = {
-        exceptionType: event.exceptionClass,
-        exceptionMessage: event.exceptionMessage ?? "Handled exception",
-        stackTrace: stackTraceElements,
-        customMessage: event.customMessage,
-        deviceId: this.device.deviceId,
-        deviceModel: event.deviceInfo.model,
-        os: `Android ${event.deviceInfo.osVersion} (API ${event.deviceInfo.sdkInt})`,
-        appVersion: event.appVersion ?? "unknown",
-        sessionId: `handled-${event.packageName}-${this.timer.now()}`,
-        currentScreen,
-      };
-
-      const occurrenceId = await failureRecorder.recordNonFatal(nonFatalInput);
-      logger.info(`[CTRL_PROXY] Recorded non-fatal exception: ${occurrenceId}`);
-    } catch (error) {
-      logger.error(`[CTRL_PROXY] Failed to record handled exception: ${error}`);
-    }
+    await this.getSdkEventIngestor().recordHandledException(event);
   }
 
   private async persistCrash(event: SdkCrashPayload): Promise<void> {
@@ -3038,44 +2956,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private async recordCrashAnalytics(event: SdkCrashPayload): Promise<void> {
-    try {
-      const failureRecorder = getFailureRecorder();
-      const stackTraceElements = this.parseStackTrace(event.stackTrace, event.packageName);
-
-      let currentScreen = event.currentScreen;
-      if (!currentScreen) {
-        try {
-          const navManager = this.getNavigationGraphManager();
-          currentScreen = navManager.getCurrentScreen() ?? undefined;
-        } catch {
-          // Continue without screen
-        }
-      }
-
-      const crashInput = {
-        exceptionType: event.exceptionClass,
-        exceptionMessage: event.message ?? "Application crashed",
-        stackTrace: stackTraceElements,
-        threadName: event.threadName,
-        deviceId: this.device.deviceId,
-        deviceModel: event.deviceInfo.model,
-        os: `Android ${event.deviceInfo.osVersion} (API ${event.deviceInfo.sdkInt})`,
-        appVersion: event.appVersion ?? "unknown",
-        sessionId: `crash-${event.packageName}-${this.timer.now()}`,
-        currentScreen,
-      };
-
-      const occurrenceId = await failureRecorder.recordCrash(crashInput);
-      logger.info(`[CTRL_PROXY] Recorded crash: ${occurrenceId}`);
-    } catch (error) {
-      logger.error(`[CTRL_PROXY] Failed to record crash: ${error}`);
-    }
-  }
-
   private async handleCrashEvent(event: SdkCrashPayload): Promise<void> {
     logger.info(`[CTRL_PROXY] Received crash: ${event.exceptionClass} on thread ${event.threadName} from ${event.packageName}`);
-    await Promise.all([this.persistCrash(event), this.recordCrashAnalytics(event)]);
+    await Promise.all([
+      this.persistCrash(event),
+      this.getSdkEventIngestor().recordCrashAnalytics(event),
+    ]);
   }
 
   private async persistAnr(event: SdkAnrPayload): Promise<void> {
@@ -3086,45 +2972,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private async recordAnrAnalytics(event: SdkAnrPayload, packageName: string): Promise<void> {
-    try {
-      const failureRecorder = getFailureRecorder();
-
-      // Parse stack trace if available
-      const stackTraceElements = event.trace
-        ? this.parseStackTrace(event.trace, packageName)
-        : [];
-
-      let currentScreen: string | undefined;
-      try {
-        const navManager = this.getNavigationGraphManager();
-        currentScreen = navManager.getCurrentScreen() ?? undefined;
-      } catch {
-        // Continue without screen
-      }
-
-      const anrInput = {
-        reason: event.reason,
-        stackTrace: stackTraceElements.length > 0 ? stackTraceElements : undefined,
-        deviceId: this.device.deviceId,
-        deviceModel: event.deviceInfo.model,
-        os: `Android ${event.deviceInfo.osVersion} (API ${event.deviceInfo.sdkInt})`,
-        appVersion: event.appVersion ?? "unknown",
-        sessionId: `anr-${packageName}-${this.timer.now()}`,
-        currentScreen,
-      };
-
-      const occurrenceId = await failureRecorder.recordAnr(anrInput);
-      logger.info(`[CTRL_PROXY] Recorded ANR: ${occurrenceId}`);
-    } catch (error) {
-      logger.error(`[CTRL_PROXY] Failed to record ANR: ${error}`);
-    }
-  }
-
   private async handleAnrEvent(event: SdkAnrPayload): Promise<void> {
     logger.info(`[CTRL_PROXY] Received ANR: pid=${event.pid}, process=${event.processName}, importance=${event.importance}`);
     const packageName = event.packageName ?? event.processName;
-    await Promise.all([this.persistAnr(event), this.recordAnrAnalytics(event, packageName)]);
+    await Promise.all([
+      this.persistAnr(event),
+      this.getSdkEventIngestor().recordAnrAnalytics(event, packageName),
+    ]);
   }
 
   private parseStackTrace(stackTrace: string, packageName: string): StackTraceElement[] {

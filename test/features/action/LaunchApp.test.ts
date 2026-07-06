@@ -558,10 +558,10 @@ describe("LaunchApp", () => {
       const deviceAppLauncher = new FakeDeviceAppLauncher(
         opts.launchResult ? { launchResult: opts.launchResult } : {}
       );
-      const clearCalls: string[] = [];
-      const clearAppDataFactory = () => ({
+      const clearCalls: Array<{ bundleId: string; device: BootedDevice; simctl: unknown }> = [];
+      const clearAppDataFactory = (clearDevice: BootedDevice, clearSimctl: unknown) => ({
         execute: async (id: string) => {
-          clearCalls.push(id);
+          clearCalls.push({ bundleId: id, device: clearDevice, simctl: clearSimctl });
           return opts.clearResult ?? { success: true, packageName: id };
         },
       });
@@ -664,7 +664,12 @@ describe("LaunchApp", () => {
       try {
         const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
         expect(result.success).toBe(true);
-        expect(clearCalls).toEqual([userBundleId]);
+        expect(clearCalls).toHaveLength(1);
+        expect(clearCalls[0]).toMatchObject({
+          bundleId: userBundleId,
+          device: { deviceId: physicalUdid, platform: "ios" },
+        });
+        expect(clearCalls[0].simctl).toBe((iosLaunchApp as any).simctl);
         expect(deviceAppLauncher.launchCalls).toEqual([{
           deviceUdid: physicalUdid,
           bundleId: userBundleId,
@@ -686,7 +691,12 @@ describe("LaunchApp", () => {
         const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
         expect(result.success).toBe(false);
         expect(result.error).toContain("Failed to clear app data: reinstall failed");
-        expect(clearCalls).toEqual([userBundleId]);
+        expect(clearCalls).toHaveLength(1);
+        expect(clearCalls[0]).toMatchObject({
+          bundleId: userBundleId,
+          device: { deviceId: physicalUdid, platform: "ios" },
+        });
+        expect(clearCalls[0].simctl).toBe((iosLaunchApp as any).simctl);
         expect(deviceAppLauncher.launchCalls).toHaveLength(0);
         expect(simctlCalls).toEqual([]);
       } finally {

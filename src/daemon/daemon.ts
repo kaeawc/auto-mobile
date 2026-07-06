@@ -22,7 +22,12 @@ import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
-import { closeDatabase, getDatabasePath, getDbWriteBarrier } from "../db";
+import {
+  awaitInFlightMigrations,
+  closeDatabase,
+  getDatabasePath,
+  getDbWriteBarrier,
+} from "../db";
 import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 import { handleFatalDatabaseStartupFailure } from "./daemonStartupGuard";
@@ -81,6 +86,13 @@ const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 // writes to quiesce before closing the connection (issue #2792). Best-effort
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
 const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
+
+// Ceiling on awaiting an in-flight cold-start migration before closing the DB on
+// shutdown (issue #3044). A SIGTERM arriving mid-startup-migration would otherwise
+// let the detached migration connection's writes/checkpoint contend with the
+// closing app connection (Windows busy_timeout stall). Bounded: a wedged migration
+// cannot itself hang shutdown — the timeout wins and shutdown proceeds anyway.
+const MIGRATION_SETTLE_TIMEOUT_MS = 5_000;
 
 /**
  * Main daemon process
@@ -1345,6 +1357,21 @@ export class Daemon {
     if (!drained) {
       logger.warn(
         `Timed out after ${DB_WRITE_DRAIN_TIMEOUT_MS}ms draining in-flight DB writes; closing database anyway`
+      );
+    }
+
+    // If a SIGTERM arrived mid cold-start migration, the detached migration
+    // connection is still open and writing on its own connection (its writes are
+    // NOT tracked by the write barrier drained above). Let it settle before
+    // closeDatabase() destroys the app connection, so their WAL writes/checkpoint
+    // can't contend and stall shutdown on busy_timeout (Windows; issue #3044).
+    // Bounded so a wedged migration cannot itself hang shutdown.
+    const migrationsSettled = await awaitInFlightMigrations(
+      MIGRATION_SETTLE_TIMEOUT_MS
+    );
+    if (!migrationsSettled) {
+      logger.warn(
+        `Timed out after ${MIGRATION_SETTLE_TIMEOUT_MS}ms awaiting in-flight startup migration; closing database anyway`
       );
     }
 

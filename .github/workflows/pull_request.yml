@@ -1233,9 +1233,18 @@ jobs:
     # generous health-poll window (240 × 500ms = 120s) so it doesn't give up (and
     # then kill+respawn) a runner still coming up, and let an `observe` request wait
     # (150s > 120s) for that cold start instead of aborting at the 30s default (#2834).
+    #
+    # The daemon's own readiness budget (DAEMON_STARTUP_TIMEOUT_MS, default 10s) must
+    # cover the entire serial bring-up: Bun cold start + from-scratch migrations +
+    # `initializeDevicePoolWithTimeout(5s)` + `initializeIosServices(5s)`. On a cold
+    # macOS runner the two 5s device probes alone can exhaust 10s before Bun start and
+    # migrations are even counted, hard-failing the Swift tests' daemon start. Raise it
+    # to 60s here, consistent with the sibling budgets above (#3110). The env var name
+    # must match src/daemon/constants.ts exactly — a typo silently falls back to 10000.
     env:
       AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS: "240"
       AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
+      AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "60000"
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

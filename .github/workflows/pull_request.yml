@@ -1311,6 +1311,13 @@ jobs:
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
+      # Keep target-app cold bring-up outside the timed Reminders plan. CtrlProxy
+      # is already warm above; this leaves Reminders foregrounded so the plan's
+      # first launch/observe no longer pays the first app launch cost (#3028).
+      - name: "Warm up Reminders target app (Xcode 26.2)"
+        timeout-minutes: 5
+        run: ./scripts/ci/warm-reminders-target-app.sh
+
       - name: "Run Reminders integration tests (Xcode 26.2)"
         timeout-minutes: 10
         env:
@@ -1348,6 +1355,10 @@ jobs:
       - name: "Warm up iOS CtrlProxy (Xcode 26.3)"
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+
+      - name: "Warm up Reminders target app (Xcode 26.3)"
+        timeout-minutes: 5
+        run: ./scripts/ci/warm-reminders-target-app.sh
 
       - name: "Run Reminders integration tests (Xcode 26.3)"
         timeout-minutes: 10

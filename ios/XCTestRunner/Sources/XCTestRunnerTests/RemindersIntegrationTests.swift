@@ -2,18 +2,6 @@ import XCTest
 @testable import XCTestRunner
 
 class RemindersIntegrationBase: AutoMobileTestCase {
-    var defaultRetryCount: Int {
-        return 1
-    }
-
-    override var retryCount: Int {
-        let environment = AutoMobileEnvironment()
-        if let explicit = environment.intValue(["AUTOMOBILE_TEST_RETRY_COUNT", "RETRY_COUNT"]) {
-            return explicit
-        }
-        return defaultRetryCount
-    }
-
     override var planBundle: Bundle? {
         return Bundle.module
     }
@@ -58,9 +46,6 @@ final class RemindersLaunchPlanTests: RemindersIntegrationBase {
             ?? "launch-reminders-app.yaml"
     }
 
-    // #2998: inherits the shared one-retry default to absorb transient cold Reminders bring-up
-    // observe timeouts; tracked for removal once #2910/#2926/#2952 fix the underlying flake.
-
     func testLaunchRemindersPlan() throws {
         PerfTimer.log("testLaunchRemindersPlan START - planPath: \(planPath)")
         let result = try executePlan()
@@ -74,9 +59,6 @@ final class RemindersAddPlanTests: RemindersIntegrationBase {
             ?? ProcessInfo.processInfo.environment["PLAN_PATH"]
             ?? "add-reminder.yaml"
     }
-
-    // #2811: inherits the shared one-retry default to absorb residual cross-iOS Reminders UI flakes;
-    // tracked for removal once the add-flow guards are proven sufficient in #2855.
 
     func testAddReminderPlan() throws {
         PerfTimer.log("testAddReminderPlan START - planPath: \(planPath)")

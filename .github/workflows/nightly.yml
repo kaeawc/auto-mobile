@@ -454,6 +454,17 @@ jobs:
       - name: "Boot iOS Simulator (Xcode 26.2)"
         run: ./scripts/ios/boot-simulator.sh
 
+      - name: "Ensure AutoMobile daemon ready"
+        run: ./scripts/ci/ensure-daemon-ready.sh
+
+      - name: "Warm up iOS CtrlProxy"
+        timeout-minutes: 12
+        run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+
+      - name: "Warm up Reminders target app (Xcode 26.2)"
+        timeout-minutes: 5
+        run: ./scripts/ci/warm-reminders-target-app.sh
+
       - name: "Run Reminders integration tests (Xcode 26.2)"
         timeout-minutes: 10
         env:
@@ -476,6 +487,17 @@ jobs:
 
       - name: "Boot iOS Simulator (Xcode 26.3)"
         run: ./scripts/ios/boot-simulator.sh
+
+      - name: "Ensure AutoMobile daemon ready (Xcode 26.3)"
+        run: ./scripts/ci/ensure-daemon-ready.sh
+
+      - name: "Warm up iOS CtrlProxy (Xcode 26.3)"
+        timeout-minutes: 12
+        run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+
+      - name: "Warm up Reminders target app (Xcode 26.3)"
+        timeout-minutes: 5
+        run: ./scripts/ci/warm-reminders-target-app.sh
 
       - name: "Run Reminders integration tests (Xcode 26.3)"
         timeout-minutes: 10

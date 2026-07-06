@@ -76,6 +76,12 @@ echo -e "  ${GREEN}✓${NC} Bun available"
 
 echo ""
 
+if [[ "${TEST_FILTER} ${TEST_PLAN}" == *Reminders* || "${TEST_FILTER} ${TEST_PLAN}" == *reminders* ]]; then
+    echo -e "${BLUE}Warming Reminders target app...${NC}"
+    "${PROJECT_ROOT}/scripts/ci/warm-reminders-target-app.sh"
+    echo ""
+fi
+
 # Run tests
 echo -e "${BLUE}Running integration tests...${NC}"
 echo ""

@@ -16,16 +16,12 @@ import {
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
-import { DefaultCmdlineToolsInstaller } from "../../utils/android-cmdline-tools/cmdlineToolsInstaller";
-import type { CmdlineToolsInstaller } from "../../utils/android-cmdline-tools/cmdlineToolsInstaller";
 import { logger } from "../../utils/logger";
 
 export interface AndroidDoctorDependencies {
   detectAndroidCommandLineTools: typeof detectAndroidCommandLineTools;
   getBestAndroidToolsLocation: typeof getBestAndroidToolsLocation;
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;
-  getAndroidHomeEnvValue: () => string | undefined;
-  cmdlineToolsInstaller: CmdlineToolsInstaller;
   logger: typeof logger;
 }
 
@@ -33,8 +29,6 @@ const createAndroidDoctorDependencies = (): AndroidDoctorDependencies => ({
   detectAndroidCommandLineTools,
   getBestAndroidToolsLocation,
   getAndroidHomeWithSystemImages,
-  getAndroidHomeEnvValue: () => process.env.ANDROID_HOME,
-  cmdlineToolsInstaller: new DefaultCmdlineToolsInstaller(),
   logger
 });
 
@@ -46,43 +40,10 @@ function normalizePath(value: string): string {
  * Check Android command line tools installation and Homebrew mismatch
  */
 export async function checkAndroidCommandLineTools(
-  options: DoctorOptions = {},
+  _options: DoctorOptions = {},
   dependencies = createAndroidDoctorDependencies()
 ): Promise<CheckResult> {
   const name = "Android Command Line Tools";
-
-  if (options.installCmdlineTools) {
-    const androidHome = dependencies.getAndroidHomeEnvValue();
-    if (!androidHome) {
-      return {
-        name,
-        status: "warn",
-        message: "ANDROID_HOME is not set; command line tools installation requires ANDROID_HOME.",
-        recommendation: "Set ANDROID_HOME and rerun: auto-mobile --cli doctor --install-cmdline-tools"
-      };
-    }
-
-    try {
-      const installResult = await dependencies.cmdlineToolsInstaller.install(androidHome);
-      return {
-        name,
-        status: installResult.success ? "pass" : "fail",
-        message: installResult.message,
-        value: installResult.path,
-        recommendation: installResult.success
-          ? undefined
-          : "Install Android command line tools into ANDROID_HOME."
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        name,
-        status: "fail",
-        message: `Failed to install Android command line tools: ${message}`,
-        recommendation: "Install Android command line tools into ANDROID_HOME."
-      };
-    }
-  }
 
   let locations: Awaited<ReturnType<typeof detectAndroidCommandLineTools>>;
   try {
@@ -102,7 +63,7 @@ export async function checkAndroidCommandLineTools(
       name,
       status: "warn",
       message: "Android command line tools not detected.",
-      recommendation: "Install command line tools into ANDROID_HOME."
+      recommendation: "Ensure Android command line tools are present under ANDROID_HOME."
     };
   }
 
@@ -114,7 +75,7 @@ export async function checkAndroidCommandLineTools(
         name,
         status: "warn",
         message: "Homebrew cmdline-tools detected while system images are in ANDROID_HOME.",
-        recommendation: "Install command line tools into ANDROID_HOME or run: auto-mobile --cli doctor --install-cmdline-tools"
+        recommendation: "Ensure Android command line tools are present under ANDROID_HOME."
       };
     }
   }

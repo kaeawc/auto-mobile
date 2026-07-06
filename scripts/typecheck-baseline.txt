@@ -236,7 +236,6 @@ src/utils/ProcessExecutor.ts: error TS2769: No overload matches this call.
 src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
 src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
 src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
-src/utils/android-cmdline-tools/cmdlineToolsInstaller.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
 src/utils/androidTransientLoading.ts: error TS2345: Argument of type 'object' is not assignable to parameter of type 'ViewHierarchyNode'.
 src/utils/filesystem/DefaultFileSystem.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 src/utils/hostEmulatorAutoConnect.ts: error TS2339: Property 'toString' does not exist on type 'never'.
@@ -292,7 +291,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 20 :: src/features/accessibility/WcagAudit.ts: error TS7053: Element implicitly has an 'any' type because expression of type '"resource-id"' can't be used to index type 'ViewHierarchyNode'.
 # swap-fp: 20 :: src/utils/CtrlProxyManager.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
 # swap-fp: 20 :: src/utils/IOSCtrlProxyBundleDownloader.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
-# swap-fp: 20 :: src/utils/android-cmdline-tools/cmdlineToolsInstaller.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
 # swap-fp: 21,28 :: src/db/migrator.ts: error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
 # swap-fp: 23 :: src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'Map<string, number>' is not assignable to parameter of type 'Map<string, { timestamp: number; }>'.
 # swap-fp: 24 :: src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string | undefined>' is not assignable to type 'Promise<void>'.

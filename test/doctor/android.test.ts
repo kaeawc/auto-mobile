@@ -8,7 +8,6 @@ import {
   checkConnectedDevices,
 } from "../../src/doctor/checks/android";
 import { tmpdir } from "node:os";
-import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -18,15 +17,6 @@ const baseDependencies: AndroidDoctorDependencies = {
   detectAndroidCommandLineTools: async () => [],
   getBestAndroidToolsLocation: () => null,
   getAndroidHomeWithSystemImages: () => null,
-  getAndroidHomeEnvValue: () => "/Users/test/Library/Android/sdk",
-  cmdlineToolsInstaller: {
-    install: async () => ({
-      success: true,
-      message: "Installed",
-      path: "/Users/test/Library/Android/sdk/cmdline-tools/latest",
-      version: "13114758"
-    })
-  },
   logger: {
     info: () => {},
     warn: () => {},
@@ -77,81 +67,6 @@ describe("Android doctor command line tools check", () => {
 
     expect(result.status).toBe("pass");
     expect(result.message).toContain("detected");
-  });
-
-  test("warns when install is requested without ANDROID_HOME", async () => {
-    let installerCalled = false;
-
-    const result = await checkAndroidCommandLineTools({ installCmdlineTools: true }, {
-      ...baseDependencies,
-      getAndroidHomeEnvValue: () => undefined,
-      cmdlineToolsInstaller: {
-        install: async () => {
-          installerCalled = true;
-          return {
-            success: true,
-            message: "Installed",
-            path: "/Users/test/Library/Android/sdk/cmdline-tools/latest",
-            version: "13114758"
-          };
-        }
-      }
-    });
-
-    expect(result.status).toBe("warn");
-    expect(result.message).toContain("ANDROID_HOME is not set");
-    expect(installerCalled).toBe(false);
-  });
-
-  test("installs when install flag is set", async () => {
-    const fakeTimer = new FakeTimer();
-    const installCalls: string[] = [];
-
-    const resultPromise = checkAndroidCommandLineTools({ installCmdlineTools: true }, {
-      ...baseDependencies,
-      cmdlineToolsInstaller: {
-        install: async () => {
-          installCalls.push("install");
-          await fakeTimer.sleep(0);
-          return {
-            success: true,
-            message: "Installed",
-            path: "/Users/test/Library/Android/sdk/cmdline-tools/latest",
-            version: "13114758"
-          };
-        }
-      }
-    });
-
-    fakeTimer.advanceTime(0);
-    const result = await resultPromise;
-
-    expect(installCalls).toHaveLength(1);
-    expect(result.status).toBe("pass");
-    expect(result.value).toContain("cmdline-tools/latest");
-  });
-
-  test("allows install when ANDROID_HOME is set", async () => {
-    const installCalls: string[] = [];
-
-    const result = await checkAndroidCommandLineTools({ installCmdlineTools: true }, {
-      ...baseDependencies,
-      getAndroidHomeEnvValue: () => "/Users/test/Library/Android/sdk",
-      cmdlineToolsInstaller: {
-        install: async () => {
-          installCalls.push("install");
-          return {
-            success: true,
-            message: "Installed",
-            path: "/Users/test/Library/Android/sdk/cmdline-tools/latest",
-            version: "13114758"
-          };
-        }
-      }
-    });
-
-    expect(installCalls).toHaveLength(1);
-    expect(result.status).toBe("pass");
   });
 });
 

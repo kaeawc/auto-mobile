@@ -394,16 +394,6 @@ function normalizeErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function errorOutput(error: unknown): string {
-  const stdout = typeof (error as { stdout?: string })?.stdout === "string"
-    ? (error as { stdout?: string }).stdout
-    : "";
-  const stderr = typeof (error as { stderr?: string })?.stderr === "string"
-    ? (error as { stderr?: string }).stderr
-    : "";
-  return [stdout, stderr, normalizeErrorMessage(error)].join("\n");
-}
-
 /**
  * Check Xcode installation and minimum version
  */
@@ -460,10 +450,10 @@ export async function checkXcodeInstallation(
 }
 
 /**
- * Check Xcode Command Line Tools (with optional auto-install)
+ * Check Xcode Command Line Tools
  */
 export async function checkXcodeCommandLineTools(
-  options: DoctorOptions = {},
+  _options: DoctorOptions = {},
   dependencies = createIosDoctorDependencies()
 ): Promise<CheckResult> {
   const name = "Command Line Tools";
@@ -474,35 +464,6 @@ export async function checkXcodeCommandLineTools(
       status: "skip",
       message: "iOS development requires macOS",
     };
-  }
-
-  if (options.installXcodeCommandLineTools) {
-    try {
-      await dependencies.execFile("xcode-select", ["--install"]);
-      return {
-        name,
-        status: "pass",
-        message: "Command Line Tools installation started",
-        recommendation: "Follow the installer prompt and re-run doctor.",
-      };
-    } catch (error) {
-      const output = errorOutput(error).toLowerCase();
-      if (output.includes("already installed")) {
-        return {
-          name,
-          status: "pass",
-          message: "Command Line Tools already installed",
-        };
-      }
-
-      dependencies.logger.warn(`Command Line Tools install failed: ${normalizeErrorMessage(error)}`, error);
-      return {
-        name,
-        status: "fail",
-        message: `Command Line Tools install failed: ${normalizeErrorMessage(error)}`,
-        recommendation: "Run: xcode-select --install",
-      };
-    }
   }
 
   try {

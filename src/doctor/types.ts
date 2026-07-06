@@ -61,10 +61,6 @@ export interface DoctorOptions {
   android?: boolean;
   /** Run iOS-specific checks only */
   ios?: boolean;
-  /** Install Android SDK command-line tools if missing */
-  installCmdlineTools?: boolean;
-  /** Install Xcode Command Line Tools if missing */
-  installXcodeCommandLineTools?: boolean;
   /** Output in JSON format */
   json?: boolean;
 }

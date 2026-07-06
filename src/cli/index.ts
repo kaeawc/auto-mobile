@@ -169,34 +169,11 @@ async function runDoctorViaDaemon(params: Record<string, any>): Promise<any> {
  */
 async function runDoctorCommand(params: Record<string, any>): Promise<void> {
   const jsonOutput = params.json === true;
-  const { installCmdlineTools, installXcodeCommandLineTools, ...daemonParams } = params;
-
-  if (installCmdlineTools === true || installXcodeCommandLineTools === true) {
-    const { runDoctor, formatConsoleOutput, formatJsonOutput } = await import("../doctor");
-    const report = await runDoctor({
-      android: params.android,
-      ios: params.ios,
-      installCmdlineTools,
-      installXcodeCommandLineTools,
-    });
-
-    if (jsonOutput) {
-      console.log(formatJsonOutput(report));
-    } else {
-      console.log(formatConsoleOutput(report, process.stdout.isTTY ?? true));
-    }
-
-    if (report.summary.failed > 0) {
-      process.exit(1);
-    }
-
-    return;
-  }
 
   // Try daemon first
   try {
     logger.debug("Attempting to run doctor via daemon");
-    const daemonResult = await runDoctorViaDaemon(daemonParams);
+    const daemonResult = await runDoctorViaDaemon(params);
     await handleDoctorResult(daemonResult, jsonOutput);
     return;
   } catch (error) {
@@ -208,8 +185,6 @@ async function runDoctorCommand(params: Record<string, any>): Promise<void> {
   const report = await runDoctor({
     android: params.android,
     ios: params.ios,
-    installCmdlineTools,
-    installXcodeCommandLineTools,
   });
 
   if (jsonOutput) {

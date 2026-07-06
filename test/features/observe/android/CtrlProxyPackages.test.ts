@@ -113,6 +113,17 @@ describe("CtrlProxyPackages (Android)", function() {
 
       expect(scheduler.cancelPendingCapturesCalls).toBe(1);
     });
+
+    test("refreshes screenshot cadence by rescheduling keepalive", function() {
+      const { factory } = createCapturingFactory(fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const scheduler = new FakeScreenshotBackoffScheduler();
+
+      (client as any).screenshotBackoffScheduler = scheduler;
+      client.refreshObservationStreamScreenshotCadence();
+
+      expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
+    });
   });
 
   describe("requestInstalledPackages", function() {

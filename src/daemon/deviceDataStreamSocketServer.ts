@@ -95,6 +95,7 @@ interface DeviceDataStreamMessage {
  */
 interface DeviceDataFilter {
   deviceId: string | null; // null means subscribe to all devices
+  screenshotIntervalMs: number | null;
 }
 
 /**
@@ -110,6 +111,11 @@ interface DeviceDataPush {
  * Can be used to trigger device WebSocket connections for real-time updates.
  */
 export type OnSubscriberConnectedCallback = (deviceId: string | null) => void;
+
+/**
+ * Callback invoked when active screenshot cadence may have changed for a device.
+ */
+export type OnScreenshotCadenceChangedCallback = (deviceId: string | null) => void;
 
 /**
  * Observation captured on demand for a stream client.
@@ -139,6 +145,9 @@ export type OnNavigationGraphRequestedCallback = (appId?: string | null) => Prom
 // above that so slow-but-valid iOS captures are not reported as stream errors
 // before the platform observe path has its allotted time to complete.
 const DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS = 20_000;
+const DEFAULT_SCREENSHOT_INTERVAL_MS = 3000;
+const MIN_SCREENSHOT_INTERVAL_MS = 250;
+const MAX_SCREENSHOT_INTERVAL_MS = 2_147_483_647;
 
 /**
  * Socket server that streams device data updates (hierarchy, screenshot, storage) to connected IDE plugins.
@@ -159,6 +168,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   DeviceDataPush
 > {
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
+  private onScreenshotCadenceChanged: OnScreenshotCadenceChangedCallback | null = null;
   private onObservationRequested: OnObservationRequestedCallback | null = null;
   private onNavigationGraphRequested: OnNavigationGraphRequestedCallback | null = null;
   private observationRequestTimeoutMs = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
@@ -173,6 +183,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    */
   setOnSubscriberConnected(callback: OnSubscriberConnectedCallback): void {
     this.onSubscriberConnected = callback;
+  }
+
+  /**
+   * Set a callback to be invoked when subscription cadence may have changed.
+   */
+  setOnScreenshotCadenceChanged(callback: OnScreenshotCadenceChangedCallback): void {
+    this.onScreenshotCadenceChanged = callback;
   }
 
   /**
@@ -311,6 +328,39 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   /**
+   * Return the fastest active screenshot cadence requested for this device,
+   * or the default low-cost keepalive cadence when none is requested.
+   */
+  getScreenshotIntervalMsForDevice(deviceId: string): number {
+    const probe: DeviceDataPush = {
+      message: {
+        type: "screenshot_update",
+        deviceId,
+      },
+      targetDeviceId: deviceId,
+    };
+    let fastestIntervalMs: number | null = null;
+
+    for (const subscriber of this.subscribers.values()) {
+      if (subscriber.backfilling || subscriber.socket.destroyed) {
+        continue;
+      }
+
+      if (!this.matchesFilter(subscriber.filter, probe)) {
+        continue;
+      }
+
+      const requestedIntervalMs = subscriber.filter.screenshotIntervalMs ?? DEFAULT_SCREENSHOT_INTERVAL_MS;
+
+      fastestIntervalMs = fastestIntervalMs === null
+        ? requestedIntervalMs
+        : Math.min(fastestIntervalMs, requestedIntervalMs);
+    }
+
+    return fastestIntervalMs ?? DEFAULT_SCREENSHOT_INTERVAL_MS;
+  }
+
+  /**
    * Notify subscribers that the underlying device control connection was lost.
    */
   onDeviceConnectionLost(deviceId: string): void {
@@ -398,6 +448,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       // Let base class handle the subscription
       await super.processLine(socket, line);
 
+      this.notifyScreenshotCadenceChanged(request.deviceId ?? null);
+
       // Trigger the callback if set
       if (this.onSubscriberConnected) {
         try {
@@ -409,13 +461,47 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       return;
     }
 
+    if (request.command === "unsubscribe") {
+      const filter = this.findFilterForSocket(socket);
+      await super.processLine(socket, line);
+      if (filter) {
+        this.notifyScreenshotCadenceChanged(filter.deviceId);
+      }
+      return;
+    }
+
     // Delegate to base class for standard commands (subscribe, unsubscribe, pong)
     await super.processLine(socket, line);
+  }
+
+  protected onConnectionClose(socket: Socket): void {
+    const filter = this.findFilterForSocket(socket);
+    super.onConnectionClose(socket);
+    if (filter) {
+      this.notifyScreenshotCadenceChanged(filter.deviceId);
+    }
+  }
+
+  protected onConnectionError(socket: Socket, error: Error): void {
+    const filter = this.findFilterForSocket(socket);
+    super.onConnectionError(socket, error);
+    if (filter) {
+      this.notifyScreenshotCadenceChanged(filter.deviceId);
+    }
+  }
+
+  protected checkKeepalive(): void {
+    const subscriberCountBefore = this.subscribers.size;
+    super.checkKeepalive();
+    if (this.subscribers.size !== subscriberCountBefore) {
+      this.notifyScreenshotCadenceChanged(null);
+    }
   }
 
   protected parseSubscriptionFilter(request: Record<string, unknown>): DeviceDataFilter {
     return {
       deviceId: (request.deviceId as string) ?? null,
+      screenshotIntervalMs: this.parseScreenshotIntervalMs(request.screenshotIntervalMs),
     };
   }
 
@@ -430,6 +516,42 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   protected createPushMessage(data: DeviceDataPush): DeviceDataStreamMessage {
     return data.message;
+  }
+
+  private parseScreenshotIntervalMs(value: unknown): number | null {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      return null;
+    }
+
+    return Math.min(
+      Math.max(Math.round(value), MIN_SCREENSHOT_INTERVAL_MS),
+      MAX_SCREENSHOT_INTERVAL_MS
+    );
+  }
+
+  private findFilterForSocket(socket: Socket): DeviceDataFilter | null {
+    for (const subscriber of this.subscribers.values()) {
+      if (subscriber.socket === socket) {
+        return subscriber.filter;
+      }
+    }
+    return null;
+  }
+
+  private notifyScreenshotCadenceChanged(deviceId: string | null): void {
+    if (!this.onScreenshotCadenceChanged) {
+      return;
+    }
+
+    try {
+      this.onScreenshotCadenceChanged(deviceId);
+    } catch (error) {
+      logger.warn(`[DeviceDataStream] Error in onScreenshotCadenceChanged callback: ${error}`);
+    }
   }
 
   private async handleObservationRequest(

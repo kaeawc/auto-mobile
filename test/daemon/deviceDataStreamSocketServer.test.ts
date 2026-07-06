@@ -29,6 +29,7 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
 
   simulateSubscription(options: {
     deviceId?: string;
+    screenshotIntervalMs?: number | null;
   }): { socket: FakeSocket; subscriptionId: string } {
     const socket = new FakeSocket();
     const subscriptionId = `devicedatastream-${++(this as any).subscriptionCounter}`;
@@ -39,6 +40,7 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
       lastActivity: timer.now(),
       filter: {
         deviceId: options.deviceId ?? null,
+        screenshotIntervalMs: options.screenshotIntervalMs ?? null,
       },
       backfilling: false,
       drainPending: false,
@@ -48,6 +50,10 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
 
   async processLineForTest(socket: FakeSocket, line: string): Promise<void> {
     await this.processLine(socket as unknown as Socket, line);
+  }
+
+  closeConnectionForTest(socket: FakeSocket): void {
+    this.onConnectionClose(socket as unknown as Socket);
   }
 }
 
@@ -474,6 +480,152 @@ describe("DeviceDataStreamSocketServer", () => {
       socket.destroy();
 
       expect(server.hasSubscriberForDevice("device-1")).toBe(false);
+    });
+  });
+
+  describe("screenshot cadence aggregation", () => {
+    it("uses the default screenshot keepalive cadence when subscribers omit cadence", () => {
+      server.simulateSubscription({ deviceId: "device-1" });
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
+    });
+
+    it("parses requested screenshot cadence from subscribe commands", async () => {
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub-fast",
+        command: "subscribe",
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      }));
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(500);
+    });
+
+    it("clamps requested screenshot cadence to the safe minimum", async () => {
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub-clamped",
+        command: "subscribe",
+        deviceId: "device-1",
+        screenshotIntervalMs: 50,
+      }));
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(250);
+    });
+
+    it("clamps requested screenshot cadence to the maximum timer delay", async () => {
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub-max-clamped",
+        command: "subscribe",
+        deviceId: "device-1",
+        screenshotIntervalMs: 3_000_000_000,
+      }));
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(2_147_483_647);
+    });
+
+    it("uses the fastest active requested cadence for a device", () => {
+      server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 1000 });
+      server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 500 });
+      server.simulateSubscription({ deviceId: "device-2", screenshotIntervalMs: 250 });
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(500);
+    });
+
+    it("keeps default cadence when another subscriber requests a slower cadence", () => {
+      server.simulateSubscription({ deviceId: "device-1" });
+      server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 10_000 });
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
+    });
+
+    it("applies all-device subscriber cadence to each device", () => {
+      server.simulateSubscription({ screenshotIntervalMs: 750 });
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(750);
+      expect(server.getScreenshotIntervalMsForDevice("device-2")).toBe(750);
+    });
+
+    it("removes requested cadence after unsubscribe", async () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 500 });
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "unsub-fast",
+        command: "unsubscribe",
+      }));
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
+    });
+
+    it("ignores destroyed subscriber sockets when aggregating cadence", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 500 });
+      socket.destroy();
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
+    });
+
+    it("notifies when subscribe changes screenshot cadence", async () => {
+      const changedDevices: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged(deviceId => {
+        changedDevices.push(deviceId);
+      });
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub-fast",
+        command: "subscribe",
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      }));
+
+      expect(changedDevices).toEqual(["device-1"]);
+    });
+
+    it("notifies when unsubscribe removes screenshot cadence", async () => {
+      const changedDevices: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged(deviceId => {
+        changedDevices.push(deviceId);
+      });
+      const { socket } = server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 500 });
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "unsub-fast",
+        command: "unsubscribe",
+      }));
+
+      expect(changedDevices).toEqual(["device-1"]);
+    });
+
+    it("does not notify when unsubscribe has no active subscription", async () => {
+      const changedDevices: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged(deviceId => {
+        changedDevices.push(deviceId);
+      });
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "unsub-missing",
+        command: "unsubscribe",
+      }));
+
+      expect(changedDevices).toEqual([]);
+    });
+
+    it("notifies when connection close removes screenshot cadence", () => {
+      const changedDevices: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged(deviceId => {
+        changedDevices.push(deviceId);
+      });
+      const { socket } = server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 500 });
+
+      server.closeConnectionForTest(socket);
+
+      expect(changedDevices).toEqual(["device-1"]);
     });
   });
 

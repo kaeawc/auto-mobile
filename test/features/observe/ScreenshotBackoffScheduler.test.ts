@@ -232,6 +232,70 @@ describe("DefaultScreenshotBackoffScheduler", () => {
 
       expect(capturedScreenshots).toHaveLength(3);
     });
+
+    it("uses dynamic keepalive interval when provided", async () => {
+      let keepAliveIntervalMs = 500;
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        captureCallback,
+        emitCallback,
+        { intervals: [0], keepAliveIntervalMs: 1000, getKeepAliveIntervalMs: () => keepAliveIntervalMs },
+        fakeTimer
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+
+      expect(fakeTimer.getPendingTimeouts()).toEqual([500]);
+
+      keepAliveIntervalMs = 250;
+      await fakeTimer.advanceTimersByTimeAsync(500);
+
+      expect(capturedScreenshots).toHaveLength(2);
+      expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+    });
+
+    it("reschedules a pending keepalive when cadence changes", async () => {
+      let keepAliveIntervalMs = 3000;
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        captureCallback,
+        emitCallback,
+        { intervals: [0], getKeepAliveIntervalMs: () => keepAliveIntervalMs },
+        fakeTimer
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+
+      expect(fakeTimer.getPendingTimeouts()).toEqual([3000]);
+
+      keepAliveIntervalMs = 250;
+      scheduler.rescheduleKeepAlive();
+
+      expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+      await fakeTimer.advanceTimersByTimeAsync(250);
+
+      expect(capturedScreenshots).toHaveLength(2);
+    });
+
+    it("starts keepalive when cadence changes without a pending keepalive", async () => {
+      const keepAliveIntervalMs = 250;
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        captureCallback,
+        emitCallback,
+        { intervals: [0], getKeepAliveIntervalMs: () => keepAliveIntervalMs },
+        fakeTimer,
+        () => true
+      );
+
+      expect(fakeTimer.getPendingTimeouts()).toEqual([]);
+
+      scheduler.rescheduleKeepAlive();
+
+      expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+      await fakeTimer.advanceTimersByTimeAsync(250);
+
+      expect(capturedScreenshots).toHaveLength(1);
+    });
   });
 
   describe("duplicate detection", () => {
@@ -498,6 +562,9 @@ describe("FakeScreenshotBackoffScheduler", () => {
     fake.cancelPendingCaptures();
     expect(fake.cancelPendingCapturesCalls).toBe(1);
     expect(fake.isActive()).toBe(false);
+
+    fake.rescheduleKeepAlive();
+    expect(fake.rescheduleKeepAliveCalls).toBe(1);
   });
 
   it("allows setting state for test scenarios", () => {

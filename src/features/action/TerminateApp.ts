@@ -113,7 +113,6 @@ export class TerminateApp extends BaseVisualChange {
       });
 
       if (!isInstalled) {
-        perf.end();
         return {
           success: true,
           packageName,
@@ -128,7 +127,6 @@ export class TerminateApp extends BaseVisualChange {
       const isRunning = true;
 
       if (!isRunning) {
-        perf.end();
         return {
           success: true,
           packageName,
@@ -151,7 +149,6 @@ export class TerminateApp extends BaseVisualChange {
         await this.adb.executeCommand(`shell am force-stop --user ${targetUserId} ${packageName}`);
       });
 
-      perf.end();
       return {
         success: true,
         packageName,
@@ -162,9 +159,13 @@ export class TerminateApp extends BaseVisualChange {
       };
     };
 
-    // Skip observation when called internally (e.g., from LaunchApp)
+    // Skip observation when called internally (e.g., from LaunchApp).
+    // `execute` owns the "terminateApp" perf block, so it — not `terminateLogic`
+    // — closes it (issue #3037; see the executeiOS note for rationale).
     if (options?.skipObservation) {
-      return terminateLogic();
+      const result = await terminateLogic();
+      perf.end();
+      return result;
     }
 
     return this.observedInteraction(
@@ -195,8 +196,17 @@ export class TerminateApp extends BaseVisualChange {
       ? () => this.terminateSimulator(bundleId, perf)
       : () => this.terminatePhysicalDevice(bundleId, perf);
 
+    // Perf-tree ownership (issue #3037): `executeiOS` opens the "terminateApp"
+    // block, so it — the single owner — must close it. The terminate helpers no
+    // longer call `perf.end()` themselves: doing so inside `observedInteraction`
+    // popped the block mid-observation, reparenting the later finalObserve /
+    // uiStability entries to the root. In the observed path the block stays open
+    // and `getTimings()` (in `takeObservation`) closes it after observation, so
+    // those entries nest correctly under "terminateApp".
     if (options?.skipObservation) {
-      return terminateLogic();
+      const result = await terminateLogic();
+      perf.end();
+      return result;
     }
 
     return this.observedInteraction(
@@ -223,7 +233,6 @@ export class TerminateApp extends BaseVisualChange {
     const wasInstalled = installedApps.some(app => this.getBundleId(app) === bundleId);
 
     if (!wasInstalled) {
-      perf.end();
       return {
         success: true,
         packageName: bundleId,
@@ -253,7 +262,6 @@ export class TerminateApp extends BaseVisualChange {
       }
     }
 
-    perf.end();
     return {
       success: !errorMessage,
       packageName: bundleId,
@@ -281,7 +289,6 @@ export class TerminateApp extends BaseVisualChange {
         "terminateApp",
         () => this.deviceTerminator.terminateApp(this.device.deviceId, bundleId)
       );
-      perf.end();
       return {
         success: true,
         packageName: bundleId,
@@ -295,7 +302,6 @@ export class TerminateApp extends BaseVisualChange {
       // but log first so the trace survives even when the client only sees the
       // summarized error (CLAUDE.md error-handling convention #2).
       logger.warn(`[TerminateApp] Physical iOS terminate failed for ${bundleId}: ${message}`, error);
-      perf.end();
       // Omit wasInstalled/wasRunning: install state is unknown at throw time (a
       // devicectl failure can occur after the app was confirmed installed), so
       // reporting them as `false` would assert a fact we never established.

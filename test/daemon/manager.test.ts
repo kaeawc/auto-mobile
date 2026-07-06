@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
@@ -19,6 +20,7 @@ import type {
   DaemonProcessLivenessChecker,
   DaemonProcessSpawner,
   DaemonProcessRecord,
+  ExtractionCleaner,
 } from "../../src/daemon/manager";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import type { DaemonClientLike } from "../../src/daemon/client";
@@ -116,6 +118,28 @@ class FakeDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLiven
 
   isProcessRunning(pid: number): boolean {
     return this.livePids.has(pid);
+  }
+}
+
+class FakeDaemonChildProcess extends EventEmitter {
+  unref(): void {}
+
+  exit(code: number | null, signal: NodeJS.Signals | null = null): void {
+    this.emit("exit", code, signal);
+  }
+}
+
+function neverReadyAfterExit(child: FakeDaemonChildProcess, code: number): Promise<boolean> {
+  child.exit(code);
+  return new Promise(() => {});
+}
+
+class FakeExtractionCleaner implements ExtractionCleaner {
+  readonly entryScripts: string[] = [];
+
+  async removeExtractionForEntryScript(entryScript: string): Promise<boolean> {
+    this.entryScripts.push(entryScript);
+    return true;
   }
 }
 
@@ -572,6 +596,309 @@ describe("Daemon manager process detection", () => {
       expect(killCalls).toEqual([]);
     } finally {
       killSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("surfaces incomplete-extraction remediation when daemon exits with exit code 75", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-incomplete-extraction-message-test-"));
+    process.env.AUTOMOBILE_DATA_DIR = dir;
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const entryScript = join(
+      dir,
+      "bunx-extract",
+      "node_modules",
+      "@kaeawc",
+      "auto-mobile",
+      "dist",
+      "src",
+      "index.js"
+    );
+    const child = new FakeDaemonChildProcess();
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => child as ChildProcess,
+    };
+    const cleaner = new FakeExtractionCleaner();
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+
+      override async waitForReady(_timeout: number, signal?: AbortSignal): Promise<boolean> {
+        await Promise.resolve();
+        if (!signal?.aborted) {
+          return neverReadyAfterExit(child, 75);
+        }
+        return false;
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        undefined,
+        undefined,
+        fakeTimer,
+        join(dir, "daemon.lock"),
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        new FakeDaemonProcessFinder([]),
+        processSpawner,
+        cleaner,
+        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] })
+      );
+
+      await expect(manager.start()).rejects.toThrow("remove the incomplete extraction directory and re-run");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("removes an incomplete extraction and retries once after exit code 75", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-incomplete-extraction-retry-test-"));
+    process.env.AUTOMOBILE_DATA_DIR = dir;
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const entryScript = join(
+      dir,
+      "bunx-extract",
+      "node_modules",
+      "@kaeawc",
+      "auto-mobile",
+      "dist",
+      "src",
+      "index.js"
+    );
+    const children: FakeDaemonChildProcess[] = [];
+    const spawnCalls: Array<{ command: string; args: string[] }> = [];
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (command: string, args: string[]) => {
+        const child = new FakeDaemonChildProcess();
+        children.push(child);
+        spawnCalls.push({ command, args: [...args] });
+        return child as ChildProcess;
+      },
+    };
+    const cleaner = new FakeExtractionCleaner();
+    let waitCalls = 0;
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+
+      override async waitForReady(_timeout: number, signal?: AbortSignal): Promise<boolean> {
+        waitCalls++;
+        await Promise.resolve();
+        if (waitCalls === 1 && !signal?.aborted) {
+          return neverReadyAfterExit(children[0], 75);
+        }
+        return true;
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        undefined,
+        undefined,
+        fakeTimer,
+        join(dir, "daemon.lock"),
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        new FakeDaemonProcessFinder([]),
+        processSpawner,
+        cleaner,
+        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] })
+      );
+
+      await manager.start({ port: 1234 });
+
+      expect(children).toHaveLength(2);
+      expect(spawnCalls[0].args).toContain(entryScript);
+      expect(spawnCalls[0].args).toContain("--port");
+      expect(spawnCalls[1].args).not.toContain(entryScript);
+      expect(spawnCalls[1].args).toContain("--port");
+      expect(cleaner.entryScripts).toEqual([entryScript]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("default extraction cleaner removes only the temporary extraction root", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-default-extraction-cleaner-test-"));
+    const dataDir = join(dir, "data");
+    process.env.AUTOMOBILE_DATA_DIR = dataDir;
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const extractionRoot = join(dir, "bunx-extract");
+    const packageDir = join(
+      extractionRoot,
+      "node_modules",
+      "@kaeawc",
+      "auto-mobile",
+      "dist",
+      "src"
+    );
+    mkdirSync(packageDir, { recursive: true });
+    const entryScript = join(packageDir, "index.js");
+    writeFileSync(entryScript, "");
+    const children: FakeDaemonChildProcess[] = [];
+    const spawnCalls: Array<{ command: string; args: string[] }> = [];
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (command: string, args: string[]) => {
+        const child = new FakeDaemonChildProcess();
+        children.push(child);
+        spawnCalls.push({ command, args: [...args] });
+        return child as ChildProcess;
+      },
+    };
+    let waitCalls = 0;
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+
+      override async waitForReady(_timeout: number, signal?: AbortSignal): Promise<boolean> {
+        waitCalls++;
+        await Promise.resolve();
+        if (waitCalls === 1 && !signal?.aborted) {
+          return neverReadyAfterExit(children[0], 75);
+        }
+        return true;
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        undefined,
+        undefined,
+        fakeTimer,
+        join(dataDir, "daemon.lock"),
+        join(dataDir, "daemon.pid"),
+        join(dataDir, "daemon.sock"),
+        new FakeDaemonProcessFinder([]),
+        processSpawner,
+        undefined,
+        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] })
+      );
+
+      await manager.start();
+
+      expect(children).toHaveLength(2);
+      expect(spawnCalls[0].args).toContain(entryScript);
+      expect(spawnCalls[1].args).not.toContain(entryScript);
+      expect(existsSync(extractionRoot)).toBe(false);
+      expect(existsSync(dataDir)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("gives up with remediation when the retry exits with exit code 75 again", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-incomplete-extraction-give-up-test-"));
+    process.env.AUTOMOBILE_DATA_DIR = dir;
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const entryScript = join(
+      dir,
+      "bunx-extract",
+      "node_modules",
+      "@kaeawc",
+      "auto-mobile",
+      "dist",
+      "src",
+      "index.js"
+    );
+    const children: FakeDaemonChildProcess[] = [];
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        const child = new FakeDaemonChildProcess();
+        children.push(child);
+        return child as ChildProcess;
+      },
+    };
+    const cleaner = new FakeExtractionCleaner();
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+
+      override async waitForReady(_timeout: number, signal?: AbortSignal): Promise<boolean> {
+        await Promise.resolve();
+        if (!signal?.aborted) {
+          return neverReadyAfterExit(children[children.length - 1], 75);
+        }
+        return false;
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        undefined,
+        undefined,
+        fakeTimer,
+        join(dir, "daemon.lock"),
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        new FakeDaemonProcessFinder([]),
+        processSpawner,
+        cleaner,
+        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] })
+      );
+
+      await expect(manager.start()).rejects.toThrow("remove the incomplete extraction directory and re-run");
+      expect(children).toHaveLength(2);
+      expect(cleaner.entryScripts).toEqual([entryScript]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not remove or retry for non-incomplete-extraction daemon exits", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-generic-exit-test-"));
+    process.env.AUTOMOBILE_DATA_DIR = dir;
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const child = new FakeDaemonChildProcess();
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => child as ChildProcess,
+    };
+    const cleaner = new FakeExtractionCleaner();
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+
+      override async waitForReady(_timeout: number, signal?: AbortSignal): Promise<boolean> {
+        await Promise.resolve();
+        if (!signal?.aborted) {
+          return neverReadyAfterExit(child, 1);
+        }
+        return false;
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        undefined,
+        undefined,
+        fakeTimer,
+        join(dir, "daemon.lock"),
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        new FakeDaemonProcessFinder([]),
+        processSpawner,
+        cleaner,
+        () => ({ command: process.execPath, args: [join(dir, "entry.js"), "--daemon-mode"] })
+      );
+
+      await expect(manager.start()).rejects.toThrow("Daemon subprocess exited before becoming ready (exit code 1)");
+      expect(cleaner.entryScripts).toEqual([]);
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });

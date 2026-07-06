@@ -62,6 +62,14 @@ public class GesturePerformer: GesturePerforming {
         }
     }
 
+    /// Every AutoMobile permission name that maps to a resettable iOS
+    /// `XCUIProtectedResource` (Xcode 26.3 header). The `all` keyword expands to
+    /// this list; the TS host list in `IosPhysicalPermissions.ts`
+    /// (`IOS_PHYSICAL_RESET_ALL_PERMISSIONS`) must stay in lock-step so the public
+    /// tool path and the direct runner path reset the identical set.
+    /// `local-network` is iOS 15.4+ only; below that OS version
+    /// `protectedResource(for:)` returns nil so it fails honestly per-permission
+    /// rather than being silently skipped.
     static let allResettablePrivacyResourceNames = [
         "camera",
         "photos",
@@ -71,6 +79,13 @@ public class GesturePerformer: GesturePerforming {
         "calendar",
         "reminders",
         "media-library",
+        "homekit",
+        "focus",
+        "local-network",
+        "bluetooth",
+        "keyboard-network",
+        "health",
+        "user-tracking",
     ]
 
     private static let resettablePrivacyResourceAliases = Set(
@@ -1371,6 +1386,21 @@ public class GesturePerformer: GesturePerforming {
             case "calendar": return .calendar
             case "reminders": return .reminders
             case "media-library": return .mediaLibrary
+            case "homekit": return .homeKit
+            case "focus": return .focus
+            case "bluetooth": return .bluetooth
+            case "keyboard-network": return .keyboardNetwork
+            case "health": return .health
+            case "user-tracking": return .userTracking
+            case "local-network":
+                // `XCUIProtectedResourceLocalNetwork` is iOS 15.4+ only. Below that
+                // OS version there is no resettable equivalent, so return nil and let
+                // the caller surface an honest per-permission failure instead of
+                // silently skipping it.
+                if #available(iOS 15.4, *) {
+                    return .localNetwork
+                }
+                return nil
             default: return nil
             }
         }

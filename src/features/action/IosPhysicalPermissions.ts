@@ -8,6 +8,14 @@ import {
   type IosSimulatorPermissionMutationResult,
 } from "./IosSimulatorPermissions";
 
+// Every AutoMobile permission name that maps to a resettable iOS
+// `XCUIProtectedResource` (Xcode 26.3 header). Keep in lock-step with the
+// authoritative Swift list in
+// `ios/control-proxy/Sources/CtrlProxy/GesturePerformer.swift`
+// (`allResettablePrivacyResourceNames`); the direct Swift runner `all`
+// expansion must reset the same set. `local-network` maps to
+// `XCUIProtectedResourceLocalNetwork` which is iOS 15.4+, so the runner
+// reports it as an honest per-permission failure on older OS versions.
 const IOS_PHYSICAL_RESET_ALL_PERMISSIONS = [
   "camera",
   "photos",
@@ -17,6 +25,13 @@ const IOS_PHYSICAL_RESET_ALL_PERMISSIONS = [
   "calendar",
   "reminders",
   "media-library",
+  "homekit",
+  "focus",
+  "local-network",
+  "bluetooth",
+  "keyboard-network",
+  "health",
+  "user-tracking",
 ];
 
 const IOS_PHYSICAL_RESET_CANONICAL_PERMISSION = new Map<string, string>([

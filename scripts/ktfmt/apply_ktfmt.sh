@@ -8,6 +8,10 @@ ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-true}
 # shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
+# Shared git file-selection + install-when-missing helpers (issue #2823).
+# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -26,29 +30,8 @@ echo "PROJECT_ROOT: $PROJECT_ROOT"
 # Check for required commands and install missing commands if allowed
 echo -e "${YELLOW}Checking for required commands...${NC}"
 
-# Check if ktfmt is installed
-if ! command_exists ktfmt; then
-    echo -e "${RED}ktfmt is not installed${NC}"
-    if [[ "${INSTALL_KTFMT_WHEN_MISSING}" == "true" ]]; then
-        echo -e "${YELLOW}Installing ktfmt...${NC}"
-        if [[ -f "$PROJECT_ROOT/scripts/ktfmt/install_ktfmt.sh" ]]; then
-            if ! bash "$PROJECT_ROOT/scripts/ktfmt/install_ktfmt.sh"; then
-                echo -e "${RED}Failed to install ktfmt${NC}"
-                exit 1
-            fi
-        else
-            echo -e "${RED}ktfmt installation script not found${NC}"
-            exit 1
-        fi
-    else
-        echo -e "${RED}ktfmt is required. Set INSTALL_KTFMT_WHEN_MISSING=true to auto-install or install manually${NC}"
-        exit 1
-    fi
-fi
-
-# Verify ktfmt is available
-if ! command_exists ktfmt; then
-    echo -e "${RED}ktfmt is still not available after installation attempt${NC}"
+# Check if ktfmt is installed (install-when-missing gate + re-verify).
+if ! ensure_tool ktfmt "$PROJECT_ROOT/scripts/ktfmt/install_ktfmt.sh" "${INSTALL_KTFMT_WHEN_MISSING}"; then
     exit 1
 fi
 
@@ -91,24 +74,8 @@ find_all_kotlin_files() {
         | sort | uniq
 }
 
-# Function to get touched/staged files
-get_touched_files() {
-    {
-        # Get staged files
-        git diff --cached --name-only --diff-filter=ACMR | while read -r file; do
-            if [[ "$file" =~ ^.*\.(kt|kts)$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-                echo "$PROJECT_ROOT/$file"
-            fi
-        done
-
-        # Get modified but not staged files
-        git diff --name-only --diff-filter=ACMR | while read -r file; do
-            if [[ "$file" =~ ^.*\.(kt|kts)$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-                echo "$PROJECT_ROOT/$file"
-            fi
-        done
-    } | sort | uniq
-}
+# Per-tool file regex for the shared collectors (issue #2823).
+KOTLIN_FILE_REGEX='^.*\.(kt|kts)$'
 
 # Determine which files to process
 declare -a files_to_process
@@ -118,7 +85,7 @@ if [[ "${ONLY_TOUCHED_FILES}" == "true" ]]; then
     echo -e "${YELLOW}Processing only touched/staged files${NC}"
 
     # Get list of changed files
-    touched_files=$(get_touched_files)
+    touched_files=$(collect_touched_files "$PROJECT_ROOT" "$KOTLIN_FILE_REGEX")
     while IFS= read -r file; do
         [[ -n "$file" ]] && files_to_process+=("$file")
     done <<< "$touched_files"

@@ -2,6 +2,13 @@
 
 ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-true}
 
+# Shared git file-selection helpers (issue #2823).
+# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
+
+# Per-tool file regex for the shared collectors (issue #2823).
+XML_FILE_REGEX='^.*\.xml$'
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -79,25 +86,6 @@ find_all_xml_files() {
       xargs -0 -I {} echo "$PROJECT_ROOT/{}"
 }
 
-# Function to get touched/staged files
-get_touched_files() {
-    {
-        # Get staged files
-        git diff --cached --name-only --diff-filter=ACMR | while read -r file; do
-            if [[ "$file" =~ ^.*\.xml$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-                echo "$PROJECT_ROOT/$file"
-            fi
-        done
-
-        # Get modified but not staged files
-        git diff --name-only --diff-filter=ACMR | while read -r file; do
-            if [[ "$file" =~ ^.*\.xml$ ]] && [[ -f "$PROJECT_ROOT/$file" ]]; then
-                echo "$PROJECT_ROOT/$file"
-            fi
-        done
-    } | sort | uniq
-}
-
 # Determine which files to process
 declare -a files_to_process
 
@@ -105,7 +93,7 @@ if [[ "${ONLY_TOUCHED_FILES}" == "true" ]]; then
     echo -e "${YELLOW}Processing only touched/staged files${NC}"
 
     # Get list of changed files
-    touched_files=$(get_touched_files)
+    touched_files=$(collect_touched_files "$PROJECT_ROOT" "$XML_FILE_REGEX")
     while IFS= read -r file; do
         [[ -n "$file" ]] && files_to_process+=("$file")
     done <<< "$touched_files"

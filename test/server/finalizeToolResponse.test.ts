@@ -681,6 +681,25 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
     });
 
+    test("falls back to full when medium-confidence iOS screen identity changes under the same app", () => {
+      const { store } = makeStore();
+      const baseline = iosScreenObserve("bundle=com.apple.reminders|tab=Inbox", "medium");
+      finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      const next = iosScreenObserve("bundle=com.apple.reminders|tab=Search", "medium");
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expect(obsSc.screenIdentity.key).toBe("bundle=com.apple.reminders|tab=Search");
+    });
+
     test("falls back to full and updates baseline when iOS screen identity is low confidence", () => {
       const { store, map } = makeStore();
       const baseline = iosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");

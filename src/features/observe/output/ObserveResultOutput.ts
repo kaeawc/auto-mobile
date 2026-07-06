@@ -740,10 +740,10 @@ function groupByKey(nodes: FlatObserveNode[]): Map<string, FlatObserveNode[]> {
 /**
  * Whether two observations describe the same screen. Cross-screen diffs are
  * meaningless (issue #2761), so the finalize hook falls back to a full emit when
- * this is false. When both sides carry high-confidence `screenIdentity`, require
- * identity equality. A low-confidence identity is deliberately conservative and
- * forces a full emit. Missing or non-high identities preserve the historical
- * app/activity/package fallback.
+ * this is false. When both sides carry non-low-confidence `screenIdentity`,
+ * require identity equality. A low-confidence identity is deliberately
+ * conservative and forces a full emit. Missing identities preserve the
+ * historical app/activity/package fallback.
  */
 export function isSameObservationScreen(baseline: ObserveResult, next: ObserveResult): boolean {
   const baselineIdentity = baseline.screenIdentity;
@@ -753,10 +753,10 @@ export function isSameObservationScreen(baseline: ObserveResult, next: ObserveRe
     return false;
   }
 
-  if (baselineIdentity?.confidence === "high" && nextIdentity?.confidence === "high") {
-    return baseline.screenIdentity?.platform === next.screenIdentity?.platform
-      && baseline.screenIdentity?.source === next.screenIdentity?.source
-      && baseline.screenIdentity?.key === next.screenIdentity?.key;
+  if (baselineIdentity && nextIdentity) {
+    return baselineIdentity.platform === nextIdentity.platform
+      && baselineIdentity.source === nextIdentity.source
+      && baselineIdentity.key === nextIdentity.key;
   }
   if ((baseline.activeWindow?.appId ?? "") !== (next.activeWindow?.appId ?? "")) {
     return false;

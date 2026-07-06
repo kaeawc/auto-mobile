@@ -1050,6 +1050,20 @@ describe("isSameObservationScreen", () => {
     expect(isSameObservationScreen(a, b)).toBe(false);
   });
 
+  test("different medium-confidence iOS screen identity → false", () => {
+    const a = obs({ "resource-id": "a" }, {
+      activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
+      viewHierarchy: { packageName: "com.apple.reminders", hierarchy: { node: { "resource-id": "a" } as any } },
+      screenIdentity: iosIdentity("bundle=com.apple.reminders|tab=Inbox", "medium"),
+    });
+    const b = obs({ "resource-id": "b" }, {
+      activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 2 },
+      viewHierarchy: { packageName: "com.apple.reminders", hierarchy: { node: { "resource-id": "b" } as any } },
+      screenIdentity: iosIdentity("bundle=com.apple.reminders|tab=Search", "medium"),
+    });
+    expect(isSameObservationScreen(a, b)).toBe(false);
+  });
+
   test("one missing identity preserves app/activity/package fallback", () => {
     const a = obs({ "resource-id": "a" }, {
       activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },

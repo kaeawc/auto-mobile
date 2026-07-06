@@ -7170,6 +7170,223 @@
           },
           "additionalProperties": {}
         },
+        "observationDiff": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "diff",
+                "full"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "diff_emitted",
+                "missing_baseline",
+                "screen_changed",
+                "missing_session",
+                "unrenderable_hierarchy",
+                "disabled",
+                "stripped_by_actions_no_observe"
+              ]
+            },
+            "fromScreen": {
+              "type": "object",
+              "properties": {
+                "activeWindow": {
+                  "type": "object",
+                  "properties": {
+                    "appId": {
+                      "type": "string"
+                    },
+                    "activityName": {
+                      "type": "string"
+                    },
+                    "layoutSeqSum": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "hierarchyPackageName": {
+                  "type": "string"
+                },
+                "screenIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "platform": {
+                      "type": "string",
+                      "enum": [
+                        "ios",
+                        "android"
+                      ]
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "heuristic",
+                        "sdk"
+                      ]
+                    },
+                    "confidence": {
+                      "type": "string",
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low"
+                      ]
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "components": {
+                      "type": "object",
+                      "properties": {
+                        "bundleId": {
+                          "type": "string"
+                        },
+                        "navigationTitle": {
+                          "type": "string"
+                        },
+                        "selectedTab": {
+                          "type": "string"
+                        },
+                        "modalClass": {
+                          "type": "string"
+                        },
+                        "modalTitle": {
+                          "type": "string"
+                        },
+                        "focusedElementId": {
+                          "type": "string"
+                        },
+                        "keyboardVisible": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "platform",
+                    "source",
+                    "confidence",
+                    "key",
+                    "components"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": {}
+            },
+            "toScreen": {
+              "type": "object",
+              "properties": {
+                "activeWindow": {
+                  "type": "object",
+                  "properties": {
+                    "appId": {
+                      "type": "string"
+                    },
+                    "activityName": {
+                      "type": "string"
+                    },
+                    "layoutSeqSum": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "hierarchyPackageName": {
+                  "type": "string"
+                },
+                "screenIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "platform": {
+                      "type": "string",
+                      "enum": [
+                        "ios",
+                        "android"
+                      ]
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "heuristic",
+                        "sdk"
+                      ]
+                    },
+                    "confidence": {
+                      "type": "string",
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low"
+                      ]
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "components": {
+                      "type": "object",
+                      "properties": {
+                        "bundleId": {
+                          "type": "string"
+                        },
+                        "navigationTitle": {
+                          "type": "string"
+                        },
+                        "selectedTab": {
+                          "type": "string"
+                        },
+                        "modalClass": {
+                          "type": "string"
+                        },
+                        "modalTitle": {
+                          "type": "string"
+                        },
+                        "focusedElementId": {
+                          "type": "string"
+                        },
+                        "keyboardVisible": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "platform",
+                    "source",
+                    "confidence",
+                    "key",
+                    "components"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "mode",
+            "reason"
+          ],
+          "additionalProperties": {}
+        },
         "selectedElement": {
           "type": "object",
           "properties": {

@@ -124,6 +124,27 @@ export const observationSummarySchema = z.object({
   screenIdentity: screenIdentitySchema.optional()
 }).passthrough();
 
+const observationDiffScreenIdentitySchema = z.object({
+  activeWindow: activeWindowSchema.optional(),
+  hierarchyPackageName: z.string().optional(),
+  screenIdentity: screenIdentitySchema.optional()
+}).passthrough();
+
+const observationDiffMetadataSchema = z.object({
+  mode: z.enum(["diff", "full"]),
+  reason: z.enum([
+    "diff_emitted",
+    "missing_baseline",
+    "screen_changed",
+    "missing_session",
+    "unrenderable_hierarchy",
+    "disabled",
+    "stripped_by_actions_no_observe"
+  ]),
+  fromScreen: observationDiffScreenIdentitySchema.optional(),
+  toScreen: observationDiffScreenIdentitySchema.optional()
+}).passthrough();
+
 const tapOnSearchUntilSchema = z.object({
   durationMs: z.number().int(),
   requestCount: z.number().int(),
@@ -136,6 +157,7 @@ export const tapOnResultSchema = z.object({
   message: z.string().optional(),
   element: elementSchema.optional(),
   observation: observationSummarySchema.optional(),
+  observationDiff: observationDiffMetadataSchema.optional(),
   selectedElement: selectedElementSchema.optional(),
   selectedElements: z.array(selectedElementSchema).optional(),
   error: z.string().optional(),

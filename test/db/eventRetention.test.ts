@@ -169,7 +169,7 @@ describe("event repository retention (#2799)", () => {
         }
       });
 
-      test("retention trims to the cap and prunes the oldest rows (output-preserving)", async () => {
+      test("retention trims to exactly the cap and prunes the oldest rows (#3137)", async () => {
         const { db } = await createInstrumentedTestDatabase();
         try {
           const cap = 5;
@@ -186,8 +186,44 @@ describe("event repository retention (#2799)", () => {
             .execute();
           const timestamps = rows.map((r: any) => Number(r.timestamp));
 
-          // Existing semantics keep cap+1 rows (offset(cap) cutoff, strict-less-than delete).
-          expect(timestamps).toEqual([7, 8, 9, 10, 11, 12]);
+          // Canonical idiom (#3137): trims to *exactly* cap rows — the cap newest.
+          // (The prior offset(cap) + strict-less-than form kept cap+1: [7..12].)
+          expect(timestamps).toEqual([8, 9, 10, 11, 12]);
+        } finally {
+          await db.destroy();
+        }
+      });
+
+      test("same-timestamp rows at the cutoff are broken by id (#3137)", async () => {
+        const { db } = await createInstrumentedTestDatabase();
+        try {
+          const cap = 3;
+          // Five rows all sharing timestamp 100. The prior `timestamp < cutoff`
+          // form could never delete any of them (all equal to the cutoff),
+          // retaining all five. The id-tiebreak form trims to exactly cap by
+          // deleting the lowest-id rows at the tied timestamp.
+          for (let i = 0; i < 5; i++) {
+            await repo.record(repo.make(100), db);
+          }
+          // Not every repo's record() returns the id, so read them from the DB.
+          const beforeRows = await db
+            .selectFrom(repo.table as any)
+            .select("id")
+            .orderBy("id", "asc")
+            .execute();
+          const ids = beforeRows.map((r: any) => Number(r.id));
+
+          await cleanupRepo(repo, db, createRetentionState(), cap, 1);
+
+          const rows = await db
+            .selectFrom(repo.table as any)
+            .select("id")
+            .orderBy("id", "asc")
+            .execute();
+          const remaining = rows.map((r: any) => Number(r.id));
+
+          // Exactly the cap highest ids survive; the two oldest (lowest id) are pruned.
+          expect(remaining).toEqual(ids.slice(-cap));
         } finally {
           await db.destroy();
         }

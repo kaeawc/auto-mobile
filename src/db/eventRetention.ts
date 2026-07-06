@@ -42,18 +42,33 @@ export async function pruneEventTableByCount(
       .executeTakeFirstOrThrow();
 
     if (Number(count.count) > maxRows) {
-      const cutoff = await resolvedDb
+      // Canonical retention idiom (#3137): pick the Nth-newest row as the
+      // threshold (offset maxRows - 1) and delete everything strictly older,
+      // breaking cutoff-timestamp ties on the monotonic `id`. This trims to
+      // *exactly* maxRows rows and deterministically prunes same-timestamp rows,
+      // unlike the prior `offset(maxRows)` + `timestamp < cutoff` form, which
+      // retained maxRows + 1 rows and could never remove rows equal to the
+      // cutoff timestamp (a burst of same-millisecond events at the cutoff could
+      // retain more than maxRows).
+      const threshold = await resolvedDb
         .selectFrom(table)
-        .select("timestamp")
+        .select(["id", "timestamp"])
         .orderBy("timestamp", "desc")
-        .offset(maxRows)
+        .orderBy("id", "desc")
         .limit(1)
+        .offset(maxRows - 1)
         .executeTakeFirst();
 
-      if (cutoff) {
+      if (threshold) {
         await resolvedDb
           .deleteFrom(table)
-          .where("timestamp", "<", cutoff.timestamp)
+          .where(eb => eb.or([
+            eb("timestamp", "<", threshold.timestamp),
+            eb.and([
+              eb("timestamp", "=", threshold.timestamp),
+              eb("id", "<", threshold.id),
+            ]),
+          ]))
           .execute();
       }
     }

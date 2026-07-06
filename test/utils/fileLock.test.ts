@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { basename, join } from "path";
-import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../../src/utils/fileLock";
+import {
+  formatLockContent,
+  parseLockContent,
+  releaseExclusiveLock,
+  tryAcquireExclusiveLock,
+} from "../../src/utils/fileLock";
 
 describe("fileLock primitive", () => {
   let dir: string;
@@ -163,6 +168,54 @@ describe("fileLock primitive", () => {
       writeFileSync(lockPath, "100\ntok-A");
       releaseExclusiveLock(lockPath, 100);
       expect(existsSync(lockPath)).toBe(false);
+    });
+  });
+
+  describe("incarnation-aware release (#3006 follow-up 1)", () => {
+    test("releases a matching pid+token lock when the token is supplied", () => {
+      writeFileSync(lockPath, "100\ntok-A");
+      releaseExclusiveLock(lockPath, 100, "tok-A");
+      expect(existsSync(lockPath)).toBe(false);
+    });
+
+    test("does NOT delete a same-PID lock bearing a DIFFERENT token (recycled-PID incarnation)", () => {
+      // Another incarnation recycled our PID and wrote its own token; a PID-only
+      // release would wrongly delete its live lock. The token guard leaves it.
+      writeFileSync(lockPath, "100\ntok-OTHER");
+      releaseExclusiveLock(lockPath, 100, "tok-A");
+      expect(existsSync(lockPath)).toBe(true);
+      expect(readFileSync(lockPath, "utf-8")).toBe("100\ntok-OTHER");
+    });
+
+    test("releases a tokenless legacy lock on a PID match even when a token is supplied", () => {
+      // A pre-token incarnation wrote only the PID; treat it as ours (PID match)
+      // so a token-aware release stays backward compatible.
+      writeFileSync(lockPath, "100");
+      releaseExclusiveLock(lockPath, 100, "tok-A");
+      expect(existsSync(lockPath)).toBe(false);
+    });
+
+    test("PID-only release (no token) deletes any same-PID lock (daemon behavior unchanged)", () => {
+      writeFileSync(lockPath, "100\ntok-A");
+      releaseExclusiveLock(lockPath, 100);
+      expect(existsSync(lockPath)).toBe(false);
+    });
+  });
+
+  describe("lock content format helpers (#3006 follow-up 2)", () => {
+    test("formatLockContent keeps the PID a bare integer on line 1", () => {
+      expect(formatLockContent(100)).toBe("100");
+      expect(formatLockContent(100, "tok-A")).toBe("100\ntok-A");
+      expect(Number.parseInt(formatLockContent(100, "tok-A"), 10)).toBe(100);
+    });
+
+    test("parseLockContent round-trips formatLockContent", () => {
+      expect(parseLockContent(formatLockContent(100))).toEqual({ pid: 100, token: undefined });
+      expect(parseLockContent(formatLockContent(100, "tok-A"))).toEqual({ pid: 100, token: "tok-A" });
+    });
+
+    test("parseLockContent reports NaN for an unreadable PID line", () => {
+      expect(parseLockContent("not-a-pid").pid).toBeNaN();
     });
   });
 

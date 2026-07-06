@@ -137,7 +137,10 @@ export class FileMigrationLock implements MigrationLock {
   }
 
   async release(): Promise<void> {
-    releaseExclusiveLock(this.lockFilePath, this.pid);
+    // Pass the owner token so release is incarnation-aware and symmetric with
+    // acquire: a same-PID lock bearing a different token belongs to another
+    // incarnation that recycled our PID and must not be deleted (#3006).
+    releaseExclusiveLock(this.lockFilePath, this.pid, this.ownerToken);
   }
 
   private tryAcquire(): boolean {

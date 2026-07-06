@@ -205,6 +205,36 @@ describe("FileMigrationLock", () => {
     expect(readFileSync(lockPath, "utf-8").trim()).toBe("9999");
   });
 
+  test("release is incarnation-aware: leaves a same-PID lock from another token (#3006)", async () => {
+    // A recycled-PID incarnation holds the lock with a DIFFERENT token. A PID-only
+    // release would wrongly delete it; the token guard leaves it intact.
+    writeFileSync(lockPath, "4242\ntok-OTHER");
+    const lock = new FileMigrationLock(lockPath, {
+      timer: new FakeTimer(),
+      pid: 4242,
+      ownerToken: "tok-MINE",
+    });
+
+    await lock.release();
+
+    expect(existsSync(lockPath)).toBe(true);
+    expect(readFileSync(lockPath, "utf-8")).toBe("4242\ntok-OTHER");
+  });
+
+  test("release removes our own pid+token lock (#3006)", async () => {
+    const lock = new FileMigrationLock(lockPath, {
+      timer: new FakeTimer(),
+      pid: 4242,
+      isProcessRunning: () => true,
+      ownerToken: "tok-MINE",
+    });
+    await lock.acquire();
+    expect(existsSync(lockPath)).toBe(true);
+
+    await lock.release();
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
   test("release is inert when the lock was never acquired", async () => {
     const lock = new FileMigrationLock(lockPath, { timer: new FakeTimer(), pid: 4242 });
     await lock.release();

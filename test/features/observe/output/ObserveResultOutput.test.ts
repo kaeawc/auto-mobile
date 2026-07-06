@@ -7,6 +7,7 @@ import {
 } from "../../../../src/features/observe/output/ObserveResultOutput";
 import {
   loadAndroidHomeObserve,
+  loadAndroidRawTrimCandidatesObserve,
   measureValue,
 } from "../../../fixtures/observe/observeFixture";
 
@@ -52,6 +53,17 @@ function allHierarchyNodes(obs: ObserveResult): ViewHierarchyNode[] {
 const DROP_NONE = { dropElements: false } as const;
 const DROP_ELEMENTS = { dropElements: true } as const;
 const COMPACT = { dropElements: false, compact: true } as const;
+const DEFAULT_FALSE_BOOLEAN_KEYS = [
+  "clickable",
+  "long-clickable",
+  "focusable",
+  "focused",
+  "scrollable",
+  "checkable",
+  "checked",
+  "selected",
+  "password",
+] as const;
 
 /** The documented positional order of a compacted bounds tuple. */
 type BoundsTuple = [number, number, number, number];
@@ -398,38 +410,71 @@ describe("sanitizeObserveResult", () => {
       expect(measureValue(perfStripped).bytes).toBeLessThan(measureValue(trimOff).bytes);
     });
 
-    test("measurably shrinks a hierarchy carrying false booleans, empty strings, and enabled=true", () => {
-      // The committed fixture is already boolean/empty-string-clean (the extractor
-      // only emits meaningful attrs), so this synthetic tree exercises the
-      // boolean/empty-string/enabled drop paths against a real byte measurement.
-      const node = (id: number): Record<string, unknown> => ({
-        "view-id": `v-${id}`,
-        "resource-id": `r-${id}`,
-        "className": "android.widget.TextView",
-        "clickable": "false",
-        "long-clickable": "false",
-        "scrollable": "false",
-        "checkable": "false",
-        "checked": "false",
-        "selected": "false",
-        "focused": "false",
-        "enabled": "true",
-        "text": "",
-        "content-desc": `desc ${id}`,
-        "node": [],
+    test("measurably shrinks false booleans over a real raw hierarchy capture", () => {
+      const obs = loadAndroidRawTrimCandidatesObserve();
+      for (const node of allHierarchyNodes(obs)) {
+        const attrs = node as unknown as Record<string, unknown>;
+        delete attrs.enabled;
+        for (const [key, value] of Object.entries(attrs)) {
+          if (value === "") {
+            delete attrs[key];
+          }
+        }
+      }
+      const falseBooleanCandidates = allHierarchyNodes(obs).filter(node => {
+        const attrs = node as unknown as Record<string, unknown>;
+        return DEFAULT_FALSE_BOOLEAN_KEYS.some(key => attrs[key] === "false");
       });
-      const obs: ObserveResult = {
-        updatedAt: 0,
-        screenSize: { width: 1, height: 1 },
-        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: {
-          hierarchy: { node: Array.from({ length: 20 }, (_, i) => node(i)) as any },
-        },
-      };
+      expect(falseBooleanCandidates.length).toBeGreaterThan(0);
 
       const trimmed = sanitizeObserveResult(obs, { dropElements: false, trimNodes: true });
       const untrimmed = sanitizeObserveResult(obs, { dropElements: false, trimNodes: false });
       expect(measureValue(trimmed).bytes).toBeLessThan(measureValue(untrimmed).bytes);
+      expect(measureValue(trimmed).tokens).toBeLessThan(measureValue(untrimmed).tokens);
+    });
+
+    test("measurably shrinks empty-string fields over a real raw hierarchy capture", () => {
+      const obs = loadAndroidRawTrimCandidatesObserve();
+      for (const node of allHierarchyNodes(obs)) {
+        const attrs = node as unknown as Record<string, unknown>;
+        delete attrs.enabled;
+        for (const key of DEFAULT_FALSE_BOOLEAN_KEYS) {
+          delete attrs[key];
+        }
+      }
+      const emptyStringCandidates = allHierarchyNodes(obs).filter(node =>
+        Object.values(node as unknown as Record<string, unknown>).some(value => value === "")
+      );
+      expect(emptyStringCandidates.length).toBeGreaterThan(0);
+
+      const trimmed = sanitizeObserveResult(obs, { dropElements: false, trimNodes: true });
+      const untrimmed = sanitizeObserveResult(obs, { dropElements: false, trimNodes: false });
+      expect(measureValue(trimmed).bytes).toBeLessThan(measureValue(untrimmed).bytes);
+      expect(measureValue(trimmed).tokens).toBeLessThan(measureValue(untrimmed).tokens);
+    });
+
+    test("measurably shrinks enabled=true over a real raw hierarchy capture", () => {
+      const obs = loadAndroidRawTrimCandidatesObserve();
+      for (const node of allHierarchyNodes(obs)) {
+        const attrs = node as unknown as Record<string, unknown>;
+        for (const key of DEFAULT_FALSE_BOOLEAN_KEYS) {
+          delete attrs[key];
+        }
+        for (const [key, value] of Object.entries(attrs)) {
+          if (value === "") {
+            delete attrs[key];
+          }
+        }
+      }
+      const enabledTrueCandidates = allHierarchyNodes(obs).filter(node =>
+        (node as unknown as Record<string, unknown>).enabled === "true"
+      );
+      expect(enabledTrueCandidates.length).toBeGreaterThan(0);
+
+      const trimmed = sanitizeObserveResult(obs, { dropElements: false, trimNodes: true });
+      const untrimmed = sanitizeObserveResult(obs, { dropElements: false, trimNodes: false });
+      expect(measureValue(trimmed).bytes).toBeLessThan(measureValue(untrimmed).bytes);
+      expect(measureValue(trimmed).tokens).toBeLessThan(measureValue(untrimmed).tokens);
     });
 
     test("does not touch rawViewHierarchy (raw stays raw)", () => {

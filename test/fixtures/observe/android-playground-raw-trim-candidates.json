@@ -1,0 +1,120 @@
+{
+  "updatedAt": 0,
+  "screenSize": {
+    "width": 1080,
+    "height": 2400
+  },
+  "systemInsets": {
+    "top": 63,
+    "bottom": 63,
+    "left": 0,
+    "right": 0
+  },
+  "viewHierarchy": {
+    "hierarchy": {
+      "node": {
+        "text": "",
+        "resource-id": "",
+        "$": {},
+        "className": "android.widget.FrameLayout",
+        "packageName": "dev.jasonpearson.automobile.playground",
+        "content-desc": "",
+        "checkable": "false",
+        "checked": "false",
+        "clickable": "false",
+        "enabled": "true",
+        "focusable": "false",
+        "focused": "false",
+        "scrollable": "false",
+        "long-clickable": "false",
+        "password": "false",
+        "selected": "false",
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "node": [
+          {
+            "text": "",
+            "resource-id": "android:id/content",
+            "$": {},
+            "className": "android.widget.FrameLayout",
+            "packageName": "dev.jasonpearson.automobile.playground",
+            "content-desc": "",
+            "checkable": "false",
+            "checked": "false",
+            "clickable": "false",
+            "enabled": "true",
+            "focusable": "false",
+            "focused": "false",
+            "scrollable": "false",
+            "long-clickable": "false",
+            "password": "false",
+            "selected": "false",
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 1080,
+              "bottom": 2400
+            },
+            "node": [
+              {
+                "text": "",
+                "resource-id": "navigation.HomeDestination",
+                "$": {},
+                "className": "android.view.View",
+                "packageName": "dev.jasonpearson.automobile.playground",
+                "content-desc": "",
+                "checkable": "false",
+                "checked": "false",
+                "clickable": "false",
+                "enabled": "true",
+                "focusable": "false",
+                "focused": "false",
+                "scrollable": "false",
+                "long-clickable": "false",
+                "password": "false",
+                "selected": "false",
+                "bounds": {
+                  "left": 0,
+                  "top": 0,
+                  "right": 1080,
+                  "bottom": 2400
+                },
+                "node": [
+                  {
+                    "text": "Swipe",
+                    "resource-id": "",
+                    "$": {},
+                    "className": "android.widget.TextView",
+                    "packageName": "dev.jasonpearson.automobile.playground",
+                    "content-desc": "",
+                    "checkable": "false",
+                    "checked": "false",
+                    "clickable": "false",
+                    "enabled": "true",
+                    "focusable": "false",
+                    "focused": "false",
+                    "scrollable": "false",
+                    "long-clickable": "false",
+                    "password": "false",
+                    "selected": "false",
+                    "bounds": {
+                      "left": 274,
+                      "top": 330,
+                      "right": 374,
+                      "bottom": 383
+                    },
+                    "node": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

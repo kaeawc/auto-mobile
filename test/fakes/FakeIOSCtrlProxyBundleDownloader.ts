@@ -30,7 +30,9 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
     const xctestrunFile = path.join(extractionRoot, "Build", "Products", "CtrlProxyApp_iphonesimulator.xctestrun");
     await fs.writeFile(xctestrunFile, "fake xctestrun");
     await fs.mkdir(path.join(productsDir, "CtrlProxyApp.app"), { recursive: true });
-    await fs.mkdir(path.join(productsDir, "CtrlProxyUITests-Runner.app"), { recursive: true });
+    const runnerDir = path.join(productsDir, "CtrlProxyUITests-Runner.app");
+    await fs.mkdir(runnerDir, { recursive: true });
+    await fs.writeFile(path.join(runnerDir, "CtrlProxyUITests-Runner"), "fake runner");
     await fs.mkdir(path.join(productsDir, "CtrlProxyTests.xctest"), { recursive: true });
   }
 }

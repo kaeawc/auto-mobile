@@ -5,7 +5,7 @@
 #   1. Version equality — the npm version, every release manifest, the checksum
 #      registry, and the git tag must all name the SAME version. Nothing else
 #      enforces this; bump-versions.sh merely writes them together.
-#   2. iOS runner-binary checksum — IOS_CTRL_PROXY_RUNNER_SHA256 must be a real
+#   2. iOS runner-binary checksum — registry[0].runnerSha256 must be a real
 #      sha256, not the "" default. Empty silently disables runner integrity
 #      verification for the simulator path.
 #
@@ -17,7 +17,7 @@
 #   <version>  release version / git tag. A leading "v" is stripped.
 #   [ipa-path] optional built control-proxy.ipa. When given, the runner binary is
 #              hashed straight out of the IPA and required to match the recorded
-#              IOS_CTRL_PROXY_RUNNER_SHA256 — this *binds* the constant to the
+#              registry[0].runnerSha256 — this *binds* the recorded hash to the
 #              artifact that ships. Without it, only the syntactic (64-hex,
 #              non-empty) floor is checked.
 set -euo pipefail
@@ -98,10 +98,19 @@ registry_version="$(grep -m1 -E '^[[:space:]]+version: "' "$RELEASE_TS" \
   | sed 's/.*version: "\([^"]*\)".*/\1/')"
 check "src/constants/release.ts registry[0].version" "$registry_version"
 
-# Runner-binary checksum must be populated. Empty ("" default) means integrity
-# verification is silently skipped — exactly the gap this gate exists to catch.
-runner_sha="$(grep -E '^export const IOS_CTRL_PROXY_RUNNER_SHA256' "$RELEASE_TS" \
-  | sed 's/.*= "\([^"]*\)".*/\1/')"
+# Runner-binary checksum must be populated on the newest registry entry. Empty
+# means integrity verification is silently skipped — exactly the gap this gate
+# exists to catch.
+runner_sha="$(awk '
+  /^[[:space:]]+version: "/ { in_first = 1 }
+  in_first && /^[[:space:]]+runnerSha256: "/ {
+    sub(/.*runnerSha256: "/, "")
+    sub(/".*/, "")
+    print
+    exit
+  }
+  in_first && /^[[:space:]]+}/ { exit }
+' "$RELEASE_TS")"
 
 sha256_stdin() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -125,16 +134,16 @@ if [ -n "$IPA_PATH" ]; then
     else
       actual_runner_sha="$(unzip -p "$IPA_PATH" "$runner_entry" | sha256_stdin)"
       if [ "$runner_sha" = "$actual_runner_sha" ]; then
-        echo "  OK  IOS_CTRL_PROXY_RUNNER_SHA256 matches the runner inside the IPA"
+        echo "  OK  registry[0].runnerSha256 matches the runner inside the IPA"
       else
-        errors+=("IOS_CTRL_PROXY_RUNNER_SHA256 ('${runner_sha:-empty}') does not match the runner binary shipped in ${IPA_PATH} ('${actual_runner_sha}')")
+        errors+=("registry[0].runnerSha256 ('${runner_sha:-empty}') does not match the runner binary shipped in ${IPA_PATH} ('${actual_runner_sha}')")
       fi
     fi
   fi
 elif [[ "$runner_sha" =~ ^[a-f0-9]{64}$ ]]; then
-  echo "  OK  IOS_CTRL_PROXY_RUNNER_SHA256 populated (syntactic; pass the IPA path to bind it)"
+  echo "  OK  registry[0].runnerSha256 populated (syntactic; pass the IPA path to bind it)"
 else
-  errors+=("IOS_CTRL_PROXY_RUNNER_SHA256 must be a 64-char hex sha256, got '${runner_sha}' (empty disables runner integrity verification)")
+  errors+=("registry[0].runnerSha256 must be a 64-char hex sha256, got '${runner_sha}' (empty disables runner integrity verification)")
 fi
 
 if [ "${#errors[@]}" -gt 0 ]; then

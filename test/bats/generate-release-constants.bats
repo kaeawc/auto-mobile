@@ -24,6 +24,7 @@ teardown() {
     RELEASE_VERSION="99.99.99" \
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -33,9 +34,10 @@ teardown() {
   [[ "$first_version" == *'version: "99.99.99"'* ]]
   grep -q "apkSha256: \"${APK_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
   grep -q "ipaSha256: \"${IPA_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
+  grep -q "runnerSha256: \"${RUNNER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
 }
 
-@test "writes IOS_CTRL_PROXY_RUNNER_SHA256 in release mode" {
+@test "writes runnerSha256 in release mode" {
   run env \
     RELEASE_VERSION="99.99.99" \
     APK_SHA256_CHECKSUM="$APK_SHA" \
@@ -44,19 +46,17 @@ teardown() {
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
-  grep -q "export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \"${RUNNER_SHA}\";" \
-    "${TEST_ROOT}/src/constants/release.ts"
+  grep -q "runnerSha256: \"${RUNNER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
 }
 
-@test "writes IOS_CTRL_PROXY_RUNNER_SHA256 in checksum-only mode" {
+@test "writes registry[0].runnerSha256 in checksum-only mode" {
   run env \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
-  grep -q "export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \"${RUNNER_SHA}\";" \
-    "${TEST_ROOT}/src/constants/release.ts"
+  grep -q "runnerSha256: \"${RUNNER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
 }
 
 @test "refreshes runner sha for an already-registered version (no duplicate entry)" {
@@ -69,7 +69,7 @@ teardown() {
   [ "$status" -eq 0 ]
 
   # Re-running for the SAME version must not duplicate the entry, but must still
-  # populate the runner sha scalar (self-heal at release time).
+  # populate the per-entry runner sha (self-heal at release time).
   run env \
     RELEASE_VERSION="99.99.99" \
     APK_SHA256_CHECKSUM="$APK_SHA" \
@@ -80,8 +80,50 @@ teardown() {
 
   entry_count="$(grep -c 'version: "99.99.99"' "${TEST_ROOT}/src/constants/release.ts")"
   [ "$entry_count" -eq 1 ]
-  grep -q "export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \"${RUNNER_SHA}\";" \
-    "${TEST_ROOT}/src/constants/release.ts"
+  grep -q "runnerSha256: \"${RUNNER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
+}
+
+@test "caps registry without orphan braces when entries include runnerSha256" {
+  python3 - "${TEST_ROOT}/src/constants/release.ts" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+entries = []
+for i in range(100):
+    entries.append(f'''  {{
+    version: "1.0.{i}",
+    apkSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ipaSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    runnerSha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  }},''')
+
+text = path.read_text()
+replacement = "export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [\n" + "\n".join(entries) + "\n];"
+text = re.sub(
+    r'export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry\[\] = \[\n.*?\n\];',
+    replacement,
+    text,
+    count=1,
+    flags=re.S,
+)
+path.write_text(text)
+PY
+
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  version_count="$(grep -c 'version: "' "${TEST_ROOT}/src/constants/release.ts")"
+  open_count="$(grep -c '^  {$' "${TEST_ROOT}/src/constants/release.ts")"
+  close_count="$(grep -c '^  },$' "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$version_count" -eq 100 ]
+  [ "$open_count" -eq "$close_count" ]
 }
 
 @test "rejects a malformed IOS_CTRL_PROXY_RUNNER_SHA256" {

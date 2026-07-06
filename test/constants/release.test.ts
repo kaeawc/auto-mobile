@@ -7,7 +7,7 @@ import {
   DAEMON_PACKAGE_NAME,
   DEFAULT_ASSET_BASE_URL,
   IOS_CTRL_PROXY_IPA_URL,
-  IOS_CTRL_PROXY_RUNNER_SHA256,
+  IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM,
   IOS_CTRL_PROXY_SHA256_CHECKSUM,
   RELEASE_CHECKSUM_REGISTRY,
   isExplicitPin,
@@ -22,6 +22,7 @@ import {
   resolveIpaUrl,
   resolveLatestVersion,
   resolvePinnedVersion,
+  resolveRunnerChecksum,
   type ReleaseChecksumEntry,
 } from "../../src/constants/release";
 
@@ -70,9 +71,9 @@ describe("resolveChecksum", function() {
 
   test("multi-entry registry resolves each version independently", function() {
     const registry: ReleaseChecksumEntry[] = [
-      { version: "0.0.20", apkSha256: "apk20", ipaSha256: "ipa20" },
-      { version: "0.0.19", apkSha256: "apk19", ipaSha256: "ipa19" },
-      { version: "0.0.18", apkSha256: "apk18", ipaSha256: "ipa18" },
+      { version: "0.0.20", apkSha256: "apk20", ipaSha256: "ipa20", runnerSha256: "runner20" },
+      { version: "0.0.19", apkSha256: "apk19", ipaSha256: "ipa19", runnerSha256: "runner19" },
+      { version: "0.0.18", apkSha256: "apk18", ipaSha256: "ipa18", runnerSha256: "runner18" },
     ];
     expect(resolveChecksum("latest", "android", registry)).toBe("apk20");
     expect(resolveChecksum("0.0.19", "android", registry)).toBe("apk19");
@@ -111,6 +112,10 @@ describe("module-level URL and checksum exports", function() {
   test("APK and IPA checksums match the newest registered entry", function() {
     expect(APK_SHA256_CHECKSUM).toBe(newest.apkSha256);
     expect(IOS_CTRL_PROXY_SHA256_CHECKSUM).toBe(newest.ipaSha256);
+  });
+
+  test("iOS runner checksum matches the newest registered entry", function() {
+    expect(IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM).toBe(newest.runnerSha256);
   });
 });
 
@@ -210,6 +215,36 @@ describe("resolveApkChecksum / resolveIpaChecksum (EC1, EC4)", function() {
   });
 });
 
+describe("resolveRunnerChecksum", function() {
+  test("unset env resolves to the latest entry runner checksum", function() {
+    const newest = RELEASE_CHECKSUM_REGISTRY[0];
+    expect(resolveRunnerChecksum({})).toBe(newest.runnerSha256);
+  });
+
+  test("AUTOMOBILE_VERSION selects that version's runner checksum", function() {
+    const registry: ReleaseChecksumEntry[] = [
+      {
+        version: "0.0.20",
+        apkSha256: "apk20",
+        ipaSha256: "ipa20",
+        runnerSha256: "runner20",
+      },
+      {
+        version: "0.0.18",
+        apkSha256: "apk18",
+        ipaSha256: "ipa18",
+        runnerSha256: "runner18",
+      },
+    ];
+
+    expect(resolveRunnerChecksum({ AUTOMOBILE_VERSION: "0.0.18" }, registry)).toBe("runner18");
+  });
+
+  test("unknown pinned version yields an empty checksum", function() {
+    expect(resolveRunnerChecksum({ AUTOMOBILE_VERSION: "99.99.99" })).toBe("");
+  });
+});
+
 describe("resolveDaemonInstallSpecifier (EC5)", function() {
   const newest = RELEASE_CHECKSUM_REGISTRY[0];
 
@@ -282,7 +317,7 @@ describe("isPinnedVersionKnown", function() {
 
 describe("resolveApkUrl / resolveIpaUrl with an injected registry", function() {
   const registry: ReleaseChecksumEntry[] = [
-    { version: "0.0.20", apkSha256: "apk20", ipaSha256: "ipa20" },
+    { version: "0.0.20", apkSha256: "apk20", ipaSha256: "ipa20", runnerSha256: "runner20" },
   ];
 
   test("uses the injected registry's newest version", function() {
@@ -318,10 +353,13 @@ describe("package.json as canonical version source", function() {
 });
 
 describe("iOS runner-binary checksum", function() {
-  test("is empty or a well-formed 64-char sha256", function() {
-    // Empty is the local-dev default (verification skipped). When populated by
-    // the release pipeline it must be a lowercase 64-hex sha256 so the runner
-    // integrity check in IOSCtrlProxyBuilder can actually run.
-    expect(IOS_CTRL_PROXY_RUNNER_SHA256 === "" || /^[a-f0-9]{64}$/.test(IOS_CTRL_PROXY_RUNNER_SHA256)).toBe(true);
+  test("registry entries carry empty or well-formed 64-char runner sha256 values", function() {
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      expect(entry.runnerSha256 === "" || /^[a-f0-9]{64}$/.test(entry.runnerSha256)).toBe(true);
+    }
+  });
+
+  test("module-level runner checksum export resolves from registry[0]", function() {
+    expect(IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM).toBe(RELEASE_CHECKSUM_REGISTRY[0].runnerSha256);
   });
 });

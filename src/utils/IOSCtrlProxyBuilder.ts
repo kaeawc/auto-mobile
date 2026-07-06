@@ -6,14 +6,14 @@ import { defaultTimer, type Timer } from "./SystemTimer";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
 import {
   IOS_CTRL_PROXY_APP_HASH,
-  IOS_CTRL_PROXY_RUNNER_SHA256,
   LATEST_RELEASE_VERSION,
   isExplicitPin,
   isPinnedVersionKnown,
   resolveAssetVersion,
   resolveIpaChecksum,
   resolveIpaUrl,
-  resolvePinnedVersion
+  resolvePinnedVersion,
+  resolveRunnerChecksum
 } from "../constants/release";
 import {
   DefaultIOSCtrlProxyBundleDownloader,
@@ -924,7 +924,7 @@ export class IOSCtrlProxyBuilder {
 
     // Verify runner binary SHA256 for simulator (used by simctl spawn)
     if (platform === "simulator") {
-      const expectedRunnerSha256 = IOS_CTRL_PROXY_RUNNER_SHA256;
+      const expectedRunnerSha256 = resolveRunnerChecksum();
       if (expectedRunnerSha256 && expectedRunnerSha256.length > 0) {
         const runnerBinaryPath = await this.getRunnerBinaryPath(platform);
         if (!runnerBinaryPath) {

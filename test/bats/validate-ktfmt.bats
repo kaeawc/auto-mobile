@@ -258,6 +258,34 @@ STUB
   [[ "$output" != *"version mismatch"* ]]
 }
 
+@test "a 3-part x.y.0 version equals the 2-part pin (issue #3004)" {
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+
+  # A future ktfmt that prints "ktfmt version 0.64.0" must still match the
+  # 2-part pin "0.64": the trailing ".0" is a redundant patch component. Without
+  # normalization this false-fails the gate ("0.64.0" != "0.64").
+  run env KTFMT_STUB_VERSION="0.64.0" ONLY_CHANGED_SINCE_SHA="" \
+    ONLY_TOUCHED_FILES=false bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Found 1 Kotlin file(s) to process"* ]]
+  [[ "$output" != *"version mismatch"* ]]
+}
+
+@test "a non-zero patch (x.y.1) still fails the pin gate (issue #3004)" {
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+
+  # Only a redundant trailing ".0" is normalized away; a real patch build like
+  # "0.64.1" IS a different formatter and must still fail loudly.
+  run env KTFMT_STUB_VERSION="0.64.1" ONLY_CHANGED_SINCE_SHA="" \
+    ONLY_TOUCHED_FILES=false bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"version mismatch"* ]]
+  [[ "$output" == *"0.64.1"* ]]
+  [[ "$output" != *"Kotlin file(s) to process"* ]]
+}
+
 @test "the gate reads the pin from the shared ktfmt_version.sh (single source)" {
   # Prove single-sourcing without mutating the tracked tree: copy the validator
   # and its sibling pin file into a temp dir, bump the *copy's* pin to 0.99, and

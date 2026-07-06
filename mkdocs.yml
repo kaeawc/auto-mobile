@@ -79,6 +79,7 @@ nav:
       - 'Reproducing Bugs': using/reproducing-bugs.md
       - 'UI Tests': using/ui-tests.md
       - 'Hermetic CI Pinning': using/hermetic-ci-pinning.md
+      - 'Environment Variables': using/environment-variables.md
       - 'Performance Analysis':
           - 'Overview': using/perf-analysis/index.md
           - 'Startup': using/perf-analysis/startup.md

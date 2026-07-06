@@ -14,6 +14,7 @@
     "watch": "bun --watch src/index.ts",
     "build": "bun build.ts && chmod +x dist/src/index.js",
     "clean": "rm -rf dist",
+    "bootstrap:worktree": "bash scripts/codex/bootstrap-worktree.sh",
     "dev:android": "bash scripts/local-dev/android-hot-reload.sh --skip-ai",
     "dev:android:hot-reload": "bash scripts/local-dev/android-hot-reload.sh",
     "dev:ios": "bash scripts/local-dev/ios-hot-reload.sh --skip-ai",

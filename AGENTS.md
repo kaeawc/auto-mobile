@@ -33,13 +33,24 @@ This document summarizes the AutoMobile repo layout and where to find key compon
 
 Bun is the primary task runner for TypeScript tooling.
 
+On a fresh worktree, run `bun run bootstrap:worktree` before validation. It
+installs Bun dependencies from the lockfile when `node_modules/` or local
+binaries are missing, and intentionally skips slow platform setup such as
+Gradle, Android SDK, Xcode, and Homebrew-managed tools.
+
 ```bash
 bun run build          # Compile TypeScript
 bun run lint           # Lint with auto-fix (run before manual fixes)
 bun test               # Run all tests
 bun test --bail        # Stop on first failure
 bun test <file>        # Run specific test file
+bun run turbo:validate # Run local Turbo lint/build/test
 ```
+
+`turbo` is a local dependency and may not be on the shell `PATH`. Do not run
+bare `turbo ...`; use the `package.json` scripts such as `bun run
+turbo:validate`, `bun run turbo:build`, `bun run turbo:lint`, or `bun run
+turbo:test`.
 
 # Validate Shell Scripts
 

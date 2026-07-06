@@ -23,8 +23,8 @@ Two phases are hard STOP gates; do not cross them without the stated condition.
    `getDatabase()`).
 3. **Implement (green).** Minimum change to pass the tests and realize the plan;
    no scope creep — extras become follow-ups.
-4. **Pre-PR validation — STOP GATE.** Before any PR: `turbo run lint build test`
-   (whole suite, for regressions), `bun run typecheck` (new-error gate; run
+4. **Pre-PR validation — STOP GATE.** Before any PR: `bun run turbo:validate`
+   (local Turbo lint/build/test whole suite, for regressions), `bun run typecheck` (new-error gate; run
    `typecheck:update` if you fixed errors), `validate` for touched
    shell/Swift/Docker/schema surfaces, and re-confirm every criterion test is
    green. Never open a PR on red.

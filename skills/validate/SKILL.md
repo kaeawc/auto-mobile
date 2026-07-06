@@ -15,6 +15,7 @@ Run the lightest validation that covers the touched code, then widen only when n
 
 - `bun run lint`
 - `bun run build`
+- `bun run turbo:validate` for the local Turbo lint/build/test gate
 
 ## Repo Script Validation
 
@@ -32,6 +33,7 @@ Run the lightest validation that covers the touched code, then widen only when n
 ## Selection Rules
 
 - TypeScript-only changes usually need `lint`, `build`, and relevant tests.
+- Use `bun run turbo:*` scripts instead of bare `turbo ...`; Turbo is installed locally and may not be on the shell `PATH`.
 - Shell or docs/config changes should prefer the matching script in `scripts/`.
 - Android changes should use the Gradle wrapper from `android/`.
 - iOS changes should use the existing `scripts/ios/` entry points.

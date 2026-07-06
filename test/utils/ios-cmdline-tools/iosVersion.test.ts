@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   parseIosMajorVersion,
   iosMajorVersionFromSimctlListDevices,
+  iosMajorVersionFromDevicectlDetails,
 } from "../../../src/utils/ios-cmdline-tools/iosVersion";
 
 describe("parseIosMajorVersion", () => {
@@ -84,5 +85,39 @@ describe("iosMajorVersionFromSimctlListDevices", () => {
       },
     });
     expect(iosMajorVersionFromSimctlListDevices(multi, udid)).toBe(18);
+  });
+});
+
+describe("iosMajorVersionFromDevicectlDetails", () => {
+  test("reads osVersionNumber from the deviceProperties envelope", () => {
+    const json = JSON.stringify({
+      result: { deviceProperties: { osVersionNumber: "18.6" } },
+    });
+    expect(iosMajorVersionFromDevicectlDetails(json)).toBe(18);
+  });
+
+  test("resolves an iOS 16 device", () => {
+    const json = JSON.stringify({
+      result: { deviceProperties: { osVersionNumber: "16.7.1" } },
+    });
+    expect(iosMajorVersionFromDevicectlDetails(json)).toBe(16);
+  });
+
+  test("accepts alternate field spellings (productVersion)", () => {
+    const json = JSON.stringify({ result: { hardware: { productVersion: "17.0" } } });
+    expect(iosMajorVersionFromDevicectlDetails(json)).toBe(17);
+  });
+
+  test("returns null for malformed JSON", () => {
+    expect(iosMajorVersionFromDevicectlDetails("{not json")).toBeNull();
+  });
+
+  test("returns null when no version field is present", () => {
+    const json = JSON.stringify({ result: { deviceProperties: { name: "iPhone" } } });
+    expect(iosMajorVersionFromDevicectlDetails(json)).toBeNull();
+  });
+
+  test("returns null for a non-object scalar payload", () => {
+    expect(iosMajorVersionFromDevicectlDetails("42")).toBeNull();
   });
 });

@@ -35,6 +35,27 @@ export function loadAndroidHomeObserve(): { raw: string; observe: ObserveResult 
 }
 
 /**
+ * iOS observe fixture with fractional point coordinates (issue #3206).
+ *
+ * No real iOS capture exists in-tree, so this is a HAND-BUILT representative —
+ * not a device capture. It mirrors the shape
+ * `CtrlProxyHierarchy.convertToViewHierarchyResult` produces (root
+ * `hierarchy.bounds` with optional left/top in points,
+ * `screenScale`/`screenWidth`/`screenHeight`, XCUIElement class names) and
+ * carries the fractional values the iOS points coordinate space legitimately
+ * produces (thirds from @3x retina, `.5` sub-point layout). It pins that the
+ * advertised output schemas never claim `integer` for a points-based
+ * coordinate. Replace with a real simulator capture when one is taken (needs
+ * hardware; see issue #3206 verification notes).
+ */
+export const IOS_FRACTIONAL_FIXTURE_PATH = join(import.meta.dir, "ios-fractional-bounds.json");
+
+/** Load the iOS fractional-bounds fixture as a parsed `ObserveResult`. */
+export function loadIosFractionalObserve(): ObserveResult {
+  return JSON.parse(readFileSync(IOS_FRACTIONAL_FIXTURE_PATH, "utf8")) as ObserveResult;
+}
+
+/**
  * Real-device before/after observation pairs captured for the `--actions-diff-observe`
  * sign-off (issue #3051; see
  * `docs/design-docs/plat/android/actions-diff-observe-signoff.md`). Each file is a

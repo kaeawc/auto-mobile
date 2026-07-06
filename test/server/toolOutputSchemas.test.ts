@@ -51,3 +51,37 @@ describe("elementBoundsSchema: object + compact tuple (#2990)", () => {
     expect(json.toLowerCase()).toContain("observe-result-compact");
   });
 });
+
+/**
+ * Fractional-coordinate coverage (issue #3206). iOS bounds are XCUITest points,
+ * which are legitimately fractional (retina point→pixel thirds, `.5` sub-point
+ * layout). The schema previously claimed `z.number().int()`, so a strict MCP
+ * client generating a decoder from the advertised `outputSchema` would have
+ * rejected a real iOS observation carrying a `.5` coordinate.
+ */
+describe("elementBoundsSchema: fractional iOS point coordinates (#3206)", () => {
+  test("accepts fractional object bounds (the issue's repro)", () => {
+    const fractional = { left: 0.5, top: 1.2, right: 100, bottom: 200 };
+    expect(elementBoundsSchema.parse(fractional)).toEqual(fractional);
+  });
+
+  test("accepts fractional centerX/centerY", () => {
+    const withCenters = { left: 20.5, top: 68.5, right: 168.5, bottom: 94.5, centerX: 94.5, centerY: 81.5 };
+    expect(elementBoundsSchema.parse(withCenters)).toEqual(withCenters);
+  });
+
+  test("accepts a fractional compact tuple", () => {
+    const tuple = [16.333333333333332, 786.5, 201.66666666666666, 823.5];
+    expect(elementBoundsSchema.parse(tuple)).toEqual(tuple);
+  });
+
+  test("the advertised JSON schema claims number, not integer, for bounds coordinates", () => {
+    const json = toJSONSchema(elementBoundsSchema) as Record<string, unknown>;
+    expect(JSON.stringify(json)).not.toContain("\"integer\"");
+  });
+
+  test("still rejects non-numeric bounds values", () => {
+    expect(() => elementBoundsSchema.parse({ left: "0.5", top: 1, right: 2, bottom: 3 })).toThrow();
+    expect(() => elementBoundsSchema.parse([0.5, 1, 2, "3"])).toThrow();
+  });
+});

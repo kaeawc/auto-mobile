@@ -1,0 +1,108 @@
+{
+  "updatedAt": 1751500000000,
+  "screenSize": {
+    "width": 1179,
+    "height": 2556
+  },
+  "viewHierarchy": {
+    "hierarchy": {
+      "bounds": {
+        "right": 393,
+        "bottom": 851.6666666666666
+      },
+      "node": {
+        "class": "XCUIElementTypeApplication",
+        "view-id": "root",
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 393,
+          "bottom": 851.6666666666666
+        },
+        "node": [
+          {
+            "class": "XCUIElementTypeNavigationBar",
+            "view-id": "nav-bar",
+            "bounds": {
+              "left": 0,
+              "top": 59.333333333333336,
+              "right": 393,
+              "bottom": 103.66666666666667
+            },
+            "node": [
+              {
+                "class": "XCUIElementTypeStaticText",
+                "text": "Reminders",
+                "view-id": "title",
+                "bounds": {
+                  "left": 20.5,
+                  "top": 68.33333333333333,
+                  "right": 168.5,
+                  "bottom": 94.66666666666667
+                }
+              }
+            ]
+          },
+          {
+            "class": "XCUIElementTypeButton",
+            "text": "New Reminder",
+            "clickable": "true",
+            "enabled": "true",
+            "view-id": "new-reminder",
+            "bounds": {
+              "left": 16.333333333333332,
+              "top": 786.5,
+              "right": 201.66666666666666,
+              "bottom": 823.5
+            }
+          }
+        ]
+      }
+    },
+    "packageName": "com.apple.reminders",
+    "screenScale": 3,
+    "screenWidth": 393,
+    "screenHeight": 852
+  },
+  "elements": {
+    "clickable": [
+      {
+        "class": "XCUIElementTypeButton",
+        "text": "New Reminder",
+        "view-id": "new-reminder",
+        "bounds": {
+          "left": 16.333333333333332,
+          "top": 786.5,
+          "right": 201.66666666666666,
+          "bottom": 823.5
+        }
+      }
+    ],
+    "scrollable": [],
+    "text": [
+      {
+        "class": "XCUIElementTypeStaticText",
+        "text": "Reminders",
+        "view-id": "title",
+        "bounds": {
+          "left": 20.5,
+          "top": 68.33333333333333,
+          "right": 168.5,
+          "bottom": 94.66666666666667
+        }
+      }
+    ],
+    "media": []
+  },
+  "focusedElement": {
+    "text": "New Reminder",
+    "bounds": {
+      "left": 16.333333333333332,
+      "top": 786.5,
+      "right": 201.66666666666666,
+      "bottom": 823.5,
+      "centerX": 109,
+      "centerY": 805
+    }
+  }
+}

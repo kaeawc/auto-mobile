@@ -94,6 +94,13 @@ export interface NodeAttributes {
 export interface ViewHierarchyNode {
   $: NodeAttributes;
   node?: ViewHierarchyNode[];
+  /**
+   * Element bounds in the platform's coordinate space: integer pixels on
+   * Android (accessibility-service `Rect`s), XCUITest points on iOS — which are
+   * legitimately fractional (retina point→pixel, sub-point layout). Consumers
+   * and wire schemas must treat these as plain numbers, never assume integers
+   * (issue #3206; see `boundsObjectSchema` in `src/server/toolOutputSchemas.ts`).
+   */
   bounds?: ElementBounds;
   recomposition?: RecompositionNodeInfo;
   recompositionMetrics?: RecompositionMetrics;

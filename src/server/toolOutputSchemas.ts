@@ -208,7 +208,7 @@ export const accessibilityFocusResultSchema = z.object({
  * not enumerate, so the schema describes the bounds shape without over-fitting
  * the large, dynamic node payload.
  */
-export const viewHierarchyNodeSchema = z.lazy(() =>
+export const viewHierarchyNodeSchema: z.ZodType = z.lazy(() =>
   z.object({
     bounds: elementBoundsSchema.optional(),
     node: z.union([viewHierarchyNodeSchema, z.array(viewHierarchyNodeSchema)]).optional()

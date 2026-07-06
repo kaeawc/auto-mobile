@@ -130,7 +130,10 @@ function formatToolParamError(toolName: string, error: unknown): string {
   const issues = flattenedIssues.map(issue => {
     const path = issue.path.length ? issue.path.join(".") : "parameters";
     if (issue.code === "invalid_type") {
-      return `${path} expected ${issue.expected}, received ${issue.received}`;
+      // zod v4 issues carry no runtime `received` field; the default message
+      // already reads "Invalid input: expected X, received Y", so reuse it
+      // minus the prefix to keep the historical "<path> expected X" format.
+      return `${path} ${issue.message.replace(/^Invalid input: /, "")}`;
     }
     return `${path} ${issue.message}`;
   });

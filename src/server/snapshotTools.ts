@@ -76,7 +76,9 @@ export function registerSnapshotTools() {
         });
       }
 
-      throw new ActionableError(`Unsupported deviceSnapshot action: ${args.action}`);
+      // Exhaustive over the discriminated union (args is `never` here); kept
+      // as a runtime guard for callers that bypass schema validation.
+      throw new ActionableError(`Unsupported deviceSnapshot action: ${(args as { action: string }).action}`);
     } catch (error) {
       throw new ActionableError(`Failed to ${args.action} snapshot: ${error}`);
     }

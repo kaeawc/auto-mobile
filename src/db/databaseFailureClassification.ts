@@ -37,3 +37,74 @@ export function classifyDatabaseFailure(error: unknown): DatabaseFailureKind {
 
   return "permanent";
 }
+
+/**
+ * Classification of a single query error at the dialect boundary, used to decide
+ * whether a bounded, backoff-driven retry is worthwhile:
+ *
+ * - `retryable`: a locking/contention error that a later attempt may clear on
+ *   its own (`SQLITE_BUSY`, `SQLITE_BUSY_SNAPSHOT`, `SQLITE_LOCKED`, …). Safe to
+ *   retry outside an open transaction — the WAL single-writer topology means a
+ *   `busy_timeout` expiry or checkpoint contention is transient.
+ * - `constraint`: a data/logic conflict (`SQLITE_CONSTRAINT*` — unique, foreign
+ *   key, NOT NULL). Retrying is pointless and would mask the caller's bug; the
+ *   error must surface immediately so callers (upserts, `ON CONFLICT`) can react.
+ * - `fatal`: anything else — corruption, misuse, a closed handle, or a
+ *   non-SQLite error. Surface immediately.
+ */
+export type SqliteErrorAction = "retryable" | "constraint" | "fatal";
+
+// SQLite primary-result-code prefixes (`SQLITE_BUSY_SNAPSHOT`,
+// `SQLITE_CONSTRAINT_UNIQUE`, …) all begin with the primary code, so a prefix
+// match covers extended codes without enumerating every variant.
+const RETRYABLE_CODE_PREFIXES = ["SQLITE_BUSY", "SQLITE_LOCKED"] as const;
+const CONSTRAINT_CODE_PREFIX = "SQLITE_CONSTRAINT";
+
+/**
+ * Read the structured `SqliteError.code` reachable by identity from the thrown
+ * error's `.cause` (the contract established in #2793 / PR #2873) and classify
+ * it. Walks exactly one level of `.cause` — the dialect wraps the raw
+ * `SqliteError` in a single `new Error(msg, { cause })` — and also inspects the
+ * error itself so a bare `SqliteError` classifies too.
+ *
+ * Falls back to the message-pattern `classifyDatabaseFailure` ONLY when no
+ * structured code is present, so callers prefer identity over `.message`
+ * scraping (acceptance criterion for #2874) while still catching legacy shapes.
+ */
+export function classifySqliteError(error: unknown): SqliteErrorAction {
+  const code = extractSqliteCode(error);
+  if (code !== undefined) {
+    if (RETRYABLE_CODE_PREFIXES.some(prefix => code.startsWith(prefix))) {
+      return "retryable";
+    }
+    if (code.startsWith(CONSTRAINT_CODE_PREFIX)) {
+      return "constraint";
+    }
+    return "fatal";
+  }
+
+  // No structured code: fall back to the message-based classifier. A transient
+  // (busy/locked) message is the only thing worth retrying; everything else is
+  // fatal here (constraint conflicts do not appear in TRANSIENT_PATTERNS).
+  return classifyDatabaseFailure(error) === "transient" ? "retryable" : "fatal";
+}
+
+/**
+ * Extract a `SqliteError.code` string from an error or its immediate `.cause`,
+ * preferring the identity-preserved cause per the #2793 contract. Returns
+ * `undefined` when no string code is reachable (so the caller can fall back to
+ * message matching).
+ */
+function extractSqliteCode(error: unknown): string | undefined {
+  const direct = readStringCode(error);
+  if (direct !== undefined) {
+    return direct;
+  }
+  const cause = (error as { cause?: unknown } | null | undefined)?.cause;
+  return readStringCode(cause);
+}
+
+function readStringCode(value: unknown): string | undefined {
+  const code = (value as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" ? code : undefined;
+}

@@ -15,8 +15,26 @@ import {
 import { CompiledQuery } from "kysely";
 import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
+import { BackoffPolicy, exponentialBackoff } from "../utils/Backoff";
+import { classifySqliteError } from "./databaseFailureClassification";
+import { defaultTimer, Timer } from "../utils/SystemTimer";
+import { defaultRandom, Random } from "../utils/Random";
 
 const MAX_CACHED_STATEMENTS = 200;
+
+/**
+ * Bounded retry for `SQLITE_BUSY`/`SQLITE_LOCKED` at the dialect boundary
+ * (issue #2874). Small cap: the daemon runs a single writer behind a JS mutex,
+ * so a busy/locked code is a rare `busy_timeout` expiry or checkpoint
+ * contention that a short backoff clears. Never applied inside an open
+ * transaction (partial re-execution) — see `#shouldRetry`.
+ */
+const DEFAULT_MAX_RETRY_ATTEMPTS = 3;
+const DEFAULT_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({
+  initialDelayMs: 5,
+  multiplier: 2,
+  maxDelayMs: 50,
+});
 
 type BunStatement = ReturnType<BunDatabase["prepare"]>;
 type SchemaVersionRow = { schema_version?: number | bigint };
@@ -52,6 +70,23 @@ export class BunSqliteDialect implements Dialect {
 interface BunSqliteDialectConfig {
   database: BunDatabase | (() => BunDatabase);
   beforeQuery?: () => Promise<void>;
+  /**
+   * BUSY/LOCKED retry knobs (issue #2874). All injected so tests can drive them
+   * with fakes (a `FakeTimer`, a deterministic `Random`) and keep unit tests
+   * <100ms and non-flaky. Defaults are production-safe.
+   */
+  retry?: BunSqliteRetryConfig;
+}
+
+interface BunSqliteRetryConfig {
+  /** Total attempts including the first. `<= 1` disables retry. */
+  maxAttempts?: number;
+  /** Backoff policy for the delay between attempts. */
+  backoff?: BackoffPolicy;
+  /** Sleep seam so tests avoid real timers. */
+  timer?: Timer;
+  /** Jitter source (0..1). Injected + faked for deterministic tests. */
+  random?: Random;
 }
 
 class BunSqliteDriver implements Driver {
@@ -65,7 +100,8 @@ class BunSqliteDriver implements Driver {
   async init(): Promise<void> {
     this.#connectionState = new BunSqliteConnectionState(
       this.#config.database,
-      this.#config.beforeQuery
+      this.#config.beforeQuery,
+      this.#config.retry
     );
   }
 
@@ -120,11 +156,23 @@ export class BunSqliteConnectionState {
   #statementCache = new Map<string, BunStatement>();
   #observedSchemaVersion: number | null = null;
   #closed = false;
+  readonly #maxRetryAttempts: number;
+  readonly #retryBackoff: BackoffPolicy;
+  readonly #timer: Timer;
+  readonly #random: Random;
 
-  constructor(database: BunDatabase | (() => BunDatabase), beforeQuery?: () => Promise<void>) {
+  constructor(
+    database: BunDatabase | (() => BunDatabase),
+    beforeQuery?: () => Promise<void>,
+    retry?: BunSqliteRetryConfig
+  ) {
     this.#databaseSource = database;
     this.#db = typeof database === "function" ? null : database;
     this.#beforeQuery = beforeQuery;
+    this.#maxRetryAttempts = Math.max(1, retry?.maxAttempts ?? DEFAULT_MAX_RETRY_ATTEMPTS);
+    this.#retryBackoff = retry?.backoff ?? DEFAULT_RETRY_BACKOFF;
+    this.#timer = retry?.timer ?? defaultTimer;
+    this.#random = retry?.random ?? defaultRandom;
   }
 
   async beginTransaction(owner: symbol): Promise<void> {
@@ -169,74 +217,133 @@ export class BunSqliteConnectionState {
     const { sql, parameters } = compiledQuery;
 
     try {
-      // Reject before touching (or reopening) the handle. A query that lost the
-      // shutdown race must fail cleanly here rather than silently reopening a new
-      // handle via #getDatabase() (issue #2792). Thrown outside the SQL-wrapping
-      // catch so callers see the closed-db cause, not a generic "Query failed".
+      // Bounded BUSY/LOCKED retry (issue #2874). Reads the structured
+      // `err.cause.code` preserved in #2793 (by identity, not `.message`
+      // scraping) to decide whether a locking contention is worth retrying.
+      // Only retries in autocommit — never across a transaction boundary, so a
+      // partially-applied statement inside another lease's transaction is never
+      // re-executed. See #shouldRetry.
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await this.#executeOnce<R>(sql, parameters);
+        } catch (error) {
+          if (!this.#shouldRetry(error, attempt)) {
+            throw error;
+          }
+          const delayMs = this.#retryDelayMs(attempt);
+          logger.warn(
+            `SQLite busy/locked (attempt ${attempt}/${this.#maxRetryAttempts}); ` +
+              `retrying in ${delayMs}ms: ${sql}`
+          );
+          await this.#timer.sleep(delayMs);
+        }
+      }
+    } finally {
+      this.#activeQueries -= 1;
+      this.#notifyWaiters();
+    }
+  }
+
+  /**
+   * Decide whether a caught query error warrants another attempt. Retries only
+   * when: the code (via `err.cause.code`, #2793 contract) is `retryable`
+   * (`SQLITE_BUSY`/`SQLITE_LOCKED`); attempts remain; the handle is still open;
+   * and we are NOT inside a transaction (autocommit only — `#transactionOwner`
+   * is cleared). Never retries `constraint`/`fatal`.
+   */
+  #shouldRetry(error: unknown, attempt: number): boolean {
+    if (attempt >= this.#maxRetryAttempts) {
+      return false;
+    }
+    if (this.#closed) {
+      return false;
+    }
+    // Autocommit only: if any transaction is open, retrying could re-run one
+    // statement of a multi-statement unit (the begin/commit are themselves
+    // routed through executeQuery). #transactionOwner is null exactly when no
+    // lease holds the transaction lock, so this also blocks retrying the raw
+    // begin/commit/rollback control statements.
+    if (this.#transactionOwner !== null) {
+      return false;
+    }
+    return classifySqliteError(error) === "retryable";
+  }
+
+  #retryDelayMs(attempt: number): number {
+    const base = this.#retryBackoff.delayForAttempt(attempt);
+    // Full jitter in [0, base] to avoid synchronized retry storms.
+    return Math.floor(this.#random.next() * (base + 1));
+  }
+
+  async #executeOnce<R>(sql: string, parameters: readonly unknown[]): Promise<QueryResult<R>> {
+    // Reject before touching (or reopening) the handle. A query that lost the
+    // shutdown race must fail cleanly here rather than silently reopening a new
+    // handle via #getDatabase() (issue #2792). Thrown outside the SQL-wrapping
+    // catch so callers see the closed-db cause, not a generic "Query failed".
+    if (this.#closed) {
+      throw new Error("Cannot use a closed database");
+    }
+
+    try {
+      await this.#beforeQuery?.();
+      // beforeQuery can await (e.g. migration gating), during which close() may
+      // run — re-check so a parked query rejects rather than reopening the handle.
       if (this.#closed) {
         throw new Error("Cannot use a closed database");
       }
+      const db = this.#getDatabase();
+
+      const schemaChanging = this.#isSchemaChangingSql(sql);
+      const stmt = schemaChanging ? db.prepare(sql) : this.#getStatement(db, sql);
+
+      // Check if this is a SELECT query or query with RETURNING clause
+      const sqlLower = sql.trim().toLowerCase();
+      const isSelect = sqlLower.startsWith("select");
+      // Word boundary (not a bare substring) so an identifier like
+      // `returning_items` isn't misclassified as a RETURNING clause. `_` is a
+      // word char, so `\breturning\b` correctly rejects `returning_items`.
+      const hasReturning = /\breturning\b/.test(sqlLower);
 
       try {
-        await this.#beforeQuery?.();
-        // beforeQuery can await (e.g. migration gating), during which close() may
-        // run — re-check so a parked query rejects rather than reopening the handle.
-        if (this.#closed) {
-          throw new Error("Cannot use a closed database");
-        }
-        const db = this.#getDatabase();
-
-        const schemaChanging = this.#isSchemaChangingSql(sql);
-        const stmt = schemaChanging ? db.prepare(sql) : this.#getStatement(db, sql);
-
-        // Check if this is a SELECT query or query with RETURNING clause
-        const sqlLower = sql.trim().toLowerCase();
-        const isSelect = sqlLower.startsWith("select");
-        // Word boundary (not a bare substring) so an identifier like
-        // `returning_items` isn't misclassified as a RETURNING clause. `_` is a
-        // word char, so `\breturning\b` correctly rejects `returning_items`.
-        const hasReturning = /\breturning\b/.test(sqlLower);
-
-        try {
-          if (isSelect || hasReturning) {
-            // For SELECT queries or queries with RETURNING, return all rows
-            const rows = stmt.all(...(parameters as any[])) as R[];
-            const result = {
-              rows,
-              numAffectedRows: hasReturning ? BigInt(rows.length) : undefined,
-            };
-            if (schemaChanging) {
-              this.#clearStatementCache();
-            }
-            return result;
-          } else {
-            // For INSERT/UPDATE/DELETE queries without RETURNING, execute and return changes
-            const writeResult = stmt.run(...(parameters as any[]));
-            const result = {
-              rows: [],
-              numAffectedRows: BigInt(writeResult.changes),
-              insertId:
+        if (isSelect || hasReturning) {
+          // For SELECT queries or queries with RETURNING, return all rows
+          const rows = stmt.all(...(parameters as any[])) as R[];
+          const result = {
+            rows,
+            numAffectedRows: hasReturning ? BigInt(rows.length) : undefined,
+          };
+          if (schemaChanging) {
+            this.#clearStatementCache();
+          }
+          return result;
+        } else {
+          // For INSERT/UPDATE/DELETE queries without RETURNING, execute and return changes
+          const writeResult = stmt.run(...(parameters as any[]));
+          const result = {
+            rows: [],
+            numAffectedRows: BigInt(writeResult.changes),
+            insertId:
                 writeResult.lastInsertRowid !== undefined
                   ? BigInt(writeResult.lastInsertRowid)
                   : undefined,
-            };
-            if (schemaChanging) {
-              this.#clearStatementCache();
-            }
-            return result;
-          }
-        } finally {
+          };
           if (schemaChanging) {
-            stmt.finalize();
+            this.#clearStatementCache();
           }
+          return result;
         }
-      } catch (error) {
-        // BigInt-safe: Kysely can bind BigInt params, and a bare
-        // JSON.stringify(parameters) throws on BigInt — which would mask the real
-        // SqliteError with a TypeError from the error reporter itself.
-        const params = JSON.stringify(parameters, (_key, value) =>
-          typeof value === "bigint" ? value.toString() : value
-        );
+      } finally {
+        if (schemaChanging) {
+          stmt.finalize();
+        }
+      }
+    } catch (error) {
+      // BigInt-safe: Kysely can bind BigInt params, and a bare
+      // JSON.stringify(parameters) throws on BigInt — which would mask the real
+      // SqliteError with a TypeError from the error reporter itself.
+      const params = JSON.stringify(parameters, (_key, value) =>
+        typeof value === "bigint" ? value.toString() : value
+      );
         // Preserve the original SqliteError (code/stack) via `cause` so future
         // BUSY/constraint-aware retries and describeUnknownError (which recurses
         // into `.cause`) can reach it. ActionableError drops `cause`, so use a
@@ -246,13 +353,9 @@ export class BunSqliteConnectionState {
         // databaseLazyPath.test.ts asserts that text via `.message`. The inline
         // `${error}` is BigInt-safe (unlike JSON.stringify) since it goes
         // through toString().
-        throw new Error(`Query failed: ${error}\nSQL: ${sql}\nParameters: ${params}`, {
-          cause: error,
-        });
-      }
-    } finally {
-      this.#activeQueries -= 1;
-      this.#notifyWaiters();
+      throw new Error(`Query failed: ${error}\nSQL: ${sql}\nParameters: ${params}`, {
+        cause: error,
+      });
     }
   }
 

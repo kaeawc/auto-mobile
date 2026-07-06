@@ -820,3 +820,71 @@ private final class LockedErrors: @unchecked Sendable {
         messages.append(message)
     }
 }
+
+// MARK: - Value Encoding Fidelity (#3194)
+
+/// Round-trip coverage for `DefaultUserDefaultsDriver.encode`, which replaced the
+/// lossy `"\(value)"` stringification for `Data`/`Date`/array/dictionary with a
+/// recoverable encoding a downstream consumer can decode by `valueType`.
+final class UserDefaultsValueEncodingTests: XCTestCase {
+    func testEncodesDateAsRoundTrippableISO8601() {
+        let date = Date(timeIntervalSince1970: 1_751_724_600.25)
+        let encoded = DefaultUserDefaultsDriver.encode(date, as: .date)
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let decoded = formatter.date(from: encoded)
+
+        XCTAssertNotNil(decoded)
+        XCTAssertEqual(decoded!.timeIntervalSince1970, date.timeIntervalSince1970, accuracy: 0.001)
+        // Not the debug description ("… +0000").
+        XCTAssertFalse(encoded.contains("+0000"))
+    }
+
+    func testEncodesDataAsRoundTrippableBase64() {
+        let data = Data([0xDE, 0xAD, 0xBE, 0xEF, 0x12, 0x34, 0x56, 0x78])
+        let encoded = DefaultUserDefaultsDriver.encode(data, as: .data)
+
+        XCTAssertEqual(Data(base64Encoded: encoded), data)
+        // Not the debug hex-dump form ("<deadbeef …>").
+        XCTAssertFalse(encoded.hasPrefix("<"))
+    }
+
+    func testEncodesArrayAsRoundTrippableJSON() throws {
+        let array: [Any] = ["a", 1, true]
+        let encoded = DefaultUserDefaultsDriver.encode(array, as: .array)
+
+        let decoded = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [Any]
+        )
+        XCTAssertEqual(decoded.count, 3)
+        XCTAssertEqual(decoded[0] as? String, "a")
+        XCTAssertEqual(decoded[1] as? Int, 1)
+        XCTAssertEqual(decoded[2] as? Bool, true)
+    }
+
+    func testEncodesDictionaryAsRoundTrippableJSON() throws {
+        let dict: [String: Any] = ["name": "widget", "count": 3]
+        let encoded = DefaultUserDefaultsDriver.encode(dict, as: .dictionary)
+
+        let decoded = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(decoded["name"] as? String, "widget")
+        XCTAssertEqual(decoded["count"] as? Int, 3)
+    }
+
+    func testScalarEncodingIsUnchanged() {
+        XCTAssertEqual(DefaultUserDefaultsDriver.encode("dark", as: .string), "dark")
+        XCTAssertEqual(DefaultUserDefaultsDriver.encode(42, as: .int), "42")
+        XCTAssertEqual(DefaultUserDefaultsDriver.encode(true, as: .bool), "true")
+    }
+
+    func testNonJsonNativeCollectionFallsBackToInterpolation() {
+        // An array holding a nested Data leaf is not JSON-serializable; the
+        // encoder must fall back to interpolation rather than drop the value.
+        let array: [Any] = [Data([0x01])]
+        let encoded = DefaultUserDefaultsDriver.encode(array, as: .array)
+        XCTAssertFalse(encoded.isEmpty)
+    }
+}

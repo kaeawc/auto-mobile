@@ -984,6 +984,20 @@ describe("diffObserveResult — volatile `extras` metadata exclusion (#3051)", (
 });
 
 describe("isSameObservationScreen", () => {
+  const iosIdentity = (
+    key: string,
+    confidence: "high" | "medium" | "low" = "high"
+  ): ObserveResult["screenIdentity"] => ({
+    platform: "ios",
+    source: "heuristic",
+    confidence,
+    key,
+    components: {
+      bundleId: "com.apple.reminders",
+      navigationTitle: key,
+    },
+  });
+
   test("same app + activity + package → true", () => {
     const a = obs({ "resource-id": "a" });
     const b = obs({ "resource-id": "b" });
@@ -1005,6 +1019,57 @@ describe("isSameObservationScreen", () => {
   test("different hierarchy packageName → false", () => {
     const a = obs({ "resource-id": "a" });
     const b = obs({ "resource-id": "a" }, { viewHierarchy: { packageName: "com.other", hierarchy: { node: { "resource-id": "a" } as any } } });
+    expect(isSameObservationScreen(a, b)).toBe(false);
+  });
+
+  test("same high-confidence iOS screen identity → true", () => {
+    const a = obs({ "resource-id": "a" }, {
+      activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
+      viewHierarchy: { packageName: "com.apple.reminders", hierarchy: { node: { "resource-id": "a" } as any } },
+      screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=Reminders"),
+    });
+    const b = obs({ "resource-id": "b" }, {
+      activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 2 },
+      viewHierarchy: { packageName: "com.apple.reminders", hierarchy: { node: { "resource-id": "b" } as any } },
+      screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=Reminders"),
+    });
+    expect(isSameObservationScreen(a, b)).toBe(true);
+  });
+
+  test("different high-confidence iOS screen identity → false", () => {
+    const a = obs({ "resource-id": "a" }, {
+      activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
+      viewHierarchy: { packageName: "com.apple.reminders", hierarchy: { node: { "resource-id": "a" } as any } },
+      screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=Reminders"),
+    });
+    const b = obs({ "resource-id": "b" }, {
+      activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 2 },
+      viewHierarchy: { packageName: "com.apple.reminders", hierarchy: { node: { "resource-id": "b" } as any } },
+      screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=New Reminder"),
+    });
+    expect(isSameObservationScreen(a, b)).toBe(false);
+  });
+
+  test("one missing identity preserves app/activity/package fallback", () => {
+    const a = obs({ "resource-id": "a" }, {
+      activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
+      viewHierarchy: { packageName: "com.apple.reminders", hierarchy: { node: { "resource-id": "a" } as any } },
+      screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=Reminders"),
+    });
+    const b = obs({ "resource-id": "b" }, {
+      activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 2 },
+      viewHierarchy: { packageName: "com.apple.reminders", hierarchy: { node: { "resource-id": "b" } as any } },
+    });
+    expect(isSameObservationScreen(a, b)).toBe(true);
+  });
+
+  test("low-confidence screen identity is conservative", () => {
+    const a = obs({ "resource-id": "a" }, {
+      screenIdentity: iosIdentity("bundle=com.apple.reminders|focus=Title", "low"),
+    });
+    const b = obs({ "resource-id": "b" }, {
+      screenIdentity: iosIdentity("bundle=com.apple.reminders|focus=Title", "low"),
+    });
     expect(isSameObservationScreen(a, b)).toBe(false);
   });
 });

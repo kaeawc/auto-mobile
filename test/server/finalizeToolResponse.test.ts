@@ -450,6 +450,30 @@ describe("finalizeToolResponse", () => {
       };
     }
 
+    function iosScreenObserve(
+      key: string,
+      confidence: "high" | "medium" | "low" = "high"
+    ): ObserveResult {
+      return {
+        ...sameScreenObserve(),
+        activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 0 },
+        screenIdentity: {
+          platform: "ios",
+          source: "heuristic",
+          confidence,
+          key,
+          components: {
+            bundleId: "com.apple.reminders",
+            navigationTitle: key,
+          },
+        },
+        viewHierarchy: {
+          packageName: "com.apple.reminders",
+          hierarchy: sameScreenObserve().viewHierarchy!.hierarchy,
+        },
+      } as ObserveResult;
+    }
+
     beforeEach(() => {
       originalDiff = serverConfig.isActionsDiffObserveEnabled();
       serverConfig.setActionsDiffObserveEnabled(true);
@@ -595,39 +619,10 @@ describe("finalizeToolResponse", () => {
 
     test("falls back to full when an iOS screen identity changes under the same app", () => {
       const { store } = makeStore();
-      const baseline = {
-        ...sameScreenObserve(),
-        activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 0 },
-        screenIdentity: {
-          platform: "ios",
-          source: "heuristic",
-          confidence: "high",
-          key: "bundle=com.apple.reminders|nav=Reminders",
-          components: {
-            bundleId: "com.apple.reminders",
-            navigationTitle: "Reminders",
-          },
-        },
-        viewHierarchy: {
-          packageName: "com.apple.reminders",
-          hierarchy: sameScreenObserve().viewHierarchy!.hierarchy,
-        },
-      } as ObserveResult;
+      const baseline = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
       finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
 
-      const next = {
-        ...baseline,
-        screenIdentity: {
-          platform: "ios",
-          source: "heuristic",
-          confidence: "high",
-          key: "bundle=com.apple.reminders|nav=New Reminder",
-          components: {
-            bundleId: "com.apple.reminders",
-            navigationTitle: "New Reminder",
-          },
-        },
-      } as ObserveResult;
+      const next = iosScreenObserve("bundle=com.apple.reminders|nav=New Reminder");
       (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
 
       const finalized = finalizeToolResponse(
@@ -639,6 +634,70 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
       expect(obsSc.screenIdentity.key).toBe("bundle=com.apple.reminders|nav=New Reminder");
+    });
+
+    test("emits a diff when high-confidence iOS screen identity stays stable", () => {
+      const { store } = makeStore();
+      const baseline = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
+      finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      const next = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
+    });
+
+    test("preserves app/activity/package fallback when only one iOS identity is present", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(
+        createStructuredToolResponse(iosScreenObserve("bundle=com.apple.reminders|nav=Reminders")),
+        { name: "observe", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const next = {
+        ...sameScreenObserve(),
+        activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 0 },
+        viewHierarchy: {
+          packageName: "com.apple.reminders",
+          hierarchy: sameScreenObserve().viewHierarchy!.hierarchy,
+        },
+      } as ObserveResult;
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
+    });
+
+    test("falls back to full and updates baseline when iOS screen identity is low confidence", () => {
+      const { store, map } = makeStore();
+      const baseline = iosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");
+      finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
+
+      const next = iosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expect((map.get("s1")!.viewHierarchy!.hierarchy.node as any).node[0].checked).toBe("true");
     });
 
     test("falls back to full when there is no sessionUuid (legacy single-agent path)", () => {

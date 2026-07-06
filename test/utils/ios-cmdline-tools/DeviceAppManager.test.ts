@@ -6,6 +6,7 @@ import { DeviceAppManager, findProcessIdentifier, findRunningProcessPid, isDevic
 import { isProcessAlreadyGoneError } from "../../../src/utils/ios-cmdline-tools/iosProcessErrors";
 import { hashAppBundle } from "../../../src/utils/ios-cmdline-tools/AppBundleHasher";
 import { FakeHostControlDeviceAppManager } from "../../fakes/FakeHostControlDeviceAppManager";
+import { ActionableError } from "../../../src/models/ActionableError";
 
 const bundleId = "dev.jasonpearson.automobile.ctrlproxy";
 
@@ -956,6 +957,7 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     const inspector = createInspector({ platform: "linux", exec });
 
     await expect(inspector.terminateApp("device-udid", bundleId)).rejects.toThrow(/macOS/);
+    await expect(inspector.terminateApp("device-udid", bundleId)).rejects.toBeInstanceOf(ActionableError);
     expect(commands).toEqual([]);
   });
 
@@ -1028,13 +1030,17 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     });
 
     const inspector = createInspector({ exec });
-    // The original devicectl error propagates unchanged (its diagnostic lives on
-    // stderr); we only assert it is not swallowed, then confirm the stderr text.
+    // The failure is not swallowed: it surfaces as an ActionableError whose
+    // message folds in the stderr diagnostic (devicectl writes "device is locked"
+    // to stderr, which getExecErrorText captures), so the MCP client sees the
+    // actionable text rather than a bare non-enumerable stderr field.
     const thrown = await inspector.terminateApp("device-udid", bundleId).then(
       () => { throw new Error("expected terminateApp to reject"); },
       (error: unknown) => error
     );
-    expect((thrown as { stderr?: string }).stderr).toMatch(/locked/i);
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect((thrown as Error).message).toMatch(/locked/i);
+    expect((thrown as Error).message).toContain(bundleId);
     expect(commands.some(c => c.includes("device process terminate"))).toBe(true);
   });
 });

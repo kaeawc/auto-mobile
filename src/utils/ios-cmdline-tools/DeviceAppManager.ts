@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { ExecResult } from "../../models";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { hashAppBundle } from "./AppBundleHasher";
 import { isProcessAlreadyGoneError } from "./iosProcessErrors";
 import { logger } from "../logger";
@@ -458,13 +459,13 @@ export class DeviceAppManager implements DeviceUrlLauncher {
   async launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void> {
     const precondition = this.getLaunchPrecondition();
     if (!precondition.ok && precondition.reason === "host-control") {
-      throw new Error(
+      throw new ActionableError(
         "Opening a URL on a physical iOS device is not supported under host control: " +
         "the host-control bridge exposes no devicectl launch-with-URL primitive."
       );
     }
     if (!precondition.ok && precondition.reason === "non-darwin") {
-      throw new Error("Opening URLs on a physical iOS device requires macOS");
+      throw new ActionableError("Opening URLs on a physical iOS device requires macOS");
     }
     const command = [
       "xcrun", "devicectl", "device", "process", "launch",
@@ -473,7 +474,11 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       "--terminate-existing",
       quoteShell(bundleId)
     ].join(" ");
-    await this.deps.exec(command);
+    try {
+      await this.deps.exec(command);
+    } catch (error) {
+      throw toActionableError(error, `Failed to open URL on physical iOS device ${bundleId}`);
+    }
   }
 
   public async getInstalledAppBundleHash(deviceUdid: string, bundleId: string, isSimulator = false): Promise<string | null> {
@@ -522,7 +527,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    */
   public async clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void> {
     if (this.isHostControlMode()) {
-      throw new Error(
+      throw new ActionableError(
         `Clearing app data via uninstall+reinstall is not supported under host control for ${bundleId}: ` +
         "the host-control bridge cannot copy the installed bundle off-device to reinstall it."
       );
@@ -534,7 +539,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       return true;
     });
     if (!done) {
-      throw new Error(`Could not resolve installed bundle for ${bundleId} to reinstall`);
+      throw new ActionableError(`Could not resolve installed bundle for ${bundleId} to reinstall`);
     }
   }
 
@@ -634,7 +639,9 @@ export class DeviceAppManager implements DeviceUrlLauncher {
 
       const result = await this.deps.hostControl.uninstallApp(deviceUdid, bundleId);
       if (!result.success) {
-        throw new Error(result.error || "Host control devicectl uninstall failed");
+        throw new ActionableError(
+          `Failed to uninstall ${bundleId} on physical device via host control: ${result.error || "unknown error"}`
+        );
       }
       return;
     }
@@ -652,7 +659,11 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       quoteShell(bundleId),
       "--quiet"
     ].join(" ");
-    await this.deps.exec(command);
+    try {
+      await this.deps.exec(command);
+    } catch (error) {
+      throw toActionableError(error, `Failed to uninstall ${bundleId} on physical iOS device`);
+    }
   }
 
   public async installApp(deviceUdid: string, artifactPath: string): Promise<void> {
@@ -660,18 +671,20 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       const available = await this.deps.hostControl.isAvailable();
       if (!available) {
         this.deps.logger.warn("[DeviceAppManager] Host control not available for devicectl install");
-        throw new Error("Host control not available for physical device app installation");
+        throw new ActionableError("Host control not available for physical device app installation");
       }
 
       const result = await this.deps.hostControl.installApp(deviceUdid, artifactPath);
       if (!result.success) {
-        throw new Error(result.error || "Host control devicectl install failed");
+        throw new ActionableError(
+          `Failed to install app on physical device via host control: ${result.error || "unknown error"}`
+        );
       }
       return;
     }
 
     if (this.deps.platform() !== "darwin") {
-      throw new Error("Physical device app installation requires macOS");
+      throw new ActionableError("Physical device app installation requires macOS");
     }
     const command = [
       "xcrun",
@@ -683,7 +696,11 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       quoteShell(artifactPath),
       "--quiet"
     ].join(" ");
-    await this.deps.exec(command);
+    try {
+      await this.deps.exec(command);
+    } catch (error) {
+      throw toActionableError(error, "Failed to install app on physical iOS device");
+    }
   }
 
   /**
@@ -776,14 +793,14 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    */
   public async terminateApp(deviceUdid: string, bundleId: string): Promise<{ wasInstalled: boolean; wasRunning: boolean }> {
     if (this.isHostControlMode()) {
-      throw new Error(
+      throw new ActionableError(
         `Terminating an app on a physical device is not supported under host control for ${bundleId}: ` +
         "the host-control bridge exposes install/uninstall but no devicectl process-management primitive."
       );
     }
 
     if (this.deps.platform() !== "darwin") {
-      throw new Error("Physical iOS device app termination requires macOS");
+      throw new ActionableError("Physical iOS device app termination requires macOS");
     }
 
     const bundlePath = await this.resolveInstalledBundlePathOnDevice(deviceUdid, bundleId);
@@ -818,7 +835,14 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       // already-exited case; any other failure (device locked, not connected)
       // still propagates. Log at debug since this is an expected non-error.
       if (!isDevicectlProcessGoneError(message)) {
-        throw error;
+        // Wrap in an ActionableError that carries the full exec diagnostic —
+        // devicectl writes its actionable failure text (e.g. "device is locked")
+        // to stderr, which getExecErrorText folds into `message`. A bare rethrow
+        // of `error` keeps stderr only on a non-enumerable field the MCP client
+        // never sees; a plain String(error) drops it entirely.
+        throw new ActionableError(
+          `Failed to terminate ${bundleId} (PID ${pid}) on physical iOS device: ${message}`
+        );
       }
       this.deps.logger.debug(
         `[DeviceAppManager] terminate PID ${pid} for ${bundleId} raced an exit; treating as terminated: ${message}`

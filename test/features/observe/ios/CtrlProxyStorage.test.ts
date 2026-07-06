@@ -74,10 +74,20 @@ describe("CtrlProxyStorage (iOS)", function() {
   ): Promise<void> => {
     if (!socket) {return;}
     for (let i = 0; i < 10; i++) {
-      if (socket.sentMessages.length >= minCount) {return;}
+      if (commandPayloads(socket).length >= minCount) {return;}
       await new Promise(r => setImmediate(r));
     }
   };
+
+  const syncMessageTypes = new Set([
+    "set_network_mock_rules",
+    "set_network_error_simulation",
+  ]);
+
+  const commandPayloads = (socket: CapturingWebSocket): any[] =>
+    socket.sentMessages
+      .map(message => JSON.parse(message))
+      .filter(payload => !syncMessageTypes.has(payload.type));
 
   // ---------------------------------------------------------------------------
   // listPreferenceFiles
@@ -95,7 +105,7 @@ describe("CtrlProxyStorage (iOS)", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("list_preference_files");
         expect(typeof sentMsg.requestId).toBe("string");
 
@@ -152,7 +162,7 @@ describe("CtrlProxyStorage (iOS)", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("get_preferences");
         expect(sentMsg.fileName).toBe("Standard");
 
@@ -194,7 +204,7 @@ describe("CtrlProxyStorage (iOS)", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("get_preference");
         expect(sentMsg.fileName).toBe("Standard");
         expect(sentMsg.key).toBe("theme");
@@ -230,7 +240,7 @@ describe("CtrlProxyStorage (iOS)", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
 
         socket!.simulateMessage(JSON.stringify({
           type: "get_preference_result",
@@ -263,7 +273,7 @@ describe("CtrlProxyStorage (iOS)", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("set_preference");
         expect(sentMsg.fileName).toBe("Standard");
         expect(sentMsg.key).toBe("theme");
@@ -293,7 +303,7 @@ describe("CtrlProxyStorage (iOS)", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
 
         socket!.simulateMessage(JSON.stringify({
           type: "set_preference_result",
@@ -325,7 +335,7 @@ describe("CtrlProxyStorage (iOS)", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("remove_preference");
         expect(sentMsg.fileName).toBe("Standard");
         expect(sentMsg.key).toBe("theme");
@@ -359,7 +369,7 @@ describe("CtrlProxyStorage (iOS)", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("clear_preferences");
         expect(sentMsg.fileName).toBe("com.example.settings");
 

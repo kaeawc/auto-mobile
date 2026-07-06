@@ -93,6 +93,7 @@ export class IOSCtrlProxyBuilder {
   private static prefetchResult: CtrlProxyIosBuildResult | null = null;
   private static prefetchError: Error | null = null;
   private static expectedChecksumOverride: string | null = null;
+  private static expectedRunnerChecksumOverride: string | null = null;
   private static timer: Timer = defaultTimer;
 
   // Singleton instances per configuration
@@ -156,6 +157,7 @@ export class IOSCtrlProxyBuilder {
     IOSCtrlProxyBuilder.prefetchResult = null;
     IOSCtrlProxyBuilder.prefetchError = null;
     IOSCtrlProxyBuilder.expectedChecksumOverride = null;
+    IOSCtrlProxyBuilder.expectedRunnerChecksumOverride = null;
     IOSCtrlProxyBuilder.timer = defaultTimer;
   }
 
@@ -171,6 +173,10 @@ export class IOSCtrlProxyBuilder {
    */
   public static setExpectedChecksumForTesting(checksum: string | null): void {
     IOSCtrlProxyBuilder.expectedChecksumOverride = checksum;
+  }
+
+  public static setExpectedRunnerChecksumForTesting(checksum: string | null): void {
+    IOSCtrlProxyBuilder.expectedRunnerChecksumOverride = checksum;
   }
 
   /**
@@ -676,6 +682,14 @@ export class IOSCtrlProxyBuilder {
     return resolveIpaChecksum();
   }
 
+  private getExpectedRunnerChecksum(): string {
+    const override = IOSCtrlProxyBuilder.expectedRunnerChecksumOverride;
+    if (override !== null) {
+      return override;
+    }
+    return resolveRunnerChecksum();
+  }
+
   public getExpectedAppHash(platform: IOSCtrlProxyPlatform): string {
     const envPlatform = platform.toUpperCase();
     // Check for platform-specific override first
@@ -924,7 +938,7 @@ export class IOSCtrlProxyBuilder {
 
     // Verify runner binary SHA256 for simulator (used by simctl spawn)
     if (platform === "simulator") {
-      const expectedRunnerSha256 = resolveRunnerChecksum();
+      const expectedRunnerSha256 = this.getExpectedRunnerChecksum();
       if (expectedRunnerSha256 && expectedRunnerSha256.length > 0) {
         const runnerBinaryPath = await this.getRunnerBinaryPath(platform);
         if (!runnerBinaryPath) {

@@ -147,6 +147,37 @@ final class CommandHandlerTests: XCTestCase {
         )
     }
 
+    func testSetNetworkErrorSimulationRelaysConfigToSdkClient() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher
+        )
+
+        let response = commandHandler.handle(WebSocketRequest.setNetworkErrorSimulation(RequestSetNetworkErrorSimulation(
+            requestId: "sim-sync-1",
+            enabled: true,
+            errorType: "timeout",
+            limit: 2,
+            expiresAtEpochMs: 1_720_000_000_000
+        )))
+
+        guard let typed = response as? SetNetworkErrorSimulationResponse else {
+            XCTFail("Expected SetNetworkErrorSimulationResponse, got \(Swift.type(of: response))")
+            return
+        }
+        XCTAssertEqual(typed.type, ResponseType.setNetworkErrorSimulationResult.rawValue)
+        XCTAssertEqual(typed.requestId, "sim-sync-1")
+        XCTAssertTrue(typed.ok)
+        XCTAssertEqual(fetcher.setNetworkErrorSimulationCallCount, 1)
+        XCTAssertEqual(fetcher.lastNetworkErrorSimulation?.enabled, true)
+        XCTAssertEqual(fetcher.lastNetworkErrorSimulation?.errorType, "timeout")
+        XCTAssertEqual(fetcher.lastNetworkErrorSimulation?.limit, 2)
+        XCTAssertEqual(fetcher.lastNetworkErrorSimulation?.expiresAtEpochMs, 1_720_000_000_000)
+    }
+
     // MARK: - Hierarchy Request Tests
 
     func testRequestHierarchyIncludesPerfTiming() {

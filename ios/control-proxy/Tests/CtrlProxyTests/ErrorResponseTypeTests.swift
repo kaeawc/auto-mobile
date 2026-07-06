@@ -47,6 +47,7 @@ final class ErrorResponseTypeTests: XCTestCase {
             .removePreference: .removePreferenceResult,
             .clearPreferences: .clearPreferencesResult,
             .setNetworkMockRules: .setNetworkMockRulesResult,
+            .setNetworkErrorSimulation: .setNetworkErrorSimulationResult,
             .executeSql: .executeSqlResult,
             .listDatabases: .listDatabasesResult,
             .listTables: .listTablesResult,

@@ -245,6 +245,20 @@ describe("decodeCtrlProxyMessage", () => {
     });
   }
 
+  test("set_network_error_simulation_result maps ok to success", () => {
+    const decoded = decodeCtrlProxyMessage(msg({
+      type: "set_network_error_simulation_result",
+      ok: true,
+      totalTimeMs: 7,
+    }));
+
+    expect(decoded?.result).toEqual({
+      success: true,
+      totalTimeMs: 7,
+      error: undefined,
+    });
+  });
+
   test("execute_sql_result carries query fields", () => {
     const decoded = decodeCtrlProxyMessage(msg({
       type: "execute_sql_result",

@@ -109,12 +109,22 @@ describe("IOSCtrlProxyClient", function() {
       return;
     }
     for (let attempt = 0; attempt < 10; attempt++) {
-      if (socket.sentMessages.length >= minCount) {
+      if (commandPayloads(socket).length >= minCount) {
         return;
       }
       await new Promise(resolve => setImmediate(resolve));
     }
   };
+
+  const syncMessageTypes = new Set([
+    "set_network_mock_rules",
+    "set_network_error_simulation",
+  ]);
+
+  const commandPayloads = (socket: CapturingWebSocket): any[] =>
+    socket.sentMessages
+      .map(message => JSON.parse(message))
+      .filter(payload => !syncMessageTypes.has(payload.type));
 
   const flushPromises = async (iterations: number = 3): Promise<void> => {
     for (let i = 0; i < iterations; i += 1) {
@@ -193,7 +203,11 @@ describe("IOSCtrlProxyClient", function() {
 
       (ctrlProxyClient as any).onConnectionEstablished();
 
-      expect(sentMessages).toHaveLength(1);
+      expect(sentMessages).toHaveLength(2);
+      expect(sentMessages.map(message => JSON.parse(message).type)).toEqual([
+        "set_network_mock_rules",
+        "set_network_error_simulation",
+      ]);
       expect(JSON.parse(sentMessages[0])).toEqual({
         type: "set_network_mock_rules",
         rules: [{
@@ -209,6 +223,171 @@ describe("IOSCtrlProxyClient", function() {
           contentType: "application/json",
         }],
       });
+      expect(JSON.parse(sentMessages[1])).toEqual({
+        type: "set_network_error_simulation",
+        enabled: false,
+      });
+    });
+
+    test("clears stale network error simulation when the connection (re)establishes without an active simulation", function() {
+      const sentMessages: string[] = [];
+
+      (ctrlProxyClient as any).sendMessage = (message: string) => {
+        sentMessages.push(message);
+        return true;
+      };
+      (ctrlProxyClient as any).startSdkEventPolling = () => { /* no-op */ };
+      (ctrlProxyClient as any).startScreenshotBackoff = () => { /* no-op */ };
+
+      (ctrlProxyClient as any).onConnectionEstablished();
+
+      expect(sentMessages).toHaveLength(1);
+      expect(JSON.parse(sentMessages[0])).toEqual({
+        type: "set_network_error_simulation",
+        enabled: false,
+      });
+    });
+
+    test("does not sync network error simulation to stale runners without command support", function() {
+      const sentMessages: string[] = [];
+
+      (ctrlProxyClient as any).supportedCommands = new Set(["set_network_mock_rules"]);
+      (ctrlProxyClient as any).sendMessage = (message: string) => {
+        sentMessages.push(message);
+        return true;
+      };
+      (ctrlProxyClient as any).startSdkEventPolling = () => { /* no-op */ };
+      (ctrlProxyClient as any).startScreenshotBackoff = () => { /* no-op */ };
+
+      (ctrlProxyClient as any).onConnectionEstablished();
+
+      expect(sentMessages.map(message => JSON.parse(message).type)).not.toContain("set_network_error_simulation");
+    });
+
+    test("syncs active network error simulation when the connection (re)establishes", function() {
+      const state = NetworkState.getInstance();
+      state.startSimulation("tlsFailure", 20, 4);
+      const sentMessages: string[] = [];
+
+      (ctrlProxyClient as any).sendMessage = (message: string) => {
+        sentMessages.push(message);
+        return true;
+      };
+      (ctrlProxyClient as any).startSdkEventPolling = () => { /* no-op */ };
+      (ctrlProxyClient as any).startScreenshotBackoff = () => { /* no-op */ };
+
+      (ctrlProxyClient as any).onConnectionEstablished();
+
+      expect(sentMessages).toHaveLength(1);
+      expect(JSON.parse(sentMessages[0])).toEqual({
+        type: "set_network_error_simulation",
+        enabled: true,
+        errorType: "tlsFailure",
+        limit: 4,
+        expiresAtEpochMs: expect.any(Number),
+      });
+    });
+  });
+
+  describe("setNetworkErrorSimulation", function() {
+    test("sends capability-gated request and resolves runner acknowledgement", async function() {
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          supportedCommands: ["set_network_error_simulation"],
+        }));
+
+        const resultPromise = testClient.setNetworkErrorSimulation({
+          enabled: true,
+          errorType: "timeout",
+          limit: 2,
+          expiresAtEpochMs: 1_720_000_000_000,
+        });
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          if (socket!.sentMessages.some(message => {
+            const payload = JSON.parse(message);
+            return payload.type === "set_network_error_simulation" && payload.requestId !== undefined;
+          })) {
+            break;
+          }
+          await new Promise(resolve => setImmediate(resolve));
+        }
+        const sentMessage = socket!.sentMessages
+          .map(message => JSON.parse(message))
+          .find(message => message.type === "set_network_error_simulation" && message.requestId !== undefined);
+        expect(sentMessage).toEqual({
+          type: "set_network_error_simulation",
+          requestId: expect.any(String),
+          enabled: true,
+          errorType: "timeout",
+          limit: 2,
+          expiresAtEpochMs: 1_720_000_000_000,
+        });
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "set_network_error_simulation_result",
+          requestId: sentMessage.requestId,
+          ok: true,
+          totalTimeMs: 4,
+        }));
+
+        expect(await resultPromise).toEqual({
+          success: true,
+          totalTimeMs: 4,
+          error: undefined,
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("fails without sending when the runner does not advertise network error simulation", async function() {
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          supportedCommands: ["request_recent_apps"],
+        }));
+
+        const result = await testClient.setNetworkErrorSimulation({
+          enabled: true,
+          errorType: "timeout",
+          limit: null,
+          expiresAtEpochMs: 1_720_000_000_000,
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.totalTimeMs).toBe(0);
+        expect(result.error).toContain("does not support set_network_error_simulation");
+        expect(commandPayloads(socket!)).toHaveLength(0);
+      } finally {
+        await testClient.close();
+      }
     });
   });
 
@@ -251,7 +430,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSentMessages(socket, 1);
 
         // Parse sent message to get requestId
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_hierarchy_if_stale");
 
         // Respond with matching requestId
@@ -309,7 +488,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_hierarchy_if_stale");
         expect(suppressionIds()).toEqual([sentMessage.requestId]);
 
@@ -547,7 +726,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSentMessages(socket, 1);
 
         // Parse sent message to get requestId
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_swipe");
         expect(sentMessage.x1).toBe(100);
         expect(sentMessage.y1).toBe(200);
@@ -611,7 +790,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_tap_coordinates");
         expect(sentMessage.x).toBe(150);
         expect(sentMessage.y).toBe(300);
@@ -651,7 +830,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_set_text");
         expect(sentMessage.text).toBe("Hello World");
         expect(sentMessage.resourceId).toBe("text_field_1");
@@ -761,7 +940,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const payload = JSON.parse(socket!.sentMessages[0]);
+        const payload = commandPayloads(socket!)[0];
         socket!.simulateMessage(JSON.stringify({
           type: "highlight_response",
           requestId: payload.requestId,
@@ -794,7 +973,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_screenshot");
 
         const fakeBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
@@ -835,7 +1014,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_ime_action");
         expect(sentMessage.action).toBe("done");
 
@@ -875,7 +1054,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_keyboard");
         expect(sentMessage.action).toBe("detect");
 
@@ -924,7 +1103,7 @@ describe("IOSCtrlProxyClient", function() {
         expect(result.open).toBe(false);
         expect(result.error).toContain("does not support request_keyboard");
         expect(result.error).toContain("out of sync");
-        expect(socket!.sentMessages).toHaveLength(0);
+        expect(commandPayloads(socket!)).toHaveLength(0);
       } finally {
         await testClient.close();
       }
@@ -981,7 +1160,7 @@ describe("IOSCtrlProxyClient", function() {
         expect(voiceOver.totalTimeMs).toBe(0);
         expect(voiceOver.error).toContain("does not support get_voiceover_state");
 
-        expect(socket!.sentMessages).toHaveLength(0);
+        expect(commandPayloads(socket!)).toHaveLength(0);
       } finally {
         await testClient.close();
       }
@@ -1092,7 +1271,7 @@ describe("IOSCtrlProxyClient", function() {
 
         const keyboardPromise = testClient.requestKeyboard("detect", 5000);
         await waitForSentMessages(socket as CapturingWebSocket, 1);
-        const keyboardMessage = JSON.parse(socket!.sentMessages[0]);
+        const keyboardMessage = commandPayloads(socket!)[0];
         socket!.simulateMessage(JSON.stringify({
           type: "error",
           requestId: keyboardMessage.requestId,
@@ -1106,7 +1285,7 @@ describe("IOSCtrlProxyClient", function() {
 
         const imeActionPromise = testClient.requestImeAction("done", 5000);
         await waitForSentMessages(socket as CapturingWebSocket, 2);
-        const imeActionMessage = JSON.parse(socket!.sentMessages[1]);
+        const imeActionMessage = commandPayloads(socket!)[1];
         socket!.simulateMessage(JSON.stringify({
           type: "error",
           requestId: imeActionMessage.requestId,
@@ -1120,7 +1299,7 @@ describe("IOSCtrlProxyClient", function() {
 
         const rotatePromise = testClient.requestRotate("landscape", 5000);
         await waitForSentMessages(socket as CapturingWebSocket, 3);
-        const rotateMessage = JSON.parse(socket!.sentMessages[2]);
+        const rotateMessage = commandPayloads(socket!)[2];
         socket!.simulateMessage(JSON.stringify({
           type: "error",
           requestId: rotateMessage.requestId,
@@ -1137,7 +1316,7 @@ describe("IOSCtrlProxyClient", function() {
 
         const clipboardPromise = testClient.requestClipboard("get", undefined, 5000);
         await waitForSentMessages(socket as CapturingWebSocket, 4);
-        const clipboardMessage = JSON.parse(socket!.sentMessages[3]);
+        const clipboardMessage = commandPayloads(socket!)[3];
         socket!.simulateMessage(JSON.stringify({
           type: "error",
           requestId: clipboardMessage.requestId,
@@ -1173,7 +1352,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_recent_apps");
 
         socket!.simulateMessage(JSON.stringify({
@@ -1210,7 +1389,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_shake");
 
         socket!.simulateMessage(JSON.stringify({
@@ -1247,7 +1426,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_launch_app");
         expect(sentMessage.bundleId).toBe("com.apple.Preferences");
 
@@ -1286,7 +1465,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_press_back");
 
         socket!.simulateMessage(JSON.stringify({
@@ -1322,7 +1501,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_press_back");
 
         socket!.simulateMessage(JSON.stringify({
@@ -1362,7 +1541,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_press_button");
         expect(sentMessage.action).toBe("volume_up");
 
@@ -1581,7 +1760,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_clear_text");
         expect(sentMessage.resourceId).toBeUndefined();
 
@@ -1617,7 +1796,7 @@ describe("IOSCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        const sentMessage = commandPayloads(socket!)[0];
         expect(sentMessage.type).toBe("request_clear_text");
         expect(sentMessage.resourceId).toBe("com.app:id/email_field");
 

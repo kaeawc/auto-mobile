@@ -118,6 +118,7 @@ export interface WebSocketMessage {
   performanceData?: CtrlProxyPerformanceSnapshot;
   format?: string;
   success?: boolean;
+  ok?: boolean;
   open?: boolean;
   totalTimeMs?: number;
   error?: string;

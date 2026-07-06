@@ -32,6 +32,7 @@ describe("IOSCtrlProxyBuilder", function() {
 
     // Reset singleton instances
     IOSCtrlProxyBuilder.resetInstances();
+    IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("");
   });
 
   afterEach(async function() {
@@ -721,6 +722,7 @@ describe("IOSCtrlProxyBuilder", function() {
 
       IOSCtrlProxyBuilder.resetInstances();
       IOSCtrlProxyBuilder.setExpectedChecksumForTesting("");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("");
       const builder = IOSCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,

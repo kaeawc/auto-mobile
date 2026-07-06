@@ -183,6 +183,9 @@ public class CommandHandler: CommandHandling {
             case let .setNetworkMockRules(payload):
                 return try handleSetNetworkMockRules(payload, startTime: startTime)
 
+            case let .setNetworkErrorSimulation(payload):
+                return try handleSetNetworkErrorSimulation(payload, startTime: startTime)
+
             // Database commands
             case let .executeSql(payload):
                 return handleExecuteSql(payload, startTime: startTime)
@@ -219,6 +222,26 @@ public class CommandHandler: CommandHandling {
     {
         let succeeded = sdkHierarchyClient?.setMockRules(request.rules) ?? false
         return SetNetworkMockRulesResponse(
+            requestId: request.requestId,
+            ok: succeeded,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleSetNetworkErrorSimulation(
+        _ request: RequestSetNetworkErrorSimulation,
+        startTime: Date
+    )
+        throws -> SetNetworkErrorSimulationResponse
+    {
+        let config = NetworkErrorSimulationDTO(
+            enabled: request.enabled,
+            errorType: request.errorType,
+            limit: request.limit,
+            expiresAtEpochMs: request.expiresAtEpochMs
+        )
+        let succeeded = sdkHierarchyClient?.setNetworkErrorSimulation(config) ?? false
+        return SetNetworkErrorSimulationResponse(
             requestId: request.requestId,
             ok: succeeded,
             totalTimeMs: totalTimeMs(from: startTime)

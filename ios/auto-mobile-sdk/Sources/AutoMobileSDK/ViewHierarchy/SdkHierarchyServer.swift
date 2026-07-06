@@ -113,6 +113,8 @@ final class SdkHierarchyServer: @unchecked Sendable {
                     self.handleHealth(connection)
                 } else if request.contains("POST /network/mock") {
                     self.handleNetworkMock(connection, initialData: requestData)
+                } else if request.contains("POST /network/error-simulation") {
+                    self.handleNetworkErrorSimulation(connection, initialData: requestData)
                 } else if request.contains("POST /highlight") {
                     self.handleHighlight(connection, initialData: requestData)
                 } else if request.contains("POST /db/execute") {
@@ -187,6 +189,22 @@ final class SdkHierarchyServer: @unchecked Sendable {
                 return
             }
             NetworkMockRuleStore.shared.setRules(payload.rules)
+            self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+        }
+    }
+
+    private func handleNetworkErrorSimulation(_ connection: NWConnection, initialData: Data) {
+        readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
+            guard let self = self else {
+                connection.cancel()
+                return
+            }
+            guard let body = body,
+                  let payload = try? JSONDecoder().decode(NetworkErrorSimulationDTO.self, from: body) else {
+                self.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+                return
+            }
+            NetworkMockRuleStore.shared.setErrorSimulation(payload)
             self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
         }
     }

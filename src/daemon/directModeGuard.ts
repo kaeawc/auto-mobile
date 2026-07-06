@@ -11,12 +11,17 @@ import type { PidFileData } from "./types";
  * A live daemon process paired with the resolved SQLite file it owns.
  *
  * `dbPath` is `undefined` when we cannot determine which DB file the daemon
- * owns — most importantly a daemon that is still starting up (`Daemon.start()`
- * opens and migrates the DB seconds before it records its `dbPath` in the PID
- * file), or one using a non-default PID file. Such a daemon could be about to
+ * owns — e.g. one using a non-default PID file. Such a daemon could be about to
  * write this very file, so the guard fails CLOSED on it (refuses) rather than
  * silently assuming no collision. A daemon with a KNOWN, different `dbPath`
  * still never matches, so the `AUTOMOBILE_DB_PATH` escape hatch is preserved.
+ *
+ * As of #2871 a daemon that is still starting up is NO LONGER a source of an
+ * unknown path: `Daemon.start()` publishes its resolved `dbPath` in the PID file
+ * (`writeEarlyOwnerRecord`) BEFORE it opens the DB, so any daemon that has opened
+ * the DB always exposes a resolvable `dbPath`. That turns the transient
+ * mid-startup over-refusal (an isolated-path launch refused during the daemon's
+ * multi-second bring-up) into a precise same-file check.
  */
 export interface DaemonDbOwner {
   pid: number;
@@ -122,11 +127,12 @@ export function assertDirectModeDbOwnership(deps: DirectModeGuardDeps): void {
   }
 
   // Fail closed on uncertainty. A live daemon whose owned DB path can't be
-  // determined may be mid-startup — it opens and migrates the DB seconds before
-  // it records `dbPath` (daemon.ts opens at start(), writes the PID file only
-  // after device discovery) — so it could be about to write this same file.
-  // Refuse rather than risk a second writer. The residual TOCTOU (a daemon that
-  // opens the DB immediately after this check) is #2794's owner-lock.
+  // determined (e.g. using a non-default PID file) could be about to write this
+  // same file, so refuse rather than risk a second writer. Note: as of #2871 a
+  // mid-startup daemon publishes its `dbPath` BEFORE opening the DB
+  // (writeEarlyOwnerRecord), so it is no longer surfaced as unknown-path here.
+  // The residual TOCTOU (a daemon that opens the DB immediately after this
+  // check) is covered by the migration cross-process lock (#2794).
   const unverifiable = owners.filter(owner => owner.dbPath === undefined);
   if (unverifiable.length > 0) {
     const pids = unverifiable.map(owner => owner.pid).join(", ");
@@ -209,11 +215,12 @@ export function createDefaultDirectModeGuardDeps(
 
       const unresolved = livePids.filter(pid => !resolvedPids.has(pid));
       if (unresolved.length > 0) {
-        // These live daemons don't match the default PID file — most importantly
-        // one still starting up (its `dbPath` isn't recorded until after device
-        // discovery), or one using a custom AUTOMOBILE_DAEMON_PID_FILE_PATH. We
-        // can't learn which DB file they own, so they're surfaced with an unknown
-        // path; the guard fails CLOSED on them (assertDirectModeDbOwnership).
+        // These live daemons don't match the default PID file — e.g. one using a
+        // custom AUTOMOBILE_DAEMON_PID_FILE_PATH. (A daemon still starting up now
+        // publishes its `dbPath` early via writeEarlyOwnerRecord (#2871), so it
+        // resolves above rather than landing here.) We can't learn which DB file
+        // these own, so they're surfaced with an unknown path; the guard fails
+        // CLOSED on them (assertDirectModeDbOwnership).
         // Trace it so the refusal is diagnosable. Reading every daemon's PID file
         // for a definitive per-file answer is #2794's owner-lock.
         logger.debug(

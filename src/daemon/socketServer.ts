@@ -927,7 +927,7 @@ export class UnixSocketServer {
         });
       }
 
-      return await new PressButton(targetDevice).press(args.button);
+      return await new PressButton(targetDevice).press(args.button, remainingTimeoutMs);
     });
 
     if (!buttonResult.success) {

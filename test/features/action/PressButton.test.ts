@@ -94,6 +94,51 @@ describe("PressButton", () => {
     }
   });
 
+  test("android ADB keyevent honors the caller timeout budget", async () => {
+    const androidDevice: BootedDevice = {
+      deviceId: "android-device",
+      platform: "android",
+      name: "Pixel"
+    };
+
+    const capturedTimeouts: (number | undefined)[] = [];
+    const fakeAdb = {
+      executeCommand: async (_command: string, timeoutMs?: number) => {
+        capturedTimeouts.push(timeoutMs);
+        return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
+      }
+    } as any;
+
+    // "menu" is not a global-action button, so it goes straight to the ADB keyevent path.
+    const pressButton = new PressButton(androidDevice, fakeAdb);
+    const result = await pressButton.press("menu", 500);
+
+    expect(result.success).toBe(true);
+    expect(capturedTimeouts).toEqual([500]);
+  });
+
+  test("android ADB keyevent leaves timeout unset when no budget is given", async () => {
+    const androidDevice: BootedDevice = {
+      deviceId: "android-device",
+      platform: "android",
+      name: "Pixel"
+    };
+
+    const capturedTimeouts: (number | undefined)[] = [];
+    const fakeAdb = {
+      executeCommand: async (_command: string, timeoutMs?: number) => {
+        capturedTimeouts.push(timeoutMs);
+        return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
+      }
+    } as any;
+
+    const pressButton = new PressButton(androidDevice, fakeAdb);
+    const result = await pressButton.press("menu");
+
+    expect(result.success).toBe(true);
+    expect(capturedTimeouts).toEqual([undefined]);
+  });
+
   test("ios menu remains unsupported", async () => {
     const pressButton = new PressButton(iosDevice);
     const result = await (pressButton as any).executeiOSButtonPress("menu");
@@ -148,6 +193,56 @@ describe("PressButton", () => {
       }
 
       expect(getInstanceSpy).not.toHaveBeenCalled();
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios press threads the caller timeout budget into the runner", async () => {
+    const homeTimeouts: (number | undefined)[] = [];
+    const buttonTimeouts: (number | undefined)[] = [];
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPressBack: async () => ({ success: true, totalTimeMs: 5 }),
+      requestPressHome: async (timeoutMs?: number) => {
+        homeTimeouts.push(timeoutMs);
+        return { success: true, totalTimeMs: 5 };
+      },
+      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 }),
+      requestPressButton: async (_button: string, timeoutMs?: number) => {
+        buttonTimeouts.push(timeoutMs);
+        return { success: true, totalTimeMs: 5 };
+      }
+    } as any);
+
+    try {
+      const pressButton = new PressButton(iosDevice);
+
+      await pressButton.press("home", 500);
+      await pressButton.press("volume_up", 750);
+
+      expect(homeTimeouts).toEqual([500]);
+      expect(buttonTimeouts).toEqual([750]);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios press without a budget leaves runner defaults untouched", async () => {
+    const homeTimeouts: (number | undefined)[] = [];
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPressBack: async () => ({ success: true, totalTimeMs: 5 }),
+      requestPressHome: async (timeoutMs?: number) => {
+        homeTimeouts.push(timeoutMs);
+        return { success: true, totalTimeMs: 5 };
+      },
+      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 })
+    } as any);
+
+    try {
+      const pressButton = new PressButton(iosDevice);
+      await pressButton.press("home");
+
+      expect(homeTimeouts).toEqual([undefined]);
     } finally {
       getInstanceSpy.mockRestore();
     }

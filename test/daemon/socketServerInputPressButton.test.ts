@@ -223,7 +223,7 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "volume_up",
     });
-    expect(press).toHaveBeenCalledWith("volume_up");
+    expect(press).toHaveBeenCalledWith("volume_up", expect.any(Number));
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
@@ -252,7 +252,35 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "home",
     });
-    expect(press).toHaveBeenCalledWith("home");
+    expect(press).toHaveBeenCalledWith("home", expect.any(Number));
+  });
+
+  test("threads the client-supplied timeout budget into the button implementation", async () => {
+    const press = mock(async (button: string): Promise<PressButtonResult> => ({
+      success: true,
+      button,
+      keyCode: -1,
+    }));
+    PressButton.prototype.press = press;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    // With the FakeTimer no wall-clock elapses in the queue, so the remaining
+    // budget threaded into press() equals the client's requested timeout.
+    const response = await sendRequest(
+      socketPath,
+      "input/pressButton",
+      {
+        platform: "ios",
+        deviceId: "ios-sim-1",
+        button: "home",
+      },
+      500
+    );
+
+    expect(response.success).toBe(true);
+    expect(press).toHaveBeenCalledWith("home", 500);
   });
 
   test("maps the socket app_switch contract name to the existing recent button implementation", async () => {
@@ -280,7 +308,7 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "app_switch",
     });
-    expect(press).toHaveBeenCalledWith("recent");
+    expect(press).toHaveBeenCalledWith("recent", expect.any(Number));
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
@@ -321,7 +349,7 @@ describe("UnixSocketServer input/pressButton", () => {
       deviceId: "emulator-5554",
       button: "back",
     });
-    expect(press).toHaveBeenCalledWith("back");
+    expect(press).toHaveBeenCalledWith("back", expect.any(Number));
   });
 
   test("propagates clear unsupported platform-gap errors from the button implementation", async () => {
@@ -344,7 +372,7 @@ describe("UnixSocketServer input/pressButton", () => {
 
     expect(response.success).toBe(false);
     expect(response.error).toBe("iOS has no menu hardware button");
-    expect(press).toHaveBeenCalledWith("menu");
+    expect(press).toHaveBeenCalledWith("menu", expect.any(Number));
   });
 
   test("accepts enter as a socket contract button and reports the current platform unsupported result", async () => {
@@ -367,7 +395,7 @@ describe("UnixSocketServer input/pressButton", () => {
 
     expect(response.success).toBe(false);
     expect(response.error).toBe("Unsupported button: enter");
-    expect(press).toHaveBeenCalledWith("enter");
+    expect(press).toHaveBeenCalledWith("enter", expect.any(Number));
   });
 
   test("rejects missing, non-string, and unsupported button values with actionable errors", async () => {

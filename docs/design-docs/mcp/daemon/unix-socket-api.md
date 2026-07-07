@@ -11,6 +11,13 @@ The AutoMobile daemon exposes a Unix socket for IDE plugins and CLI clients to c
 ```
 
 The path can be overridden via the `AUTOMOBILE_DAEMON_SOCKET_PATH` or `AUTO_MOBILE_DAEMON_SOCKET_PATH` environment variables.
+Consumers that launch the daemon themselves should pass one of those environment
+variables to both the daemon and their client. Consumers attaching to the default
+daemon can derive the path from the current user ID:
+
+```bash
+export AUTOMOBILE_DAEMON_SOCKET_PATH="/tmp/auto-mobile-daemon-$(id -u).sock"
+```
 
 ## Protocol
 
@@ -265,9 +272,16 @@ socket protocol and response envelope as the rest of this page, but they are
 purpose-built for coordinate, text, and button input instead of requiring
 clients to construct ad hoc MCP `tools/call` payloads.
 
+Use the `input/*` methods for direct consumer input from IDE plugins, CLI
+clients, screen mirrors, and test recorders. Use `tools/call` as a fallback for
+non-input MCP tools, advanced agent workflows that need an MCP-only tool, or
+temporary access to behavior that does not yet have a direct daemon input
+method.
+
 IDE screen control must call these `input/*` socket methods. It must not bypass
 this contract by invoking MCP tool payloads directly for tap, swipe, text, or
-button input.
+button input. See [Screen Streaming](../observe/screen-streaming.md) for the
+future IDE mirroring/control surface that consumes this API.
 
 ### Common input fields
 
@@ -286,10 +300,10 @@ may target the only booted device matching `platform`. If more than one matching
 device is available, the request fails and the caller must retry with an
 explicit `deviceId`.
 
-Input responses return the action result only. They do not include a fresh
-observation and do not implicitly trigger one. Callers that need post-input
-state should call `observe` through the MCP proxy or subscribe to the observation
-stream after the input response returns.
+Input responses do not include a fresh observation or implicitly trigger one;
+they return the action result only. Callers that need post-input state should
+call `observe` through the MCP proxy or subscribe to the observation stream after
+the input response returns.
 
 ### Implementation status
 
@@ -318,12 +332,53 @@ socket response envelope:
 
 ```json
 {
-  "id": "tap-1",
+  "id": "key-ios-1",
   "type": "mcp_response",
   "success": false,
-  "error": "Unsupported input action input/key on ios"
+  "error": "input/key is unsupported on ios; CtrlProxy does not expose discrete key events"
 }
 ```
+
+### Copy-paste raw socket examples
+
+The examples below send one newline-delimited JSON request over the Unix socket.
+They use the default socket path; replace `platform`, `deviceId`, and coordinates
+with values from your device discovery flow. The short `nc -w` timeout keeps
+these one-shot examples from staying attached to the daemon's long-lived socket
+after the response frame is printed.
+
+```bash
+export AUTOMOBILE_DAEMON_SOCKET_PATH="${AUTOMOBILE_DAEMON_SOCKET_PATH:-/tmp/auto-mobile-daemon-$(id -u).sock}"
+
+printf '%s\n' '{"id":"tap-1","type":"mcp_request","method":"input/tap","params":{"platform":"android","deviceId":"emulator-5554","x":240,"y":640,"duration":50}}' \
+  | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
+
+printf '%s\n' '{"id":"swipe-1","type":"mcp_request","method":"input/swipe","params":{"platform":"android","deviceId":"emulator-5554","startX":520,"startY":1700,"endX":520,"endY":500,"durationMs":350}}' \
+  | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
+
+printf '%s\n' '{"id":"button-1","type":"mcp_request","method":"input/pressButton","params":{"platform":"android","deviceId":"emulator-5554","button":"back"}}' \
+  | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
+
+printf '%s\n' '{"id":"type-1","type":"mcp_request","method":"input/typeText","params":{"platform":"android","deviceId":"emulator-5554","text":"hello from socket","submit":false}}' \
+  | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
+
+printf '%s\n' '{"id":"key-1","type":"mcp_request","method":"input/key","params":{"platform":"android","deviceId":"emulator-5554","key":"enter"}}' \
+  | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
+```
+
+Example success responses:
+
+```json
+{ "id": "tap-1", "type": "mcp_response", "success": true, "result": { "action": "input/tap", "platform": "android", "deviceId": "emulator-5554", "success": true, "coordinates": { "x": 240, "y": 640 } } }
+{ "id": "swipe-1", "type": "mcp_response", "success": true, "result": { "action": "input/swipe", "platform": "android", "deviceId": "emulator-5554", "success": true, "start": { "x": 520, "y": 1700 }, "end": { "x": 520, "y": 500 }, "durationMs": 350 } }
+{ "id": "button-1", "type": "mcp_response", "success": true, "result": { "action": "input/pressButton", "platform": "android", "deviceId": "emulator-5554", "success": true, "button": "back" } }
+{ "id": "type-1", "type": "mcp_response", "success": true, "result": { "action": "input/typeText", "platform": "android", "deviceId": "emulator-5554", "success": true, "textLength": 17, "submitted": false } }
+{ "id": "key-1", "type": "mcp_response", "success": true, "result": { "action": "input/key", "platform": "android", "deviceId": "emulator-5554", "success": true, "key": "enter" } }
+```
+
+The socket returns exactly one response per request. If the request times out,
+the envelope has `success: false`; treat that response as authoritative and
+re-observe device state before assuming the input landed.
 
 ### `input/tap`
 

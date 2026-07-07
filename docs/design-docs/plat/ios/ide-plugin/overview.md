@@ -12,6 +12,8 @@ Xcode does not support the rich plugin APIs available in Android Studio. The clo
 parity is a companion macOS app plus an Xcode Source Editor Extension (XcodeKit).
 This approach provides UI parity with the Android IDE plugin while staying within
 supported Apple tooling.
+Future interactive screen control should use the [daemon input API](../../../mcp/daemon/unix-socket-api.md#input-api)
+for tap, swipe, text, and button input over the daemon socket.
 
 ## Components
 

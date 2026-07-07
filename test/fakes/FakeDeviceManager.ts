@@ -6,6 +6,7 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   deviceImages: DeviceInfo[] = [];
   bootedDevices: BootedDevice[] = [];
   startedDevices: DeviceInfo[] = [];
+  startDeviceTimeouts: Array<number | undefined> = [];
   // Platforms whose discovery should report as failed/unavailable (used to
   // exercise partial-discovery handling). Defaults to all platforms succeeding.
   failedPlatforms: Set<Platform> = new Set();
@@ -51,8 +52,9 @@ export class FakeDeviceManager implements PlatformDeviceManager {
     return { devices, succeededPlatforms };
   }
 
-  async startDevice(device: DeviceInfo): Promise<ChildProcess> {
+  async startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess> {
     this.startedDevices.push(device);
+    this.startDeviceTimeouts.push(timeoutMs);
     const id = device.deviceId ?? device.name;
     const alreadyBooted = this.bootedDevices.some(booted => booted.deviceId === id);
     if (!alreadyBooted) {

@@ -6,6 +6,8 @@ import { SimCtlClient, DOCKER_IOS_UNSUPPORTED_MESSAGE } from "./ios-cmdline-tool
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import { logger } from "./logger";
 
+export const DEFAULT_DEVICE_READY_TIMEOUT_MS = 120000;
+
 /**
  * Result of a discovery sweep that distinguishes per-platform success.
  *
@@ -60,7 +62,7 @@ export interface PlatformDeviceManager {
    * @param device - The device to start
    * @returns Promise with the spawned child process for the running device
    */
-  startDevice(device: DeviceInfo): Promise<ChildProcess>;
+  startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess>;
 
   /**
    * Kill/terminate a running device
@@ -263,7 +265,8 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * @returns Promise with the spawned child process
    */
   async startDevice(
-    device: DeviceInfo
+    device: DeviceInfo,
+    timeoutMs?: number,
   ): Promise<ChildProcess> {
     const isRunning = await this.isDeviceImageRunning(device);
     if (isRunning) {
@@ -276,7 +279,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.startEmulator(device.name);
       case "ios":
-        return this.simctl.startSimulator(device.deviceId ?? device.name);
+        return this.simctl.startSimulator(device.deviceId ?? device.name, timeoutMs);
       default:
         throw new ActionableError("Unknown platform");
     }
@@ -306,7 +309,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    */
   async waitForDeviceReady(
     device: DeviceInfo,
-    timeoutMs: number = 120000,
+    timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
     childProcess?: ChildProcess | null,
   ): Promise<BootedDevice> {
     switch (device.platform) {

@@ -86,7 +86,21 @@ const waitForContainerForFinder = (
     : { text: waitFor.container.text };
 };
 
-const findWaitForElement = (
+const isElementCenterOffScreen = (
+  element: Element,
+  viewHierarchy: ViewHierarchyResult
+): boolean => {
+  if (!viewHierarchy.screenWidth || !viewHierarchy.screenHeight || !element.bounds) {
+    return false;
+  }
+
+  const centerX = (element.bounds.left + element.bounds.right) / 2;
+  const centerY = (element.bounds.top + element.bounds.bottom) / 2;
+  return centerX < 0 || centerX > viewHierarchy.screenWidth ||
+    centerY < 0 || centerY > viewHierarchy.screenHeight;
+};
+
+export const findWaitForElement = (
   finder: ElementFinder,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult
@@ -121,6 +135,9 @@ const findWaitForElement = (
         false
       );
       if (element) {
+        if (isElementCenterOffScreen(element, viewHierarchy)) {
+          continue;
+        }
         return element;
       }
     }

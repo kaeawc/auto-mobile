@@ -203,6 +203,28 @@ describe("TapOnElement extended selectors", () => {
       expect(selector.lastText).toBe("Add");
     });
 
+    test("textAny returns no element when every matched variant is off-screen", () => {
+      const doneElement = makeElement({ left: -300, top: 0, right: -200, bottom: 50 });
+      const addElement = makeElement({ left: 220, top: 20, right: 320, bottom: 70 });
+      class VariantSelector extends FakeElementSelector {
+        override selectByText(...args: Parameters<FakeElementSelector["selectByText"]>) {
+          this.setNextElement(args[1] === "Done" ? doneElement : addElement);
+          return super.selectByText(...args);
+        }
+      }
+      const selector = new VariantSelector(null);
+      const tapOn = createTapOnElement(selector);
+
+      const result = (tapOn as any).findElementInHierarchy(
+        { textAny: ["Done", "Add"], action: "tap" },
+        { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 }
+      );
+
+      expect(result.selection.element).toBeNull();
+      expect(selector.textCalls).toEqual(["Done", "Add"]);
+      expect(selector.lastText).toBe("Add");
+    });
+
     test("sibling respects selectionStrategy", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);

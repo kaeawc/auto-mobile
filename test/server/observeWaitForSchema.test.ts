@@ -1,5 +1,28 @@
 import { describe, expect, test } from "bun:test";
-import { observeSchema } from "../../src/server/observeTools";
+import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
+import type { ViewHierarchyResult } from "../../src/models";
+import { findWaitForElement, observeSchema } from "../../src/server/observeTools";
+
+const bounds = (left: number, top: number, right: number, bottom: number) => ({
+  left,
+  top,
+  right,
+  bottom,
+});
+
+const makeHierarchy = (
+  nodes: unknown[],
+  screenSize = { width: 200, height: 200 }
+): ViewHierarchyResult => ({
+  hierarchy: {
+    node: {
+      $: { bounds: bounds(0, 0, screenSize.width, screenSize.height) },
+      node: nodes,
+    },
+  },
+  screenWidth: screenSize.width,
+  screenHeight: screenSize.height,
+});
 
 describe("observeSchema waitFor.container", () => {
   test("accepts elementId waitFor with container elementId", () => {
@@ -92,5 +115,40 @@ describe("observeSchema waitFor.container", () => {
         },
       })
     ).toThrow();
+  });
+});
+
+describe("findWaitForElement textAny", () => {
+  test("skips off-screen earlier variants when a later variant is visible", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      { $: { text: "Done", bounds: bounds(-300, 0, -200, 50) } },
+      { $: { text: "Add", bounds: bounds(20, 20, 120, 70) } },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      { textAny: ["Done", "Add"] },
+      hierarchy
+    );
+
+    expect(element?.text).toBe("Add");
+    expect(element?.bounds).toEqual(bounds(20, 20, 120, 70));
+  });
+
+  test("returns null when every matched variant is off-screen", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      { $: { text: "Done", bounds: bounds(-300, 0, -200, 50) } },
+      { $: { text: "Add", bounds: bounds(220, 20, 320, 70) } },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      { textAny: ["Done", "Add"] },
+      hierarchy
+    );
+
+    expect(element).toBeNull();
   });
 });

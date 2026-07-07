@@ -332,6 +332,7 @@ export class TapOnElement extends BaseVisualChange {
 
     if (options.textAny) {
       let lastSelection: ElementSelectionResult | null = null;
+      let offScreenSelection: ElementSelectionResult | null = null;
       const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
       for (const text of options.textAny) {
         const selection = options.sibling
@@ -350,10 +351,18 @@ export class TapOnElement extends BaseVisualChange {
         lastSelection = selection;
         if (selection.element) {
           if (this.isElementCenterOffScreen(selection.element, screenSize)) {
+            offScreenSelection = selection;
             continue;
           }
           return { selection, containerFound };
         }
+      }
+
+      if (offScreenSelection) {
+        return {
+          selection: { ...offScreenSelection, element: null },
+          containerFound
+        };
       }
 
       if (lastSelection) {

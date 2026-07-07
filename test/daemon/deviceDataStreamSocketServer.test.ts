@@ -638,6 +638,12 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
     });
 
+    it("uses a caller-provided hierarchy fallback when subscribers omit cadence", () => {
+      server.simulateSubscription({ deviceId: "device-1" });
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1", 250)).toBe(250);
+    });
+
     it("parses requested hierarchy cadence from subscribe commands", async () => {
       const socket = new FakeSocket();
 
@@ -692,11 +698,18 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getHierarchyIntervalMsForDevice("device-2")).toBe(750);
     });
 
-    it("keeps default hierarchy cadence when another subscriber requests a slower cadence", () => {
+    it("uses the slowest explicit hierarchy cadence when omitted subscribers do not request one", () => {
       server.simulateSubscription({ deviceId: "device-1" });
       server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 10_000 });
 
-      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(10_000);
+    });
+
+    it("ignores subscribers that omit hierarchy cadence when another subscriber requests one", () => {
+      server.simulateSubscription({ deviceId: "device-1" });
+      server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(500);
     });
 
     it("removes requested hierarchy cadence after unsubscribe", async () => {

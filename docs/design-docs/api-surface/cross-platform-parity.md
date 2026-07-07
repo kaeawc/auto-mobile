@@ -117,9 +117,9 @@ Side-by-side comparison of every public API symbol on Android and iOS.
 | `setCaptureBodies` | -- | `setCaptureBodies(Bool)` | iOS-only config |
 | `setMaxBodyBytes` | -- | `setMaxBodyBytes(Int)` | iOS-only config |
 | `setEnabled` | -- | `setEnabled(Bool)` | iOS-only toggle |
-| `NetworkMockRuleStore` | Yes (with BroadcastReceiver) | Yes (via CtrlProxy relay to SDK server) | iOS requires sessions to register `protocolClass()` |
+| `NetworkMockRuleStore` | Yes (with BroadcastReceiver) | Yes (via CtrlProxy relay to SDK server) | Mock rules and error simulation; iOS requires sessions to register `protocolClass()` and error simulation requires the supporting iOS CtrlProxy runner release or a local runner override |
 
-**Why these differ:** Network interception is inherently platform-specific. Android uses OkHttp interceptors; iOS uses URLProtocol. Mock-rule transport also differs: Android uses broadcast intents, while iOS relays through CtrlProxy to the SDK server.
+**Why these differ:** Network interception is inherently platform-specific. Android uses OkHttp interceptors; iOS uses URLProtocol. Mock-rule and error-simulation transport also differs: Android uses broadcast intents, while iOS relays through CtrlProxy to the SDK server.
 
 ## 10. ANR / Hang Detection
 

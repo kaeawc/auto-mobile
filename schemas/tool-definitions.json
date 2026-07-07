@@ -3209,6 +3209,59 @@
                 "text"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "textAny": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": "Ordered text variants; first visible match wins"
+                },
+                "timeout": {
+                  "description": "Wait timeout ms (default: 5000)",
+                  "type": "number"
+                },
+                "container": {
+                  "description": "Scope match to a container",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "elementId": {
+                          "type": "string",
+                          "description": "Container resource ID"
+                        }
+                      },
+                      "required": [
+                        "elementId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "description": "Container text"
+                        }
+                      },
+                      "required": [
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "textAny"
+              ],
+              "additionalProperties": false
             }
           ]
         },
@@ -6295,9 +6348,27 @@
                 "text"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "textAny": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": "Ordered text variants; first visible match wins"
+                }
+              },
+              "required": [
+                "textAny"
+              ],
+              "additionalProperties": false
             }
           ],
-          "description": "Element to tap: elementId or text"
+          "description": "Element to tap: elementId, text, or ordered text variants"
         },
         "sibling": {
           "description": "Tap a clickable sibling of the match, e.g. checkbox beside label",

@@ -92,6 +92,7 @@ nav:
       - 'Overview': design-docs/index.md
       - 'Status Glossary': design-docs/status-glossary.md
       - 'Image Backend': design-docs/image-backend.md
+      - 'Sharp Bun 0.35 Repro': reproductions/sharp-bun-035/README.md
       - 'API Surface':
           - 'Autocomplete Audit': design-docs/api-surface/autocomplete-audit.md
           - 'Cross-Platform Parity': design-docs/api-surface/cross-platform-parity.md

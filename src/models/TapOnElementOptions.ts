@@ -3,6 +3,7 @@ import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 export interface TapOnElementOptions {
   // Element selection - one of these must be provided
   text?: string;
+  textAny?: string[];
   elementId?: string;
   // Selection strategy when multiple elements match (default: first)
   selectionStrategy?: ElementSelectionStrategy;

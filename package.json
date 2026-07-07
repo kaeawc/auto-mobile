@@ -7,6 +7,7 @@
     "test:coverage": "bun test --coverage",
     "test:startup:bun": "bash scripts/ci/mcp-startup-smoke.sh",
     "test:image:bun": "bun scripts/ci/image-runtime-smoke.ts",
+    "test:image:sharp-bun-repro": "bash scripts/validate-sharp-bun-repro.sh",
     "test:memory-leaks": "bun --expose-gc scripts/detect-memory-leaks.ts",
     "lint": "eslint . --fix",
     "typecheck": "bash scripts/typecheck-baseline.sh",

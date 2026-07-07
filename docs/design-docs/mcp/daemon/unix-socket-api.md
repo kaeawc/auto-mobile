@@ -298,7 +298,7 @@ stream after the input response returns.
 | `input/tap` | Supported | Supported | Absolute device-screen coordinates. |
 | `input/swipe` | Supported | Supported | Absolute device-screen start/end coordinates. Use for drag gestures until `input/drag` has distinct semantics. |
 | `input/drag` | Deferred | Deferred | Not a separate method in this contract. |
-| `input/pressButton` | Contract only | Contract only | Not implemented yet. Unsupported buttons fail instead of being ignored. |
+| `input/pressButton` | Supported | Supported with platform gaps | Device/navigation buttons aligned with MCP `pressButton`. Unsupported buttons fail instead of being ignored. |
 | `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. |
 | `input/key` | Deferred | Deferred | Use `input/pressButton` or `input/typeText`. |
 
@@ -430,7 +430,7 @@ Presses a device or navigation button.
 |---|---|---|---|
 | `platform` | `"android" \| "ios"` | Yes | Target platform. |
 | `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
-| `button` | `"back" \| "home" \| "app_switch" \| "volume_up" \| "volume_down" \| "power" \| "enter"` | Yes | Button to press. Unsupported buttons fail with `success: false`. |
+| `button` | `"back" \| "home" \| "app_switch" \| "volume_up" \| "volume_down" \| "power" \| "enter"` plus MCP aliases `"menu"` and `"recent"` | Yes | Button to press. Unsupported buttons fail with `success: false`. |
 
 **Request**
 
@@ -457,6 +457,33 @@ Presses a device or navigation button.
   "button": "back"
 }
 ```
+
+**Examples**
+
+Examples for supported Android navigation and hardware actions:
+
+```json
+{ "method": "input/pressButton", "params": { "platform": "android", "button": "back" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "button": "home" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "button": "app_switch" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "button": "power" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "button": "volume_up" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "button": "volume_down" } }
+```
+
+`app_switch` is the socket API name for the app switcher and maps to the MCP
+`recent` button implementation. The daemon also accepts the MCP alias `recent`.
+
+`enter` is reserved by the socket contract but is not implemented by
+`input/pressButton`; callers should use `input/typeText` for committed text and
+wait for `input/key` for discrete key forwarding. `enter` currently returns a
+clear unsupported error instead of being treated as an unknown field value.
+
+iOS supports `home`, `back`, and `app_switch` through CtrlProxy navigation. On
+physical iOS devices, `power`, `volume_up`, and `volume_down` route to the
+hardware button endpoint. iOS simulators return clear unsupported errors for
+hardware buttons, and all iOS targets return an unsupported error for `menu`
+because iOS has no menu hardware button.
 
 ### `input/typeText`
 

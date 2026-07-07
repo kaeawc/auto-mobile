@@ -34,12 +34,17 @@ const waitForSchema = z.union([
     elementId: z.string().describe("Element resource ID / accessibility identifier"),
     timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
     container: waitForContainerField
-  }),
+  }).strict(),
   z.object({
     text: z.string().describe("Element text"),
     timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
     container: waitForContainerField
-  })
+  }).strict(),
+  z.object({
+    textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins"),
+    timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
+    container: waitForContainerField
+  }).strict()
 ]);
 
 export const observeSchema = addDeviceTargetingToSchema(z.object({
@@ -81,7 +86,21 @@ const waitForContainerForFinder = (
     : { text: waitFor.container.text };
 };
 
-const findWaitForElement = (
+const isElementCenterOffScreen = (
+  element: Element,
+  viewHierarchy: ViewHierarchyResult
+): boolean => {
+  if (!viewHierarchy.screenWidth || !viewHierarchy.screenHeight || !element.bounds) {
+    return false;
+  }
+
+  const centerX = (element.bounds.left + element.bounds.right) / 2;
+  const centerY = (element.bounds.top + element.bounds.bottom) / 2;
+  return centerX < 0 || centerX > viewHierarchy.screenWidth ||
+    centerY < 0 || centerY > viewHierarchy.screenHeight;
+};
+
+export const findWaitForElement = (
   finder: ElementFinder,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult
@@ -106,6 +125,22 @@ const findWaitForElement = (
     );
   }
 
+  if ("textAny" in waitFor) {
+    for (const text of waitFor.textAny) {
+      const elements = finder.findElementsByText(
+        viewHierarchy,
+        text,
+        container,
+        true,
+        false
+      );
+      const element = elements.find(candidate => !isElementCenterOffScreen(candidate, viewHierarchy));
+      if (element) {
+        return element;
+      }
+    }
+  }
+
   return null;
 };
 
@@ -124,7 +159,7 @@ const waitForObservation = async (
   const timeoutMs = waitFor.timeout ?? 5000;
   const finder = new DefaultElementFinder();
   const queryOptions = {
-    text: "text" in waitFor ? waitFor.text : undefined,
+    text: "text" in waitFor ? waitFor.text : ("textAny" in waitFor ? waitFor.textAny[0] : undefined),
     elementId: "elementId" in waitFor ? waitFor.elementId : undefined
   };
 

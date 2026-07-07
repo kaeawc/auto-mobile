@@ -66,6 +66,7 @@ public struct NetworkRequestRecord: Sendable {
 /// or call ``recordRequest(_:)`` to record requests manually.
 public final class AutoMobileNetwork: @unchecked Sendable {
     public static let shared = AutoMobileNetwork()
+    private static let defaultMaxBodyBytes = 32 * 1024
 
     private let lock = NSLock()
     private var bundleId: String?
@@ -73,12 +74,22 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     private var _isEnabled = true
     private var _captureHeaders = false
     private var _captureBodies = false
-    var _maxBodyBytes: Int = 32 * 1024 // 32KB default (internal for URLProtocol access)
+    var _maxBodyBytes: Int = AutoMobileNetwork.defaultMaxBodyBytes // 32KB default (internal for URLProtocol access)
 
     /// Thread-safe read of maxBodyBytes for URLProtocol callbacks.
     var maxBodyBytes: Int {
         lock.lock()
         defer { lock.unlock() }
+        return _maxBodyBytes
+    }
+
+    /// Byte limit for request body capture, or nil when capture is disabled.
+    var requestBodyCaptureLimit: Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard _captureBodies, _maxBodyBytes > 0 else {
+            return nil
+        }
         return _maxBodyBytes
     }
 
@@ -397,6 +408,7 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         _isEnabled = true
         _captureHeaders = false
         _captureBodies = false
+        _maxBodyBytes = AutoMobileNetwork.defaultMaxBodyBytes
         lock.unlock()
     }
 }
@@ -479,6 +491,14 @@ public class AutoMobileURLProtocol: URLProtocol {
             ))
             return
         }
+
+        if AutoMobileSDK.shared.isEnabled,
+           let url = request.url,
+           let simulation = NetworkMockRuleStore.shared.activeErrorSimulation()
+        {
+            serveSimulatedError(simulation, url: url)
+            return
+        }
         #endif
 
         guard let mutableRequest = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest else {
@@ -505,6 +525,98 @@ public class AutoMobileURLProtocol: URLProtocol {
         urlSession = nil
         dataTask = nil
     }
+
+    #if DEBUG
+    private func capturedRequestBodyData(limit: Int?) -> Data? {
+        guard let limit, limit > 0 else {
+            return nil
+        }
+
+        if let body = request.httpBody {
+            return Data(body.prefix(limit))
+        }
+
+        guard let stream = request.httpBodyStream else {
+            return nil
+        }
+
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable, data.count < limit {
+            let remaining = limit - data.count
+            let read = stream.read(&buffer, maxLength: min(buffer.count, remaining))
+            if read > 0 {
+                data.append(buffer, count: read)
+            } else {
+                break
+            }
+        }
+        return data.isEmpty ? nil : data
+    }
+
+    private func serveSimulatedError(_ simulation: NetworkMockRuleStore.ErrorSimulation, url: URL) {
+        let method = request.httpMethod ?? "GET"
+        let durationMs = startTime.map { Date().timeIntervalSince($0) * 1000 }
+        let requestBodySize = request.httpBody?.count
+        let requestBodyData: Data?
+        if AutoMobileNetwork.isTextContentType(request.value(forHTTPHeaderField: "Content-Type")) {
+            requestBodyData = capturedRequestBodyData(limit: AutoMobileNetwork.shared.requestBodyCaptureLimit)
+        } else {
+            requestBodyData = nil
+        }
+        let requestBody = requestBodyData.flatMap { AutoMobileNetwork.utf8String(from: $0) }
+
+        if simulation.errorType == "http500" {
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: 500,
+                httpVersion: "HTTP/1.1",
+                headerFields: nil
+            )!
+            AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
+                url: url.absoluteString,
+                method: method,
+                requestHeaders: request.allHTTPHeaderFields,
+                requestBodySize: requestBodySize,
+                statusCode: 500,
+                durationMs: durationMs,
+                error: "simulated:\(simulation.errorType)",
+                requestBody: requestBody
+            ))
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+
+        let code: URLError.Code
+        switch simulation.errorType {
+        case "timeout":
+            code = .timedOut
+        case "connectionRefused":
+            code = .cannotConnectToHost
+        case "dnsFailure":
+            code = .cannotFindHost
+        case "tlsFailure":
+            code = .secureConnectionFailed
+        default:
+            code = .cannotConnectToHost
+        }
+
+        AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
+            url: url.absoluteString,
+            method: method,
+            requestHeaders: request.allHTTPHeaderFields,
+            requestBodySize: requestBodySize,
+            durationMs: durationMs,
+            error: "simulated:\(simulation.errorType)",
+            requestBody: requestBody
+        ))
+        client?.urlProtocol(self, didFailWithError: URLError(code))
+    }
+    #endif
 }
 
 extension AutoMobileURLProtocol: URLSessionDataDelegate {

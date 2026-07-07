@@ -52,6 +52,7 @@ export interface TapOnArgs {
   selector: {
     elementId?: string;
     text?: string;
+    textAny?: string[];
   };
   sibling?: boolean;
   container?: {

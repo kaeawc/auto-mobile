@@ -44,11 +44,14 @@ import {
   WebSocketFactory,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
+import { sendCommand } from "../DeviceServiceUtils";
 import {
   observationStreamDeviceConnectionLostNotifier,
   type DeviceConnectionLostNotifier,
 } from "../DeviceConnectionLostNotifier";
+import type { BaseResult } from "../shared/types";
 import type { SetTextOptions } from "../DeviceService";
+import type { SimulatedErrorType } from "../../../server/NetworkState";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../../daemon/deviceDataStreamSocketServer";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
@@ -176,6 +179,12 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker
   ): Promise<CtrlProxyHighlightResult>;
 
+  setNetworkErrorSimulation(
+    config: IosNetworkErrorSimulationConfig,
+    timeoutMs?: number,
+    perf?: PerformanceTracker
+  ): Promise<BaseResult>;
+
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
@@ -298,12 +307,20 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   onPushUpdate(callback: (hierarchy: XCTestHierarchy) => void): () => void;
 }
 
+export interface IosNetworkErrorSimulationConfig {
+  enabled: boolean;
+  errorType?: SimulatedErrorType | null;
+  limit?: number | null;
+  expiresAtEpochMs?: number | null;
+}
+
 /**
  * Command rawValues a *fresh* iOS CtrlProxy runner advertises in its `connected`
  * handshake that the released v0.0.38 runner predates. The runner exposes no
  * version/hash, so presence of all of these in `supportedCommands` is the runner
  * identity used by diagnostics (doctor) and the booted-devices resource to tell a
- * current runner from a stale one.
+ * current runner from a stale one. Keep unreleased feature-gated commands out of
+ * this list until they are present in the released runner registry.
  */
 export const IOS_RUNNER_FEATURE_COMMANDS = [
   "request_shake",
@@ -782,6 +799,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     logger.info(`[IOSCtrlProxyClient] Connection established, reset failure counter`);
 
     this.syncNetworkMockRulesToDevice();
+    this.syncNetworkErrorSimulationToDevice();
 
     // Start polling for SDK events from the CtrlProxy HTTP endpoint
     this.startSdkEventPolling();
@@ -804,6 +822,32 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
     } catch (e) {
       logger.warn(`[IOSCtrlProxyClient] Failed to sync network mock rules on reconnect: ${e}`);
+    }
+  }
+
+  private syncNetworkErrorSimulationToDevice(): void {
+    if (!this.isCommandSupported("set_network_error_simulation")) {
+      logger.info("[IOSCtrlProxyClient] Skipping network error simulation sync; runner does not advertise set_network_error_simulation");
+      return;
+    }
+    try {
+      const sim = NetworkState.getInstance().simulation;
+      if (sim === null) {
+        this.sendMessage(JSON.stringify({
+          type: "set_network_error_simulation",
+          enabled: false,
+        }));
+        return;
+      }
+      this.sendMessage(JSON.stringify({
+        type: "set_network_error_simulation",
+        enabled: true,
+        errorType: sim.errorType,
+        limit: sim.limit,
+        expiresAtEpochMs: sim.expiresAt,
+      }));
+    } catch (e) {
+      logger.warn(`[IOSCtrlProxyClient] Failed to sync network error simulation on reconnect: ${e}`);
     }
   }
 
@@ -1160,6 +1204,28 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<CtrlProxyHighlightResult> {
     return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
+  }
+
+  async setNetworkErrorSimulation(
+    config: IosNetworkErrorSimulationConfig,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<BaseResult> {
+    return sendCommand<BaseResult>(this.createDelegateContext(), {
+      idPrefix: "networkErrorSimulation",
+      responseType: "set_network_error_simulation_result",
+      messageType: "set_network_error_simulation",
+      params: {
+        enabled: config.enabled,
+        errorType: config.errorType ?? null,
+        limit: config.limit ?? null,
+        expiresAtEpochMs: config.expiresAtEpochMs ?? null,
+      },
+      timeoutMs,
+      perf,
+      cancelScreenshotBackoff: false,
+      errorLabel: "Network error simulation",
+    });
   }
 
   // ===========================================================================

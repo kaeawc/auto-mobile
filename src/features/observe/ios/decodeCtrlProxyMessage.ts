@@ -205,8 +205,9 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
     case "set_preference_result":
     case "remove_preference_result":
     case "clear_preferences_result":
+    case "set_network_error_simulation_result":
       result = {
-        success: message.success ?? false,
+        success: message.success ?? message.ok ?? false,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
       };

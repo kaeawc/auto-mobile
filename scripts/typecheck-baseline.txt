@@ -95,8 +95,6 @@ src/features/action/TapAnyElement.ts: error TS2339: Property 'longPress' does no
 src/features/action/TapAnyElement.ts: error TS2339: Property 'selectClickable' does not exist on type 'ElementSelector'.
 src/features/action/TapAnyElement.ts: error TS2339: Property 'tap' does not exist on type 'IOSCtrlProxyClient'.
 src/features/action/TapAnyElement.ts: error TS2416: Property 'hashViewHierarchy' in type 'TapAnyElement' is not assignable to the same property in base type 'BaseVisualChange'.
-src/features/action/TapOnElement.ts: error TS2339: Property 'selectClickableSiblingOfResourceId' does not exist on type 'ElementSelector'.
-src/features/action/TapOnElement.ts: error TS2339: Property 'selectClickableSiblingOfText' does not exist on type 'ElementSelector'.
 src/features/action/TapOnElement.ts: error TS2416: Property 'hashViewHierarchy' in type 'TapOnElement' is not assignable to the same property in base type 'BaseVisualChange'.
 src/features/action/refreshAndroidViewHierarchy.ts: error TS2339: Property 'getUiAutomatorHierarchy' does not exist on type 'ViewHierarchy'.
 src/features/action/refreshAndroidViewHierarchy.ts: error TS2339: Property 'mergeHierarchies' does not exist on type 'ViewHierarchy'.
@@ -339,8 +337,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 40,58 :: src/db/migrator.ts: error TS7006: Parameter 'migration' implicitly has an 'any' type.
 # swap-fp: 40,74 :: src/db/migrator.ts: error TS2307: Cannot find module 'kysely/migration' or its corresponding type declarations.
 # swap-fp: 43 :: src/doctor/index.ts: error TS2367: This comparison appears to be unintentional because the types 'false | undefined' and 'true' have no overlap.
-# swap-fp: 43 :: src/features/action/TapOnElement.ts: error TS2339: Property 'selectClickableSiblingOfResourceId' does not exist on type 'ElementSelector'.
-# swap-fp: 43 :: src/features/action/TapOnElement.ts: error TS2339: Property 'selectClickableSiblingOfText' does not exist on type 'ElementSelector'.
 # swap-fp: 43,45 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 # swap-fp: 44 :: src/db/failureAnalyticsRepository.ts: error TS2345: Argument of type 'FailureType' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_groups", "type">'.
 # swap-fp: 44 :: src/db/failureAnalyticsRepository.ts: error TS2345: Argument of type 'FailureType' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_notifications", "type">'.

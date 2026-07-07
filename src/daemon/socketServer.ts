@@ -640,6 +640,9 @@ export class UnixSocketServer {
     if (request.method === "input/tap") {
       return await this.handleInputTap(request, socketSessionId);
     }
+    if (request.method === "input/swipe") {
+      return await this.handleInputSwipe(request, socketSessionId);
+    }
 
     switch (request.method) {
       case "ide/listFeatureFlags": {
@@ -806,7 +809,12 @@ export class UnixSocketServer {
     const queueEnterMs = this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputTapParams(request.params);
-    const targetDevice = await this.resolveInputTargetDevice(args.platform, args.deviceId, socketSessionId);
+    const targetDevice = await this.resolveInputTargetDevice(
+      args.platform,
+      args.deviceId,
+      socketSessionId,
+      "input/tap"
+    );
     const gestureResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
       const queueWaitMs = this.timer.now() - queueEnterMs;
       const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
@@ -838,6 +846,55 @@ export class UnixSocketServer {
       deviceId: targetDevice.deviceId,
       success: true,
       coordinates: { x: args.x, y: args.y },
+    };
+  }
+
+  private async handleInputSwipe(
+    request: DaemonRequest,
+    socketSessionId?: string
+  ): Promise<any | undefined> {
+    const queueEnterMs = this.timer.now();
+    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const args = this.parseInputSwipeParams(request.params);
+    const targetDevice = await this.resolveInputTargetDevice(
+      args.platform,
+      args.deviceId,
+      socketSessionId,
+      "input/swipe"
+    );
+    const gestureResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      const queueWaitMs = this.timer.now() - queueEnterMs;
+      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+      if (remainingTimeoutMs <= 0) {
+        throw new McpTimeoutError({
+          toolName: request.method,
+          timeoutMs: totalTimeoutMs,
+          origin: "UnixSocketServer.handleInputSwipe",
+          detail: `spent ${queueWaitMs}ms waiting in queue`,
+        });
+      }
+
+      return args.platform === "android"
+        ? await AndroidCtrlProxyClient
+          .getInstance(targetDevice, defaultAdbClientFactory)
+          .requestSwipe(args.startX, args.startY, args.endX, args.endY, args.durationMs, remainingTimeoutMs)
+        : await IOSCtrlProxyClient
+          .getInstance(targetDevice)
+          .requestSwipe(args.startX, args.startY, args.endX, args.endY, args.durationMs, remainingTimeoutMs);
+    });
+
+    if (!gestureResult.success) {
+      throw new Error(gestureResult.error ?? `input/swipe failed on ${args.platform}`);
+    }
+
+    return {
+      action: "input/swipe",
+      platform: args.platform,
+      deviceId: targetDevice.deviceId,
+      success: true,
+      start: { x: args.startX, y: args.startY },
+      end: { x: args.endX, y: args.endY },
+      durationMs: args.durationMs,
     };
   }
 
@@ -875,14 +932,70 @@ export class UnixSocketServer {
     };
   }
 
+  private parseInputSwipeParams(params: unknown): {
+    platform: "android" | "ios";
+    deviceId?: string;
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    durationMs: number;
+  } {
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
+      throw new Error("input/swipe requires params object");
+    }
+
+    const args = params as Record<string, unknown>;
+    if (args.platform !== "android" && args.platform !== "ios") {
+      throw new Error("input/swipe requires platform 'android' or 'ios'");
+    }
+    if (
+      typeof args.startX !== "number" ||
+      !Number.isFinite(args.startX) ||
+      typeof args.startY !== "number" ||
+      !Number.isFinite(args.startY) ||
+      typeof args.endX !== "number" ||
+      !Number.isFinite(args.endX) ||
+      typeof args.endY !== "number" ||
+      !Number.isFinite(args.endY)
+    ) {
+      throw new Error("input/swipe requires numeric startX, startY, endX, and endY params");
+    }
+    if (
+      args.durationMs !== undefined &&
+      (
+        typeof args.durationMs !== "number" ||
+        !Number.isFinite(args.durationMs) ||
+        args.durationMs < 1 ||
+        args.durationMs > 60_000
+      )
+    ) {
+      throw new Error("input/swipe durationMs must be between 1 and 60000 milliseconds");
+    }
+    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
+      throw new Error("input/swipe deviceId must be a string when provided");
+    }
+
+    return {
+      platform: args.platform,
+      deviceId: args.deviceId,
+      startX: args.startX,
+      startY: args.startY,
+      endX: args.endX,
+      endY: args.endY,
+      durationMs: args.durationMs ?? 300,
+    };
+  }
+
   private async resolveInputTargetDevice(
     platform: "android" | "ios",
     deviceId: string | undefined,
-    socketSessionId: string | undefined
+    socketSessionId: string | undefined,
+    action: "input/tap" | "input/swipe"
   ): Promise<BootedDevice> {
     const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
     if (!discovery.succeededPlatforms.has(platform)) {
-      throw new Error(`Unable to discover booted ${platform} devices for input/tap`);
+      throw new Error(`Unable to discover booted ${platform} devices for ${action}`);
     }
     const bootedDevices = discovery.devices;
     if (deviceId) {
@@ -913,9 +1026,9 @@ export class UnixSocketServer {
       return bootedDevices[0];
     }
     if (bootedDevices.length === 0) {
-      throw new Error(`No booted ${platform} devices found for input/tap`);
+      throw new Error(`No booted ${platform} devices found for ${action}`);
     }
-    throw new Error(`input/tap requires deviceId when multiple ${platform} devices are booted`);
+    throw new Error(`${action} requires deviceId when multiple ${platform} devices are booted`);
   }
 
   private async handleIdeRequest(

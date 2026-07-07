@@ -296,7 +296,7 @@ stream after the input response returns.
 | Method | Android | iOS | Notes |
 |---|---|---|---|
 | `input/tap` | Supported | Supported | Absolute device-screen coordinates. |
-| `input/swipe` | Contract only | Contract only | Not implemented yet. Use for drag gestures until `input/drag` has distinct semantics. |
+| `input/swipe` | Supported | Supported | Absolute device-screen start/end coordinates. Use for drag gestures until `input/drag` has distinct semantics. |
 | `input/drag` | Deferred | Deferred | Not a separate method in this contract. |
 | `input/pressButton` | Contract only | Contract only | Not implemented yet. Unsupported buttons fail instead of being ignored. |
 | `input/typeText` | Contract only | Contract only | Not implemented yet. Sends committed text only; IME composition is deferred. |
@@ -386,7 +386,7 @@ duration.
 | `startY` | `number` | Yes | Start Y coordinate in physical screen pixels. |
 | `endX` | `number` | Yes | End X coordinate in physical screen pixels. |
 | `endY` | `number` | Yes | End Y coordinate in physical screen pixels. |
-| `durationMs` | `number` | No | Gesture duration in milliseconds. The daemon chooses a platform default when omitted. |
+| `durationMs` | `number` | No | Gesture duration in milliseconds, from 1 to 60 000 inclusive. The daemon uses 300 when omitted. |
 
 **Request**
 

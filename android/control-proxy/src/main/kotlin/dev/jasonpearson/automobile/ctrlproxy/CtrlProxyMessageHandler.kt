@@ -40,6 +40,7 @@ import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import dev.jasonpearson.automobile.protocol.SetAccessibilityFlags
+import dev.jasonpearson.automobile.protocol.SetHierarchyInterval
 import dev.jasonpearson.automobile.protocol.SetNetworkErrorSimulation
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRules
 import dev.jasonpearson.automobile.protocol.SetPreference
@@ -89,6 +90,7 @@ class CtrlProxyMessageHandler(
     when (request) {
       is RequestHierarchy -> actions.requestHierarchy(request.disableAllFiltering)
       is RequestHierarchyIfStale -> actions.requestHierarchyIfStale(request.sinceTimestamp)
+      is SetHierarchyInterval -> actions.setHierarchyInterval(request.intervalMs)
       is RequestScreenshot -> actions.requestScreenshot(request.requestId)
       is RequestSwipe -> {
         firstNonFinite(

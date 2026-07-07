@@ -1171,6 +1171,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   protected onConnectionEstablished(): void {
     this.syncNetworkStateToDevice();
     this.syncAccessibilityFlagsToDevice();
+    this.refreshObservationStreamHierarchyCadence();
     // Resume the screenshot keepalive after a (re)connect. onConnectionClosed()
     // cancels it; without restarting here, a transient drop on a STATIC screen
     // leaves the live view frozen forever (no UI change to retrigger a capture).
@@ -1995,6 +1996,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   refreshObservationStreamScreenshotCadence(): void {
     this.screenshotBackoffScheduler?.rescheduleKeepAlive();
+  }
+
+  refreshObservationStreamHierarchyCadence(intervalMs?: number | null): void {
+    const resolvedIntervalMs = intervalMs === undefined
+      ? getDeviceDataStreamServer()?.getHierarchyIntervalMsForDevice(this.device.deviceId) ?? null
+      : intervalMs;
+
+    this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({
+      intervalMs: resolvedIntervalMs,
+    })));
   }
 
   // ===========================================================================

@@ -22,6 +22,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   // View hierarchy
   "request_hierarchy",
   "request_hierarchy_if_stale",
+  "set_hierarchy_interval",
   "request_screenshot",
 
   // Gestures

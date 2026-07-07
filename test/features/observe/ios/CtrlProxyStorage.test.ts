@@ -80,6 +80,7 @@ describe("CtrlProxyStorage (iOS)", function() {
   };
 
   const syncMessageTypes = new Set([
+    "set_hierarchy_interval",
     "set_network_mock_rules",
     "set_network_error_simulation",
   ]);

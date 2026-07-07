@@ -43,6 +43,9 @@ public class CtrlProxy {
         )
         server = WebSocketServer(port: port, commandHandler: commandHandler, sdkHierarchyCache: sdkHierarchyCache)
         hierarchyDebouncer = HierarchyDebouncer(elementLocator: elementLocator, timer: timer)
+        commandHandler.setHierarchyIntervalHandler { [hierarchyDebouncer] intervalMs in
+            hierarchyDebouncer.setPollIntervalMs(intervalMs ?? HierarchyDebouncer.defaultPollIntervalMs)
+        }
         fpsMonitor = DisplayLinkFPSMonitor()
     }
 

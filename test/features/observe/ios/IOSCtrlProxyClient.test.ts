@@ -117,6 +117,7 @@ describe("IOSCtrlProxyClient", function() {
   };
 
   const syncMessageTypes = new Set([
+    "set_hierarchy_interval",
     "set_network_mock_rules",
     "set_network_error_simulation",
   ]);
@@ -149,6 +150,30 @@ describe("IOSCtrlProxyClient", function() {
       ctrlProxyClient.refreshObservationStreamScreenshotCadence();
 
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
+    });
+
+    test("refreshes hierarchy cadence by sending interval config", async function() {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      ctrlProxyClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer
+      );
+
+      const connected = await ctrlProxyClient.ensureConnected();
+      const socket = await waitForSocket(getSocket) as CapturingWebSocket | null;
+      await waitForSocketOpen(socket);
+      expect(connected).toBe(true);
+      socket!.sentMessages = [];
+
+      ctrlProxyClient.refreshObservationStreamHierarchyCadence(500);
+
+      const sentPayloads = socket!.sentMessages.map(message => JSON.parse(message));
+      expect(sentPayloads).toContainEqual({
+        type: "set_hierarchy_interval",
+        intervalMs: 500,
+      });
     });
 
     test("notifies the observation stream when the WebSocket connection closes", function() {
@@ -212,10 +237,11 @@ describe("IOSCtrlProxyClient", function() {
 
       (ctrlProxyClient as any).onConnectionEstablished();
 
-      expect(sentMessages).toHaveLength(2);
+      expect(sentMessages).toHaveLength(3);
       expect(sentMessages.map(message => JSON.parse(message).type)).toEqual([
         "set_network_mock_rules",
         "set_network_error_simulation",
+        "set_hierarchy_interval",
       ]);
       expect(JSON.parse(sentMessages[0])).toEqual({
         type: "set_network_mock_rules",
@@ -236,6 +262,10 @@ describe("IOSCtrlProxyClient", function() {
         type: "set_network_error_simulation",
         enabled: false,
       });
+      expect(JSON.parse(sentMessages[2])).toEqual({
+        type: "set_hierarchy_interval",
+        intervalMs: null,
+      });
     });
 
     test("clears stale network error simulation when the connection (re)establishes without an active simulation", function() {
@@ -250,10 +280,14 @@ describe("IOSCtrlProxyClient", function() {
 
       (ctrlProxyClient as any).onConnectionEstablished();
 
-      expect(sentMessages).toHaveLength(1);
+      expect(sentMessages).toHaveLength(2);
       expect(JSON.parse(sentMessages[0])).toEqual({
         type: "set_network_error_simulation",
         enabled: false,
+      });
+      expect(JSON.parse(sentMessages[1])).toEqual({
+        type: "set_hierarchy_interval",
+        intervalMs: null,
       });
     });
 
@@ -287,13 +321,17 @@ describe("IOSCtrlProxyClient", function() {
 
       (ctrlProxyClient as any).onConnectionEstablished();
 
-      expect(sentMessages).toHaveLength(1);
+      expect(sentMessages).toHaveLength(2);
       expect(JSON.parse(sentMessages[0])).toEqual({
         type: "set_network_error_simulation",
         enabled: true,
         errorType: "tlsFailure",
         limit: 4,
         expiresAtEpochMs: expect.any(Number),
+      });
+      expect(JSON.parse(sentMessages[1])).toEqual({
+        type: "set_hierarchy_interval",
+        intervalMs: null,
       });
     });
   });

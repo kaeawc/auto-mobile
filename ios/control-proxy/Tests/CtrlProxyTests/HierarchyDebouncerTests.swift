@@ -122,6 +122,42 @@ final class HierarchyDebouncerTests: XCTestCase {
         }
     }
 
+    func testUpdatedPollIntervalControlsNextPoll() {
+        let first = ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: UIElementInfo(
+                text: "First",
+                className: "UIView",
+                bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 812)
+            ),
+            windowInfo: WindowInfo(id: 0, type: 1, isActive: true, isFocused: true)
+        )
+        let second = ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: UIElementInfo(
+                text: "Second",
+                className: "UIView",
+                bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 812)
+            ),
+            windowInfo: WindowInfo(id: 0, type: 1, isActive: true, isFocused: true)
+        )
+        fakeLocator.setHierarchy(first)
+        let results = Box<[HierarchyResult]>([])
+        debouncer.setOnResult { result in
+            results.value.append(result)
+        }
+
+        debouncer.start()
+        debouncer.setPollIntervalMs(50)
+        fakeLocator.setHierarchy(second)
+        fakeTimer.advance(by: 49)
+        XCTAssertEqual(results.value.count, 1, "initial capture only before updated interval elapses")
+
+        fakeTimer.advance(by: 1)
+
+        XCTAssertEqual(results.value.count, 2, "updated interval should drive the next poll")
+    }
+
     func testStopPreventsPolling() {
         debouncer.start()
         XCTAssertTrue(debouncer.isRunning)

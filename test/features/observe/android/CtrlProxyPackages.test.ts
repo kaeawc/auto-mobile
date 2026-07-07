@@ -124,6 +124,22 @@ describe("CtrlProxyPackages (Android)", function() {
 
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
     });
+
+    test("refreshes hierarchy cadence by sending interval config", async function() {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+
+      const connected = await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+      expect(connected).toBe(true);
+      socket!.sentMessages = [];
+
+      client.refreshObservationStreamHierarchyCadence(500);
+
+      const message = findSentMessage(socket!, "set_hierarchy_interval");
+      expect(message).toEqual({ type: "set_hierarchy_interval", intervalMs: 500 });
+    });
   });
 
   describe("requestInstalledPackages", function() {

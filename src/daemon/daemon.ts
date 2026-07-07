@@ -782,6 +782,23 @@ export class Daemon {
       }
     });
 
+    server.setOnHierarchyCadenceChanged((deviceId: string | null) => {
+      const devices = this.devicePool.getAllDevices()
+        .filter(device => deviceId === null || device.id === deviceId);
+
+      for (const device of devices) {
+        if (device.platform === "android") {
+          AndroidCtrlProxyClient
+            .getExistingInstance(device.id)
+            ?.refreshObservationStreamHierarchyCadence();
+        } else if (device.platform === "ios") {
+          IOSCtrlProxyClient
+            .getExistingInstance(device.id)
+            ?.refreshObservationStreamHierarchyCadence();
+        }
+      }
+    });
+
     server.setOnObservationRequested(async ({ deviceId, signal }) => {
       const pooledDevices = deviceId
         ? [this.devicePool.getDevice(deviceId)].filter(device => device !== null)

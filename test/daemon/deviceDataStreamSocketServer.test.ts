@@ -30,6 +30,7 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
   simulateSubscription(options: {
     deviceId?: string;
     screenshotIntervalMs?: number | null;
+    hierarchyIntervalMs?: number | null;
   }): { socket: FakeSocket; subscriptionId: string } {
     const socket = new FakeSocket();
     const subscriptionId = `devicedatastream-${++(this as any).subscriptionCounter}`;
@@ -41,6 +42,7 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
       filter: {
         deviceId: options.deviceId ?? null,
         screenshotIntervalMs: options.screenshotIntervalMs ?? null,
+        hierarchyIntervalMs: options.hierarchyIntervalMs ?? null,
       },
       backfilling: false,
       drainPending: false,
@@ -622,6 +624,130 @@ describe("DeviceDataStreamSocketServer", () => {
         changedDevices.push(deviceId);
       });
       const { socket } = server.simulateSubscription({ deviceId: "device-1", screenshotIntervalMs: 500 });
+
+      server.closeConnectionForTest(socket);
+
+      expect(changedDevices).toEqual(["device-1"]);
+    });
+  });
+
+  describe("hierarchy cadence aggregation", () => {
+    it("keeps default hierarchy behavior when subscribers omit cadence", () => {
+      server.simulateSubscription({ deviceId: "device-1" });
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBeNull();
+    });
+
+    it("parses requested hierarchy cadence from subscribe commands", async () => {
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub-hierarchy-fast",
+        command: "subscribe",
+        deviceId: "device-1",
+        hierarchyIntervalMs: 500,
+      }));
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(500);
+    });
+
+    it("clamps requested hierarchy cadence to the safe minimum", async () => {
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub-hierarchy-clamped",
+        command: "subscribe",
+        deviceId: "device-1",
+        hierarchyIntervalMs: 50,
+      }));
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(250);
+    });
+
+    it("clamps requested hierarchy cadence to the maximum timer delay", async () => {
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub-hierarchy-max-clamped",
+        command: "subscribe",
+        deviceId: "device-1",
+        hierarchyIntervalMs: 3_000_000_000,
+      }));
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(2_147_483_647);
+    });
+
+    it("uses the fastest active requested hierarchy cadence for a device", () => {
+      server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 1000 });
+      server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+      server.simulateSubscription({ deviceId: "device-2", hierarchyIntervalMs: 250 });
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(500);
+    });
+
+    it("applies all-device subscriber hierarchy cadence to each device", () => {
+      server.simulateSubscription({ hierarchyIntervalMs: 750 });
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(750);
+      expect(server.getHierarchyIntervalMsForDevice("device-2")).toBe(750);
+    });
+
+    it("removes requested hierarchy cadence after unsubscribe", async () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "unsub-hierarchy-fast",
+        command: "unsubscribe",
+      }));
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBeNull();
+    });
+
+    it("ignores destroyed subscriber sockets when aggregating hierarchy cadence", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+      socket.destroy();
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBeNull();
+    });
+
+    it("notifies when subscribe changes hierarchy cadence", async () => {
+      const changedDevices: Array<string | null> = [];
+      server.setOnHierarchyCadenceChanged(deviceId => {
+        changedDevices.push(deviceId);
+      });
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub-hierarchy-fast",
+        command: "subscribe",
+        deviceId: "device-1",
+        hierarchyIntervalMs: 500,
+      }));
+
+      expect(changedDevices).toEqual(["device-1"]);
+    });
+
+    it("notifies when unsubscribe removes hierarchy cadence", async () => {
+      const changedDevices: Array<string | null> = [];
+      server.setOnHierarchyCadenceChanged(deviceId => {
+        changedDevices.push(deviceId);
+      });
+      const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "unsub-hierarchy-fast",
+        command: "unsubscribe",
+      }));
+
+      expect(changedDevices).toEqual(["device-1"]);
+    });
+
+    it("notifies when connection close removes hierarchy cadence", () => {
+      const changedDevices: Array<string | null> = [];
+      server.setOnHierarchyCadenceChanged(deviceId => {
+        changedDevices.push(deviceId);
+      });
+      const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
 
       server.closeConnectionForTest(socket);
 

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { AvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -121,7 +122,10 @@ describe("AndroidEmulatorClient listAvds", () => {
   test("returns AVDs when emulator command succeeds", async () => {
     const execAsync = async (_command: string): Promise<ExecResult> =>
       createExecResult("Pixel_9\nPixel_Tablet\n");
-    const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer());
+    const noMetadataReader: AvdConfigReader = {
+      readConfig: async () => null,
+    };
+    const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer(), undefined, noMetadataReader);
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([

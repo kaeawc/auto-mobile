@@ -66,7 +66,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
 
     private let elementLocator: ElementLocating
     private let timer: Timer
-    private let pollIntervalMs: Int64
+    private var pollIntervalMs: Int64
 
     // MARK: - State
 
@@ -80,6 +80,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
     private let lock = NSLock()
     private var _isRunning = false
     private var pollScheduled = false
+    private var pollGeneration = 0
     private var onResult: ((HierarchyResult) -> Void)?
 
     public var isRunning: Bool {
@@ -108,6 +109,19 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         onResult = callback
     }
 
+    public func setPollIntervalMs(_ intervalMs: Int64) {
+        lock.lock()
+        pollIntervalMs = max(1, intervalMs)
+        pollGeneration += 1
+        let shouldReschedule = _isRunning
+        pollScheduled = false
+        lock.unlock()
+
+        if shouldReschedule {
+            scheduleNextPoll()
+        }
+    }
+
     public func start() {
         lock.lock()
         guard !_isRunning else {
@@ -122,15 +136,14 @@ public class HierarchyDebouncer: HierarchyDebouncing {
 
         // Schedule first poll
         scheduleNextPoll()
-
     }
 
     public func stop() {
         lock.lock()
         _isRunning = false
         pollScheduled = false
+        pollGeneration += 1
         lock.unlock()
-
     }
 
     public func extractNow() {
@@ -180,12 +193,18 @@ public class HierarchyDebouncer: HierarchyDebouncing {
             return
         }
         pollScheduled = true
+        let scheduledGeneration = pollGeneration
+        let intervalMs = pollIntervalMs
         lock.unlock()
 
-        timer.schedule(after: pollIntervalMs) { [weak self] in
+        timer.schedule(after: intervalMs) { [weak self] in
             guard let self = self else { return }
 
             self.lock.lock()
+            guard scheduledGeneration == self.pollGeneration else {
+                self.lock.unlock()
+                return
+            }
             self.pollScheduled = false
             let shouldContinue = self._isRunning
             self.lock.unlock()

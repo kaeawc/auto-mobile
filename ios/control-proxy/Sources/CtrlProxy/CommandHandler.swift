@@ -22,6 +22,7 @@ public class CommandHandler: CommandHandling {
     private let sdkHierarchyClient: (any SdkHierarchyFetching)?
     private let sdkHierarchyCache: (any SdkHierarchyCaching)?
     private let sdkDatabaseClient: (any SdkDatabaseFetching)?
+    private var hierarchyIntervalHandler: ((Int64?) -> Void)?
 
     public init(
         elementLocator: ElementLocating,
@@ -39,6 +40,10 @@ public class CommandHandler: CommandHandling {
         self.sdkHierarchyClient = sdkHierarchyClient
         self.sdkHierarchyCache = sdkHierarchyCache
         self.sdkDatabaseClient = sdkDatabaseClient
+    }
+
+    public func setHierarchyIntervalHandler(_ handler: @escaping (Int64?) -> Void) {
+        hierarchyIntervalHandler = handler
     }
 
     /// Factory for testing - allows injecting fakes
@@ -80,6 +85,9 @@ public class CommandHandler: CommandHandling {
 
             case let .requestScreenshot(payload):
                 return try handleRequestScreenshot(payload, startTime: startTime)
+
+            case let .setHierarchyInterval(payload):
+                return handleSetHierarchyInterval(payload, startTime: startTime)
 
             // Gesture commands
             case let .tapCoordinates(payload):
@@ -249,6 +257,20 @@ public class CommandHandler: CommandHandling {
     }
 
     // MARK: - View Hierarchy
+
+    private func handleSetHierarchyInterval(
+        _ request: RequestSetHierarchyInterval,
+        startTime: Date
+    )
+        -> WebSocketResponse
+    {
+        hierarchyIntervalHandler?(request.intervalMs)
+        return WebSocketResponse.success(
+            type: ResponseType.setHierarchyIntervalResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
 
     private func handleRequestHierarchy(
         _ request: RequestHierarchy,

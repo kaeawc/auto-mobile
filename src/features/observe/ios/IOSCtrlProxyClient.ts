@@ -800,6 +800,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     this.syncNetworkMockRulesToDevice();
     this.syncNetworkErrorSimulationToDevice();
+    this.refreshObservationStreamHierarchyCadence();
 
     // Start polling for SDK events from the CtrlProxy HTTP endpoint
     this.startSdkEventPolling();
@@ -1689,6 +1690,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   refreshObservationStreamScreenshotCadence(): void {
     this.screenshotBackoffScheduler?.rescheduleKeepAlive();
+  }
+
+  refreshObservationStreamHierarchyCadence(intervalMs?: number | null): void {
+    const resolvedIntervalMs = intervalMs === undefined
+      ? getDeviceDataStreamServer()?.getHierarchyIntervalMsForDevice(this.device.deviceId) ?? null
+      : intervalMs;
+
+    this.sendMessage(JSON.stringify({
+      type: "set_hierarchy_interval",
+      intervalMs: resolvedIntervalMs,
+    }));
   }
 
   // ===========================================================================

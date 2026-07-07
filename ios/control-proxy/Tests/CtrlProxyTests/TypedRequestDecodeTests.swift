@@ -122,6 +122,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         let payloads: [RequestType: String] = [
             .requestHierarchy: "{}",
             .requestHierarchyIfStale: "{}",
+            .setHierarchyInterval: #"{"intervalMs":500}"#,
             .requestScreenshot: "{}",
             .requestTapCoordinates: #"{"x":1,"y":2}"#,
             .requestSwipe: #"{"x1":1,"y1":2,"x2":3,"y2":4}"#,

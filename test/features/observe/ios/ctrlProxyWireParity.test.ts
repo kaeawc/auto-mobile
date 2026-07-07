@@ -41,6 +41,7 @@ const MODELS_SWIFT = resolve(REPO_ROOT, "ios/control-proxy/Sources/CtrlProxy/Mod
 const SWIFT_REQUEST_TYPES = [
   "request_hierarchy",
   "request_hierarchy_if_stale",
+  "set_hierarchy_interval",
   "request_screenshot",
   "request_tap_coordinates",
   "request_swipe",

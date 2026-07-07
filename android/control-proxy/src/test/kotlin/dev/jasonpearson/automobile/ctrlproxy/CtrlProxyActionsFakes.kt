@@ -11,6 +11,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long) {}
 
+  override fun setHierarchyInterval(intervalMs: Long?) {}
+
   override fun requestScreenshot(requestId: String?) {}
 
   override fun requestSwipe(
@@ -187,6 +189,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long) =
     record("requestHierarchyIfStale", sinceTimestamp)
+
+  override fun setHierarchyInterval(intervalMs: Long?) = record("setHierarchyInterval", intervalMs)
 
   override fun requestScreenshot(requestId: String?) = record("requestScreenshot", requestId)
 

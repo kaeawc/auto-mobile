@@ -105,6 +105,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     // File name for app-scoped storage
     private const val HIERARCHY_FILE_NAME = "latest_hierarchy.json"
+    private const val DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250L
 
     // Broadcast actions
     const val ACTION_EXTRACT_HIERARCHY = "dev.jasonpearson.automobile.EXTRACT_HIERARCHY"
@@ -196,6 +197,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val timeProvider: TimeProvider = SystemTimeProvider()
   private lateinit var webSocketServer: WebSocketServer
   private lateinit var hierarchyDebouncer: HierarchyDebouncer
+  private var hierarchyBroadcastThrottler: BroadcastThrottler? = null
   private val navigationEventAccumulator = NavigationEventAccumulator()
   private lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
@@ -806,7 +808,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // pipe. The extraction itself stays fast (request_hierarchy uses extractNowBlocking
       // and bypasses this flow entirely), but unsolicited pushes are rate-limited so
       // on-demand requests have a clear pipe to travel through.
-      val broadcastThrottler = BroadcastThrottler(timeProvider, minIntervalMs = 250L)
+      val broadcastThrottler =
+        BroadcastThrottler(timeProvider, minIntervalMs = DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS)
+      hierarchyBroadcastThrottler = broadcastThrottler
 
       hierarchyFlowJob =
         hierarchyDebouncer.hierarchyFlow
@@ -1002,6 +1006,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long) =
     hierarchyDebouncer.extractIfStale(sinceTimestamp)
+
+  override fun setHierarchyInterval(intervalMs: Long?) {
+    val resolvedIntervalMs = intervalMs ?: DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
+    hierarchyBroadcastThrottler?.setMinIntervalMs(resolvedIntervalMs)
+    Log.d(TAG, "Hierarchy broadcast interval set to ${resolvedIntervalMs}ms")
+  }
 
   override fun requestScreenshot(requestId: String?) = broadcastScreenshot(requestId)
 

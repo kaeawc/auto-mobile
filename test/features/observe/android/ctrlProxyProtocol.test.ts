@@ -25,6 +25,7 @@ import {
 const KOTLIN_SERIAL_NAMES = [
   "request_hierarchy",
   "request_hierarchy_if_stale",
+  "set_hierarchy_interval",
   "request_screenshot",
   "request_tap_coordinates",
   "request_swipe",
@@ -112,6 +113,13 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   test("request_hierarchy_if_stale", () => {
     expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestHierarchyIfStale({ requestId: "stale-1", sinceTimestamp: 1720000000000 })))
       .toBe('{"type":"request_hierarchy_if_stale","requestId":"stale-1","sinceTimestamp":1720000000000}');
+  });
+
+  test("set_hierarchy_interval", () => {
+    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({ intervalMs: 500 })))
+      .toBe('{"type":"set_hierarchy_interval","intervalMs":500}');
+    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({ intervalMs: null })))
+      .toBe('{"type":"set_hierarchy_interval","intervalMs":null}');
   });
 
   test("request_screenshot", () => {

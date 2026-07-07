@@ -13,6 +13,7 @@ const implementedInputMethods = [
   "input/swipe",
   "input/pressButton",
   "input/typeText",
+  "input/key",
 ] as const;
 
 type ImplementedInputMethod = typeof implementedInputMethods[number];
@@ -91,6 +92,11 @@ describe("daemon input API consumer docs", () => {
         text: "hello from socket",
         submit: false,
       },
+      "input/key": {
+        platform: "android",
+        deviceId: "emulator-5554",
+        key: "enter",
+      },
     };
 
     for (const method of implementedInputMethods) {
@@ -120,13 +126,13 @@ describe("daemon input API consumer docs", () => {
     expect(unixSocketApi).toContain("non-input MCP tools");
   });
 
-  test("documents platform support, unsupported behavior, observations, and deferred key input", async () => {
+  test("documents platform support, unsupported behavior, observations, and key input platform gaps", async () => {
     const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
 
-    expect(unixSocketApi).toContain("| `input/key` | Deferred | Deferred | Use `input/pressButton` or `input/typeText`. |");
+    expect(unixSocketApi).toContain("| `input/key` | Supported | Unsupported | Discrete non-text key presses. Modifiers are deferred. |");
     expect(unixSocketApi).toContain("Unsupported platforms or unsupported actions return `success: false`");
     expect(unixSocketApi).toContain("do not include a fresh observation");
-    expect(unixSocketApi).toContain("[#3370]");
+    expect(unixSocketApi).toContain("input/key is unsupported on ios");
   });
 
   test("links future IDE screen control docs to the daemon input API", async () => {

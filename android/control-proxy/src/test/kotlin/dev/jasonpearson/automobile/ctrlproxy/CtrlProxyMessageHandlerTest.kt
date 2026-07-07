@@ -75,6 +75,18 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches set_hierarchy_interval`() = runTest {
+    dispatch("""{"type":"set_hierarchy_interval","intervalMs":500}""")
+    assertEquals("setHierarchyInterval" to listOf<Any?>(500L), lastCall)
+  }
+
+  @Test
+  fun `dispatches set_hierarchy_interval reset`() = runTest {
+    dispatch("""{"type":"set_hierarchy_interval","intervalMs":null}""")
+    assertEquals("setHierarchyInterval" to listOf<Any?>(null), lastCall)
+  }
+
+  @Test
   fun `dispatches request_screenshot`() = runTest {
     dispatch("""{"type":"request_screenshot","requestId":"s1"}""")
     assertEquals("requestScreenshot" to listOf<Any?>("s1"), lastCall)

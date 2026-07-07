@@ -54,6 +54,13 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { PressButton } from "../features/action/PressButton";
+import {
+  INPUT_KEY_IOS_UNSUPPORTED_ERROR,
+  InputKey,
+  SUPPORTED_INPUT_KEYS,
+  isInputKeyName,
+  type InputKeyName,
+} from "../features/action/InputKey";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction } from "../models";
@@ -651,6 +658,9 @@ export class UnixSocketServer {
     if (request.method === "input/pressButton") {
       return await this.handleInputPressButton(request, socketSessionId);
     }
+    if (request.method === "input/key") {
+      return await this.handleInputKey(request, socketSessionId);
+    }
 
     switch (request.method) {
       case "ide/listFeatureFlags": {
@@ -996,6 +1006,50 @@ export class UnixSocketServer {
     };
   }
 
+  private async handleInputKey(
+    request: DaemonRequest,
+    socketSessionId?: string
+  ): Promise<any | undefined> {
+    const queueEnterMs = this.timer.now();
+    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const args = this.parseInputKeyParams(request.params);
+    if (args.platform === "ios") {
+      throw new Error(INPUT_KEY_IOS_UNSUPPORTED_ERROR);
+    }
+    const targetDevice = await this.resolveInputTargetDevice(
+      args.platform,
+      args.deviceId,
+      socketSessionId,
+      "input/key"
+    );
+    const keyResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      const queueWaitMs = this.timer.now() - queueEnterMs;
+      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+      if (remainingTimeoutMs <= 0) {
+        throw new McpTimeoutError({
+          toolName: request.method,
+          timeoutMs: totalTimeoutMs,
+          origin: "UnixSocketServer.handleInputKey",
+          detail: `spent ${queueWaitMs}ms waiting in queue`,
+        });
+      }
+
+      return await new InputKey(targetDevice).press(args.key, remainingTimeoutMs);
+    });
+
+    if (!keyResult.success) {
+      throw new Error(keyResult.error ?? `input/key failed on ${args.platform}`);
+    }
+
+    return {
+      action: "input/key",
+      platform: args.platform,
+      deviceId: targetDevice.deviceId,
+      success: true,
+      key: args.key,
+    };
+  }
+
   private async executeInputTypeText(
     platform: "android" | "ios",
     targetDevice: BootedDevice,
@@ -1249,11 +1303,46 @@ export class UnixSocketServer {
     };
   }
 
+  private parseInputKeyParams(params: unknown): {
+    platform: "android" | "ios";
+    deviceId?: string;
+    key: InputKeyName;
+  } {
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
+      throw new Error("input/key requires params object");
+    }
+
+    const args = params as Record<string, unknown>;
+    const supportedParams = new Set(["platform", "deviceId", "key"]);
+    const unsupportedParams = Object.keys(args).filter(key => !supportedParams.has(key));
+    if (unsupportedParams.length > 0) {
+      throw new Error(`input/key unsupported params: ${unsupportedParams.join(", ")}`);
+    }
+    if (args.platform !== "android" && args.platform !== "ios") {
+      throw new Error("input/key requires platform 'android' or 'ios'");
+    }
+    if (typeof args.key !== "string") {
+      throw new Error("input/key requires key");
+    }
+    if (!isInputKeyName(args.key)) {
+      throw new Error(`input/key key must be one of: ${SUPPORTED_INPUT_KEYS.join(", ")}`);
+    }
+    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
+      throw new Error("input/key deviceId must be a string when provided");
+    }
+
+    return {
+      platform: args.platform,
+      deviceId: args.deviceId,
+      key: args.key,
+    };
+  }
+
   private async resolveInputTargetDevice(
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton"
+    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton" | "input/key"
   ): Promise<BootedDevice> {
     const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
     if (!discovery.succeededPlatforms.has(platform)) {

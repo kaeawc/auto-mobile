@@ -20,6 +20,7 @@ import { installInMemoryNavManager } from "../../helpers/navigationTestHarness";
 import type { HierarchySyncDiagnostics } from "../../../src/features/observe/android/types";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { logger } from "../../../src/utils/logger";
+import { stopDeviceDataStreamSocketServer } from "../../../src/daemon/deviceDataStreamSocketServer";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -72,6 +73,7 @@ describe("AndroidCtrlProxyClient", function() {
     if (accessibilityServiceClient) {
       await accessibilityServiceClient.close();
     }
+    await stopDeviceDataStreamSocketServer();
   });
 
   class CapturingWebSocket extends FakeWebSocket {

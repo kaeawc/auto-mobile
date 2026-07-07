@@ -55,6 +55,12 @@ export interface RequestHierarchyIfStaleMessage {
   sinceTimestamp: number;
 }
 
+/** `@SerialName("set_hierarchy_interval")` -> `SetHierarchyInterval` */
+export interface SetHierarchyIntervalMessage {
+  type: "set_hierarchy_interval";
+  intervalMs: number | null;
+}
+
 // =============================================================================
 // Screenshot Request
 // =============================================================================
@@ -488,6 +494,7 @@ export interface StopRecordingMessage {
 export type CtrlProxyRequest =
   | RequestHierarchyMessage
   | RequestHierarchyIfStaleMessage
+  | SetHierarchyIntervalMessage
   | RequestScreenshotMessage
   | RequestTapCoordinatesMessage
   | RequestSwipeMessage
@@ -550,6 +557,7 @@ export type CtrlProxyRequestType = CtrlProxyRequest["type"];
 const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_hierarchy: true,
   request_hierarchy_if_stale: true,
+  set_hierarchy_interval: true,
   request_screenshot: true,
   request_tap_coordinates: true,
   request_swipe: true,
@@ -631,6 +639,10 @@ export const ctrlProxyRequests = {
 
   requestHierarchyIfStale(args: { requestId: string; sinceTimestamp: number }): RequestHierarchyIfStaleMessage {
     return { type: "request_hierarchy_if_stale", requestId: args.requestId, sinceTimestamp: args.sinceTimestamp };
+  },
+
+  setHierarchyInterval(args: { intervalMs: number | null }): SetHierarchyIntervalMessage {
+    return { type: "set_hierarchy_interval", intervalMs: args.intervalMs };
   },
 
   requestScreenshot(args: { requestId: string }): RequestScreenshotMessage {

@@ -203,6 +203,7 @@ interface WsRequestBase extends WsMessageBase {
 
 interface WsConnectedMessage extends WsMessageBase {
   type: "connected";
+  supportedCommands?: string[];
 }
 
 interface ObservationStreamSuppression {
@@ -840,6 +841,8 @@ const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
  * Uses singleton pattern per device to maintain persistent WebSocket connection.
  */
 export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
+  private static readonly DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250;
+
   private device: BootedDevice;
   private adb: AdbExecutor;
 
@@ -896,6 +899,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Work profile monitor for polling profiles without accessibility service
   private workProfileMonitor: WorkProfileMonitor | null = null;
+  private supportedCommands: Set<string> | null = null;
 
   // Track foreground package for crash monitoring
   private lastForegroundPackage: string | null = null;
@@ -1230,6 +1234,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   protected onConnectionClosed(): void {
+    this.supportedCommands = null;
     this.cancelScreenshotBackoff();
     void this.markInstalledAppsStale("websocket_closed");
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
@@ -1997,6 +2002,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.screenshotBackoffScheduler?.rescheduleKeepAlive();
   }
 
+  refreshObservationStreamHierarchyCadence(intervalMs?: number | null): void {
+    if (!this.isCommandSupported("set_hierarchy_interval")) {
+      logger.info("[AndroidCtrlProxyClient] Skipping hierarchy cadence sync; runner does not advertise set_hierarchy_interval");
+      return;
+    }
+
+    const resolvedIntervalMs = intervalMs === undefined
+      ? getDeviceDataStreamServer()?.getHierarchyIntervalMsForDevice(
+        this.device.deviceId,
+        AndroidCtrlProxyClient.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
+      ) ?? AndroidCtrlProxyClient.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
+      : intervalMs;
+
+    this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({
+      intervalMs: resolvedIntervalMs,
+    })));
+  }
+
   // ===========================================================================
   // Connection Management
   // ===========================================================================
@@ -2108,7 +2131,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const message: WebSocketMessage = JSON.parse(data.toString());
 
       if (message.type === "connected") {
+        this.supportedCommands = Array.isArray(message.supportedCommands)
+          ? new Set(message.supportedCommands)
+          : new Set();
         logger.debug(`[CTRL_PROXY] Received connection confirmation`);
+        this.refreshObservationStreamHierarchyCadence();
         return;
       }
 
@@ -2961,6 +2988,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private async handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {
     logger.info(`[CTRL_PROXY] Received handled exception: ${event.exceptionClass} from ${event.packageName}`);
     await this.getSdkEventIngestor().recordHandledException(event);
+  }
+
+  private isCommandSupported(messageType: string): boolean {
+    return this.supportedCommands?.has(messageType) === true;
   }
 
   private async persistCrash(event: SdkCrashPayload): Promise<void> {

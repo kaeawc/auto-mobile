@@ -82,4 +82,19 @@ class BroadcastThrottlerTest {
     time.nowMs = 1150L
     assertTrue(throttler.timeSinceLastBroadcastMs() == 150L)
   }
+
+  @Test
+  fun `updated interval controls subsequent broadcasts`() {
+    val time = FakeTimeProvider(1000L)
+    val throttler = BroadcastThrottler(time, minIntervalMs = 250L)
+
+    assertTrue(throttler.shouldBroadcast())
+
+    throttler.setMinIntervalMs(500L)
+    time.nowMs = 1300L
+    assertFalse(throttler.shouldBroadcast())
+
+    time.nowMs = 1500L
+    assertTrue(throttler.shouldBroadcast())
+  }
 }

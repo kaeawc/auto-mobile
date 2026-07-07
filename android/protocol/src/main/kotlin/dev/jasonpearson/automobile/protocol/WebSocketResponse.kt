@@ -23,6 +23,7 @@ sealed class WebSocketResponse {
 @SerialName("connected")
 data class ConnectedResponse(
   val id: Int,
+  val supportedCommands: List<String> = emptyList(),
   override val timestamp: Long = System.currentTimeMillis(),
 ) : WebSocketResponse()
 

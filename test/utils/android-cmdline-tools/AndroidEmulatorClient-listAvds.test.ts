@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { AvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -14,8 +15,10 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   includes: (s: string) => stdout.includes(s),
 });
 
-const noAvdConfigReader = {
-  readConfig: async () => null,
+const noAvdConfigReader: AvdConfigReader = {
+  async readConfig() {
+    return null;
+  },
 };
 
 describe("AndroidEmulatorClient listAvds", () => {

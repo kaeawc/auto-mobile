@@ -60,7 +60,7 @@ describe("daemon input API consumer docs", () => {
 
     expect(unixSocketApi).toContain("Copy-paste raw socket examples");
     expect(unixSocketApi).toContain("printf '%s\\n'");
-    expect(unixSocketApi).toContain("nc -U \"$AUTOMOBILE_DAEMON_SOCKET_PATH\"");
+    expect(unixSocketApi).toContain("nc -U -w 2 \"$AUTOMOBILE_DAEMON_SOCKET_PATH\"");
     expect(requestExamples).toHaveLength(implementedInputMethods.length);
     expect(responseExamples).toHaveLength(implementedInputMethods.length);
 

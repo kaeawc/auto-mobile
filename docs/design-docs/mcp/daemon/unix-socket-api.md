@@ -343,25 +343,27 @@ socket response envelope:
 
 The examples below send one newline-delimited JSON request over the Unix socket.
 They use the default socket path; replace `platform`, `deviceId`, and coordinates
-with values from your device discovery flow.
+with values from your device discovery flow. The short `nc -w` timeout keeps
+these one-shot examples from staying attached to the daemon's long-lived socket
+after the response frame is printed.
 
 ```bash
 export AUTOMOBILE_DAEMON_SOCKET_PATH="${AUTOMOBILE_DAEMON_SOCKET_PATH:-/tmp/auto-mobile-daemon-$(id -u).sock}"
 
 printf '%s\n' '{"id":"tap-1","type":"mcp_request","method":"input/tap","params":{"platform":"android","deviceId":"emulator-5554","x":240,"y":640,"duration":50}}' \
-  | nc -U "$AUTOMOBILE_DAEMON_SOCKET_PATH"
+  | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
 
 printf '%s\n' '{"id":"swipe-1","type":"mcp_request","method":"input/swipe","params":{"platform":"android","deviceId":"emulator-5554","startX":520,"startY":1700,"endX":520,"endY":500,"durationMs":350}}' \
-  | nc -U "$AUTOMOBILE_DAEMON_SOCKET_PATH"
+  | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
 
 printf '%s\n' '{"id":"button-1","type":"mcp_request","method":"input/pressButton","params":{"platform":"android","deviceId":"emulator-5554","button":"back"}}' \
-  | nc -U "$AUTOMOBILE_DAEMON_SOCKET_PATH"
+  | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
 
 printf '%s\n' '{"id":"type-1","type":"mcp_request","method":"input/typeText","params":{"platform":"android","deviceId":"emulator-5554","text":"hello from socket","submit":false}}' \
-  | nc -U "$AUTOMOBILE_DAEMON_SOCKET_PATH"
+  | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
 
 printf '%s\n' '{"id":"key-1","type":"mcp_request","method":"input/key","params":{"platform":"android","deviceId":"emulator-5554","key":"enter"}}' \
-  | nc -U "$AUTOMOBILE_DAEMON_SOCKET_PATH"
+  | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
 ```
 
 Example success responses:

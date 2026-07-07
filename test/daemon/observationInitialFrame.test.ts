@@ -9,8 +9,8 @@ import type { ViewHierarchyResult } from "../../src/models";
 import type {
   AccessibilityHierarchy,
   AccessibilityHierarchyResponse,
-  ScreenshotResult,
 } from "../../src/features/observe/android";
+import type { ScreenshotCaptureResult } from "../../src/features/observe/ScreenshotBackoffScheduler";
 import type {
   CtrlProxyHierarchy,
   CtrlProxyHierarchyResponse,
@@ -57,14 +57,21 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
     skipWaitForFresh?: boolean;
   }> = [];
   readonly suppressedSyncHierarchyCalls: Array<{ timeoutMs?: number }> = [];
-  readonly suppressedScreenshotCalls: Array<{ timeoutMs?: number }> = [];
+  observationScreenshotCallCount = 0;
 
   constructor(
     private readonly connected: boolean,
     private readonly latestHierarchy: AccessibilityHierarchy | null,
     private readonly syncHierarchy: AccessibilityHierarchy | null = latestHierarchy,
     private readonly latestHierarchyFresh: boolean = true,
-    private readonly screenshot: ScreenshotResult = { success: true, data: "android-shot" }
+    private readonly screenshot: ScreenshotCaptureResult = {
+      success: true,
+      data: "android-shot",
+      screenshotMimeType: "image/jpeg",
+      screenshotFormat: "jpeg",
+      screenshotCaptureSource: "android_ctrlproxy_a11y",
+      screenshotFallback: false,
+    }
   ) {}
 
   async ensureConnected(): Promise<boolean> {
@@ -105,8 +112,8 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
     };
   }
 
-  async requestScreenshotWithoutObservationStreamPush(timeoutMs?: number): Promise<ScreenshotResult> {
-    this.suppressedScreenshotCalls.push({ timeoutMs });
+  async captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult> {
+    this.observationScreenshotCallCount += 1;
     return this.screenshot;
   }
 }
@@ -120,7 +127,7 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
     private readonly connected: boolean,
     private readonly latestHierarchy: CtrlProxyHierarchy | null,
     private readonly syncHierarchy: CtrlProxyHierarchy | null = latestHierarchy,
-    private readonly screenshot: CtrlProxyScreenshotResult = { success: true, data: "ios-shot" },
+    private readonly screenshot: CtrlProxyScreenshotResult = { success: true, data: "ios-shot", format: "png" },
     private readonly latestHierarchyFresh: boolean = true
   ) {}
 
@@ -238,7 +245,56 @@ describe("pushInitialObservationFramesForSubscriber", () => {
       { waitForFresh: false, timeout: 3000, skipWaitForFresh: true },
     ]);
     expect(androidClient.suppressedSyncHierarchyCalls).toHaveLength(0);
-    expect(androidClient.suppressedScreenshotCalls).toEqual([{ timeoutMs: 3000 }]);
+    expect(androidClient.observationScreenshotCallCount).toBe(1);
+  });
+
+  it("pushes Android initial ADB fallback screenshots with fallback metadata", async () => {
+    const streamServer = new FakeObservationStreamServer();
+    const androidClient = new FakeAndroidInitialFrameClient(
+      true,
+      {
+        updatedAt: 123,
+        packageName: "com.example",
+        screenWidth: 1440,
+        screenHeight: 3120,
+        hierarchy: { text: "Home", bounds: { left: 0, top: 0, right: 1440, bottom: 3120 } },
+      },
+      undefined,
+      true,
+      {
+        success: true,
+        data: "android-adb-shot",
+        screenshotMimeType: "image/png",
+        screenshotFormat: "png",
+        screenshotCaptureSource: "android_adb_screencap",
+        screenshotFallback: true,
+        screenshotFallbackReason: "websocket_unavailable",
+      }
+    );
+
+    await pushInitialObservationFramesForSubscriber(androidDevice.id, [androidDevice], {
+      streamServer,
+      androidClientFactory: () => androidClient,
+      iosClientFactory: () => {
+        throw new Error("unexpected iOS client");
+      },
+    });
+
+    expect(streamServer.screenshotUpdates).toEqual([
+      {
+        deviceId: androidDevice.id,
+        screenshotBase64: "android-adb-shot",
+        screenWidth: 1440,
+        screenHeight: 3120,
+        metadata: {
+          screenshotMimeType: "image/png",
+          screenshotFormat: "png",
+          screenshotCaptureSource: "android_adb_screencap",
+          screenshotFallback: true,
+          screenshotFallbackReason: "websocket_unavailable",
+        },
+      },
+    ]);
   });
 
   it("captures Android hierarchy without an automatic stream push when the initial cache is empty", async () => {
@@ -267,7 +323,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
       { waitForFresh: false, timeout: 3000, skipWaitForFresh: true },
     ]);
     expect(androidClient.suppressedSyncHierarchyCalls).toEqual([{ timeoutMs: 3000 }]);
-    expect(androidClient.suppressedScreenshotCalls).toEqual([{ timeoutMs: 3000 }]);
+    expect(androidClient.observationScreenshotCallCount).toBe(1);
     expect(streamServer.hierarchyUpdates[0].hierarchy.updatedAt).toBe(789);
     expect(streamServer.screenshotUpdates[0]).toMatchObject({
       deviceId: androidDevice.id,

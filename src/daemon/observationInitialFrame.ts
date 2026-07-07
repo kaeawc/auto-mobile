@@ -5,17 +5,17 @@ import type { PerformanceTracker } from "../utils/PerformanceTracker";
 import type {
   AccessibilityHierarchy,
   AccessibilityHierarchyResponse,
-  ScreenshotResult,
 } from "../features/observe/android";
+import type { ScreenshotCaptureResult } from "../features/observe/ScreenshotBackoffScheduler";
 import type {
   CtrlProxyHierarchy,
   CtrlProxyHierarchyResponse,
   CtrlProxyScreenshotResult,
 } from "../features/observe/ios/types";
 import {
-  ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
   IOS_CTRLPROXY_SCREENSHOT_METADATA,
   metadataForScreenshotFormat,
+  pickScreenshotMetadata,
 } from "../features/observe/ScreenshotMetadata";
 
 const INITIAL_FRAME_HIERARCHY_TIMEOUT_MS = 3_000;
@@ -47,7 +47,7 @@ export interface ObservationStreamAndroidClient {
     timeoutMs?: number
   ): Promise<{ hierarchy: AccessibilityHierarchy } | null>;
   convertToViewHierarchyResult(hierarchy: AccessibilityHierarchy): ViewHierarchyResult;
-  requestScreenshotWithoutObservationStreamPush(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
+  captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult>;
 }
 
 export interface ObservationStreamIosClient {
@@ -144,10 +144,7 @@ async function pushAndroidInitialScreenshot(
   streamServer: Pick<DeviceDataStreamSocketServer, "pushScreenshotUpdate">,
   viewHierarchy: ViewHierarchyResult
 ): Promise<void> {
-  // Android's normal screenshot request auto-pushes to the observation stream.
-  // Suppress that side effect so this initial frame is pushed exactly once with
-  // dimensions derived from the paired hierarchy.
-  const screenshot = await client.requestScreenshotWithoutObservationStreamPush(INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS);
+  const screenshot = await client.captureScreenshotForObservationStream();
   if (screenshot.success && screenshot.data) {
     const dimensions = getAndroidScreenshotDimensions(viewHierarchy);
     streamServer.pushScreenshotUpdate(
@@ -155,7 +152,7 @@ async function pushAndroidInitialScreenshot(
       screenshot.data,
       dimensions.width,
       dimensions.height,
-      metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, screenshot.format)
+      pickScreenshotMetadata(screenshot)
     );
   }
 }

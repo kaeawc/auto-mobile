@@ -2839,6 +2839,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return { success: false, error: "No subscribers" };
     }
 
+    return this.captureScreenshotForObservationStream();
+  }
+
+  async captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult> {
     // If we know the device doesn't support a11y screenshots, go straight to ADB fallback
     if (this.a11yScreenshotSupported === false) {
       return this.captureScreenshotViaAdb("a11y_screenshot_unsupported");
@@ -2852,6 +2856,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const message = serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId }));
 
     try {
+      this.screenshotObservationStreamSuppressions.add(requestId);
       const screenshotPromise = this.requestManager.register<ScreenshotResult>(
         requestId, "screenshot", 3000,
         (_id, _type, _timeout) => ({ success: false, error: "Screenshot timeout" })
@@ -2883,7 +2888,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, result.format),
       };
     } catch (error) {
+      this.requestManager.resolve<ScreenshotResult>(requestId, { success: false, error: `${error}` });
       return this.captureScreenshotViaAdb("ctrlproxy_exception");
+    } finally {
+      this.screenshotObservationStreamSuppressions.delete(requestId);
     }
   }
 

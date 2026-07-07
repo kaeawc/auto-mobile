@@ -138,7 +138,21 @@ export class PressButton extends BaseVisualChange {
       }
     }
 
-    await this.adb.executeCommand(`shell input keyevent ${keyCode}`, remainingMs());
+    // Fail fast if the (optional) deadline was fully consumed by the global-action
+    // attempt above. Passing 0 to executeCommand would arm NO timeout (the
+    // `if (timeoutMs)` check treats 0 as falsy), leaving the ADB keyevent
+    // unbounded — the exact overrun this budget threading exists to prevent.
+    const adbBudget = remainingMs();
+    if (adbBudget !== undefined && adbBudget <= 0) {
+      return {
+        success: false,
+        button,
+        keyCode: -1,
+        error: `Button press deadline exhausted before ADB keyevent for ${button}`
+      };
+    }
+
+    await this.adb.executeCommand(`shell input keyevent ${keyCode}`, adbBudget);
     return { success: true, button, keyCode };
   }
 

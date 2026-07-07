@@ -1,7 +1,9 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice } from "../../../src/models";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("PressButton", () => {
   const iosDevice: BootedDevice = {
@@ -137,6 +139,94 @@ describe("PressButton", () => {
 
     expect(result.success).toBe(true);
     expect(capturedTimeouts).toEqual([undefined]);
+  });
+
+  test("android global-action fallback shares the deadline budget with the ADB keyevent", async () => {
+    const androidDevice: BootedDevice = {
+      deviceId: "android-device",
+      platform: "android",
+      name: "Pixel"
+    };
+
+    const fakeTimer = new FakeTimer();
+    const globalActionTimeouts: number[] = [];
+    const adbTimeouts: (number | undefined)[] = [];
+
+    // Fails the accessibility path (forcing the ADB fallback) after consuming
+    // part of the shared deadline.
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestGlobalAction: async (action: string, timeoutMs: number) => {
+        globalActionTimeouts.push(timeoutMs);
+        fakeTimer.advanceTime(300);
+        return { success: false, action, totalTimeMs: 300, error: "WebSocket not connected" };
+      }
+    } as any);
+
+    const fakeAdb = {
+      executeCommand: async (_command: string, timeoutMs?: number) => {
+        adbTimeouts.push(timeoutMs);
+        return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
+      }
+    } as any;
+
+    try {
+      const pressButton = new PressButton(androidDevice, fakeAdb);
+      (pressButton as any).timer = fakeTimer;
+
+      // "back" is a global-action button, so this exercises the two-call path.
+      const result = await pressButton.press("back", 500);
+
+      expect(result.success).toBe(true);
+      // Global action capped at min(3000, 500).
+      expect(globalActionTimeouts).toEqual([500]);
+      // ADB fallback receives the REMAINING budget after 300ms was consumed,
+      // proving total time is bounded by the caller's budget, not the sum of
+      // per-transport defaults.
+      expect(adbTimeouts).toEqual([200]);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("android fails fast when the global action exhausts the deadline before the ADB fallback", async () => {
+    const androidDevice: BootedDevice = {
+      deviceId: "android-device",
+      platform: "android",
+      name: "Pixel"
+    };
+
+    const fakeTimer = new FakeTimer();
+    let adbCalled = false;
+
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestGlobalAction: async (action: string, timeoutMs: number) => {
+        // Consume the entire budget.
+        fakeTimer.advanceTime(timeoutMs);
+        return { success: false, action, totalTimeMs: timeoutMs, error: "timeout" };
+      }
+    } as any);
+
+    const fakeAdb = {
+      executeCommand: async () => {
+        adbCalled = true;
+        return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
+      }
+    } as any;
+
+    try {
+      const pressButton = new PressButton(androidDevice, fakeAdb);
+      (pressButton as any).timer = fakeTimer;
+
+      const result = await pressButton.press("back", 500);
+
+      // Deadline exhausted -> structured failure, and the unbounded ADB keyevent
+      // is never dispatched.
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("deadline exhausted");
+      expect(adbCalled).toBe(false);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
   });
 
   test("ios menu remains unsupported", async () => {

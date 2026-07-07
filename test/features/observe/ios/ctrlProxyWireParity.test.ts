@@ -73,6 +73,7 @@ const SWIFT_REQUEST_TYPES = [
   "remove_preference",
   "clear_preferences",
   "set_network_mock_rules",
+  "set_network_error_simulation",
   "execute_sql",
   "list_databases",
   "list_tables",
@@ -225,5 +226,10 @@ describe("iOS control-proxy — emitted commands are a subset of the runner cont
   test("IOS_RUNNER_FEATURE_COMMANDS is a subset of the known RequestType set", () => {
     const unknown = IOS_RUNNER_FEATURE_COMMANDS.filter(c => !IOS_KNOWN_REQUEST_TYPE_SET.has(c));
     expect(unknown).toEqual([]);
+  });
+
+  test("IOS_RUNNER_FEATURE_COMMANDS excludes feature-gated unreleased commands", () => {
+    const baselineCommands: readonly string[] = IOS_RUNNER_FEATURE_COMMANDS;
+    expect(baselineCommands).not.toContain("set_network_error_simulation");
   });
 });

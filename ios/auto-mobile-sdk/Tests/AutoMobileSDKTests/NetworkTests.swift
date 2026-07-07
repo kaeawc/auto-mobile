@@ -13,6 +13,12 @@ final class AutoMobileNetworkTests: XCTestCase {
         AutoMobileNetwork.shared.reset()
         #if DEBUG
         NetworkMockRuleStore.shared.setRules([])
+        NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+            enabled: false,
+            errorType: nil,
+            limit: nil,
+            expiresAtEpochMs: nil
+        ))
         #endif
         super.tearDown()
     }
@@ -317,6 +323,49 @@ final class AutoMobileNetworkTests: XCTestCase {
         XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/one", method: "GET"))
     }
 
+    func testNetworkMockRuleStoreHonorsErrorSimulationLimitAndExpiry() {
+        let dateProvider = FakeDateProvider(initialDate: Date(timeIntervalSince1970: 100))
+        let store = NetworkMockRuleStore(dateProvider: dateProvider)
+        store.setErrorSimulation(NetworkErrorSimulationDTO(
+            enabled: true,
+            errorType: "http500",
+            limit: 1,
+            expiresAtEpochMs: 101_000
+        ))
+
+        XCTAssertEqual(store.activeErrorSimulation()?.errorType, "http500")
+        XCTAssertNil(store.activeErrorSimulation())
+
+        store.setErrorSimulation(NetworkErrorSimulationDTO(
+            enabled: true,
+            errorType: "timeout",
+            limit: nil,
+            expiresAtEpochMs: 101_000
+        ))
+        dateProvider.advance(by: 2)
+
+        XCTAssertNil(store.activeErrorSimulation())
+    }
+
+    func testNetworkMockRuleStoreClearsErrorSimulationWhenDisabled() {
+        let store = NetworkMockRuleStore()
+        store.setErrorSimulation(NetworkErrorSimulationDTO(
+            enabled: true,
+            errorType: "http500",
+            limit: nil,
+            expiresAtEpochMs: nil
+        ))
+
+        store.setErrorSimulation(NetworkErrorSimulationDTO(
+            enabled: false,
+            errorType: nil,
+            limit: nil,
+            expiresAtEpochMs: nil
+        ))
+
+        XCTAssertNil(store.activeErrorSimulation())
+    }
+
     func testNetworkMockRuleStoreSkipsInvalidRegexRules() {
         let store = NetworkMockRuleStore()
         store.setRules([
@@ -391,6 +440,165 @@ final class AutoMobileNetworkTests: XCTestCase {
         XCTAssertEqual(event?.responseBody, "{\"error\":\"mocked\"}")
         XCTAssertEqual(event?.contentType, "application/json")
         XCTAssertEqual(event?.error, "mocked:mock-1")
+    }
+
+    func testURLProtocolPrefersMockRuleOverErrorSimulation() async throws {
+        let collector = EventCollector()
+        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+            collector.collect(events)
+        }
+        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+        AutoMobileNetwork.shared.setCaptureBodies(true)
+        NetworkMockRuleStore.shared.setRules([
+            NetworkMockRuleDTO(
+                mockId: "mock-1",
+                host: "api\\.example\\.com",
+                path: "^/v1/items$",
+                method: "GET",
+                limit: nil,
+                remaining: nil,
+                statusCode: 418,
+                responseHeaders: ["x-mocked": "true"],
+                responseBody: "mock-wins",
+                contentType: "text/plain"
+            ),
+        ])
+        NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+            enabled: true,
+            errorType: "timeout",
+            limit: nil,
+            expiresAtEpochMs: nil
+        ))
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
+        let session = URLSession(configuration: config)
+
+        let (data, response) = try await session.data(from: URL(string: "https://api.example.com/v1/items")!)
+
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 418)
+        XCTAssertEqual(String(data: data, encoding: .utf8), "mock-wins")
+        XCTAssertEqual((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "x-mocked"), "true")
+        buffer.flush()
+        let event = collector.events.first as? SdkNetworkRequestEvent
+        XCTAssertEqual(event?.url, "https://api.example.com/v1/items")
+        XCTAssertEqual(event?.statusCode, 418)
+        XCTAssertEqual(event?.responseBody, "mock-wins")
+        XCTAssertEqual(event?.error, "mocked:mock-1")
+    }
+
+    func testURLProtocolServesSimulatedHttp500AndRecordsRequest() async throws {
+        let collector = EventCollector()
+        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+            collector.collect(events)
+        }
+        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+        AutoMobileNetwork.shared.setCaptureBodies(true)
+        NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+            enabled: true,
+            errorType: "http500",
+            limit: nil,
+            expiresAtEpochMs: nil
+        ))
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
+        let session = URLSession(configuration: config)
+        var request = URLRequest(url: URL(string: "https://api.example.com/fail")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("{\"query\":\"mutation\"}".utf8)
+
+        let (data, response) = try await session.data(for: request)
+
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 500)
+        XCTAssertTrue(data.isEmpty)
+        buffer.flush()
+        let event = collector.events.first as? SdkNetworkRequestEvent
+        XCTAssertEqual(event?.url, "https://api.example.com/fail")
+        XCTAssertEqual(event?.method, "POST")
+        XCTAssertEqual(event?.requestBody, "{\"query\":\"mutation\"}")
+        XCTAssertEqual(event?.statusCode, 500)
+        XCTAssertEqual(event?.error, "simulated:http500")
+    }
+
+    func testURLProtocolCapsSimulatedErrorStreamBodyCapture() async throws {
+        let collector = EventCollector()
+        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+            collector.collect(events)
+        }
+        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+        AutoMobileNetwork.shared.setCaptureBodies(true)
+        AutoMobileNetwork.shared.setMaxBodyBytes(8)
+        NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+            enabled: true,
+            errorType: "http500",
+            limit: nil,
+            expiresAtEpochMs: nil
+        ))
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
+        let session = URLSession(configuration: config)
+        var request = URLRequest(url: URL(string: "https://api.example.com/stream")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBodyStream = InputStream(data: Data("{\"query\":\"mutation with a long payload\"}".utf8))
+
+        let (_, response) = try await session.data(for: request)
+
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 500)
+        buffer.flush()
+        let event = collector.events.first as? SdkNetworkRequestEvent
+        XCTAssertEqual(event?.url, "https://api.example.com/stream")
+        XCTAssertEqual(event?.method, "POST")
+        XCTAssertEqual(event?.requestBody, "{\"query\"")
+        XCTAssertEqual(event?.statusCode, 500)
+        XCTAssertEqual(event?.error, "simulated:http500")
+    }
+
+    func testURLProtocolServesTransportErrorSimulationsAndRecordsRequests() async {
+        let cases: [(String, URLError.Code)] = [
+            ("timeout", .timedOut),
+            ("connectionRefused", .cannotConnectToHost),
+            ("dnsFailure", .cannotFindHost),
+            ("tlsFailure", .secureConnectionFailed),
+        ]
+
+        for (errorType, expectedCode) in cases {
+            let collector = EventCollector()
+            let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+                collector.collect(events)
+            }
+            AutoMobileNetwork.shared.reset()
+            AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+            AutoMobileNetwork.shared.setCaptureBodies(true)
+            NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true,
+                errorType: errorType,
+                limit: nil,
+                expiresAtEpochMs: nil
+            ))
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
+            let session = URLSession(configuration: config)
+            var request = URLRequest(url: URL(string: "https://api.example.com/\(errorType)")!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data("{\"operation\":\"\(errorType)\"}".utf8)
+
+            do {
+                _ = try await session.data(for: request)
+                XCTFail("Expected \(errorType) to fail")
+            } catch {
+                XCTAssertEqual((error as? URLError)?.code, expectedCode)
+            }
+
+            buffer.flush()
+            let event = collector.events.first as? SdkNetworkRequestEvent
+            XCTAssertEqual(event?.url, "https://api.example.com/\(errorType)")
+            XCTAssertEqual(event?.method, "POST")
+            XCTAssertEqual(event?.requestBody, "{\"operation\":\"\(errorType)\"}")
+            XCTAssertNil(event?.statusCode)
+            XCTAssertEqual(event?.error, "simulated:\(errorType)")
+        }
     }
     #endif
 }

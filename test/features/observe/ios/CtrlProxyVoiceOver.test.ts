@@ -75,10 +75,20 @@ describe("CtrlProxyVoiceOver", function() {
   ): Promise<void> => {
     if (!socket) {return;}
     for (let i = 0; i < 10; i++) {
-      if (socket.sentMessages.length >= minCount) {return;}
+      if (commandPayloads(socket).length >= minCount) {return;}
       await new Promise(r => setImmediate(r));
     }
   };
+
+  const syncMessageTypes = new Set([
+    "set_network_mock_rules",
+    "set_network_error_simulation",
+  ]);
+
+  const commandPayloads = (socket: CapturingWebSocket): any[] =>
+    socket.sentMessages
+      .map(message => JSON.parse(message))
+      .filter(payload => !syncMessageTypes.has(payload.type));
 
   // ---------------------------------------------------------------------------
   // Tests
@@ -96,7 +106,7 @@ describe("CtrlProxyVoiceOver", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("get_voiceover_state");
         expect(typeof sentMsg.requestId).toBe("string");
 
@@ -126,7 +136,7 @@ describe("CtrlProxyVoiceOver", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
 
         socket!.simulateMessage(JSON.stringify({
           type: "voiceover_state_result",
@@ -172,7 +182,7 @@ describe("CtrlProxyVoiceOver", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("get_voiceover_state");
 
         // Resolve the pending request to avoid leaking
@@ -204,7 +214,7 @@ describe("CtrlProxyVoiceOver", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("request_action");
         expect(sentMsg.type).not.toBe("request_voiceover_action");
         expect(sentMsg.label).toBe("Submit");
@@ -237,7 +247,7 @@ describe("CtrlProxyVoiceOver", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const sentMsg = JSON.parse(socket!.sentMessages[0]);
+        const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("request_action");
         expect(sentMsg.action).toBe("long_press");
 
@@ -305,7 +315,7 @@ describe("CtrlProxyVoiceOver", function() {
         expect(result.totalTimeMs).toBe(0);
         expect(result.error).toContain("request_action");
         // Unsupported commands short-circuit before hitting the wire.
-        expect(socket!.sentMessages).toHaveLength(0);
+        expect(commandPayloads(socket!)).toHaveLength(0);
       } finally {
         await client.close();
       }

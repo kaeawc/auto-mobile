@@ -13,8 +13,18 @@ import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { BootedDevice } from "../utils/deviceUtils";
 import { logger } from "../utils/logger";
+import {
+  LATEST_RELEASE_VERSION,
+  RELEASE_CHECKSUM_REGISTRY,
+  resolveAssetVersion,
+  resolvePinnedVersion,
+  isPinnedVersionKnown,
+  type ReleaseChecksumEntry,
+} from "../constants/release";
 
 // --- network tool ---
+
+export const IOS_NETWORK_ERROR_SIMULATION_MIN_RELEASE = "0.0.41";
 
 const simulateErrorsSchema = z.object({
   errorType: z
@@ -117,6 +127,62 @@ const getNetworkGraphSchema = addDeviceTargetingToSchema(
 
 type GetNetworkGraphArgs = z.infer<typeof getNetworkGraphSchema>;
 
+function compareDottedVersion(a: string, b: string): number {
+  const aParts = a.split(".").map(part => Number(part));
+  const bParts = b.split(".").map(part => Number(part));
+  const length = Math.max(aParts.length, bParts.length);
+  for (let i = 0; i < length; i += 1) {
+    const left = Number.isFinite(aParts[i]) ? aParts[i] : 0;
+    const right = Number.isFinite(bParts[i]) ? bParts[i] : 0;
+    if (left !== right) {
+      return left - right;
+    }
+  }
+  return 0;
+}
+
+function hasIosCtrlProxyRunnerOverride(env: NodeJS.ProcessEnv = process.env): boolean {
+  const ipaPath = env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
+  const bundlePath = env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
+  return (
+    (ipaPath !== undefined && ipaPath.length > 0) ||
+    (bundlePath !== undefined && bundlePath.length > 0)
+  );
+}
+
+export function isIosNetworkErrorSimulationAvailable(
+  env: NodeJS.ProcessEnv = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): boolean {
+  if (hasIosCtrlProxyRunnerOverride(env)) {
+    return true;
+  }
+
+  const pinned = resolvePinnedVersion(env);
+  if (pinned !== LATEST_RELEASE_VERSION && !isPinnedVersionKnown(env, registry)) {
+    return false;
+  }
+
+  return compareDottedVersion(
+    resolveAssetVersion(pinned, registry),
+    IOS_NETWORK_ERROR_SIMULATION_MIN_RELEASE
+  ) >= 0;
+}
+
+function assertIosNetworkErrorSimulationAvailable(): void {
+  if (isIosNetworkErrorSimulationAvailable()) {
+    return;
+  }
+  const resolvedVersion = resolveAssetVersion(resolvePinnedVersion());
+  throw new ActionableError(
+    `Network error simulation is not enabled for the bundled iOS CtrlProxy runner ` +
+    `(${resolvedVersion}); it requires iOS CtrlProxy ${IOS_NETWORK_ERROR_SIMULATION_MIN_RELEASE} ` +
+    `or newer with set_network_error_simulation. Use Android for this scenario, ` +
+    `provide a locally built iOS runner via AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH or ` +
+    `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH, or retry after the updated runner ships.`
+  );
+}
+
 function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void {
   if (device.platform !== "android" && device.platform !== "ios") {return;}
   try {
@@ -134,12 +200,24 @@ function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void 
   }
 }
 
-function syncErrorSimulationToDevice(device: BootedDevice, state: NetworkState): void {
-  if (device.platform !== "android") {return;}
+async function syncErrorSimulationToDevice(device: BootedDevice, state: NetworkState): Promise<void> {
+  if (device.platform !== "android" && device.platform !== "ios") {return;}
   try {
-    const client = AndroidCtrlProxyClient.getInstance(device);
     const sim = state.simulation;
-    client.sendMessage(JSON.stringify({
+    if (device.platform === "ios") {
+      const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation({
+        enabled: sim !== null,
+        errorType: sim?.errorType ?? null,
+        limit: sim?.limit ?? null,
+        expiresAtEpochMs: sim?.expiresAt ?? null,
+      });
+      if (!result.success) {
+        throw new ActionableError(result.error ?? "Failed to sync iOS network error simulation.");
+      }
+      return;
+    }
+
+    AndroidCtrlProxyClient.getInstance(device).sendMessage(JSON.stringify({
       type: "set_network_error_simulation",
       enabled: sim !== null,
       errorType: sim?.errorType ?? null,
@@ -147,8 +225,39 @@ function syncErrorSimulationToDevice(device: BootedDevice, state: NetworkState):
       expiresAtEpochMs: sim?.expiresAt ?? null,
     }));
   } catch (e) {
+    if (device.platform === "ios") {
+      throw e;
+    }
     logger.debug(`[networkTools] Failed to sync error simulation to device: ${e}`);
   }
+}
+
+async function setIosErrorSimulation(
+  device: BootedDevice,
+  state: NetworkState,
+  config: { errorType: SimulatedErrorType; durationSeconds: number; limit: number | null } | null
+): Promise<void> {
+  if (config === null) {
+    state.cancelSimulation();
+  }
+
+  const expiresAtEpochMs = config
+    ? Math.ceil(state.timer.now() + config.durationSeconds * 1000)
+    : null;
+  const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation({
+    enabled: config !== null,
+    errorType: config?.errorType ?? null,
+    limit: config?.limit ?? null,
+    expiresAtEpochMs,
+  });
+  if (!result.success) {
+    throw new ActionableError(result.error ?? "Failed to sync iOS network error simulation.");
+  }
+
+  if (config === null) {
+    return;
+  }
+  state.startSimulationUntil(config.errorType, expiresAtEpochMs!, config.limit);
 }
 
 export function registerNetworkTools(): void {
@@ -161,26 +270,41 @@ export function registerNetworkTools(): void {
     }
 
     if (args.simulateErrors !== undefined) {
-      if (device.platform !== "android") {
-        throw new ActionableError(
-          "Network error simulation is only supported on Android devices."
-        );
-      }
-      if (args.simulateErrors.cancel) {
-        state.cancelSimulation();
-      } else {
-        if (!args.simulateErrors.durationSeconds) {
-          throw new ActionableError("durationSeconds is required unless cancel is true");
+      if (device.platform === "ios") {
+        if (args.simulateErrors.cancel) {
+          if (isIosNetworkErrorSimulationAvailable()) {
+            await setIosErrorSimulation(device, state, null);
+          } else {
+            state.cancelSimulation();
+          }
+        } else {
+          assertIosNetworkErrorSimulationAvailable();
+          if (!args.simulateErrors.durationSeconds) {
+            throw new ActionableError("durationSeconds is required unless cancel is true");
+          }
+          await setIosErrorSimulation(device, state, {
+            errorType: args.simulateErrors.errorType ?? "http500",
+            durationSeconds: args.simulateErrors.durationSeconds,
+            limit: args.simulateErrors.limit ?? null,
+          });
         }
-        const errorType: SimulatedErrorType =
-                args.simulateErrors.errorType ?? "http500";
-        state.startSimulation(
-          errorType,
-          args.simulateErrors.durationSeconds,
-          args.simulateErrors.limit ?? null
-        );
+      } else {
+        if (args.simulateErrors.cancel) {
+          state.cancelSimulation();
+        } else {
+          if (!args.simulateErrors.durationSeconds) {
+            throw new ActionableError("durationSeconds is required unless cancel is true");
+          }
+          const errorType: SimulatedErrorType =
+                  args.simulateErrors.errorType ?? "http500";
+          state.startSimulation(
+            errorType,
+            args.simulateErrors.durationSeconds,
+            args.simulateErrors.limit ?? null
+          );
+        }
+        await syncErrorSimulationToDevice(device, state);
       }
-      syncErrorSimulationToDevice(device, state);
     }
 
     if (args.notifFilter !== undefined) {

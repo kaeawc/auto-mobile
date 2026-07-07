@@ -216,6 +216,14 @@ public struct RequestSetNetworkMockRules: Decodable {
     public var rules: [NetworkMockRuleDTO]
 }
 
+public struct RequestSetNetworkErrorSimulation: Decodable {
+    public var requestId: String?
+    public var enabled: Bool
+    public var errorType: String?
+    public var limit: Int?
+    public var expiresAtEpochMs: Int64?
+}
+
 // MARK: Database inspection
 
 public struct RequestExecuteSql: Decodable {
@@ -293,6 +301,7 @@ extension RequestSetPreference: CommandPayload {}
 extension RequestRemovePreference: CommandPayload {}
 extension RequestClearPreferences: CommandPayload {}
 extension RequestSetNetworkMockRules: CommandPayload {}
+extension RequestSetNetworkErrorSimulation: CommandPayload {}
 extension RequestExecuteSql: CommandPayload {}
 extension RequestListDatabases: CommandPayload {}
 extension RequestListTables: CommandPayload {}
@@ -347,6 +356,7 @@ public enum WebSocketRequest: Decodable {
     case clearPreferences(RequestClearPreferences)
 
     case setNetworkMockRules(RequestSetNetworkMockRules)
+    case setNetworkErrorSimulation(RequestSetNetworkErrorSimulation)
 
     case executeSql(RequestExecuteSql)
     case listDatabases(RequestListDatabases)
@@ -441,6 +451,8 @@ public enum WebSocketRequest: Decodable {
             self = try .clearPreferences(RequestClearPreferences(from: decoder))
         case .setNetworkMockRules:
             self = try .setNetworkMockRules(RequestSetNetworkMockRules(from: decoder))
+        case .setNetworkErrorSimulation:
+            self = try .setNetworkErrorSimulation(RequestSetNetworkErrorSimulation(from: decoder))
         case .executeSql:
             self = try .executeSql(RequestExecuteSql(from: decoder))
         case .listDatabases:
@@ -492,6 +504,7 @@ public enum WebSocketRequest: Decodable {
         case .removePreference: return .removePreference
         case .clearPreferences: return .clearPreferences
         case .setNetworkMockRules: return .setNetworkMockRules
+        case .setNetworkErrorSimulation: return .setNetworkErrorSimulation
         case .executeSql: return .executeSql
         case .listDatabases: return .listDatabases
         case .listTables: return .listTables
@@ -547,6 +560,7 @@ public enum WebSocketRequest: Decodable {
         case let .removePreference(payload): return payload
         case let .clearPreferences(payload): return payload
         case let .setNetworkMockRules(payload): return payload
+        case let .setNetworkErrorSimulation(payload): return payload
         case let .executeSql(payload): return payload
         case let .listDatabases(payload): return payload
         case let .listTables(payload): return payload
@@ -595,6 +609,20 @@ public struct NetworkMockRuleDTO: Codable, Sendable, Equatable {
         self.responseHeaders = responseHeaders
         self.responseBody = responseBody
         self.contentType = contentType
+    }
+}
+
+public struct NetworkErrorSimulationDTO: Codable, Sendable, Equatable {
+    public let enabled: Bool
+    public let errorType: String?
+    public let limit: Int?
+    public let expiresAtEpochMs: Int64?
+
+    public init(enabled: Bool, errorType: String?, limit: Int?, expiresAtEpochMs: Int64?) {
+        self.enabled = enabled
+        self.errorType = errorType
+        self.limit = limit
+        self.expiresAtEpochMs = expiresAtEpochMs
     }
 }
 
@@ -683,6 +711,22 @@ public struct SetNetworkMockRulesResponse: Codable {
 
     public init(requestId: String?, ok: Bool, totalTimeMs: Int64?) {
         type = ResponseType.setNetworkMockRulesResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.ok = ok
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+public struct SetNetworkErrorSimulationResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let ok: Bool
+    public let totalTimeMs: Int64?
+
+    public init(requestId: String?, ok: Bool, totalTimeMs: Int64?) {
+        type = ResponseType.setNetworkErrorSimulationResult.rawValue
         timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.ok = ok
@@ -1476,6 +1520,7 @@ public enum RequestType: String, CaseIterable {
 
     /// Network mocking
     case setNetworkMockRules = "set_network_mock_rules"
+    case setNetworkErrorSimulation = "set_network_error_simulation"
 
     // Database inspection
     case executeSql = "execute_sql"
@@ -1525,6 +1570,7 @@ public enum ResponseType: String {
     case removePreferenceResult = "remove_preference_result"
     case clearPreferencesResult = "clear_preferences_result"
     case setNetworkMockRulesResult = "set_network_mock_rules_result"
+    case setNetworkErrorSimulationResult = "set_network_error_simulation_result"
 
     // Database inspection
     case executeSqlResult = "execute_sql_result"
@@ -1583,6 +1629,7 @@ extension RequestType {
         case .removePreference: return .removePreferenceResult
         case .clearPreferences: return .clearPreferencesResult
         case .setNetworkMockRules: return .setNetworkMockRulesResult
+        case .setNetworkErrorSimulation: return .setNetworkErrorSimulationResult
         case .executeSql: return .executeSqlResult
         case .listDatabases: return .listDatabasesResult
         case .listTables: return .listTablesResult

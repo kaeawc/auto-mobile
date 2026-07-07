@@ -154,6 +154,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             .removePreference: #"{"key":"k"}"#,
             .clearPreferences: "{}",
             .setNetworkMockRules: #"{"rules":[]}"#,
+            .setNetworkErrorSimulation: #"{"enabled":false}"#,
             .executeSql: "{}",
             .listDatabases: "{}",
             .listTables: "{}",
@@ -653,6 +654,20 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         )
         XCTAssertEqual(response?.type, "set_network_mock_rules_result")
         XCTAssertEqual(fakeSdkHierarchy.lastMockRules?.first?.mockId, "m1")
+    }
+
+    func testSetNetworkErrorSimulationDecodeDispatchRelaysConfig() {
+        let response = dispatch(
+            #"""
+            {"type":"set_network_error_simulation","requestId":"nes-1","enabled":true,"errorType":"tlsFailure","limit":3,"expiresAtEpochMs":1720000000000}
+            """#,
+            as: SetNetworkErrorSimulationResponse.self
+        )
+        XCTAssertEqual(response?.type, "set_network_error_simulation_result")
+        XCTAssertEqual(fakeSdkHierarchy.lastNetworkErrorSimulation?.enabled, true)
+        XCTAssertEqual(fakeSdkHierarchy.lastNetworkErrorSimulation?.errorType, "tlsFailure")
+        XCTAssertEqual(fakeSdkHierarchy.lastNetworkErrorSimulation?.limit, 3)
+        XCTAssertEqual(fakeSdkHierarchy.lastNetworkErrorSimulation?.expiresAtEpochMs, 1_720_000_000_000)
     }
 
     // MARK: - Database

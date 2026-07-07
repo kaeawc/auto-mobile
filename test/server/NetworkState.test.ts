@@ -64,6 +64,32 @@ describe("NetworkState", () => {
       expect(sim!.expiresAt).toBe(30_000);
     });
 
+    it("rounds fractional duration expirations up to integer milliseconds", () => {
+      state.startSimulation("http500", 1.2345, null);
+
+      expect(state.simulation?.expiresAt).toBe(1_235);
+    });
+
+    it("starts simulation with an absolute expiration", () => {
+      timer.advanceTime(5_000);
+      state.startSimulationUntil("http500", 30_000, null);
+      const sim = state.simulation;
+      expect(sim).not.toBeNull();
+      expect(sim!.expiresAt).toBe(30_000);
+
+      timer.advanceTime(24_999);
+      expect(state.simulation).not.toBeNull();
+      timer.advanceTime(1);
+      expect(state.simulation).toBeNull();
+    });
+
+    it("does not keep already-expired absolute simulations active", () => {
+      timer.advanceTime(30_000);
+      state.startSimulationUntil("http500", 30_000, null);
+
+      expect(state.simulation).toBeNull();
+    });
+
     it("expires simulation after duration", () => {
       state.startSimulation("timeout", 10, null);
       expect(state.simulation).not.toBeNull();

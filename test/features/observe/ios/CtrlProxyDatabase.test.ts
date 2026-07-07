@@ -62,10 +62,20 @@ describe("CtrlProxyDatabase (iOS)", function() {
   const waitForSentMessages = async (socket: CapturingWebSocket | null, minCount = 1): Promise<void> => {
     if (!socket) { return; }
     for (let i = 0; i < 10; i += 1) {
-      if (socket.sentMessages.length >= minCount) { return; }
+      if (commandPayloads(socket).length >= minCount) { return; }
       await new Promise(resolve => setImmediate(resolve));
     }
   };
+
+  const syncMessageTypes = new Set([
+    "set_network_mock_rules",
+    "set_network_error_simulation",
+  ]);
+
+  const commandPayloads = (socket: CapturingWebSocket): any[] =>
+    socket.sentMessages
+      .map(message => JSON.parse(message))
+      .filter(payload => !syncMessageTypes.has(payload.type));
 
   test("executeSQLForIos sends execute_sql and returns query rows including blob strings", async function() {
     const { factory, getSocket } = createCapturingFactory();
@@ -77,7 +87,7 @@ describe("CtrlProxyDatabase (iOS)", function() {
       await waitForSocketOpen(socket);
       await waitForSentMessages(socket);
 
-      const sentMessage = JSON.parse(socket!.sentMessages[0]);
+      const sentMessage = commandPayloads(socket!)[0];
       expect(sentMessage.type).toBe("execute_sql");
       expect(sentMessage.appId).toBe("com.example.app");
       expect(sentMessage.databasePath).toBe("/app/Documents/app.db");
@@ -113,7 +123,7 @@ describe("CtrlProxyDatabase (iOS)", function() {
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       await waitForSentMessages(socket);
-      const sentMessage = JSON.parse(socket!.sentMessages[0]);
+      const sentMessage = commandPayloads(socket!)[0];
 
       socket!.simulateMessage(JSON.stringify({
         type: "execute_sql_result",
@@ -142,7 +152,7 @@ describe("CtrlProxyDatabase (iOS)", function() {
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       await waitForSentMessages(socket);
-      const sentMessage = JSON.parse(socket!.sentMessages[0]);
+      const sentMessage = commandPayloads(socket!)[0];
 
       socket!.simulateMessage(JSON.stringify({
         type: "execute_sql_result",

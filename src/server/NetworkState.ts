@@ -145,10 +145,23 @@ export class NetworkState {
     durationSeconds: number,
     limit: number | null
   ): void {
+    this.startSimulationUntil(errorType, Math.ceil(this.timer.now() + durationSeconds * 1000), limit);
+  }
+
+  startSimulationUntil(
+    errorType: SimulatedErrorType,
+    expiresAt: number,
+    limit: number | null
+  ): void {
     if (this._simulationTimeout) {
       this.timer.clearTimeout(this._simulationTimeout);
+      this._simulationTimeout = null;
     }
-    const expiresAt = this.timer.now() + durationSeconds * 1000;
+    const timeoutMs = Math.max(0, expiresAt - this.timer.now());
+    if (timeoutMs === 0) {
+      this._simulation = null;
+      return;
+    }
     this._simulation = {
       errorType,
       limit,
@@ -158,7 +171,7 @@ export class NetworkState {
     this._simulationTimeout = this.timer.setTimeout(() => {
       this._simulation = null;
       this._simulationTimeout = null;
-    }, durationSeconds * 1000);
+    }, timeoutMs);
   }
 
   cancelSimulation(): void {

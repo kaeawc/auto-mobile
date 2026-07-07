@@ -44,6 +44,13 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
         return postSync(path: "/network/mock", body: body, session: urlSession)
     }
 
+    public func setNetworkErrorSimulation(_ config: NetworkErrorSimulationDTO) -> Bool {
+        guard let body = try? JSONEncoder().encode(config) else {
+            return false
+        }
+        return postSync(path: "/network/error-simulation", body: body, session: urlSession)
+    }
+
     /// Draw a highlight in the target app through the SDK's in-app server.
     public func addHighlight(id: String, shape: HighlightShape) -> SdkHighlightOutcome {
         guard let body = try? JSONEncoder().encode(AddHighlightBody(id: id, shape: shape)) else {

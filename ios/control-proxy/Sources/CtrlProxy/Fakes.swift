@@ -791,10 +791,13 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
     private var _fetchServerInfoCallCount = 0
     private var _isAvailableCallCount = 0
     private var _setMockRulesCallCount = 0
+    private var _setNetworkErrorSimulationCallCount = 0
     private var _addHighlightCallCount = 0
     private var _lastMockRules: [NetworkMockRuleDTO]?
+    private var _lastNetworkErrorSimulation: NetworkErrorSimulationDTO?
     private var _lastHighlight: (id: String, shape: HighlightShape)?
     public var setMockRulesResult = true
+    public var setNetworkErrorSimulationResult = true
     public var addHighlightResult: SdkHighlightOutcome = .unavailable
 
     public init() {}
@@ -857,6 +860,12 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         return _setMockRulesCallCount
     }
 
+    public var setNetworkErrorSimulationCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _setNetworkErrorSimulationCallCount
+    }
+
     public var addHighlightCallCount: Int {
         lock.lock()
         defer { lock.unlock() }
@@ -867,6 +876,12 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         lock.lock()
         defer { lock.unlock() }
         return _lastMockRules
+    }
+
+    public var lastNetworkErrorSimulation: NetworkErrorSimulationDTO? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _lastNetworkErrorSimulation
     }
 
     public var lastHighlight: (id: String, shape: HighlightShape)? {
@@ -882,8 +897,10 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         _fetchServerInfoCallCount = 0
         _isAvailableCallCount = 0
         _setMockRulesCallCount = 0
+        _setNetworkErrorSimulationCallCount = 0
         _addHighlightCallCount = 0
         _lastMockRules = nil
+        _lastNetworkErrorSimulation = nil
         _lastHighlight = nil
         lock.unlock()
     }
@@ -927,6 +944,15 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         _setMockRulesCallCount += 1
         _lastMockRules = rules
         let result = setMockRulesResult
+        lock.unlock()
+        return result
+    }
+
+    public func setNetworkErrorSimulation(_ config: NetworkErrorSimulationDTO) -> Bool {
+        lock.lock()
+        _setNetworkErrorSimulationCallCount += 1
+        _lastNetworkErrorSimulation = config
+        let result = setNetworkErrorSimulationResult
         lock.unlock()
         return result
     }

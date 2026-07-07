@@ -758,6 +758,24 @@ function stringAttr(attrs: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+const IOS_GENERATED_VIEW_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function iosStableId(attrs: Record<string, unknown>): string {
+  const resourceId = stringAttr(attrs, "resource-id");
+  if (resourceId !== "") {
+    return resourceId;
+  }
+  const accessibilityIdentifier = stringAttr(attrs, "accessibilityIdentifier");
+  if (accessibilityIdentifier !== "") {
+    return accessibilityIdentifier;
+  }
+  const viewId = stringAttr(attrs, "view-id");
+  if (viewId !== "" && !IOS_GENERATED_VIEW_ID_PATTERN.test(viewId)) {
+    return viewId;
+  }
+  return "";
+}
+
 function quantizedBoundsKey(bounds: unknown): string {
   const parts = boundsKey(bounds).split(",").map(part => Number(part));
   if (parts.length !== 4 || parts.some(part => !Number.isFinite(part))) {
@@ -808,9 +826,7 @@ function iosStableIdentityKey(node: DiffRepairNode): string | null {
   if (isIosListCellClass(className) || !isIosEditableClass(className)) {
     return null;
   }
-  const stableId = stringAttr(node.attributes, "resource-id")
-    || stringAttr(node.attributes, "view-id")
-    || stringAttr(node.attributes, "accessibilityIdentifier");
+  const stableId = iosStableId(node.attributes);
   if (stableId === "") {
     return null;
   }

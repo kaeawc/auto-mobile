@@ -903,6 +903,30 @@ describe("diffObserveResult — conservative iOS stable identity (#3318)", () =>
     expect(diff.changed[0].changes.value).toEqual({ from: "", to: "Buy milk" });
   });
 
+  test("iOS generated UUID view-ids do not re-pair id-less text fields", () => {
+    const baseline = iosObs({
+      "view-id": "123e4567-e89b-12d3-a456-426614174000",
+      "class": "UITextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Old field",
+      "value": "Old field",
+    });
+    const next = iosObs({
+      "view-id": "123e4567-e89b-12d3-a456-426614174000",
+      "class": "UITextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Different field",
+      "value": "Different field",
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.added[0].attributes.text).toBe("Different field");
+    expect(diff.removed[0].attributes.text).toBe("Old field");
+  });
+
   test("contentIdentity:false disables the iOS editable-control repair path", () => {
     const baseline = iosObs({
       "resource-id": "TitleField",

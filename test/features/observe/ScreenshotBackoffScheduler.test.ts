@@ -363,6 +363,56 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       expect(emittedScreenshots[0]).toBe("same-data");
     });
 
+    it("emits when screenshot metadata changes even if image bytes are unchanged", async () => {
+      const emittedResults: ScreenshotCaptureResult[] = [];
+      const captures: ScreenshotCaptureResult[] = [
+        {
+          success: true,
+          data: "same-data",
+          screenshotMimeType: "image/jpeg",
+          screenshotFormat: "jpeg",
+          screenshotCaptureSource: "android_ctrlproxy_a11y",
+          screenshotFallback: false,
+        },
+        {
+          success: true,
+          data: "same-data",
+          screenshotMimeType: "image/png",
+          screenshotFormat: "png",
+          screenshotCaptureSource: "android_adb_screencap",
+          screenshotFallback: true,
+          screenshotFallbackReason: "websocket_unavailable",
+        },
+        {
+          success: true,
+          data: "same-data",
+          screenshotMimeType: "image/png",
+          screenshotFormat: "png",
+          screenshotCaptureSource: "android_adb_screencap",
+          screenshotFallback: true,
+          screenshotFallbackReason: "websocket_unavailable",
+        },
+      ];
+      let captureIndex = 0;
+      captureCallback = async () => captures[captureIndex++]!;
+
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        captureCallback,
+        result => {
+          emittedResults.push(result);
+        },
+        { intervals: [0, 100, 200], keepAliveIntervalMs: null },
+        fakeTimer
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+      await fakeTimer.advanceTimersByTimeAsync(100);
+      await fakeTimer.advanceTimersByTimeAsync(100);
+
+      expect(emittedResults).toEqual([captures[0], captures[1]]);
+    });
+
     it("emits when screenshot changes", async () => {
       let screenshotIndex = 0;
       const screenshots = ["frame1", "frame1", "frame2", "frame2", "frame3"];

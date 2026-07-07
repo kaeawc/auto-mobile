@@ -118,6 +118,7 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
   private pendingTimeouts: ReturnType<Timer["setTimeout"]>[] = [];
   private keepAliveTimeout: ReturnType<Timer["setTimeout"]> | null = null;
   private lastEmittedChecksum: string | null = null;
+  private lastEmittedMetadataSignature: string | null = null;
   private sequenceId: number = 0;
 
   constructor(
@@ -196,6 +197,7 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
    */
   resetLastChecksum(): void {
     this.lastEmittedChecksum = null;
+    this.lastEmittedMetadataSignature = null;
   }
 
   private async captureAtInterval(sequenceId: number, interval: number): Promise<void> {
@@ -263,21 +265,36 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
 
       // Compute checksum
       const checksum = result.checksum || computeChecksum(result.data);
+      const metadataSignature = this.createMetadataSignature(result);
+      const isDuplicateCapture =
+        checksum === this.lastEmittedChecksum &&
+        metadataSignature === this.lastEmittedMetadataSignature;
 
-      // Skip if same as last emitted
-      if (!emitDuplicates && checksum === this.lastEmittedChecksum) {
-        logger.debug(`[ScreenshotBackoff] Skipping duplicate screenshot at ${captureLabel} (checksum: ${checksum.substring(0, 8)}...)`);
+      // Skip only when both the image bytes and public screenshot metadata match.
+      if (!emitDuplicates && isDuplicateCapture) {
+        logger.debug(`[ScreenshotBackoff] Skipping duplicate screenshot at ${captureLabel} (checksum: ${checksum.substring(0, 8)}..., metadata: ${metadataSignature})`);
         return;
       }
 
       // Emit the screenshot
       logger.debug(`[ScreenshotBackoff] Emitting screenshot at ${captureLabel} (checksum: ${checksum.substring(0, 8)}..., size: ${result.data.length})`);
       this.lastEmittedChecksum = checksum;
+      this.lastEmittedMetadataSignature = metadataSignature;
       this.emitCallback(result);
 
     } catch (error) {
       logger.warn(`[ScreenshotBackoff] Error capturing screenshot at ${captureLabel}: ${error}`);
     }
+  }
+
+  private createMetadataSignature(metadata: ScreenshotMetadata): string {
+    return JSON.stringify([
+      metadata.screenshotMimeType ?? null,
+      metadata.screenshotFormat ?? null,
+      metadata.screenshotCaptureSource ?? null,
+      metadata.screenshotFallback ?? null,
+      metadata.screenshotFallbackReason ?? null,
+    ]);
   }
 
   private scheduleKeepAliveIfIdle(sequenceId: number): void {

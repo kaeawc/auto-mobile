@@ -6,6 +6,8 @@
 
 The AutoMobile IntelliJ/Android Studio plugin attaches to a running MCP server to render navigation data and
 manage development workflows. It connects via STDIO or the local daemon socket.
+Future interactive screen control should use the [daemon input API](../../../mcp/daemon/unix-socket-api.md#input-api)
+for tap, swipe, text, and button input over that socket.
 
 ## Transport selection
 The plugin resolves a transport when the user clicks "Attach to MCP":

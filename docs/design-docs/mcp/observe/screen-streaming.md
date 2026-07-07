@@ -10,6 +10,9 @@
 > See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 Real-time screen streaming from mobile devices to the IDE plugin, enabling interactive device mirroring at up to 60fps with <100ms latency.
+Interactive screen control should send tap, swipe, text, and button input through
+the [daemon input API](../daemon/unix-socket-api.md#input-api) rather than
+constructing MCP tool payloads directly.
 
 ## Goals
 

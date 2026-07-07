@@ -14,6 +14,10 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   includes: (s: string) => stdout.includes(s),
 });
 
+const noAvdConfigReader = {
+  readConfig: async () => null,
+};
+
 describe("AndroidEmulatorClient listAvds", () => {
   test("reports deleted daemon cwd failures separately from a missing emulator binary", async () => {
     const sdkDir = mkdtempSync(join(tmpdir(), "android-sdk-"));
@@ -121,7 +125,7 @@ describe("AndroidEmulatorClient listAvds", () => {
   test("returns AVDs when emulator command succeeds", async () => {
     const execAsync = async (_command: string): Promise<ExecResult> =>
       createExecResult("Pixel_9\nPixel_Tablet\n");
-    const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer());
+    const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer(), undefined, noAvdConfigReader);
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([

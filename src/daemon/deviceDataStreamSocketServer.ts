@@ -353,7 +353,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       deviceId,
       "screenshot_update",
       DEFAULT_SCREENSHOT_INTERVAL_MS,
-      filter => filter.screenshotIntervalMs
+      filter => filter.screenshotIntervalMs,
+      true
     );
   }
 
@@ -366,7 +367,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       deviceId,
       "hierarchy_update",
       DEFAULT_HIERARCHY_INTERVAL_MS,
-      filter => filter.hierarchyIntervalMs
+      filter => filter.hierarchyIntervalMs,
+      false
     );
   }
 
@@ -374,7 +376,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     deviceId: string,
     messageType: "screenshot_update" | "hierarchy_update",
     defaultIntervalMs: number,
-    requestedIntervalMs: (filter: DeviceDataFilter) => number | null
+    getRequestedIntervalMs: (filter: DeviceDataFilter) => number | null,
+    useDefaultWhenRequestMissing: boolean
   ): number {
     const probe: DeviceDataPush = {
       message: {
@@ -394,11 +397,15 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         continue;
       }
 
-      const requestedInterval = requestedIntervalMs(subscriber.filter) ?? defaultIntervalMs;
+      const requestedIntervalMs = getRequestedIntervalMs(subscriber.filter);
+      if (requestedIntervalMs === null && !useDefaultWhenRequestMissing) {
+        continue;
+      }
+      const intervalMs = requestedIntervalMs ?? defaultIntervalMs;
 
       fastestIntervalMs = fastestIntervalMs === null
-        ? requestedInterval
-        : Math.min(fastestIntervalMs, requestedInterval);
+        ? intervalMs
+        : Math.min(fastestIntervalMs, intervalMs);
     }
 
     return fastestIntervalMs ?? defaultIntervalMs;

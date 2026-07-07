@@ -13,7 +13,7 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
-import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer } from "../../../../src/daemon/deviceDataStreamSocketServer";
+import { stopDeviceDataStreamSocketServer } from "../../../../src/daemon/deviceDataStreamSocketServer";
 
 describe("IOSCtrlProxyClient", function() {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -119,7 +119,7 @@ describe("IOSCtrlProxyClient", function() {
   };
 
   const syncMessageTypes = new Set([
-    "set_hierarchy_interval",
+    "set_hierarchy_poll_interval",
     "set_network_mock_rules",
     "set_network_error_simulation",
   ]);
@@ -154,62 +154,32 @@ describe("IOSCtrlProxyClient", function() {
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
     });
 
-    test("refreshes hierarchy cadence by sending interval config", async function() {
-      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      ctrlProxyClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer
-      );
+    test("sends hierarchy cadence updates to the runner", function() {
+      const sentMessages: string[] = [];
+      (ctrlProxyClient as any).sendMessage = (message: string) => {
+        sentMessages.push(message);
+        return true;
+      };
 
-      const connected = await ctrlProxyClient.ensureConnected();
-      const socket = await waitForSocket(getSocket) as CapturingWebSocket | null;
-      await waitForSocketOpen(socket);
-      expect(connected).toBe(true);
-      socket!.sentMessages = [];
+      (ctrlProxyClient as any).refreshObservationStreamHierarchyCadence(500);
 
-      ctrlProxyClient.refreshObservationStreamHierarchyCadence(500);
-
-      const sentPayloads = socket!.sentMessages.map(message => JSON.parse(message));
-      expect(sentPayloads).toContainEqual({
-        type: "set_hierarchy_interval",
+      expect(sentMessages.map(message => JSON.parse(message))).toEqual([{
+        type: "set_hierarchy_poll_interval",
         intervalMs: 500,
-      });
+      }]);
     });
 
-    test("refreshes hierarchy cadence from the stream server when no interval is passed", async function() {
-      const streamServer = await startDeviceDataStreamSocketServer(fakeTimer);
-      (streamServer as any).subscribers.set("hierarchy-cadence-test", {
-        socket: { destroyed: false },
-        backfilling: false,
-        filter: {
-          deviceId: testDevice.deviceId,
-          screenshotIntervalMs: null,
-          hierarchyIntervalMs: 500,
-        },
-      });
-      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      ctrlProxyClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer
-      );
+    test("does not send hierarchy cadence updates to stale runners without command support", function() {
+      const sentMessages: string[] = [];
+      (ctrlProxyClient as any).supportedCommands = new Set(["request_hierarchy"]);
+      (ctrlProxyClient as any).sendMessage = (message: string) => {
+        sentMessages.push(message);
+        return true;
+      };
 
-      const connected = await ctrlProxyClient.ensureConnected();
-      const socket = await waitForSocket(getSocket) as CapturingWebSocket | null;
-      await waitForSocketOpen(socket);
-      expect(connected).toBe(true);
-      socket!.sentMessages = [];
+      (ctrlProxyClient as any).refreshObservationStreamHierarchyCadence(500);
 
-      ctrlProxyClient.refreshObservationStreamHierarchyCadence();
-
-      const sentPayloads = socket!.sentMessages.map(message => JSON.parse(message));
-      expect(sentPayloads).toContainEqual({
-        type: "set_hierarchy_interval",
-        intervalMs: 500,
-      });
+      expect(sentMessages).toEqual([]);
     });
 
     test("notifies the observation stream when the WebSocket connection closes", function() {
@@ -273,11 +243,10 @@ describe("IOSCtrlProxyClient", function() {
 
       (ctrlProxyClient as any).onConnectionEstablished();
 
-      expect(sentMessages).toHaveLength(3);
+      expect(sentMessages).toHaveLength(2);
       expect(sentMessages.map(message => JSON.parse(message).type)).toEqual([
         "set_network_mock_rules",
         "set_network_error_simulation",
-        "set_hierarchy_interval",
       ]);
       expect(JSON.parse(sentMessages[0])).toEqual({
         type: "set_network_mock_rules",
@@ -298,10 +267,6 @@ describe("IOSCtrlProxyClient", function() {
         type: "set_network_error_simulation",
         enabled: false,
       });
-      expect(JSON.parse(sentMessages[2])).toEqual({
-        type: "set_hierarchy_interval",
-        intervalMs: null,
-      });
     });
 
     test("clears stale network error simulation when the connection (re)establishes without an active simulation", function() {
@@ -316,14 +281,10 @@ describe("IOSCtrlProxyClient", function() {
 
       (ctrlProxyClient as any).onConnectionEstablished();
 
-      expect(sentMessages).toHaveLength(2);
+      expect(sentMessages).toHaveLength(1);
       expect(JSON.parse(sentMessages[0])).toEqual({
         type: "set_network_error_simulation",
         enabled: false,
-      });
-      expect(JSON.parse(sentMessages[1])).toEqual({
-        type: "set_hierarchy_interval",
-        intervalMs: null,
       });
     });
 
@@ -357,17 +318,13 @@ describe("IOSCtrlProxyClient", function() {
 
       (ctrlProxyClient as any).onConnectionEstablished();
 
-      expect(sentMessages).toHaveLength(2);
+      expect(sentMessages).toHaveLength(1);
       expect(JSON.parse(sentMessages[0])).toEqual({
         type: "set_network_error_simulation",
         enabled: true,
         errorType: "tlsFailure",
         limit: 4,
         expiresAtEpochMs: expect.any(Number),
-      });
-      expect(JSON.parse(sentMessages[1])).toEqual({
-        type: "set_hierarchy_interval",
-        intervalMs: null,
       });
     });
   });

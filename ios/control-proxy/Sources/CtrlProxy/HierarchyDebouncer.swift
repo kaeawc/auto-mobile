@@ -29,6 +29,9 @@ public protocol HierarchyDebouncing {
     /// Perform an immediate extraction and wait for it to complete (blocking)
     func extractNowBlocking(skipFlowEmit: Bool) -> ViewHierarchy?
 
+    /// Update the polling interval used for future hierarchy checks
+    func updatePollIntervalMs(_ pollIntervalMs: Int64)
+
     /// Set callback for hierarchy results
     func setOnResult(_ callback: @escaping (HierarchyResult) -> Void)
 
@@ -165,6 +168,19 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         let hierarchy = lastHierarchy
         lock.unlock()
         return hierarchy
+    }
+
+    public func updatePollIntervalMs(_ pollIntervalMs: Int64) {
+        lock.lock()
+        self.pollIntervalMs = pollIntervalMs
+        pollGeneration += 1
+        let running = _isRunning
+        pollScheduled = false
+        lock.unlock()
+
+        if running {
+            scheduleNextPoll()
+        }
     }
 
     public func getLastHierarchy() -> ViewHierarchy? {
@@ -417,6 +433,7 @@ public class FakeHierarchyDebouncer: HierarchyDebouncing {
     public private(set) var stopCallCount = 0
     public private(set) var extractNowCallCount = 0
     public private(set) var extractNowBlockingCallCount = 0
+    public private(set) var updatePollIntervalMsCallCount = 0
     public private(set) var setOnResultCallCount = 0
     public private(set) var resetCallCount = 0
 
@@ -428,6 +445,7 @@ public class FakeHierarchyDebouncer: HierarchyDebouncing {
 
     /// Configure what hierarchy to return from extractNowBlocking
     public var hierarchyToReturn: ViewHierarchy?
+    public private(set) var lastPollIntervalMs: Int64?
 
     public var isRunning: Bool {
         lock.lock()
@@ -464,6 +482,13 @@ public class FakeHierarchyDebouncer: HierarchyDebouncing {
         lastHierarchy = hierarchy
         lock.unlock()
         return hierarchy
+    }
+
+    public func updatePollIntervalMs(_ pollIntervalMs: Int64) {
+        lock.lock()
+        updatePollIntervalMsCallCount += 1
+        lastPollIntervalMs = pollIntervalMs
+        lock.unlock()
     }
 
     public func setOnResult(_ callback: @escaping (HierarchyResult) -> Void) {
@@ -506,8 +531,10 @@ public class FakeHierarchyDebouncer: HierarchyDebouncing {
         stopCallCount = 0
         extractNowCallCount = 0
         extractNowBlockingCallCount = 0
+        updatePollIntervalMsCallCount = 0
         setOnResultCallCount = 0
         resetCallCount = 0
+        lastPollIntervalMs = nil
         lock.unlock()
     }
 }

@@ -800,7 +800,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     this.syncNetworkMockRulesToDevice();
     this.syncNetworkErrorSimulationToDevice();
-    this.refreshObservationStreamHierarchyCadence();
+    this.syncHierarchyCadenceToDevice();
 
     // Start polling for SDK events from the CtrlProxy HTTP endpoint
     this.startSdkEventPolling();
@@ -850,6 +850,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     } catch (e) {
       logger.warn(`[IOSCtrlProxyClient] Failed to sync network error simulation on reconnect: ${e}`);
     }
+  }
+
+  private syncHierarchyCadenceToDevice(): void {
+    const server = getDeviceDataStreamServer();
+    if (!server) {
+      return;
+    }
+
+    this.refreshObservationStreamHierarchyCadence(
+      server.getHierarchyIntervalMsForDevice(this.device.deviceId)
+    );
   }
 
   protected onConnectionClosed(): void {
@@ -1692,14 +1703,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.screenshotBackoffScheduler?.rescheduleKeepAlive();
   }
 
-  refreshObservationStreamHierarchyCadence(intervalMs?: number | null): void {
-    const resolvedIntervalMs = intervalMs === undefined
-      ? getDeviceDataStreamServer()?.getHierarchyIntervalMsForDevice(this.device.deviceId) ?? null
-      : intervalMs;
+  refreshObservationStreamHierarchyCadence(intervalMs: number): void {
+    if (!this.isCommandSupported("set_hierarchy_poll_interval")) {
+      logger.info("[IOSCtrlProxyClient] Skipping hierarchy cadence sync; runner does not advertise set_hierarchy_poll_interval");
+      return;
+    }
 
     this.sendMessage(JSON.stringify({
-      type: "set_hierarchy_interval",
-      intervalMs: resolvedIntervalMs,
+      type: "set_hierarchy_poll_interval",
+      intervalMs,
     }));
   }
 

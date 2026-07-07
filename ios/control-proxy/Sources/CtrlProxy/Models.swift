@@ -34,9 +34,9 @@ public struct RequestHierarchy: Decodable {
     public var sinceTimestamp: Int64?
 }
 
-public struct RequestSetHierarchyInterval: Decodable {
+public struct RequestSetHierarchyPollInterval: Decodable {
     public var requestId: String?
-    public var intervalMs: Int64?
+    public var intervalMs: Int64
 }
 
 // MARK: Gestures
@@ -284,7 +284,7 @@ public protocol CommandPayload {
 
 extension RequestEnvelope: CommandPayload {}
 extension RequestHierarchy: CommandPayload {}
-extension RequestSetHierarchyInterval: CommandPayload {}
+extension RequestSetHierarchyPollInterval: CommandPayload {}
 extension RequestTapCoordinates: CommandPayload {}
 extension RequestSwipe: CommandPayload {}
 extension RequestMultiFingerSwipe: CommandPayload {}
@@ -323,7 +323,7 @@ extension RequestGetTableStructure: CommandPayload {}
 public enum WebSocketRequest: Decodable {
     case requestHierarchy(RequestHierarchy)
     case requestHierarchyIfStale(RequestHierarchy)
-    case setHierarchyInterval(RequestSetHierarchyInterval)
+    case setHierarchyPollInterval(RequestSetHierarchyPollInterval)
     case requestScreenshot(RequestEnvelope)
 
     case tapCoordinates(RequestTapCoordinates)
@@ -392,8 +392,8 @@ public enum WebSocketRequest: Decodable {
             self = try .requestHierarchy(RequestHierarchy(from: decoder))
         case .requestHierarchyIfStale:
             self = try .requestHierarchyIfStale(RequestHierarchy(from: decoder))
-        case .setHierarchyInterval:
-            self = try .setHierarchyInterval(RequestSetHierarchyInterval(from: decoder))
+        case .setHierarchyPollInterval:
+            self = try .setHierarchyPollInterval(RequestSetHierarchyPollInterval(from: decoder))
         case .requestScreenshot:
             self = try .requestScreenshot(RequestEnvelope(from: decoder))
         case .requestTapCoordinates:
@@ -480,7 +480,7 @@ public enum WebSocketRequest: Decodable {
         switch self {
         case .requestHierarchy: return .requestHierarchy
         case .requestHierarchyIfStale: return .requestHierarchyIfStale
-        case .setHierarchyInterval: return .setHierarchyInterval
+        case .setHierarchyPollInterval: return .setHierarchyPollInterval
         case .requestScreenshot: return .requestScreenshot
         case .tapCoordinates: return .requestTapCoordinates
         case .swipe: return .requestSwipe
@@ -536,7 +536,7 @@ public enum WebSocketRequest: Decodable {
         switch self {
         case let .requestHierarchy(payload), let .requestHierarchyIfStale(payload):
             return payload
-        case let .setHierarchyInterval(payload): return payload
+        case let .setHierarchyPollInterval(payload): return payload
         case let .requestScreenshot(payload),
              let .selectAll(payload),
              let .pressHome(payload),
@@ -1480,7 +1480,7 @@ public enum RequestType: String, CaseIterable {
     // View hierarchy
     case requestHierarchy = "request_hierarchy"
     case requestHierarchyIfStale = "request_hierarchy_if_stale"
-    case setHierarchyInterval = "set_hierarchy_interval"
+    case setHierarchyPollInterval = "set_hierarchy_poll_interval"
     case requestScreenshot = "request_screenshot"
 
     // Gestures
@@ -1546,7 +1546,7 @@ public enum RequestType: String, CaseIterable {
 
 public enum ResponseType: String {
     case hierarchyUpdate = "hierarchy_update"
-    case setHierarchyIntervalResult = "set_hierarchy_interval_result"
+    case setHierarchyPollIntervalResult = "set_hierarchy_poll_interval_result"
     case screenshot
     case screenshotError = "screenshot_error"
     case tapCoordinatesResult = "tap_coordinates_result"
@@ -1610,7 +1610,7 @@ extension RequestType {
     public var responseType: ResponseType {
         switch self {
         case .requestHierarchy, .requestHierarchyIfStale: return .hierarchyUpdate
-        case .setHierarchyInterval: return .setHierarchyIntervalResult
+        case .setHierarchyPollInterval: return .setHierarchyPollIntervalResult
         case .requestScreenshot: return .screenshot
         case .requestTapCoordinates: return .tapCoordinatesResult
         case .requestSwipe: return .swipeResult

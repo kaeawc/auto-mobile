@@ -792,9 +792,21 @@ export class Daemon {
             .getExistingInstance(device.id)
             ?.refreshObservationStreamHierarchyCadence();
         } else if (device.platform === "ios") {
-          IOSCtrlProxyClient
-            .getExistingInstance(device.id)
-            ?.refreshObservationStreamHierarchyCadence();
+          const client = IOSCtrlProxyClient.getExistingInstance(device.id);
+          if (!client) {
+            continue;
+          }
+
+          const intervalMs = server.getHierarchyIntervalMsForDevice(device.id);
+          void client.ensureConnected().then(connected => {
+            if (connected) {
+              client.refreshObservationStreamHierarchyCadence(intervalMs);
+            }
+          }).catch(error => {
+            logger.warn(`[Daemon] Failed to refresh iOS hierarchy cadence for ${device.id}: ${error}`);
+          });
+        } else {
+          continue;
         }
       }
     });
@@ -842,7 +854,16 @@ export class Daemon {
   private createObservationStreamIosClient(device: BootedDevice): ObservationStreamIosClient {
     const client = IOSCtrlProxyClient.getInstance(device);
     return {
-      ensureConnected: () => client.ensureConnected(),
+      ensureConnected: async () => {
+        const connected = await client.ensureConnected();
+        const server = getDeviceDataStreamServer();
+        if (connected && server) {
+          client.refreshObservationStreamHierarchyCadence(
+            server.getHierarchyIntervalMsForDevice(device.deviceId)
+          );
+        }
+        return connected;
+      },
       getLatestHierarchy: (...args) => client.getLatestHierarchy(...args),
       requestHierarchySyncWithoutObservationStreamPush: async (...args) => {
         const result = await client.requestHierarchySyncWithoutObservationStreamPush(...args);

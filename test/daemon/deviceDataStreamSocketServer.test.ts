@@ -632,17 +632,17 @@ describe("DeviceDataStreamSocketServer", () => {
   });
 
   describe("hierarchy cadence aggregation", () => {
-    it("keeps default hierarchy behavior when subscribers omit cadence", () => {
+    it("uses the default hierarchy polling cadence when subscribers omit cadence", () => {
       server.simulateSubscription({ deviceId: "device-1" });
 
-      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBeNull();
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
     });
 
     it("parses requested hierarchy cadence from subscribe commands", async () => {
       const socket = new FakeSocket();
 
       await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-hierarchy-fast",
+        id: "sub-fast-hierarchy",
         command: "subscribe",
         deviceId: "device-1",
         hierarchyIntervalMs: 500,
@@ -655,7 +655,7 @@ describe("DeviceDataStreamSocketServer", () => {
       const socket = new FakeSocket();
 
       await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-hierarchy-clamped",
+        id: "sub-clamped-hierarchy",
         command: "subscribe",
         deviceId: "device-1",
         hierarchyIntervalMs: 50,
@@ -692,33 +692,40 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getHierarchyIntervalMsForDevice("device-2")).toBe(750);
     });
 
+    it("keeps default hierarchy cadence when another subscriber requests a slower cadence", () => {
+      server.simulateSubscription({ deviceId: "device-1" });
+      server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 10_000 });
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
+    });
+
     it("removes requested hierarchy cadence after unsubscribe", async () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
 
       await server.processLineForTest(socket, JSON.stringify({
-        id: "unsub-hierarchy-fast",
+        id: "unsub-fast-hierarchy",
         command: "unsubscribe",
       }));
 
-      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBeNull();
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
     });
 
     it("ignores destroyed subscriber sockets when aggregating hierarchy cadence", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
       socket.destroy();
 
-      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBeNull();
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
     });
 
     it("notifies when subscribe changes hierarchy cadence", async () => {
       const changedDevices: Array<string | null> = [];
-      server.setOnHierarchyCadenceChanged(deviceId => {
+      server.setOnHierarchyCadenceChanged((deviceId: string | null) => {
         changedDevices.push(deviceId);
       });
       const socket = new FakeSocket();
 
       await server.processLineForTest(socket, JSON.stringify({
-        id: "sub-hierarchy-fast",
+        id: "sub-fast-hierarchy",
         command: "subscribe",
         deviceId: "device-1",
         hierarchyIntervalMs: 500,
@@ -729,7 +736,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
     it("notifies when unsubscribe removes hierarchy cadence", async () => {
       const changedDevices: Array<string | null> = [];
-      server.setOnHierarchyCadenceChanged(deviceId => {
+      server.setOnHierarchyCadenceChanged((deviceId: string | null) => {
         changedDevices.push(deviceId);
       });
       const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });
@@ -744,7 +751,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
     it("notifies when connection close removes hierarchy cadence", () => {
       const changedDevices: Array<string | null> = [];
-      server.setOnHierarchyCadenceChanged(deviceId => {
+      server.setOnHierarchyCadenceChanged((deviceId: string | null) => {
         changedDevices.push(deviceId);
       });
       const { socket } = server.simulateSubscription({ deviceId: "device-1", hierarchyIntervalMs: 500 });

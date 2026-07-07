@@ -171,6 +171,50 @@ final class HierarchyDebouncerTests: XCTestCase {
         XCTAssertEqual(fakeLocator.hierarchyRequestCount, initialCount)
     }
 
+    func testUpdatePollIntervalWhileRunningChangesNextPollCadence() {
+        let hierarchy = ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: UIElementInfo(
+                text: "Root",
+                className: "UIView",
+                bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 812)
+            ),
+            windowInfo: WindowInfo(id: 0, type: 1, isActive: true, isFocused: true)
+        )
+        fakeLocator.setHierarchy(hierarchy)
+        debouncer.start()
+        let initialCount = fakeLocator.hierarchyRequestCount
+
+        debouncer.updatePollIntervalMs(50)
+        fakeTimer.advance(by: 49)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, initialCount)
+
+        fakeTimer.advance(by: 1)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, initialCount + 1)
+    }
+
+    func testResetPollIntervalUsesDefaultCadenceForFuturePolls() {
+        let hierarchy = ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: UIElementInfo(
+                text: "Root",
+                className: "UIView",
+                bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 812)
+            ),
+            windowInfo: WindowInfo(id: 0, type: 1, isActive: true, isFocused: true)
+        )
+        fakeLocator.setHierarchy(hierarchy)
+        debouncer.start()
+        debouncer.updatePollIntervalMs(HierarchyDebouncer.defaultPollIntervalMs)
+        let initialCount = fakeLocator.hierarchyRequestCount
+
+        fakeTimer.advance(by: HierarchyDebouncer.defaultPollIntervalMs - 1)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, initialCount)
+
+        fakeTimer.advance(by: 1)
+        XCTAssertEqual(fakeLocator.hierarchyRequestCount, initialCount + 1)
+    }
+
     func testExtractNowBlockingReturnsHierarchy() {
         let hierarchy = ViewHierarchy(
             packageName: "com.test.app",

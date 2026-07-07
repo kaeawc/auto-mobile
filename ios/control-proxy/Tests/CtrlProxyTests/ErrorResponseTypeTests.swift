@@ -14,6 +14,7 @@ final class ErrorResponseTypeTests: XCTestCase {
         let expected: [RequestType: ResponseType] = [
             .requestHierarchy: .hierarchyUpdate,
             .requestHierarchyIfStale: .hierarchyUpdate,
+            .setHierarchyPollInterval: .setHierarchyPollIntervalResult,
             .requestScreenshot: .screenshot,
             .requestTapCoordinates: .tapCoordinatesResult,
             .requestSwipe: .swipeResult,

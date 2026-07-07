@@ -30,6 +30,17 @@ fi
 echo "✓ Swift version: $(swift --version | head -n 1)"
 echo ""
 
+# Drift gate: the XCTestRunner's baked version constant is generated from
+# package.json. Fail here if the committed AutoMobileVersion.swift has drifted,
+# rather than shipping a stale version (issue #2814).
+echo "Checking XCTestRunner version constant is in sync with package.json..."
+if ! (cd "${PROJECT_ROOT}" && bash scripts/versioning/generate-ios-version.sh --check); then
+  echo "❌ XCTestRunner version constant is out of sync with package.json"
+  echo "   Run: scripts/versioning/generate-ios-version.sh"
+  exit 1
+fi
+echo ""
+
 # Component directories
 COMPONENTS=(
   "ios/AccessibilityService"

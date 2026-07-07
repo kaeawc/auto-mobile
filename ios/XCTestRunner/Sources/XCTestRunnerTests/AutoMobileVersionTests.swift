@@ -2,6 +2,32 @@ import XCTest
 @testable import XCTestRunner
 
 final class AutoMobileVersionTests: XCTestCase {
+    /// AC #2814: the built runner reports the version of the release it was cut from.
+    /// package.json is the canonical source; the constant is generated from it, so this
+    /// pins that the baked value has not drifted. Resolved via `#filePath` so it is
+    /// independent of the test's working directory.
+    func testCurrentVersionMatchesCanonicalPackageJson() throws {
+        // .../ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift
+        //  -> repo root is five directories up from this source file.
+        var repoRoot = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 {
+            repoRoot.deleteLastPathComponent()
+        }
+        let packageJsonURL = repoRoot.appendingPathComponent("package.json")
+
+        let data = try Data(contentsOf: packageJsonURL)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let packageVersion = try XCTUnwrap(json?["version"] as? String,
+                                           "package.json must have a string version field")
+
+        XCTAssertEqual(
+            AutoMobileVersion.current,
+            packageVersion,
+            "baked runner version must match canonical package.json; regenerate with "
+                + "scripts/versioning/generate-ios-version.sh"
+        )
+    }
+
     func testCurrentVersionIsNonEmptySemver() {
         let version = AutoMobileVersion.current
         XCTAssertFalse(version.isEmpty, "baked client version must not be empty")

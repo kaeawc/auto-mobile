@@ -598,6 +598,13 @@ jobs:
         shell: bash
         run: bats test/bats/
 
+      # Drift gate for the generated iOS runner version constant (#2814). Pure
+      # bash + python3, so it runs on this Ubuntu job rather than the macOS Swift
+      # lane — the committed AutoMobileVersion.swift must match package.json.
+      - name: "Check iOS version constant is in sync with package.json"
+        shell: bash
+        run: bash scripts/versioning/generate-ios-version.sh --check
+
       - name: "Run hadolint"
         uses: hadolint/hadolint-action@v3.1.0
         with:

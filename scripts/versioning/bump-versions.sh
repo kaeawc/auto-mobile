@@ -27,6 +27,14 @@ if [[ -z "$new_version" ]]; then
   exit 1
 fi
 
+# Validate the version shape up front, before any file is written. The iOS
+# generator (invoked late, below) rejects non-semver; validating here avoids
+# aborting mid-bump with a half-updated tree on operator error.
+if ! [[ "$new_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+  echo "Invalid --new-version '${new_version}': expected MAJOR.MINOR.PATCH semver." >&2
+  exit 1
+fi
+
 snapshot_version="${new_version}-SNAPSHOT"
 
 update_json_version() {
@@ -172,11 +180,16 @@ update_marketplace_plugin_version ".claude-plugin/marketplace.json" "$new_versio
 # Keep the iOS XCTestRunner's baked client version in sync (mirrors Android's jar
 # Implementation-Version). The daemon's version handshake compares the release portion,
 # so this carries the plain MAJOR.MINOR.PATCH with no SNAPSHOT suffix.
-replace_optional_single_match \
-  "ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift" \
-  'public static let current = "[^"]*"' \
-  "public static let current = \"${new_version}\"" \
-  "$dry_run"
+#
+# AutoMobileVersion.swift is a generated artifact. package.json is already updated
+# above, so regenerate the Swift constant from it rather than regex-editing in place:
+# this keeps package.json the single source of truth and lets the generator's
+# `--check` drift gate catch any skew in CI. Resolve the generator relative to this
+# script so it works regardless of the caller's cwd.
+if [[ "$dry_run" != true ]]; then
+  bump_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  bash "${bump_script_dir}/generate-ios-version.sh"
+fi
 
 if ! command -v rg >/dev/null 2>&1; then
   echo "ripgrep (rg) is required for fast Gradle scanning." >&2

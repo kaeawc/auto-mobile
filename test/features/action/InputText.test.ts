@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import type { InputTextMode } from "../../../src/features/action/InputText";
 import type { BootedDevice } from "../../../src/models";
@@ -11,7 +12,13 @@ interface TestInputText {
     text: string,
     imeAction?: undefined,
     dismissKeyboard?: boolean,
-    mode?: InputTextMode
+    mode?: InputTextMode,
+    timeoutMs?: number
+  ) => Promise<{ success: boolean; error?: string; method?: string }>;
+  executeiOSTextInput: (
+    text: string,
+    imeAction?: "done",
+    timeoutMs?: number
   ) => Promise<{ success: boolean; error?: string; method?: string }>;
 }
 
@@ -46,17 +53,27 @@ describe("InputText", () => {
     platform: "android",
     name: "Test Device",
   };
+  const iosDevice: BootedDevice = {
+    deviceId: "ios-input-text-device",
+    platform: "ios",
+    name: "iPhone",
+  };
 
   let originalGetInstance: typeof AndroidCtrlProxyClient.getInstance;
+  let originalIosGetInstance: typeof IOSCtrlProxyClient.getInstance;
 
   beforeEach(() => {
     originalGetInstance = AndroidCtrlProxyClient.getInstance;
+    originalIosGetInstance = IOSCtrlProxyClient.getInstance;
     AndroidCtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
   });
 
   afterEach(() => {
     AndroidCtrlProxyClient.getInstance = originalGetInstance;
+    IOSCtrlProxyClient.getInstance = originalIosGetInstance;
     AndroidCtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
   });
 
   // Regression for https://github.com/kaeawc/auto-mobile/issues/2229.
@@ -299,5 +316,25 @@ describe("InputText", () => {
     expect(result.method).toBe("a11y");
     expect(setTextCalls).toEqual(["你好😊"]);
     expect(inputCommands(factory)).toEqual([]);
+  });
+
+  test("iOS text input fails when submit IME action fails", async () => {
+    const inputText = new InputText(iosDevice);
+    IOSCtrlProxyClient.getInstance = (() => ({
+      requestSetText: async (_text: string, _options?: { timeoutMs?: number }) => ({
+        success: true,
+        totalTimeMs: 1,
+      }),
+      requestImeAction: async (_action: "done", _timeoutMs?: number) => ({
+        success: false,
+        error: "return key unavailable",
+        totalTimeMs: 1,
+      }),
+    })) as typeof IOSCtrlProxyClient.getInstance;
+
+    const result = await testInputText(inputText).executeiOSTextInput("hello", "done", 1234);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("return key unavailable");
   });
 });

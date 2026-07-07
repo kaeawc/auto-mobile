@@ -53,9 +53,10 @@ import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
+import { InputText } from "../features/action/InputText";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
-import type { BootedDevice } from "../models";
+import type { BootedDevice, ImeAction } from "../models";
 /** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
 const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
@@ -643,6 +644,12 @@ export class UnixSocketServer {
     if (request.method === "input/swipe") {
       return await this.handleInputSwipe(request, socketSessionId);
     }
+    if (request.method === "input/typeText") {
+      return await this.handleInputTypeText(request, socketSessionId);
+    }
+    if (request.method === "input/key") {
+      throw new Error("input/key is not implemented; use input/pressButton or input/typeText");
+    }
 
     switch (request.method) {
       case "ide/listFeatureFlags": {
@@ -898,6 +905,84 @@ export class UnixSocketServer {
     };
   }
 
+  private async handleInputTypeText(
+    request: DaemonRequest,
+    socketSessionId?: string
+  ): Promise<any | undefined> {
+    const queueEnterMs = this.timer.now();
+    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const args = this.parseInputTypeTextParams(request.params);
+    const targetDevice = await this.resolveInputTargetDevice(
+      args.platform,
+      args.deviceId,
+      socketSessionId,
+      "input/typeText"
+    );
+    const inputResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      const queueWaitMs = this.timer.now() - queueEnterMs;
+      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+      if (remainingTimeoutMs <= 0) {
+        throw new McpTimeoutError({
+          toolName: request.method,
+          timeoutMs: totalTimeoutMs,
+          origin: "UnixSocketServer.handleInputTypeText",
+          detail: `spent ${queueWaitMs}ms waiting in queue`,
+        });
+      }
+
+      const inputText = new InputText(targetDevice);
+      const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
+      return await this.runInputOperationWithTimeout(
+        request.method,
+        totalTimeoutMs,
+        remainingTimeoutMs,
+        "UnixSocketServer.handleInputTypeText",
+        () => inputText.execute(args.text, imeAction, false, undefined, remainingTimeoutMs)
+      );
+    });
+
+    if (!inputResult.success) {
+      throw new Error(inputResult.error ?? `input/typeText failed on ${args.platform}`);
+    }
+
+    return {
+      action: "input/typeText",
+      platform: args.platform,
+      deviceId: targetDevice.deviceId,
+      success: true,
+      textLength: args.text.length,
+      submitted: args.submit,
+    };
+  }
+
+  private async runInputOperationWithTimeout<T>(
+    toolName: string,
+    totalTimeoutMs: number,
+    remainingTimeoutMs: number,
+    origin: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutHandle = this.timer.setTimeout(() => {
+        reject(new McpTimeoutError({
+          toolName,
+          timeoutMs: totalTimeoutMs,
+          origin,
+          detail: `operation exceeded remaining budget ${remainingTimeoutMs}ms`,
+        }));
+      }, remainingTimeoutMs);
+    });
+
+    try {
+      return await Promise.race([operation(), timeout]);
+    } finally {
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
   private parseInputTapParams(params: unknown): {
     platform: "android" | "ios";
     deviceId?: string;
@@ -987,11 +1072,48 @@ export class UnixSocketServer {
     };
   }
 
+  private parseInputTypeTextParams(params: unknown): {
+    platform: "android" | "ios";
+    deviceId?: string;
+    text: string;
+    submit: boolean;
+  } {
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
+      throw new Error("input/typeText requires params object");
+    }
+
+    const args = params as Record<string, unknown>;
+    const supportedParams = new Set(["platform", "deviceId", "text", "submit"]);
+    const unsupportedParams = Object.keys(args).filter(key => !supportedParams.has(key));
+    if (unsupportedParams.length > 0) {
+      throw new Error(`input/typeText unsupported params: ${unsupportedParams.join(", ")}`);
+    }
+    if (args.platform !== "android" && args.platform !== "ios") {
+      throw new Error("input/typeText requires platform 'android' or 'ios'");
+    }
+    if (typeof args.text !== "string" || args.text.length === 0) {
+      throw new Error("input/typeText requires non-empty string text param");
+    }
+    if (args.submit !== undefined && typeof args.submit !== "boolean") {
+      throw new Error("input/typeText submit must be a boolean when provided");
+    }
+    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
+      throw new Error("input/typeText deviceId must be a string when provided");
+    }
+
+    return {
+      platform: args.platform,
+      deviceId: args.deviceId,
+      text: args.text,
+      submit: args.submit ?? false,
+    };
+  }
+
   private async resolveInputTargetDevice(
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: "input/tap" | "input/swipe"
+    action: "input/tap" | "input/swipe" | "input/typeText"
   ): Promise<BootedDevice> {
     const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
     if (!discovery.succeededPlatforms.has(platform)) {

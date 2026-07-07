@@ -29,7 +29,8 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
-    mode: InputTextMode = "a11y"
+    mode: InputTextMode = "a11y",
+    timeoutMs: number = 5000
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
@@ -52,13 +53,13 @@ export class InputText extends BaseVisualChange {
           switch (this.device.platform) {
             case "android":
               return await perf.track("androidTextInput", () =>
-                this.executeAndroidTextInput(text, imeAction, dismissKeyboard, mode)
+                this.executeAndroidTextInput(text, imeAction, dismissKeyboard, mode, timeoutMs)
               );
             case "ios":
               // dismissKeyboard is Android-only — it works around an emulator
               // bug where the soft keyboard stays visible after setText.
               return await perf.track("iOSTextInput", () =>
-                this.executeiOSTextInput(text, imeAction)
+                this.executeiOSTextInput(text, imeAction, timeoutMs)
               );
             default:
               perf.end();
@@ -79,7 +80,7 @@ export class InputText extends BaseVisualChange {
       {
         changeExpected: true,
         tolerancePercent: 0.00,
-        timeoutMs: 5000,
+        timeoutMs,
         perf,
         skipUiStability: true // Skip UI stability wait - a11y service already waits 100ms for tree update
       }
@@ -96,20 +97,21 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
-    mode: InputTextMode = "a11y"
+    mode: InputTextMode = "a11y",
+    timeoutMs: number = 5000
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     if (mode === "eventLast") {
-      return this.executeAndroidEventLastTextInput(text, imeAction, dismissKeyboard);
+      return this.executeAndroidEventLastTextInput(text, imeAction, dismissKeyboard, timeoutMs);
     }
 
     if (mode === "eventAll") {
-      return this.executeAndroidEventAllTextInput(text, imeAction, dismissKeyboard);
+      return this.executeAndroidEventAllTextInput(text, imeAction, dismissKeyboard, timeoutMs);
     }
 
     // Use accessibility service exclusively (fastest method, ~10-30ms vs ~200-300ms for ADB)
     // It also natively supports Unicode without needing virtual keyboard
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const a11yResult = await a11yClient.requestSetText(text, { dismissKeyboard });
+    const a11yResult = await a11yClient.requestSetText(text, { dismissKeyboard, timeoutMs });
 
     if (a11yResult.success) {
       logger.info(`[InputText] Text input via accessibility service: ${a11yResult.totalTimeMs}ms`);
@@ -140,13 +142,14 @@ export class InputText extends BaseVisualChange {
   private async executeAndroidEventLastTextInput(
     text: string,
     imeAction?: ImeAction,
-    dismissKeyboard: boolean = false
+    dismissKeyboard: boolean = false,
+    timeoutMs: number = 5000
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const split = this.findLastPrintableAsciiNonWhitespace(text);
 
     if (!split) {
       logger.info("[InputText] eventLast requested but no printable non-whitespace ASCII character was found; using a11y");
-      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
+      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y", timeoutMs);
       return { ...result, method: "a11y" };
     }
 
@@ -156,13 +159,13 @@ export class InputText extends BaseVisualChange {
     const keyEventPlan = await this.getAsciiKeyEventPlan(char);
     if (!keyEventPlan) {
       logger.info(`[InputText] eventLast could not map ASCII character ${JSON.stringify(char)} to a key event; using a11y`);
-      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
+      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y", timeoutMs);
       return { ...result, method: "a11y" };
     }
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
-    const prefixResult = await a11yClient.requestSetText(prefix);
+    const prefixResult = await a11yClient.requestSetText(prefix, { timeoutMs });
     if (!prefixResult.success) {
       return this.setTextFailure(text, "eventLast prefix", "before real key event", prefixResult.error, "eventLast");
     }
@@ -170,7 +173,7 @@ export class InputText extends BaseVisualChange {
     await this.executeKeyEventPlan(keyEventPlan);
 
     if (suffix.length > 0 || dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard });
+      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard, timeoutMs });
       if (!finalResult.success) {
         return this.setTextFailure(text, "eventLast final", "after real key event", finalResult.error, "eventLast");
       }
@@ -191,16 +194,17 @@ export class InputText extends BaseVisualChange {
   private async executeAndroidEventAllTextInput(
     text: string,
     imeAction?: ImeAction,
-    dismissKeyboard: boolean = false
+    dismissKeyboard: boolean = false,
+    timeoutMs: number = 5000
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const chars = Array.from(text);
     if (!await this.hasAsciiKeyEventPlan(chars)) {
-      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
+      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y", timeoutMs);
       return { ...result, method: "a11y" };
     }
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const clearResult = await a11yClient.requestSetText("");
+    const clearResult = await a11yClient.requestSetText("", { timeoutMs });
     if (!clearResult.success) {
       return this.setTextFailure(text, "eventAll initial clear", "before eventAll input", clearResult.error, "eventAll");
     }
@@ -223,14 +227,14 @@ export class InputText extends BaseVisualChange {
       }
 
       targetText += unsupportedRun;
-      const setTextResult = await a11yClient.requestSetText(targetText);
+      const setTextResult = await a11yClient.requestSetText(targetText, { timeoutMs });
       if (!setTextResult.success) {
         return this.setTextFailure(text, "eventAll unsupported text run", "during eventAll input", setTextResult.error, "eventAll");
       }
     }
 
     if (dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard: true });
+      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard: true, timeoutMs });
       if (!finalResult.success) {
         return this.setTextFailure(text, "eventAll final", "after eventAll input", finalResult.error, "eventAll");
       }
@@ -405,13 +409,14 @@ export class InputText extends BaseVisualChange {
    */
   private async executeiOSTextInput(
     text: string,
-    imeAction?: ImeAction
+    imeAction?: ImeAction,
+    timeoutMs: number = 5000
   ): Promise<SendTextResult & { method?: "a11y" }> {
     const startMs = Date.now();
     logger.debug(`[InputText] iOS begin textLength=${text.length} imeAction=${imeAction ?? "none"}`);
 
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    const result = await client.requestSetText(text);
+    const result = await client.requestSetText(text, { timeoutMs });
 
     if (!result.success) {
       logger.error(`[InputText] CtrlProxy iOS setText failed: ${result.error} totalMs=${Date.now() - startMs}`);
@@ -427,9 +432,16 @@ export class InputText extends BaseVisualChange {
 
     // Handle IME action if specified (CtrlProxy iOS supports this)
     if (imeAction) {
-      const imeResult = await client.requestImeAction(imeAction);
+      const imeResult = await client.requestImeAction(imeAction, timeoutMs);
       if (!imeResult.success) {
         logger.warn(`[InputText] CtrlProxy iOS IME action failed: ${imeResult.error}`);
+        return {
+          success: false,
+          text,
+          imeAction,
+          error: imeResult.error ?? `IME action ${imeAction} failed`,
+          method: "a11y"
+        };
       }
     }
 

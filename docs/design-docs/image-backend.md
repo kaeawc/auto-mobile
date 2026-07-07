@@ -214,6 +214,8 @@ The standalone repro lives in `docs/reproductions/sharp-bun-035`. It pins
 exercises lossy/lossless/near-lossless WebP encodes, and reads WebP metadata.
 Capture local output under `scratch/sharp-bun-0.35-repro/` before posting
 evidence upstream.
+Use `bash scripts/validate-sharp-bun-repro.sh` to run the standalone harness in
+an isolated scratch copy and verify the live output shape.
 
 Local issue #3014 capture on 2026-07-07: `darwin arm64`, Bun `1.3.14`,
 sharp `0.35.3`, and libvips `8.18.3` passed the standalone repro. A Linux

@@ -26,6 +26,7 @@ function uniformRaw(width: number, height: number, r: number, g: number, b: numb
 describe("ContrastChecker", function() {
   let checker: ContrastChecker;
   const fixturesDir = path.join(__dirname, "../../fixtures/screenshots");
+  const syntheticScreenshotPath = "/synthetic/contrast.png";
 
   beforeEach(function() {
     checker = new ContrastChecker();
@@ -399,27 +400,29 @@ describe("ContrastChecker", function() {
     it("decodes screenshots through the injected ImageBackend.rawPixels", async function() {
       const backend = new FakeImageBackend();
       backend.setRawPixelsResult(uniformRaw(100, 50, 255, 255, 255));
-      const seamChecker = new ContrastChecker({}, undefined, backend);
-      // A real file must exist for fs.readFile; its bytes are ignored because the
-      // fake backend returns canned pixels regardless of buffer content.
-      const screenshotPath = path.join(fixturesDir, "black-on-white.png");
+      const screenshotBytes = Buffer.from("synthetic screenshot");
+      const seamChecker = new ContrastChecker({}, undefined, backend, {
+        readFile: async path => path === syntheticScreenshotPath ? screenshotBytes : Buffer.from("unexpected"),
+      });
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         text: "Sample",
       };
 
-      const result = await seamChecker.checkContrast(screenshotPath, element, "AA");
+      const result = await seamChecker.checkContrast(syntheticScreenshotPath, element, "AA");
 
       expect(result).not.toBeNull();
       // Decoded exactly once via the seam (screenshot cache holds the RawImage).
       expect(backend.rawPixelsCalls).toHaveLength(1);
+      expect(backend.rawPixelsCalls[0]).toBe(screenshotBytes);
     });
 
     it("tolerates element bounds beyond the image via edge clamping", async function() {
       const backend = new FakeImageBackend();
       backend.setRawPixelsResult(uniformRaw(20, 20, 0, 0, 0));
-      const seamChecker = new ContrastChecker({}, undefined, backend);
-      const screenshotPath = path.join(fixturesDir, "black-on-white.png");
+      const seamChecker = new ContrastChecker({}, undefined, backend, {
+        readFile: async () => Buffer.from("synthetic screenshot"),
+      });
       // Bounds extend past the 20x20 image; jimp getPixelColor edge-extends, so
       // sampling must not throw and should resolve to the (uniform black) edge.
       const element: Element = {
@@ -427,7 +430,7 @@ describe("ContrastChecker", function() {
         text: "Sample",
       };
 
-      const result = await seamChecker.checkContrast(screenshotPath, element, "AA");
+      const result = await seamChecker.checkContrast(syntheticScreenshotPath, element, "AA");
 
       expect(result).not.toBeNull();
     });

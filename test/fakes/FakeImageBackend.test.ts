@@ -30,6 +30,17 @@ describe("FakeImageBackend", () => {
       expect(raw.height).toBe(2);
       expect(raw.data.length).toBe(2 * 2 * 4);
     });
+
+    test("rawPixels returns a defensive copy of canned pixels", async () => {
+      const first = await backend.rawPixels(source);
+      first.data[0] = 1;
+
+      const second = await backend.rawPixels(source);
+
+      expect(second).not.toBe(first);
+      expect(second.data).not.toBe(first.data);
+      expect(second.data[0]).toBe(255);
+    });
   });
 
   describe("configuration", () => {

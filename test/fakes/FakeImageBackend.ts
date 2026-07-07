@@ -53,7 +53,11 @@ export class FakeImageBackend implements ImageBackend {
   }
 
   setRawPixelsResult(raw: RawImage): void {
-    this.rawPixelsResult = raw;
+    this.rawPixelsResult = {
+      width: raw.width,
+      height: raw.height,
+      data: Buffer.from(raw.data)
+    };
   }
 
   setShouldThrowOnExecute(shouldThrow: boolean): void {
@@ -94,6 +98,10 @@ export class FakeImageBackend implements ImageBackend {
     if (this.shouldThrowOnRawPixels) {
       throw new Error("Simulated error in rawPixels");
     }
-    return this.rawPixelsResult;
+    return {
+      width: this.rawPixelsResult.width,
+      height: this.rawPixelsResult.height,
+      data: Buffer.from(this.rawPixelsResult.data)
+    };
   }
 }

@@ -25,7 +25,6 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -162,7 +161,8 @@ class WebSocketServer(
                   // Send connection greeting before registering for broadcasts
                   send(
                     Frame.Text(
-                      json.encodeToString(
+                      responseJson.encodeToString(
+                        WebSocketResponse.serializer(),
                         ConnectedResponse(
                           id = connectionId,
                           supportedCommands = listOf("set_hierarchy_interval"),

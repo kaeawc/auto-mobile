@@ -239,10 +239,10 @@ describe("UnixSocketServer input/swipe", () => {
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
-  test("routes iOS coordinate swipes through the iOS gesture client", async () => {
-    const requestSwipe = mock(async () => ({ success: true }));
+  test("routes iOS coordinate swipes through the duration-aware iOS drag gesture", async () => {
+    const requestDrag = mock(async () => ({ success: true }));
     IOSCtrlProxyClient.getInstance = mock(() => ({
-      requestSwipe,
+      requestDrag,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
@@ -255,6 +255,7 @@ describe("UnixSocketServer input/swipe", () => {
       startY: 30,
       endX: 80,
       endY: 90,
+      durationMs: 750,
     });
 
     expect(response.success).toBe(true);
@@ -265,9 +266,9 @@ describe("UnixSocketServer input/swipe", () => {
       success: true,
       start: { x: 20, y: 30 },
       end: { x: 80, y: 90 },
-      durationMs: 300,
+      durationMs: 750,
     });
-    expect(requestSwipe).toHaveBeenCalledWith(20, 30, 80, 90, 300, 30_000);
+    expect(requestDrag).toHaveBeenCalledWith(20, 30, 80, 90, 0, 750, 0, 30_000);
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {

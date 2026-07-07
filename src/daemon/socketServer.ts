@@ -880,7 +880,7 @@ export class UnixSocketServer {
           .requestSwipe(args.startX, args.startY, args.endX, args.endY, args.durationMs, remainingTimeoutMs)
         : await IOSCtrlProxyClient
           .getInstance(targetDevice)
-          .requestSwipe(args.startX, args.startY, args.endX, args.endY, args.durationMs, remainingTimeoutMs);
+          .requestDrag(args.startX, args.startY, args.endX, args.endY, 0, args.durationMs, 0, remainingTimeoutMs);
     });
 
     if (!gestureResult.success) {

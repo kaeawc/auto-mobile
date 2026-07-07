@@ -124,7 +124,7 @@ which we reject).
 - Resolution order: `AUTOMOBILE_CWEBP_PATH`/`AUTOMOBILE_DWEBP_PATH` → `PATH` →
   bundled copy.
 - Invoke via `ProcessExecutor` with stdin/stdout piping (`cwebp -o - -- -`,
-  `dwebp - -o -`). Flag mapping: `{quality}`→`-q`, `{lossless}`→`-lossless -q`,
+  `dwebp -o - -- -`). Flag mapping: `{quality}`→`-q`, `{lossless}`→`-lossless -q`,
   `{nearLossless}`→`-near_lossless <quality>` (cwebp's `-near_lossless` requires a
   numeric preprocessing level; the current API models `nearLossless` as a boolean
   and uses `quality` as that level — mirror it, do not emit a bare `-near_lossless`).

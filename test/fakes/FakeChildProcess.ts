@@ -22,6 +22,8 @@ export class FakeChildProcess extends EventEmitter implements Partial<ChildProce
   private errorMessage = "Process error";
   private stdoutData: Buffer[] = [];
   private stderrData: Buffer[] = [];
+  private stdinData: Buffer[] = [];
+  private stdinError: Error | null = null;
 
   constructor() {
     super();
@@ -36,7 +38,12 @@ export class FakeChildProcess extends EventEmitter implements Partial<ChildProce
       },
     });
     this.stdin = new Writable({
-      write(chunk, encoding, callback) {
+      write: (chunk, encoding, callback) => {
+        if (this.stdinError) {
+          callback(this.stdinError);
+          return;
+        }
+        this.stdinData.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
         callback();
       },
     });
@@ -79,6 +86,14 @@ export class FakeChildProcess extends EventEmitter implements Partial<ChildProce
     this.stderrData.push(Buffer.isBuffer(data) ? data : Buffer.from(data));
   }
 
+  setStdinError(message = "stdin write failed"): void {
+    this.stdinError = new Error(message);
+  }
+
+  getStdinData(): Buffer {
+    return Buffer.concat(this.stdinData);
+  }
+
   /**
    * Simulate the spawn lifecycle
    */
@@ -111,6 +126,7 @@ export class FakeChildProcess extends EventEmitter implements Partial<ChildProce
       this.stdout.push(null); // End stdout stream
       this.stderr.push(null); // End stderr stream
       this.emit("exit", code, signal);
+      this.emit("close", code, signal);
     }, this.exitDelay);
   }
 

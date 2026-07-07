@@ -928,7 +928,7 @@ jobs:
           turbo run test --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
 
       - name: "Run Bun image runtime smoke"
-        if: env.RUN_MCP_BUILD_TEST == 'true' && matrix.os == 'macos-latest'
+        if: env.RUN_MCP_BUILD_TEST == 'true' && (matrix.os == 'macos-latest' || matrix.os == 'windows-latest')
         run: bun run test:image:bun
 
       - name: "Upload Build/Test Logs"
@@ -1037,11 +1037,9 @@ jobs:
       - name: "Run Bun MCP startup smoke"
         run: bun run test:startup:bun
 
-      # Linux uses the sharp backend here. The OSR guard remains until the
-      # Windows cwebp follow-up removes the @jimp/wasm-webp path entirely.
+      # Linux uses the sharp backend here; Windows covers the jimp+cwebp path in
+      # the matrix smoke above.
       - name: "Run Bun image runtime smoke"
-        env:
-          BUN_JSC_useWasmOSR: "0"
         run: bun run test:image:bun
 
       - name: "Run Tests with Coverage"

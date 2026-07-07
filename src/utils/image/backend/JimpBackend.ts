@@ -12,29 +12,10 @@ import type { ImageBackend, ImageMetadata, ImageOperation, ImagePipeline, RawIma
  */
 const NEAREST_NEIGHBOR = "nearestNeighbor" as ResizeStrategy;
 
-export function toJimpWebpOptions(options?: Record<string, unknown>): Record<string, unknown> | undefined {
-  if (!options) {
-    return undefined;
-  }
-
-  const quality = typeof options.quality === "number" ? options.quality : undefined;
-  if (options.lossless === true) {
-    return quality === undefined ? { lossless: 1 } : { lossless: 1, quality };
-  }
-  if (options.nearLossless === true) {
-    // wasm-webp models near-lossless as a lossless-mode preprocessing level.
-    // Use the public quality value for that level, matching the former
-    // ImageTransformer shaping and the sharp backend's neutral option intent.
-    return quality === undefined ? { lossless: 1, nearLossless: 75 } : { lossless: 1, nearLossless: quality };
-  }
-  return options;
-}
-
 /**
  * Jimp-backed `ImageBackend`. Reproduces exactly what `ImageTransformer` used
- * to run inline, including WebP encode/decode via the `@jimp/wasm-webp` plugin
- * (wired in `loadJimp`). Used as the Windows backend until the cwebp backend
- * lands, and as the catchable-discovery fallback for sharp on macOS/Linux.
+ * to run inline for Jimp-supported formats. WebP is intentionally excluded:
+ * sharp owns WebP on macOS/Linux and `JimpCliBackend` owns WebP on Windows.
  */
 export class JimpBackend implements ImageBackend {
   private applyOperation(image: JimpImage, op: ImageOperation): JimpImage {
@@ -67,12 +48,12 @@ export class JimpBackend implements ImageBackend {
     }
     // Fall back to the decoded input format when no output encoding was requested.
     const mime = pipeline.encoding?.mime ?? image.mime ?? "image/png";
-    const options = mime === "image/webp"
-      ? toJimpWebpOptions(pipeline.encoding?.options)
-      : pipeline.encoding?.options;
+    if (mime === "image/webp") {
+      throw new Error("JimpBackend does not encode WebP; use SharpBackend or JimpCliBackend.");
+    }
     return (image.getBuffer as (m: string, o?: Record<string, unknown>) => Promise<Buffer>)(
       mime,
-      options
+      pipeline.encoding?.options
     );
   }
 

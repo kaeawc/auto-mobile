@@ -6,9 +6,7 @@ import { Image, ImageMetadata } from "./image/ImageTransformer";
 import { ImageUtils as ImageUtilsInterface } from "./interfaces/ImageUtils";
 
 /**
- * Jimp-based implementation for image utilities
- * Provides a functional API for common image operations using the Jimp library
- * (with WebP support via the @jimp/wasm-webp plugin)
+ * Backend-based implementation for image utilities.
  */
 export class JimpImageUtils implements ImageUtilsInterface {
   public getOriginalBuffer(buffer: Buffer): Buffer {

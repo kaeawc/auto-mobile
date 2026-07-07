@@ -1,6 +1,7 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { resolveImageBackend } from "../../../../src/utils/image/backend/resolveImageBackend";
 import { JimpBackend } from "../../../../src/utils/image/backend/JimpBackend";
+import { JimpCliBackend } from "../../../../src/utils/image/backend/JimpCliBackend";
 import { SharpBackend } from "../../../../src/utils/image/backend/SharpBackend";
 
 describe("resolveImageBackend", () => {
@@ -16,13 +17,15 @@ describe("resolveImageBackend", () => {
     const backend = resolveImageBackend();
     if (process.platform === "darwin" || process.platform === "linux") {
       expect(backend).toBeInstanceOf(SharpBackend);
+    } else if (process.platform === "win32") {
+      expect(backend).toBeInstanceOf(JimpCliBackend);
     } else {
       expect(backend).toBeInstanceOf(JimpBackend);
     }
   });
 
-  test("returns JimpBackend on Windows", () => {
-    expect(resolveImageBackend({ platform: "win32" })).toBeInstanceOf(JimpBackend);
+  test("returns JimpCliBackend on Windows", () => {
+    expect(resolveImageBackend({ platform: "win32" })).toBeInstanceOf(JimpCliBackend);
   });
 
   test("returns SharpBackend on macOS and Linux", () => {

@@ -43,6 +43,11 @@
   - If the accessibility service is not installed or not enabled yet, we fall back to `uiautomator` output that is
     cached based on a perceptual hash plus pixel matching within a tolerance threshold.
 
+  - Per-machine cache contract: nav-screenshot caches are local to the machine that produced them. The active image
+    backend affects resize kernels and decoded pixels (`sharp` on macOS/Linux, `jimp` on Windows), so pHash and
+    pixelmatch results can differ for the same screenshot across platforms. These caches are not portable across platforms;
+    do not copy them between machines or platforms. Let each machine rebuild its own cache.
+
     ```mermaid
     flowchart LR
     A["Observe()"] --> B["Screenshot<br/>+perceptual hash"];

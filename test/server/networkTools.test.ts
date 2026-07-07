@@ -293,21 +293,31 @@ describe("network tool schema", () => {
     expect(NetworkState.getInstance().getSnapshot().simulatingErrors).toBeUndefined();
   });
 
-  test("network simulateErrors on iOS stays gated until a supporting runner is shipped or overridden", async () => {
+  test("network simulateErrors on iOS uses the bundled runner once a supporting release is pinned", async () => {
     const tool = ToolRegistry.getTool("network");
 
-    await expect(tool!.deviceAwareHandler!(iosDevice, {
+    const response = await tool!.deviceAwareHandler!(iosDevice, {
       simulateErrors: {
         errorType: "timeout",
         durationSeconds: 30,
       },
-    })).rejects.toThrow("not enabled for the bundled iOS CtrlProxy runner");
+    });
 
-    expect(iosGetInstanceSpy).not.toHaveBeenCalled();
-    expect(NetworkState.getInstance().getSnapshot().simulatingErrors).toBeUndefined();
+    expect(parseToolJson(response).simulatingErrors).toEqual({
+      errorType: "timeout",
+      remainingSeconds: 30,
+      limit: undefined,
+    });
+    expect(iosGetInstanceSpy).toHaveBeenCalledWith(iosDevice);
+    expect(iosErrorSimulations).toEqual([{
+      enabled: true,
+      errorType: "timeout",
+      limit: null,
+      expiresAtEpochMs: expect.any(Number),
+    }]);
   });
 
-  test("network simulateErrors cancel clears local iOS state when the runner gate is closed", async () => {
+  test("network simulateErrors cancel syncs bundled iOS runner once the supporting release is pinned", async () => {
     const state = NetworkState.getInstance();
     state.startSimulation("timeout", 30, null);
     const tool = ToolRegistry.getTool("network");
@@ -319,23 +329,39 @@ describe("network tool schema", () => {
     });
 
     expect(parseToolJson(response).simulatingErrors).toBeUndefined();
-    expect(iosGetInstanceSpy).not.toHaveBeenCalled();
+    expect(iosGetInstanceSpy).toHaveBeenCalledWith(iosDevice);
+    expect(iosErrorSimulations).toEqual([{
+      enabled: false,
+      errorType: null,
+      limit: null,
+      expiresAtEpochMs: null,
+    }]);
     expect(state.getSnapshot().simulatingErrors).toBeUndefined();
   });
 
-  test("network simulateErrors on iOS stays gated when CtrlProxy downloads are skipped", async () => {
+  test("network simulateErrors on iOS remains available when CtrlProxy downloads are skipped after a supporting release ships", async () => {
     process.env.AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD = "1";
     const tool = ToolRegistry.getTool("network");
 
-    await expect(tool!.deviceAwareHandler!(iosDevice, {
+    const response = await tool!.deviceAwareHandler!(iosDevice, {
       simulateErrors: {
         errorType: "timeout",
         durationSeconds: 30,
       },
-    })).rejects.toThrow("not enabled for the bundled iOS CtrlProxy runner");
+    });
 
-    expect(iosGetInstanceSpy).not.toHaveBeenCalled();
-    expect(NetworkState.getInstance().getSnapshot().simulatingErrors).toBeUndefined();
+    expect(parseToolJson(response).simulatingErrors).toEqual({
+      errorType: "timeout",
+      remainingSeconds: 30,
+      limit: undefined,
+    });
+    expect(iosGetInstanceSpy).toHaveBeenCalledWith(iosDevice);
+    expect(iosErrorSimulations).toEqual([{
+      enabled: true,
+      errorType: "timeout",
+      limit: null,
+      expiresAtEpochMs: expect.any(Number),
+    }]);
   });
 
   test("iOS network error simulation release gate opens for a supporting released runner", () => {

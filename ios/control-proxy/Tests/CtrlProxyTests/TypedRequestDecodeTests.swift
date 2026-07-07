@@ -50,6 +50,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
     var fakeStorage: FakeStorageInspecting!
     var fakeSdkHierarchy: FakeSdkHierarchyFetcher!
     var fakeDatabase: FakeSdkDatabaseFetcher!
+    var fakeHierarchyDebouncer: FakeHierarchyDebouncer!
     var commandHandler: CommandHandler!
 
     override func setUp() {
@@ -62,13 +63,15 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         fakeSdkHierarchy = FakeSdkHierarchyFetcher()
         fakeSdkHierarchy.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app"))
         fakeDatabase = FakeSdkDatabaseFetcher()
+        fakeHierarchyDebouncer = FakeHierarchyDebouncer()
         commandHandler = CommandHandler.createForTesting(
             elementLocator: fakeElementLocator,
             gesturePerformer: fakeGesturePerformer,
             perfProvider: perfProvider,
             storageInspector: fakeStorage,
             sdkHierarchyClient: fakeSdkHierarchy,
-            sdkDatabaseClient: fakeDatabase
+            sdkDatabaseClient: fakeDatabase,
+            hierarchyDebouncer: fakeHierarchyDebouncer
         )
         fakeElementLocator.setHierarchy(ViewHierarchy(packageName: "com.example.app"))
     }
@@ -122,6 +125,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         let payloads: [RequestType: String] = [
             .requestHierarchy: "{}",
             .requestHierarchyIfStale: "{}",
+            .setHierarchyPollInterval: #"{"intervalMs":500}"#,
             .requestScreenshot: "{}",
             .requestTapCoordinates: #"{"x":1,"y":2}"#,
             .requestSwipe: #"{"x1":1,"y1":2,"x2":3,"y2":4}"#,
@@ -532,6 +536,19 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             return XCTFail("Expected .requestHierarchyIfStale, got \(request)")
         }
         XCTAssertEqual(payload.sinceTimestamp, 1234)
+    }
+
+    func testSetHierarchyPollIntervalDecodeDispatchUpdatesDebouncer() {
+        let response = dispatch(
+            #"{"type":"set_hierarchy_poll_interval","requestId":"poll-1","intervalMs":500}"#,
+            as: WebSocketResponse.self
+        )
+
+        XCTAssertEqual(response?.type, "set_hierarchy_poll_interval_result")
+        XCTAssertEqual(response?.requestId, "poll-1")
+        XCTAssertEqual(response?.success, true)
+        XCTAssertEqual(fakeHierarchyDebouncer.updatePollIntervalMsCallCount, 1)
+        XCTAssertEqual(fakeHierarchyDebouncer.lastPollIntervalMs, 500)
     }
 
     func testScreenshotDecodeDispatch() {

@@ -151,6 +151,34 @@ describe("IOSCtrlProxyClient", function() {
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
     });
 
+    test("sends hierarchy cadence updates to the runner", function() {
+      const sentMessages: string[] = [];
+      (ctrlProxyClient as any).sendMessage = (message: string) => {
+        sentMessages.push(message);
+        return true;
+      };
+
+      (ctrlProxyClient as any).refreshObservationStreamHierarchyCadence(500);
+
+      expect(sentMessages.map(message => JSON.parse(message))).toEqual([{
+        type: "set_hierarchy_poll_interval",
+        intervalMs: 500,
+      }]);
+    });
+
+    test("does not send hierarchy cadence updates to stale runners without command support", function() {
+      const sentMessages: string[] = [];
+      (ctrlProxyClient as any).supportedCommands = new Set(["request_hierarchy"]);
+      (ctrlProxyClient as any).sendMessage = (message: string) => {
+        sentMessages.push(message);
+        return true;
+      };
+
+      (ctrlProxyClient as any).refreshObservationStreamHierarchyCadence(500);
+
+      expect(sentMessages).toEqual([]);
+    });
+
     test("notifies the observation stream when the WebSocket connection closes", function() {
       const lostDeviceIds: string[] = [];
       const notifier: DeviceConnectionLostNotifier = {

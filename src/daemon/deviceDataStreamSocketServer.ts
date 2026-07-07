@@ -96,6 +96,7 @@ interface DeviceDataStreamMessage {
 interface DeviceDataFilter {
   deviceId: string | null; // null means subscribe to all devices
   screenshotIntervalMs: number | null;
+  hierarchyIntervalMs: number | null;
 }
 
 /**
@@ -116,6 +117,11 @@ export type OnSubscriberConnectedCallback = (deviceId: string | null) => void;
  * Callback invoked when active screenshot cadence may have changed for a device.
  */
 export type OnScreenshotCadenceChangedCallback = (deviceId: string | null) => void;
+
+/**
+ * Callback invoked when active hierarchy cadence may have changed for a device.
+ */
+export type OnHierarchyCadenceChangedCallback = (deviceId: string | null) => void;
 
 /**
  * Observation captured on demand for a stream client.
@@ -146,8 +152,11 @@ export type OnNavigationGraphRequestedCallback = (appId?: string | null) => Prom
 // before the platform observe path has its allotted time to complete.
 const DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_SCREENSHOT_INTERVAL_MS = 3000;
+const DEFAULT_HIERARCHY_INTERVAL_MS = 1000;
 const MIN_SCREENSHOT_INTERVAL_MS = 250;
+const MIN_HIERARCHY_INTERVAL_MS = 250;
 const MAX_SCREENSHOT_INTERVAL_MS = 2_147_483_647;
+const MAX_HIERARCHY_INTERVAL_MS = 2_147_483_647;
 
 /**
  * Socket server that streams device data updates (hierarchy, screenshot, storage) to connected IDE plugins.
@@ -169,6 +178,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 > {
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
   private onScreenshotCadenceChanged: OnScreenshotCadenceChangedCallback | null = null;
+  private onHierarchyCadenceChanged: OnHierarchyCadenceChangedCallback | null = null;
   private onObservationRequested: OnObservationRequestedCallback | null = null;
   private onNavigationGraphRequested: OnNavigationGraphRequestedCallback | null = null;
   private observationRequestTimeoutMs = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
@@ -190,6 +200,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    */
   setOnScreenshotCadenceChanged(callback: OnScreenshotCadenceChangedCallback): void {
     this.onScreenshotCadenceChanged = callback;
+  }
+
+  /**
+   * Set a callback to be invoked when active hierarchy polling cadence may have changed.
+   */
+  setOnHierarchyCadenceChanged(callback: OnHierarchyCadenceChangedCallback): void {
+    this.onHierarchyCadenceChanged = callback;
   }
 
   /**
@@ -332,9 +349,36 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * or the default low-cost keepalive cadence when none is requested.
    */
   getScreenshotIntervalMsForDevice(deviceId: string): number {
+    return this.getFastestIntervalMsForDevice(
+      deviceId,
+      "screenshot_update",
+      DEFAULT_SCREENSHOT_INTERVAL_MS,
+      filter => filter.screenshotIntervalMs
+    );
+  }
+
+  /**
+   * Return the fastest active hierarchy cadence requested for this device,
+   * or the default iOS hierarchy polling cadence when none is requested.
+   */
+  getHierarchyIntervalMsForDevice(deviceId: string): number {
+    return this.getFastestIntervalMsForDevice(
+      deviceId,
+      "hierarchy_update",
+      DEFAULT_HIERARCHY_INTERVAL_MS,
+      filter => filter.hierarchyIntervalMs
+    );
+  }
+
+  private getFastestIntervalMsForDevice(
+    deviceId: string,
+    messageType: "screenshot_update" | "hierarchy_update",
+    defaultIntervalMs: number,
+    requestedIntervalMs: (filter: DeviceDataFilter) => number | null
+  ): number {
     const probe: DeviceDataPush = {
       message: {
-        type: "screenshot_update",
+        type: messageType,
         deviceId,
       },
       targetDeviceId: deviceId,
@@ -350,14 +394,14 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         continue;
       }
 
-      const requestedIntervalMs = subscriber.filter.screenshotIntervalMs ?? DEFAULT_SCREENSHOT_INTERVAL_MS;
+      const requestedInterval = requestedIntervalMs(subscriber.filter) ?? defaultIntervalMs;
 
       fastestIntervalMs = fastestIntervalMs === null
-        ? requestedIntervalMs
-        : Math.min(fastestIntervalMs, requestedIntervalMs);
+        ? requestedInterval
+        : Math.min(fastestIntervalMs, requestedInterval);
     }
 
-    return fastestIntervalMs ?? DEFAULT_SCREENSHOT_INTERVAL_MS;
+    return fastestIntervalMs ?? defaultIntervalMs;
   }
 
   /**
@@ -449,6 +493,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       await super.processLine(socket, line);
 
       this.notifyScreenshotCadenceChanged(request.deviceId ?? null);
+      this.notifyHierarchyCadenceChanged(request.deviceId ?? null);
 
       // Trigger the callback if set
       if (this.onSubscriberConnected) {
@@ -466,6 +511,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       await super.processLine(socket, line);
       if (filter) {
         this.notifyScreenshotCadenceChanged(filter.deviceId);
+        this.notifyHierarchyCadenceChanged(filter.deviceId);
       }
       return;
     }
@@ -479,6 +525,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     super.onConnectionClose(socket);
     if (filter) {
       this.notifyScreenshotCadenceChanged(filter.deviceId);
+      this.notifyHierarchyCadenceChanged(filter.deviceId);
     }
   }
 
@@ -487,6 +534,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     super.onConnectionError(socket, error);
     if (filter) {
       this.notifyScreenshotCadenceChanged(filter.deviceId);
+      this.notifyHierarchyCadenceChanged(filter.deviceId);
     }
   }
 
@@ -495,6 +543,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     super.checkKeepalive();
     if (this.subscribers.size !== subscriberCountBefore) {
       this.notifyScreenshotCadenceChanged(null);
+      this.notifyHierarchyCadenceChanged(null);
     }
   }
 
@@ -502,6 +551,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     return {
       deviceId: (request.deviceId as string) ?? null,
       screenshotIntervalMs: this.parseScreenshotIntervalMs(request.screenshotIntervalMs),
+      hierarchyIntervalMs: this.parseHierarchyIntervalMs(request.hierarchyIntervalMs),
     };
   }
 
@@ -519,6 +569,14 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   private parseScreenshotIntervalMs(value: unknown): number | null {
+    return this.parseClampedIntervalMs(value, MIN_SCREENSHOT_INTERVAL_MS, MAX_SCREENSHOT_INTERVAL_MS);
+  }
+
+  private parseHierarchyIntervalMs(value: unknown): number | null {
+    return this.parseClampedIntervalMs(value, MIN_HIERARCHY_INTERVAL_MS, MAX_HIERARCHY_INTERVAL_MS);
+  }
+
+  private parseClampedIntervalMs(value: unknown, minIntervalMs: number, maxIntervalMs: number): number | null {
     if (value === null || value === undefined) {
       return null;
     }
@@ -528,8 +586,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
 
     return Math.min(
-      Math.max(Math.round(value), MIN_SCREENSHOT_INTERVAL_MS),
-      MAX_SCREENSHOT_INTERVAL_MS
+      Math.max(Math.round(value), minIntervalMs),
+      maxIntervalMs
     );
   }
 
@@ -543,14 +601,26 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   private notifyScreenshotCadenceChanged(deviceId: string | null): void {
-    if (!this.onScreenshotCadenceChanged) {
+    this.notifyCadenceChanged(this.onScreenshotCadenceChanged, "onScreenshotCadenceChanged", deviceId);
+  }
+
+  private notifyHierarchyCadenceChanged(deviceId: string | null): void {
+    this.notifyCadenceChanged(this.onHierarchyCadenceChanged, "onHierarchyCadenceChanged", deviceId);
+  }
+
+  private notifyCadenceChanged(
+    callback: ((deviceId: string | null) => void) | null,
+    callbackName: string,
+    deviceId: string | null
+  ): void {
+    if (!callback) {
       return;
     }
 
     try {
-      this.onScreenshotCadenceChanged(deviceId);
+      callback(deviceId);
     } catch (error) {
-      logger.warn(`[DeviceDataStream] Error in onScreenshotCadenceChanged callback: ${error}`);
+      logger.warn(`[DeviceDataStream] Error in ${callbackName} callback: ${error}`);
     }
   }
 

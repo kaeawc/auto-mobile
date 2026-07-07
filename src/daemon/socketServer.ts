@@ -646,9 +646,6 @@ export class UnixSocketServer {
     if (request.method === "input/typeText") {
       return await this.handleInputTypeText(request, socketSessionId);
     }
-    if (request.method === "input/key") {
-      throw new Error("input/key is not implemented; use input/pressButton or input/typeText");
-    }
 
     switch (request.method) {
       case "ide/listFeatureFlags": {
@@ -960,6 +957,12 @@ export class UnixSocketServer {
     imeAction: ImeAction | undefined,
     timeoutMs: number
   ): Promise<{ success: boolean; error?: string }> {
+    // Charge set-text and the optional submit/IME action against a single
+    // shared budget. Otherwise submit:true would hand each request the full
+    // timeout, letting the combined operation run up to 2x the caller's
+    // budget while the per-device queue stays held until it settles.
+    const deadline = this.timer.now() + timeoutMs;
+
     if (platform === "android") {
       const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
       const textResult = await client.requestSetText(text, { timeoutMs });
@@ -969,7 +972,7 @@ export class UnixSocketServer {
       if (!imeAction) {
         return { success: true };
       }
-      return await client.requestImeAction(imeAction, timeoutMs);
+      return await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs);
     }
 
     const client = IOSCtrlProxyClient.getInstance(targetDevice);
@@ -980,7 +983,23 @@ export class UnixSocketServer {
     if (!imeAction) {
       return { success: true };
     }
-    return await client.requestImeAction(imeAction, timeoutMs);
+    return await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs);
+  }
+
+  private async runImeActionWithinBudget(
+    client: { requestImeAction: (imeAction: ImeAction, timeoutMs: number) => Promise<{ success: boolean; error?: string }> },
+    imeAction: ImeAction,
+    deadline: number,
+    totalTimeoutMs: number
+  ): Promise<{ success: boolean; error?: string }> {
+    const remainingTimeoutMs = deadline - this.timer.now();
+    if (remainingTimeoutMs <= 0) {
+      return {
+        success: false,
+        error: `input/typeText exceeded ${totalTimeoutMs}ms budget before submit`,
+      };
+    }
+    return await client.requestImeAction(imeAction, remainingTimeoutMs);
   }
 
   private async runInputOperationWithTimeout<T>(
@@ -1006,7 +1025,6 @@ export class UnixSocketServer {
         return result;
       }
 
-      await operationPromise.catch(() => undefined);
       throw new McpTimeoutError({
         toolName,
         timeoutMs: totalTimeoutMs,
@@ -1018,6 +1036,10 @@ export class UnixSocketServer {
         this.timer.clearTimeout(timeoutHandle);
       }
       if (timedOut) {
+        // Hold the per-device queue until the in-flight CtrlProxy request
+        // settles so a following same-device input cannot interleave its text
+        // write with this one. The operation is bounded to the caller's total
+        // budget (see executeInputTypeText), so this wait cannot exceed it.
         await operationPromise.catch(() => undefined);
       }
     }

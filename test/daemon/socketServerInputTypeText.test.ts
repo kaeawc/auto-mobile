@@ -488,6 +488,46 @@ describe("UnixSocketServer input/typeText", () => {
     expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
   });
 
+  test("charges the submit IME action against the remaining shared budget", async () => {
+    const requestSetText = mock(async () => {
+      await new Promise<void>(resolve => {
+        fakeTimer.setTimeout(resolve, 40);
+      });
+      return { success: true, totalTimeMs: 1 };
+    });
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const responsePromise = sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "hello",
+      submit: true,
+    }, 100);
+
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    fakeTimer.advanceTime(40);
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+
+    const response = await responsePromise;
+
+    expect(response.success).toBe(true);
+    // set-text consumed 40ms of the 100ms budget, so the IME action gets the
+    // remaining 60ms rather than a fresh full timeout.
+    expect(requestSetText).toHaveBeenCalledWith("hello", { timeoutMs: 100 });
+    expect(requestImeAction).toHaveBeenCalledWith("done", 60);
+  });
+
   test("rejects missing, empty, and non-string text with actionable errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
@@ -539,18 +579,5 @@ describe("UnixSocketServer input/typeText", () => {
     expect(unsupportedImeAction.error).toBe("input/typeText unsupported params: imeAction");
     expect(unsupportedDismissKeyboard.success).toBe(false);
     expect(unsupportedDismissKeyboard.error).toBe("input/typeText unsupported params: dismissKeyboard");
-  });
-
-  test("keeps input/key deferred with the documented error", async () => {
-    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
-    await server.start();
-
-    const response = await sendRequest(socketPath, "input/key", {
-      platform: "android",
-      key: "A",
-    });
-
-    expect(response.success).toBe(false);
-    expect(response.error).toBe("input/key is not implemented; use input/pressButton or input/typeText");
   });
 });

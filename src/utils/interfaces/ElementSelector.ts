@@ -23,4 +23,25 @@ export interface ElementSelector {
       strategy?: ElementSelectionStrategy;
     }
   ): ElementSelectionResult;
+
+  selectClickableSiblingOfText(
+    viewHierarchy: ViewHierarchyResult,
+    text: string,
+    options?: {
+      container?: { elementId?: string; text?: string } | null;
+      fuzzyMatch?: boolean;
+      caseSensitive?: boolean;
+      strategy?: ElementSelectionStrategy;
+    }
+  ): ElementSelectionResult;
+
+  selectClickableSiblingOfResourceId(
+    viewHierarchy: ViewHierarchyResult,
+    resourceId: string,
+    options?: {
+      container?: { elementId?: string; text?: string } | null;
+      partialMatch?: boolean;
+      strategy?: ElementSelectionStrategy;
+    }
+  ): ElementSelectionResult;
 }

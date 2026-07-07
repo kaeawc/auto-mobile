@@ -36,7 +36,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.partialMatch ?? true,
       options?.caseSensitive ?? false
     );
-    return this.pickMatch(matches, strategy);
+    return this.pickMatch(matches, strategy, viewHierarchy);
   }
 
   selectByResourceId(
@@ -55,7 +55,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.container ?? null,
       options?.partialMatch ?? false
     );
-    return this.pickMatch(matches, strategy);
+    return this.pickMatch(matches, strategy, viewHierarchy);
   }
 
   selectClickableParentByText(
@@ -76,7 +76,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.fuzzyMatch ?? true,
       options?.caseSensitive ?? false
     );
-    return this.pickMatch(matches, strategy);
+    return this.pickMatch(matches, strategy, viewHierarchy);
   }
 
   selectClickable(
@@ -93,7 +93,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.container ?? null,
       options?.scrollableContainer ?? false
     );
-    return this.pickMatch(matches, strategy);
+    return this.pickMatch(matches, strategy, viewHierarchy);
   }
 
   selectClickableSiblingOfText(
@@ -114,7 +114,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.fuzzyMatch ?? true,
       options?.caseSensitive ?? false
     );
-    return this.pickMatch(matches, strategy);
+    return this.pickMatch(matches, strategy, viewHierarchy);
   }
 
   selectClickableSiblingOfResourceId(
@@ -133,23 +133,52 @@ export class DefaultElementSelector implements ElementSelector {
       options?.container ?? null,
       options?.partialMatch ?? false
     );
-    return this.pickMatch(matches, strategy);
+    return this.pickMatch(matches, strategy, viewHierarchy);
   }
 
-  private pickMatch(matches: Element[], strategy: ElementSelectionStrategy): ElementSelectionResult {
+  private isElementCenterOffScreen(element: Element, viewHierarchy: ViewHierarchyResult): boolean {
+    if (!viewHierarchy.screenWidth || !viewHierarchy.screenHeight || !element.bounds) {
+      return false;
+    }
+
+    const centerX = (element.bounds.left + element.bounds.right) / 2;
+    const centerY = (element.bounds.top + element.bounds.bottom) / 2;
+    return centerX < 0 || centerX > viewHierarchy.screenWidth ||
+      centerY < 0 || centerY > viewHierarchy.screenHeight;
+  }
+
+  private pickMatch(
+    matches: Element[],
+    strategy: ElementSelectionStrategy,
+    viewHierarchy: ViewHierarchyResult
+  ): ElementSelectionResult {
     const totalMatches = matches.length;
     if (totalMatches === 0) {
       return { element: null, indexInMatches: -1, totalMatches: 0, strategy };
     }
 
-    let indexInMatches = 0;
+    const visibleMatches = matches
+      .map((element, index) => ({ element, index }))
+      .filter(match => !this.isElementCenterOffScreen(match.element, viewHierarchy));
+
+    if (visibleMatches.length === 0) {
+      return { element: null, indexInMatches: -1, totalMatches, strategy };
+    }
+
+    let selectedVisibleIndex = 0;
     if (strategy === "random") {
-      const rawIndex = Math.floor(this.random() * totalMatches);
-      indexInMatches = Number.isFinite(rawIndex)
-        ? Math.min(totalMatches - 1, Math.max(0, rawIndex))
+      const rawIndex = Math.floor(this.random() * visibleMatches.length);
+      selectedVisibleIndex = Number.isFinite(rawIndex)
+        ? Math.min(visibleMatches.length - 1, Math.max(0, rawIndex))
         : 0;
     }
 
-    return { element: matches[indexInMatches], indexInMatches, totalMatches, strategy };
+    const selectedMatch = visibleMatches[selectedVisibleIndex];
+    return {
+      element: selectedMatch.element,
+      indexInMatches: selectedMatch.index,
+      totalMatches,
+      strategy
+    };
   }
 }

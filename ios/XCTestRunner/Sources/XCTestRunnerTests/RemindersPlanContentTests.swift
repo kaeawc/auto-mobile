@@ -53,6 +53,70 @@ final class RemindersPlanContentTests: XCTestCase {
         )
     }
 
+    /// The save flow must tolerate Reminders' observed iOS-version label variants. iOS 18.6 showed
+    /// "Add", while CI's original iOS 26 image showed "Done"; the plan should wait for and tap whichever
+    /// save control is actually present rather than pinning itself to one label.
+    func testAddReminderPlanWaitsForAndTapsAddOrDoneSaveControl() throws {
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
+
+        guard let saveTapIndex = steps.firstIndex(where: { $0.tool == "tapOn" && $0.mentionsAll(["Add", "Done"]) }) else {
+            XCTFail("Plan is missing a tapOn save step that accepts both \"Add\" and \"Done\"")
+            return
+        }
+
+        XCTAssertGreaterThan(saveTapIndex, 0)
+        let guardStep = steps[saveTapIndex - 1]
+        XCTAssertEqual(guardStep.tool, "observe", "The variant save tap must follow an observe guard")
+        XCTAssertTrue(guardStep.hasWaitFor, "The variant save guard must use waitFor")
+        XCTAssertTrue(
+            guardStep.mentionsAll(["Add", "Done"]),
+            "The save waitFor guard must accept both \"Add\" and \"Done\" labels"
+        )
+    }
+
+    /// A successful save needs an observable signal after the tap. The title must be unique per test run
+    /// so a stale reminder from a previous attempt cannot satisfy the post-save verification.
+    func testAddReminderPlanUsesUniqueTitleAndVerifiesSavedReminder() throws {
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
+        let content = try loadAddReminderPlan()
+        let integrationSource = try loadRemindersIntegrationTestSource()
+
+        XCTAssertTrue(
+            content.contains("${REMINDER_TITLE}"),
+            "The plan must type a substituted reminder title so post-save verification cannot pass on stale data"
+        )
+        XCTAssertTrue(
+            classBody(named: "RemindersAddPlanTests", in: integrationSource).contains("\"REMINDER_TITLE\""),
+            "RemindersAddPlanTests must provide the title parameter used by add-reminder.yaml"
+        )
+
+        guard let inputIndex = steps.firstIndex(where: { $0.tool == "inputText" && $0.mentions("${REMINDER_TITLE}") }) else {
+            XCTFail("Plan must type ${REMINDER_TITLE}")
+            return
+        }
+        guard let saveIndex = steps.firstIndex(where: { $0.tool == "tapOn" && $0.mentionsAll(["Add", "Done"]) }) else {
+            XCTFail("Plan must save the reminder after typing ${REMINDER_TITLE}")
+            return
+        }
+        guard let verificationIndex = steps.firstIndex(where: {
+            $0.tool == "observe" && $0.hasWaitFor && $0.mentions("${REMINDER_TITLE}")
+        }) else {
+            XCTFail("Plan must verify the saved reminder by observing ${REMINDER_TITLE}")
+            return
+        }
+
+        XCTAssertGreaterThan(
+            saveIndex,
+            inputIndex,
+            "The save step must run after typing the title"
+        )
+        XCTAssertGreaterThan(
+            verificationIndex,
+            saveIndex,
+            "Saved-reminder verification must run after saving the title"
+        )
+    }
+
     /// The guard must be bounded so a genuinely-absent control fails fast instead of hanging for the
     /// whole plan timeout.
     func testAddWaitGuardHasBoundedTimeout() throws {
@@ -254,16 +318,18 @@ final class RemindersPlanContentTests: XCTestCase {
             return
         }
 
-        // A best-effort dismissal of the "Not Now" alert button precedes the create tap.
-        let dismissIndex = steps.firstIndex { $0.tool == "tapOn" && $0.mentions("Not Now") }
+        // A best-effort dismissal of the iCloud alert button precedes the create tap.
+        let dismissIndex = steps.firstIndex {
+            $0.tool == "tapOn" && $0.mentions("Not Now") && $0.mentions("Close")
+        }
         guard let dismissIndex = dismissIndex else {
-            XCTFail("Plan must dismiss the iCloud alert via a tapOn \"Not Now\" step")
+            XCTFail("Plan must dismiss the iCloud alert via a tapOn textAny step covering \"Not Now\" and \"Close\"")
             return
         }
         XCTAssertLessThan(dismissIndex, createTapIndex, "The alert dismissal must precede creating a reminder")
         XCTAssertTrue(
             steps[dismissIndex].isOptional,
-            "The \"Not Now\" dismissal must be optional so alert-absent runs don't fail"
+            "The iCloud alert dismissal must be optional so alert-absent runs don't fail"
         )
 
         // Any waitFor guarding the (intermittent) alert must also be optional for the same reason.
@@ -272,6 +338,10 @@ final class RemindersPlanContentTests: XCTestCase {
                 steps[index].isOptional,
                 "A waitFor guarding the intermittent alert must be optional"
             )
+            XCTAssertTrue(
+                steps[index].mentions("Close"),
+                "The iCloud alert wait must cover the observed \"Close\" variant"
+            )
         }
 
         // The create tap is guarded by a preceding observe waitFor on the same control.
@@ -279,6 +349,111 @@ final class RemindersPlanContentTests: XCTestCase {
         let createGuard = steps[createTapIndex - 1]
         XCTAssertEqual(createGuard.tool, "observe", "The tapOn \"New Reminder\" must follow an observe guard")
         XCTAssertTrue(createGuard.hasWaitFor && createGuard.mentions("New Reminder"))
+    }
+
+    /// A cold launch can restore inside Today or another list. The plan should optionally back out
+    /// before selecting the default Reminders list so local state does not decide the flow.
+    func testReturnsToAccountsHomeBeforeOpeningDefaultListWhenRestoredInsideAList() throws {
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
+
+        guard let openListIndex = steps.firstIndex(where: {
+            $0.tool == "tapOn" && $0.mentions("Reminders, 0 reminders")
+        }) else {
+            XCTFail("Plan must open the default Reminders list")
+            return
+        }
+
+        guard let backIndex = steps.firstIndex(where: {
+            $0.tool == "tapOn" && $0.mentions("Back")
+        }) else {
+            XCTFail("Plan must optionally return from a restored list before choosing the default list")
+            return
+        }
+
+        XCTAssertLessThan(backIndex, openListIndex, "The restored-list back step must precede default-list selection")
+        XCTAssertTrue(steps[backIndex].isOptional, "The restored-list back step must be optional")
+
+        XCTAssertGreaterThan(backIndex, 0)
+        let backGuard = steps[backIndex - 1]
+        XCTAssertEqual(backGuard.tool, "observe", "The restored-list back tap must follow an observe guard")
+        XCTAssertTrue(backGuard.hasWaitFor && backGuard.mentions("Back"))
+        XCTAssertTrue(backGuard.isOptional, "The restored-list back wait must be optional")
+    }
+
+    /// Reminders can open on the accounts home screen instead of the default list. In that state,
+    /// the "New Reminder" toolbar item is absent until the default Reminders list is opened.
+    func testOpensDefaultRemindersListBeforeCreatingWhenOnAccountsHome() throws {
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
+
+        guard let createTapIndex = steps.firstIndex(where: {
+            $0.tool == "tapOn" && $0.mentions("New Reminder")
+        }) else {
+            XCTFail("Plan is missing the tapOn \"New Reminder\" step")
+            return
+        }
+
+        guard let openListIndex = steps.firstIndex(where: {
+            $0.tool == "tapOn" && $0.mentions("Reminders, 0 reminders") && $0.mentions("Reminders,")
+        }) else {
+            XCTFail("Plan must open the default Reminders list when Reminders starts on accounts home")
+            return
+        }
+
+        XCTAssertLessThan(openListIndex, createTapIndex, "The default list hop must precede creating a reminder")
+        XCTAssertTrue(
+            steps[openListIndex].isOptional,
+            "The default list hop must be optional so already-in-list runs don't fail"
+        )
+
+        XCTAssertGreaterThan(openListIndex, 0)
+        let listGuard = steps[openListIndex - 1]
+        XCTAssertEqual(listGuard.tool, "observe", "The default list tap must follow an observe guard")
+        XCTAssertTrue(
+            listGuard.hasWaitFor && listGuard.mentions("Reminders, 0 reminders") && listGuard.mentions("Reminders,"),
+            "The default list tap must be guarded by a waitFor on the same row"
+        )
+        XCTAssertTrue(
+            listGuard.isOptional,
+            "The default list wait must be optional so already-in-list runs don't fail"
+        )
+    }
+
+    /// Location permission prompts can appear after entering the list and cover the create control.
+    /// The dismissal must be optional because privacy state differs across simulators.
+    func testDismissesLocationAlertBestEffortBeforeCreating() throws {
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
+
+        guard let createTapIndex = steps.firstIndex(where: {
+            $0.tool == "tapOn" && $0.mentions("New Reminder")
+        }) else {
+            XCTFail("Plan is missing the tapOn \"New Reminder\" step")
+            return
+        }
+
+        guard let dismissIndex = steps.firstIndex(where: {
+            $0.tool == "tapOn" && $0.mentions("Don’t Allow")
+        }) else {
+            XCTFail("Plan must dismiss the location permission alert via a tapOn \"Don’t Allow\" step")
+            return
+        }
+
+        XCTAssertLessThan(dismissIndex, createTapIndex, "The location alert dismissal must precede creating a reminder")
+        XCTAssertTrue(
+            steps[dismissIndex].isOptional,
+            "The \"Don’t Allow\" dismissal must be optional so alert-absent runs don't fail"
+        )
+
+        XCTAssertGreaterThan(dismissIndex, 0)
+        let alertGuard = steps[dismissIndex - 1]
+        XCTAssertEqual(alertGuard.tool, "observe", "The location alert tap must follow an observe guard")
+        XCTAssertTrue(
+            alertGuard.hasWaitFor && alertGuard.mentions("Don’t Allow"),
+            "The location alert tap must be guarded by a waitFor on the same control"
+        )
+        XCTAssertTrue(
+            alertGuard.isOptional,
+            "The location alert wait must be optional so alert-absent runs don't fail"
+        )
     }
 
     /// Regression guard: the determinism fix must not break the surrounding flow — the plan still
@@ -336,6 +511,10 @@ private struct PlanStep {
 
     func mentions(_ needle: String) -> Bool {
         body.contains("\"\(needle)\"") || body.contains(needle)
+    }
+
+    func mentionsAll(_ needles: [String]) -> Bool {
+        needles.allSatisfy { mentions($0) }
     }
 
     /// The `timeout:` value declared anywhere in the step body (the waitFor block), in milliseconds.

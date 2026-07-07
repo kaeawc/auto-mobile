@@ -223,9 +223,13 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   private validateOptions(options: TapOnElementOptions): string | null {
-    const selectorCount = [options.text, options.elementId].filter(Boolean).length;
+    const selectorCount = [options.text, options.elementId, options.textAny].filter(Boolean).length;
     if (selectorCount !== 1) {
-      return "tapOn requires exactly one of text or elementId";
+      return "tapOn requires exactly one of text, textAny, or elementId";
+    }
+
+    if (options.textAny && options.textAny.length === 0) {
+      return "tapOn textAny selector must be non-empty";
     }
 
     if (options.container) {
@@ -285,6 +289,17 @@ export class TapOnElement extends BaseVisualChange {
            centerY < 0 || centerY > screenSize.height;
   }
 
+  private getScreenSizeFromHierarchy(viewHierarchy: ViewHierarchyResult): ObserveResult["screenSize"] | undefined {
+    if (!viewHierarchy.screenWidth || !viewHierarchy.screenHeight) {
+      return undefined;
+    }
+
+    return {
+      width: viewHierarchy.screenWidth,
+      height: viewHierarchy.screenHeight
+    };
+  }
+
   private findElementInHierarchy(
     options: TapOnElementOptions,
     viewHierarchy: ViewHierarchyResult
@@ -315,6 +330,46 @@ export class TapOnElement extends BaseVisualChange {
       };
     }
 
+    if (options.textAny) {
+      let lastSelection: ElementSelectionResult | null = null;
+      let offScreenSelection: ElementSelectionResult | null = null;
+      const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
+      for (const text of options.textAny) {
+        const selection = options.sibling
+          ? this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
+            container: options.container,
+            fuzzyMatch: true,
+            caseSensitive: false,
+            strategy: options.selectionStrategy
+          })
+          : this.elementSelector.selectByText(viewHierarchy, text, {
+            container: options.container,
+            partialMatch: true,
+            caseSensitive: false,
+            strategy: options.selectionStrategy
+          });
+        lastSelection = selection;
+        if (selection.element) {
+          if (this.isElementCenterOffScreen(selection.element, screenSize)) {
+            offScreenSelection = selection;
+            continue;
+          }
+          return { selection, containerFound };
+        }
+      }
+
+      if (offScreenSelection) {
+        return {
+          selection: { ...offScreenSelection, element: null },
+          containerFound
+        };
+      }
+
+      if (lastSelection) {
+        return { selection: lastSelection, containerFound };
+      }
+    }
+
     if (options.elementId) {
       if (options.sibling) {
         return {
@@ -337,7 +392,7 @@ export class TapOnElement extends BaseVisualChange {
       };
     }
 
-    throw new ActionableError("tapOn requires non-blank text or elementId to interact with");
+    throw new ActionableError("tapOn requires non-blank text, textAny, or elementId to interact with");
   }
 
   private prepareViewHierarchyForResponse(
@@ -739,6 +794,8 @@ export class TapOnElement extends BaseVisualChange {
       baseError = `No clickable sibling found next to element with elementId '${options.elementId}'${containerHint}`;
     } else if (options.text) {
       baseError = `Element not found with provided text '${options.text}'${containerHint}`;
+    } else if (options.textAny) {
+      baseError = `Element not found with any provided text '${options.textAny.join("', '")}'${containerHint}`;
     } else {
       baseError = `Element not found with provided elementId '${options.elementId}'${containerHint}`;
     }
@@ -749,7 +806,7 @@ export class TapOnElement extends BaseVisualChange {
         this.screenshotCapturer,
         observeResult.viewHierarchy,
         {
-          text: options.text,
+          text: options.text ?? options.textAny?.join(" | "),
           resourceId: options.elementId,
           description: `Interactive element for tapping (action: ${options.action})`,
         },
@@ -1140,7 +1197,7 @@ export class TapOnElement extends BaseVisualChange {
         },
         {
           queryOptions: {
-            text: options.text,
+            text: options.text ?? options.textAny?.[0],
             elementId: options.elementId,
             containerElementId: options.container?.elementId
           },
@@ -1153,6 +1210,7 @@ export class TapOnElement extends BaseVisualChange {
             toolName: "tapOn",
             toolArgs: {
               text: options.text,
+              textAny: options.textAny,
               id: options.elementId,
               action: options.action,
               duration: options.duration,

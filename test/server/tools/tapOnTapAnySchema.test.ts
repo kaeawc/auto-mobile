@@ -19,11 +19,28 @@ describe("tapOn schema", () => {
     expect(result.selector).toEqual({ elementId: "com.app:id/btn_login" });
   });
 
+  test("accepts selector with ordered text variants", () => {
+    const result = tapOnSchema.parse({
+      platform: "ios",
+      selector: { textAny: ["Done", "Add"] },
+    });
+    expect(result.selector).toEqual({ textAny: ["Done", "Add"] });
+  });
+
   test("rejects selector with both text and elementId", () => {
     expect(() =>
       tapOnSchema.parse({
         platform: "android",
         selector: { text: "Login", elementId: "com.app:id/btn_login" },
+      })
+    ).toThrow();
+  });
+
+  test("rejects empty textAny selector", () => {
+    expect(() =>
+      tapOnSchema.parse({
+        platform: "ios",
+        selector: { textAny: [] },
       })
     ).toThrow();
   });

@@ -125,7 +125,8 @@ class McpDaemonClientInputTest {
         client.inputTypeText(text = "hello", platform = "ios", deviceId = "device-2", submit = true)
       }
     val key =
-      captureInputRequest("""{ "action": "input/key", "success": true, "key": "enter" }""") { client ->
+      captureInputRequest("""{ "action": "input/key", "success": true, "key": "enter" }""") { client
+        ->
         client.inputKey(key = "enter", platform = "android", deviceId = "device-3")
       }
 

@@ -2,7 +2,6 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { resolveRunnerChecksum } from "../../src/constants/release";
 import type { Sha256Source, CtrlProxyIosBundleDownloader } from "../../src/utils/IOSCtrlProxyBundleDownloader";
-import { resolveRunnerChecksum } from "../../src/constants/release";
 
 export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownloader {
   public downloadedUrls: string[] = [];
@@ -11,7 +10,6 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
   public runnerChecksum: string = resolveRunnerChecksum();
   public checksumSource: Sha256Source = "node";
   public extractedSubdir: string = "";
-  public runnerChecksum: string = resolveRunnerChecksum();
 
   public async download(url: string, destination: string): Promise<void> {
     this.downloadedUrls.push(url);

@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.testing
 
+import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
+import dev.jasonpearson.automobile.desktop.core.daemon.InputCoordinates
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResource
 import dev.jasonpearson.automobile.desktop.core.daemon.McpTool
@@ -21,9 +23,10 @@ class FakeAutoMobileClientTest {
     client.ping()
     client.listTools()
     client.observe()
+    client.inputTap(x = 10, y = 20)
     client.close()
 
-    assertEquals(listOf("ping", "listTools", "observe", "close"), client.calls)
+    assertEquals(listOf("ping", "listTools", "observe", "inputTap", "close"), client.calls)
   }
 
   @Test
@@ -139,6 +142,96 @@ class FakeAutoMobileClientTest {
     assertEquals("device-1", call.deviceId)
     assertEquals("com.app", call.appId)
     assertEquals("prefs", call.fileName)
+  }
+
+  @Test
+  fun `records typed input calls with arguments`() {
+    val client = FakeAutoMobileClient()
+
+    client.inputTap(x = 10, y = 20, platform = "android", deviceId = "device-1", duration = 50)
+    client.inputSwipe(
+      startX = 1,
+      startY = 2,
+      endX = 3,
+      endY = 4,
+      platform = "ios",
+      deviceId = "device-2",
+      durationMs = 500,
+    )
+    client.inputPressButton(button = "back", platform = "android", deviceId = "device-3")
+    client.inputTypeText(text = "hello", platform = "ios", deviceId = "device-4", submit = true)
+    client.inputKey(key = "enter", platform = "android", deviceId = "device-5")
+
+    assertEquals(
+      listOf("inputTap", "inputSwipe", "inputPressButton", "inputTypeText", "inputKey"),
+      client.calls,
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputTapCall(
+        x = 10,
+        y = 20,
+        platform = "android",
+        deviceId = "device-1",
+        duration = 50,
+      ),
+      client.inputTapCalls.single(),
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputSwipeCall(
+        startX = 1,
+        startY = 2,
+        endX = 3,
+        endY = 4,
+        platform = "ios",
+        deviceId = "device-2",
+        durationMs = 500,
+      ),
+      client.inputSwipeCalls.single(),
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputPressButtonCall(
+        button = "back",
+        platform = "android",
+        deviceId = "device-3",
+      ),
+      client.inputPressButtonCalls.single(),
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputTypeTextCall(
+        text = "hello",
+        platform = "ios",
+        deviceId = "device-4",
+        submit = true,
+      ),
+      client.inputTypeTextCalls.single(),
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputKeyCall(
+        key = "enter",
+        platform = "android",
+        deviceId = "device-5",
+      ),
+      client.inputKeyCalls.single(),
+    )
+  }
+
+  @Test
+  fun `returns configurable typed input results`() {
+    val client = FakeAutoMobileClient()
+    client.inputTapResult =
+      InputActionResult(
+        action = "input/tap",
+        platform = "android",
+        deviceId = "device-1",
+        success = true,
+        coordinates = InputCoordinates(x = 10, y = 20),
+      )
+
+    val result = client.inputTap(x = 10, y = 20)
+
+    assertEquals(true, result.success)
+    assertEquals("input/tap", result.action)
+    assertEquals(InputCoordinates(x = 10, y = 20), result.coordinates)
   }
 
   @Test

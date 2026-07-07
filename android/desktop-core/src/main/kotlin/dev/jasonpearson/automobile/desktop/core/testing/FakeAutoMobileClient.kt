@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ClearKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.ExecutePlanResult
 import dev.jasonpearson.automobile.desktop.core.daemon.FeatureFlagState
+import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.daemon.KillDeviceResult
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResource
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResourceContent
@@ -74,6 +75,14 @@ class FakeAutoMobileClient : AutoMobileClient {
   var killDeviceResult: KillDeviceResult = KillDeviceResult(success = true)
   var getDaemonStatusResult: DaemonStatusResponse = DaemonStatusResponse()
   var updateServiceResult: UpdateServiceResult = UpdateServiceResult(success = true)
+  var inputTapResult: InputActionResult = InputActionResult(action = "input/tap", success = true)
+  var inputSwipeResult: InputActionResult =
+    InputActionResult(action = "input/swipe", success = true)
+  var inputPressButtonResult: InputActionResult =
+    InputActionResult(action = "input/pressButton", success = true)
+  var inputTypeTextResult: InputActionResult =
+    InputActionResult(action = "input/typeText", success = true)
+  var inputKeyResult: InputActionResult = InputActionResult(action = "input/key", success = true)
   var setKeyValueResult: SetKeyValueResult = SetKeyValueResult(success = true)
   var removeKeyValueResult: RemoveKeyValueResult = RemoveKeyValueResult(success = true)
   var clearKeyValueFileResult: ClearKeyValueResult = ClearKeyValueResult(success = true)
@@ -119,9 +128,51 @@ class FakeAutoMobileClient : AutoMobileClient {
     val fileName: String,
   )
 
+  data class InputTapCall(
+    val x: Int,
+    val y: Int,
+    val platform: String,
+    val deviceId: String?,
+    val duration: Int?,
+  )
+
+  data class InputSwipeCall(
+    val startX: Int,
+    val startY: Int,
+    val endX: Int,
+    val endY: Int,
+    val platform: String,
+    val deviceId: String?,
+    val durationMs: Int?,
+  )
+
+  data class InputPressButtonCall(
+    val button: String,
+    val platform: String,
+    val deviceId: String?,
+  )
+
+  data class InputTypeTextCall(
+    val text: String,
+    val platform: String,
+    val deviceId: String?,
+    val submit: Boolean?,
+  )
+
+  data class InputKeyCall(
+    val key: String,
+    val platform: String,
+    val deviceId: String?,
+  )
+
   val setKeyValueCalls = mutableListOf<SetKeyValueCall>()
   val removeKeyValueCalls = mutableListOf<RemoveKeyValueCall>()
   val clearKeyValueFileCalls = mutableListOf<ClearKeyValueFileCall>()
+  val inputTapCalls = mutableListOf<InputTapCall>()
+  val inputSwipeCalls = mutableListOf<InputSwipeCall>()
+  val inputPressButtonCalls = mutableListOf<InputPressButtonCall>()
+  val inputTypeTextCalls = mutableListOf<InputTypeTextCall>()
+  val inputKeyCalls = mutableListOf<InputKeyCall>()
 
   // -- AutoMobileClient implementation --
 
@@ -238,6 +289,63 @@ class FakeAutoMobileClient : AutoMobileClient {
   override fun updateService(deviceId: String, platform: String): UpdateServiceResult {
     calls.add("updateService")
     return updateServiceResult
+  }
+
+  override fun inputTap(
+    x: Int,
+    y: Int,
+    platform: String,
+    deviceId: String?,
+    duration: Int?,
+  ): InputActionResult {
+    calls.add("inputTap")
+    inputTapCalls.add(InputTapCall(x, y, platform, deviceId, duration))
+    return inputTapResult
+  }
+
+  override fun inputSwipe(
+    startX: Int,
+    startY: Int,
+    endX: Int,
+    endY: Int,
+    platform: String,
+    deviceId: String?,
+    durationMs: Int?,
+  ): InputActionResult {
+    calls.add("inputSwipe")
+    inputSwipeCalls.add(InputSwipeCall(startX, startY, endX, endY, platform, deviceId, durationMs))
+    return inputSwipeResult
+  }
+
+  override fun inputPressButton(
+    button: String,
+    platform: String,
+    deviceId: String?,
+  ): InputActionResult {
+    calls.add("inputPressButton")
+    inputPressButtonCalls.add(InputPressButtonCall(button, platform, deviceId))
+    return inputPressButtonResult
+  }
+
+  override fun inputTypeText(
+    text: String,
+    platform: String,
+    deviceId: String?,
+    submit: Boolean?,
+  ): InputActionResult {
+    calls.add("inputTypeText")
+    inputTypeTextCalls.add(InputTypeTextCall(text, platform, deviceId, submit))
+    return inputTypeTextResult
+  }
+
+  override fun inputKey(
+    key: String,
+    platform: String,
+    deviceId: String?,
+  ): InputActionResult {
+    calls.add("inputKey")
+    inputKeyCalls.add(InputKeyCall(key, platform, deviceId))
+    return inputKeyResult
   }
 
   override fun setKeyValue(

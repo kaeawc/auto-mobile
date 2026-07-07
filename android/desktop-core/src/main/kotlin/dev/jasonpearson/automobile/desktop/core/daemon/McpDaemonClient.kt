@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -266,6 +267,95 @@ class McpDaemonClient(
     return json.decodeFromJsonElement(UpdateServiceResult.serializer(), response.result!!)
   }
 
+  override fun inputTap(
+    x: Int,
+    y: Int,
+    platform: String,
+    deviceId: String?,
+    duration: Int?,
+  ): InputActionResult {
+    return sendInputRequest(
+      "input/tap",
+      buildJsonObject {
+        put("platform", JsonPrimitive(platform))
+        putOptionalString("deviceId", deviceId)
+        put("x", JsonPrimitive(x))
+        put("y", JsonPrimitive(y))
+        putOptionalInt("duration", duration)
+      },
+    )
+  }
+
+  override fun inputSwipe(
+    startX: Int,
+    startY: Int,
+    endX: Int,
+    endY: Int,
+    platform: String,
+    deviceId: String?,
+    durationMs: Int?,
+  ): InputActionResult {
+    return sendInputRequest(
+      "input/swipe",
+      buildJsonObject {
+        put("platform", JsonPrimitive(platform))
+        putOptionalString("deviceId", deviceId)
+        put("startX", JsonPrimitive(startX))
+        put("startY", JsonPrimitive(startY))
+        put("endX", JsonPrimitive(endX))
+        put("endY", JsonPrimitive(endY))
+        putOptionalInt("durationMs", durationMs)
+      },
+    )
+  }
+
+  override fun inputPressButton(
+    button: String,
+    platform: String,
+    deviceId: String?,
+  ): InputActionResult {
+    return sendInputRequest(
+      "input/pressButton",
+      buildJsonObject {
+        put("platform", JsonPrimitive(platform))
+        putOptionalString("deviceId", deviceId)
+        put("button", JsonPrimitive(button))
+      },
+    )
+  }
+
+  override fun inputTypeText(
+    text: String,
+    platform: String,
+    deviceId: String?,
+    submit: Boolean?,
+  ): InputActionResult {
+    return sendInputRequest(
+      "input/typeText",
+      buildJsonObject {
+        put("platform", JsonPrimitive(platform))
+        putOptionalString("deviceId", deviceId)
+        put("text", JsonPrimitive(text))
+        putOptionalBoolean("submit", submit)
+      },
+    )
+  }
+
+  override fun inputKey(
+    key: String,
+    platform: String,
+    deviceId: String?,
+  ): InputActionResult {
+    return sendInputRequest(
+      "input/key",
+      buildJsonObject {
+        put("platform", JsonPrimitive(platform))
+        putOptionalString("deviceId", deviceId)
+        put("key", JsonPrimitive(key))
+      },
+    )
+  }
+
   override fun setKeyValue(
     deviceId: String,
     appId: String,
@@ -353,6 +443,21 @@ class McpDaemonClient(
     return response.result ?: JsonObject(emptyMap())
   }
 
+  private fun sendInputRequest(method: String, params: JsonObject): InputActionResult {
+    val response = sendRequest(method, params)
+    if (!response.success) {
+      return InputActionResult(action = method, success = false, error = response.error)
+    }
+    val result =
+      response.result
+        ?: return InputActionResult(
+          action = method,
+          success = false,
+          error = "Daemon response missing result",
+        )
+    return json.decodeFromJsonElement(InputActionResult.serializer(), result)
+  }
+
   private fun sendRequest(
     method: String,
     params: JsonObject = JsonObject(emptyMap()),
@@ -398,6 +503,33 @@ class McpDaemonClient(
     }
     if (response.result == null) {
       throw DaemonUnavailableException("Daemon response missing result")
+    }
+  }
+
+  private fun JsonObjectBuilder.putOptionalString(
+    key: String,
+    value: String?,
+  ) {
+    if (value != null) {
+      put(key, JsonPrimitive(value))
+    }
+  }
+
+  private fun JsonObjectBuilder.putOptionalInt(
+    key: String,
+    value: Int?,
+  ) {
+    if (value != null) {
+      put(key, JsonPrimitive(value))
+    }
+  }
+
+  private fun JsonObjectBuilder.putOptionalBoolean(
+    key: String,
+    value: Boolean?,
+  ) {
+    if (value != null) {
+      put(key, JsonPrimitive(value))
     }
   }
 }

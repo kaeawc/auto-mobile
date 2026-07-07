@@ -71,6 +71,43 @@ interface AutoMobileClient {
 
   fun updateService(deviceId: String, platform: String): UpdateServiceResult
 
+  fun inputTap(
+    x: Int,
+    y: Int,
+    platform: String = "android",
+    deviceId: String? = null,
+    duration: Int? = null,
+  ): InputActionResult = unsupportedInputAction("input/tap")
+
+  fun inputSwipe(
+    startX: Int,
+    startY: Int,
+    endX: Int,
+    endY: Int,
+    platform: String = "android",
+    deviceId: String? = null,
+    durationMs: Int? = null,
+  ): InputActionResult = unsupportedInputAction("input/swipe")
+
+  fun inputPressButton(
+    button: String,
+    platform: String = "android",
+    deviceId: String? = null,
+  ): InputActionResult = unsupportedInputAction("input/pressButton")
+
+  fun inputTypeText(
+    text: String,
+    platform: String = "android",
+    deviceId: String? = null,
+    submit: Boolean? = null,
+  ): InputActionResult = unsupportedInputAction("input/typeText")
+
+  fun inputKey(
+    key: String,
+    platform: String = "android",
+    deviceId: String? = null,
+  ): InputActionResult = unsupportedInputAction("input/key")
+
   fun setKeyValue(
     deviceId: String,
     appId: String,
@@ -96,6 +133,13 @@ interface AutoMobileClient {
   fun callTool(name: String, arguments: JsonObject): JsonElement
 
   fun close() {}
+
+  private fun unsupportedInputAction(action: String): InputActionResult =
+    InputActionResult(
+      action = action,
+      success = false,
+      error = "$transportName does not support direct daemon input helpers",
+    )
 }
 
 @Serializable
@@ -154,6 +198,29 @@ data class ObserveResult(
 data class ObserveScreenSize(
   val width: Int? = null,
   val height: Int? = null,
+)
+
+@Serializable
+data class InputCoordinates(
+  val x: Int,
+  val y: Int,
+)
+
+@Serializable
+data class InputActionResult(
+  val action: String? = null,
+  val platform: String? = null,
+  val deviceId: String? = null,
+  val success: Boolean = true,
+  val error: String? = null,
+  val coordinates: InputCoordinates? = null,
+  val start: InputCoordinates? = null,
+  val end: InputCoordinates? = null,
+  val durationMs: Int? = null,
+  val button: String? = null,
+  val textLength: Int? = null,
+  val submitted: Boolean? = null,
+  val key: String? = null,
 )
 
 open class McpConnectionException(message: String, cause: Throwable? = null) :

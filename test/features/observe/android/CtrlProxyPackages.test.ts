@@ -11,6 +11,7 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
+import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer } from "../../../../src/daemon/deviceDataStreamSocketServer";
 
 describe("CtrlProxyPackages (Android)", function() {
   let fakeAdb: FakeAdbExecutor;
@@ -38,8 +39,9 @@ describe("CtrlProxyPackages (Android)", function() {
     AndroidCtrlProxyManager.getInstance(testDevice, new FakeAdbClientFactory()).clearAvailabilityCache();
   });
 
-  afterEach(function() {
+  afterEach(async function() {
     NavigationGraphManager.getInstance();
+    await stopDeviceDataStreamSocketServer();
   });
 
   class CapturingWebSocket extends FakeWebSocket {
@@ -136,6 +138,32 @@ describe("CtrlProxyPackages (Android)", function() {
       socket!.sentMessages = [];
 
       client.refreshObservationStreamHierarchyCadence(500);
+
+      const message = findSentMessage(socket!, "set_hierarchy_interval");
+      expect(message).toEqual({ type: "set_hierarchy_interval", intervalMs: 500 });
+    });
+
+    test("refreshes hierarchy cadence from the stream server when no interval is passed", async function() {
+      const streamServer = await startDeviceDataStreamSocketServer(fakeTimer);
+      (streamServer as any).subscribers.set("hierarchy-cadence-test", {
+        socket: { destroyed: false },
+        backfilling: false,
+        filter: {
+          deviceId: testDevice.deviceId,
+          screenshotIntervalMs: null,
+          hierarchyIntervalMs: 500,
+        },
+      });
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+
+      const connected = await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+      expect(connected).toBe(true);
+      socket!.sentMessages = [];
+
+      client.refreshObservationStreamHierarchyCadence();
 
       const message = findSentMessage(socket!, "set_hierarchy_interval");
       expect(message).toEqual({ type: "set_hierarchy_interval", intervalMs: 500 });

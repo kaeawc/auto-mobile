@@ -13,6 +13,7 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
+import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer } from "../../../../src/daemon/deviceDataStreamSocketServer";
 
 describe("IOSCtrlProxyClient", function() {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -50,6 +51,7 @@ describe("IOSCtrlProxyClient", function() {
     if (ctrlProxyClient) {
       await ctrlProxyClient.close();
     }
+    await stopDeviceDataStreamSocketServer();
     NetworkState.resetInstance();
     serverConfig.setNetworkMockableEnabled(false);
   });
@@ -168,6 +170,40 @@ describe("IOSCtrlProxyClient", function() {
       socket!.sentMessages = [];
 
       ctrlProxyClient.refreshObservationStreamHierarchyCadence(500);
+
+      const sentPayloads = socket!.sentMessages.map(message => JSON.parse(message));
+      expect(sentPayloads).toContainEqual({
+        type: "set_hierarchy_interval",
+        intervalMs: 500,
+      });
+    });
+
+    test("refreshes hierarchy cadence from the stream server when no interval is passed", async function() {
+      const streamServer = await startDeviceDataStreamSocketServer(fakeTimer);
+      (streamServer as any).subscribers.set("hierarchy-cadence-test", {
+        socket: { destroyed: false },
+        backfilling: false,
+        filter: {
+          deviceId: testDevice.deviceId,
+          screenshotIntervalMs: null,
+          hierarchyIntervalMs: 500,
+        },
+      });
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      ctrlProxyClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer
+      );
+
+      const connected = await ctrlProxyClient.ensureConnected();
+      const socket = await waitForSocket(getSocket) as CapturingWebSocket | null;
+      await waitForSocketOpen(socket);
+      expect(connected).toBe(true);
+      socket!.sentMessages = [];
+
+      ctrlProxyClient.refreshObservationStreamHierarchyCadence();
 
       const sentPayloads = socket!.sentMessages.map(message => JSON.parse(message));
       expect(sentPayloads).toContainEqual({

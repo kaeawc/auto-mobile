@@ -125,6 +125,10 @@ interface CacheStats {
   };
 }
 
+interface ContrastCheckerDependencies {
+  readFile: (path: string) => Promise<Buffer>;
+}
+
 /**
  * Screenshot cache entry
  */
@@ -171,7 +175,8 @@ export class ContrastChecker {
   constructor(
     config: ContrastCheckConfig = {},
     timer: Timer = defaultTimer,
-    backend: ImageBackend = resolveImageBackend()
+    backend: ImageBackend = resolveImageBackend(),
+    private readonly deps: ContrastCheckerDependencies = { readFile: fs.readFile }
   ) {
     this.timer = timer;
     this.backend = backend;
@@ -487,7 +492,7 @@ export class ContrastChecker {
    * decode the same PNG), so contrast sampling is byte-for-byte unchanged.
    */
   private async decodeScreenshot(path: string): Promise<RawImage> {
-    const buffer = await fs.readFile(path);
+    const buffer = await this.deps.readFile(path);
     return this.backend.rawPixels(buffer);
   }
 
@@ -668,12 +673,7 @@ export class ContrastChecker {
     for (let x = centerX - sampleSize; x <= centerX + sampleSize; x++) {
       for (let y = centerY - sampleSize; y <= centerY + sampleSize; y++) {
         if (x >= left && x < right && y >= top && y < bottom) {
-          try {
-            const color = this.resolvePixelColor(image, x, y);
-            colors.push(color);
-          } catch (e) {
-            // Skip invalid pixels
-          }
+          colors.push(this.resolvePixelColor(image, x, y));
         }
       }
     }
@@ -751,35 +751,19 @@ export class ContrastChecker {
 
     for (let x = left; x < right; x += 3) {
       for (let y = top; y < top + edgeSampleSize; y++) {
-        try {
-          colors.push(this.resolvePixelColor(image, x, y));
-        } catch (e) {
-          // Skip
-        }
+        colors.push(this.resolvePixelColor(image, x, y));
       }
       for (let y = bottom - edgeSampleSize; y < bottom; y++) {
-        try {
-          colors.push(this.resolvePixelColor(image, x, y));
-        } catch (e) {
-          // Skip
-        }
+        colors.push(this.resolvePixelColor(image, x, y));
       }
     }
 
     for (let y = top; y < bottom; y += 3) {
       for (let x = left; x < left + edgeSampleSize; x++) {
-        try {
-          colors.push(this.resolvePixelColor(image, x, y));
-        } catch (e) {
-          // Skip
-        }
+        colors.push(this.resolvePixelColor(image, x, y));
       }
       for (let x = right - edgeSampleSize; x < right; x++) {
-        try {
-          colors.push(this.resolvePixelColor(image, x, y));
-        } catch (e) {
-          // Skip
-        }
+        colors.push(this.resolvePixelColor(image, x, y));
       }
     }
 
@@ -787,11 +771,7 @@ export class ContrastChecker {
       const margin = 5;
       for (let x = Math.max(0, left - margin); x < left; x++) {
         for (let y = top; y < bottom; y += 3) {
-          try {
-            colors.push(this.resolvePixelColor(image, x, y));
-          } catch (e) {
-            // Skip
-          }
+          colors.push(this.resolvePixelColor(image, x, y));
         }
       }
     }

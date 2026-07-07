@@ -2,8 +2,25 @@ import XCTest
 @testable import XCTestRunner
 
 class RemindersIntegrationBase: AutoMobileTestCase {
+    private let executorTimeoutConsumersPerAttempt = 2
+    private let workflowStepReservedOverheadSeconds: TimeInterval = 60
+    private let workflowStepTimeoutSeconds: TimeInterval = 600
+
     override var planBundle: Bundle? {
         return Bundle.module
+    }
+
+    override var timeoutSeconds: TimeInterval {
+        let attempts = retryCount + 1
+        guard attempts > 1 else {
+            return super.timeoutSeconds
+        }
+
+        let retryDelayBudget = TimeInterval(attempts - 1) * retryDelaySeconds
+        let remainingStepBudget = workflowStepTimeoutSeconds - workflowStepReservedOverheadSeconds - retryDelayBudget
+        let timeoutConsumers = attempts * executorTimeoutConsumersPerAttempt
+        let maximumPerAttemptTimeout = max(1, floor(remainingStepBudget / TimeInterval(timeoutConsumers)))
+        return min(super.timeoutSeconds, maximumPerAttemptTimeout)
     }
 
     override func setUpAutoMobile() throws {

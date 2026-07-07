@@ -166,7 +166,7 @@ class WebSocketServer(
                         ConnectedResponse(
                           id = connectionId,
                           supportedCommands = listOf("set_hierarchy_interval"),
-                        )
+                        ),
                       )
                     )
                   )

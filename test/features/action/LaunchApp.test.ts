@@ -538,6 +538,7 @@ describe("LaunchApp", () => {
     function createDeviceHarness(opts: {
       deviceId: string;
       launchResult?: { success: boolean; pid?: number; error?: string };
+      clearResult?: { success: boolean; packageName: string; error?: string };
     }) {
       const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: opts.deviceId };
       const fakeCtrlProxy = new FakeIOSCtrlProxy();
@@ -557,6 +558,13 @@ describe("LaunchApp", () => {
       const deviceAppLauncher = new FakeDeviceAppLauncher(
         opts.launchResult ? { launchResult: opts.launchResult } : {}
       );
+      const clearCalls: Array<{ bundleId: string; device: BootedDevice; simctl: unknown }> = [];
+      const clearAppDataFactory = (clearDevice: BootedDevice, clearSimctl: unknown) => ({
+        execute: async (id: string) => {
+          clearCalls.push({ bundleId: id, device: clearDevice, simctl: clearSimctl });
+          return opts.clearResult ?? { success: true, packageName: id };
+        },
+      });
 
       const iosObserveScreen = new FakeObserveScreen();
       iosObserveScreen.setObserveResult({
@@ -572,13 +580,14 @@ describe("LaunchApp", () => {
       const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, {
         installedAppsProvider: installedApps,
         deviceAppLauncher,
+        clearAppDataFactory,
       });
       (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
       (iosLaunchApp as any).observeScreen = iosObserveScreen;
       (iosLaunchApp as any).window = iosWindow;
       (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
 
-      return { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup: () => { ctrlProxySpy.mockRestore(); managerSpy.mockRestore(); } };
+      return { iosLaunchApp, deviceAppLauncher, simctlCalls, clearCalls, cleanup: () => { ctrlProxySpy.mockRestore(); managerSpy.mockRestore(); } };
     }
 
     test("cold boot on a physical device launches via devicectl (not simctl) and propagates the PID", async () => {
@@ -644,6 +653,52 @@ describe("LaunchApp", () => {
         const result = await iosLaunchApp.execute(userBundleId, false, true);
         expect(result.success).toBe(false);
         expect(result.error).toContain("Application not found on device");
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("clearAppData on a physical device clears via injected transport before devicectl relaunch", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, clearCalls, cleanup } = createDeviceHarness({ deviceId: physicalUdid });
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        expect(result.success).toBe(true);
+        expect(clearCalls).toHaveLength(1);
+        expect(clearCalls[0]).toMatchObject({
+          bundleId: userBundleId,
+          device: { deviceId: physicalUdid, platform: "ios" },
+        });
+        expect(clearCalls[0].simctl).toBe((iosLaunchApp as any).simctl);
+        expect(deviceAppLauncher.launchCalls).toEqual([{
+          deviceUdid: physicalUdid,
+          bundleId: userBundleId,
+          terminateExisting: true,
+        }]);
+        expect(simctlCalls).toEqual([]);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("clearAppData failure on a physical device aborts without devicectl relaunch", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, clearCalls, cleanup } = createDeviceHarness({
+        deviceId: physicalUdid,
+        clearResult: { success: false, packageName: userBundleId, error: "reinstall failed" },
+      });
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Failed to clear app data: reinstall failed");
+        expect(clearCalls).toHaveLength(1);
+        expect(clearCalls[0]).toMatchObject({
+          bundleId: userBundleId,
+          device: { deviceId: physicalUdid, platform: "ios" },
+        });
+        expect(clearCalls[0].simctl).toBe((iosLaunchApp as any).simctl);
+        expect(deviceAppLauncher.launchCalls).toHaveLength(0);
+        expect(simctlCalls).toEqual([]);
       } finally {
         cleanup();
       }

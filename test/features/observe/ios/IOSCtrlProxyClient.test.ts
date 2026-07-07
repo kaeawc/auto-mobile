@@ -132,6 +132,15 @@ describe("IOSCtrlProxyClient", function() {
       expect(scheduler.cancelPendingCapturesCalls).toBe(1);
     });
 
+    test("refreshes screenshot cadence by rescheduling keepalive", function() {
+      const scheduler = new FakeScreenshotBackoffScheduler();
+
+      (ctrlProxyClient as any).screenshotBackoffScheduler = scheduler;
+      ctrlProxyClient.refreshObservationStreamScreenshotCadence();
+
+      expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
+    });
+
     test("notifies the observation stream when the WebSocket connection closes", function() {
       const lostDeviceIds: string[] = [];
       const notifier: DeviceConnectionLostNotifier = {

@@ -1564,7 +1564,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           const screenHeight = this.cachedScreenDimensions?.height ?? 2532;
           this.pushScreenshotToObservationStream(data, screenWidth, screenHeight);
         },
-        undefined, // Use default config
+        {
+          getKeepAliveIntervalMs: () => {
+            const server = getDeviceDataStreamServer();
+            return server?.getScreenshotIntervalMsForDevice(this.device.deviceId) ?? 3000;
+          },
+        },
         this.timer,
         () => {
           const server = getDeviceDataStreamServer();
@@ -1614,6 +1619,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (this.screenshotBackoffScheduler) {
       this.screenshotBackoffScheduler.cancelPendingCaptures();
     }
+  }
+
+  refreshObservationStreamScreenshotCadence(): void {
+    this.screenshotBackoffScheduler?.rescheduleKeepAlive();
   }
 
   // ===========================================================================

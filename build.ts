@@ -77,6 +77,15 @@ if (existsSync(sourcemapPath)) {
 // Copy raw DB runtime files for FileMigrationProvider usage.
 copyDatabaseRuntimeFiles({ projectRoot: import.meta.dir });
 
+// Copy bundled native tools for runtime lookup from the published dist package.
+const vendorSource = join(import.meta.dir, "vendor");
+const vendorDest = join(import.meta.dir, "dist", "vendor");
+if (existsSync(vendorSource)) {
+  mkdirSync(vendorDest, { recursive: true });
+  cpSync(vendorSource, vendorDest, { recursive: true });
+  console.log("✓ Copied bundled vendor tools");
+}
+
 // Copy schemas for runtime validation (PlanSchemaValidator reads from disk)
 const schemasSource = join(import.meta.dir, "schemas");
 const schemasDest = join(import.meta.dir, "dist", "schemas");

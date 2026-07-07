@@ -1,6 +1,6 @@
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange } from "./BaseVisualChange";
-import { BootedDevice, LaunchAppResult, ObserveResult } from "../../models";
+import { BootedDevice, ClearAppDataResult, LaunchAppResult, ObserveResult } from "../../models";
 import { ActionableError } from "../../models";
 import { TerminateApp } from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
@@ -30,6 +30,10 @@ export interface InstalledAppsProvider {
   listInstalledApps(): Promise<string[]>;
 }
 
+export interface IosClearAppDataRunner {
+  execute(bundleId: string): Promise<ClearAppDataResult>;
+}
+
 /**
  * Launch an app on a physical iOS device via devicectl. Narrow injection point
  * so tests never shell out; parallels `DeviceAppUninstaller` in UninstallApp.
@@ -50,6 +54,7 @@ interface LaunchAppDependencies {
   installedAppsProvider?: InstalledAppsProvider;
   performanceTrackerFactory?: () => PerformanceTracker;
   deviceAppLauncher?: DeviceAppLauncher;
+  clearAppDataFactory?: (device: BootedDevice, simctl: SimCtlClient) => IosClearAppDataRunner;
 }
 
 export class LaunchApp extends BaseVisualChange {
@@ -59,6 +64,7 @@ export class LaunchApp extends BaseVisualChange {
   private targetUserDetector: TargetUserDetector;
   private installedAppsProvider: InstalledAppsProvider;
   private performanceTrackerFactory: () => PerformanceTracker;
+  private clearAppDataFactory: (device: BootedDevice, simctl: SimCtlClient) => IosClearAppDataRunner;
   /**
    * Create an LaunchApp instance
    * @param device - Optional device
@@ -83,6 +89,9 @@ export class LaunchApp extends BaseVisualChange {
       listInstalledApps: () => this.listInstalledApps()
     };
     this.performanceTrackerFactory = dependencies.performanceTrackerFactory ?? createGlobalPerformanceTracker;
+    this.clearAppDataFactory = dependencies.clearAppDataFactory ?? (
+      (device, simctl) => new ClearAppDataIos(device, simctl)
+    );
   }
 
   /**
@@ -320,7 +329,7 @@ export class LaunchApp extends BaseVisualChange {
           // we never want to wipe SpringBoard/Settings data.
           if (clearAppData && !isSystemBundleId) {
             const clearResult = await perf.track("clearAppData", () =>
-              new ClearAppDataIos(this.device, this.simctl).execute(bundleId)
+              this.clearAppDataFactory(this.device, this.simctl).execute(bundleId)
             );
             if (!clearResult.success) {
               // Do NOT launch with stale data — callers request clearAppData to

@@ -10,6 +10,7 @@ import {
 } from "../../../../src/features/observe/output/ObserveResultOutput";
 import {
   loadAndroidHomeObserve,
+  loadIosRemindersNoiseObservePair,
   measureValue,
 } from "../../../fixtures/observe/observeFixture";
 
@@ -40,6 +41,24 @@ function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): Obs
     },
     ...extra,
   } as ObserveResult;
+}
+
+function iosObs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): ObserveResult {
+  return obs(node, {
+    activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
+    viewHierarchy: {
+      packageName: "com.apple.reminders",
+      hierarchy: { node: node as any },
+    },
+    screenIdentity: {
+      platform: "ios",
+      source: "heuristic",
+      confidence: "high",
+      key: "bundle=com.apple.reminders|nav=Reminders",
+      components: { bundleId: "com.apple.reminders", navigationTitle: "Reminders" },
+    },
+    ...extra,
+  } as ObserveResult);
 }
 
 describe("diffObserveResult", () => {
@@ -830,6 +849,289 @@ describe("diffObserveResult", () => {
     expect(diff.changed).toEqual([]);
     expect(diff.added.map(n => n.attributes["resource-id"])).toEqual(["fresh"]);
     expect(diff.removed.map(n => n.attributes["resource-id"])).toEqual(["gone"]);
+  });
+});
+
+describe("diffObserveResult — conservative iOS stable identity (#3318)", () => {
+  test("iOS text input edits emit one `changed` entry instead of remove+add", () => {
+    const baseline = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "",
+      "value": "",
+      "focused": "true",
+    });
+    const next = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+      "value": "Buy milk",
+      "focused": "true",
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.text).toEqual({ from: "", to: "Buy milk" });
+    expect(diff.changed[0].changes.value).toEqual({ from: "", to: "Buy milk" });
+  });
+
+  test("iOS UIKit text fields emitted by the runner also re-pair text/value edits", () => {
+    const baseline = iosObs({
+      "view-id": "title-field",
+      "class": "UITextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "",
+      "value": "",
+    });
+    const next = iosObs({
+      "view-id": "title-field",
+      "class": "UITextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+      "value": "Buy milk",
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.text).toEqual({ from: "", to: "Buy milk" });
+    expect(diff.changed[0].changes.value).toEqual({ from: "", to: "Buy milk" });
+  });
+
+  test("third-party iOS bundles without screenIdentity still use iOS text-field repair", () => {
+    const root = (text: string) => ({
+      "class": "XCUIApplication",
+      "bounds": { left: 0, top: 0, right: 393, bottom: 852 },
+      "node": [{
+        "resource-id": "TitleField",
+        "class": "UITextField",
+        "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+        "text": text,
+        "value": text,
+      }],
+    });
+    const screen = (text: string) => iosObs(root(text), {
+      activeWindow: { appId: "dev.example.todo", activityName: "", layoutSeqSum: 1 },
+      viewHierarchy: {
+        packageName: "dev.example.todo",
+        hierarchy: { node: root(text) as any },
+      },
+      screenIdentity: undefined,
+    });
+
+    const diff = diffObserveResult(screen(""), screen("Buy milk"));
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.text).toEqual({ from: "", to: "Buy milk" });
+    expect(diff.changed[0].changes.value).toEqual({ from: "", to: "Buy milk" });
+  });
+
+  test("Android-provenance hierarchies with mixed screenScale do not use iOS text-field repair", () => {
+    const androidObs = (node: Record<string, unknown>) => obs(node, {
+      activeWindow: { appId: "com.example.android", activityName: ".MainActivity", layoutSeqSum: 1 },
+      viewHierarchy: {
+        packageName: "com.example.android",
+        density: 440,
+        sdkInt: 34,
+        foregroundActivity: "com.example.android/.MainActivity",
+        screenScale: 3,
+        hierarchy: { node: node as any },
+      },
+    } as ObserveResult);
+    const baseline = androidObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "",
+    });
+    const next = androidObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+  });
+
+  test("iOS generated UUID view-ids do not re-pair id-less text fields", () => {
+    const baseline = iosObs({
+      "view-id": "123e4567-e89b-12d3-a456-426614174000",
+      "class": "UITextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Old field",
+      "value": "Old field",
+    });
+    const next = iosObs({
+      "view-id": "123e4567-e89b-12d3-a456-426614174000",
+      "class": "UITextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Different field",
+      "value": "Different field",
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.added[0].attributes.text).toBe("Different field");
+    expect(diff.removed[0].attributes.text).toBe("Old field");
+  });
+
+  test("contentIdentity:false disables the iOS editable-control repair path", () => {
+    const baseline = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "",
+      "value": "",
+    });
+    const next = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+      "value": "Buy milk",
+    });
+
+    const diff = diffObserveResult(baseline, next, { contentIdentity: false });
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+  });
+
+  test("iOS focus and selection remain changed attributes, not identity", () => {
+    const baseline = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+      "focused": "false",
+      "selected": "false",
+    });
+    const next = iosObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+      "focused": "true",
+      "selected": "true",
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.focused).toEqual({ from: "false", to: "true" });
+    expect(diff.changed[0].changes.selected).toEqual({ from: "false", to: "true" });
+  });
+
+  test("iOS reused list cell identifiers do not false-merge different logical rows", () => {
+    const row = (label: string, top: number) => ({
+      "resource-id": "ReusableCell",
+      "className": "XCUIElementTypeCell",
+      "bounds": { left: 0, top, right: 390, bottom: top + 44 },
+      "text": label,
+      "value": label,
+    });
+    const baseline = iosObs({
+      "resource-id": "ReminderList",
+      "className": "XCUIElementTypeTable",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [row("Old row", 100)],
+    });
+    const next = iosObs({
+      "resource-id": "ReminderList",
+      "className": "XCUIElementTypeTable",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [row("Different row", 100)],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+  });
+
+  test("iOS text fields inside reused cells do not re-pair different logical rows", () => {
+    const row = (label: string) => ({
+      "view-id": "reused-cell",
+      "class": "UITableViewCell",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 144 },
+      "node": [{
+        "resource-id": "TitleField",
+        "class": "UITextField",
+        "bounds": { left: 16, top: 108, right: 300, bottom: 136 },
+        "text": label,
+        "value": label,
+      }],
+    });
+    const baseline = iosObs({
+      "view-id": "ReminderList",
+      "class": "UITableView",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [row("Old row")],
+    });
+    const next = iosObs({
+      "view-id": "ReminderList",
+      "class": "UITableView",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [row("Different row")],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.added[0].attributes.text).toBe("Different row");
+    expect(diff.removed[0].attributes.text).toBe("Old row");
+  });
+
+  test("iOS text fields directly under lists do not re-pair different logical rows", () => {
+    const field = (label: string) => ({
+      "resource-id": "TitleField",
+      "class": "UITextField",
+      "bounds": { left: 16, top: 108, right: 300, bottom: 136 },
+      "text": label,
+      "value": label,
+    });
+    const baseline = iosObs({
+      "view-id": "ReminderList",
+      "class": "UITableView",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [field("Old row")],
+    });
+    const next = iosObs({
+      "view-id": "ReminderList",
+      "class": "UITableView",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [field("Different row")],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.added[0].attributes.text).toBe("Different row");
+    expect(diff.removed[0].attributes.text).toBe("Old row");
+  });
+
+  test("real iOS fixture churn stays neutral with iOS identity enabled", () => {
+    const { before, after } = loadIosRemindersNoiseObservePair();
+    const withIdentity = diffObserveResult(before, after);
+    const positional = diffObserveResult(before, after, { contentIdentity: false });
+    const churn = (diff: typeof withIdentity) => diff.added.length + diff.removed.length + diff.changed.length;
+
+    expect(churn(withIdentity)).toBeLessThanOrEqual(churn(positional));
   });
 });
 

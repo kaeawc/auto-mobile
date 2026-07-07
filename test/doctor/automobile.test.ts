@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  checkImageBackend,
   checkCtrlProxy,
   checkCtrlProxyVersion,
   checkDaemonBuildIdentity,
@@ -63,6 +64,95 @@ describe("checkCtrlProxyVersion", () => {
         process.env.AUTOMOBILE_VERSION = prev;
       }
     }
+  });
+});
+
+describe("checkImageBackend", () => {
+  test("reports active sharp backend and load status on macOS and Linux", async () => {
+    const result = await checkImageBackend({
+      platform: "linux",
+      sharpLoader: async () => ({} as never),
+    });
+
+    expect(result).toEqual({
+      name: "Image Backend",
+      status: "pass",
+      message: "active=sharp; sharp=loaded",
+    });
+  });
+
+  test("logs and returns a typed failure when sharp cannot load", async () => {
+    const warnings: string[] = [];
+
+    const result = await checkImageBackend({
+      platform: "darwin",
+      sharpLoader: async () => {
+        throw new Error("sharp import failed");
+      },
+      logger: {
+        warn: message => warnings.push(message),
+      },
+    });
+
+    expect(result.name).toBe("Image Backend");
+    expect(result.status).toBe("fail");
+    expect(result.message).toBe("active=sharp; sharp=unavailable; webp=unavailable; error=sharp import failed");
+    expect(result.recommendation).toContain("Reinstall dependencies");
+    expect(result.recommendation).toContain("WebP support");
+    expect(warnings).toEqual(["Image backend doctor check failed: sharp import failed"]);
+  });
+
+  test("skips real sharp loading when tests spoof process.platform away from the host OS", async () => {
+    const result = await checkImageBackend({
+      platform: "linux",
+      hostPlatform: "darwin",
+    });
+
+    expect(result).toEqual({
+      name: "Image Backend",
+      status: "skip",
+      message: "active=sharp; sharp=not checked; platform=linux; host=darwin",
+    });
+  });
+
+  test("reports active jimp-cli backend and cwebp/dwebp resolution on Windows", async () => {
+    const result = await checkImageBackend({
+      platform: "win32",
+      webpBinaryResolver: {
+        resolve: async () => ({
+          cwebp: "C:\\auto-mobile\\vendor\\libwebp\\cwebp.exe",
+          dwebp: "C:\\auto-mobile\\vendor\\libwebp\\dwebp.exe",
+        }),
+      },
+    });
+
+    expect(result).toEqual({
+      name: "Image Backend",
+      status: "pass",
+      message: "active=jimp-cli; cwebp=C:\\auto-mobile\\vendor\\libwebp\\cwebp.exe; dwebp=C:\\auto-mobile\\vendor\\libwebp\\dwebp.exe",
+    });
+  });
+
+  test("logs and returns a typed failure when Windows WebP binaries are unavailable", async () => {
+    const warnings: string[] = [];
+
+    const result = await checkImageBackend({
+      platform: "win32",
+      webpBinaryResolver: {
+        resolve: async () => {
+          throw new Error("Unable to resolve cwebp");
+        },
+      },
+      logger: {
+        warn: message => warnings.push(message),
+      },
+    });
+
+    expect(result.name).toBe("Image Backend");
+    expect(result.status).toBe("fail");
+    expect(result.message).toBe("active=jimp-cli; cwebp=unavailable; dwebp=unavailable; error=Unable to resolve cwebp");
+    expect(result.recommendation).toContain("AUTOMOBILE_CWEBP_PATH");
+    expect(warnings).toEqual(["Image backend doctor check failed: Unable to resolve cwebp"]);
   });
 });
 
@@ -374,6 +464,11 @@ describe("checkCtrlProxy", () => {
 
 describe("runAutoMobileChecks", () => {
   const stubChecks = {
+    checkImageBackend: async () => ({
+      name: "Image Backend",
+      status: "pass" as const,
+      message: "active=sharp; sharp=loaded",
+    }),
     checkDaemonStatus: async () => ({
       name: "Daemon Status",
       status: "pass" as const,
@@ -408,5 +503,15 @@ describe("runAutoMobileChecks", () => {
 
     expect(buildIdentity).toBeDefined();
     expect(buildIdentity?.status).toBe("pass");
+  });
+
+  test("includes the image backend provisioning check", async () => {
+    const results = await runAutoMobileChecks({ ios: true }, stubChecks);
+
+    const imageBackend = results.find(result => result.name === "Image Backend");
+
+    expect(imageBackend).toBeDefined();
+    expect(imageBackend?.status).toBe("pass");
+    expect(imageBackend?.message).toBe("active=sharp; sharp=loaded");
   });
 });

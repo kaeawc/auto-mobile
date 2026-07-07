@@ -59,6 +59,11 @@ export interface ScreenshotBackoffScheduler {
    * Get the number of pending captures remaining in the current sequence.
    */
   getPendingCount(): number;
+
+  /**
+   * Recompute the pending keepalive timeout using the current cadence.
+   */
+  rescheduleKeepAlive(): void;
 }
 
 /**
@@ -77,7 +82,15 @@ interface ScreenshotBackoffConfig {
    * Default: 3000
    */
   keepAliveIntervalMs?: number | null;
+
+  /**
+   * Optional dynamic keepalive interval provider. When set, this is evaluated
+   * each time the next keepalive capture is scheduled.
+   */
+  getKeepAliveIntervalMs?: () => number | null | undefined;
 }
+
+type ScreenshotBackoffConfigInput = Partial<ScreenshotBackoffConfig>;
 
 const DEFAULT_CONFIG: ScreenshotBackoffConfig = {
   intervals: [0, 100, 300, 500, 800, 1300],
@@ -109,7 +122,7 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
   constructor(
     captureCallback: ScreenshotCaptureCallback,
     emitCallback: ScreenshotEmitCallback,
-    config: ScreenshotBackoffConfig = DEFAULT_CONFIG,
+    config: ScreenshotBackoffConfigInput = DEFAULT_CONFIG,
     timer: Timer = defaultTimer,
     shouldKeepAlive: ScreenshotKeepAlivePredicate = () => true
   ) {
@@ -164,6 +177,17 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
 
   getPendingCount(): number {
     return this.pendingTimeouts.length;
+  }
+
+  rescheduleKeepAlive(): void {
+    if (!this.keepAliveTimeout) {
+      this.scheduleKeepAliveIfIdle(this.sequenceId);
+      return;
+    }
+
+    this.timer.clearTimeout(this.keepAliveTimeout);
+    this.keepAliveTimeout = null;
+    this.scheduleKeepAliveIfIdle(this.sequenceId);
   }
 
   /**
@@ -260,7 +284,7 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
       return;
     }
 
-    const keepAliveIntervalMs = this.config.keepAliveIntervalMs;
+    const keepAliveIntervalMs = this.config.getKeepAliveIntervalMs?.() ?? this.config.keepAliveIntervalMs;
     if (keepAliveIntervalMs === null || keepAliveIntervalMs === undefined || keepAliveIntervalMs <= 0) {
       return;
     }
@@ -283,6 +307,7 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
 export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffScheduler {
   public startBackoffSequenceCalls: number = 0;
   public cancelPendingCapturesCalls: number = 0;
+  public rescheduleKeepAliveCalls: number = 0;
   private _isActive: boolean = false;
   private _pendingCount: number = 0;
 
@@ -306,6 +331,10 @@ export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffSchedule
     return this._pendingCount;
   }
 
+  rescheduleKeepAlive(): void {
+    this.rescheduleKeepAliveCalls++;
+  }
+
   // Test helpers
   setActive(active: boolean): void {
     this._isActive = active;
@@ -318,6 +347,7 @@ export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffSchedule
   reset(): void {
     this.startBackoffSequenceCalls = 0;
     this.cancelPendingCapturesCalls = 0;
+    this.rescheduleKeepAliveCalls = 0;
     this._isActive = false;
     this._pendingCount = 0;
   }

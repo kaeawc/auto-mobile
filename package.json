@@ -80,7 +80,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
     "@jimp/core": "^1.6.1",
-    "@jimp/wasm-webp": "^1.6.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "adm-zip": "^0.5.16",
     "ajv": "^8.18.0",

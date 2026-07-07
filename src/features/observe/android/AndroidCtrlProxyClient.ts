@@ -956,6 +956,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return AndroidCtrlProxyClient.instances.get(deviceId)!;
   }
 
+  public static getExistingInstance(deviceId: string): AndroidCtrlProxyClient | null {
+    return AndroidCtrlProxyClient.instances.get(deviceId) ?? null;
+  }
+
   /**
    * Bind this client to a session for multi-agent NavigationGraphManager isolation.
    * Called when a tool execution context binds a session to this device.
@@ -1989,6 +1993,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  refreshObservationStreamScreenshotCadence(): void {
+    this.screenshotBackoffScheduler?.rescheduleKeepAlive();
+  }
+
   // ===========================================================================
   // Connection Management
   // ===========================================================================
@@ -2765,7 +2773,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         (data: string) => {
           this.pushScreenshotToObservationStream(data);
         },
-        { intervals: [0, 100, 300, 500, 800, 1300], keepAliveIntervalMs: 3000 },
+        {
+          intervals: [0, 100, 300, 500, 800, 1300],
+          keepAliveIntervalMs: 3000,
+          getKeepAliveIntervalMs: () => {
+            const server = getDeviceDataStreamServer();
+            return server?.getScreenshotIntervalMsForDevice(this.device.deviceId) ?? 3000;
+          },
+        },
         this.timer,
         () => {
           const server = getDeviceDataStreamServer();

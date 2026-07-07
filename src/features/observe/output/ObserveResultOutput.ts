@@ -365,6 +365,11 @@ export interface DiffObserveConfig {
    * identity) never re-pairs. Purely additive — it only re-pairs nodes positional
    * matching already left unpaired, so cross-subtree collisions stay disambiguated
    * by the path key. Set `false` for exact positional-only behavior.
+   *
+   * iOS adds one narrower repair pass under this same gate: editable controls
+   * (`XCUIElementTypeTextField` / `TextView` / `SearchField`) with a stable
+   * accessibility identifier and quantized screen region may re-pair across
+   * text/value edits. Reused table/collection cell classes opt out.
    */
   contentIdentity?: boolean;
 }
@@ -420,6 +425,11 @@ interface FlatObserveNode {
   /** This node's own local key (resource-id + bounds + text + sibling index), for display. */
   key: string;
   attributes: Record<string, unknown>;
+  ancestorClasses: readonly string[];
+}
+
+interface DiffRepairNode extends ObserveDiffNode {
+  ancestorClasses: readonly string[];
 }
 
 /**
@@ -471,6 +481,24 @@ function nodeAttributes(node: Record<string, unknown>): Record<string, unknown> 
   return attrs;
 }
 
+function classNameForDiff(node: Record<string, unknown>): string {
+  const className = node.className ?? node.class;
+  return typeof className === "string" ? className : "";
+}
+
+function platformClassNameForDiff(node: Record<string, unknown>): string {
+  const className = classNameForDiff(node);
+  if (className !== "") {
+    return className;
+  }
+  const xmlAttrs = node.$;
+  if (!xmlAttrs || typeof xmlAttrs !== "object" || Array.isArray(xmlAttrs)) {
+    return "";
+  }
+  const xmlClassName = (xmlAttrs as Record<string, unknown>).class;
+  return typeof xmlClassName === "string" ? xmlClassName : "";
+}
+
 /**
  * Pre-order flatten of an observation's hierarchy into positionally-keyed nodes.
  * Each node's `pathKey` is its ancestor chain of local keys plus its own, so the
@@ -479,17 +507,24 @@ function nodeAttributes(node: Record<string, unknown>): Record<string, unknown> 
  */
 function flattenForDiff(obs: ObserveResult): FlatObserveNode[] {
   const out: FlatObserveNode[] = [];
-  const walk = (node: ViewHierarchyNode | undefined, siblingIndex: number, parentPath: string): void => {
+  const walk = (
+    node: ViewHierarchyNode | undefined,
+    siblingIndex: number,
+    parentPath: string,
+    ancestorClasses: readonly string[]
+  ): void => {
     if (!node || typeof node !== "object") {
       return;
     }
     const rec = node as unknown as Record<string, unknown>;
     const localKey = nodeKey(rec, siblingIndex);
     const pathKey = parentPath === "" ? localKey : `${parentPath}${PATH_KEY_SEP}${localKey}`;
-    out.push({ pathKey, key: localKey, attributes: nodeAttributes(rec) });
-    toNodeArray(node.node).forEach((child, index) => walk(child, index, pathKey));
+    out.push({ pathKey, key: localKey, attributes: nodeAttributes(rec), ancestorClasses });
+    const className = classNameForDiff(rec);
+    const childAncestorClasses = className === "" ? ancestorClasses : [...ancestorClasses, className];
+    toNodeArray(node.node).forEach((child, index) => walk(child, index, pathKey, childAncestorClasses));
   };
-  toNodeArray(obs.viewHierarchy?.hierarchy?.node).forEach((root, index) => walk(root, index, ""));
+  toNodeArray(obs.viewHierarchy?.hierarchy?.node).forEach((root, index) => walk(root, index, "", []));
   return out;
 }
 
@@ -685,10 +720,10 @@ function indexByContentKey(nodes: ObserveDiffNode[]): Map<string, number[]> {
  * no `changed` entry (a pure sibling-index move with no visible change).
  */
 function repairByContentIdentity(
-  added: ObserveDiffNode[],
-  removed: ObserveDiffNode[],
+  added: DiffRepairNode[],
+  removed: DiffRepairNode[],
   changed: ObserveDiffNodeChange[]
-): { added: ObserveDiffNode[]; removed: ObserveDiffNode[] } {
+): { added: DiffRepairNode[]; removed: DiffRepairNode[] } {
   const addedByKey = indexByContentKey(added);
   const removedByKey = indexByContentKey(removed);
   const consumedAdded = new Set<number>();
@@ -721,6 +756,182 @@ function repairByContentIdentity(
     added: added.filter((_, index) => !consumedAdded.has(index)),
     removed: removed.filter((_, index) => !consumedRemoved.has(index)),
   };
+}
+
+function isIosObservation(obs: ObserveResult): boolean {
+  if (obs.screenIdentity?.platform === "ios") {
+    return true;
+  }
+  const viewHierarchy = obs.viewHierarchy;
+  if (viewHierarchy) {
+    if (hasAndroidHierarchySignals(viewHierarchy)) {
+      return false;
+    }
+    if (viewHierarchy.screenScale !== undefined) {
+      return true;
+    }
+    const hierarchy = viewHierarchy.hierarchy as Record<string, unknown>;
+    if (hierarchy.type === "XCUIElementTypeApplication" || hierarchy.elementType === "application") {
+      return true;
+    }
+    if (typeof hierarchy.bundleId === "string" && !viewHierarchy.hierarchy.node) {
+      return true;
+    }
+    const roots = toNodeArray(viewHierarchy.hierarchy.node);
+    if (roots.some(root => classNameForDiff(root as unknown as Record<string, unknown>) === "XCUIApplication"
+      || classNameForDiff(root as unknown as Record<string, unknown>) === "XCUIElementTypeApplication")) {
+      return true;
+    }
+  }
+  const appId = obs.activeWindow?.appId ?? obs.viewHierarchy?.packageName ?? "";
+  return appId.startsWith("com.apple.") || appId.endsWith(".ios");
+}
+
+function hasAndroidHierarchySignals(viewHierarchy: NonNullable<ObserveResult["viewHierarchy"]>): boolean {
+  if (viewHierarchy.density !== undefined
+    || viewHierarchy.sdkInt !== undefined
+    || viewHierarchy.foregroundActivity !== undefined) {
+    return true;
+  }
+  const roots = toNodeArray(viewHierarchy.hierarchy.node);
+  return roots.some(root => platformClassNameForDiff(root as unknown as Record<string, unknown>).startsWith("android."));
+}
+
+function stringAttr(attrs: Record<string, unknown>, key: string): string {
+  const value = attrs[key];
+  return typeof value === "string" ? value : "";
+}
+
+const IOS_GENERATED_VIEW_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function iosStableId(attrs: Record<string, unknown>): string {
+  const resourceId = stringAttr(attrs, "resource-id");
+  if (resourceId !== "") {
+    return resourceId;
+  }
+  const accessibilityIdentifier = stringAttr(attrs, "accessibilityIdentifier");
+  if (accessibilityIdentifier !== "") {
+    return accessibilityIdentifier;
+  }
+  const viewId = stringAttr(attrs, "view-id");
+  if (viewId !== "" && !IOS_GENERATED_VIEW_ID_PATTERN.test(viewId)) {
+    return viewId;
+  }
+  return "";
+}
+
+function quantizedBoundsKey(bounds: unknown): string {
+  const parts = boundsKey(bounds).split(",").map(part => Number(part));
+  if (parts.length !== 4 || parts.some(part => !Number.isFinite(part))) {
+    return "";
+  }
+  return parts.map(part => Math.round(part / 8)).join(",");
+}
+
+function isIosEditableClass(className: string): boolean {
+  return className === "XCUIElementTypeTextField"
+    || className === "XCUIElementTypeSecureTextField"
+    || className === "XCUIElementTypeTextView"
+    || className === "XCUIElementTypeSearchField"
+    || className === "UITextField"
+    || className === "UISecureTextField"
+    || className === "UITextView"
+    || className === "UISearchBar";
+}
+
+function isIosListCellClass(className: string): boolean {
+  return className === "XCUIElementTypeCell"
+    || className === "UITableViewCell"
+    || className === "UICollectionViewCell"
+    || className === "XCUIElementTypeTable"
+    || className === "XCUIElementTypeCollectionView"
+    || className === "UITableView"
+    || className === "UICollectionView";
+}
+
+function hasIosListCellAncestor(node: DiffRepairNode): boolean {
+  return node.ancestorClasses.some(className => isIosListCellClass(className));
+}
+
+/**
+ * Conservative iOS identity for in-place editable controls (#3318). UIKit /
+ * SwiftUI wrappers commonly churn text/value/focus while preserving an
+ * accessibility identifier and screen region; pairing those as `changed` makes
+ * text entry readable. Reused table/collection cell identifiers deliberately
+ * opt out because a lone reused id can describe a different logical row.
+ */
+function iosStableIdentityKey(node: DiffRepairNode): string | null {
+  const className = stringAttr(node.attributes, "className") || stringAttr(node.attributes, "class");
+  if (hasIosListCellAncestor(node)) {
+    return null;
+  }
+  if (isIosListCellClass(className) || !isIosEditableClass(className)) {
+    return null;
+  }
+  const stableId = iosStableId(node.attributes);
+  if (stableId === "") {
+    return null;
+  }
+  const boundsRegion = quantizedBoundsKey(node.attributes.bounds);
+  if (boundsRegion === "") {
+    return null;
+  }
+  return [stableId, className, boundsRegion].join(" ");
+}
+
+function indexByIosStableKey(nodes: DiffRepairNode[]): Map<string, number[]> {
+  const byKey = new Map<string, number[]>();
+  nodes.forEach((node, index) => {
+    const key = iosStableIdentityKey(node);
+    if (key === null) {
+      return;
+    }
+    const bucket = byKey.get(key);
+    if (bucket) {
+      bucket.push(index);
+    } else {
+      byKey.set(key, [index]);
+    }
+  });
+  return byKey;
+}
+
+function repairByIosStableIdentity(
+  added: DiffRepairNode[],
+  removed: DiffRepairNode[],
+  changed: ObserveDiffNodeChange[]
+): { added: DiffRepairNode[]; removed: DiffRepairNode[] } {
+  const addedByKey = indexByIosStableKey(added);
+  const removedByKey = indexByIosStableKey(removed);
+  const consumedAdded = new Set<number>();
+  const consumedRemoved = new Set<number>();
+
+  for (const [key, addedIndices] of addedByKey) {
+    const removedIndices = removedByKey.get(key);
+    if (!removedIndices || addedIndices.length !== 1 || removedIndices.length !== 1) {
+      continue;
+    }
+    const addedNode = added[addedIndices[0]];
+    const removedNode = removed[removedIndices[0]];
+    consumedAdded.add(addedIndices[0]);
+    consumedRemoved.add(removedIndices[0]);
+    const attrChanges = diffAttributes(removedNode.attributes, addedNode.attributes);
+    if (Object.keys(attrChanges).length > 0) {
+      changed.push({ key: addedNode.key, fromKey: removedNode.key, changes: attrChanges });
+    }
+  }
+
+  if (consumedAdded.size === 0 && consumedRemoved.size === 0) {
+    return { added, removed };
+  }
+  return {
+    added: added.filter((_, index) => !consumedAdded.has(index)),
+    removed: removed.filter((_, index) => !consumedRemoved.has(index)),
+  };
+}
+
+function toObserveDiffNode(node: DiffRepairNode): ObserveDiffNode {
+  return { key: node.key, attributes: node.attributes };
 }
 
 /** Group flattened nodes by their positional `pathKey`, preserving encounter order. */
@@ -788,8 +999,8 @@ export function diffObserveResult(
   const baseByKey = groupByKey(flattenForDiff(baseline));
   const nextByKey = groupByKey(flattenForDiff(next));
 
-  const added: ObserveDiffNode[] = [];
-  const removed: ObserveDiffNode[] = [];
+  const added: DiffRepairNode[] = [];
+  const removed: DiffRepairNode[] = [];
   const changed: ObserveDiffNodeChange[] = [];
 
   for (const pathKey of new Set([...baseByKey.keys(), ...nextByKey.keys()])) {
@@ -803,10 +1014,18 @@ export function diffObserveResult(
       }
     }
     for (let i = paired; i < nextNodes.length; i++) {
-      added.push({ key: nextNodes[i].key, attributes: nextNodes[i].attributes });
+      added.push({
+        key: nextNodes[i].key,
+        attributes: nextNodes[i].attributes,
+        ancestorClasses: nextNodes[i].ancestorClasses,
+      });
     }
     for (let i = paired; i < baseNodes.length; i++) {
-      removed.push({ key: baseNodes[i].key, attributes: baseNodes[i].attributes });
+      removed.push({
+        key: baseNodes[i].key,
+        attributes: baseNodes[i].attributes,
+        ancestorClasses: baseNodes[i].ancestorClasses,
+      });
     }
   }
 
@@ -820,9 +1039,19 @@ export function diffObserveResult(
     const repaired = repairByContentIdentity(added, removed, changed);
     finalAdded = repaired.added;
     finalRemoved = repaired.removed;
+    if (isIosObservation(baseline) && isIosObservation(next)) {
+      const iosRepaired = repairByIosStableIdentity(finalAdded, finalRemoved, changed);
+      finalAdded = iosRepaired.added;
+      finalRemoved = iosRepaired.removed;
+    }
   }
 
-  const diff: ObserveDiff = { isDiff: true, added: finalAdded, removed: finalRemoved, changed };
+  const diff: ObserveDiff = {
+    isDiff: true,
+    added: finalAdded.map(toObserveDiffNode),
+    removed: finalRemoved.map(toObserveDiffNode),
+    changed,
+  };
 
   const scalarFields = cfg?.scalarFields ?? DIFF_SCALAR_FIELDS;
   const elementFields = cfg?.elementFields ?? DIFF_ELEMENT_FIELDS;

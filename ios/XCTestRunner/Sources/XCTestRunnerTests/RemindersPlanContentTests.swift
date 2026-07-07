@@ -24,7 +24,7 @@ final class RemindersPlanContentTests: XCTestCase {
     /// executor polls for the control (and its `awaitTimeout` path fails fast on genuine absence)
     /// instead of racing a bare tap.
     func testAddReminderPlanWaitsForAddBeforeTappingIt() throws {
-        let steps = PlanStepSequence.parse(try loadAddReminderPlan())
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
 
         guard let saveTapIndex = steps.firstIndex(where: { $0.tool == "tapOn" && $0.mentions("Add") }) else {
             XCTFail("Plan is missing the tapOn \"Add\" save step")
@@ -56,7 +56,7 @@ final class RemindersPlanContentTests: XCTestCase {
     /// The guard must be bounded so a genuinely-absent control fails fast instead of hanging for the
     /// whole plan timeout.
     func testAddWaitGuardHasBoundedTimeout() throws {
-        let steps = PlanStepSequence.parse(try loadAddReminderPlan())
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
 
         guard let saveTapIndex = steps.firstIndex(where: { $0.tool == "tapOn" && $0.mentions("Add") }),
               saveTapIndex > 0
@@ -81,7 +81,7 @@ final class RemindersPlanContentTests: XCTestCase {
     /// The title field must be visible/focused before `inputText`; otherwise text entry can run while
     /// the quick-entry sheet is still animating and leave no save control to wait for.
     func testAddReminderPlanWaitsForTitleFieldBeforeTyping() throws {
-        let steps = PlanStepSequence.parse(try loadAddReminderPlan())
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
 
         guard let inputIndex = steps.firstIndex(where: { $0.tool == "inputText" }) else {
             XCTFail("Plan is missing the inputText title step")
@@ -125,6 +125,40 @@ final class RemindersPlanContentTests: XCTestCase {
         setenv(key, "3", 1)
         XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 3)
         XCTAssertEqual(RemindersAddPlanTests().retryCount, 3)
+    }
+
+    /// If Reminders retries are explicitly re-enabled, each attempt must be capped so the whole
+    /// attempt budget still fits under the 10-minute GitHub Actions step.
+    func testExplicitRemindersRetryTimeoutFitsWorkflowStepCap() {
+        let retryKey = "AUTOMOBILE_TEST_RETRY_COUNT"
+        let timeoutKey = "AUTOMOBILE_TEST_TIMEOUT_SECONDS"
+        let originalRetry = ProcessInfo.processInfo.environment[retryKey]
+        let originalTimeout = ProcessInfo.processInfo.environment[timeoutKey]
+        setenv(retryKey, "1", 1)
+        setenv(timeoutKey, "300", 1)
+        defer {
+            restoreEnvironmentValue(originalRetry, for: retryKey)
+            restoreEnvironmentValue(originalTimeout, for: timeoutKey)
+        }
+
+        assertRemindersTimeoutFitsWorkflowStepCap(RemindersLaunchPlanTests(), expectedTimeoutSeconds: 134)
+        assertRemindersTimeoutFitsWorkflowStepCap(RemindersAddPlanTests(), expectedTimeoutSeconds: 134)
+    }
+
+    func testExplicitLowerRemindersTimeoutIsPreserved() {
+        let retryKey = "AUTOMOBILE_TEST_RETRY_COUNT"
+        let timeoutKey = "AUTOMOBILE_TEST_TIMEOUT_SECONDS"
+        let originalRetry = ProcessInfo.processInfo.environment[retryKey]
+        let originalTimeout = ProcessInfo.processInfo.environment[timeoutKey]
+        setenv(retryKey, "1", 1)
+        setenv(timeoutKey, "120", 1)
+        defer {
+            restoreEnvironmentValue(originalRetry, for: retryKey)
+            restoreEnvironmentValue(originalTimeout, for: timeoutKey)
+        }
+
+        XCTAssertEqual(RemindersLaunchPlanTests().timeoutSeconds, 120)
+        XCTAssertEqual(RemindersAddPlanTests().timeoutSeconds, 120)
     }
 
     /// Retry is no longer the stabilization mechanism for Reminders. The integration base should only
@@ -211,7 +245,7 @@ final class RemindersPlanContentTests: XCTestCase {
     /// create step, and the create tap must itself be guarded by a wait. The dismissal has to be
     /// `optional` so runs where the alert never appears don't fail.
     func testDismissesICloudAlertBestEffortBeforeCreating() throws {
-        let steps = PlanStepSequence.parse(try loadAddReminderPlan())
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
 
         guard let createTapIndex = steps.firstIndex(where: {
             $0.tool == "tapOn" && $0.mentions("New Reminder")
@@ -233,7 +267,7 @@ final class RemindersPlanContentTests: XCTestCase {
         )
 
         // Any waitFor guarding the (intermittent) alert must also be optional for the same reason.
-        for index in 0..<dismissIndex where steps[index].tool == "observe" && steps[index].mentions("Not Now") {
+        for index in 0 ..< dismissIndex where steps[index].tool == "observe" && steps[index].mentions("Not Now") {
             XCTAssertTrue(
                 steps[index].isOptional,
                 "A waitFor guarding the intermittent alert must be optional"
@@ -281,7 +315,9 @@ private struct PlanStep {
     let tool: String
     let bodyLines: [String]
 
-    var body: String { bodyLines.joined(separator: "\n") }
+    var body: String {
+        bodyLines.joined(separator: "\n")
+    }
 
     var hasWaitFor: Bool {
         bodyLines.contains { $0.trimmingCharacters(in: .whitespaces).hasPrefix("waitFor:") }
@@ -370,6 +406,37 @@ private func loadRemindersIntegrationTestSource() throws -> String {
     return try String(contentsOf: sourceURL, encoding: .utf8)
 }
 
+private func restoreEnvironmentValue(_ value: String?, for key: String) {
+    if let value = value {
+        setenv(key, value, 1)
+    } else {
+        unsetenv(key)
+    }
+}
+
+private func assertRemindersTimeoutFitsWorkflowStepCap(
+    _ testCase: RemindersIntegrationBase,
+    expectedTimeoutSeconds: TimeInterval,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    let attempts = testCase.retryCount + 1
+    let retryDelayBudget = max(0, attempts - 1) * Int(testCase.retryDelaySeconds.rounded(.up))
+    let executorTimeoutConsumersPerAttempt = 2
+    let workflowStepReservedOverheadSeconds = 60
+    let totalAttemptBudget = Int(testCase.timeoutSeconds.rounded(.up)) * attempts * executorTimeoutConsumersPerAttempt +
+        retryDelayBudget + workflowStepReservedOverheadSeconds
+
+    XCTAssertLessThan(
+        totalAttemptBudget,
+        600,
+        "Reminders retries must fit inside the 10-minute workflow step cap",
+        file: file,
+        line: line
+    )
+    XCTAssertEqual(testCase.timeoutSeconds, expectedTimeoutSeconds, file: file, line: line)
+}
+
 private func loadRepositoryFile(_ path: String) throws -> String {
     let currentFile = URL(fileURLWithPath: #filePath)
     let repositoryRoot = currentFile
@@ -400,7 +467,7 @@ private func classBody(named className: String, in source: String) -> String {
         } else if character == "}" {
             depth -= 1
             if depth == 0 {
-                return String(source[source.index(after: openingBrace)..<index])
+                return String(source[source.index(after: openingBrace) ..< index])
             }
         }
         index = source.index(after: index)
@@ -424,12 +491,28 @@ private func assertWorkflowWarmsTargetAppBeforeRemindersRun(
         return
     }
 
-    XCTAssertLessThan(warmupRange.lowerBound, runRange.lowerBound, "\(warmupStepName) must run before \(runStepName)", file: file, line: line)
+    XCTAssertLessThan(
+        warmupRange.lowerBound,
+        runRange.lowerBound,
+        "\(warmupStepName) must run before \(runStepName)",
+        file: file,
+        line: line
+    )
 
-    let warmupBlock = workflow[warmupRange.lowerBound..<runRange.lowerBound]
+    let warmupBlock = workflow[warmupRange.lowerBound ..< runRange.lowerBound]
     XCTAssertTrue(
         warmupBlock.contains("./scripts/ci/warm-reminders-target-app.sh"),
         "\(warmupStepName) must invoke the target-app warm-up helper",
+        file: file,
+        line: line
+    )
+
+    let nextStepRange = workflow[runRange.upperBound...].range(of: "\n      - name:")
+    let runBlockEnd = nextStepRange?.lowerBound ?? workflow.endIndex
+    let runBlock = workflow[runRange.lowerBound ..< runBlockEnd]
+    XCTAssertTrue(
+        runBlock.contains("timeout-minutes: 10"),
+        "\(runStepName) must keep the Reminders step cap aligned with the retry timeout guard",
         file: file,
         line: line
     )

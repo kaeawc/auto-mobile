@@ -1,5 +1,6 @@
 import type { ImageBackend } from "./ImageBackend";
 import { JimpBackend } from "./JimpBackend";
+import { JimpCliBackend } from "./JimpCliBackend";
 import { SharpBackend, type SharpLoader } from "./SharpBackend";
 
 export interface ResolveImageBackendOptions {
@@ -10,14 +11,12 @@ export interface ResolveImageBackendOptions {
 /**
  * Selects the image backend for the current platform.
  *
- * Returns sharp on macOS/Linux and jimp on Windows. The next milestone step
- * replaces the Windows jimp WebP leg with cwebp while keeping this selection
- * seam stable for call sites.
+ * Returns sharp on macOS/Linux and jimp+cwebp on Windows.
  */
 export function resolveImageBackend(options: ResolveImageBackendOptions = {}): ImageBackend {
   const platform = options.platform ?? process.platform;
   if (platform === "win32") {
-    return new JimpBackend();
+    return new JimpCliBackend();
   }
   if (platform === "darwin" || platform === "linux") {
     return new SharpBackend({

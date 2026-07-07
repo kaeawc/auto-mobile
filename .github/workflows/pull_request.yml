@@ -928,7 +928,7 @@ jobs:
           turbo run test --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
 
       - name: "Run Bun image runtime smoke"
-        if: env.RUN_MCP_BUILD_TEST == 'true' && matrix.os == 'macos-latest'
+        if: env.RUN_MCP_BUILD_TEST == 'true' && (matrix.os == 'macos-latest' || matrix.os == 'windows-latest')
         run: bun run test:image:bun
 
       - name: "Upload Build/Test Logs"
@@ -1037,11 +1037,9 @@ jobs:
       - name: "Run Bun MCP startup smoke"
         run: bun run test:startup:bun
 
-      # Linux uses the sharp backend here. The OSR guard remains until the
-      # Windows cwebp follow-up removes the @jimp/wasm-webp path entirely.
+      # Linux uses the sharp backend here; Windows covers the jimp+cwebp path in
+      # the matrix smoke above.
       - name: "Run Bun image runtime smoke"
-        env:
-          BUN_JSC_useWasmOSR: "0"
         run: bun run test:image:bun
 
       - name: "Run Tests with Coverage"
@@ -1284,6 +1282,23 @@ jobs:
           ls -la /tmp/automobile-ctrl-proxy/Build/Products/Debug-iphonesimulator/ || true
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
           echo "xctestrun file: ${XCTESTRUN}"
+
+      - name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.3)"
+        id: ctrlproxy-simulator
+        run: ./scripts/ios/boot-simulator.sh
+
+      - name: "Run CtrlProxy privacy resource mapping UI test (Xcode 26.3)"
+        timeout-minutes: 5
+        run: |
+          XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+          xcodebuild test-without-building \
+            -xctestrun "${XCTESTRUN}" \
+            -destination "id=${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}" \
+            -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests
+
+      - name: "Shutdown CtrlProxy UI test simulator"
+        if: always()
+        run: xcrun simctl shutdown all || true
 
       - name: "Select Xcode 26.2"
         uses: maxim-lobanov/setup-xcode@v1

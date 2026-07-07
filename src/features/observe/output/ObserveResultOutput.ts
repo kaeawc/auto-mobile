@@ -486,6 +486,19 @@ function classNameForDiff(node: Record<string, unknown>): string {
   return typeof className === "string" ? className : "";
 }
 
+function platformClassNameForDiff(node: Record<string, unknown>): string {
+  const className = classNameForDiff(node);
+  if (className !== "") {
+    return className;
+  }
+  const xmlAttrs = node.$;
+  if (!xmlAttrs || typeof xmlAttrs !== "object" || Array.isArray(xmlAttrs)) {
+    return "";
+  }
+  const xmlClassName = (xmlAttrs as Record<string, unknown>).class;
+  return typeof xmlClassName === "string" ? xmlClassName : "";
+}
+
 /**
  * Pre-order flatten of an observation's hierarchy into positionally-keyed nodes.
  * Each node's `pathKey` is its ancestor chain of local keys plus its own, so the
@@ -751,6 +764,9 @@ function isIosObservation(obs: ObserveResult): boolean {
   }
   const viewHierarchy = obs.viewHierarchy;
   if (viewHierarchy) {
+    if (hasAndroidHierarchySignals(viewHierarchy)) {
+      return false;
+    }
     if (viewHierarchy.screenScale !== undefined) {
       return true;
     }
@@ -769,6 +785,16 @@ function isIosObservation(obs: ObserveResult): boolean {
   }
   const appId = obs.activeWindow?.appId ?? obs.viewHierarchy?.packageName ?? "";
   return appId.startsWith("com.apple.") || appId.endsWith(".ios");
+}
+
+function hasAndroidHierarchySignals(viewHierarchy: NonNullable<ObserveResult["viewHierarchy"]>): boolean {
+  if (viewHierarchy.density !== undefined
+    || viewHierarchy.sdkInt !== undefined
+    || viewHierarchy.foregroundActivity !== undefined) {
+    return true;
+  }
+  const roots = toNodeArray(viewHierarchy.hierarchy.node);
+  return roots.some(root => platformClassNameForDiff(root as unknown as Record<string, unknown>).startsWith("android."));
 }
 
 function stringAttr(attrs: Record<string, unknown>, key: string): string {
@@ -818,15 +844,13 @@ function isIosListCellClass(className: string): boolean {
     || className === "UITableViewCell"
     || className === "UICollectionViewCell"
     || className === "XCUIElementTypeTable"
-    || className === "XCUIElementTypeCollectionView";
+    || className === "XCUIElementTypeCollectionView"
+    || className === "UITableView"
+    || className === "UICollectionView";
 }
 
 function hasIosListCellAncestor(node: DiffRepairNode): boolean {
-  return node.ancestorClasses.some(className => (
-    className === "XCUIElementTypeCell"
-      || className === "UITableViewCell"
-      || className === "UICollectionViewCell"
-  ));
+  return node.ancestorClasses.some(className => isIosListCellClass(className));
 }
 
 /**

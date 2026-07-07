@@ -932,6 +932,37 @@ describe("diffObserveResult — conservative iOS stable identity (#3318)", () =>
     expect(diff.changed[0].changes.value).toEqual({ from: "", to: "Buy milk" });
   });
 
+  test("Android-provenance hierarchies with mixed screenScale do not use iOS text-field repair", () => {
+    const androidObs = (node: Record<string, unknown>) => obs(node, {
+      activeWindow: { appId: "com.example.android", activityName: ".MainActivity", layoutSeqSum: 1 },
+      viewHierarchy: {
+        packageName: "com.example.android",
+        density: 440,
+        sdkInt: 34,
+        foregroundActivity: "com.example.android/.MainActivity",
+        screenScale: 3,
+        hierarchy: { node: node as any },
+      },
+    } as ObserveResult);
+    const baseline = androidObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "",
+    });
+    const next = androidObs({
+      "resource-id": "TitleField",
+      "className": "XCUIElementTypeTextField",
+      "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+      "text": "Buy milk",
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+  });
+
   test("iOS generated UUID view-ids do not re-pair id-less text fields", () => {
     const baseline = iosObs({
       "view-id": "123e4567-e89b-12d3-a456-426614174000",
@@ -1055,6 +1086,35 @@ describe("diffObserveResult — conservative iOS stable identity (#3318)", () =>
       "class": "UITableView",
       "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
       "node": [row("Different row")],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.added[0].attributes.text).toBe("Different row");
+    expect(diff.removed[0].attributes.text).toBe("Old row");
+  });
+
+  test("iOS text fields directly under lists do not re-pair different logical rows", () => {
+    const field = (label: string) => ({
+      "resource-id": "TitleField",
+      "class": "UITextField",
+      "bounds": { left: 16, top: 108, right: 300, bottom: 136 },
+      "text": label,
+      "value": label,
+    });
+    const baseline = iosObs({
+      "view-id": "ReminderList",
+      "class": "UITableView",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [field("Old row")],
+    });
+    const next = iosObs({
+      "view-id": "ReminderList",
+      "class": "UITableView",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [field("Different row")],
     });
 
     const diff = diffObserveResult(baseline, next);

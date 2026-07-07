@@ -56,7 +56,8 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { PressButton } from "../features/action/PressButton";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
-import type { BootedDevice } from "../models";
+import type { BootedDevice, ImeAction } from "../models";
+import type { DeviceService } from "../features/observe/DeviceService";
 /** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
 const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
@@ -644,6 +645,9 @@ export class UnixSocketServer {
     if (request.method === "input/swipe") {
       return await this.handleInputSwipe(request, socketSessionId);
     }
+    if (request.method === "input/typeText") {
+      return await this.handleInputTypeText(request, socketSessionId);
+    }
     if (request.method === "input/pressButton") {
       return await this.handleInputPressButton(request, socketSessionId);
     }
@@ -902,6 +906,55 @@ export class UnixSocketServer {
     };
   }
 
+  private async handleInputTypeText(
+    request: DaemonRequest,
+    socketSessionId?: string
+  ): Promise<any | undefined> {
+    const queueEnterMs = this.timer.now();
+    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const args = this.parseInputTypeTextParams(request.params);
+    const targetDevice = await this.resolveInputTargetDevice(
+      args.platform,
+      args.deviceId,
+      socketSessionId,
+      "input/typeText"
+    );
+    const inputResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      const queueWaitMs = this.timer.now() - queueEnterMs;
+      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+      if (remainingTimeoutMs <= 0) {
+        throw new McpTimeoutError({
+          toolName: request.method,
+          timeoutMs: totalTimeoutMs,
+          origin: "UnixSocketServer.handleInputTypeText",
+          detail: `spent ${queueWaitMs}ms waiting in queue`,
+        });
+      }
+
+      const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
+      return await this.runInputOperationWithTimeout(
+        request.method,
+        totalTimeoutMs,
+        remainingTimeoutMs,
+        "UnixSocketServer.handleInputTypeText",
+        () => this.executeInputTypeText(args.platform, targetDevice, args.text, imeAction, remainingTimeoutMs)
+      );
+    });
+
+    if (!inputResult.success) {
+      throw new Error(inputResult.error ?? `input/typeText failed on ${args.platform}`);
+    }
+
+    return {
+      action: "input/typeText",
+      platform: args.platform,
+      deviceId: targetDevice.deviceId,
+      success: true,
+      textLength: args.text.length,
+      submitted: args.submit,
+    };
+  }
+
   private async handleInputPressButton(
     request: DaemonRequest,
     socketSessionId?: string
@@ -941,6 +994,99 @@ export class UnixSocketServer {
       success: true,
       button: args.responseButton,
     };
+  }
+
+  private async executeInputTypeText(
+    platform: "android" | "ios",
+    targetDevice: BootedDevice,
+    text: string,
+    imeAction: ImeAction | undefined,
+    timeoutMs: number
+  ): Promise<{ success: boolean; error?: string }> {
+    // Charge set-text and the optional submit/IME action against a single
+    // shared budget. Otherwise submit:true would hand each request the full
+    // timeout, letting the combined operation run up to 2x the caller's
+    // budget while the per-device queue stays held until it settles.
+    const deadline = this.timer.now() + timeoutMs;
+    const client: DeviceService =
+      platform === "android"
+        ? AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory)
+        : IOSCtrlProxyClient.getInstance(targetDevice);
+
+    const textResult = await client.requestSetText(text, { timeoutMs });
+    if (!textResult.success) {
+      return textResult;
+    }
+    if (!imeAction) {
+      return { success: true };
+    }
+    return await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs);
+  }
+
+  private async runImeActionWithinBudget(
+    client: Pick<DeviceService, "requestImeAction">,
+    imeAction: ImeAction,
+    deadline: number,
+    totalTimeoutMs: number
+  ): Promise<{ success: boolean; error?: string }> {
+    const remainingTimeoutMs = deadline - this.timer.now();
+    if (remainingTimeoutMs <= 0) {
+      // Defensive: in practice the outer Promise.race timeout fires first, so
+      // this path is only reached if set-text spends the entire budget before
+      // the submit action starts.
+      return {
+        success: false,
+        error: `input/typeText exceeded ${totalTimeoutMs}ms budget before submit`,
+      };
+    }
+    return await client.requestImeAction(imeAction, remainingTimeoutMs);
+  }
+
+  private async runInputOperationWithTimeout<T>(
+    toolName: string,
+    totalTimeoutMs: number,
+    remainingTimeoutMs: number,
+    origin: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    let timedOut = false;
+    const operationPromise = operation();
+    const timeout = new Promise<"timeout">(resolve => {
+      timeoutHandle = this.timer.setTimeout(() => {
+        timedOut = true;
+        resolve("timeout");
+      }, remainingTimeoutMs);
+    });
+
+    try {
+      const result = await Promise.race([operationPromise, timeout]);
+      if (result !== "timeout") {
+        return result;
+      }
+
+      throw new McpTimeoutError({
+        toolName,
+        timeoutMs: totalTimeoutMs,
+        origin,
+        detail: `operation exceeded remaining budget ${remainingTimeoutMs}ms`,
+      });
+    } finally {
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+      if (timedOut) {
+        // Hold the per-device queue until the in-flight CtrlProxy request
+        // settles so a following same-device input cannot interleave its text
+        // write with this one. This defers delivery of the timeout error until
+        // the operation ends; the wait normally tracks the caller's budget
+        // (executeInputTypeText bounds set-text + IME to it) but can exceed it
+        // if a CtrlProxy request ignores its own timeout or blocks in an
+        // unbounded connect phase. This serialization-over-responsiveness
+        // trade-off matches input/tap and input/swipe.
+        await operationPromise.catch(() => undefined);
+      }
+    }
   }
 
   private parseInputTapParams(params: unknown): {
@@ -1032,6 +1178,43 @@ export class UnixSocketServer {
     };
   }
 
+  private parseInputTypeTextParams(params: unknown): {
+    platform: "android" | "ios";
+    deviceId?: string;
+    text: string;
+    submit: boolean;
+  } {
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
+      throw new Error("input/typeText requires params object");
+    }
+
+    const args = params as Record<string, unknown>;
+    const supportedParams = new Set(["platform", "deviceId", "text", "submit"]);
+    const unsupportedParams = Object.keys(args).filter(key => !supportedParams.has(key));
+    if (unsupportedParams.length > 0) {
+      throw new Error(`input/typeText unsupported params: ${unsupportedParams.join(", ")}`);
+    }
+    if (args.platform !== "android" && args.platform !== "ios") {
+      throw new Error("input/typeText requires platform 'android' or 'ios'");
+    }
+    if (typeof args.text !== "string" || args.text.length === 0) {
+      throw new Error("input/typeText requires non-empty string text param");
+    }
+    if (args.submit !== undefined && typeof args.submit !== "boolean") {
+      throw new Error("input/typeText submit must be a boolean when provided");
+    }
+    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
+      throw new Error("input/typeText deviceId must be a string when provided");
+    }
+
+    return {
+      platform: args.platform,
+      deviceId: args.deviceId,
+      text: args.text,
+      submit: args.submit ?? false,
+    };
+  }
+
   private parseInputPressButtonParams(params: unknown): {
     platform: "android" | "ios";
     deviceId?: string;
@@ -1070,7 +1253,7 @@ export class UnixSocketServer {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: "input/tap" | "input/swipe" | "input/pressButton"
+    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton"
   ): Promise<BootedDevice> {
     const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
     if (!discovery.succeededPlatforms.has(platform)) {

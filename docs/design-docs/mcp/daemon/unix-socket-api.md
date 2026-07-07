@@ -299,7 +299,7 @@ stream after the input response returns.
 | `input/swipe` | Supported | Supported | Absolute device-screen start/end coordinates. Use for drag gestures until `input/drag` has distinct semantics. |
 | `input/drag` | Deferred | Deferred | Not a separate method in this contract. |
 | `input/pressButton` | Supported | Supported with platform gaps | Device/navigation buttons aligned with MCP `pressButton`. Unsupported buttons fail instead of being ignored. |
-| `input/typeText` | Contract only | Contract only | Not implemented yet. Sends committed text only; IME composition is deferred. |
+| `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. |
 | `input/key` | Deferred | Deferred | Use `input/pressButton` or `input/typeText`. |
 
 All successful input responses use this result shape:
@@ -496,7 +496,7 @@ this contract; clients should send the final committed string.
 |---|---|---|---|
 | `platform` | `"android" \| "ios"` | Yes | Target platform. |
 | `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
-| `text` | `string` | Yes | Text to type. |
+| `text` | `string` | Yes | Non-empty text to type. |
 | `submit` | `boolean` | No | When true, press enter/return after typing if the platform supports it. |
 
 **Request**

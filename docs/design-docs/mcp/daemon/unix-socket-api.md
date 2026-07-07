@@ -255,6 +255,269 @@ Clears all keys from an Android app's SharedPreferences file. <kbd>🤖 Android 
 
 ---
 
+## Input API
+
+<kbd>🚧 Design Only</kbd> <kbd>❌ Not Implemented</kbd>
+
+The daemon input API is the consumer-facing contract for IDE screen control and
+other direct-input clients. These methods use the same newline-delimited JSON
+socket protocol and response envelope as the rest of this page, but they are
+purpose-built for coordinate, text, and button input instead of requiring
+clients to construct ad hoc MCP `tools/call` payloads.
+
+IDE screen control must call these `input/*` socket methods. It must not bypass
+this contract by invoking MCP tool payloads directly for tap, swipe, text, or
+button input.
+
+### Common input fields
+
+All input requests use `type: "mcp_request"` and a method name under `input/`.
+The method-specific payload lives in `params`. `timeoutMs` remains a top-level
+socket request field, matching the base protocol envelope.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `platform` | `"android" \| "ios"` | Yes | Target device platform. |
+| `deviceId` | `string` | No | ADB device ID or iOS simulator UDID. |
+
+When `deviceId` is omitted, the daemon targets the device assigned to the
+current socket session. If the socket session has no assigned device, the daemon
+may target the only booted device matching `platform`. If more than one matching
+device is available, the request fails and the caller must retry with an
+explicit `deviceId`.
+
+Input responses return the action result only. They do not include a fresh
+observation and do not implicitly trigger one. Callers that need post-input
+state should call `observe` through the MCP proxy or subscribe to the observation
+stream after the input response returns.
+
+### Platform support
+
+| Method | Android | iOS | Notes |
+|---|---|---|---|
+| `input/tap` | Supported | Supported | Absolute device-screen coordinates. |
+| `input/swipe` | Supported | Supported | Use for drag gestures until `input/drag` has distinct semantics. |
+| `input/drag` | Deferred | Deferred | Not a separate method in this contract. |
+| `input/pressButton` | Supported per button | Supported per button | Unsupported buttons fail instead of being ignored. |
+| `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. |
+| `input/key` | Deferred | Deferred | Use `input/pressButton` or `input/typeText`. |
+
+All successful input responses use this result shape:
+
+```json
+{
+  "action": "input/tap",
+  "platform": "android",
+  "deviceId": "emulator-5554",
+  "success": true
+}
+```
+
+Unsupported platforms or unsupported actions return `success: false` in the
+socket response envelope:
+
+```json
+{
+  "id": "tap-1",
+  "type": "mcp_response",
+  "success": false,
+  "error": "Unsupported input action input/key on ios"
+}
+```
+
+### `input/tap`
+
+Taps an absolute device-screen coordinate. Coordinates are physical pixels in
+the current device orientation.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `platform` | `"android" \| "ios"` | Yes | Target platform. |
+| `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
+| `x` | `number` | Yes | X coordinate in physical screen pixels. |
+| `y` | `number` | Yes | Y coordinate in physical screen pixels. |
+
+**Request**
+
+```json
+{
+  "id": "tap-1",
+  "type": "mcp_request",
+  "method": "input/tap",
+  "params": {
+    "platform": "android",
+    "deviceId": "emulator-5554",
+    "x": 240,
+    "y": 640
+  }
+}
+```
+
+**Result**
+
+```json
+{
+  "action": "input/tap",
+  "platform": "android",
+  "deviceId": "emulator-5554",
+  "success": true,
+  "coordinates": { "x": 240, "y": 640 }
+}
+```
+
+### `input/swipe`
+
+Swipes from one absolute device-screen coordinate to another. `input/drag` is
+deferred until a distinct drag semantic is needed; clients should use
+`input/swipe` for pointer drags that only need start/end coordinates and a
+duration.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `platform` | `"android" \| "ios"` | Yes | Target platform. |
+| `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
+| `startX` | `number` | Yes | Start X coordinate in physical screen pixels. |
+| `startY` | `number` | Yes | Start Y coordinate in physical screen pixels. |
+| `endX` | `number` | Yes | End X coordinate in physical screen pixels. |
+| `endY` | `number` | Yes | End Y coordinate in physical screen pixels. |
+| `durationMs` | `number` | No | Gesture duration in milliseconds. The daemon chooses a platform default when omitted. |
+
+**Request**
+
+```json
+{
+  "id": "swipe-1",
+  "type": "mcp_request",
+  "method": "input/swipe",
+  "params": {
+    "platform": "android",
+    "startX": 520,
+    "startY": 1700,
+    "endX": 520,
+    "endY": 500,
+    "durationMs": 350
+  }
+}
+```
+
+**Result**
+
+```json
+{
+  "action": "input/swipe",
+  "platform": "android",
+  "deviceId": "emulator-5554",
+  "success": true,
+  "start": { "x": 520, "y": 1700 },
+  "end": { "x": 520, "y": 500 },
+  "durationMs": 350
+}
+```
+
+### `input/pressButton`
+
+Presses a device or navigation button.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `platform` | `"android" \| "ios"` | Yes | Target platform. |
+| `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
+| `button` | `"back" \| "home" \| "app_switch" \| "volume_up" \| "volume_down" \| "power" \| "enter"` | Yes | Button to press. Unsupported buttons fail with `success: false`. |
+
+**Request**
+
+```json
+{
+  "id": "button-1",
+  "type": "mcp_request",
+  "method": "input/pressButton",
+  "params": {
+    "platform": "android",
+    "button": "back"
+  }
+}
+```
+
+**Result**
+
+```json
+{
+  "action": "input/pressButton",
+  "platform": "android",
+  "deviceId": "emulator-5554",
+  "success": true,
+  "button": "back"
+}
+```
+
+### `input/typeText`
+
+Types text into the currently focused field. IME composition is out of scope for
+this contract; clients should send the final committed string.
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `platform` | `"android" \| "ios"` | Yes | Target platform. |
+| `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
+| `text` | `string` | Yes | Text to type. |
+| `submit` | `boolean` | No | When true, press enter/return after typing if the platform supports it. |
+
+**Request**
+
+```json
+{
+  "id": "type-1",
+  "type": "mcp_request",
+  "method": "input/typeText",
+  "params": {
+    "platform": "ios",
+    "deviceId": "A1B2C3D4-0000-0000-0000-000000000000",
+    "text": "hello",
+    "submit": false
+  }
+}
+```
+
+**Result**
+
+```json
+{
+  "action": "input/typeText",
+  "platform": "ios",
+  "deviceId": "A1B2C3D4-0000-0000-0000-000000000000",
+  "success": true,
+  "textLength": 5,
+  "submitted": false
+}
+```
+
+### `input/key`
+
+Discrete key input is deferred until the daemon has a platform-neutral key name
+set. Until then, clients should use `input/pressButton` for supported device and
+navigation buttons, and `input/typeText` for text.
+
+Requests to `input/key` must fail until implemented:
+
+```json
+{
+  "id": "key-1",
+  "type": "mcp_response",
+  "success": false,
+  "error": "input/key is not implemented; use input/pressButton or input/typeText"
+}
+```
+
+---
+
 ## MCP Proxy Endpoints
 
 These are forwarded to the daemon's internal MCP server. The response wraps whatever the MCP server returns.

@@ -165,8 +165,8 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     return { devices, succeededPlatforms };
   }
 
-  async startDevice(device: DeviceInfo): Promise<ChildProcess> {
-    this.executedOperations.push(`startDevice:${device.name}`);
+  async startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess> {
+    this.executedOperations.push(`startDevice:${device.name}:${timeoutMs ?? "default"}`);
     this.runningDeviceNames.add(device.name);
     if (device.deviceId) {
       this.runningDeviceNames.add(device.deviceId);

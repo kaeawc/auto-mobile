@@ -125,8 +125,7 @@ DEVICE_NAME=$(xcrun simctl list devices available -j \
       | select(.udid == $udid) | .name
     ')
 
-echo "Booting ${DEVICE_NAME} (${UDID})..." >&2
-xcrun simctl boot "${UDID}"
+echo "Ensuring ${DEVICE_NAME} (${UDID}) is booted..." >&2
 xcrun simctl bootstatus "${UDID}" -b >&2
 
 echo "Booted: ${DEVICE_NAME} (${UDID})" >&2

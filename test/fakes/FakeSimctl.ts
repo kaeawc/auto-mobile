@@ -190,8 +190,8 @@ export class FakeSimctl implements ISimCtl {
     return this.isSimulatorRunningResult;
   }
 
-  async startSimulator(udid: string): Promise<any> {
-    this.recordCall("startSimulator", { udid });
+  async startSimulator(udid: string, timeoutMs?: number): Promise<any> {
+    this.recordCall("startSimulator", { udid, timeoutMs });
     return {
       pid: Date.now(),
       kill: () => false,

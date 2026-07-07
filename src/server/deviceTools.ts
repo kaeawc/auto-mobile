@@ -2,6 +2,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, SomePlatform } from "../models";
 import type { DeviceMatchCriteria, FormFactor, MatchingStrategy, StartDeviceResult } from "../models/DeviceMatchCriteria";
@@ -322,8 +323,10 @@ export function registerDeviceTools() {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
     }
 
+    const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+
     perf.startOperation("launchProcess");
-    const childProcess = await deviceUtils.startDevice(image);
+    const childProcess = await deviceUtils.startDevice(image, timeoutMs);
     perf.endOperation("launchProcess");
 
     if (progress) {
@@ -331,7 +334,7 @@ export function registerDeviceTools() {
     }
 
     perf.startOperation("waitForReady");
-    const readyDevice = await deviceUtils.waitForDeviceReady(image, args.timeoutMs, childProcess);
+    const readyDevice = await deviceUtils.waitForDeviceReady(image, timeoutMs, childProcess);
     perf.endOperation("waitForReady");
 
     if (progress) {

@@ -7,6 +7,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { MultiPlatformDeviceManager } from "../../src/utils/deviceUtils";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -430,6 +431,10 @@ describe("DevicePool", () => {
       expect(assignments.get("session-a")).toBe("sim-1");
       expect(assignments.get("session-b")).toBe("sim-2");
       expect(fakeDeviceManager.startedDevices.map(device => device.deviceId)).toEqual(["sim-1", "sim-2"]);
+      expect(fakeDeviceManager.startDeviceTimeouts).toEqual([
+        DEFAULT_DEVICE_READY_TIMEOUT_MS,
+        DEFAULT_DEVICE_READY_TIMEOUT_MS,
+      ]);
       expect(devicePool.getTotalDeviceCount()).toBe(2);
     });
 
@@ -488,6 +493,7 @@ describe("DevicePool", () => {
 
       expect(assignments.get("session-a")).toBe("sim-1");
       expect(fakeDeviceManager.startedDevices.map(device => device.deviceId)).toEqual(["sim-1"]);
+      expect(fakeDeviceManager.startDeviceTimeouts).toEqual([DEFAULT_DEVICE_READY_TIMEOUT_MS]);
       expect(devicePool.getDevice("sim-1")?.iosVersion).toBe("17.5");
     });
 

@@ -1,11 +1,13 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import type { Sha256Source, CtrlProxyIosBundleDownloader } from "../../src/utils/IOSCtrlProxyBundleDownloader";
+import { resolveRunnerChecksum } from "../../src/constants/release";
 
 export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownloader {
   public downloadedUrls: string[] = [];
   public extractedPaths: string[] = [];
   public checksum: string = "fake-checksum";
+  public runnerChecksum: string = resolveRunnerChecksum();
   public checksumSource: Sha256Source = "node";
   public extractedSubdir: string = "";
 
@@ -16,7 +18,10 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
     await fs.writeFile(destination, payload);
   }
 
-  public async computeFileSha256(_filePath: string): Promise<{ checksum: string; source: Sha256Source }> {
+  public async computeFileSha256(filePath: string): Promise<{ checksum: string; source: Sha256Source }> {
+    if (path.basename(filePath) === "CtrlProxyUITests-Runner") {
+      return { checksum: this.runnerChecksum, source: this.checksumSource };
+    }
     return { checksum: this.checksum, source: this.checksumSource };
   }
 

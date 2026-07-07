@@ -8,6 +8,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceUtils";
 
 const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
@@ -123,6 +124,59 @@ describe("startDevice handler", () => {
     expect(result.deviceId).toBeDefined();
     expect(result.source).toBe("cold-boot");
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
+  });
+
+  it("passes timeout to the cold boot start operation", async () => {
+    fakeDeviceUtils.setBootedDevices("ios", []);
+    fakeDeviceUtils.setDeviceImages("ios", [{
+      name: "iPhone 15",
+      platform: "ios",
+      deviceId: "ABCD-1234",
+      isRunning: false,
+      osVersion: "17.2",
+    }]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult({
+      name: "iPhone 15",
+      platform: "ios",
+      deviceId: "ABCD-1234",
+      isRunning: false,
+      osVersion: "17.2",
+    });
+
+    const result = await callStartDevice({ platform: "ios", timeoutMs: 30_000 });
+
+    expect(result.source).toBe("cold-boot");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      "startDevice:iPhone 15:30000",
+    );
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      "waitForDeviceReady:iPhone 15:30000",
+    );
+  });
+
+  it("passes the default timeout to cold boot when timeout is omitted", async () => {
+    fakeDeviceUtils.setBootedDevices("ios", []);
+    const iosImage: DeviceInfo = {
+      name: "iPhone 15",
+      platform: "ios",
+      deviceId: "ABCD-1234",
+      isRunning: false,
+      osVersion: "17.2",
+    };
+    fakeDeviceUtils.setDeviceImages("ios", [iosImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(iosImage);
+
+    const result = await callStartDevice({ platform: "ios" });
+
+    expect(result.source).toBe("cold-boot");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      `startDevice:iPhone 15:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
+    );
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      `waitForDeviceReady:iPhone 15:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
+    );
   });
 
   it("finds device by direct deviceId", async () => {

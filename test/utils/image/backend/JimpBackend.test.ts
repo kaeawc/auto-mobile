@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { JimpBackend, toJimpWebpOptions } from "../../../../src/utils/image/backend/JimpBackend";
+import { JimpBackend } from "../../../../src/utils/image/backend/JimpBackend";
 import type { ImagePipeline } from "../../../../src/utils/image/backend/ImageBackend";
 
 // Build a small, non-uniform source PNG. Solid colors survive any resize kernel
@@ -16,13 +16,6 @@ async function makeSourcePng(width = 8, height = 8): Promise<Buffer> {
 }
 
 const PNG_MAGIC = "89504e47";
-
-// Executing @jimp/wasm-webp encode/decode under `bun test` on Windows can
-// segfault via the JSC Wasm OSR/JIT path (bun#26366). CI keeps the invariant
-// "no bun-test unit executes WebP on Windows" (WebP is covered on ubuntu by the
-// image-runtime smoke), so gate the WebP-executing cases the same way. PNG
-// decode/encode does not hit the WebP WASM hot path and runs on all platforms.
-const skipWebpOnWindows = process.platform === "win32" ? test.skip : test;
 
 describe("JimpBackend", () => {
   describe("execute", () => {
@@ -111,7 +104,7 @@ describe("JimpBackend", () => {
       expect(meta.height).toBe(2);
     });
 
-    skipWebpOnWindows("webp encoding produces a RIFF/WEBP container", async () => {
+    test("rejects WebP encoding because WebP belongs to platform-specific backends", async () => {
       const backend = new JimpBackend();
       const source = await makeSourcePng();
       const pipeline: ImagePipeline = {
@@ -119,32 +112,7 @@ describe("JimpBackend", () => {
         encoding: { mime: "image/webp", options: { quality: 60 } }
       };
 
-      const out = await backend.execute(source, pipeline);
-
-      expect(out.subarray(0, 4).toString()).toBe("RIFF");
-      expect(out.subarray(8, 12).toString()).toBe("WEBP");
-    });
-
-    skipWebpOnWindows("nearLossless webp is distinct from lossless (option not dropped)", async () => {
-      const backend = new JimpBackend();
-      const source = await makeSourcePng();
-
-      const lossless = await backend.execute(source, {
-        operations: [],
-        encoding: { mime: "image/webp", options: { lossless: 1, quality: 75 } }
-      });
-      const nearLossless = await backend.execute(source, {
-        operations: [],
-        encoding: { mime: "image/webp", options: { lossless: 1, nearLossless: 40 } }
-      });
-
-      expect(nearLossless.length).not.toBe(lossless.length);
-    });
-
-    test("maps backend-neutral WebP options to wasm-webp libwebp flags", () => {
-      expect(toJimpWebpOptions({ lossless: true, quality: 90 })).toEqual({ lossless: 1, quality: 90 });
-      expect(toJimpWebpOptions({ nearLossless: true, quality: 40 })).toEqual({ lossless: 1, nearLossless: 40 });
-      expect(toJimpWebpOptions({ quality: 60 })).toEqual({ quality: 60 });
+      await expect(backend.execute(source, pipeline)).rejects.toThrow("does not encode WebP");
     });
 
     test("resize mode:nearest picks source pixels (distinct from default kernel)", async () => {

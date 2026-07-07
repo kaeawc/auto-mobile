@@ -332,10 +332,10 @@ socket response envelope:
 
 ```json
 {
-  "id": "tap-1",
+  "id": "key-ios-1",
   "type": "mcp_response",
   "success": false,
-  "error": "Unsupported input action input/key on ios"
+  "error": "input/key is unsupported on ios; CtrlProxy does not expose discrete key events"
 }
 ```
 

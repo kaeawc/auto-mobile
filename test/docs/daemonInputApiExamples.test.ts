@@ -98,6 +98,46 @@ describe("daemon input API consumer docs", () => {
         key: "enter",
       },
     };
+    const expectedResultByMethod: Record<ImplementedInputMethod, Record<string, unknown>> = {
+      "input/tap": {
+        action: "input/tap",
+        platform: "android",
+        deviceId: "emulator-5554",
+        success: true,
+        coordinates: { x: 240, y: 640 },
+      },
+      "input/swipe": {
+        action: "input/swipe",
+        platform: "android",
+        deviceId: "emulator-5554",
+        success: true,
+        start: { x: 520, y: 1700 },
+        end: { x: 520, y: 500 },
+        durationMs: 350,
+      },
+      "input/pressButton": {
+        action: "input/pressButton",
+        platform: "android",
+        deviceId: "emulator-5554",
+        success: true,
+        button: "back",
+      },
+      "input/typeText": {
+        action: "input/typeText",
+        platform: "android",
+        deviceId: "emulator-5554",
+        success: true,
+        textLength: 17,
+        submitted: false,
+      },
+      "input/key": {
+        action: "input/key",
+        platform: "android",
+        deviceId: "emulator-5554",
+        success: true,
+        key: "enter",
+      },
+    };
 
     for (const method of implementedInputMethods) {
       expect(requestsByMethod.get(method)).toMatchObject({
@@ -108,12 +148,7 @@ describe("daemon input API consumer docs", () => {
       expect(responsesByAction.get(method)).toMatchObject({
         type: "mcp_response",
         success: true,
-        result: {
-          action: method,
-          platform: "android",
-          deviceId: "emulator-5554",
-          success: true,
-        },
+        result: expectedResultByMethod[method],
       });
     }
   });
@@ -129,10 +164,23 @@ describe("daemon input API consumer docs", () => {
   test("documents platform support, unsupported behavior, observations, and key input platform gaps", async () => {
     const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
 
-    expect(unixSocketApi).toContain("| `input/key` | Supported | Unsupported | Discrete non-text key presses. Modifiers are deferred. |");
+    const expectedStatusRows = [
+      "| `input/tap` | Supported | Supported | Absolute device-screen coordinates. |",
+      "| `input/swipe` | Supported | Supported | Absolute device-screen start/end coordinates. Use for drag gestures until `input/drag` has distinct semantics. |",
+      "| `input/pressButton` | Supported | Supported with platform gaps | Device/navigation buttons aligned with MCP `pressButton`. Unsupported buttons fail instead of being ignored. |",
+      "| `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. |",
+      "| `input/key` | Supported | Unsupported | Discrete non-text key presses. Modifiers are deferred. |",
+    ];
+
+    for (const row of expectedStatusRows) {
+      expect(unixSocketApi).toContain(row);
+    }
+
     expect(unixSocketApi).toContain("Unsupported platforms or unsupported actions return `success: false`");
     expect(unixSocketApi).toContain("do not include a fresh observation");
+    expect(unixSocketApi).not.toContain("Unsupported input action input/key on ios");
     expect(unixSocketApi).toContain("input/key is unsupported on ios");
+    expect(unixSocketApi).toContain("iOS simulators return clear unsupported errors for");
   });
 
   test("links future IDE screen control docs to the daemon input API", async () => {

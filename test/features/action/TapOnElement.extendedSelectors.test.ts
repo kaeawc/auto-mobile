@@ -19,8 +19,8 @@ const createTapOnElement = (selector: FakeElementSelector) => {
   );
 };
 
-const makeElement = () => ({
-  bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+const makeElement = (bounds = { left: 0, top: 0, right: 100, bottom: 50 }) => ({
+  bounds,
   text: "Item",
   clickable: "true",
 } as any);
@@ -177,6 +177,28 @@ describe("TapOnElement extended selectors", () => {
       );
 
       expect(result.selection.element).not.toBeNull();
+      expect(selector.textCalls).toEqual(["Done", "Add"]);
+      expect(selector.lastText).toBe("Add");
+    });
+
+    test("textAny skips off-screen earlier variants when a later variant is visible", () => {
+      const offScreenElement = makeElement({ left: -300, top: 0, right: -200, bottom: 50 });
+      const visibleElement = makeElement({ left: 20, top: 20, right: 120, bottom: 70 });
+      class VariantSelector extends FakeElementSelector {
+        override selectByText(...args: Parameters<FakeElementSelector["selectByText"]>) {
+          this.setNextElement(args[1] === "Done" ? offScreenElement : visibleElement);
+          return super.selectByText(...args);
+        }
+      }
+      const selector = new VariantSelector(null);
+      const tapOn = createTapOnElement(selector);
+
+      const result = (tapOn as any).findElementInHierarchy(
+        { textAny: ["Done", "Add"], action: "tap" },
+        { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 }
+      );
+
+      expect(result.selection.element).toBe(visibleElement);
       expect(selector.textCalls).toEqual(["Done", "Add"]);
       expect(selector.lastText).toBe("Add");
     });

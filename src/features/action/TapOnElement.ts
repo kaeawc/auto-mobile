@@ -289,6 +289,17 @@ export class TapOnElement extends BaseVisualChange {
            centerY < 0 || centerY > screenSize.height;
   }
 
+  private getScreenSizeFromHierarchy(viewHierarchy: ViewHierarchyResult): ObserveResult["screenSize"] | undefined {
+    if (!viewHierarchy.screenWidth || !viewHierarchy.screenHeight) {
+      return undefined;
+    }
+
+    return {
+      width: viewHierarchy.screenWidth,
+      height: viewHierarchy.screenHeight
+    };
+  }
+
   private findElementInHierarchy(
     options: TapOnElementOptions,
     viewHierarchy: ViewHierarchyResult
@@ -321,6 +332,7 @@ export class TapOnElement extends BaseVisualChange {
 
     if (options.textAny) {
       let lastSelection: ElementSelectionResult | null = null;
+      const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
       for (const text of options.textAny) {
         const selection = options.sibling
           ? this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
@@ -337,6 +349,9 @@ export class TapOnElement extends BaseVisualChange {
           });
         lastSelection = selection;
         if (selection.element) {
+          if (this.isElementCenterOffScreen(selection.element, screenSize)) {
+            continue;
+          }
           return { selection, containerFound };
         }
       }

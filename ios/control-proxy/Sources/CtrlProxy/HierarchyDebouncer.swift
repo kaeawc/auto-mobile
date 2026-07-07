@@ -112,6 +112,19 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         onResult = callback
     }
 
+    public func setPollIntervalMs(_ intervalMs: Int64) {
+        lock.lock()
+        pollIntervalMs = max(1, intervalMs)
+        pollGeneration += 1
+        let shouldReschedule = _isRunning
+        pollScheduled = false
+        lock.unlock()
+
+        if shouldReschedule {
+            scheduleNextPoll()
+        }
+    }
+
     public func start() {
         lock.lock()
         guard !_isRunning else {
@@ -126,7 +139,6 @@ public class HierarchyDebouncer: HierarchyDebouncing {
 
         // Schedule first poll
         scheduleNextPoll()
-
     }
 
     public func stop() {
@@ -135,7 +147,6 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         pollScheduled = false
         pollGeneration += 1
         lock.unlock()
-
     }
 
     public func extractNow() {

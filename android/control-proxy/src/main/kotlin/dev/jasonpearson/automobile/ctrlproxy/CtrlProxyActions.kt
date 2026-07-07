@@ -19,6 +19,8 @@ interface CtrlProxyActions {
 
   fun requestHierarchyIfStale(sinceTimestamp: Long)
 
+  fun setHierarchyInterval(intervalMs: Long?)
+
   fun requestScreenshot(requestId: String?)
 
   // Coordinate params are `Double` so fractional wire values pass through untruncated to the

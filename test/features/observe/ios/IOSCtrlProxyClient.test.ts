@@ -13,6 +13,7 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
+import { stopDeviceDataStreamSocketServer } from "../../../../src/daemon/deviceDataStreamSocketServer";
 
 describe("IOSCtrlProxyClient", function() {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -50,6 +51,7 @@ describe("IOSCtrlProxyClient", function() {
     if (ctrlProxyClient) {
       await ctrlProxyClient.close();
     }
+    await stopDeviceDataStreamSocketServer();
     NetworkState.resetInstance();
     serverConfig.setNetworkMockableEnabled(false);
   });
@@ -117,6 +119,7 @@ describe("IOSCtrlProxyClient", function() {
   };
 
   const syncMessageTypes = new Set([
+    "set_hierarchy_poll_interval",
     "set_network_mock_rules",
     "set_network_error_simulation",
   ]);

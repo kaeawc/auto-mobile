@@ -787,23 +787,27 @@ export class Daemon {
         .filter(device => deviceId === null || device.id === deviceId);
 
       for (const device of devices) {
-        if (device.platform !== "ios") {
-          continue;
-        }
-
-        const client = IOSCtrlProxyClient.getExistingInstance(device.id);
-        if (!client) {
-          continue;
-        }
-
-        const intervalMs = server.getHierarchyIntervalMsForDevice(device.id);
-        void client.ensureConnected().then(connected => {
-          if (connected) {
-            client.refreshObservationStreamHierarchyCadence(intervalMs);
+        if (device.platform === "android") {
+          AndroidCtrlProxyClient
+            .getExistingInstance(device.id)
+            ?.refreshObservationStreamHierarchyCadence();
+        } else if (device.platform === "ios") {
+          const client = IOSCtrlProxyClient.getExistingInstance(device.id);
+          if (!client) {
+            continue;
           }
-        }).catch(error => {
-          logger.warn(`[Daemon] Failed to refresh iOS hierarchy cadence for ${device.id}: ${error}`);
-        });
+
+          const intervalMs = server.getHierarchyIntervalMsForDevice(device.id);
+          void client.ensureConnected().then(connected => {
+            if (connected) {
+              client.refreshObservationStreamHierarchyCadence(intervalMs);
+            }
+          }).catch(error => {
+            logger.warn(`[Daemon] Failed to refresh iOS hierarchy cadence for ${device.id}: ${error}`);
+          });
+        } else {
+          continue;
+        }
       }
     });
 

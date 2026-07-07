@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
+import dev.jasonpearson.automobile.protocol.ConnectedResponse
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
 import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
@@ -158,7 +159,17 @@ class WebSocketServer(
 
                 try {
                   // Send connection greeting before registering for broadcasts
-                  send(Frame.Text("""{"type":"connected","id":$connectionId}"""))
+                  send(
+                    Frame.Text(
+                      responseJson.encodeToString(
+                        WebSocketResponse.serializer(),
+                        ConnectedResponse(
+                          id = connectionId,
+                          supportedCommands = listOf("set_hierarchy_interval"),
+                        ),
+                      )
+                    )
+                  )
 
                   synchronized(connections) { connections.add(this) }
 

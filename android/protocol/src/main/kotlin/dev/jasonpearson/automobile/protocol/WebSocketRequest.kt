@@ -33,6 +33,13 @@ data class RequestHierarchyIfStale(
   val disableAllFiltering: Boolean = false,
 ) : WebSocketRequest()
 
+@Serializable
+@SerialName("set_hierarchy_interval")
+data class SetHierarchyInterval(
+  override val requestId: String? = null,
+  val intervalMs: Long? = null,
+) : WebSocketRequest()
+
 // =============================================================================
 // Screenshot Request
 // =============================================================================

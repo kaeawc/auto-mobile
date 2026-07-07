@@ -4,7 +4,7 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 
 class BroadcastThrottler(
   private val timeProvider: TimeProvider,
-  private val minIntervalMs: Long,
+  private var minIntervalMs: Long,
 ) {
   private var lastBroadcastMs: Long? = null
 
@@ -21,5 +21,9 @@ class BroadcastThrottler(
   fun timeSinceLastBroadcastMs(): Long {
     val last = lastBroadcastMs ?: return 0L
     return timeProvider.currentTimeMillis() - last
+  }
+
+  fun setMinIntervalMs(intervalMs: Long) {
+    minIntervalMs = intervalMs
   }
 }

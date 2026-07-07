@@ -135,12 +135,29 @@ describe("CtrlProxyPackages (Android)", function() {
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       expect(connected).toBe(true);
+      (client as any).supportedCommands = new Set(["set_hierarchy_interval"]);
       socket!.sentMessages = [];
 
       client.refreshObservationStreamHierarchyCadence(500);
 
       const message = findSentMessage(socket!, "set_hierarchy_interval");
       expect(message).toEqual({ type: "set_hierarchy_interval", intervalMs: 500 });
+    });
+
+    test("skips hierarchy cadence refresh when runner does not advertise support", async function() {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+
+      const connected = await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+      expect(connected).toBe(true);
+      (client as any).supportedCommands = new Set();
+      socket!.sentMessages = [];
+
+      client.refreshObservationStreamHierarchyCadence(500);
+
+      expect(socket!.sentMessages).toEqual([]);
     });
 
     test("refreshes hierarchy cadence from the stream server when no interval is passed", async function() {
@@ -161,6 +178,7 @@ describe("CtrlProxyPackages (Android)", function() {
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       expect(connected).toBe(true);
+      (client as any).supportedCommands = new Set(["set_hierarchy_interval"]);
       socket!.sentMessages = [];
 
       client.refreshObservationStreamHierarchyCadence();

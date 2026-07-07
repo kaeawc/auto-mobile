@@ -56,6 +56,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction } from "../models";
+import type { DeviceService } from "../features/observe/DeviceService";
 /** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
 const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
@@ -962,20 +963,11 @@ export class UnixSocketServer {
     // timeout, letting the combined operation run up to 2x the caller's
     // budget while the per-device queue stays held until it settles.
     const deadline = this.timer.now() + timeoutMs;
+    const client: DeviceService =
+      platform === "android"
+        ? AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory)
+        : IOSCtrlProxyClient.getInstance(targetDevice);
 
-    if (platform === "android") {
-      const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-      const textResult = await client.requestSetText(text, { timeoutMs });
-      if (!textResult.success) {
-        return textResult;
-      }
-      if (!imeAction) {
-        return { success: true };
-      }
-      return await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs);
-    }
-
-    const client = IOSCtrlProxyClient.getInstance(targetDevice);
     const textResult = await client.requestSetText(text, { timeoutMs });
     if (!textResult.success) {
       return textResult;
@@ -987,13 +979,16 @@ export class UnixSocketServer {
   }
 
   private async runImeActionWithinBudget(
-    client: { requestImeAction: (imeAction: ImeAction, timeoutMs: number) => Promise<{ success: boolean; error?: string }> },
+    client: Pick<DeviceService, "requestImeAction">,
     imeAction: ImeAction,
     deadline: number,
     totalTimeoutMs: number
   ): Promise<{ success: boolean; error?: string }> {
     const remainingTimeoutMs = deadline - this.timer.now();
     if (remainingTimeoutMs <= 0) {
+      // Defensive: in practice the outer Promise.race timeout fires first, so
+      // this path is only reached if set-text spends the entire budget before
+      // the submit action starts.
       return {
         success: false,
         error: `input/typeText exceeded ${totalTimeoutMs}ms budget before submit`,
@@ -1038,8 +1033,12 @@ export class UnixSocketServer {
       if (timedOut) {
         // Hold the per-device queue until the in-flight CtrlProxy request
         // settles so a following same-device input cannot interleave its text
-        // write with this one. The operation is bounded to the caller's total
-        // budget (see executeInputTypeText), so this wait cannot exceed it.
+        // write with this one. This defers delivery of the timeout error until
+        // the operation ends; the wait normally tracks the caller's budget
+        // (executeInputTypeText bounds set-text + IME to it) but can exceed it
+        // if a CtrlProxy request ignores its own timeout or blocks in an
+        // unbounded connect phase. This serialization-over-responsiveness
+        // trade-off matches input/tap and input/swipe.
         await operationPromise.catch(() => undefined);
       }
     }

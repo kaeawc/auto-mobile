@@ -48,8 +48,12 @@ version="$(python3 - "$package_json" <<'PY'
 import json
 import sys
 
-with open(sys.argv[1], encoding="utf-8") as handle:
-    data = json.load(handle)
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        data = json.load(handle)
+except json.JSONDecodeError as exc:
+    sys.stderr.write(f"ERROR: package.json is not valid JSON: {exc}\n")
+    sys.exit(1)
 
 version = data.get("version")
 if not version:

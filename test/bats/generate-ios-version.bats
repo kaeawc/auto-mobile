@@ -89,3 +89,35 @@ EOF
   after="$(cat "${TEST_ROOT}/${SWIFT_REL}")"
   [ "$before" = "$after" ]
 }
+
+@test "fails cleanly when package.json is missing" {
+  rm -f "${TEST_ROOT}/package.json"
+  run_generate
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"package.json not found"* ]]
+}
+
+@test "fails cleanly when package.json has no version field" {
+  cat > "${TEST_ROOT}/package.json" <<'EOF'
+{ "name": "@kaeawc/auto-mobile" }
+EOF
+  run_generate
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no version field"* ]]
+}
+
+@test "fails cleanly on invalid JSON instead of a raw traceback" {
+  printf '{ not valid json' > "${TEST_ROOT}/package.json"
+  run_generate
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not valid JSON"* ]]
+}
+
+@test "rejects a non-semver version" {
+  cat > "${TEST_ROOT}/package.json" <<'EOF'
+{ "name": "@kaeawc/auto-mobile", "version": "not-semver" }
+EOF
+  run_generate
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"semver"* ]]
+}

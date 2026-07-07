@@ -105,8 +105,22 @@ run_bump() {
   grep -q "^VERSION_NAME=${VERSION}-SNAPSHOT$" "${TEST_ROOT}/android/gradle.properties"
   grep -q "^version = \"${VERSION}-SNAPSHOT\"$" "${TEST_ROOT}/android/junit-runner/build.gradle.kts"
   grep -q "versionName = \"${VERSION}-SNAPSHOT\"" "${TEST_ROOT}/android/playground/app/build.gradle.kts"
+  # The Swift constant must be *regenerated* (not regex-edited in place): assert
+  # the generator's output markers so a regression back to an in-place edit fails.
   grep -q "public static let current = \"${VERSION}\"" \
     "${TEST_ROOT}/ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift"
+  grep -q "GENERATED FILE — DO NOT EDIT" \
+    "${TEST_ROOT}/ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift"
+  grep -q "public enum AutoMobileVersion" \
+    "${TEST_ROOT}/ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift"
+}
+
+@test "rejects a non-semver --new-version before writing anything" {
+  run bash -c "cd '${TEST_ROOT}' && bash '${SCRIPT_ABS}' --new-version 'not-a-version'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid --new-version"* ]]
+  # package.json must be untouched (no partial write).
+  [ "$(json_field "${TEST_ROOT}/package.json" 'data["version"]')" = "0.0.1" ]
 }
 
 @test "dry-run output names SNAPSHOT as the Android dev/Maven coordinate policy" {

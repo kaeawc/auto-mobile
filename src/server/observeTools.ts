@@ -34,17 +34,17 @@ const waitForSchema = z.union([
     elementId: z.string().describe("Element resource ID / accessibility identifier"),
     timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
     container: waitForContainerField
-  }),
+  }).strict(),
   z.object({
     text: z.string().describe("Element text"),
     timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
     container: waitForContainerField
-  }),
+  }).strict(),
   z.object({
     textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins"),
     timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
     container: waitForContainerField
-  })
+  }).strict()
 ]);
 
 export const observeSchema = addDeviceTargetingToSchema(z.object({

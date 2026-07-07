@@ -56,6 +56,32 @@ describe("observeSchema waitFor.container", () => {
     ).toThrow();
   });
 
+  test.each([
+    {
+      waitFor: { elementId: "com.app:id/name", text: "Name" },
+      label: "elementId and text",
+    },
+    {
+      waitFor: { elementId: "com.app:id/name", textAny: ["Name", "Label"] },
+      label: "elementId and textAny",
+    },
+    {
+      waitFor: { text: "Name", textAny: ["Name", "Label"] },
+      label: "text and textAny",
+    },
+    {
+      waitFor: { elementId: "com.app:id/name", text: "Name", textAny: ["Name", "Label"] },
+      label: "elementId, text, and textAny",
+    },
+  ])("rejects waitFor with mixed selectors: $label", ({ waitFor }) => {
+    expect(() =>
+      observeSchema.parse({
+        platform: "ios",
+        waitFor,
+      })
+    ).toThrow();
+  });
+
   test("rejects container object that includes both elementId and text", () => {
     expect(() =>
       observeSchema.parse({

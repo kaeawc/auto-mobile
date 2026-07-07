@@ -20,11 +20,7 @@ import { installInMemoryNavManager } from "../../helpers/navigationTestHarness";
 import type { HierarchySyncDiagnostics } from "../../../src/features/observe/android/types";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { logger } from "../../../src/utils/logger";
-import {
-  startDeviceDataStreamSocketServer,
-  stopDeviceDataStreamSocketServer,
-} from "../../../src/daemon/deviceDataStreamSocketServer";
-import { FakeSocket } from "../../fakes/FakeNetServer";
+import { stopDeviceDataStreamSocketServer } from "../../../src/daemon/deviceDataStreamSocketServer";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -144,34 +140,6 @@ describe("AndroidCtrlProxyClient", function() {
       await new Promise(resolve => setImmediate(resolve));
     }
   };
-
-  const subscribeToObservationStreamForTest = async (options: {
-    deviceId?: string;
-    hierarchyIntervalMs?: number;
-  }): Promise<FakeSocket> => {
-    const server = await startDeviceDataStreamSocketServer();
-    const socket = new FakeSocket();
-    await (server as any).processLine(socket, JSON.stringify({
-      id: "test-subscribe",
-      command: "subscribe",
-      deviceId: options.deviceId,
-      hierarchyIntervalMs: options.hierarchyIntervalMs,
-    }));
-    return socket;
-  };
-
-  const unsubscribeFromObservationStreamForTest = async (socket: FakeSocket): Promise<void> => {
-    const server = await startDeviceDataStreamSocketServer();
-    await (server as any).processLine(socket, JSON.stringify({
-      id: "test-unsubscribe",
-      command: "unsubscribe",
-    }));
-  };
-
-  const findThrottleMessage = (socket: CapturingWebSocket): { type: string; intervalMs: number } | undefined =>
-    socket.sentMessages
-      .map(raw => JSON.parse(raw))
-      .find(message => message.type === "set_hierarchy_broadcast_interval");
 
   test("setupPortForwarding reallocates when the current local port becomes busy before adb forward", async function() {
     await accessibilityServiceClient.close();

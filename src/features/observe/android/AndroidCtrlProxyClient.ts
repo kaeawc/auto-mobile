@@ -841,6 +841,8 @@ const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
  * Uses singleton pattern per device to maintain persistent WebSocket connection.
  */
 export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
+  private static readonly DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250;
+
   private device: BootedDevice;
   private adb: AdbExecutor;
 

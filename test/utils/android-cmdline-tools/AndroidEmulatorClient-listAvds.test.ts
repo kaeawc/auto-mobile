@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { AvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
@@ -121,7 +122,16 @@ describe("AndroidEmulatorClient listAvds", () => {
   test("returns AVDs when emulator command succeeds", async () => {
     const execAsync = async (_command: string): Promise<ExecResult> =>
       createExecResult("Pixel_9\nPixel_Tablet\n");
-    const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer());
+    const avdConfigReader: AvdConfigReader = {
+      readConfig: async () => null,
+    };
+    const client = new AndroidEmulatorClient(
+      execAsync,
+      null,
+      new FakeTimer(),
+      undefined,
+      avdConfigReader
+    );
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([

@@ -300,7 +300,7 @@ stream after the input response returns.
 | `input/drag` | Deferred | Deferred | Not a separate method in this contract. |
 | `input/pressButton` | Supported | Supported with platform gaps | Device/navigation buttons aligned with MCP `pressButton`. Unsupported buttons fail instead of being ignored. |
 | `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. |
-| `input/key` | Deferred | Deferred | Use `input/pressButton` or `input/typeText`. |
+| `input/key` | Supported | Unsupported | Discrete non-text key presses. Modifiers are deferred. |
 
 All successful input responses use this result shape:
 
@@ -475,9 +475,9 @@ Examples for supported Android navigation and hardware actions:
 `recent` button implementation. The daemon also accepts the MCP alias `recent`.
 
 `enter` is reserved by the socket contract but is not implemented by
-`input/pressButton`; callers should use `input/typeText` for committed text and
-wait for `input/key` for discrete key forwarding. `enter` currently returns a
-clear unsupported error instead of being treated as an unknown field value.
+`input/pressButton`; callers should use `input/key` for a discrete Enter press
+or `input/typeText` for committed text. `enter` currently returns a clear
+unsupported error instead of being treated as an unknown field value.
 
 iOS supports `home`, `back`, and `app_switch` through CtrlProxy navigation. On
 physical iOS devices, `power`, `volume_up`, and `volume_down` route to the
@@ -530,18 +530,82 @@ this contract; clients should send the final committed string.
 
 ### `input/key`
 
-Discrete key input is deferred until the daemon has a platform-neutral key name
-set. Until then, clients should use `input/pressButton` for supported device and
-navigation buttons, and `input/typeText` for text.
+Presses one discrete, non-text key. Use `input/typeText` for printable text and
+`input/pressButton` for device/navigation buttons such as back, home, app switch,
+power, and volume.
 
-Requests to `input/key` must fail until implemented:
+Modifiers are not supported in the first version. Requests that include
+`modifiers` fail validation instead of silently ignoring them.
+
+Supported key names:
+
+| Key | Android mapping | iOS |
+|---|---|---|
+| `enter` | `KEYCODE_ENTER` | Unsupported |
+| `tab` | `KEYCODE_TAB` | Unsupported |
+| `escape` | `KEYCODE_ESCAPE` | Unsupported |
+| `backspace` | `KEYCODE_DEL` | Unsupported |
+| `delete` | `KEYCODE_FORWARD_DEL` | Unsupported |
+| `arrow_up` | `KEYCODE_DPAD_UP` | Unsupported |
+| `arrow_down` | `KEYCODE_DPAD_DOWN` | Unsupported |
+| `arrow_left` | `KEYCODE_DPAD_LEFT` | Unsupported |
+| `arrow_right` | `KEYCODE_DPAD_RIGHT` | Unsupported |
+
+**Params**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `platform` | `"android" \| "ios"` | Yes | Target platform. |
+| `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
+| `key` | One of the supported key names above | Yes | Platform-neutral key name. |
+
+**Request**
+
+```json
+{
+  "id": "key-1",
+  "type": "mcp_request",
+  "method": "input/key",
+  "params": {
+    "platform": "android",
+    "deviceId": "emulator-5554",
+    "key": "enter"
+  }
+}
+```
+
+**Result**
+
+```json
+{
+  "action": "input/key",
+  "platform": "android",
+  "deviceId": "emulator-5554",
+  "success": true,
+  "key": "enter"
+}
+```
+
+Unsupported keys fail with an actionable validation error:
+
+```json
+{
+  "id": "key-2",
+  "type": "mcp_response",
+  "success": false,
+  "error": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right"
+}
+```
+
+iOS currently returns an explicit unsupported-platform error because CtrlProxy
+does not expose discrete key events:
 
 ```json
 {
   "id": "key-1",
   "type": "mcp_response",
   "success": false,
-  "error": "input/key is not implemented; use input/pressButton or input/typeText"
+  "error": "input/key is unsupported on ios; CtrlProxy does not expose discrete key events"
 }
 ```
 

@@ -1,6 +1,6 @@
 # Image backend: sharp primary + native cwebp on Windows
 
-Status: proposed
+Status: accepted
 Related: #2974 (Windows WebP daemon crash), #2920 (sharp→jimp migration), #2939 (screenshot cache format), #2424 (original sharp-under-Bun pin)
 
 ## Problem
@@ -154,9 +154,9 @@ resize kernel ≠ jimp's:
 
 - pHash values change again on macOS/Linux (jimp→sharp), and Windows (jimp)
   produces different hashes than macOS/Linux (sharp) for the same screenshot →
-  **nav-screenshot caches are not portable across platforms**. Within one
-  machine it is self-consistent (one backend), matching still works, and nav
-  caches are local — tolerable, but document as the cache contract (ties to #2939).
+  **nav-screenshot caches are per-machine and are not portable across platforms**.
+  Within one machine it is self-consistent (one backend), matching still works,
+  and nav caches are local — this is the accepted cache contract (ties to #2939).
 - WebP format is now uniform across platforms (bundled cwebp, no PNG downgrade),
   so the only cross-platform difference is the resize-kernel pixel delta, not a
   format mismatch.
@@ -176,8 +176,8 @@ resize kernel ≠ jimp's:
 
 ## doctor + observability
 
-Add a `doctor` check (log-then-return-typed-failure, CLAUDE.md strategy 2)
-reporting: active backend, sharp load status (macOS/Linux), cwebp/dwebp
+`doctor` includes a log-then-return-typed-failure check (CLAUDE.md strategy 2)
+reporting: active backend, sharp load status (macOS/Linux), and cwebp/dwebp
 resolution (Windows).
 
 ## Phasing

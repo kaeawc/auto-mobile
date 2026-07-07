@@ -412,6 +412,12 @@ describe("runDoctor", () => {
       expect(report.android).toBeUndefined();
       expect(report.ios?.checks.length).toBeGreaterThan(0);
       expect(report.ios?.checks.every(check => check.status === "skip")).toBe(true);
+      const imageBackend = report.autoMobile.checks.find(check => check.name === "Image Backend");
+      expect(imageBackend).toBeDefined();
+      expect(imageBackend?.message).toContain("active=sharp");
+      expect(report.summary.total).toBe(
+        report.system.checks.length + (report.ios?.checks.length ?? 0) + report.autoMobile.checks.length
+      );
     });
   });
 

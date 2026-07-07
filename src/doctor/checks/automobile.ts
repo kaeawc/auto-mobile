@@ -5,6 +5,7 @@
 
 import { CheckResult } from "../types";
 import type { DoctorOptions } from "../types";
+import { platform as getHostPlatform } from "node:os";
 import { DaemonManager } from "../../daemon/manager";
 import { getDaemonHealthReport } from "../../daemon/debugTools";
 import type { DaemonHealthReport } from "../../daemon/debugTools";
@@ -26,6 +27,8 @@ import { getMcpServerVersion } from "../../utils/mcpVersion";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
+import { loadSharp, type SharpFactory } from "../../utils/image/loadSharp";
+import { WebpBinaryResolver, type ResolvedWebpBinaries } from "../../utils/image/webp/WebpBinaryResolver";
 import { logger } from "../../utils/logger";
 
 const RELEASES_URL = "https://github.com/kaeawc/auto-mobile/releases";
@@ -45,9 +48,22 @@ export interface DaemonBuildIdentityDependencies {
 }
 
 export interface AutoMobileCheckDependencies {
+  checkImageBackend?: () => Promise<CheckResult>;
   checkDaemonStatus?: () => Promise<CheckResult>;
   checkDaemonConnectivity?: () => Promise<CheckResult>;
   checkDaemonBuildIdentity?: () => Promise<CheckResult>;
+}
+
+export interface ImageBackendDoctorLogger {
+  warn(message: string, ...args: unknown[]): void;
+}
+
+export interface ImageBackendDoctorDependencies {
+  platform?: NodeJS.Platform;
+  hostPlatform?: NodeJS.Platform;
+  sharpLoader?: () => Promise<SharpFactory>;
+  webpBinaryResolver?: { resolve(): Promise<ResolvedWebpBinaries> };
+  logger?: ImageBackendDoctorLogger;
 }
 
 /**
@@ -76,6 +92,76 @@ export function checkCtrlProxyVersion(): CheckResult {
     status: "pass",
     message: `Version ${resolved}${pinned === LATEST_RELEASE_VERSION ? " (latest)" : ""}`,
     value: resolved,
+  };
+}
+
+/**
+ * Report the active image backend and the platform-specific provisioning that
+ * makes it usable without doing real image work.
+ */
+export async function checkImageBackend(
+  dependencies: ImageBackendDoctorDependencies = {}
+): Promise<CheckResult> {
+  const platform = dependencies.platform ?? process.platform;
+  const hostPlatform = dependencies.hostPlatform ?? getHostPlatform();
+  const log = dependencies.logger ?? logger;
+
+  if (platform === "win32") {
+    try {
+      const binaries = await (dependencies.webpBinaryResolver ?? new WebpBinaryResolver()).resolve();
+      return {
+        name: "Image Backend",
+        status: "pass",
+        message: `active=jimp-cli; cwebp=${binaries.cwebp}; dwebp=${binaries.dwebp}`,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn(`Image backend doctor check failed: ${message}`, error);
+      return {
+        name: "Image Backend",
+        status: "fail",
+        message: `active=jimp-cli; cwebp=unavailable; dwebp=unavailable; error=${message}`,
+        recommendation:
+          "Ensure bundled vendor/libwebp/win32-x64/cwebp.exe and dwebp.exe are present, " +
+          "or set AUTOMOBILE_CWEBP_PATH and AUTOMOBILE_DWEBP_PATH to executable libwebp binaries.",
+      };
+    }
+  }
+
+  if (platform === "darwin" || platform === "linux") {
+    if (!dependencies.sharpLoader && platform !== hostPlatform) {
+      return {
+        name: "Image Backend",
+        status: "skip",
+        message: `active=sharp; sharp=not checked; platform=${platform}; host=${hostPlatform}`,
+      };
+    }
+
+    try {
+      await (dependencies.sharpLoader ?? loadSharp)();
+      return {
+        name: "Image Backend",
+        status: "pass",
+        message: "active=sharp; sharp=loaded",
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn(`Image backend doctor check failed: ${message}`, error);
+      return {
+        name: "Image Backend",
+        status: "fail",
+        message: `active=sharp; sharp=unavailable; webp=unavailable; error=${message}`,
+        recommendation:
+          "Reinstall dependencies from the lockfile and re-run doctor. " +
+          "Navigation screenshots require sharp-backed WebP support on macOS/Linux.",
+      };
+    }
+  }
+
+  return {
+    name: "Image Backend",
+    status: "pass",
+    message: "active=jimp",
   };
 }
 
@@ -467,6 +553,7 @@ export async function runAutoMobileChecks(
 
   results.push(checkDaemonVersion());
   results.push(checkCtrlProxyVersion());
+  results.push(await (dependencies.checkImageBackend ?? (() => checkImageBackend()))());
   results.push(await (dependencies.checkDaemonStatus ?? (() => checkDaemonStatus()))());
   results.push(await (dependencies.checkDaemonConnectivity ?? (() => checkDaemonConnectivity()))());
   results.push(await (dependencies.checkDaemonBuildIdentity ?? (() => checkDaemonBuildIdentity()))());

@@ -31,6 +31,31 @@ describe("observeSchema waitFor.container", () => {
     });
   });
 
+  test("accepts textAny waitFor with ordered variants", () => {
+    const parsed = observeSchema.parse({
+      platform: "ios",
+      waitFor: {
+        textAny: ["Done", "Add"],
+        timeout: 8000,
+      },
+    });
+    expect(parsed.waitFor).toMatchObject({
+      textAny: ["Done", "Add"],
+      timeout: 8000,
+    });
+  });
+
+  test("rejects empty textAny waitFor", () => {
+    expect(() =>
+      observeSchema.parse({
+        platform: "ios",
+        waitFor: {
+          textAny: [],
+        },
+      })
+    ).toThrow();
+  });
+
   test("rejects container object that includes both elementId and text", () => {
     expect(() =>
       observeSchema.parse({

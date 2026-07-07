@@ -133,8 +133,9 @@ export const keyboardSchema = addDeviceTargetingToSchema(z.object({
 
 const tapOnSelectorSchema = z.union([
   z.object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/btn_login") }).strict(),
-  z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict()
-]).describe("Element to tap: elementId or text");
+  z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict(),
+  z.object({ textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins") }).strict()
+]).describe("Element to tap: elementId, text, or ordered text variants");
 
 export const tapOnSchema = addDeviceTargetingToSchema(z.object({
   selector: tapOnSelectorSchema,
@@ -415,6 +416,7 @@ export function registerInteractionTools() {
     const result = await tapOnTextCommand.execute({
       container: args.container,
       text: args.selector.text,
+      textAny: args.selector.textAny,
       elementId: args.selector.elementId,
       sibling: args.sibling,
       selectionStrategy: args.selectionStrategy,

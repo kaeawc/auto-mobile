@@ -264,11 +264,15 @@ const migrateStepFields = (
         selector.text = mergedParams.text;
         delete mergedParams.text;
       }
+      if (Array.isArray(mergedParams.textAny)) {
+        selector.textAny = mergedParams.textAny;
+        delete mergedParams.textAny;
+      }
       if (Object.keys(selector).length > 0) {
         mergedParams.selector = selector;
         recordWarning(
           warnings,
-          "Wrapped legacy tapOn { elementId|text } under { selector: { ... } } for v0.0.30+ schema.",
+          "Wrapped legacy tapOn { elementId|text|textAny } under { selector: { ... } } for v0.0.30+ schema.",
           stepIndex
         );
         changed = true;

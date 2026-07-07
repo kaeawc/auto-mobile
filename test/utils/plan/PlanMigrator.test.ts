@@ -298,6 +298,22 @@ describe("PlanMigrator", () => {
         ).toBe(true);
       });
 
+      test("wraps legacy tapOn { textAny } under { selector: { textAny } }", () => {
+        const { plan, report } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{ tool: "tapOn", params: { textAny: ["Done", "Add"] } }],
+        });
+
+        const selector = plan.steps[0].params.selector as { textAny?: string[] };
+        expect(selector.textAny).toEqual(["Done", "Add"]);
+        expect(plan.steps[0].params.textAny).toBeUndefined();
+        expect(
+          report.warnings.some(w => w.message.includes("Wrapped legacy tapOn"))
+        ).toBe(true);
+      });
+
       test("does not double-wrap tapOn that already has selector", () => {
         const { plan } = migratePlan({
           name: "Plan",

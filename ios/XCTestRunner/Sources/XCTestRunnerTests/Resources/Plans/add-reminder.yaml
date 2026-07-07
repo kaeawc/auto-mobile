@@ -1,8 +1,8 @@
 ---
 name: add-reminder
 description: Create a basic reminder in the iOS Reminders app (English UI assumed)
-# NOTE: the system Reminders UI varies by iOS version — the "New Reminder" and "Add" control
-# labels below are pinned to the CI simulator's iOS (English).
+# NOTE: the system Reminders UI varies by iOS version — the save control has been observed as
+# both "Done" and "Add". The plan accepts either label, then verifies the saved title.
 # Deliberately does NOT clearAppData: on newer iOS a cleared Reminders launches to a home without
 # the "New Reminder" control, which would break this plan.
 platform: ios
@@ -21,6 +21,22 @@ steps:
       timeout: 20000
     label: Wait for Reminders UI
 
+  # A prior local run can leave Reminders restored inside a smart list such as Today. Return to the
+  # accounts/list home first so the next hop can choose the default Reminders list deterministically.
+  - tool: observe
+    waitFor:
+      text: "Back"
+      timeout: 2000
+    optional: true
+    label: Wait for list back button (if restored inside a list)
+
+  - tool: tapOn
+    selector:
+      text: "Back"
+    action: "tap"
+    optional: true
+    label: Return to Reminders accounts home (if restored inside a list)
+
   # Reminders intermittently shows an "Enable iCloud Syncing?" alert on launch that covers the
   # list and blocks the create/save controls. It appears on some simulators (fresh state, no iCloud
   # account) and not others, which is the flaky-test root cause (issue #2811): when present the
@@ -29,16 +45,58 @@ steps:
   # failing.
   - tool: observe
     waitFor:
-      text: "Not Now"
+      textAny:
+        - "Not Now"
+        - "Close"
       timeout: 5000
     optional: true
     label: Wait for the iCloud syncing alert (if shown)
 
   - tool: tapOn
-    text: "Not Now"
+    selector:
+      textAny:
+        - "Not Now"
+        - "Close"
     action: "tap"
     optional: true
     label: Dismiss the iCloud syncing alert (if shown)
+
+  # Some iOS versions launch to the accounts home, where the create control is only available after
+  # entering the default Reminders list. This optional hop is skipped when the plan already starts in a
+  # list that shows "New Reminder".
+  - tool: observe
+    waitFor:
+      textAny:
+        - "Reminders, 0 reminders"
+        - "Reminders,"
+      timeout: 2000
+    optional: true
+    label: Wait for default Reminders list row (if on accounts home)
+
+  - tool: tapOn
+    selector:
+      textAny:
+        - "Reminders, 0 reminders"
+        - "Reminders,"
+    action: "tap"
+    optional: true
+    label: Open default Reminders list (if on accounts home)
+
+  # Reminders can also ask for location permission before exposing the create control. Dismiss this
+  # best-effort so local/simulator privacy state does not block the add flow.
+  - tool: observe
+    waitFor:
+      text: "Don’t Allow"
+      timeout: 5000
+    optional: true
+    label: Wait for location permission alert (if shown)
+
+  - tool: tapOn
+    selector:
+      text: "Don’t Allow"
+    action: "tap"
+    optional: true
+    label: Dismiss location permission alert (if shown)
 
   # Wait for the create control to render before tapping it, so the tap doesn't race the shade/list
   # layout on a slow simulator.
@@ -62,22 +120,32 @@ steps:
     label: Wait for title field
 
   - tool: inputText
-    text: "AutoMobile XCTest demo"
+    text: "${REMINDER_TITLE}"
     label: Type reminder title
 
-  # Wait for the "Add" save control to render before tapping it. Without this guard the tap races
-  # the keyboard/nav-bar layout and fails with "Element not found with provided text 'Add'"
-  # (issue #2811). observe waitFor polls until it appears and fails fast via awaitTimeout otherwise.
+  # Wait for the save control to render before tapping it. The label has varied between "Done"
+  # and "Add" across iOS versions, so the wait and tap use the same ordered variant list.
   - tool: observe
     waitFor:
-      text: "Add"
+      textAny:
+        - "Done"
+        - "Add"
       timeout: 10000
-    label: Wait for Add control
+    label: Wait for save control
 
   - tool: tapOn
-    text: "Add"
+    selector:
+      textAny:
+        - "Done"
+        - "Add"
     action: "tap"
     label: Save reminder
+
+  - tool: observe
+    waitFor:
+      text: "${REMINDER_TITLE}"
+      timeout: 10000
+    label: Verify saved reminder title
 
   - tool: terminateApp
     appId: com.apple.reminders

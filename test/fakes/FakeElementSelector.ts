@@ -14,6 +14,7 @@ import type { ElementSelector } from "../../src/utils/interfaces/ElementSelector
 export class FakeElementSelector implements ElementSelector {
   lastStrategy?: ElementSelectionStrategy;
   lastText?: string;
+  textCalls: string[] = [];
   lastResourceId?: string;
   nextElement: Element | null;
   nextIndexInMatches?: number;
@@ -62,6 +63,7 @@ export class FakeElementSelector implements ElementSelector {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
     this.lastText = text;
+    this.textCalls.push(text);
     return this.buildSelectionResult(options?.strategy);
   }
 
@@ -93,6 +95,7 @@ export class FakeElementSelector implements ElementSelector {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
     this.lastText = text;
+    this.textCalls.push(text);
     return this.buildSelectionResult(options?.strategy);
   }
 
@@ -122,6 +125,7 @@ export class FakeElementSelector implements ElementSelector {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
     this.lastText = text;
+    this.textCalls.push(text);
     return this.buildSelectionResult(options?.strategy);
   }
 

@@ -39,6 +39,11 @@ const waitForSchema = z.union([
     text: z.string().describe("Element text"),
     timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
     container: waitForContainerField
+  }),
+  z.object({
+    textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins"),
+    timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
+    container: waitForContainerField
   })
 ]);
 
@@ -106,6 +111,21 @@ const findWaitForElement = (
     );
   }
 
+  if ("textAny" in waitFor) {
+    for (const text of waitFor.textAny) {
+      const element = finder.findElementByText(
+        viewHierarchy,
+        text,
+        container,
+        true,
+        false
+      );
+      if (element) {
+        return element;
+      }
+    }
+  }
+
   return null;
 };
 
@@ -124,7 +144,7 @@ const waitForObservation = async (
   const timeoutMs = waitFor.timeout ?? 5000;
   const finder = new DefaultElementFinder();
   const queryOptions = {
-    text: "text" in waitFor ? waitFor.text : undefined,
+    text: "text" in waitFor ? waitFor.text : ("textAny" in waitFor ? waitFor.textAny[0] : undefined),
     elementId: "elementId" in waitFor ? waitFor.elementId : undefined
   };
 

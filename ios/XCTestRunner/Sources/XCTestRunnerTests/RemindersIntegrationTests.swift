@@ -77,6 +77,12 @@ final class RemindersAddPlanTests: RemindersIntegrationBase {
             ?? "add-reminder.yaml"
     }
 
+    override var planParameters: [String: String] {
+        return [
+            "REMINDER_TITLE": "AutoMobile XCTest demo \(UUID().uuidString)"
+        ]
+    }
+
     func testAddReminderPlan() throws {
         PerfTimer.log("testAddReminderPlan START - planPath: \(planPath)")
         let result = try executePlan()

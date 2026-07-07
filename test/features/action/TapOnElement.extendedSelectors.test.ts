@@ -65,6 +65,26 @@ describe("TapOnElement extended selectors", () => {
       expect(error).toBeNull();
     });
 
+    test("accepts textAny as sole selector", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+      const error = (tapOn as any).validateOptions({
+        action: "tap",
+        textAny: ["Done", "Add"],
+      });
+      expect(error).toBeNull();
+    });
+
+    test("rejects empty textAny selector", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+      const error = (tapOn as any).validateOptions({
+        action: "tap",
+        textAny: [],
+      });
+      expect(error).toContain("non-empty");
+    });
+
     test("accepts text with sibling flag", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
@@ -139,6 +159,26 @@ describe("TapOnElement extended selectors", () => {
 
       expect(result.selection.element).not.toBeNull();
       expect(selector.lastResourceId).toBe("com.app:id/label");
+    });
+
+    test("textAny tries variants in order and returns the first match", () => {
+      class VariantSelector extends FakeElementSelector {
+        override selectByText(...args: Parameters<FakeElementSelector["selectByText"]>) {
+          this.setNextElement(args[1] === "Add" ? makeElement() : null);
+          return super.selectByText(...args);
+        }
+      }
+      const selector = new VariantSelector(null);
+      const tapOn = createTapOnElement(selector);
+
+      const result = (tapOn as any).findElementInHierarchy(
+        { textAny: ["Done", "Add"], action: "tap" },
+        { hierarchy: { node: {} } }
+      );
+
+      expect(result.selection.element).not.toBeNull();
+      expect(selector.textCalls).toEqual(["Done", "Add"]);
+      expect(selector.lastText).toBe("Add");
     });
 
     test("sibling respects selectionStrategy", () => {

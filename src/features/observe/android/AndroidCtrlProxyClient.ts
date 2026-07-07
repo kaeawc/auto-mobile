@@ -50,6 +50,13 @@ import {
   computeChecksum,
 } from "../ScreenshotBackoffScheduler";
 import {
+  ANDROID_ADB_SCREENSHOT_METADATA,
+  ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
+  metadataForScreenshotFormat,
+  type ScreenshotFallbackReason,
+  type ScreenshotMetadata,
+} from "../ScreenshotMetadata";
+import {
   normalizeAnr,
   normalizeCrash,
   type SdkAnrPayload,
@@ -2170,7 +2177,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (message.type === "screenshot" && message.requestId) {
         const suppressObservationStreamPush = this.screenshotObservationStreamSuppressions.delete(message.requestId);
         if (!suppressObservationStreamPush) {
-          this.pushScreenshotToObservationStream(message.data);
+          this.pushScreenshotToObservationStream(
+            message.data,
+            metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, message.format)
+          );
         } else {
           logger.debug("[CTRL_PROXY] Suppressed screenshot observation stream push for explicit initial-frame request");
         }
@@ -2748,7 +2758,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private pushScreenshotToObservationStream(screenshotBase64: string): void {
+  private pushScreenshotToObservationStream(
+    screenshotBase64: string,
+    metadata: ScreenshotMetadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA
+  ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
       return;
@@ -2758,7 +2771,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const screenHeight = this.cachedScreenDimensions?.height ?? 2340;
 
     try {
-      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight);
+      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata);
     } catch (error) {
       logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);
     }
@@ -2797,8 +2810,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         async (): Promise<ScreenshotCaptureResult> => {
           return this.captureScreenshotForBackoff();
         },
-        (data: string) => {
-          this.pushScreenshotToObservationStream(data);
+        (result: ScreenshotCaptureResult) => {
+          if (result.data) {
+            this.pushScreenshotToObservationStream(result.data, result);
+          }
         },
         {
           intervals: [0, 100, 300, 500, 800, 1300],
@@ -2826,11 +2841,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     // If we know the device doesn't support a11y screenshots, go straight to ADB fallback
     if (this.a11yScreenshotSupported === false) {
-      return this.captureScreenshotViaAdb();
+      return this.captureScreenshotViaAdb("a11y_screenshot_unsupported");
     }
 
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      return this.captureScreenshotViaAdb();
+      return this.captureScreenshotViaAdb("websocket_unavailable");
     }
 
     const requestId = this.requestManager.generateId("screenshot-backoff");
@@ -2854,24 +2869,33 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             `${this.a11yScreenshotFailures} consecutive failures, falling back to ADB screencap`);
           this.a11yScreenshotSupported = false;
         }
-        return this.captureScreenshotViaAdb();
+        return this.captureScreenshotViaAdb(this.fallbackReasonForCtrlProxyFailure(result.error));
       }
 
       this.a11yScreenshotFailures = 0;
       this.a11yScreenshotSupported = true;
       const checksum = computeChecksum(result.data);
 
-      return { success: true, data: result.data, checksum };
+      return {
+        success: true,
+        data: result.data,
+        checksum,
+        ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, result.format),
+      };
     } catch (error) {
-      return this.captureScreenshotViaAdb();
+      return this.captureScreenshotViaAdb("ctrlproxy_exception");
     }
+  }
+
+  private fallbackReasonForCtrlProxyFailure(error?: string): ScreenshotFallbackReason {
+    return error === "Screenshot timeout" ? "ctrlproxy_timeout" : "ctrlproxy_failed";
   }
 
   /**
    * Fallback screenshot capture via ADB screencap for devices that don't support
    * accessibility service screenshots (API < 30).
    */
-  private async captureScreenshotViaAdb(): Promise<ScreenshotCaptureResult> {
+  private async captureScreenshotViaAdb(fallbackReason?: ScreenshotFallbackReason): Promise<ScreenshotCaptureResult> {
     try {
       const tempFile = "/sdcard/screenshot_stream.png";
       const command = `shell "screencap -p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
@@ -2885,7 +2909,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const data = result.stdout.replace(/[\r\n]/g, "");
       const checksum = computeChecksum(data);
 
-      return { success: true, data, checksum };
+      return {
+        success: true,
+        data,
+        checksum,
+        ...ANDROID_ADB_SCREENSHOT_METADATA,
+        screenshotFallbackReason: fallbackReason,
+      };
     } catch (error) {
       return { success: false, error: `ADB screencap failed: ${error}` };
     }

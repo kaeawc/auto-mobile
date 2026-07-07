@@ -7,6 +7,39 @@ import kotlinx.coroutines.test.runTest
 
 class ObservationStreamClientTest {
   @Test
+  fun `emits screenshot metadata when provided by stream`() = runTest {
+    val client = ObservationStreamClient()
+
+    client.screenshotUpdates.test {
+      client.handleMessage(
+        """
+        {
+          "type": "screenshot_update",
+          "deviceId": "emulator-5554",
+          "timestamp": 1001,
+          "screenshotBase64": "aW1hZ2U=",
+          "screenWidth": 100,
+          "screenHeight": 200,
+          "screenshotMimeType": "image/png",
+          "screenshotFormat": "png",
+          "screenshotCaptureSource": "android_adb_screencap",
+          "screenshotFallback": true,
+          "screenshotFallbackReason": "websocket_unavailable"
+        }
+        """
+          .trimIndent()
+      )
+
+      val update = awaitItem()
+      assertEquals("image/png", update.screenshotMimeType)
+      assertEquals("png", update.screenshotFormat)
+      assertEquals("android_adb_screencap", update.screenshotCaptureSource)
+      assertEquals(true, update.screenshotFallback)
+      assertEquals("websocket_unavailable", update.screenshotFallbackReason)
+    }
+  }
+
+  @Test
   fun `emits device connection lost event for disconnect error message`() = runTest {
     val client = ObservationStreamClient()
 

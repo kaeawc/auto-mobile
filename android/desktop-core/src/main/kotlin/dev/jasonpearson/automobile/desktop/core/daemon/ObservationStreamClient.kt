@@ -281,6 +281,11 @@ class ObservationStreamClient {
             screenshotBase64 = response.screenshotBase64,
             screenWidth = response.screenWidth ?: 1080,
             screenHeight = response.screenHeight ?: 2340,
+            screenshotMimeType = response.screenshotMimeType,
+            screenshotFormat = response.screenshotFormat,
+            screenshotCaptureSource = response.screenshotCaptureSource,
+            screenshotFallback = response.screenshotFallback,
+            screenshotFallbackReason = response.screenshotFallbackReason,
           )
         _screenshotUpdates.emit(update)
         log.info("Emitted screenshot update to flow")
@@ -434,6 +439,11 @@ data class StreamResponse(
   val screenshotBase64: String? = null,
   val screenWidth: Int? = null,
   val screenHeight: Int? = null,
+  val screenshotMimeType: String? = null,
+  val screenshotFormat: String? = null,
+  val screenshotCaptureSource: String? = null,
+  val screenshotFallback: Boolean? = null,
+  val screenshotFallbackReason: String? = null,
   val navigationGraph: NavigationGraphStreamData? = null,
   val performanceData: PerformanceStreamData? = null,
 )
@@ -476,6 +486,11 @@ data class ScreenshotStreamUpdate(
   val screenshotBase64: String?,
   val screenWidth: Int,
   val screenHeight: Int,
+  val screenshotMimeType: String? = null,
+  val screenshotFormat: String? = null,
+  val screenshotCaptureSource: String? = null,
+  val screenshotFallback: Boolean? = null,
+  val screenshotFallbackReason: String? = null,
 )
 
 data class NavigationGraphStreamUpdate(

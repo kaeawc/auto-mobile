@@ -141,6 +141,25 @@ describe("AndroidCtrlProxyClient", function() {
     }
   };
 
+  test("reports ADB screencap fallback screenshots as PNG fallback with reason", async () => {
+    fakeAdb.setCommandResponse("screencap -p", {
+      stdout: "png-base64\n",
+      stderr: "",
+    });
+
+    const result = await (accessibilityServiceClient as any).captureScreenshotViaAdb("websocket_unavailable");
+
+    expect(result).toMatchObject({
+      success: true,
+      data: "png-base64",
+      screenshotMimeType: "image/png",
+      screenshotFormat: "png",
+      screenshotCaptureSource: "android_adb_screencap",
+      screenshotFallback: true,
+      screenshotFallbackReason: "websocket_unavailable",
+    });
+  });
+
   test("setupPortForwarding reallocates when the current local port becomes busy before adb forward", async function() {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();

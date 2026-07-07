@@ -12,6 +12,11 @@ import type {
   CtrlProxyHierarchyResponse,
   CtrlProxyScreenshotResult,
 } from "../features/observe/ios/types";
+import {
+  ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
+  IOS_CTRLPROXY_SCREENSHOT_METADATA,
+  metadataForScreenshotFormat,
+} from "../features/observe/ScreenshotMetadata";
 
 const INITIAL_FRAME_HIERARCHY_TIMEOUT_MS = 3_000;
 const INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS = 3_000;
@@ -149,7 +154,8 @@ async function pushAndroidInitialScreenshot(
       deviceId,
       screenshot.data,
       dimensions.width,
-      dimensions.height
+      dimensions.height,
+      metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, screenshot.format)
     );
   }
 }
@@ -205,7 +211,8 @@ async function pushIosInitialObservationFrame(
       device.deviceId,
       screenshot.data,
       dimensions.width,
-      dimensions.height
+      dimensions.height,
+      metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, screenshot.format)
     );
   }
 }

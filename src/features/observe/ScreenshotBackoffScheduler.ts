@@ -1,11 +1,12 @@
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import crypto from "crypto";
+import type { ScreenshotMetadata } from "./ScreenshotMetadata";
 
 /**
  * Result of a screenshot capture attempt
  */
-export interface ScreenshotCaptureResult {
+export interface ScreenshotCaptureResult extends ScreenshotMetadata {
   success: boolean;
   data?: string; // base64 encoded
   checksum?: string;
@@ -20,7 +21,7 @@ type ScreenshotCaptureCallback = () => Promise<ScreenshotCaptureResult>;
 /**
  * Callback to emit a screenshot to the stream
  */
-type ScreenshotEmitCallback = (data: string) => void;
+type ScreenshotEmitCallback = (result: ScreenshotCaptureResult) => void;
 
 /**
  * Callback to decide whether keepalive screenshots should continue.
@@ -272,7 +273,7 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
       // Emit the screenshot
       logger.debug(`[ScreenshotBackoff] Emitting screenshot at ${captureLabel} (checksum: ${checksum.substring(0, 8)}..., size: ${result.data.length})`);
       this.lastEmittedChecksum = checksum;
-      this.emitCallback(result.data);
+      this.emitCallback(result);
 
     } catch (error) {
       logger.warn(`[ScreenshotBackoff] Error capturing screenshot at ${captureLabel}: ${error}`);

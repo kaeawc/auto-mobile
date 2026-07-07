@@ -9,6 +9,7 @@ import {
 import type { ObserveResult, ViewHierarchyResult } from "../models";
 import type { StorageChangedEvent } from "../features/storage/storageTypes";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
+import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
 
 /**
  * Navigation graph summary for streaming to IDE plugins.
@@ -65,7 +66,7 @@ export interface PerformanceStreamData {
 /**
  * Response/push message format
  */
-interface DeviceDataStreamMessage {
+interface DeviceDataStreamMessage extends ScreenshotMetadata {
   id?: string;
   type:
     | "subscription_response"
@@ -251,8 +252,16 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     deviceId: string,
     screenshotBase64: string,
     screenWidth: number,
-    screenHeight: number
+    screenHeight: number,
+    metadata: ScreenshotMetadata = {}
   ): void {
+    const {
+      screenshotMimeType,
+      screenshotFormat,
+      screenshotCaptureSource,
+      screenshotFallback,
+      screenshotFallbackReason,
+    } = metadata;
     const message: DeviceDataStreamMessage = {
       type: "screenshot_update",
       deviceId,
@@ -260,6 +269,11 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       screenshotBase64,
       screenWidth,
       screenHeight,
+      screenshotMimeType,
+      screenshotFormat,
+      screenshotCaptureSource,
+      screenshotFallback,
+      screenshotFallbackReason,
     };
 
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });

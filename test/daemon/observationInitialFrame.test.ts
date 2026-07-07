@@ -19,12 +19,7 @@ import type {
 
 class FakeObservationStreamServer {
   readonly hierarchyUpdates: Array<{ deviceId: string; hierarchy: ViewHierarchyResult }> = [];
-  readonly screenshotUpdates: Array<{
-    deviceId: string;
-    screenshotBase64: string;
-    screenWidth: number;
-    screenHeight: number;
-  }> = [];
+  readonly screenshotUpdates: ScreenshotUpdate[] = [];
 
   pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult): void {
     this.hierarchyUpdates.push({ deviceId, hierarchy });
@@ -34,10 +29,25 @@ class FakeObservationStreamServer {
     deviceId: string,
     screenshotBase64: string,
     screenWidth: number,
-    screenHeight: number
+    screenHeight: number,
+    metadata?: Record<string, unknown>
   ): void {
-    this.screenshotUpdates.push({ deviceId, screenshotBase64, screenWidth, screenHeight });
+    this.screenshotUpdates.push({
+      deviceId,
+      screenshotBase64,
+      screenWidth,
+      screenHeight,
+      ...(metadata === undefined ? {} : { metadata }),
+    });
   }
+}
+
+interface ScreenshotUpdate {
+  deviceId: string;
+  screenshotBase64: string;
+  screenWidth: number;
+  screenHeight: number;
+  metadata?: Record<string, unknown>;
 }
 
 class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
@@ -216,6 +226,12 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         screenshotBase64: "android-shot",
         screenWidth: 1440,
         screenHeight: 3120,
+        metadata: {
+          screenshotMimeType: "image/jpeg",
+          screenshotFormat: "jpeg",
+          screenshotCaptureSource: "android_ctrlproxy_a11y",
+          screenshotFallback: false,
+        },
       },
     ]);
     expect(androidClient.latestHierarchyCalls).toEqual([
@@ -322,6 +338,12 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         screenshotBase64: "ios-shot",
         screenWidth: 1170,
         screenHeight: 2532,
+        metadata: {
+          screenshotMimeType: "image/png",
+          screenshotFormat: "png",
+          screenshotCaptureSource: "ios_ctrlproxy",
+          screenshotFallback: false,
+        },
       },
     ]);
     expect(iosClient.syncHierarchyCalls).toHaveLength(0);

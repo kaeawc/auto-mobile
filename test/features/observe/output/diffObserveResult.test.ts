@@ -903,6 +903,35 @@ describe("diffObserveResult — conservative iOS stable identity (#3318)", () =>
     expect(diff.changed[0].changes.value).toEqual({ from: "", to: "Buy milk" });
   });
 
+  test("third-party iOS bundles without screenIdentity still use iOS text-field repair", () => {
+    const root = (text: string) => ({
+      "class": "XCUIApplication",
+      "bounds": { left: 0, top: 0, right: 393, bottom: 852 },
+      "node": [{
+        "resource-id": "TitleField",
+        "class": "UITextField",
+        "bounds": { left: 16, top: 120, right: 300, bottom: 160 },
+        "text": text,
+        "value": text,
+      }],
+    });
+    const screen = (text: string) => iosObs(root(text), {
+      activeWindow: { appId: "dev.example.todo", activityName: "", layoutSeqSum: 1 },
+      viewHierarchy: {
+        packageName: "dev.example.todo",
+        hierarchy: { node: root(text) as any },
+      },
+      screenIdentity: undefined,
+    });
+
+    const diff = diffObserveResult(screen(""), screen("Buy milk"));
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.text).toEqual({ from: "", to: "Buy milk" });
+    expect(diff.changed[0].changes.value).toEqual({ from: "", to: "Buy milk" });
+  });
+
   test("iOS generated UUID view-ids do not re-pair id-less text fields", () => {
     const baseline = iosObs({
       "view-id": "123e4567-e89b-12d3-a456-426614174000",

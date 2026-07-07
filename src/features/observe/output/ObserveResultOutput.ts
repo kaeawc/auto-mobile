@@ -749,6 +749,24 @@ function isIosObservation(obs: ObserveResult): boolean {
   if (obs.screenIdentity?.platform === "ios") {
     return true;
   }
+  const viewHierarchy = obs.viewHierarchy;
+  if (viewHierarchy) {
+    if (viewHierarchy.screenScale !== undefined) {
+      return true;
+    }
+    const hierarchy = viewHierarchy.hierarchy as Record<string, unknown>;
+    if (hierarchy.type === "XCUIElementTypeApplication" || hierarchy.elementType === "application") {
+      return true;
+    }
+    if (typeof hierarchy.bundleId === "string" && !viewHierarchy.hierarchy.node) {
+      return true;
+    }
+    const roots = toNodeArray(viewHierarchy.hierarchy.node);
+    if (roots.some(root => classNameForDiff(root as unknown as Record<string, unknown>) === "XCUIApplication"
+      || classNameForDiff(root as unknown as Record<string, unknown>) === "XCUIElementTypeApplication")) {
+      return true;
+    }
+  }
   const appId = obs.activeWindow?.appId ?? obs.viewHierarchy?.packageName ?? "";
   return appId.startsWith("com.apple.") || appId.endsWith(".ios");
 }

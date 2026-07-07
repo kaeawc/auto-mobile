@@ -58,7 +58,7 @@ export class InputKey {
 
     const keyCode = INPUT_KEY_CODE_MAP[key];
     try {
-      await this.adb.executeCommand(`shell input keyevent ${keyCode}`, timeoutMs);
+      await this.adb.executeCommand(`shell input keyevent ${keyCode}`, timeoutMs, undefined, true);
       return {
         success: true,
         key,

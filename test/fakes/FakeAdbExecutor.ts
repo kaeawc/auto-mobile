@@ -12,6 +12,13 @@ export class FakeAdbExecutor implements AdbExecutor {
   private defaultResponse: ExecResult = this.createExecResult("", "");
   private defaultError: Error | null = null;
   private executedCommands: string[] = [];
+  private commandCalls: Array<{
+    command: string;
+    timeoutMs?: number;
+    maxBuffer?: number;
+    noRetry?: boolean;
+    signal?: AbortSignal;
+  }> = [];
 
   // Configurable state
   private screenOn: boolean = true;
@@ -139,6 +146,16 @@ export class FakeAdbExecutor implements AdbExecutor {
     return [...this.executedCommands];
   }
 
+  getCommandCalls(): Array<{
+    command: string;
+    timeoutMs?: number;
+    maxBuffer?: number;
+    noRetry?: boolean;
+    signal?: AbortSignal;
+  }> {
+    return [...this.commandCalls];
+  }
+
   /**
    * Check if a specific command pattern was executed
    * @param pattern - Pattern to search for in command history
@@ -153,6 +170,7 @@ export class FakeAdbExecutor implements AdbExecutor {
    */
   clearHistory(): void {
     this.executedCommands = [];
+    this.commandCalls = [];
   }
 
   /**
@@ -187,9 +205,10 @@ export class FakeAdbExecutor implements AdbExecutor {
     timeoutMs?: number,
     maxBuffer?: number,
     noRetry?: boolean,
-    _signal?: AbortSignal
+    signal?: AbortSignal
   ): Promise<ExecResult> {
     this.executedCommands.push(command);
+    this.commandCalls.push({ command, timeoutMs, maxBuffer, noRetry, signal });
 
     // Check for per-command errors based on pattern matching
     for (const [pattern, error] of this.commandErrors.entries()) {

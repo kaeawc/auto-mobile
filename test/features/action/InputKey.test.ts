@@ -35,6 +35,15 @@ describe("InputKey", () => {
       keyCode: "KEYCODE_ENTER",
     });
     expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_ENTER"]);
+    expect(fakeAdb.getCommandCalls()).toEqual([
+      {
+        command: "shell input keyevent KEYCODE_ENTER",
+        timeoutMs: 1234,
+        maxBuffer: undefined,
+        noRetry: true,
+        signal: undefined,
+      },
+    ]);
   });
 
   test("maps the full first-version key set to Android keyevents", async () => {

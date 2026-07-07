@@ -431,6 +431,43 @@ class FakeAutoMobileClient : AutoMobileClient {
 
   override fun updateService(deviceId: String, platform: String) = notImplemented()
 
+  override fun inputTap(
+    x: Double,
+    y: Double,
+    platform: String,
+    deviceId: String?,
+    duration: Int?,
+  ) = notImplemented()
+
+  override fun inputSwipe(
+    startX: Double,
+    startY: Double,
+    endX: Double,
+    endY: Double,
+    platform: String,
+    deviceId: String?,
+    durationMs: Int?,
+  ) = notImplemented()
+
+  override fun inputPressButton(
+    button: String,
+    platform: String,
+    deviceId: String?,
+  ) = notImplemented()
+
+  override fun inputTypeText(
+    text: String,
+    platform: String,
+    deviceId: String?,
+    submit: Boolean?,
+  ) = notImplemented()
+
+  override fun inputKey(
+    key: String,
+    platform: String,
+    deviceId: String?,
+  ) = notImplemented()
+
   override fun setKeyValue(
     deviceId: String,
     appId: String,

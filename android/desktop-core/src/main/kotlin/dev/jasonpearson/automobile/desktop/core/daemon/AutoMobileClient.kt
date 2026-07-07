@@ -72,41 +72,41 @@ interface AutoMobileClient {
   fun updateService(deviceId: String, platform: String): UpdateServiceResult
 
   fun inputTap(
-    x: Int,
-    y: Int,
+    x: Double,
+    y: Double,
     platform: String = "android",
     deviceId: String? = null,
     duration: Int? = null,
-  ): InputActionResult = unsupportedInputAction("input/tap")
+  ): InputActionResult
 
   fun inputSwipe(
-    startX: Int,
-    startY: Int,
-    endX: Int,
-    endY: Int,
+    startX: Double,
+    startY: Double,
+    endX: Double,
+    endY: Double,
     platform: String = "android",
     deviceId: String? = null,
     durationMs: Int? = null,
-  ): InputActionResult = unsupportedInputAction("input/swipe")
+  ): InputActionResult
 
   fun inputPressButton(
     button: String,
     platform: String = "android",
     deviceId: String? = null,
-  ): InputActionResult = unsupportedInputAction("input/pressButton")
+  ): InputActionResult
 
   fun inputTypeText(
     text: String,
     platform: String = "android",
     deviceId: String? = null,
     submit: Boolean? = null,
-  ): InputActionResult = unsupportedInputAction("input/typeText")
+  ): InputActionResult
 
   fun inputKey(
     key: String,
     platform: String = "android",
     deviceId: String? = null,
-  ): InputActionResult = unsupportedInputAction("input/key")
+  ): InputActionResult
 
   fun setKeyValue(
     deviceId: String,
@@ -133,13 +133,6 @@ interface AutoMobileClient {
   fun callTool(name: String, arguments: JsonObject): JsonElement
 
   fun close() {}
-
-  private fun unsupportedInputAction(action: String): InputActionResult =
-    InputActionResult(
-      action = action,
-      success = false,
-      error = "$transportName does not support direct daemon input helpers",
-    )
 }
 
 @Serializable
@@ -202,16 +195,16 @@ data class ObserveScreenSize(
 
 @Serializable
 data class InputCoordinates(
-  val x: Int,
-  val y: Int,
+  val x: Double,
+  val y: Double,
 )
 
 @Serializable
 data class InputActionResult(
-  val action: String? = null,
+  val action: String,
+  val success: Boolean,
   val platform: String? = null,
   val deviceId: String? = null,
-  val success: Boolean = true,
   val error: String? = null,
   val coordinates: InputCoordinates? = null,
   val start: InputCoordinates? = null,
@@ -222,6 +215,13 @@ data class InputActionResult(
   val submitted: Boolean? = null,
   val key: String? = null,
 )
+
+internal fun unsupportedInputAction(transportName: String, action: String): InputActionResult =
+  InputActionResult(
+    action = action,
+    success = false,
+    error = "$transportName does not support direct daemon input helpers",
+  )
 
 open class McpConnectionException(message: String, cause: Throwable? = null) :
   Exception(message, cause)

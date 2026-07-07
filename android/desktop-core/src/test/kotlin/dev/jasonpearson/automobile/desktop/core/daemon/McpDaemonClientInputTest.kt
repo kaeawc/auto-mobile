@@ -12,6 +12,8 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -31,7 +33,7 @@ class McpDaemonClientInputTest {
         "platform": "android",
         "deviceId": "emulator-5554",
         "success": true,
-        "coordinates": { "x": 240, "y": 640 }
+        "coordinates": { "x": 240.5, "y": 640.25 }
       }
       """
         .trimIndent()
@@ -39,8 +41,8 @@ class McpDaemonClientInputTest {
     val result =
       captureInputRequest(responseResult) { client ->
         client.inputTap(
-          x = 240,
-          y = 640,
+          x = 240.5,
+          y = 640.25,
           platform = "android",
           deviceId = "emulator-5554",
           duration = 50,
@@ -52,14 +54,14 @@ class McpDaemonClientInputTest {
       mapOf(
         "platform" to JsonPrimitive("android"),
         "deviceId" to JsonPrimitive("emulator-5554"),
-        "x" to JsonPrimitive(240),
-        "y" to JsonPrimitive(640),
+        "x" to JsonPrimitive(240.5),
+        "y" to JsonPrimitive(640.25),
         "duration" to JsonPrimitive(50),
       ),
       result.request.params,
     )
     assertEquals(true, result.response.success)
-    assertEquals(InputCoordinates(x = 240, y = 640), result.response.coordinates)
+    assertEquals(InputCoordinates(x = 240.5, y = 640.25), result.response.coordinates)
   }
 
   @Test
@@ -71,8 +73,8 @@ class McpDaemonClientInputTest {
         "platform": "android",
         "deviceId": "emulator-5554",
         "success": true,
-        "start": { "x": 520, "y": 1700 },
-        "end": { "x": 520, "y": 500 },
+        "start": { "x": 520.75, "y": 1700.5 },
+        "end": { "x": 520.25, "y": 500.5 },
         "durationMs": 350
       }
       """
@@ -81,10 +83,10 @@ class McpDaemonClientInputTest {
     val result =
       captureInputRequest(responseResult) { client ->
         client.inputSwipe(
-          startX = 520,
-          startY = 1700,
-          endX = 520,
-          endY = 500,
+          startX = 520.75,
+          startY = 1700.5,
+          endX = 520.25,
+          endY = 500.5,
           platform = "android",
           deviceId = "emulator-5554",
           durationMs = 350,
@@ -96,17 +98,17 @@ class McpDaemonClientInputTest {
       mapOf(
         "platform" to JsonPrimitive("android"),
         "deviceId" to JsonPrimitive("emulator-5554"),
-        "startX" to JsonPrimitive(520),
-        "startY" to JsonPrimitive(1700),
-        "endX" to JsonPrimitive(520),
-        "endY" to JsonPrimitive(500),
+        "startX" to JsonPrimitive(520.75),
+        "startY" to JsonPrimitive(1700.5),
+        "endX" to JsonPrimitive(520.25),
+        "endY" to JsonPrimitive(500.5),
         "durationMs" to JsonPrimitive(350),
       ),
       result.request.params,
     )
     assertEquals(true, result.response.success)
-    assertEquals(InputCoordinates(x = 520, y = 1700), result.response.start)
-    assertEquals(InputCoordinates(x = 520, y = 500), result.response.end)
+    assertEquals(InputCoordinates(x = 520.75, y = 1700.5), result.response.start)
+    assertEquals(InputCoordinates(x = 520.25, y = 500.5), result.response.end)
     assertEquals(350, result.response.durationMs)
   }
 
@@ -176,6 +178,43 @@ class McpDaemonClientInputTest {
     assertEquals("input/key", result.request.method)
     assertEquals(false, result.response.success)
     assertEquals("input/key is unsupported on ios", result.response.error)
+  }
+
+  @Test
+  fun `input helpers reject malformed success payloads`() {
+    TestDaemonSocket(resultJson = "{}", error = null).use { server ->
+      assertFailsWith<SerializationException> {
+        McpDaemonClient(socketPathValue = server.socketPath.toString()).inputTap(x = 10.0, y = 20.0)
+      }
+      assertEquals("input/tap", server.awaitRequest().method)
+    }
+  }
+
+  @Test
+  fun `input helpers reject success payloads for a different action`() {
+    val result =
+      captureInputRequest("""{ "action": "input/swipe", "success": true }""") { client ->
+        client.inputTap(x = 10.0, y = 20.0)
+      }
+
+    assertEquals(false, result.response.success)
+    assertEquals(
+      "Daemon response action input/swipe did not match input/tap",
+      result.response.error,
+    )
+  }
+
+  @Test
+  fun `non socket clients explicitly report unsupported typed input`() {
+    val httpResult = McpHttpClient("http://localhost:1/auto-mobile/streamable").inputTap(1.0, 2.0)
+    val stdioResult = McpStdioClient("unused").inputTap(1.0, 2.0)
+
+    assertEquals(false, httpResult.success)
+    assertEquals("input/tap", httpResult.action)
+    assertEquals("MCP HTTP does not support direct daemon input helpers", httpResult.error)
+    assertEquals(false, stdioResult.success)
+    assertEquals("input/tap", stdioResult.action)
+    assertEquals("MCP STDIO does not support direct daemon input helpers", stdioResult.error)
   }
 
   private fun captureInputRequest(

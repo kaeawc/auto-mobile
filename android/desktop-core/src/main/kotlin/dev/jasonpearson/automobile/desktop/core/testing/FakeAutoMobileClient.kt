@@ -129,18 +129,18 @@ class FakeAutoMobileClient : AutoMobileClient {
   )
 
   data class InputTapCall(
-    val x: Int,
-    val y: Int,
+    val x: Double,
+    val y: Double,
     val platform: String,
     val deviceId: String?,
     val duration: Int?,
   )
 
   data class InputSwipeCall(
-    val startX: Int,
-    val startY: Int,
-    val endX: Int,
-    val endY: Int,
+    val startX: Double,
+    val startY: Double,
+    val endX: Double,
+    val endY: Double,
     val platform: String,
     val deviceId: String?,
     val durationMs: Int?,
@@ -292,8 +292,8 @@ class FakeAutoMobileClient : AutoMobileClient {
   }
 
   override fun inputTap(
-    x: Int,
-    y: Int,
+    x: Double,
+    y: Double,
     platform: String,
     deviceId: String?,
     duration: Int?,
@@ -304,10 +304,10 @@ class FakeAutoMobileClient : AutoMobileClient {
   }
 
   override fun inputSwipe(
-    startX: Int,
-    startY: Int,
-    endX: Int,
-    endY: Int,
+    startX: Double,
+    startY: Double,
+    endX: Double,
+    endY: Double,
     platform: String,
     deviceId: String?,
     durationMs: Int?,

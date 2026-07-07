@@ -23,7 +23,7 @@ class FakeAutoMobileClientTest {
     client.ping()
     client.listTools()
     client.observe()
-    client.inputTap(x = 10, y = 20)
+    client.inputTap(x = 10.0, y = 20.0)
     client.close()
 
     assertEquals(listOf("ping", "listTools", "observe", "inputTap", "close"), client.calls)
@@ -148,12 +148,12 @@ class FakeAutoMobileClientTest {
   fun `records typed input calls with arguments`() {
     val client = FakeAutoMobileClient()
 
-    client.inputTap(x = 10, y = 20, platform = "android", deviceId = "device-1", duration = 50)
+    client.inputTap(x = 10.0, y = 20.0, platform = "android", deviceId = "device-1", duration = 50)
     client.inputSwipe(
-      startX = 1,
-      startY = 2,
-      endX = 3,
-      endY = 4,
+      startX = 1.0,
+      startY = 2.0,
+      endX = 3.0,
+      endY = 4.0,
       platform = "ios",
       deviceId = "device-2",
       durationMs = 500,
@@ -168,8 +168,8 @@ class FakeAutoMobileClientTest {
     )
     assertEquals(
       FakeAutoMobileClient.InputTapCall(
-        x = 10,
-        y = 20,
+        x = 10.0,
+        y = 20.0,
         platform = "android",
         deviceId = "device-1",
         duration = 50,
@@ -178,10 +178,10 @@ class FakeAutoMobileClientTest {
     )
     assertEquals(
       FakeAutoMobileClient.InputSwipeCall(
-        startX = 1,
-        startY = 2,
-        endX = 3,
-        endY = 4,
+        startX = 1.0,
+        startY = 2.0,
+        endX = 3.0,
+        endY = 4.0,
         platform = "ios",
         deviceId = "device-2",
         durationMs = 500,
@@ -224,14 +224,14 @@ class FakeAutoMobileClientTest {
         platform = "android",
         deviceId = "device-1",
         success = true,
-        coordinates = InputCoordinates(x = 10, y = 20),
+        coordinates = InputCoordinates(x = 10.0, y = 20.0),
       )
 
-    val result = client.inputTap(x = 10, y = 20)
+    val result = client.inputTap(x = 10.0, y = 20.0)
 
     assertEquals(true, result.success)
     assertEquals("input/tap", result.action)
-    assertEquals(InputCoordinates(x = 10, y = 20), result.coordinates)
+    assertEquals(InputCoordinates(x = 10.0, y = 20.0), result.coordinates)
   }
 
   @Test

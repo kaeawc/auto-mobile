@@ -356,6 +356,43 @@ class McpHttpClient(
     }
   }
 
+  override fun inputTap(
+    x: Double,
+    y: Double,
+    platform: String,
+    deviceId: String?,
+    duration: Int?,
+  ): InputActionResult = unsupportedInputAction(transportName, "input/tap")
+
+  override fun inputSwipe(
+    startX: Double,
+    startY: Double,
+    endX: Double,
+    endY: Double,
+    platform: String,
+    deviceId: String?,
+    durationMs: Int?,
+  ): InputActionResult = unsupportedInputAction(transportName, "input/swipe")
+
+  override fun inputPressButton(
+    button: String,
+    platform: String,
+    deviceId: String?,
+  ): InputActionResult = unsupportedInputAction(transportName, "input/pressButton")
+
+  override fun inputTypeText(
+    text: String,
+    platform: String,
+    deviceId: String?,
+    submit: Boolean?,
+  ): InputActionResult = unsupportedInputAction(transportName, "input/typeText")
+
+  override fun inputKey(
+    key: String,
+    platform: String,
+    deviceId: String?,
+  ): InputActionResult = unsupportedInputAction(transportName, "input/key")
+
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
     ensureInitialized()
     val response =

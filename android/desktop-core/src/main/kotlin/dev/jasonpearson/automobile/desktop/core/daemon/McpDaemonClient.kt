@@ -268,8 +268,8 @@ class McpDaemonClient(
   }
 
   override fun inputTap(
-    x: Int,
-    y: Int,
+    x: Double,
+    y: Double,
     platform: String,
     deviceId: String?,
     duration: Int?,
@@ -287,10 +287,10 @@ class McpDaemonClient(
   }
 
   override fun inputSwipe(
-    startX: Int,
-    startY: Int,
-    endX: Int,
-    endY: Int,
+    startX: Double,
+    startY: Double,
+    endX: Double,
+    endY: Double,
     platform: String,
     deviceId: String?,
     durationMs: Int?,
@@ -455,7 +455,15 @@ class McpDaemonClient(
           success = false,
           error = "Daemon response missing result",
         )
-    return json.decodeFromJsonElement(InputActionResult.serializer(), result)
+    val inputResult = json.decodeFromJsonElement(InputActionResult.serializer(), result)
+    if (inputResult.action != method) {
+      return InputActionResult(
+        action = method,
+        success = false,
+        error = "Daemon response action ${inputResult.action} did not match $method",
+      )
+    }
+    return inputResult
   }
 
   private fun sendRequest(

@@ -53,6 +53,7 @@ import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
+import { PressButton } from "../features/action/PressButton";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice } from "../models";
@@ -643,6 +644,9 @@ export class UnixSocketServer {
     if (request.method === "input/swipe") {
       return await this.handleInputSwipe(request, socketSessionId);
     }
+    if (request.method === "input/pressButton") {
+      return await this.handleInputPressButton(request, socketSessionId);
+    }
 
     switch (request.method) {
       case "ide/listFeatureFlags": {
@@ -898,6 +902,47 @@ export class UnixSocketServer {
     };
   }
 
+  private async handleInputPressButton(
+    request: DaemonRequest,
+    socketSessionId?: string
+  ): Promise<any | undefined> {
+    const queueEnterMs = this.timer.now();
+    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const args = this.parseInputPressButtonParams(request.params);
+    const targetDevice = await this.resolveInputTargetDevice(
+      args.platform,
+      args.deviceId,
+      socketSessionId,
+      "input/pressButton"
+    );
+    const buttonResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      const queueWaitMs = this.timer.now() - queueEnterMs;
+      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+      if (remainingTimeoutMs <= 0) {
+        throw new McpTimeoutError({
+          toolName: request.method,
+          timeoutMs: totalTimeoutMs,
+          origin: "UnixSocketServer.handleInputPressButton",
+          detail: `spent ${queueWaitMs}ms waiting in queue`,
+        });
+      }
+
+      return await new PressButton(targetDevice).press(args.button, remainingTimeoutMs);
+    });
+
+    if (!buttonResult.success) {
+      throw new Error(buttonResult.error ?? `input/pressButton failed on ${args.platform}`);
+    }
+
+    return {
+      action: "input/pressButton",
+      platform: args.platform,
+      deviceId: targetDevice.deviceId,
+      success: true,
+      button: args.responseButton,
+    };
+  }
+
   private parseInputTapParams(params: unknown): {
     platform: "android" | "ios";
     deviceId?: string;
@@ -987,11 +1032,45 @@ export class UnixSocketServer {
     };
   }
 
+  private parseInputPressButtonParams(params: unknown): {
+    platform: "android" | "ios";
+    deviceId?: string;
+    button: string;
+    responseButton: string;
+  } {
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
+      throw new Error("input/pressButton requires params object");
+    }
+
+    const args = params as Record<string, unknown>;
+    if (args.platform !== "android" && args.platform !== "ios") {
+      throw new Error("input/pressButton requires platform 'android' or 'ios'");
+    }
+    if (typeof args.button !== "string") {
+      throw new Error("input/pressButton requires button");
+    }
+    const supportedButtons = ["home", "back", "menu", "power", "volume_up", "volume_down", "recent", "app_switch", "enter"];
+    if (!supportedButtons.includes(args.button)) {
+      throw new Error(`input/pressButton button must be one of: ${supportedButtons.join(", ")}`);
+    }
+    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
+      throw new Error("input/pressButton deviceId must be a string when provided");
+    }
+    const button = args.button === "app_switch" ? "recent" : args.button;
+
+    return {
+      platform: args.platform,
+      deviceId: args.deviceId,
+      button,
+      responseButton: args.button,
+    };
+  }
+
   private async resolveInputTargetDevice(
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: "input/tap" | "input/swipe"
+    action: "input/tap" | "input/swipe" | "input/pressButton"
   ): Promise<BootedDevice> {
     const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
     if (!discovery.succeededPlatforms.has(platform)) {

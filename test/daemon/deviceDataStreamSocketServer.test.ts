@@ -638,6 +638,12 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(1000);
     });
 
+    it("uses a caller-provided hierarchy fallback when subscribers omit cadence", () => {
+      server.simulateSubscription({ deviceId: "device-1" });
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1", 250)).toBe(250);
+    });
+
     it("parses requested hierarchy cadence from subscribe commands", async () => {
       const socket = new FakeSocket();
 

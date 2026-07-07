@@ -362,11 +362,11 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * Return the fastest active hierarchy cadence requested for this device,
    * or the default iOS hierarchy polling cadence when none is requested.
    */
-  getHierarchyIntervalMsForDevice(deviceId: string): number {
+  getHierarchyIntervalMsForDevice(deviceId: string, defaultIntervalMs: number = DEFAULT_HIERARCHY_INTERVAL_MS): number {
     return this.getFastestIntervalMsForDevice(
       deviceId,
       "hierarchy_update",
-      DEFAULT_HIERARCHY_INTERVAL_MS,
+      defaultIntervalMs,
       filter => filter.hierarchyIntervalMs,
       false
     );

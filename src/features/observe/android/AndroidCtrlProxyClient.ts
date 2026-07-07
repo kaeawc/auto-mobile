@@ -2007,7 +2007,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     const resolvedIntervalMs = intervalMs === undefined
-      ? getDeviceDataStreamServer()?.getHierarchyIntervalMsForDevice(this.device.deviceId) ?? null
+      ? getDeviceDataStreamServer()?.getHierarchyIntervalMsForDevice(
+        this.device.deviceId,
+        AndroidCtrlProxyClient.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
+      ) ?? AndroidCtrlProxyClient.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
       : intervalMs;
 
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({

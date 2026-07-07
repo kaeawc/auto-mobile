@@ -71,6 +71,43 @@ interface AutoMobileClient {
 
   fun updateService(deviceId: String, platform: String): UpdateServiceResult
 
+  fun inputTap(
+    x: Double,
+    y: Double,
+    platform: String = "android",
+    deviceId: String? = null,
+    duration: Int? = null,
+  ): InputActionResult
+
+  fun inputSwipe(
+    startX: Double,
+    startY: Double,
+    endX: Double,
+    endY: Double,
+    platform: String = "android",
+    deviceId: String? = null,
+    durationMs: Int? = null,
+  ): InputActionResult
+
+  fun inputPressButton(
+    button: String,
+    platform: String = "android",
+    deviceId: String? = null,
+  ): InputActionResult
+
+  fun inputTypeText(
+    text: String,
+    platform: String = "android",
+    deviceId: String? = null,
+    submit: Boolean? = null,
+  ): InputActionResult
+
+  fun inputKey(
+    key: String,
+    platform: String = "android",
+    deviceId: String? = null,
+  ): InputActionResult
+
   fun setKeyValue(
     deviceId: String,
     appId: String,
@@ -155,6 +192,36 @@ data class ObserveScreenSize(
   val width: Int? = null,
   val height: Int? = null,
 )
+
+@Serializable
+data class InputCoordinates(
+  val x: Double,
+  val y: Double,
+)
+
+@Serializable
+data class InputActionResult(
+  val action: String,
+  val success: Boolean,
+  val platform: String? = null,
+  val deviceId: String? = null,
+  val error: String? = null,
+  val coordinates: InputCoordinates? = null,
+  val start: InputCoordinates? = null,
+  val end: InputCoordinates? = null,
+  val durationMs: Int? = null,
+  val button: String? = null,
+  val textLength: Int? = null,
+  val submitted: Boolean? = null,
+  val key: String? = null,
+)
+
+internal fun unsupportedInputAction(transportName: String, action: String): InputActionResult =
+  InputActionResult(
+    action = action,
+    success = false,
+    error = "$transportName does not support direct daemon input helpers",
+  )
 
 open class McpConnectionException(message: String, cause: Throwable? = null) :
   Exception(message, cause)

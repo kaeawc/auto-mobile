@@ -206,3 +206,17 @@ task off the critical path: build a minimal reproducible repro of the
 (reference the closed-for-no-repro
 [sharp#4042](https://github.com/lovell/sharp/issues/4042)). If Bun fixes the
 interop, sharp can later be unfrozen and Windows collapsed onto it.
+
+### Issue #3014 upstream repro record
+
+The standalone repro lives in `docs/reproductions/sharp-bun-035`. It pins
+`sharp@0.35.3`, imports no AutoMobile code, creates a tiny PNG through sharp,
+exercises lossy/lossless/near-lossless WebP encodes, and reads WebP metadata.
+Capture local output under `scratch/sharp-bun-0.35-repro/` before posting
+evidence upstream.
+
+Local issue #3014 capture on 2026-07-07: `darwin arm64`, Bun `1.3.14`,
+sharp `0.35.3`, and libvips `8.18.3` passed the standalone repro. A Linux
+container attempt could not run because the Docker daemon was unavailable, so
+the recorded evidence is a minimal sharp 0.35.x interop repro package plus a
+macOS pass result, not a Linux/Windows crash log.

@@ -1,0 +1,11 @@
+{
+  "name": "sharp-bun-0.35-repro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "repro": "bun run index.ts"
+  },
+  "dependencies": {
+    "sharp": "0.35.3"
+  }
+}

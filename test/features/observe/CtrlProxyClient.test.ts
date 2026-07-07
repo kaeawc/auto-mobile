@@ -20,7 +20,11 @@ import { installInMemoryNavManager } from "../../helpers/navigationTestHarness";
 import type { HierarchySyncDiagnostics } from "../../../src/features/observe/android/types";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { logger } from "../../../src/utils/logger";
-import { stopDeviceDataStreamSocketServer } from "../../../src/daemon/deviceDataStreamSocketServer";
+import {
+  startDeviceDataStreamSocketServer,
+  stopDeviceDataStreamSocketServer,
+} from "../../../src/daemon/deviceDataStreamSocketServer";
+import { FakeSocket } from "../../fakes/FakeNetServer";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -141,6 +145,22 @@ describe("AndroidCtrlProxyClient", function() {
     }
   };
 
+  const startStreamServerWithScreenshotSubscriber = async (): Promise<void> => {
+    await stopDeviceDataStreamSocketServer();
+    const server = await startDeviceDataStreamSocketServer(fakeTimer);
+    (server as any).subscribers.set("screenshot-metadata-test", {
+      socket: new FakeSocket() as any,
+      subscriptionId: "screenshot-metadata-test",
+      lastActivity: fakeTimer.now(),
+      filter: {
+        deviceId: testDevice.deviceId,
+        screenshotIntervalMs: null,
+      },
+      backfilling: false,
+      drainPending: false,
+    });
+  };
+
   test("reports ADB screencap fallback screenshots as PNG fallback with reason", async () => {
     fakeAdb.setCommandResponse("screencap -p", {
       stdout: "png-base64\n",
@@ -157,6 +177,65 @@ describe("AndroidCtrlProxyClient", function() {
       screenshotCaptureSource: "android_adb_screencap",
       screenshotFallback: true,
       screenshotFallbackReason: "websocket_unavailable",
+    });
+  });
+
+  test("reports websocket-unavailable backoff captures as ADB PNG fallback", async () => {
+    await startStreamServerWithScreenshotSubscriber();
+    fakeAdb.setCommandResponse("screencap -p", {
+      stdout: "png-base64\n",
+      stderr: "",
+    });
+
+    const result = await (accessibilityServiceClient as any).captureScreenshotForBackoff();
+
+    expect(result).toMatchObject({
+      success: true,
+      data: "png-base64",
+      screenshotMimeType: "image/png",
+      screenshotFormat: "png",
+      screenshotCaptureSource: "android_adb_screencap",
+      screenshotFallback: true,
+      screenshotFallbackReason: "websocket_unavailable",
+    });
+  });
+
+  test("reports CtrlProxy backoff captures as JPEG non-fallback", async () => {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      factory,
+      fakeTimer
+    );
+    await startStreamServerWithScreenshotSubscriber();
+
+    await accessibilityServiceClient.ensureConnected();
+    const socket = await waitForSocket(getSocket) as CapturingWebSocket | null;
+    await waitForSocketOpen(socket);
+
+    const capturePromise = (accessibilityServiceClient as any).captureScreenshotForBackoff();
+    await waitForSentMessages(socket);
+    const request = JSON.parse(socket!.sentMessages.at(-1)!);
+    socket!.emit("message", JSON.stringify({
+      type: "screenshot",
+      requestId: request.requestId,
+      data: "jpeg-base64",
+      format: "jpeg",
+      timestamp: 123,
+    }));
+
+    const result = await capturePromise;
+
+    expect(result).toMatchObject({
+      success: true,
+      data: "jpeg-base64",
+      screenshotMimeType: "image/jpeg",
+      screenshotFormat: "jpeg",
+      screenshotCaptureSource: "android_ctrlproxy_a11y",
+      screenshotFallback: false,
     });
   });
 

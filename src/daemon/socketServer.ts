@@ -52,8 +52,10 @@ import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
+import type { BootedDevice } from "../models";
 /** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
 const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
@@ -330,8 +332,8 @@ export class UnixSocketServer {
           };
         }
 
-        // Handle IDE-only requests that don't need the MCP client
-        const localResult = await this.handleLocalIdeRequest(request);
+        // Handle socket-local requests that don't need the MCP client
+        const localResult = await this.handleLocalSocketRequest(request, sessionId);
         if (localResult !== undefined) {
           return {
             id: request.id,
@@ -628,12 +630,17 @@ export class UnixSocketServer {
   }
 
   /**
-   * Handle IDE requests that don't require the MCP client.
+   * Handle socket requests that don't require the MCP client.
    * Returns undefined if the request should be forwarded to MCP.
    */
-  private async handleLocalIdeRequest(
-    request: DaemonRequest
+  private async handleLocalSocketRequest(
+    request: DaemonRequest,
+    socketSessionId?: string
   ): Promise<any | undefined> {
+    if (request.method === "input/tap") {
+      return await this.handleInputTap(request, socketSessionId);
+    }
+
     switch (request.method) {
       case "ide/listFeatureFlags": {
         if (!this.featureFlagService) {
@@ -790,6 +797,125 @@ export class UnixSocketServer {
       default:
         return undefined;
     }
+  }
+
+  private async handleInputTap(
+    request: DaemonRequest,
+    socketSessionId?: string
+  ): Promise<any | undefined> {
+    const queueEnterMs = this.timer.now();
+    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const args = this.parseInputTapParams(request.params);
+    const targetDevice = await this.resolveInputTargetDevice(args.platform, args.deviceId, socketSessionId);
+    const gestureResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      const queueWaitMs = this.timer.now() - queueEnterMs;
+      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+      if (remainingTimeoutMs <= 0) {
+        throw new McpTimeoutError({
+          toolName: request.method,
+          timeoutMs: totalTimeoutMs,
+          origin: "UnixSocketServer.handleInputTap",
+          detail: `spent ${queueWaitMs}ms waiting in queue`,
+        });
+      }
+
+      return args.platform === "android"
+        ? await AndroidCtrlProxyClient
+          .getInstance(targetDevice, defaultAdbClientFactory)
+          .requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs)
+        : await IOSCtrlProxyClient
+          .getInstance(targetDevice)
+          .requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs);
+    });
+
+    if (!gestureResult.success) {
+      throw new Error(gestureResult.error ?? `input/tap failed on ${args.platform}`);
+    }
+
+    return {
+      action: "input/tap",
+      platform: args.platform,
+      deviceId: targetDevice.deviceId,
+      success: true,
+      coordinates: { x: args.x, y: args.y },
+    };
+  }
+
+  private parseInputTapParams(params: unknown): {
+    platform: "android" | "ios";
+    deviceId?: string;
+    x: number;
+    y: number;
+    duration?: number;
+  } {
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
+      throw new Error("input/tap requires params object");
+    }
+
+    const args = params as Record<string, unknown>;
+    if (args.platform !== "android" && args.platform !== "ios") {
+      throw new Error("input/tap requires platform 'android' or 'ios'");
+    }
+    if (typeof args.x !== "number" || Number.isNaN(args.x) || typeof args.y !== "number" || Number.isNaN(args.y)) {
+      throw new Error("input/tap requires numeric x and y params");
+    }
+    if (args.duration !== undefined && (typeof args.duration !== "number" || Number.isNaN(args.duration))) {
+      throw new Error("input/tap duration must be numeric when provided");
+    }
+    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
+      throw new Error("input/tap deviceId must be a string when provided");
+    }
+
+    return {
+      platform: args.platform,
+      deviceId: args.deviceId,
+      x: args.x,
+      y: args.y,
+      duration: args.duration,
+    };
+  }
+
+  private async resolveInputTargetDevice(
+    platform: "android" | "ios",
+    deviceId: string | undefined,
+    socketSessionId: string | undefined
+  ): Promise<BootedDevice> {
+    const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
+    if (!discovery.succeededPlatforms.has(platform)) {
+      throw new Error(`Unable to discover booted ${platform} devices for input/tap`);
+    }
+    const bootedDevices = discovery.devices;
+    if (deviceId) {
+      const targetDevice = bootedDevices.find(device => device.deviceId === deviceId);
+      if (!targetDevice) {
+        throw new Error(`Device not found: ${deviceId}`);
+      }
+      return targetDevice;
+    }
+
+    const autolockSessionId = this.daemonState.isInitialized()
+      ? this.daemonState
+        .getDevicePool()
+        .resolveAutolockSessionForMcpSession?.(socketSessionId, platform)
+      : undefined;
+    const autolockDeviceId = autolockSessionId
+      ? this.daemonState.getSessionManager().getSession(autolockSessionId)?.assignedDevice
+      : undefined;
+    if (autolockDeviceId) {
+      const targetDevice = bootedDevices.find(device => device.deviceId === autolockDeviceId);
+      if (!targetDevice) {
+        throw new Error(`Device not found: ${autolockDeviceId}`);
+      }
+      return targetDevice;
+    }
+
+    if (bootedDevices.length === 1) {
+      return bootedDevices[0];
+    }
+    if (bootedDevices.length === 0) {
+      throw new Error(`No booted ${platform} devices found for input/tap`);
+    }
+    throw new Error(`input/tap requires deviceId when multiple ${platform} devices are booted`);
   }
 
   private async handleIdeRequest(

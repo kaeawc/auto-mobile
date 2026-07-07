@@ -257,7 +257,7 @@ Clears all keys from an Android app's SharedPreferences file. <kbd>🤖 Android 
 
 ## Input API
 
-<kbd>🚧 Design Only</kbd> <kbd>❌ Not Implemented</kbd>
+<kbd>🚧 Partially Implemented</kbd>
 
 The daemon input API is the consumer-facing contract for IDE screen control and
 other direct-input clients. These methods use the same newline-delimited JSON
@@ -291,15 +291,15 @@ observation and do not implicitly trigger one. Callers that need post-input
 state should call `observe` through the MCP proxy or subscribe to the observation
 stream after the input response returns.
 
-### Platform support
+### Implementation status
 
 | Method | Android | iOS | Notes |
 |---|---|---|---|
 | `input/tap` | Supported | Supported | Absolute device-screen coordinates. |
-| `input/swipe` | Supported | Supported | Use for drag gestures until `input/drag` has distinct semantics. |
+| `input/swipe` | Contract only | Contract only | Not implemented yet. Use for drag gestures until `input/drag` has distinct semantics. |
 | `input/drag` | Deferred | Deferred | Not a separate method in this contract. |
-| `input/pressButton` | Supported per button | Supported per button | Unsupported buttons fail instead of being ignored. |
-| `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. |
+| `input/pressButton` | Contract only | Contract only | Not implemented yet. Unsupported buttons fail instead of being ignored. |
+| `input/typeText` | Contract only | Contract only | Not implemented yet. Sends committed text only; IME composition is deferred. |
 | `input/key` | Deferred | Deferred | Use `input/pressButton` or `input/typeText`. |
 
 All successful input responses use this result shape:
@@ -338,6 +338,7 @@ the current device orientation.
 | `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
 | `x` | `number` | Yes | X coordinate in physical screen pixels. |
 | `y` | `number` | Yes | Y coordinate in physical screen pixels. |
+| `duration` | `number` | No | Tap duration in milliseconds. |
 
 **Request**
 
@@ -350,7 +351,8 @@ the current device orientation.
     "platform": "android",
     "deviceId": "emulator-5554",
     "x": 240,
-    "y": 640
+    "y": 640,
+    "duration": 50
   }
 }
 ```

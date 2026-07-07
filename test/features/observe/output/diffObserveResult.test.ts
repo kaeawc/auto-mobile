@@ -978,6 +978,40 @@ describe("diffObserveResult — conservative iOS stable identity (#3318)", () =>
     expect(diff.removed).toHaveLength(1);
   });
 
+  test("iOS text fields inside reused cells do not re-pair different logical rows", () => {
+    const row = (label: string) => ({
+      "view-id": "reused-cell",
+      "class": "UITableViewCell",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 144 },
+      "node": [{
+        "resource-id": "TitleField",
+        "class": "UITextField",
+        "bounds": { left: 16, top: 108, right: 300, bottom: 136 },
+        "text": label,
+        "value": label,
+      }],
+    });
+    const baseline = iosObs({
+      "view-id": "ReminderList",
+      "class": "UITableView",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [row("Old row")],
+    });
+    const next = iosObs({
+      "view-id": "ReminderList",
+      "class": "UITableView",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [row("Different row")],
+    });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.added[0].attributes.text).toBe("Different row");
+    expect(diff.removed[0].attributes.text).toBe("Old row");
+  });
+
   test("real iOS fixture churn stays neutral with iOS identity enabled", () => {
     const { before, after } = loadIosRemindersNoiseObservePair();
     const withIdentity = diffObserveResult(before, after);

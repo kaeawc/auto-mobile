@@ -72,9 +72,8 @@ elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
   fi
 elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
   echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-4":[{"name":"iPhone 16","udid":"FAKE-UDID","state":"Shutdown"}]}}'
-elif [ "$1" = "simctl" ] && [ "$2" = "boot" ]; then
-  exit 0
 elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
+  [ "$4" = "-b" ] || exit 2
   exit 0
 fi
 SCRIPT
@@ -96,4 +95,85 @@ SCRIPT
 @test "uses jq to find runtime identifier from simctl output" {
   grep -q 'simctl list runtimes iOS --json' "$SCRIPT"
   grep -q '.identifier' "$SCRIPT"
+}
+
+@test "uses bootstatus -b so already-booted simulators are accepted" {
+  cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
+#!/bin/sh
+if [ "$1" = "--sdk" ] && [ "$2" = "iphonesimulator" ] && [ "$3" = "--show-sdk-version" ]; then
+  echo "26.2"
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
+  echo '{"runtimes":[{"version":"26.2.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-2"}]}'
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
+  echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-2":[{"name":"iPhone 17 Pro","udid":"BOOTED-UDID","state":"Booted"}]}}'
+elif [ "$1" = "simctl" ] && [ "$2" = "boot" ]; then
+  echo "boot should not be called" >&2
+  exit 149
+elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
+  [ "$3" = "BOOTED-UDID" ] || exit 2
+  [ "$4" = "-b" ] || exit 2
+  exit 0
+fi
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun"
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run bash "$SCRIPT" --ios-version 26.2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BOOTED-UDID"* ]]
+  [[ "$output" != *"boot should not be called"* ]]
+}
+
+@test "waits for shutting down simulator before bootstatus -b" {
+  CALLS_FILE="${MOCK_BIN}/calls.log"
+  STATE_CALLS_FILE="${MOCK_BIN}/state-calls"
+  export CALLS_FILE
+  export STATE_CALLS_FILE
+  cat > "${MOCK_BIN}/sleep" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+  chmod +x "${MOCK_BIN}/sleep"
+  cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "--sdk" ] && [ "$2" = "iphonesimulator" ] && [ "$3" = "--show-sdk-version" ]; then
+  echo "26.2"
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
+  echo '{"runtimes":[{"version":"26.2.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-2"}]}'
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
+  if [ "${4:-}" = "available" ]; then
+    echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-2":[{"name":"iPhone 17 Pro","udid":"SHUTTING-DOWN-UDID","state":"Shutting Down"}]}}'
+  else
+    count=0
+    if [ -f "${STATE_CALLS_FILE}" ]; then
+      count=$(cat "${STATE_CALLS_FILE}")
+    fi
+    count=$((count + 1))
+    echo "${count}" > "${STATE_CALLS_FILE}"
+    if [ "${count}" -eq 1 ]; then
+      echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-2":[{"name":"iPhone 17 Pro","udid":"SHUTTING-DOWN-UDID","state":"Shutting Down"}]}}'
+    else
+      echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-2":[{"name":"iPhone 17 Pro","udid":"SHUTTING-DOWN-UDID","state":"Shutdown"}]}}'
+    fi
+  fi
+elif [ "$1" = "simctl" ] && [ "$2" = "boot" ]; then
+  echo "boot should not be called" >&2
+  exit 99
+elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
+  echo "bootstatus" >> "${CALLS_FILE}"
+  [ "$3" = "SHUTTING-DOWN-UDID" ] || exit 2
+  [ "$4" = "-b" ] || exit 2
+  exit 0
+fi
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun"
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run env AUTOMOBILE_SIMULATOR_SHUTDOWN_WAIT_SECONDS=5 bash "$SCRIPT" --ios-version 26.2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"still shutting down"* ]]
+  [[ "$output" == *"SHUTTING-DOWN-UDID"* ]]
+  [[ "$output" != *"boot should not be called"* ]]
+  grep -q '^bootstatus$' "${CALLS_FILE}"
 }

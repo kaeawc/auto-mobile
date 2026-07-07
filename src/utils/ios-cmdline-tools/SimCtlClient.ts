@@ -595,9 +595,11 @@ export class SimCtlClient implements SimCtl {
     logger.debug(`Starting iOS simulator ${udid}`);
     const perf = createGlobalPerformanceTracker();
 
-    perf.startOperation("simctlBoot");
-    await this.executeCommand(`boot ${udid}`);
-    perf.endOperation("simctlBoot");
+    // `bootstatus -b` is idempotent: it boots shutdown simulators, accepts
+    // already-booted simulators, and waits until CoreSimulator reports ready.
+    perf.startOperation("bootstatus");
+    await this.executeCommand(`bootstatus ${udid} -b`);
+    perf.endOperation("bootstatus");
 
     // Open Simulator.app focused on this specific device (no-op on headless hosts)
     try {
@@ -609,7 +611,7 @@ export class SimCtlClient implements SimCtl {
       logger.debug("Could not open Simulator.app (non-fatal)");
     }
 
-    // simctl boot is synchronous, so we return a mock process handle
+    // simctl bootstatus is synchronous, so we return a mock process handle
     // with the minimal subset of ChildProcess fields used by callers
     return {
       pid: this.timer.now(), // Use timestamp as mock PID

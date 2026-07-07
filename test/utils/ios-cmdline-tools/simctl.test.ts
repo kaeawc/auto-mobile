@@ -162,6 +162,41 @@ describe("Simctl", function() {
     });
   });
 
+  describe("startSimulator", function() {
+    test("uses bootstatus -b instead of raw boot so already-booted simulators are accepted", async function() {
+      const commands: string[][] = [];
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        commands.push([file, ...args]);
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl boot test-ios-device-id") {
+          throw new Error("raw boot should not be called");
+        }
+        return createExecResult("command executed", "");
+      };
+
+      simctl = new Simctl(mockDevice, mockExecAsync);
+
+      const childProcess = await simctl.startSimulator("test-ios-device-id");
+
+      expect(childProcess.exitCode).toBe(0);
+      expect(commands).toContainEqual([
+        "xcrun",
+        "simctl",
+        "bootstatus",
+        "test-ios-device-id",
+        "-b",
+      ]);
+      expect(commands).not.toContainEqual([
+        "xcrun",
+        "simctl",
+        "boot",
+        "test-ios-device-id",
+      ]);
+    });
+  });
+
   describe("docker host-control mode (iOS unsupported)", function() {
     // Driving the iOS simulator from inside Docker is intentionally unsupported
     // for now (see SimCtlClient.executeCommand). The simctl surface must fail fast

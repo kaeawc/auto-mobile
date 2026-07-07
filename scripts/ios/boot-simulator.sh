@@ -86,6 +86,42 @@ fi
 
 echo "Using runtime: ${RUNTIME_ID}" >&2
 
+get_device_state() {
+  xcrun simctl list devices -j \
+    | jq -r --arg udid "$1" '
+        .devices | to_entries[] | .value[]
+        | select(.udid == $udid)
+        | .state // empty
+      ' \
+    | head -1
+}
+
+wait_for_shutdown_if_needed() {
+  local udid="$1"
+  local state="$2"
+  local waited=0
+  local max_wait="${AUTOMOBILE_SIMULATOR_SHUTDOWN_WAIT_SECONDS:-60}"
+
+  if [[ "${state}" != "Shutting Down" ]]; then
+    echo "${state}"
+    return 0
+  fi
+
+  echo "Simulator is still shutting down; waiting up to ${max_wait}s..." >&2
+  while (( waited < max_wait )); do
+    sleep 1
+    waited=$((waited + 1))
+    state=$(get_device_state "${udid}")
+    if [[ "${state}" != "Shutting Down" ]]; then
+      echo "${state}"
+      return 0
+    fi
+  done
+
+  echo "error: simulator ${udid} still shutting down after ${max_wait}s" >&2
+  exit 1
+}
+
 # Find the first available iPhone device for the requested iOS version
 UDID=$(xcrun simctl list devices available -j \
   | jq -r --arg runtime "${RUNTIME_ID}" '
@@ -125,8 +161,14 @@ DEVICE_NAME=$(xcrun simctl list devices available -j \
       | select(.udid == $udid) | .name
     ')
 
-echo "Booting ${DEVICE_NAME} (${UDID})..." >&2
-xcrun simctl boot "${UDID}"
+DEVICE_STATE=$(get_device_state "${UDID}")
+DEVICE_STATE=$(wait_for_shutdown_if_needed "${UDID}" "${DEVICE_STATE}")
+if [[ "${DEVICE_STATE}" == "Booted" ]]; then
+  echo "${DEVICE_NAME} (${UDID}) is already booted; waiting for readiness..." >&2
+else
+  echo "Ensuring ${DEVICE_NAME} (${UDID}) is booted..." >&2
+fi
+
 xcrun simctl bootstatus "${UDID}" -b >&2
 
 echo "Booted: ${DEVICE_NAME} (${UDID})" >&2

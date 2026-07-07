@@ -1283,6 +1283,23 @@ jobs:
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
           echo "xctestrun file: ${XCTESTRUN}"
 
+      - name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.3)"
+        id: ctrlproxy-simulator
+        run: ./scripts/ios/boot-simulator.sh
+
+      - name: "Run CtrlProxy privacy resource mapping UI test (Xcode 26.3)"
+        timeout-minutes: 5
+        run: |
+          XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+          xcodebuild test-without-building \
+            -xctestrun "${XCTESTRUN}" \
+            -destination "id=${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}" \
+            -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests
+
+      - name: "Shutdown CtrlProxy UI test simulator"
+        if: always()
+        run: xcrun simctl shutdown all || true
+
       - name: "Select Xcode 26.2"
         uses: maxim-lobanov/setup-xcode@v1
         with:

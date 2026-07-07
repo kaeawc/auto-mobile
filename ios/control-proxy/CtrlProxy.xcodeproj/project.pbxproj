@@ -18,6 +18,7 @@
 		1BF8D64D9A034BEC375AEE8B /* ObjCExceptionCatcher.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		1E92C9DDBA24968595494BA3 /* RequestSnapshotWireParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A158ADBA8E3301E9FF181598 /* RequestSnapshotWireParityTests.swift */; };
 		1F968B5EDB744057F51321EF /* ElementLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95565999DC108319DEED894A /* ElementLocator.swift */; };
+		22D17AADC9A8AC3CE96D19A5 /* PrivacyResourceMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E0C8F550D3A30C87BF84E67 /* PrivacyResourceMappingTests.swift */; };
 		261F76AE6277D92BD87CFB1C /* SdkHierarchyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */; };
 		2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */; };
 		2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9D7B74C318EE243B225B95 /* Protocols.swift */; };
@@ -181,6 +182,7 @@
 		649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjCExceptionBridgeTests.swift; sourceTree = "<group>"; };
 		652F5687D2FC57F3D6D4629C /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		6B8E0FBA4D04484920DA1D03 /* MainThreadRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadRunner.swift; sourceTree = "<group>"; };
+		6E0C8F550D3A30C87BF84E67 /* PrivacyResourceMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyResourceMappingTests.swift; sourceTree = "<group>"; };
 		6FC3D01763F51CE349F7E923 /* PinchFallbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinchFallbackTests.swift; sourceTree = "<group>"; };
 		73D776AE5CF32E6E89AEF7A5 /* ObjCExceptionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjCExceptionBridge.swift; sourceTree = "<group>"; };
 		76DC5538569B4FCF89EA7547 /* ErrorResponseTypeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorResponseTypeTests.swift; sourceTree = "<group>"; };
@@ -286,6 +288,7 @@
 			isa = PBXGroup;
 			children = (
 				802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */,
+				6E0C8F550D3A30C87BF84E67 /* PrivacyResourceMappingTests.swift */,
 			);
 			name = CtrlProxyUITests;
 			path = Tests/CtrlProxyUITests;
@@ -634,6 +637,7 @@
 				4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */,
 				B55A16F80CE62B998CEBC6E0 /* PerformanceMetrics.swift in Sources */,
 				5BE77C31B3E127345E3830A6 /* PinchFallback.swift in Sources */,
+				22D17AADC9A8AC3CE96D19A5 /* PrivacyResourceMappingTests.swift in Sources */,
 				2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */,
 				9E975A4E407F93A21BD80EB4 /* SdkDatabaseClient.swift in Sources */,
 				EE7765F6DA0807474D52C3DD /* SdkHierarchyCache.swift in Sources */,

@@ -1376,7 +1376,7 @@ public class GesturePerformer: GesturePerforming {
         /// support matrix is advertised honestly — see issue #2491). The mapping is
         /// authoritative here rather than duplicated on the TS host, since
         /// `XCUIProtectedResource` only exists in this process.
-        private static func protectedResource(for name: String) -> XCUIProtectedResource? {
+        static func protectedResource(for name: String) -> XCUIProtectedResource? {
             switch name {
             case "camera": return .camera
             case "photos", "photos-add": return .photos

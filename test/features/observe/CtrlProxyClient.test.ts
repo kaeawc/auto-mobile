@@ -20,7 +20,11 @@ import { installInMemoryNavManager } from "../../helpers/navigationTestHarness";
 import type { HierarchySyncDiagnostics } from "../../../src/features/observe/android/types";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { logger } from "../../../src/utils/logger";
-import { stopDeviceDataStreamSocketServer } from "../../../src/daemon/deviceDataStreamSocketServer";
+import {
+  startDeviceDataStreamSocketServer,
+  stopDeviceDataStreamSocketServer,
+} from "../../../src/daemon/deviceDataStreamSocketServer";
+import { FakeSocket } from "../../fakes/FakeNetServer";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -140,6 +144,247 @@ describe("AndroidCtrlProxyClient", function() {
       await new Promise(resolve => setImmediate(resolve));
     }
   };
+
+  interface ScreenshotUpdateMessage {
+    type: string;
+    deviceId?: string;
+    screenshotBase64?: string;
+    screenshotMimeType?: string;
+    screenshotFormat?: string;
+    screenshotCaptureSource?: string;
+    screenshotFallback?: boolean;
+    screenshotFallbackReason?: string | null;
+  }
+
+  const startStreamServerWithScreenshotSubscriber = async (): Promise<FakeSocket> => {
+    await stopDeviceDataStreamSocketServer();
+    const server = await startDeviceDataStreamSocketServer(fakeTimer);
+    const socket = new FakeSocket();
+    await (server as any).processLine(
+      socket as any,
+      JSON.stringify({
+        id: "subscribe-screenshot-metadata-test",
+        command: "subscribe",
+        deviceId: testDevice.deviceId,
+        screenshotIntervalMs: 250,
+      })
+    );
+    socket.reset();
+    return socket;
+  };
+
+  const getScreenshotUpdates = (socket: FakeSocket): ScreenshotUpdateMessage[] => {
+    return socket.getWrittenMessages<ScreenshotUpdateMessage>()
+      .filter(message => message.type === "screenshot_update");
+  };
+
+  const expectSingleScreenshotUpdate = (
+    socket: FakeSocket,
+    expected: Partial<ScreenshotUpdateMessage>
+  ): void => {
+    expect(getScreenshotUpdates(socket)).toEqual([expect.objectContaining(expected)]);
+  };
+
+  const setAdbPngScreenshotResponse = (): void => {
+    fakeAdb.setCommandResponse("screencap -p", {
+      stdout: "png-base64\n",
+      stderr: "",
+    });
+  };
+
+  const startScreenshotBackoffAndFlush = async (): Promise<void> => {
+    (accessibilityServiceClient as any).startScreenshotBackoff();
+    await fakeTimer.advanceTimersByTimeAsync(0);
+    await flushPromises();
+  };
+
+  const startScreenshotBackoffAndReadRequest = async (
+    ctrlProxySocket: CapturingWebSocket
+  ): Promise<{ requestId: string }> => {
+    (accessibilityServiceClient as any).startScreenshotBackoff();
+    await fakeTimer.advanceTimersByTimeAsync(0);
+    await waitForSentMessages(ctrlProxySocket);
+    return JSON.parse(ctrlProxySocket.sentMessages.at(-1)!) as { requestId: string };
+  };
+
+  const recreateClientForManualTimerTest = async (): Promise<void> => {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeTimer = new FakeTimer();
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(fakeTimer),
+      fakeTimer
+    );
+    accessibilityServiceClient.invalidateCache();
+  };
+
+  const startCapturingBackoffStreamTest = async (): Promise<{
+    streamSocket: FakeSocket;
+    ctrlProxySocket: CapturingWebSocket;
+  }> => {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeTimer = new FakeTimer();
+    const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      factory,
+      fakeTimer
+    );
+    accessibilityServiceClient.invalidateCache();
+    const streamSocket = await startStreamServerWithScreenshotSubscriber();
+
+    await accessibilityServiceClient.ensureConnected();
+    const ctrlProxySocket = await waitForSocket(getSocket) as CapturingWebSocket | null;
+    await waitForSocketOpen(ctrlProxySocket);
+    if (!ctrlProxySocket) {
+      throw new Error("Expected capturing CtrlProxy socket");
+    }
+
+    return { streamSocket, ctrlProxySocket };
+  };
+
+  test("reports ADB screencap fallback screenshots as PNG fallback with reason", async () => {
+    fakeAdb.setCommandResponse("screencap -p", {
+      stdout: "png-base64\n",
+      stderr: "",
+    });
+
+    const result = await (accessibilityServiceClient as any).captureScreenshotViaAdb("websocket_unavailable");
+
+    expect(result).toMatchObject({
+      success: true,
+      data: "png-base64",
+      screenshotMimeType: "image/png",
+      screenshotFormat: "png",
+      screenshotCaptureSource: "android_adb_screencap",
+      screenshotFallback: true,
+      screenshotFallbackReason: "websocket_unavailable",
+    });
+  });
+
+  test("reports websocket-unavailable backoff captures as ADB PNG fallback", async () => {
+    await recreateClientForManualTimerTest();
+    const streamSocket = await startStreamServerWithScreenshotSubscriber();
+    setAdbPngScreenshotResponse();
+
+    await startScreenshotBackoffAndFlush();
+
+    expectSingleScreenshotUpdate(streamSocket, {
+      screenshotBase64: "png-base64",
+      screenshotMimeType: "image/png",
+      screenshotFormat: "png",
+      screenshotCaptureSource: "android_adb_screencap",
+      screenshotFallback: true,
+      screenshotFallbackReason: "websocket_unavailable",
+    });
+  });
+
+  test("reports CtrlProxy backoff captures as JPEG non-fallback", async () => {
+    const { streamSocket, ctrlProxySocket } = await startCapturingBackoffStreamTest();
+
+    const request = await startScreenshotBackoffAndReadRequest(ctrlProxySocket);
+    ctrlProxySocket.emit("message", JSON.stringify({
+      type: "screenshot",
+      requestId: request.requestId,
+      data: "jpeg-base64",
+      format: "jpeg",
+      timestamp: 123,
+    }));
+    await flushPromises();
+
+    expectSingleScreenshotUpdate(streamSocket, {
+      screenshotBase64: "jpeg-base64",
+      screenshotMimeType: "image/jpeg",
+      screenshotFormat: "jpeg",
+      screenshotCaptureSource: "android_ctrlproxy_a11y",
+      screenshotFallback: false,
+    });
+  });
+
+  test("reports unsupported a11y screenshots as emitted ADB PNG fallback frames", async () => {
+    await recreateClientForManualTimerTest();
+    const streamSocket = await startStreamServerWithScreenshotSubscriber();
+    setAdbPngScreenshotResponse();
+    (accessibilityServiceClient as any).a11yScreenshotSupported = false;
+
+    await startScreenshotBackoffAndFlush();
+
+    expectSingleScreenshotUpdate(streamSocket, {
+      screenshotBase64: "png-base64",
+      screenshotMimeType: "image/png",
+      screenshotFormat: "png",
+      screenshotCaptureSource: "android_adb_screencap",
+      screenshotFallback: true,
+      screenshotFallbackReason: "a11y_screenshot_unsupported",
+    });
+  });
+
+  test("reports CtrlProxy screenshot errors as emitted ADB PNG fallback frames", async () => {
+    const { streamSocket, ctrlProxySocket } = await startCapturingBackoffStreamTest();
+    setAdbPngScreenshotResponse();
+
+    const request = await startScreenshotBackoffAndReadRequest(ctrlProxySocket);
+    ctrlProxySocket.emit("message", JSON.stringify({
+      type: "screenshot_error",
+      requestId: request.requestId,
+      error: "Runner failed to capture screenshot",
+    }));
+    await flushPromises();
+
+    expectSingleScreenshotUpdate(streamSocket, {
+      screenshotBase64: "png-base64",
+      screenshotMimeType: "image/png",
+      screenshotFormat: "png",
+      screenshotCaptureSource: "android_adb_screencap",
+      screenshotFallback: true,
+      screenshotFallbackReason: "ctrlproxy_failed",
+    });
+  });
+
+  test("reports CtrlProxy screenshot timeout errors as emitted ADB PNG fallback frames", async () => {
+    const { streamSocket, ctrlProxySocket } = await startCapturingBackoffStreamTest();
+    setAdbPngScreenshotResponse();
+
+    const request = await startScreenshotBackoffAndReadRequest(ctrlProxySocket);
+    ctrlProxySocket.emit("message", JSON.stringify({
+      type: "screenshot_error",
+      requestId: request.requestId,
+      error: "Screenshot timeout",
+    }));
+    await flushPromises();
+
+    expectSingleScreenshotUpdate(streamSocket, {
+      screenshotBase64: "png-base64",
+      screenshotMimeType: "image/png",
+      screenshotFormat: "png",
+      screenshotCaptureSource: "android_adb_screencap",
+      screenshotFallback: true,
+      screenshotFallbackReason: "ctrlproxy_timeout",
+    });
+  });
+
+  test("reports CtrlProxy screenshot exceptions as emitted ADB PNG fallback frames", async () => {
+    const { streamSocket, ctrlProxySocket } = await startCapturingBackoffStreamTest();
+    setAdbPngScreenshotResponse();
+    ctrlProxySocket.send = () => {
+      throw new Error("boom");
+    };
+
+    await startScreenshotBackoffAndFlush();
+
+    expectSingleScreenshotUpdate(streamSocket, {
+      screenshotBase64: "png-base64",
+      screenshotMimeType: "image/png",
+      screenshotFormat: "png",
+      screenshotCaptureSource: "android_adb_screencap",
+      screenshotFallback: true,
+      screenshotFallbackReason: "ctrlproxy_exception",
+    });
+  });
 
   test("setupPortForwarding reallocates when the current local port becomes busy before adb forward", async function() {
     await accessibilityServiceClient.close();

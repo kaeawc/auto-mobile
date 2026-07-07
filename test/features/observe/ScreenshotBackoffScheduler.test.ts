@@ -35,7 +35,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
   let emittedScreenshots: string[];
   let captureCount: number;
   let captureCallback: () => Promise<ScreenshotCaptureResult>;
-  let emitCallback: (data: string) => void;
+  let emitCallback: (result: ScreenshotCaptureResult) => void;
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
@@ -51,12 +51,49 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       return { success: true, data };
     };
 
-    emitCallback = (data: string) => {
-      emittedScreenshots.push(data);
+    emitCallback = (result: ScreenshotCaptureResult) => {
+      if (result.data) {
+        emittedScreenshots.push(result.data);
+      }
     };
   });
 
   describe("startBackoffSequence", () => {
+    it("emits the full capture result so screenshot metadata is preserved", async () => {
+      const emittedResults: ScreenshotCaptureResult[] = [];
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        async () => ({
+          success: true,
+          data: "jpeg-frame",
+          checksum: "jpeg-checksum",
+          screenshotMimeType: "image/jpeg",
+          screenshotFormat: "jpeg",
+          screenshotCaptureSource: "android_ctrlproxy_a11y",
+          screenshotFallback: false,
+        }),
+        result => {
+          emittedResults.push(result);
+        },
+        { intervals: [0], keepAliveIntervalMs: null },
+        fakeTimer
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+
+      expect(emittedResults).toEqual([
+        {
+          success: true,
+          data: "jpeg-frame",
+          checksum: "jpeg-checksum",
+          screenshotMimeType: "image/jpeg",
+          screenshotFormat: "jpeg",
+          screenshotCaptureSource: "android_ctrlproxy_a11y",
+          screenshotFallback: false,
+        },
+      ]);
+    });
+
     it("schedules captures at default intervals", () => {
       const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
@@ -324,6 +361,56 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       // But only 1 was emitted (first one)
       expect(emittedScreenshots).toHaveLength(1);
       expect(emittedScreenshots[0]).toBe("same-data");
+    });
+
+    it("emits when screenshot metadata changes even if image bytes are unchanged", async () => {
+      const emittedResults: ScreenshotCaptureResult[] = [];
+      const captures: ScreenshotCaptureResult[] = [
+        {
+          success: true,
+          data: "same-data",
+          screenshotMimeType: "image/jpeg",
+          screenshotFormat: "jpeg",
+          screenshotCaptureSource: "android_ctrlproxy_a11y",
+          screenshotFallback: false,
+        },
+        {
+          success: true,
+          data: "same-data",
+          screenshotMimeType: "image/png",
+          screenshotFormat: "png",
+          screenshotCaptureSource: "android_adb_screencap",
+          screenshotFallback: true,
+          screenshotFallbackReason: "websocket_unavailable",
+        },
+        {
+          success: true,
+          data: "same-data",
+          screenshotMimeType: "image/png",
+          screenshotFormat: "png",
+          screenshotCaptureSource: "android_adb_screencap",
+          screenshotFallback: true,
+          screenshotFallbackReason: "websocket_unavailable",
+        },
+      ];
+      let captureIndex = 0;
+      captureCallback = async () => captures[captureIndex++]!;
+
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        captureCallback,
+        result => {
+          emittedResults.push(result);
+        },
+        { intervals: [0, 100, 200], keepAliveIntervalMs: null },
+        fakeTimer
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+      await fakeTimer.advanceTimersByTimeAsync(100);
+      await fakeTimer.advanceTimersByTimeAsync(100);
+
+      expect(emittedResults).toEqual([captures[0], captures[1]]);
     });
 
     it("emits when screenshot changes", async () => {

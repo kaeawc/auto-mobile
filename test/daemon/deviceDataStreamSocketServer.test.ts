@@ -454,6 +454,54 @@ describe("DeviceDataStreamSocketServer", () => {
     });
   });
 
+  describe("screenshot updates", () => {
+    it("includes optional screenshot metadata when pushing updates", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushScreenshotUpdate(
+        "device-1",
+        "png-frame",
+        1080,
+        2340,
+        {
+          screenshotMimeType: "image/png",
+          screenshotFormat: "png",
+          screenshotCaptureSource: "android_adb_screencap",
+          screenshotFallback: true,
+          screenshotFallbackReason: "websocket_unavailable",
+          checksum: "internal-checksum",
+        } as any
+      );
+
+      const msgs = socket.getWrittenMessages<{
+        type: string;
+        deviceId?: string;
+        screenshotBase64?: string;
+        screenWidth?: number;
+        screenHeight?: number;
+        screenshotMimeType?: string;
+        screenshotFormat?: string;
+        screenshotCaptureSource?: string;
+        screenshotFallback?: boolean;
+        screenshotFallbackReason?: string;
+      }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]).toMatchObject({
+        type: "screenshot_update",
+        deviceId: "device-1",
+        screenshotBase64: "png-frame",
+        screenWidth: 1080,
+        screenHeight: 2340,
+        screenshotMimeType: "image/png",
+        screenshotFormat: "png",
+        screenshotCaptureSource: "android_adb_screencap",
+        screenshotFallback: true,
+        screenshotFallbackReason: "websocket_unavailable",
+      });
+      expect(msgs[0]).not.toHaveProperty("checksum");
+    });
+  });
+
   describe("hasSubscriberForDevice", () => {
     it("returns false when there are no subscribers", () => {
       expect(server.hasSubscriberForDevice("device-1")).toBe(false);

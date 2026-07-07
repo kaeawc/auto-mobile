@@ -103,6 +103,7 @@ describe("PressButton", () => {
       name: "Pixel"
     };
 
+    const fakeTimer = new FakeTimer();
     const capturedTimeouts: (number | undefined)[] = [];
     const fakeAdb = {
       executeCommand: async (_command: string, timeoutMs?: number) => {
@@ -113,6 +114,7 @@ describe("PressButton", () => {
 
     // "menu" is not a global-action button, so it goes straight to the ADB keyevent path.
     const pressButton = new PressButton(androidDevice, fakeAdb);
+    (pressButton as any).timer = fakeTimer;
     const result = await pressButton.press("menu", 500);
 
     expect(result.success).toBe(true);

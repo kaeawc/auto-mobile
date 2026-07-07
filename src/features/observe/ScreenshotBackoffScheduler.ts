@@ -1,11 +1,12 @@
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import crypto from "crypto";
+import type { ScreenshotMetadata } from "./ScreenshotMetadata";
 
 /**
  * Result of a screenshot capture attempt
  */
-export interface ScreenshotCaptureResult {
+export interface ScreenshotCaptureResult extends ScreenshotMetadata {
   success: boolean;
   data?: string; // base64 encoded
   checksum?: string;
@@ -20,7 +21,7 @@ type ScreenshotCaptureCallback = () => Promise<ScreenshotCaptureResult>;
 /**
  * Callback to emit a screenshot to the stream
  */
-type ScreenshotEmitCallback = (data: string) => void;
+type ScreenshotEmitCallback = (result: ScreenshotCaptureResult) => void;
 
 /**
  * Callback to decide whether keepalive screenshots should continue.
@@ -117,6 +118,7 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
   private pendingTimeouts: ReturnType<Timer["setTimeout"]>[] = [];
   private keepAliveTimeout: ReturnType<Timer["setTimeout"]> | null = null;
   private lastEmittedChecksum: string | null = null;
+  private lastEmittedMetadataSignature: string | null = null;
   private sequenceId: number = 0;
 
   constructor(
@@ -195,6 +197,7 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
    */
   resetLastChecksum(): void {
     this.lastEmittedChecksum = null;
+    this.lastEmittedMetadataSignature = null;
   }
 
   private async captureAtInterval(sequenceId: number, interval: number): Promise<void> {
@@ -262,21 +265,36 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
 
       // Compute checksum
       const checksum = result.checksum || computeChecksum(result.data);
+      const metadataSignature = this.createMetadataSignature(result);
+      const isDuplicateCapture =
+        checksum === this.lastEmittedChecksum &&
+        metadataSignature === this.lastEmittedMetadataSignature;
 
-      // Skip if same as last emitted
-      if (!emitDuplicates && checksum === this.lastEmittedChecksum) {
-        logger.debug(`[ScreenshotBackoff] Skipping duplicate screenshot at ${captureLabel} (checksum: ${checksum.substring(0, 8)}...)`);
+      // Skip only when both the image bytes and public screenshot metadata match.
+      if (!emitDuplicates && isDuplicateCapture) {
+        logger.debug(`[ScreenshotBackoff] Skipping duplicate screenshot at ${captureLabel} (checksum: ${checksum.substring(0, 8)}..., metadata: ${metadataSignature})`);
         return;
       }
 
       // Emit the screenshot
       logger.debug(`[ScreenshotBackoff] Emitting screenshot at ${captureLabel} (checksum: ${checksum.substring(0, 8)}..., size: ${result.data.length})`);
       this.lastEmittedChecksum = checksum;
-      this.emitCallback(result.data);
+      this.lastEmittedMetadataSignature = metadataSignature;
+      this.emitCallback(result);
 
     } catch (error) {
       logger.warn(`[ScreenshotBackoff] Error capturing screenshot at ${captureLabel}: ${error}`);
     }
+  }
+
+  private createMetadataSignature(metadata: ScreenshotMetadata): string {
+    return JSON.stringify([
+      metadata.screenshotMimeType ?? null,
+      metadata.screenshotFormat ?? null,
+      metadata.screenshotCaptureSource ?? null,
+      metadata.screenshotFallback ?? null,
+      metadata.screenshotFallbackReason ?? null,
+    ]);
   }
 
   private scheduleKeepAliveIfIdle(sequenceId: number): void {

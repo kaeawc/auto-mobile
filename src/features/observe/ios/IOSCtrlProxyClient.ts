@@ -60,6 +60,11 @@ import {
   DefaultScreenshotBackoffScheduler,
   ScreenshotCaptureResult,
 } from "../ScreenshotBackoffScheduler";
+import {
+  IOS_CTRLPROXY_SCREENSHOT_METADATA,
+  metadataForScreenshotFormat,
+  type ScreenshotMetadata,
+} from "../ScreenshotMetadata";
 
 /**
  * Factory function type for creating CtrlProxyIosManager instances.
@@ -1599,14 +1604,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   /**
    * Push screenshot update to the device data stream for IDE plugins.
    */
-  private pushScreenshotToObservationStream(screenshotBase64: string, screenWidth: number, screenHeight: number): void {
+  private pushScreenshotToObservationStream(
+    screenshotBase64: string,
+    screenWidth: number,
+    screenHeight: number,
+    metadata: ScreenshotMetadata = IOS_CTRLPROXY_SCREENSHOT_METADATA
+  ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
       return;
     }
 
     try {
-      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight);
+      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata);
     } catch (error) {
       logger.debug(`[IOSCtrlProxyClient] Failed to push screenshot to observation stream: ${error}`);
     }
@@ -1636,11 +1646,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         async (): Promise<ScreenshotCaptureResult> => {
           return this.captureScreenshotForBackoff();
         },
-        (data: string) => {
+        (result: ScreenshotCaptureResult) => {
+          if (!result.data) {
+            return;
+          }
           // Get screen dimensions from cached hierarchy or use defaults
           const screenWidth = this.cachedScreenDimensions?.width ?? 1170;
           const screenHeight = this.cachedScreenDimensions?.height ?? 2532;
-          this.pushScreenshotToObservationStream(data, screenWidth, screenHeight);
+          this.pushScreenshotToObservationStream(result.data, screenWidth, screenHeight, result);
         },
         {
           getKeepAliveIntervalMs: () => {
@@ -1684,6 +1697,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return {
         success: true,
         data: result.data,
+        ...metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, result.format),
       };
     } catch (error) {
       return { success: false, error: `${error}` };

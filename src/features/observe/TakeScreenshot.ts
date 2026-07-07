@@ -16,6 +16,10 @@ import { selectScreenshotsToEvict, SCREENSHOT_MIN_EVICT_AGE_MS } from "./screens
 import { IOSCtrlProxyClient } from "./ios";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import {
+  ANDROID_ADB_SCREENSHOT_METADATA,
+  IOS_CTRLPROXY_SCREENSHOT_METADATA,
+} from "./ScreenshotMetadata";
 
 /** Secure file mode: owner read/write only */
 const SECURE_FILE_MODE = 0o600;
@@ -317,7 +321,13 @@ export class TakeScreenshot implements ScreenshotService {
     }
 
     try {
-      server.pushScreenshotUpdate(this.device.deviceId, base64Data, width, height);
+      server.pushScreenshotUpdate(
+        this.device.deviceId,
+        base64Data,
+        width,
+        height,
+        this.device.platform === "ios" ? IOS_CTRLPROXY_SCREENSHOT_METADATA : ANDROID_ADB_SCREENSHOT_METADATA
+      );
     } catch (error) {
       logger.debug(`[SCREENSHOT] Failed to push screenshot to observation stream: ${error}`);
     }

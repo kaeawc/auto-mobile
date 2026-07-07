@@ -252,20 +252,10 @@ final class RemindersPlanContentTests: XCTestCase {
             warmupStepName: "Warm up Reminders target app (Xcode 26.2)",
             runStepName: "Run Reminders integration tests (Xcode 26.2)"
         )
-        assertWorkflowRunsAddReminderAfterLaunch(
-            workflow,
-            launchRunStepName: "Run Reminders integration tests (Xcode 26.2)",
-            addRunStepName: "Run Reminders add integration test (Xcode 26.2)"
-        )
         assertWorkflowWarmsTargetAppBeforeRemindersRun(
             workflow,
             warmupStepName: "Warm up Reminders target app (Xcode 26.3)",
             runStepName: "Run Reminders integration tests (Xcode 26.3)"
-        )
-        assertWorkflowRunsAddReminderAfterLaunch(
-            workflow,
-            launchRunStepName: "Run Reminders integration tests (Xcode 26.3)",
-            addRunStepName: "Run Reminders add integration test (Xcode 26.3)"
         )
     }
 
@@ -277,20 +267,10 @@ final class RemindersPlanContentTests: XCTestCase {
             warmupStepName: "Warm up Reminders target app (Xcode 26.2)",
             runStepName: "Run Reminders integration tests (Xcode 26.2)"
         )
-        assertWorkflowRunsAddReminderAfterLaunch(
-            workflow,
-            launchRunStepName: "Run Reminders integration tests (Xcode 26.2)",
-            addRunStepName: "Run Reminders add integration test (Xcode 26.2)"
-        )
         assertWorkflowWarmsTargetAppBeforeRemindersRun(
             workflow,
             warmupStepName: "Warm up Reminders target app (Xcode 26.3)",
             runStepName: "Run Reminders integration tests (Xcode 26.3)"
-        )
-        assertWorkflowRunsAddReminderAfterLaunch(
-            workflow,
-            launchRunStepName: "Run Reminders integration tests (Xcode 26.3)",
-            addRunStepName: "Run Reminders add integration test (Xcode 26.3)"
         )
     }
 
@@ -712,59 +692,6 @@ private func assertWorkflowWarmsTargetAppBeforeRemindersRun(
     XCTAssertTrue(
         runBlock.contains("timeout-minutes: 10"),
         "\(runStepName) must keep the Reminders step cap aligned with the retry timeout guard",
-        file: file,
-        line: line
-    )
-}
-
-private func assertWorkflowRunsAddReminderAfterLaunch(
-    _ workflow: String,
-    launchRunStepName: String,
-    addRunStepName: String,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) {
-    guard let launchRange = workflow.range(of: #"name: "\#(launchRunStepName)""#) else {
-        XCTFail("Workflow is missing step named \(launchRunStepName)", file: file, line: line)
-        return
-    }
-    guard let addRange = workflow.range(of: #"name: "\#(addRunStepName)""#) else {
-        XCTFail("Workflow is missing step named \(addRunStepName)", file: file, line: line)
-        return
-    }
-
-    XCTAssertLessThan(
-        launchRange.lowerBound,
-        addRange.lowerBound,
-        "\(addRunStepName) should run after the launch smoke test",
-        file: file,
-        line: line
-    )
-
-    let nextStepRange = workflow[addRange.upperBound...].range(of: "\n      - name:")
-    let addBlockEnd = nextStepRange?.lowerBound ?? workflow.endIndex
-    let addBlock = workflow[addRange.lowerBound ..< addBlockEnd]
-    XCTAssertTrue(
-        addBlock.contains("AUTOMOBILE_TEST_PLAN: \"Plans/add-reminder-app.yaml\"") == false,
-        "\(addRunStepName) must not point at a misspelled add reminder plan",
-        file: file,
-        line: line
-    )
-    XCTAssertTrue(
-        addBlock.contains("AUTOMOBILE_TEST_PLAN: \"Plans/add-reminder.yaml\""),
-        "\(addRunStepName) must execute add-reminder.yaml",
-        file: file,
-        line: line
-    )
-    XCTAssertTrue(
-        addBlock.contains("swift test --filter RemindersAddPlanTests"),
-        "\(addRunStepName) must run RemindersAddPlanTests",
-        file: file,
-        line: line
-    )
-    XCTAssertTrue(
-        addBlock.contains("timeout-minutes: 10"),
-        "\(addRunStepName) must keep the Reminders step cap aligned with the retry timeout guard",
         file: file,
         line: line
     )

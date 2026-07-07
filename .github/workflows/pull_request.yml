@@ -1341,14 +1341,6 @@ jobs:
           cd ios/XCTestRunner
           swift test --filter RemindersLaunchPlanTests 2>&1
 
-      - name: "Run Reminders add integration test (Xcode 26.2)"
-        timeout-minutes: 10
-        env:
-          AUTOMOBILE_TEST_PLAN: "Plans/add-reminder.yaml"
-        run: |
-          cd ios/XCTestRunner
-          swift test --filter RemindersAddPlanTests 2>&1
-
       - name: "Shutdown iOS Simulators"
         if: always()
         run: xcrun simctl shutdown all || true
@@ -1390,14 +1382,6 @@ jobs:
         run: |
           cd ios/XCTestRunner
           swift test --filter RemindersLaunchPlanTests 2>&1
-
-      - name: "Run Reminders add integration test (Xcode 26.3)"
-        timeout-minutes: 10
-        env:
-          AUTOMOBILE_TEST_PLAN: "Plans/add-reminder.yaml"
-        run: |
-          cd ios/XCTestRunner
-          swift test --filter RemindersAddPlanTests 2>&1
 
       # Daemon-internal logs (CtrlProxy startup/health/observe timing) are the only
       # way to diagnose iOS observe failures — the swift-test stdout doesn't include

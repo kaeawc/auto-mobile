@@ -32,30 +32,7 @@ export class PressButton extends BaseVisualChange {
 
     return this.observedInteraction(
       async () => {
-        try {
-          // Platform-specific button press execution
-          switch (this.device.platform) {
-            case "android":
-              return await perf.track("androidButtonPress", () =>
-                this.executeAndroidButtonPress(button)
-              );
-            case "ios":
-              return await perf.track("iOSButtonPress", () =>
-                this.executeiOSButtonPress(button)
-              );
-            default:
-              perf.end();
-              throw new Error(`Unsupported platform: ${this.device.platform}`);
-          }
-        } catch (error) {
-          perf.end();
-          return {
-            success: false,
-            button,
-            keyCode: -1,
-            error: `Failed to press button: ${error instanceof Error ? error.message : String(error)}`
-          };
-        }
+        return await perf.track("buttonPress", () => this.press(button));
       },
       {
         changeExpected: isNavigationButton,
@@ -64,6 +41,26 @@ export class PressButton extends BaseVisualChange {
         perf
       }
     );
+  }
+
+  async press(button: string): Promise<PressButtonResult> {
+    try {
+      switch (this.device.platform) {
+        case "android":
+          return await this.executeAndroidButtonPress(button);
+        case "ios":
+          return await this.executeiOSButtonPress(button);
+        default:
+          throw new Error(`Unsupported platform: ${this.device.platform}`);
+      }
+    } catch (error) {
+      return {
+        success: false,
+        button,
+        keyCode: -1,
+        error: `Failed to press button: ${error instanceof Error ? error.message : String(error)}`
+      };
+    }
   }
 
   // Buttons that can be handled via accessibility service global actions

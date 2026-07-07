@@ -62,6 +62,38 @@ describe("PressButton", () => {
     }
   });
 
+  test("press delegates to platform button handling without observing", async () => {
+    let homeCalls = 0;
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPressBack: async () => ({ success: true, totalTimeMs: 5 }),
+      requestPressHome: async () => {
+        homeCalls++;
+        return { success: true, totalTimeMs: 5 };
+      },
+      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 })
+    } as any);
+
+    try {
+      const pressButton = new PressButton(iosDevice);
+      (pressButton as any).observeScreen = {
+        getMostRecentCachedObserveResult: async () => {
+          throw new Error("press should not read cached observations");
+        },
+        execute: async () => {
+          throw new Error("press should not observe");
+        }
+      };
+
+      const result = await pressButton.press("home");
+
+      expect(result.success).toBe(true);
+      expect(homeCalls).toBe(1);
+      expect(getInstanceSpy).toHaveBeenCalled();
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
   test("ios menu remains unsupported", async () => {
     const pressButton = new PressButton(iosDevice);
     const result = await (pressButton as any).executeiOSButtonPress("menu");

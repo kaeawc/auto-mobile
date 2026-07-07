@@ -151,4 +151,22 @@ describe("findWaitForElement textAny", () => {
 
     expect(element).toBeNull();
   });
+
+  test("checks visible duplicate matches before trying later variants", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      { $: { text: "Done", bounds: bounds(-300, 0, -200, 50) } },
+      { $: { text: "Done", bounds: bounds(20, 20, 120, 70) } },
+      { $: { text: "Add", bounds: bounds(20, 90, 120, 140) } },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      { textAny: ["Done", "Add"] },
+      hierarchy
+    );
+
+    expect(element?.text).toBe("Done");
+    expect(element?.bounds).toEqual(bounds(20, 20, 120, 70));
+  });
 });

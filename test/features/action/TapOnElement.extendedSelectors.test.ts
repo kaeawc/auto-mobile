@@ -19,6 +19,20 @@ const createTapOnElement = (selector: FakeElementSelector) => {
   );
 };
 
+const createDefaultTapOnElement = () => {
+  return new TapOnElement(
+    {
+      name: "test-device",
+      platform: "android",
+      deviceId: "emulator-5554",
+    } as any,
+    new FakeAdbClient() as any,
+    {
+      timer: new FakeTimer(),
+    }
+  );
+};
+
 const makeElement = (bounds = { left: 0, top: 0, right: 100, bottom: 50 }) => ({
   bounds,
   text: "Item",
@@ -223,6 +237,31 @@ describe("TapOnElement extended selectors", () => {
       expect(result.selection.element).toBeNull();
       expect(selector.textCalls).toEqual(["Done", "Add"]);
       expect(selector.lastText).toBe("Add");
+    });
+
+    test("textAny skips off-screen duplicate text matches before trying later variants", () => {
+      const tapOn = createDefaultTapOnElement();
+
+      const result = (tapOn as any).findElementInHierarchy(
+        { textAny: ["Done", "Add"], action: "tap" },
+        {
+          hierarchy: {
+            node: {
+              $: { bounds: { left: 0, top: 0, right: 200, bottom: 200 } },
+              node: [
+                { $: { text: "Done", bounds: { left: -300, top: 0, right: -200, bottom: 50 } } },
+                { $: { text: "Done", bounds: { left: 20, top: 20, right: 120, bottom: 70 } } },
+                { $: { text: "Add", bounds: { left: 20, top: 90, right: 120, bottom: 140 } } },
+              ],
+            },
+          },
+          screenWidth: 200,
+          screenHeight: 200,
+        }
+      );
+
+      expect(result.selection.element?.text).toBe("Done");
+      expect(result.selection.element?.bounds).toEqual({ left: 20, top: 20, right: 120, bottom: 70 });
     });
 
     test("sibling respects selectionStrategy", () => {

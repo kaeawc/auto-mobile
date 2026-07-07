@@ -27,7 +27,9 @@ const createViewHierarchy = (nodes: NodeSpec[]): ViewHierarchyResult => {
           }
         }))
       }
-    }
+    },
+    screenWidth: 100,
+    screenHeight: 100
   } as ViewHierarchyResult;
 };
 
@@ -45,6 +47,34 @@ describe("DefaultElementSelector", () => {
     expect(match.indexInMatches).toBe(0);
     expect(match.totalMatches).toBe(2);
     expect(match.strategy).toBe("first");
+  });
+
+  test("first strategy skips off-screen matches before selecting", () => {
+    const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
+    const viewHierarchy = createViewHierarchy([
+      { bounds: { left: -20, top: 0, right: -10, bottom: 10 }, text: "Match" },
+      { bounds: { left: 10, top: 0, right: 40, bottom: 30 }, text: "Match" }
+    ]);
+
+    const match = selector.selectByText(viewHierarchy, "Match", { strategy: "first" });
+
+    expect(match.element?.bounds).toEqual({ left: 10, top: 0, right: 40, bottom: 30 });
+    expect(match.indexInMatches).toBe(1);
+    expect(match.totalMatches).toBe(2);
+  });
+
+  test("returns null when every match is off-screen", () => {
+    const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
+    const viewHierarchy = createViewHierarchy([
+      { bounds: { left: -300, top: 0, right: -200, bottom: 30 }, text: "Match" },
+      { bounds: { left: 120, top: 0, right: 160, bottom: 30 }, text: "Match" }
+    ]);
+
+    const match = selector.selectByText(viewHierarchy, "Match", { strategy: "first" });
+
+    expect(match.element).toBeNull();
+    expect(match.indexInMatches).toBe(-1);
+    expect(match.totalMatches).toBe(2);
   });
 
   test("random strategy returns different matches across calls", () => {

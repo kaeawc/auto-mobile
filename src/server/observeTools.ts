@@ -127,17 +127,15 @@ export const findWaitForElement = (
 
   if ("textAny" in waitFor) {
     for (const text of waitFor.textAny) {
-      const element = finder.findElementByText(
+      const elements = finder.findElementsByText(
         viewHierarchy,
         text,
         container,
         true,
         false
       );
+      const element = elements.find(candidate => !isElementCenterOffScreen(candidate, viewHierarchy));
       if (element) {
-        if (isElementCenterOffScreen(element, viewHierarchy)) {
-          continue;
-        }
         return element;
       }
     }

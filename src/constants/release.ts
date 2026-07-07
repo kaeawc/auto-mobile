@@ -30,7 +30,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "0.0.40",
     apkSha256: "8e89fbab6462ac1ead1f3f0a334aff4f5f299e7ae72e192045cf75e893ca87aa",
     ipaSha256: "38adaed641ac6a8590773682e127a80a86c54e5804d47394e1b0cd437009b9ff",
-    runnerSha256: "",
+    runnerSha256: "b281f9fd516116164a76dc049a413d5123bfb7bf96c79c6ad654ba90c08ed982",
   },
   {
     version: "0.0.39",

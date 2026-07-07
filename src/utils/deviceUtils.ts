@@ -5,8 +5,9 @@ import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor
 import { SimCtlClient, DOCKER_IOS_UNSUPPORTED_MESSAGE } from "./ios-cmdline-tools/SimCtlClient";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import { logger } from "./logger";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 
-export const DEFAULT_DEVICE_READY_TIMEOUT_MS = 120000;
+export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 
 /**
  * Result of a discovery sweep that distinguishes per-platform success.
@@ -266,7 +267,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    */
   async startDevice(
     device: DeviceInfo,
-    timeoutMs?: number,
+    timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess> {
     const isRunning = await this.isDeviceImageRunning(device);
     if (isRunning) {

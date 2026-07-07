@@ -10,6 +10,7 @@ import { isHostControlAvailable, runSimctlExec, shouldUseHostControl } from "../
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
 
 /**
  * Shared message for the intentionally-unsupported "drive iOS simulator from
@@ -591,7 +592,7 @@ export class SimCtlClient implements SimCtl {
     );
   }
 
-  async startSimulator(udid: string, timeoutMs?: number): Promise<ChildProcess> {
+  async startSimulator(udid: string, timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS): Promise<ChildProcess> {
     logger.debug(`Starting iOS simulator ${udid}`);
     const perf = createGlobalPerformanceTracker();
 

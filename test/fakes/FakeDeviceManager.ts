@@ -1,6 +1,7 @@
 import { ChildProcess } from "child_process";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import { BootedDeviceDiscovery, PlatformDeviceManager } from "../../src/utils/deviceUtils";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 
 export class FakeDeviceManager implements PlatformDeviceManager {
   deviceImages: DeviceInfo[] = [];
@@ -52,7 +53,7 @@ export class FakeDeviceManager implements PlatformDeviceManager {
     return { devices, succeededPlatforms };
   }
 
-  async startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess> {
+  async startDevice(device: DeviceInfo, timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS): Promise<ChildProcess> {
     this.startedDevices.push(device);
     this.startDeviceTimeouts.push(timeoutMs);
     const id = device.deviceId ?? device.name;

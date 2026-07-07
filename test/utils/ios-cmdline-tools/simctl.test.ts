@@ -3,6 +3,7 @@ import { Simctl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice, ExecResult } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
 
 function resetSimctlCaches(): void {
   const simctlClass = Simctl as unknown as {
@@ -218,6 +219,32 @@ describe("Simctl", function() {
 
       await expect(bootPromise).rejects.toThrow(
         "Command timed out after 1234ms: xcrun simctl bootstatus test-ios-device-id -b",
+      );
+      resolveCommand?.(createExecResult("late bootstatus", ""));
+    });
+
+    test("applies the default timeout to the bootstatus wait", async function() {
+      const timer = new FakeTimer();
+      let resolveCommand: ((result: ExecResult) => void) | undefined;
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        return new Promise<ExecResult>(resolve => {
+          resolveCommand = resolve;
+        });
+      };
+
+      simctl = new Simctl(mockDevice, mockExecAsync, null, timer);
+
+      const bootPromise = simctl.startSimulator("test-ios-device-id");
+      while (!resolveCommand) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
+
+      await expect(bootPromise).rejects.toThrow(
+        `Command timed out after ${DEFAULT_DEVICE_READY_TIMEOUT_MS}ms: xcrun simctl bootstatus test-ios-device-id -b`,
       );
       resolveCommand?.(createExecResult("late bootstatus", ""));
     });

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS, MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
+import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, SomePlatform } from "../models";
 import type { DeviceMatchCriteria, FormFactor, MatchingStrategy, StartDeviceResult } from "../models/DeviceMatchCriteria";

@@ -22,6 +22,18 @@ The script imports sharp, prints Bun/platform/sharp runtime versions, creates a
 small PNG entirely through sharp, exercises lossy/lossless/near-lossless WebP
 encodes, reads WebP metadata, and prints `ok` if the process survives.
 
+To validate the full behavior without mutating this directory, run the repo
+helper from the root:
+
+```bash
+bash scripts/validate-sharp-bun-repro.sh
+```
+
+The helper copies this standalone package into `scratch/`, installs with the
+checked-in lockfile, runs `bun run repro`, and asserts sharp `0.35.3`, WebP
+metadata, nonzero lossy/lossless/near-lossless outputs, and the final `ok`
+marker.
+
 Local result captured for issue #3014 on 2026-07-07:
 
 - `darwin arm64`, Bun `1.3.14`, sharp `0.35.3`, libvips `8.18.3`: passed;

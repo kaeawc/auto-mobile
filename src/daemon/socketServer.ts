@@ -53,7 +53,6 @@ import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
-import { InputText } from "../features/action/InputText";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction } from "../models";
@@ -930,14 +929,13 @@ export class UnixSocketServer {
         });
       }
 
-      const inputText = new InputText(targetDevice);
       const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
       return await this.runInputOperationWithTimeout(
         request.method,
         totalTimeoutMs,
         remainingTimeoutMs,
         "UnixSocketServer.handleInputTypeText",
-        () => inputText.execute(args.text, imeAction, false, undefined, remainingTimeoutMs)
+        () => this.executeInputTypeText(args.platform, targetDevice, args.text, imeAction, remainingTimeoutMs)
       );
     });
 
@@ -955,6 +953,36 @@ export class UnixSocketServer {
     };
   }
 
+  private async executeInputTypeText(
+    platform: "android" | "ios",
+    targetDevice: BootedDevice,
+    text: string,
+    imeAction: ImeAction | undefined,
+    timeoutMs: number
+  ): Promise<{ success: boolean; error?: string }> {
+    if (platform === "android") {
+      const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+      const textResult = await client.requestSetText(text, { timeoutMs });
+      if (!textResult.success) {
+        return textResult;
+      }
+      if (!imeAction) {
+        return { success: true };
+      }
+      return await client.requestImeAction(imeAction, timeoutMs);
+    }
+
+    const client = IOSCtrlProxyClient.getInstance(targetDevice);
+    const textResult = await client.requestSetText(text, { timeoutMs });
+    if (!textResult.success) {
+      return textResult;
+    }
+    if (!imeAction) {
+      return { success: true };
+    }
+    return await client.requestImeAction(imeAction, timeoutMs);
+  }
+
   private async runInputOperationWithTimeout<T>(
     toolName: string,
     totalTimeoutMs: number,
@@ -963,22 +991,34 @@ export class UnixSocketServer {
     operation: () => Promise<T>
   ): Promise<T> {
     let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_resolve, reject) => {
+    let timedOut = false;
+    const operationPromise = operation();
+    const timeout = new Promise<"timeout">(resolve => {
       timeoutHandle = this.timer.setTimeout(() => {
-        reject(new McpTimeoutError({
-          toolName,
-          timeoutMs: totalTimeoutMs,
-          origin,
-          detail: `operation exceeded remaining budget ${remainingTimeoutMs}ms`,
-        }));
+        timedOut = true;
+        resolve("timeout");
       }, remainingTimeoutMs);
     });
 
     try {
-      return await Promise.race([operation(), timeout]);
+      const result = await Promise.race([operationPromise, timeout]);
+      if (result !== "timeout") {
+        return result;
+      }
+
+      await operationPromise.catch(() => undefined);
+      throw new McpTimeoutError({
+        toolName,
+        timeoutMs: totalTimeoutMs,
+        origin,
+        detail: `operation exceeded remaining budget ${remainingTimeoutMs}ms`,
+      });
     } finally {
       if (timeoutHandle) {
         this.timer.clearTimeout(timeoutHandle);
+      }
+      if (timedOut) {
+        await operationPromise.catch(() => undefined);
       }
     }
   }

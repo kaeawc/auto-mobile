@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { InputText } from "../../src/features/action/InputText";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
@@ -174,13 +175,17 @@ describe("UnixSocketServer input/typeText", () => {
   let socketPath: string;
   let server: UnixSocketServer;
   let fakeTimer: FakeTimer;
-  let originalExecute: typeof InputText.prototype.execute;
+  let originalAndroidGetInstance: typeof AndroidCtrlProxyClient.getInstance;
+  let originalIosGetInstance: typeof IOSCtrlProxyClient.getInstance;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `input-type-text-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
     PlatformDeviceManagerFactory.reset();
-    originalExecute = InputText.prototype.execute;
+    AndroidCtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
+    originalAndroidGetInstance = AndroidCtrlProxyClient.getInstance;
+    originalIosGetInstance = IOSCtrlProxyClient.getInstance;
   });
 
   afterEach(async () => {
@@ -190,15 +195,20 @@ describe("UnixSocketServer input/typeText", () => {
     if (existsSync(socketPath)) {
       await unlink(socketPath);
     }
-    InputText.prototype.execute = originalExecute;
+    AndroidCtrlProxyClient.getInstance = originalAndroidGetInstance;
+    IOSCtrlProxyClient.getInstance = originalIosGetInstance;
     PlatformDeviceManagerFactory.reset();
+    AndroidCtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
   });
 
-  test("routes Android text input through existing InputText infrastructure", async () => {
-    const execute = mock(async function(this: InputText, text: string) {
-      return { success: true, text, method: "a11y" as const };
-    });
-    InputText.prototype.execute = execute;
+  test("routes Android text input through existing platform input infrastructure", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     const createMcpClient = mock(async () => {
       throw new Error("input/typeText should not create an MCP client");
     });
@@ -222,15 +232,18 @@ describe("UnixSocketServer input/typeText", () => {
       textLength: 13,
       submitted: false,
     });
-    expect(execute).toHaveBeenCalledWith("hello, Jason!", undefined, false, undefined, 1234);
+    expect(requestSetText).toHaveBeenCalledWith("hello, Jason!", { timeoutMs: 1234 });
+    expect(requestImeAction).not.toHaveBeenCalled();
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
-  test("routes iOS text input through existing InputText infrastructure", async () => {
-    const execute = mock(async function(this: InputText, text: string) {
-      return { success: true, text, method: "a11y" as const };
-    });
-    InputText.prototype.execute = execute;
+  test("routes iOS text input through existing platform input infrastructure", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
     await server.start();
@@ -251,14 +264,17 @@ describe("UnixSocketServer input/typeText", () => {
       textLength: 8,
       submitted: true,
     });
-    expect(execute).toHaveBeenCalledWith("hi there", "done", false, undefined, 30_000);
+    expect(requestSetText).toHaveBeenCalledWith("hi there", { timeoutMs: 30_000 });
+    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
-    const execute = mock(async function(this: InputText, text: string) {
-      return { success: true, text, method: "a11y" as const };
-    });
-    InputText.prototype.execute = execute;
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const session = createFakeSession("session-1", "emulator-5554", "android");
     const autolockSessions = new Map([[session.sessionId, session]]);
@@ -290,22 +306,27 @@ describe("UnixSocketServer input/typeText", () => {
       deviceId: "emulator-5554",
       textLength: 12,
     });
-    expect(execute).toHaveBeenCalledWith("from session", undefined, false, undefined, 30_000);
+    expect(requestSetText).toHaveBeenCalledWith("from session", { timeoutMs: 30_000 });
+    expect(requestImeAction).not.toHaveBeenCalled();
   });
 
   test("serializes concurrent typeText calls for the same device", async () => {
     let inFlight = 0;
     let maxInFlight = 0;
-    const execute = mock(async function(this: InputText, text: string) {
+    const requestSetText = mock(async () => {
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
       await new Promise<void>(resolve => {
         fakeTimer.setTimeout(resolve, 40);
       });
       inFlight -= 1;
-      return { success: true, text, method: "a11y" as const };
+      return { success: true, totalTimeMs: 1 };
     });
-    InputText.prototype.execute = execute;
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
     await server.start();
@@ -334,34 +355,137 @@ describe("UnixSocketServer input/typeText", () => {
 
     expect(first.success).toBe(true);
     expect(second.success).toBe(true);
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(requestSetText).toHaveBeenCalledTimes(2);
     expect(maxInFlight).toBe(1);
     expect(inFlight).toBe(0);
   });
 
   test("fails typeText when execution exceeds the socket timeout budget", async () => {
-    const execute = mock(async function(this: InputText, text: string) {
+    const requestSetText = mock(async () => {
       await new Promise<void>(resolve => {
         fakeTimer.setTimeout(resolve, 100);
       });
-      return { success: true, text, method: "a11y" as const };
+      return { success: true, totalTimeMs: 1 };
     });
-    InputText.prototype.execute = execute;
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    fakeTimer.enableAutoAdvance();
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
     await server.start();
 
-    const response = await sendRequest(socketPath, "input/typeText", {
+    const responsePromise = sendRequest(socketPath, "input/typeText", {
       platform: "android",
       deviceId: "emulator-5554",
       text: "slow",
     }, 1);
 
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    fakeTimer.advanceTime(1);
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    fakeTimer.advanceTime(99);
+
+    const response = await responsePromise;
+
     expect(response.success).toBe(false);
     expect(response.error).toContain("input/typeText exceeded 1ms");
     expect(response.error).toContain("operation exceeded remaining budget 1ms");
-    expect(execute).toHaveBeenCalledWith("slow", undefined, false, undefined, 1);
+    expect(requestSetText).toHaveBeenCalledWith("slow", { timeoutMs: 1 });
+    expect(requestImeAction).not.toHaveBeenCalled();
+  });
+
+  test("keeps same-device typeText serialized until a timed-out operation settles", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const requestSetText = mock(async (text: string) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      if (text === "first") {
+        await new Promise<void>(resolve => {
+          fakeTimer.setTimeout(resolve, 100);
+        });
+      }
+      inFlight -= 1;
+      return { success: true, totalTimeMs: 1 };
+    });
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const firstPromise = sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "first",
+    }, 1);
+
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    fakeTimer.advanceTime(1);
+
+    const secondPromise = sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "second",
+    });
+
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    expect(requestSetText).toHaveBeenCalledTimes(1);
+    expect(inFlight).toBe(1);
+
+    fakeTimer.advanceTime(99);
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+
+    expect(first.success).toBe(false);
+    expect(second.success).toBe(true);
+    expect(requestSetText).toHaveBeenCalledTimes(2);
+    expect(maxInFlight).toBe(1);
+    expect(inFlight).toBe(0);
+  });
+
+  test("fails when submit action fails after text input succeeds", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({
+      success: false,
+      error: "return key unavailable",
+      totalTimeMs: 1,
+    }));
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "ios",
+      deviceId: "ios-sim-1",
+      text: "hi there",
+      submit: true,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toBe("return key unavailable");
+    expect(requestSetText).toHaveBeenCalledWith("hi there", { timeoutMs: 30_000 });
+    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
   });
 
   test("rejects missing, empty, and non-string text with actionable errors", async () => {

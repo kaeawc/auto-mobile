@@ -68,6 +68,48 @@ describe("DeviceSnapshotRepository", () => {
     expect(result!.manifest.snapshotName).toBe("snap-1");
   });
 
+  test("insertSnapshot upserts an existing snapshot name", async () => {
+    await repo.insertSnapshot(makeRecord());
+
+    await repo.insertSnapshot(
+      makeRecord({
+        snapshotName: "snap-1",
+        deviceId: "device-B",
+        deviceName: "Pixel_8",
+        platform: "ios",
+        snapshotType: "adb",
+        includeAppData: true,
+        includeSettings: true,
+        createdAt: "2024-02-01T00:00:00.000Z",
+        lastAccessedAt: "2024-02-02T00:00:00.000Z",
+        sizeBytes: 2048,
+        manifest: makeManifest({
+          snapshotName: "snap-1",
+          deviceId: "device-B",
+          deviceName: "Pixel_8",
+          platform: "ios",
+          snapshotType: "adb",
+          includeAppData: true,
+          includeSettings: true,
+          osVersion: "17",
+        }),
+      })
+    );
+
+    const result = await repo.getSnapshot("snap-1");
+    expect(result).not.toBeNull();
+    expect(result!.deviceId).toBe("device-B");
+    expect(result!.deviceName).toBe("Pixel_8");
+    expect(result!.platform).toBe("ios");
+    expect(result!.snapshotType).toBe("adb");
+    expect(result!.includeAppData).toBe(true);
+    expect(result!.includeSettings).toBe(true);
+    expect(result!.createdAt).toBe("2024-02-01T00:00:00.000Z");
+    expect(result!.lastAccessedAt).toBe("2024-02-02T00:00:00.000Z");
+    expect(result!.sizeBytes).toBe(2048);
+    expect(result!.manifest.osVersion).toBe("17");
+  });
+
   test("getSnapshot returns null for unknown snapshot", async () => {
     const result = await repo.getSnapshot("nonexistent");
     expect(result).toBeNull();

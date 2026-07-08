@@ -876,24 +876,35 @@ export class NavigationGraphManager implements NavigationGraphService {
     const dbEdges = await this.repository.getEdges(this.currentAppId);
     const edges = await this.convertDBEdgesToNavigationEdges(dbEdges);
 
+    const edgesBySource = new Map<string, NavigationEdge[]>();
+    for (const edge of edges) {
+      const source = edge.from;
+      const outgoingEdges = edgesBySource.get(source);
+      if (outgoingEdges) {
+        outgoingEdges.push(edge);
+      } else {
+        edgesBySource.set(source, [edge]);
+      }
+    }
+
     // BFS to find shortest path
-    const queue: Array<{ screen: string; path: NavigationEdge[] }> = [
-      { screen: startScreen, path: [] },
-    ];
+    const queue: string[] = [startScreen];
+    let queueHead = 0;
     const visited = new Set<string>([startScreen]);
+    const predecessor = new Map<string, NavigationEdge>();
 
-    while (queue.length > 0) {
-      const { screen, path } = queue.shift()!;
-
-      // Find all edges from current screen
-      const outgoingEdges = edges.filter(e => e.from === screen);
+    while (queueHead < queue.length) {
+      const screen = queue[queueHead++];
+      const outgoingEdges = edgesBySource.get(screen) ?? [];
 
       for (const edge of outgoingEdges) {
         if (edge.to === targetScreen) {
+          predecessor.set(edge.to, edge);
+
           // Found the target
           return {
             found: true,
-            path: [...path, edge],
+            path: this.reconstructPath(startScreen, targetScreen, predecessor),
             startScreen,
             targetScreen,
           };
@@ -901,10 +912,8 @@ export class NavigationGraphManager implements NavigationGraphService {
 
         if (!visited.has(edge.to)) {
           visited.add(edge.to);
-          queue.push({
-            screen: edge.to,
-            path: [...path, edge],
-          });
+          predecessor.set(edge.to, edge);
+          queue.push(edge.to);
         }
       }
     }
@@ -916,6 +925,27 @@ export class NavigationGraphManager implements NavigationGraphService {
       startScreen,
       targetScreen,
     };
+  }
+
+  private reconstructPath(
+    startScreen: string,
+    targetScreen: string,
+    predecessor: Map<string, NavigationEdge>
+  ): NavigationEdge[] {
+    const path: NavigationEdge[] = [];
+    let screen = targetScreen;
+
+    while (screen !== startScreen) {
+      const edge = predecessor.get(screen);
+      if (!edge) {
+        return [];
+      }
+
+      path.push(edge);
+      screen = edge.from;
+    }
+
+    return path.reverse();
   }
 
   /**

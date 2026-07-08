@@ -2,7 +2,8 @@ import { expect, describe, test, beforeEach, afterEach, beforeAll, afterAll, it,
 import type { Kysely } from "kysely";
 import {
   NavigationGraphManager,
-  NavigationEvent
+  NavigationEvent,
+  type NavigationEdge
 } from "../../../src/features/navigation/NavigationGraphManager";
 import { runMigrations } from "../../helpers/database";
 import { createTestDatabase } from "../../db/testDbHelper";
@@ -300,6 +301,31 @@ describe("NavigationGraphManager", () => {
       expect(result.path[1].to).toBe("Advanced");
     });
 
+    test("should read edge sources linearly while searching a long path", async () => {
+      await manager.recordNavigationEvent(createEvent("Screen0", 1000));
+
+      let fromReadCount = 0;
+      const edges = Array.from({ length: 40 }, (_, index) =>
+        createCountingEdge(`Screen${index}`, `Screen${index + 1}`, () => {
+          fromReadCount++;
+        })
+      );
+
+      const conversionSpy = spyOn(
+        manager as unknown as {
+          convertDBEdgesToNavigationEdges: () => Promise<NavigationEdge[]>;
+        },
+        "convertDBEdgesToNavigationEdges"
+      ).mockResolvedValue(edges);
+
+      const result = await manager.findPath("Screen40");
+
+      conversionSpy.mockRestore();
+      expect(result.found).toBe(true);
+      expect(result.path).toHaveLength(40);
+      expect(fromReadCount).toBeLessThanOrEqual(edges.length + result.path.length);
+    });
+
     test("should return not found when no path exists", async () => {
       await manager.recordNavigationEvent(createEvent("Screen1"));
 
@@ -439,6 +465,28 @@ function createEventWithApp(
     sequenceNumber: 0,
     applicationId
   };
+}
+
+function createCountingEdge(
+  from: string,
+  to: string,
+  onFromRead: () => void
+): NavigationEdge {
+  const edge = {
+    to,
+    timestamp: 1000,
+    edgeType: "unknown" as const,
+  } as NavigationEdge;
+
+  Object.defineProperty(edge, "from", {
+    enumerable: true,
+    get: () => {
+      onFromRead();
+      return from;
+    },
+  });
+
+  return edge;
 }
 
 describe("NavigationGraphManager - Scroll Position", () => {

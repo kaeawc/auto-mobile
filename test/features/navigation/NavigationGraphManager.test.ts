@@ -318,12 +318,28 @@ describe("NavigationGraphManager", () => {
         "convertDBEdgesToNavigationEdges"
       ).mockResolvedValue(edges);
 
-      const result = await manager.findPath("Screen40");
+      const result = await manager
+        .findPath("Screen40")
+        .finally(() => conversionSpy.mockRestore());
 
-      conversionSpy.mockRestore();
       expect(result.found).toBe(true);
       expect(result.path).toHaveLength(40);
       expect(fromReadCount).toBeLessThanOrEqual(edges.length + result.path.length);
+    });
+
+    test("should keep BFS queue and path tracking linear in source", () => {
+      const managerSource = readFileSync(
+        join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
+        "utf8"
+      );
+      const findPathBody = extractMethodBody(managerSource, "public async findPath");
+
+      expect(findPathBody).toContain("const edgesBySource = new Map");
+      expect(findPathBody).toContain("let queueHead = 0");
+      expect(findPathBody).not.toContain(".shift(");
+      expect(findPathBody).toContain("const predecessor = new Map");
+      expect(findPathBody).not.toContain("[...path");
+      expect(findPathBody).toContain("this.reconstructPath(");
     });
 
     test("should return not found when no path exists", async () => {
@@ -487,6 +503,31 @@ function createCountingEdge(
   });
 
   return edge;
+}
+
+function extractMethodBody(source: string, signature: string): string {
+  const signatureIndex = source.indexOf(signature);
+  if (signatureIndex < 0) {
+    throw new Error(`Could not find method signature: ${signature}`);
+  }
+
+  const openingBrace = source.indexOf("{", signatureIndex);
+  if (openingBrace < 0) {
+    throw new Error(`Could not find method body: ${signature}`);
+  }
+
+  let depth = 1;
+  let index = openingBrace + 1;
+  for (; index < source.length && depth > 0; index++) {
+    const char = source[index];
+    if (char === "{") {
+      depth++;
+    } else if (char === "}") {
+      depth--;
+    }
+  }
+
+  return source.slice(openingBrace + 1, index - 1);
 }
 
 describe("NavigationGraphManager - Scroll Position", () => {

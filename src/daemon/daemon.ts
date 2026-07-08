@@ -975,6 +975,13 @@ export class Daemon {
     }
   }
 
+  private stopHealthCheckTimer(): void {
+    if (this.healthCheckTimer) {
+      this.timer.clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
+  }
+
   /**
    * Start periodic heartbeat checks to cancel stale sessions
    */
@@ -1355,10 +1362,7 @@ export class Daemon {
     logger.info("Stopping daemon...");
 
     // Clear health check timer
-    if (this.healthCheckTimer) {
-      clearInterval(this.healthCheckTimer);
-      this.healthCheckTimer = null;
-    }
+    this.stopHealthCheckTimer();
     if (this.heartbeatMonitor) {
       this.heartbeatMonitor.stop();
       this.heartbeatMonitor = null;

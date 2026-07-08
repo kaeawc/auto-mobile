@@ -1,62 +1,62 @@
-import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DefaultDatabaseHealthProbe } from "../../src/db/DatabaseHealthProbe";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-class FakeProbeConnection {
-  execStatements: string[] = [];
-  queryStatements: string[] = [];
-  closed = false;
+interface SqliteSetupConnection {
+  exec(sql: string): unknown;
+  close(): void;
+}
 
-  exec(sql: string): void {
-    this.execStatements.push(sql);
-  }
+type BunDatabaseConstructor = new (dbPath: string) => SqliteSetupConnection;
 
-  query(sql: string): { get: () => { ok: number } } {
-    this.queryStatements.push(sql);
-    return {
-      get: () => ({ ok: 1 }),
-    };
-  }
-
-  close(): void {
-    this.closed = true;
+function createSqliteFile(dbPath: string): void {
+  const { Database } = require("bun:sqlite") as { Database: BunDatabaseConstructor };
+  const db = new Database(dbPath);
+  try {
+    db.exec("CREATE TABLE probe_smoke (id INTEGER PRIMARY KEY)");
+  } finally {
+    db.close();
   }
 }
 
 describe("DefaultDatabaseHealthProbe", () => {
+  let tempDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const tempDir of tempDirs) {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+    tempDirs = [];
+  });
+
   test("throws a cached migration error without issuing SELECT 1", async () => {
     const migrationError = new Error("startup migration failed");
-    let openCalls = 0;
+    let selectCalls = 0;
     const probe = new DefaultDatabaseHealthProbe({
       getMigrationsError: () => migrationError,
-      openProbeConnection: () => {
-        openCalls += 1;
-        return new FakeProbeConnection();
+      executeSelectOne: async () => {
+        selectCalls += 1;
       },
     });
 
     await expect(probe.check()).rejects.toBe(migrationError);
-    expect(openCalls).toBe(0);
+    expect(selectCalls).toBe(0);
   });
 
-  test("issues a lightweight SELECT 1 with a short SQLite busy timeout", async () => {
-    const connection = new FakeProbeConnection();
-    const openedPaths: string[] = [];
+  test("issues a worker-backed lightweight SELECT 1 against a read-only sqlite file", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "auto-mobile-health-probe-"));
+    tempDirs.push(tempDir);
+    const dbPath = join(tempDir, "auto-mobile.db");
+    createSqliteFile(dbPath);
     const probe = new DefaultDatabaseHealthProbe({
       getMigrationsError: () => null,
-      getDatabasePath: () => ":memory:",
-      openProbeConnection: dbPath => {
-        openedPaths.push(dbPath);
-        return connection;
-      },
+      getDatabasePath: () => dbPath,
     });
 
     await probe.check();
-
-    expect(openedPaths).toEqual([":memory:"]);
-    expect(connection.execStatements).toEqual(["PRAGMA busy_timeout = 50;"]);
-    expect(connection.queryStatements).toEqual(["SELECT 1 as ok"]);
-    expect(connection.closed).toBe(true);
   });
 
   test("bounds a wedged SELECT 1 probe", async () => {

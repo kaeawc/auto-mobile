@@ -19,6 +19,7 @@ interface DaemonHealthInternals {
   socketServer: FakeSocketServer | null;
   healthCheckTimer: NodeJS.Timeout | null;
   startHealthCheckTimer(): void;
+  stopHealthCheckTimer(): void;
   attemptRecovery(): Promise<void>;
 }
 
@@ -52,12 +53,12 @@ function buildDaemon(timer: FakeTimer, databaseHealthProbe: FakeDatabaseHealthPr
 }
 
 describe("Daemon database health check", () => {
-  let internalsToCleanUp: DaemonHealthInternals | null = null;
+  let cleanup: { internals: DaemonHealthInternals; timer: FakeTimer } | null = null;
 
   afterEach(() => {
-    if (internalsToCleanUp?.healthCheckTimer) {
-      clearInterval(internalsToCleanUp.healthCheckTimer);
-      internalsToCleanUp = null;
+    if (cleanup?.internals.healthCheckTimer) {
+      cleanup.timer.clearInterval(cleanup.internals.healthCheckTimer);
+      cleanup = null;
     }
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
@@ -70,7 +71,7 @@ describe("Daemon database health check", () => {
     databaseHealthProbe.failWith(new Error("SQLITE_BUSY: database is locked"));
     const daemon = buildDaemon(timer, databaseHealthProbe);
     const internals = daemon as unknown as DaemonHealthInternals;
-    internalsToCleanUp = internals;
+    cleanup = { internals, timer };
     const recoveryTimes: number[] = [];
 
     internals.httpServer = { listening: true };
@@ -87,5 +88,23 @@ describe("Daemon database health check", () => {
 
     expect(databaseHealthProbe.checkCalls).toBe(MAX_FAILED_CHECKS);
     expect(recoveryTimes).toEqual([HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS]);
+  });
+
+  test("clears the health interval through the injected timer", () => {
+    const timer = new FakeTimer();
+    const databaseHealthProbe = new FakeDatabaseHealthProbe();
+    const daemon = buildDaemon(timer, databaseHealthProbe);
+    const internals = daemon as unknown as DaemonHealthInternals;
+    cleanup = { internals, timer };
+    const intervalCountBeforeHealthCheck = timer.getPendingIntervalCount();
+
+    internals.startHealthCheckTimer();
+    expect(timer.getPendingIntervalCount()).toBe(intervalCountBeforeHealthCheck + 1);
+
+    internals.stopHealthCheckTimer();
+
+    expect(timer.getPendingIntervalCount()).toBe(intervalCountBeforeHealthCheck);
+    expect(internals.healthCheckTimer).toBe(null);
+    cleanup = null;
   });
 });

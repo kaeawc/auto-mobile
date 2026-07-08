@@ -43,7 +43,8 @@ function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingSco
     if (
       cleaned &&
       !isRedundantStaticTextChildForParent(node, cleaned) &&
-      !isStructuralWrapperWithOnlyScrollBarNoise(cleaned)
+      !isStructuralWrapperWithOnlyScrollBarNoise(cleaned) &&
+      !isStructuralWrapperWithOnlyScrollBarNoise(child)
     ) {
       compactedChildren.push(cleaned);
     } else {

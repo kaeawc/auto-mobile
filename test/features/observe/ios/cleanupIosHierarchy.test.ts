@@ -320,6 +320,40 @@ describe("cleanupIosXCTestHierarchy", () => {
     })).toBe(false);
   });
 
+  test("drops structural scroll bar wrappers after an earlier sibling registers the same noise", () => {
+    const result = cleanupIosXCTestHierarchy({
+      updatedAt: 1,
+      hierarchy: {
+        className: "XCUIApplication",
+        node: [
+          {
+            className: "UIView",
+            text: "Vertical scroll bar, 1 page",
+            bounds: [383, 156, 390, 704],
+          },
+          {
+            className: "UIView",
+            bounds: [383, 156, 390, 704],
+            node: {
+              className: "UIView",
+              text: "Vertical scroll bar, 1 page",
+              bounds: [383, 156, 390, 704],
+            },
+          },
+        ],
+      },
+    });
+
+    const nodes = collectNodes(result.hierarchy);
+    expect(nodes.filter(node => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
+    expect(nodes.some(node => {
+      const children = Array.isArray(node.node) ? node.node : node.node ? [node.node] : [];
+      return node.className === "UIView" &&
+        children.length === 0 &&
+        node.text === undefined;
+    })).toBe(false);
+  });
+
   test("drops Reminders fixture scroll bar wrappers in raw TS cleanup", () => {
     const { before } = loadIosRemindersNoiseObservePair();
     const result = cleanupIosXCTestHierarchy(before.viewHierarchy);

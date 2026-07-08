@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { SharpBackend } from "../../../../src/utils/image/backend/SharpBackend";
 import type { ImagePipeline } from "../../../../src/utils/image/backend/ImageBackend";
+import type { SharpFactory } from "../../../../src/utils/image/loadSharp";
 
 async function makeSourcePng(width = 8, height = 8): Promise<Buffer> {
   const { Jimp, rgbaToInt } = await import("jimp");
@@ -15,12 +16,73 @@ async function makeSourcePng(width = 8, height = 8): Promise<Buffer> {
 
 const PNG_MAGIC = "89504e47";
 
+interface FakeSharpImage {
+  resize(options: unknown): FakeSharpImage;
+  extract(options: unknown): FakeSharpImage;
+  png(): FakeSharpImage;
+  webp(options?: unknown): FakeSharpImage;
+  toBuffer(): Promise<Buffer>;
+}
+
+function makeRecordingSharpFactory(events: string[]): SharpFactory {
+  const image: FakeSharpImage = {
+    resize(options) {
+      events.push(`resize:${JSON.stringify(options)}`);
+      return image;
+    },
+    extract(options) {
+      events.push(`extract:${JSON.stringify(options)}`);
+      return image;
+    },
+    png() {
+      events.push("png");
+      return image;
+    },
+    webp(options) {
+      events.push(`webp:${JSON.stringify(options)}`);
+      return image;
+    },
+    async toBuffer() {
+      events.push("toBuffer");
+      return Buffer.from("encoded");
+    }
+  };
+
+  return ((source: Buffer) => {
+    events.push(`sharp:${source.toString("utf8")}`);
+    return image;
+  }) as unknown as SharpFactory;
+}
+
 // Production keeps Windows on Jimp because sharp can abort under Bun there.
 // These cases intentionally exercise the real native sharp backend on macOS/Linux only.
 const describeSharp = process.platform === "win32" ? describe.skip : describe;
 
 describeSharp("SharpBackend", () => {
   describe("execute", () => {
+    test("chains multi-operation pipelines without intermediate materialization", async () => {
+      const events: string[] = [];
+      const backend = new SharpBackend({
+        loadSharp: async () => makeRecordingSharpFactory(events)
+      });
+
+      await backend.execute(Buffer.from("source"), {
+        operations: [
+          { type: "resize", width: 5, height: 5, maintainAspectRatio: false },
+          { type: "crop", x: 1, y: 2, width: 3, height: 4 }
+        ],
+        encoding: { mime: "image/png" }
+      });
+
+      expect(events).toEqual([
+        "sharp:source",
+        "resize:{\"width\":5,\"height\":5,\"fit\":\"fill\"}",
+        "extract:{\"left\":1,\"top\":2,\"width\":3,\"height\":4}",
+        "png",
+        "toBuffer"
+      ]);
+    });
+
     test("resize with fill produces exact target dimensions", async () => {
       const backend = new SharpBackend();
       const source = await makeSourcePng(8, 8);

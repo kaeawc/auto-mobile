@@ -127,6 +127,29 @@ describeSharp("SharpBackend native", () => {
       expect(meta.height).toBe(2);
     });
 
+    test("applies crop after resize on the resized coordinate space", async () => {
+      const backend = new SharpBackend();
+      const source = await makeSourcePng(8, 8);
+      const sharp = (await import("sharp")).default;
+      const expected = await backend.rawPixels(await sharp(source)
+        .resize({ width: 4, height: 4, fit: "fill" })
+        .extract({ left: 1, top: 1, width: 2, height: 2 })
+        .png()
+        .toBuffer());
+
+      const actual = await backend.rawPixels(await backend.execute(source, {
+        operations: [
+          { type: "resize", width: 4, height: 4, maintainAspectRatio: false },
+          { type: "crop", x: 1, y: 1, width: 2, height: 2 }
+        ],
+        encoding: { mime: "image/png" }
+      }));
+
+      expect(actual.width).toBe(2);
+      expect(actual.height).toBe(2);
+      expect(actual.data).toEqual(expected.data);
+    });
+
     test("applies chained resize operations in pipeline order", async () => {
       const backend = new SharpBackend();
       const source = await makeSourcePng(8, 8);

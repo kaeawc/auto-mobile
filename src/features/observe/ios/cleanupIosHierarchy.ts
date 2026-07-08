@@ -44,7 +44,7 @@ function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingSco
       cleaned &&
       !isRedundantStaticTextChildForParent(node, cleaned) &&
       !isStructuralWrapperWithOnlyScrollBarNoise(cleaned) &&
-      !isStructuralWrapperWithOnlyScrollBarNoise(child)
+      !wasStructuralWrapperEmptiedByScopedDedupe(child, cleaned)
     ) {
       compactedChildren.push(cleaned);
     } else {
@@ -107,6 +107,21 @@ function isRedundantStaticTextChild(parentText: string, child: IosHierarchyNode)
   }
 
   return !hasStandaloneContentProperties(child);
+}
+
+function wasStructuralWrapperEmptiedByScopedDedupe(
+  original: IosHierarchyNode,
+  cleaned: IosHierarchyNode
+): boolean {
+  if (normalizeChildren(cleaned.node).length !== 0) {
+    return false;
+  }
+
+  const originalChildren = normalizeChildren(original.node);
+  return isStructuralWrapperWithOnlyScrollBarNoise(original) ||
+    originalChildren.length === 1 &&
+    noiseSiblingKey(originalChildren[0]) !== null &&
+    isSingleChildStructuralWrapper(original, originalChildren);
 }
 
 function dedupeCurrentNoiseSibling(

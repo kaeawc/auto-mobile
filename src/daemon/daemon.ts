@@ -29,6 +29,7 @@ import {
   getDbWriteBarrier,
 } from "../db";
 import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
+import { DatabaseHealthProbe, DefaultDatabaseHealthProbe } from "../db/DatabaseHealthProbe";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 import { handleFatalDatabaseStartupFailure } from "./daemonStartupGuard";
 import { runStartupPrologue } from "./startupPrologue";
@@ -126,6 +127,7 @@ export class Daemon {
   private timer: Timer;
   private idGenerator: IdGenerator;
   private databaseInitializer: DatabaseInitializer;
+  private databaseHealthProbe: DatabaseHealthProbe;
   private startupFailureTracker: StartupFailureTracker;
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
@@ -138,7 +140,8 @@ export class Daemon {
     deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
     idGenerator: IdGenerator = defaultIdGenerator,
     databaseInitializer: DatabaseInitializer = new DefaultDatabaseInitializer(),
-    startupFailureTracker: StartupFailureTracker = new DefaultStartupFailureTracker()
+    startupFailureTracker: StartupFailureTracker = new DefaultStartupFailureTracker(),
+    databaseHealthProbe: DatabaseHealthProbe = new DefaultDatabaseHealthProbe({ timer })
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -150,6 +153,7 @@ export class Daemon {
     this.daemonSessionId = this.idGenerator.next();
     this.timer = timer;
     this.databaseInitializer = databaseInitializer;
+    this.databaseHealthProbe = databaseHealthProbe;
     this.startupFailureTracker = startupFailureTracker;
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
@@ -926,7 +930,7 @@ export class Daemon {
     const MAX_FAILED_CHECKS = 3; // Allow 3 consecutive failures before taking action
     let failedCheckCount = 0;
 
-    this.healthCheckTimer = defaultTimer.setInterval(async () => {
+    this.healthCheckTimer = this.timer.setInterval(async () => {
       try {
         // Check if HTTP server is responsive
         if (!this.httpServer) {
@@ -936,14 +940,20 @@ export class Daemon {
           logger.warn("Health check failed: HTTP server not listening");
           failedCheckCount++;
         } else {
-          // Check if socket server is active
+          // Check if socket server is active before probing shared dependencies.
           if (!this.socketServer || !this.socketServer.isListening()) {
             logger.warn("Health check failed: Socket server not listening");
             failedCheckCount++;
           } else {
-            // Health check passed
-            failedCheckCount = 0;
-            logger.debug("Health check passed");
+            try {
+              await this.databaseHealthProbe.check();
+              // Health check passed
+              failedCheckCount = 0;
+              logger.debug("Health check passed");
+            } catch (error) {
+              logger.warn(`Health check failed: Database probe failed: ${error}`);
+              failedCheckCount++;
+            }
           }
         }
 
@@ -960,7 +970,9 @@ export class Daemon {
     }, HEALTH_CHECK_INTERVAL);
 
     // Keep timer alive even if there are no other references
-    this.healthCheckTimer.unref();
+    if (typeof (this.healthCheckTimer as { unref?: () => void }).unref === "function") {
+      (this.healthCheckTimer as { unref: () => void }).unref();
+    }
   }
 
   /**

@@ -496,6 +496,25 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5556:get-state"))).toBe(true);
   });
 
+  test("keeps explicit physical deviceId authoritative when model name later resolves", async () => {
+    fakeTimer.enableAutoAdvance();
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      { name: "Pixel 8", platform: "android", deviceId: "R58M123456A" },
+    ]);
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const result = await client.waitForEmulatorReady(
+      "R58M123456A",
+      5_000,
+      null,
+      "R58M123456A",
+    );
+
+    expect(result.deviceId).toBe("R58M123456A");
+    expect(scopedFactory.commandLog.some(command => command.startsWith("R58M123456A:get-state"))).toBe(true);
+  });
+
   test("does not report a different local emulator ready during cold-boot name resolution", async () => {
     fakeTimer.enableAutoAdvance();
     const existingDevice: BootedDevice = {

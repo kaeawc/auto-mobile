@@ -1157,6 +1157,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   private matchesRequestedAvdOrUnknown(emulator: BootedDevice, avdName: string, targetDeviceId?: string): boolean {
+    if (targetDeviceId === emulator.deviceId && !targetDeviceId.startsWith("emulator-")) {
+      return true;
+    }
+
     return emulator.name === avdName
       || this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
       || (targetDeviceId === emulator.deviceId && this.isUnknownEmulatorName(avdName, targetDeviceId));

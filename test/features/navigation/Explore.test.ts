@@ -155,52 +155,56 @@ describe("Explore", () => {
   }
 
   describe("execute", () => {
-    test("should use graph stats instead of exporting the full graph for progress node counts", async () => {
-      fakeGraph.recordNavigationEvent({
-        destination: "Home",
-        source: "TEST",
-        arguments: {},
-        metadata: {},
-        timestamp: fakeTimer.now(),
-        sequenceNumber: 1,
-        applicationId: "com.test.app"
-      });
-
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-      (explore as any).observeScreen = {
-        execute: async () => createMockObservation()
-      };
-      (explore as any).performInteraction = async () => {
+    for (const mode of ["hybrid", "discover"] as const) {
+      test(`should use graph stats instead of exporting the full graph for ${mode} progress node counts`, async () => {
         fakeGraph.recordNavigationEvent({
-          destination: "Settings",
+          destination: "Home",
           source: "TEST",
           arguments: {},
           metadata: {},
           timestamp: fakeTimer.now(),
-          sequenceNumber: 2,
+          sequenceNumber: 1,
           applicationId: "com.test.app"
         });
-        return true;
-      };
 
-      fakeGraph.clearCallHistory();
-      const progressMessages: string[] = [];
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+        (explore as any).observeScreen = {
+          execute: async () => createMockObservation()
+        };
+        (explore as any).performInteraction = async () => {
+          fakeGraph.recordNavigationEvent({
+            destination: "Settings",
+            source: "TEST",
+            arguments: {},
+            metadata: {},
+            timestamp: fakeTimer.now(),
+            sequenceNumber: 2,
+            applicationId: "com.test.app"
+          });
+          return true;
+        };
 
-      await explore.execute(
-        {
-          maxInteractions: 1,
-          timeoutMs: 5000,
-          packageName: "com.test.app"
-        },
-        (_current, _total, message) => {
-          progressMessages.push(message);
-        }
-      );
+        fakeGraph.clearCallHistory();
+        const progressMessages: string[] = [];
 
-      expect(fakeGraph.getMethodCallCount("getStats")).toBe(1);
-      expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(2);
-      expect(progressMessages).toContain("Explored 1 new screens (1/1 interactions)");
-    });
+        const result = await explore.execute(
+          {
+            maxInteractions: 1,
+            timeoutMs: 5000,
+            packageName: "com.test.app",
+            mode
+          },
+          (_current, _total, message) => {
+            progressMessages.push(message);
+          }
+        );
+
+        expect(fakeGraph.getMethodCallCount("getStats")).toBe(1);
+        expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(2);
+        expect(progressMessages).toContain("Explored 1 new screens (1/1 interactions)");
+        expect(result.screensDiscovered).toBe(1);
+      });
+    }
   });
 
   describe("element selection", () => {

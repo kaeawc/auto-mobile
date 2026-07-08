@@ -39,6 +39,27 @@ export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
  */
 export const SQLITE_WAL_SIZE_LIMIT_BYTES = 4 * 1024 * 1024;
 
+/**
+ * Connection-local SQLite page cache budget. Negative cache_size values are
+ * kibibytes, not pages; 16 MiB is enough to keep the SELECT-heavy telemetry and
+ * navigation working sets warm without being surprising for a local daemon.
+ */
+export const SQLITE_CACHE_SIZE_KIB = 16 * 1024;
+
+/**
+ * Upper bound for SQLite memory-mapped reads. 64 MiB gives growing local
+ * telemetry/diagnostics databases a cheap read path while keeping the address
+ * window conservative on developer machines.
+ */
+export const SQLITE_MMAP_SIZE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Keep temporary sort and b-tree storage in memory. These are local diagnostic
+ * queries over bounded data, so avoiding temp files is a read-performance knob
+ * rather than a durability trade-off.
+ */
+export const SQLITE_TEMP_STORE = "MEMORY";
+
 interface SqlitePragmaDatabase {
   exec(sql: string): unknown;
 }
@@ -70,6 +91,15 @@ export function configureSqliteDatabase(sqliteDb: SqlitePragmaDatabase): void {
   // Truncate the WAL back to this bound after each passive/auto checkpoint
   // instead of leaving it allocated at its high-water mark (issue #2802).
   sqliteDb.exec(`PRAGMA journal_size_limit = ${SQLITE_WAL_SIZE_LIMIT_BYTES};`);
+
+  // Use a modest page cache for the SELECT-heavy observe/nav/stream workload.
+  sqliteDb.exec(`PRAGMA cache_size = -${SQLITE_CACHE_SIZE_KIB};`);
+
+  // Allow SQLite to memory-map the hot prefix of the local diagnostics DB.
+  sqliteDb.exec(`PRAGMA mmap_size = ${SQLITE_MMAP_SIZE_BYTES};`);
+
+  // Keep temporary sort/b-tree structures off disk for local diagnostic queries.
+  sqliteDb.exec(`PRAGMA temp_store = ${SQLITE_TEMP_STORE};`);
 
   // WAL + NORMAL avoids an fsync per commit while remaining corruption-safe.
   // The whole DB stores local telemetry, diagnostics, cache, config, and session

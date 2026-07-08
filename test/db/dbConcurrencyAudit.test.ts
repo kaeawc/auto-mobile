@@ -14,6 +14,17 @@ describe("DB concurrency RMW audit", () => {
   const N = 16;
   const openDbs: Kysely<Database>[] = [];
 
+  function tablePathsInSection(markdown: string, heading: string): string[] {
+    const section = markdown.split(`## ${heading}`)[1]?.split("\n## ")[0];
+    if (!section) {
+      throw new Error(`Missing audit section: ${heading}`);
+    }
+    return section
+      .split("\n")
+      .map(line => line.match(/^\| `([^`]+)` \|/)?.[1])
+      .filter((path): path is string => path !== undefined);
+  }
+
   afterEach(async () => {
     await Promise.all(openDbs.splice(0).map(db => db.destroy()));
   });
@@ -48,24 +59,30 @@ describe("DB concurrency RMW audit", () => {
     );
 
     const guardedPaths = [
-      ["NavigationRepository.getOrCreateApp", "Atomic upsert"],
-      ["NavigationRepository.getOrCreateNode", "Atomic upsert"],
+      ["NavigationRepository.getOrCreateApp", "Atomic upsert on `navigation_apps.app_id`"],
+      ["NavigationRepository.getOrCreateNode", "Atomic upsert on `(app_id, screen_name)`"],
       ["NavigationRepository.getOrCreateUIElement", "guarded by `db.transaction()`"],
-      ["NavigationRepository.getOrCreateFingerprint", "Atomic upsert"],
-      ["NavigationRepository.addOrUpdateSuggestion", "Atomic upsert"],
+      ["NavigationRepository.getOrCreateFingerprint", "Atomic upsert on `(app_id, fingerprint_hash)`"],
+      ["NavigationRepository.addOrUpdateSuggestion", "Atomic upsert on `(app_id, fingerprint_hash)`"],
       ["FailureAnalyticsRepository.recordFailure", "Method-level transaction"],
-      ["TestCoverageRepository.getOrCreateSession", "Atomic upsert"],
-      ["TestCoverageRepository.recordNodeVisit", "Atomic upsert"],
-      ["TestCoverageRepository.recordEdgeTraversal", "Atomic upsert"],
-      ["PredictionHistoryRepository.upsertTransitionStats", "Atomic upsert"],
+      ["TestCoverageRepository.getOrCreateSession", "Atomic upsert on `session_uuid`"],
+      ["TestCoverageRepository.recordNodeVisit", "Atomic upsert on `(session_id, node_id)`"],
+      ["TestCoverageRepository.recordEdgeTraversal", "Atomic upsert on `(session_id, edge_id)`"],
+      [
+        "PredictionHistoryRepository.upsertTransitionStats",
+        "Atomic upsert on `(app_id, from_screen, to_screen, tool_name, tool_args)`",
+      ],
       ["InstalledAppsRepository.replaceInstalledApps", "guarded by a transaction"],
-      ["InstalledAppsRepository.upsertInstalledApp", "Atomic upsert"],
-      ["DeviceSessionRepository.upsertActiveSession", "Atomic upsert"],
-      ["AppearanceConfigRepository.setConfig", "Atomic upsert"],
-      ["DeviceSnapshotConfigRepository.setConfig", "Atomic upsert"],
-      ["VideoRecordingConfigRepository.setConfig", "Atomic upsert"],
+      ["InstalledAppsRepository.upsertInstalledApp", "Atomic upsert on `(device_id, user_id, package_name)`"],
+      ["DeviceSessionRepository.upsertActiveSession", "Atomic upsert on `session_uuid`"],
+      ["AppearanceConfigRepository.setConfig", "Atomic upsert on the singleton `key`"],
+      ["DeviceSnapshotConfigRepository.setConfig", "Atomic upsert on the singleton `key`"],
+      ["VideoRecordingConfigRepository.setConfig", "Atomic upsert on the singleton `key`"],
     ] as const;
 
+    expect(tablePathsInSection(audit, "Guarded Paths")).toEqual(
+      guardedPaths.map(([path]) => path)
+    );
     for (const [path, strategy] of guardedPaths) {
       expect(audit).toContain(`| \`${path}\` |`);
       expect(audit).toContain(strategy);
@@ -75,10 +92,30 @@ describe("DB concurrency RMW audit", () => {
       ["SqliteFeatureFlagRepository.ensureFlags", "Concurrent first initialization can race"],
       ["SqliteFeatureFlagRepository.upsertFlag", "Concurrent first writes can race"],
       ["recordStorageEvent", "Concurrent inserts can observe the same prior value"],
-      ["NavigationRepository.promoteSuggestion", "not an atomic unit"],
+      ["NavigationRepository.promoteSuggestion", "the repository method itself does not enforce that contract"],
     ] as const;
 
+    expect(tablePathsInSection(audit, "Follow-Up Candidates")).toEqual(
+      followUpPaths.map(([path]) => path)
+    );
     for (const [path, status] of followUpPaths) {
+      expect(audit).toContain(`| \`${path}\` |`);
+      expect(audit).toContain(status);
+    }
+
+    const adjacentFollowUpPaths = [
+      ["ThresholdManager.getOrCreateThresholds", "Concurrent callers can insert duplicate threshold samples"],
+      ["MemoryThresholdManager.getOrCreateThresholds", "Concurrent callers can insert duplicate threshold samples"],
+      ["BaselineManager.saveBaseline", "Concurrent first saves can race on the unique key"],
+      ["MemoryBaselineManager.updateBaseline", "Concurrent updates can lose samples/averages"],
+      ["ThresholdManager.updateThresholdWeight", "Concurrent updates can lose weight adjustments"],
+      ["MemoryThresholdManager.updateThresholdWeight", "Concurrent updates can lose weight adjustments"],
+    ] as const;
+
+    expect(tablePathsInSection(audit, "Adjacent Follow-Up Candidates")).toEqual(
+      adjacentFollowUpPaths.map(([path]) => path)
+    );
+    for (const [path, status] of adjacentFollowUpPaths) {
       expect(audit).toContain(`| \`${path}\` |`);
       expect(audit).toContain(status);
     }

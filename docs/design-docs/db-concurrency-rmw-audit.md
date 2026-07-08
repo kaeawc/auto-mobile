@@ -55,17 +55,23 @@ acceptance criteria ask for follow-up fixes for any unguarded path found.
 | `SqliteFeatureFlagRepository.ensureFlags` | Reads all existing flag keys, computes missing definitions in JS, then inserts the missing rows. Concurrent first initialization can race on the primary key. | Convert to `INSERT ... ON CONFLICT DO NOTHING` or a transaction. |
 | `SqliteFeatureFlagRepository.upsertFlag` | SELECTs by key, then UPDATEs or INSERTs. Concurrent first writes can race on the primary key. | Replace with `insertInto(...).onConflict(...doUpdateSet(...))`. |
 | `recordStorageEvent` | When `previousValue` is omitted, SELECTs the latest same device/file/key value, then inserts a new event with that value. Concurrent inserts can observe the same prior value. | Decide whether previous-value derivation is best-effort telemetry or must be serialized per key; then either document best-effort semantics or guard the lookup+insert. |
-| `NavigationRepository.promoteSuggestion` | SELECTs a suggestion, upserts a fingerprint, then updates the suggestion outside a transaction. The fingerprint upsert is safe, but the multi-statement promotion is not an atomic unit. | Wrap promotion in `runInTransaction`/`withExecutor`, taking care not to nest transactions. |
+| `NavigationRepository.promoteSuggestion` | Direct raw repository callers SELECT a suggestion, upsert a fingerprint, then update the suggestion outside a transaction. The public `NavigationGraphManager.promoteSuggestion` path already wraps this in `runInTransaction`/`withExecutor`, but the repository method itself does not enforce that contract. | Either make the repository method transaction-safe for direct use or narrow its visibility/contract so callers cannot bypass the manager-owned transaction. |
 
-## Adjacent Non-Repository Paths
+## Adjacent Follow-Up Candidates
 
-`ThresholdManager.getOrCreateThresholds` and
-`MemoryThresholdManager.getOrCreateThresholds` also read existing threshold rows
-before storing new threshold rows, but they live in feature managers rather than
-DB repositories and write append-only threshold history rather than enforcing a
-single-row get-or-create contract. Concurrent callers may insert duplicate
-threshold samples. If that is undesirable, track it as a threshold-history
-deduplication issue rather than as part of the repository RMW audit.
+These paths are DB-backed feature-manager methods rather than repositories, so
+they are outside the strict repository-method acceptance criterion. They still
+have the same awaited read-then-write shape and should be tracked with the
+follow-up fixes if their current best-effort/history semantics are not intended.
+
+| Path | Current behavior | Follow-up direction |
+| --- | --- | --- |
+| `ThresholdManager.getOrCreateThresholds` | Reads valid threshold rows, then stores a new append-only threshold row when none exist. Concurrent callers can insert duplicate threshold samples. | Decide whether duplicate threshold history is acceptable; if not, add a transaction or atomic key. |
+| `MemoryThresholdManager.getOrCreateThresholds` | Reads valid threshold rows, then stores a new append-only threshold row when no weighted/adaptive threshold exists. Concurrent callers can insert duplicate threshold samples. | Decide whether duplicate threshold history is acceptable; if not, add a transaction or atomic key. |
+| `BaselineManager.saveBaseline` | SELECTs by unique `screen_id`, then UPDATEs or INSERTs the accessibility baseline. Concurrent first saves can race on the unique key. | Replace with `INSERT ... ON CONFLICT(screen_id) DO UPDATE`. |
+| `MemoryBaselineManager.updateBaseline` | Reads the current `(device_id, package_name, tool_name)` baseline, computes EMA and `sample_count + 1` in JS, then UPDATEs or INSERTs. Concurrent updates can lose samples/averages and concurrent first writes can race on the unique key. | Convert to a transaction or an atomic upsert/update strategy that preserves read-derived calculations. |
+| `ThresholdManager.updateThresholdWeight` | Reads the latest performance threshold weight, computes the next weight in JS, then UPDATEs that row. Concurrent updates can lose weight adjustments. | Move the weight adjustment into SQL or serialize the read-derived update. |
+| `MemoryThresholdManager.updateThresholdWeight` | Reads the latest memory threshold weight, computes the next weight in JS, then UPDATEs that row. Concurrent updates can lose weight adjustments. | Move the weight adjustment into SQL or serialize the read-derived update. |
 
 `SessionManager.getOrCreateSession` is an in-memory session-map operation; its
 persistence path goes through `DeviceSessionRepository.upsertActiveSession`,

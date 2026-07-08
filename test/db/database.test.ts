@@ -10,6 +10,9 @@ import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import {
   configureSqliteDatabase,
   SQLITE_BUSY_TIMEOUT_MS,
+  SQLITE_CACHE_SIZE_KIB,
+  SQLITE_MMAP_SIZE_BYTES,
+  SQLITE_TEMP_STORE,
   SQLITE_WAL_SIZE_LIMIT_BYTES,
 } from "../../src/db/database";
 
@@ -36,7 +39,7 @@ function createDeferred<T = void>(): Deferred<T> {
 }
 
 describe("configureSqliteDatabase", () => {
-  test("enables WAL, busy timeout, WAL size limit, and foreign keys for new connections", () => {
+  test("enables WAL, busy timeout, read pragmas, WAL size limit, and foreign keys for new connections", () => {
     const db = new FakeSqliteDatabase();
 
     configureSqliteDatabase(db);
@@ -45,6 +48,9 @@ describe("configureSqliteDatabase", () => {
       `PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`,
       "PRAGMA journal_mode = WAL;",
       `PRAGMA journal_size_limit = ${SQLITE_WAL_SIZE_LIMIT_BYTES};`,
+      `PRAGMA cache_size = -${SQLITE_CACHE_SIZE_KIB};`,
+      `PRAGMA mmap_size = ${SQLITE_MMAP_SIZE_BYTES};`,
+      `PRAGMA temp_store = ${SQLITE_TEMP_STORE};`,
       "PRAGMA synchronous = NORMAL;",
       "PRAGMA foreign_keys = ON;",
     ]);
@@ -106,6 +112,33 @@ describe("configureSqliteDatabase", () => {
     } finally {
       sqliteDb.close();
       rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("sets read workload pragmas on Bun SQLite databases", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "auto-mobile-sqlite-"));
+    const sqliteDb = new BunDatabase(join(tempDir, "test.db"));
+
+    try {
+      configureSqliteDatabase(sqliteDb);
+
+      const cacheSize = sqliteDb
+        .query<{ cache_size: number }, []>("PRAGMA cache_size;")
+        .get();
+      expect(cacheSize?.cache_size).toBe(-SQLITE_CACHE_SIZE_KIB);
+
+      const mmapSize = sqliteDb
+        .query<{ mmap_size: number }, []>("PRAGMA mmap_size;")
+        .get();
+      expect(mmapSize?.mmap_size).toBe(SQLITE_MMAP_SIZE_BYTES);
+
+      const tempStore = sqliteDb
+        .query<{ temp_store: number }, []>("PRAGMA temp_store;")
+        .get();
+      expect(tempStore?.temp_store).toBe(2);
+    } finally {
+      sqliteDb.close();
+      await removeTempDbDir(tempDir);
     }
   });
 });

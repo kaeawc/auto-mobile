@@ -14,7 +14,14 @@ export type ScreenshotFallbackReason =
   | "ctrlproxy_timeout"
   | "ctrlproxy_exception";
 
-export interface ScreenshotMetadata {
+export interface ScreenshotPerformanceMetadata {
+  screenshotCaptureDurationMs?: number;
+  screenshotEncodeDurationMs?: number;
+  screenshotByteLength?: number;
+  screenshotBase64Length?: number;
+}
+
+export interface ScreenshotMetadata extends ScreenshotPerformanceMetadata {
   screenshotMimeType?: ScreenshotMimeType;
   screenshotFormat?: ScreenshotFormat;
   screenshotCaptureSource?: ScreenshotCaptureSource;
@@ -86,6 +93,18 @@ export function pickScreenshotMetadata(metadata: ScreenshotMetadata): Screenshot
   }
   if (metadata.screenshotFallbackReason !== undefined) {
     pickedMetadata.screenshotFallbackReason = metadata.screenshotFallbackReason;
+  }
+  if (metadata.screenshotCaptureDurationMs !== undefined) {
+    pickedMetadata.screenshotCaptureDurationMs = metadata.screenshotCaptureDurationMs;
+  }
+  if (metadata.screenshotEncodeDurationMs !== undefined) {
+    pickedMetadata.screenshotEncodeDurationMs = metadata.screenshotEncodeDurationMs;
+  }
+  if (metadata.screenshotByteLength !== undefined) {
+    pickedMetadata.screenshotByteLength = metadata.screenshotByteLength;
+  }
+  if (metadata.screenshotBase64Length !== undefined) {
+    pickedMetadata.screenshotBase64Length = metadata.screenshotBase64Length;
   }
 
   return pickedMetadata;

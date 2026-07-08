@@ -261,6 +261,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       screenshotCaptureSource,
       screenshotFallback,
       screenshotFallbackReason,
+      screenshotCaptureDurationMs,
+      screenshotEncodeDurationMs,
+      screenshotByteLength,
+      screenshotBase64Length,
     } = metadata;
     const message: DeviceDataStreamMessage = {
       type: "screenshot_update",
@@ -274,6 +278,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       screenshotCaptureSource,
       screenshotFallback,
       screenshotFallbackReason,
+      screenshotCaptureDurationMs,
+      screenshotEncodeDurationMs,
+      screenshotByteLength,
+      screenshotBase64Length,
     };
 
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });

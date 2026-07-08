@@ -55,6 +55,7 @@ import dev.jasonpearson.automobile.protocol.NavigationEventData
 import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
+import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
@@ -230,6 +231,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   @Volatile private var pendingScrollDeltaX: Int = 0
   @Volatile private var pendingScrollDeltaY: Int = 0
   private var pendingScrollPackageName: String? = null
+
+  private data class ScreenshotCapturePayload(
+    val base64Image: String,
+    val captureDurationMs: Long,
+    val encodeDurationMs: Long,
+    val byteLength: Int,
+    val base64Length: Int,
+  )
 
   // Job for collecting hierarchy flow results
   private var hierarchyFlowJob: Job? = null
@@ -2128,10 +2137,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Takes a screenshot and returns it as a base64-encoded JPEG string. Requires Android R (API 30)
-   * or higher. Runs on IO dispatcher to avoid blocking the main thread.
+   * Takes a screenshot and returns it as a base64-encoded JPEG plus capture diagnostics. Requires
+   * Android R (API 30) or higher. Runs on IO dispatcher to avoid blocking the main thread.
    */
-  private suspend fun takeScreenshotAsync(quality: Int = 80): String? {
+  private suspend fun takeScreenshotAsync(quality: Int = 80): ScreenshotCapturePayload? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
       Log.w(TAG, "Screenshot API requires Android R (API 30) or higher")
       return null
@@ -2196,7 +2205,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           "Screenshot encoded: ${jpegBytes.size} bytes -> ${base64String.length} base64 chars in ${encodeTime}ms (total: ${totalTime}ms)",
         )
 
-        base64String
+        ScreenshotCapturePayload(
+          base64Image = base64String,
+          captureDurationMs = screenshotTime,
+          encodeDurationMs = encodeTime,
+          byteLength = jpegBytes.size,
+          base64Length = base64String.length,
+        )
       } catch (e: CancellationException) {
         // The awaiting caller is being cancelled — rethrow instead of converting the cancellation
         // into a null screenshot (#3191).
@@ -4965,16 +4980,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // otherwise be logged-and-swallowed here, emitting neither `screenshot` nor `screenshot_error`
     // and hanging the awaiting client until timeout (issue #3023).
     asyncActionRunner.launch(requestId, "screenshot") {
-      val base64Image = takeScreenshotAsync()
-      if (base64Image != null) {
-        val message = buildString {
-          append("""{"type":"screenshot","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","format":"jpeg","data":"$base64Image"}""")
-        }
-        webSocketServer.broadcast(message)
+      val screenshot = takeScreenshotAsync()
+      if (screenshot != null) {
+        webSocketServer.broadcast(
+          ProtocolScreenshotResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = requestId,
+            data = screenshot.base64Image,
+            format = "jpeg",
+            screenshotCaptureDurationMs = screenshot.captureDurationMs,
+            screenshotEncodeDurationMs = screenshot.encodeDurationMs,
+            screenshotByteLength = screenshot.byteLength,
+            screenshotBase64Length = screenshot.base64Length,
+          )
+        )
         Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
       } else {
         val errorMessage = buildString {

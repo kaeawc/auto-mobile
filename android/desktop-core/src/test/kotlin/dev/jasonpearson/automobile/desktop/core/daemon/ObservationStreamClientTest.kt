@@ -24,7 +24,11 @@ class ObservationStreamClientTest {
           "screenshotFormat": "png",
           "screenshotCaptureSource": "android_adb_screencap",
           "screenshotFallback": true,
-          "screenshotFallbackReason": "websocket_unavailable"
+          "screenshotFallbackReason": "websocket_unavailable",
+          "screenshotCaptureDurationMs": 42,
+          "screenshotEncodeDurationMs": 7,
+          "screenshotByteLength": 1200,
+          "screenshotBase64Length": 1600
         }
         """
           .trimIndent()
@@ -36,6 +40,10 @@ class ObservationStreamClientTest {
       assertEquals("android_adb_screencap", update.screenshotCaptureSource)
       assertEquals(true, update.screenshotFallback)
       assertEquals("websocket_unavailable", update.screenshotFallbackReason)
+      assertEquals(42L, update.screenshotCaptureDurationMs)
+      assertEquals(7L, update.screenshotEncodeDurationMs)
+      assertEquals(1200, update.screenshotByteLength)
+      assertEquals(1600, update.screenshotBase64Length)
     }
   }
 

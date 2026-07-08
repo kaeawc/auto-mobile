@@ -42,6 +42,10 @@ class WebSocketResponseTest {
         format = "png",
         width = 1080,
         height = 1920,
+        screenshotCaptureDurationMs = 42L,
+        screenshotEncodeDurationMs = 7L,
+        screenshotByteLength = 1200,
+        screenshotBase64Length = 1600,
       )
 
     val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
@@ -52,6 +56,10 @@ class WebSocketResponseTest {
     assertTrue(encoded.contains(""""format":"png""""))
     assertTrue(encoded.contains(""""width":1080"""))
     assertTrue(encoded.contains(""""height":1920"""))
+    assertTrue(encoded.contains(""""screenshotCaptureDurationMs":42"""))
+    assertTrue(encoded.contains(""""screenshotEncodeDurationMs":7"""))
+    assertTrue(encoded.contains(""""screenshotByteLength":1200"""))
+    assertTrue(encoded.contains(""""screenshotBase64Length":1600"""))
   }
 
   @Test

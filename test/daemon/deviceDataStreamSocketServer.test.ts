@@ -469,6 +469,10 @@ describe("DeviceDataStreamSocketServer", () => {
           screenshotCaptureSource: "android_adb_screencap",
           screenshotFallback: true,
           screenshotFallbackReason: "websocket_unavailable",
+          screenshotCaptureDurationMs: 42,
+          screenshotEncodeDurationMs: 7,
+          screenshotByteLength: 1200,
+          screenshotBase64Length: 1600,
           checksum: "internal-checksum",
         } as any
       );
@@ -484,6 +488,10 @@ describe("DeviceDataStreamSocketServer", () => {
         screenshotCaptureSource?: string;
         screenshotFallback?: boolean;
         screenshotFallbackReason?: string;
+        screenshotCaptureDurationMs?: number;
+        screenshotEncodeDurationMs?: number;
+        screenshotByteLength?: number;
+        screenshotBase64Length?: number;
       }>();
       expect(msgs).toHaveLength(1);
       expect(msgs[0]).toMatchObject({
@@ -497,8 +505,40 @@ describe("DeviceDataStreamSocketServer", () => {
         screenshotCaptureSource: "android_adb_screencap",
         screenshotFallback: true,
         screenshotFallbackReason: "websocket_unavailable",
+        screenshotCaptureDurationMs: 42,
+        screenshotEncodeDurationMs: 7,
+        screenshotByteLength: 1200,
+        screenshotBase64Length: 1600,
       });
       expect(msgs[0]).not.toHaveProperty("checksum");
+    });
+
+    it("omits screenshot performance metadata when it is not provided", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushScreenshotUpdate(
+        "device-1",
+        "legacy-frame",
+        1080,
+        2340,
+        {
+          screenshotMimeType: "image/jpeg",
+          screenshotFormat: "jpeg",
+          screenshotCaptureSource: "android_ctrlproxy_a11y",
+          screenshotFallback: false,
+        }
+      );
+
+      const [message] = socket.getWrittenMessages<Record<string, unknown>>();
+      expect(message).toMatchObject({
+        type: "screenshot_update",
+        screenshotBase64: "legacy-frame",
+        screenshotMimeType: "image/jpeg",
+      });
+      expect(message).not.toHaveProperty("screenshotCaptureDurationMs");
+      expect(message).not.toHaveProperty("screenshotEncodeDurationMs");
+      expect(message).not.toHaveProperty("screenshotByteLength");
+      expect(message).not.toHaveProperty("screenshotBase64Length");
     });
   });
 

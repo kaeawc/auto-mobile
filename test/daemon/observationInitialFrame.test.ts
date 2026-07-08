@@ -297,6 +297,61 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     ]);
   });
 
+  it("pushes Android initial CtrlProxy screenshots with performance metadata", async () => {
+    const streamServer = new FakeObservationStreamServer();
+    const androidClient = new FakeAndroidInitialFrameClient(
+      true,
+      {
+        updatedAt: 123,
+        packageName: "com.example",
+        screenWidth: 1440,
+        screenHeight: 3120,
+        hierarchy: { text: "Home", bounds: { left: 0, top: 0, right: 1440, bottom: 3120 } },
+      },
+      undefined,
+      true,
+      {
+        success: true,
+        data: "android-shot",
+        screenshotMimeType: "image/jpeg",
+        screenshotFormat: "jpeg",
+        screenshotCaptureSource: "android_ctrlproxy_a11y",
+        screenshotFallback: false,
+        screenshotCaptureDurationMs: 42,
+        screenshotEncodeDurationMs: 7,
+        screenshotByteLength: 1200,
+        screenshotBase64Length: 1600,
+      }
+    );
+
+    await pushInitialObservationFramesForSubscriber(androidDevice.id, [androidDevice], {
+      streamServer,
+      androidClientFactory: () => androidClient,
+      iosClientFactory: () => {
+        throw new Error("unexpected iOS client");
+      },
+    });
+
+    expect(streamServer.screenshotUpdates).toEqual([
+      {
+        deviceId: androidDevice.id,
+        screenshotBase64: "android-shot",
+        screenWidth: 1440,
+        screenHeight: 3120,
+        metadata: {
+          screenshotMimeType: "image/jpeg",
+          screenshotFormat: "jpeg",
+          screenshotCaptureSource: "android_ctrlproxy_a11y",
+          screenshotFallback: false,
+          screenshotCaptureDurationMs: 42,
+          screenshotEncodeDurationMs: 7,
+          screenshotByteLength: 1200,
+          screenshotBase64Length: 1600,
+        },
+      },
+    ]);
+  });
+
   it("captures Android hierarchy without an automatic stream push when the initial cache is empty", async () => {
     const streamServer = new FakeObservationStreamServer();
     const androidClient = new FakeAndroidInitialFrameClient(

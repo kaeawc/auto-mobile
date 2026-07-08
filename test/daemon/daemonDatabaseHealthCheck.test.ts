@@ -20,7 +20,7 @@ interface DaemonHealthInternals {
   healthCheckTimer: NodeJS.Timeout | null;
   startHealthCheckTimer(): void;
   stopHealthCheckTimer(): void;
-  attemptRecovery(): Promise<void>;
+  attemptRecovery(failureKind?: string): Promise<void>;
 }
 
 class FakeDatabaseHealthProbe {
@@ -39,7 +39,11 @@ class FakeDatabaseHealthProbe {
   }
 }
 
-function buildDaemon(timer: FakeTimer, databaseHealthProbe: FakeDatabaseHealthProbe): Daemon {
+function buildDaemon(
+  timer: FakeTimer,
+  databaseHealthProbe: FakeDatabaseHealthProbe,
+  exitProcess: (code: number) => void = () => {}
+): Daemon {
   return new Daemon(
     {},
     new FakeInstalledAppsRepository(),
@@ -48,7 +52,8 @@ function buildDaemon(timer: FakeTimer, databaseHealthProbe: FakeDatabaseHealthPr
     new CountingIdGenerator("daemon-session"),
     new FakeDatabaseInitializer(),
     new FakeStartupFailureTracker(),
-    databaseHealthProbe
+    databaseHealthProbe,
+    exitProcess
   );
 }
 
@@ -72,12 +77,12 @@ describe("Daemon database health check", () => {
     const daemon = buildDaemon(timer, databaseHealthProbe);
     const internals = daemon as unknown as DaemonHealthInternals;
     cleanup = { internals, timer };
-    const recoveryTimes: number[] = [];
+    const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
 
     internals.httpServer = { listening: true };
     internals.socketServer = { isListening: () => true };
-    internals.attemptRecovery = async () => {
-      recoveryTimes.push(timer.now());
+    internals.attemptRecovery = async failureKind => {
+      recoveryCalls.push({ at: timer.now(), failureKind });
     };
 
     internals.startHealthCheckTimer();
@@ -87,7 +92,32 @@ describe("Daemon database health check", () => {
     }
 
     expect(databaseHealthProbe.checkCalls).toBe(MAX_FAILED_CHECKS);
-    expect(recoveryTimes).toEqual([HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS]);
+    expect(recoveryCalls).toEqual([{
+      at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
+      failureKind: "database",
+    }]);
+  });
+
+  test("exits the daemon when repeated database probe failures reach recovery", async () => {
+    const timer = new FakeTimer();
+    const databaseHealthProbe = new FakeDatabaseHealthProbe();
+    databaseHealthProbe.failWith(new Error("database disk image is malformed"));
+    const exitCodes: number[] = [];
+    const daemon = buildDaemon(timer, databaseHealthProbe, code => {
+      exitCodes.push(code);
+    });
+    const internals = daemon as unknown as DaemonHealthInternals;
+    cleanup = { internals, timer };
+
+    internals.httpServer = { listening: true };
+    internals.socketServer = { isListening: () => true };
+    internals.startHealthCheckTimer();
+
+    for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
+      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    expect(exitCodes).toEqual([1]);
   });
 
   test("clears the health interval through the injected timer", () => {

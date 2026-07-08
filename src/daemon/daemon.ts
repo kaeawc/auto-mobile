@@ -96,6 +96,9 @@ const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 // cannot itself hang shutdown — the timeout wins and shutdown proceeds anyway.
 const MIGRATION_SETTLE_TIMEOUT_MS = 5_000;
 
+type HealthFailureKind = "http" | "socket" | "database" | "unknown";
+type DatabaseHealthFailureRecovery = (code: number) => void;
+
 /**
  * Main daemon process
  *
@@ -129,6 +132,7 @@ export class Daemon {
   private databaseInitializer: DatabaseInitializer;
   private databaseHealthProbe: DatabaseHealthProbe;
   private startupFailureTracker: StartupFailureTracker;
+  private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
@@ -141,7 +145,8 @@ export class Daemon {
     idGenerator: IdGenerator = defaultIdGenerator,
     databaseInitializer: DatabaseInitializer = new DefaultDatabaseInitializer(),
     startupFailureTracker: StartupFailureTracker = new DefaultStartupFailureTracker(),
-    databaseHealthProbe: DatabaseHealthProbe = new DefaultDatabaseHealthProbe({ timer })
+    databaseHealthProbe: DatabaseHealthProbe = new DefaultDatabaseHealthProbe({ timer }),
+    recoverFromDatabaseHealthFailure?: DatabaseHealthFailureRecovery
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -155,6 +160,11 @@ export class Daemon {
     this.databaseInitializer = databaseInitializer;
     this.databaseHealthProbe = databaseHealthProbe;
     this.startupFailureTracker = startupFailureTracker;
+    this.recoverFromDatabaseHealthFailure = recoverFromDatabaseHealthFailure ?? (code => {
+      cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
+      logger.close();
+      process.exit(code);
+    });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     // Register centralized cleanup for session-scoped state
@@ -929,20 +939,24 @@ export class Daemon {
     const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
     const MAX_FAILED_CHECKS = 3; // Allow 3 consecutive failures before taking action
     let failedCheckCount = 0;
+    let lastFailureKind: HealthFailureKind = "unknown";
 
     this.healthCheckTimer = this.timer.setInterval(async () => {
       try {
         // Check if HTTP server is responsive
         if (!this.httpServer) {
           logger.warn("Health check failed: HTTP server not initialized");
+          lastFailureKind = "http";
           failedCheckCount++;
         } else if (!this.httpServer.listening) {
           logger.warn("Health check failed: HTTP server not listening");
+          lastFailureKind = "http";
           failedCheckCount++;
         } else {
           // Check if socket server is active before probing shared dependencies.
           if (!this.socketServer || !this.socketServer.isListening()) {
             logger.warn("Health check failed: Socket server not listening");
+            lastFailureKind = "socket";
             failedCheckCount++;
           } else {
             try {
@@ -952,6 +966,7 @@ export class Daemon {
               logger.debug("Health check passed");
             } catch (error) {
               logger.warn(`Health check failed: Database probe failed: ${error}`);
+              lastFailureKind = "database";
               failedCheckCount++;
             }
           }
@@ -960,11 +975,12 @@ export class Daemon {
         // If too many failures, attempt recovery
         if (failedCheckCount >= MAX_FAILED_CHECKS) {
           logger.error(`Health check failed ${failedCheckCount} times, attempting recovery...`);
-          await this.attemptRecovery();
+          await this.attemptRecovery(lastFailureKind);
           failedCheckCount = 0;
         }
       } catch (error) {
         logger.warn(`Health check error: ${error}`);
+        lastFailureKind = "unknown";
         failedCheckCount++;
       }
     }, HEALTH_CHECK_INTERVAL);
@@ -1144,9 +1160,15 @@ export class Daemon {
   /**
    * Attempt to recover daemon components
    */
-  private async attemptRecovery(): Promise<void> {
+  private async attemptRecovery(failureKind: HealthFailureKind = "unknown"): Promise<void> {
     try {
       logger.info("Attempting daemon recovery...");
+
+      if (failureKind === "database") {
+        logger.error("Database health check failed repeatedly; exiting daemon for a clean restart.");
+        this.recoverFromDatabaseHealthFailure(1);
+        return;
+      }
 
       // Try to restart socket server if it's not responding
       if (this.socketServer && !this.socketServer.isListening()) {

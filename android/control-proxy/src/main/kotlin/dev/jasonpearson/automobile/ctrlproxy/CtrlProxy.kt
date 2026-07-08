@@ -69,6 +69,7 @@ import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.protocol.SdkNotificationActionEvent
 import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
+import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
@@ -230,6 +231,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   @Volatile private var pendingScrollDeltaX: Int = 0
   @Volatile private var pendingScrollDeltaY: Int = 0
   private var pendingScrollPackageName: String? = null
+
+  private data class ScreenshotCapturePayload(
+    val base64Image: String,
+    val captureDurationMs: Long,
+    val encodeDurationMs: Long,
+    val byteLength: Int,
+    val base64Length: Int,
+  )
 
   // Job for collecting hierarchy flow results
   private var hierarchyFlowJob: Job? = null
@@ -4973,8 +4982,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     asyncActionRunner.launch(requestId, "screenshot") {
       val screenshot = takeScreenshotAsync()
       if (screenshot != null) {
-        val message = buildScreenshotMessageJson(requestId, System.currentTimeMillis(), screenshot)
-        webSocketServer.broadcast(message)
+        webSocketServer.broadcast(
+          ProtocolScreenshotResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = requestId,
+            data = screenshot.base64Image,
+            format = "jpeg",
+            screenshotCaptureDurationMs = screenshot.captureDurationMs,
+            screenshotEncodeDurationMs = screenshot.encodeDurationMs,
+            screenshotByteLength = screenshot.byteLength,
+            screenshotBase64Length = screenshot.base64Length,
+          )
+        )
         Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
       } else {
         val errorMessage = buildString {

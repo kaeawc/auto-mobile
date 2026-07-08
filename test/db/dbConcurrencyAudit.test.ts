@@ -102,6 +102,23 @@ describe("DB concurrency RMW audit", () => {
       expect(audit).toContain(`| \`${path}\` |`);
       expect(audit).toContain(status);
     }
+
+    const adjacentFollowUpPaths = [
+      ["ThresholdManager.getOrCreateThresholds", "Concurrent callers can insert duplicate threshold samples"],
+      ["MemoryThresholdManager.getOrCreateThresholds", "Concurrent callers can insert duplicate threshold samples"],
+      ["BaselineManager.saveBaseline", "Concurrent first saves can race on the unique key"],
+      ["MemoryBaselineManager.updateBaseline", "Concurrent updates can lose samples/averages"],
+      ["ThresholdManager.updateThresholdWeight", "Concurrent updates can lose weight adjustments"],
+      ["MemoryThresholdManager.updateThresholdWeight", "Concurrent updates can lose weight adjustments"],
+    ] as const;
+
+    expect(tablePathsInSection(audit, "Adjacent Follow-Up Candidates")).toEqual(
+      adjacentFollowUpPaths.map(([path]) => path)
+    );
+    for (const [path, status] of adjacentFollowUpPaths) {
+      expect(audit).toContain(`| \`${path}\` |`);
+      expect(audit).toContain(status);
+    }
   });
 
   test("stresses guarded get-or-create and increment paths through the real dialect mutex", async () => {

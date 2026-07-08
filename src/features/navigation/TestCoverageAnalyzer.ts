@@ -84,6 +84,9 @@ interface TestScenario {
 
 /**
  * Analyzes test coverage for navigation graphs and generates recommendations.
+ *
+ * @internal Exported for focused unit tests and internal dependency injection;
+ * production callers should use the `testCoverageAnalyzer` singleton.
  */
 export class TestCoverageAnalyzer {
   private coverageRepository: TestCoverageAnalysisRepository;

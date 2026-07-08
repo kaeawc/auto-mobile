@@ -45,6 +45,16 @@ class FakeNavigationRepository {
 }
 
 class NoRepeatedScanEdges extends Array<NavigationEdge> {
+  iterationCount = 0;
+
+  override [Symbol.iterator](): IterableIterator<NavigationEdge> {
+    this.iterationCount++;
+    if (this.iterationCount > 1) {
+      throw new Error("expected edges to be indexed once, not scanned again per gap");
+    }
+    return super[Symbol.iterator]();
+  }
+
   filter(): NavigationEdge[] {
     throw new Error("expected edge lookups to use precomputed maps instead of filter()");
   }
@@ -55,6 +65,16 @@ class NoRepeatedScanEdges extends Array<NavigationEdge> {
 }
 
 class NoRepeatedScanNodes extends Array<NavigationNode> {
+  iterationCount = 0;
+
+  override [Symbol.iterator](): IterableIterator<NavigationNode> {
+    this.iterationCount++;
+    if (this.iterationCount > 1) {
+      throw new Error("expected nodes to be indexed once, not scanned again per gap");
+    }
+    return super[Symbol.iterator]();
+  }
+
   find(): NavigationNode | undefined {
     throw new Error("expected node lookups to use precomputed map instead of find()");
   }
@@ -151,7 +171,10 @@ describe("TestCoverageAnalyzer", () => {
     expect(coverageRepository.getAnalysisCallCount).toBe(1);
     expect(navigationRepository.getNodesCallCount).toBe(1);
     expect(navigationRepository.getEdgesCallCount).toBe(1);
+    expect(nodes.iterationCount).toBe(1);
+    expect(edges.iterationCount).toBe(1);
     expect(report.criticalGaps).toHaveLength(2);
+    expect(report.criticalGaps.map(gap => gap.id)).toEqual([11, 3]);
     const nodeGap = report.criticalGaps.find(gap => gap.type === "node");
     const edgeGap = report.criticalGaps.find(gap => gap.type === "edge");
     expect(nodeGap).toMatchObject({
@@ -169,6 +192,27 @@ describe("TestCoverageAnalyzer", () => {
       criticalityScore: 85,
     });
     expect(edgeGap?.recommendation).toContain("shallow in navigation tree");
+    expect(report.recommendations).toEqual([
+      "Overall coverage is 60.0% - add tests for critical user journeys to reach 80%+ coverage.",
+      "2 high-priority coverage gap(s) identified in frequently-used, shallow screens. Prioritize testing these areas.",
+      "1 screen(s) have no test coverage. Top uncovered: Details",
+    ]);
+    expect(report.suggestedScenarios).toEqual([
+      {
+        title: "Cover Critical Screens",
+        description: "Test 1 frequently-accessed screen(s) that currently have no coverage. These are shallow in the navigation tree and likely part of core user journeys.",
+        priority: "high",
+        targetScreens: ["Details"],
+        estimatedCoverageImprovement: 50,
+      },
+      {
+        title: "Test Critical User Journeys",
+        description: "Test 1 common navigation path(s) between screens. These transitions are frequently used but not covered by tests.",
+        priority: "high",
+        targetScreens: ["Search", "Details"],
+        estimatedCoverageImprovement: 50,
+      },
+    ]);
   });
 
   test("uses shortest depth from multiple entry points", async () => {
@@ -238,7 +282,11 @@ describe("TestCoverageAnalyzer", () => {
       uncoveredNodes: [nodes[0]],
       uncoveredEdges: [],
     };
-    const { analyzer: noEntryAnalyzer } = analyzerFor(noEntryAnalysis, nodes.slice(0, 2), edges.slice(0, 2));
+    const { analyzer: noEntryAnalyzer } = analyzerFor(
+      noEntryAnalysis,
+      nodes.slice(0, 2),
+      edges.slice(0, 2)
+    );
 
     const noEntryReport = await noEntryAnalyzer.generateReport("com.example.app");
 

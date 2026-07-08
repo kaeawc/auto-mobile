@@ -20,6 +20,47 @@ export interface ObservationBaselineStore {
   set(sessionUuid: string, observation: ObserveResult): void;
 }
 
+export type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
+
+const NAVIGATION_PRESS_BUTTONS = new Set(["back", "home", "recent", "power"]);
+const IN_PLACE_PRESS_BUTTONS = new Set(["menu", "volume_up", "volume_down"]);
+
+export function classifyObservationAction(
+  name: string,
+  args?: Record<string, unknown>
+): ObservationActionClass {
+  switch (name) {
+    case "tapOn":
+    case "tapAny":
+    case "homeScreen":
+    case "recentApps":
+    case "openLink":
+      return "navigation";
+    case "pressButton": {
+      const button = typeof args?.button === "string" ? args.button.toLowerCase() : "";
+      if (NAVIGATION_PRESS_BUTTONS.has(button)) {
+        return "navigation";
+      }
+      if (IN_PLACE_PRESS_BUTTONS.has(button)) {
+        return "inPlace";
+      }
+      return "unknown";
+    }
+    case "inputText":
+    case "clearText":
+    case "selectAllText":
+    case "imeAction":
+    case "keyboard":
+    case "clipboard":
+      return "inPlace";
+    case "swipeOn":
+    case "dragAndDrop":
+      return "scroll";
+    default:
+      return "unknown";
+  }
+}
+
 /**
  * Context needed to finalize a tool response at the serialization chokepoint.
  * `name` selects where the `ObserveResult` lives (top-level for `observe`, else
@@ -32,6 +73,7 @@ export interface FinalizeToolResponseContext {
   name: string;
   sessionUuid?: string;
   baselineStore?: ObservationBaselineStore;
+  actionClass?: ObservationActionClass;
   /**
    * Internal tool-to-tool invocation guard (issue #3053). PlanExecutor calls the
    * wrapped `tool.handler` (so this hook runs) with an injected `sessionUuid`, so a
@@ -196,7 +238,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             fromScreen: observationScreenIdentity(baseline),
             toScreen: observationScreenIdentity(sanitized),
           };
-        } else if (isSameObservationScreen(baseline, sanitized)) {
+        } else if (shouldDiffObservation(baseline, sanitized, ctx.actionClass ?? classifyObservationAction(ctx.name))) {
           observationOut = diffObserveResult(baseline, sanitized);
           observationDiff = {
             mode: "diff",
@@ -286,4 +328,55 @@ function observationScreenIdentity(observation: ObserveResult): ObservationDiffS
     identity.screenIdentity = observation.screenIdentity;
   }
   return identity;
+}
+
+function shouldDiffObservation(
+  baseline: ObserveResult,
+  next: ObserveResult,
+  actionClass: ObservationActionClass
+): boolean {
+  if (actionClass === "inPlace" || actionClass === "scroll") {
+    return isSameStableMutationSurface(baseline, next);
+  }
+  return isSameObservationScreen(baseline, next);
+}
+
+function isSameStableMutationSurface(baseline: ObserveResult, next: ObserveResult): boolean {
+  if (!hasSameWindowPackageSurface(baseline, next)) {
+    return false;
+  }
+
+  return hasCompatibleStableMutationIdentity(baseline, next);
+}
+
+function hasCompatibleStableMutationIdentity(baseline: ObserveResult, next: ObserveResult): boolean {
+  const baselineIdentity = baseline.screenIdentity;
+  const nextIdentity = next.screenIdentity;
+  if (!baselineIdentity || !nextIdentity) {
+    return true;
+  }
+
+  // Low-confidence screen identity is too uncertain for navigation-prone actions,
+  // but in-place edits and scrolls can still diff when the app/activity/package
+  // surface stayed stable.
+  if (baselineIdentity.confidence === "low" || nextIdentity.confidence === "low") {
+    return true;
+  }
+
+  return baselineIdentity.platform === nextIdentity.platform
+    && baselineIdentity.source === nextIdentity.source
+    && baselineIdentity.key === nextIdentity.key;
+}
+
+function hasSameWindowPackageSurface(baseline: ObserveResult, next: ObserveResult): boolean {
+  if ((baseline.activeWindow?.appId ?? "") !== (next.activeWindow?.appId ?? "")) {
+    return false;
+  }
+  if ((baseline.activeWindow?.activityName ?? "") !== (next.activeWindow?.activityName ?? "")) {
+    return false;
+  }
+  if ((baseline.viewHierarchy?.packageName ?? "") !== (next.viewHierarchy?.packageName ?? "")) {
+    return false;
+  }
+  return true;
 }

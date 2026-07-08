@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
-import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
+import {
+  classifyObservationAction,
+  finalizeToolResponse,
+} from "../../src/server/finalizeToolResponse";
+import {
+  createStructuredToolResponse,
+  stringifyToolResponse,
+  type StructuredToolResponse,
+} from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { GFXINFO_DUMP_MARKER } from "../../src/features/observe/output/ObserveResultOutput";
 import type { ObserveResult } from "../../src/models/ObserveResult";
@@ -485,6 +492,38 @@ describe("finalizeToolResponse", () => {
       } as ObserveResult;
     }
 
+    function checkedIosScreenObserve(
+      key: string,
+      confidence: "high" | "medium" | "low" = "high"
+    ): ObserveResult {
+      const observation = iosScreenObserve(key, confidence);
+      (observation.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      return observation;
+    }
+
+    function finalizeChangedLowConfidenceAction(
+      name: string,
+      actionArgs: Record<string, unknown>,
+      key = "bundle=com.apple.reminders|focus=Title"
+    ): StructuredToolResponse<{ success: boolean; observation: ObserveResult }> {
+      const { store } = makeStore();
+      const baseline = iosScreenObserve(key, "low");
+      finalizeToolResponse(
+        createStructuredToolResponse(baseline),
+        { name: "observe", sessionUuid: "s1", baselineStore: store }
+      );
+
+      return finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: checkedIosScreenObserve(key, "low") }),
+        {
+          name,
+          actionClass: classifyObservationAction(name, actionArgs),
+          sessionUuid: "s1",
+          baselineStore: store,
+        }
+      );
+    }
+
     beforeEach(() => {
       originalDiff = serverConfig.isActionsDiffObserveEnabled();
       serverConfig.setActionsDiffObserveEnabled(true);
@@ -676,8 +715,7 @@ describe("finalizeToolResponse", () => {
       const baseline = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
       finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
 
-      const next = iosScreenObserve("bundle=com.apple.reminders|nav=New Reminder");
-      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const next = checkedIosScreenObserve("bundle=com.apple.reminders|nav=New Reminder");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
@@ -698,8 +736,7 @@ describe("finalizeToolResponse", () => {
       const baseline = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
       finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
 
-      const next = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
-      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const next = checkedIosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
@@ -744,8 +781,7 @@ describe("finalizeToolResponse", () => {
       const baseline = iosScreenObserve("bundle=com.apple.reminders|tab=Inbox", "medium");
       finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
 
-      const next = iosScreenObserve("bundle=com.apple.reminders|tab=Search", "medium");
-      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const next = checkedIosScreenObserve("bundle=com.apple.reminders|tab=Search", "medium");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
@@ -764,8 +800,7 @@ describe("finalizeToolResponse", () => {
       const baseline = iosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");
       finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
 
-      const next = iosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");
-      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const next = checkedIosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
@@ -777,6 +812,47 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.viewHierarchy).toBeDefined();
       expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
       expect((map.get("s1")!.viewHierarchy!.hierarchy.node as any).node[0].checked).toBe("true");
+    });
+
+    test("action policy: navigation-prone tap stays full on uncertain identity", () => {
+      const finalized = finalizeChangedLowConfidenceAction("tapOn", { action: "tap" });
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+    });
+
+    test("action policy: inputText diffs on stable surface despite uncertain identity", () => {
+      const finalized = finalizeChangedLowConfidenceAction("inputText", { text: "hello" });
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
+      expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+    });
+
+    test("action policy: swipeOn diffs on stable surface despite uncertain identity", () => {
+      const finalized = finalizeChangedLowConfidenceAction(
+        "swipeOn",
+        { direction: "up" },
+        "bundle=com.apple.reminders|list=Inbox"
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
+      expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+    });
+
+    test("classifies non-observe actions for policy selection", () => {
+      expect(classifyObservationAction("tapOn", { action: "tap" })).toBe("navigation");
+      expect(classifyObservationAction("pressButton", { button: "back" })).toBe("navigation");
+      expect(classifyObservationAction("pressButton", { button: "volume_up" })).toBe("inPlace");
+      expect(classifyObservationAction("inputText", { text: "hello" })).toBe("inPlace");
+      expect(classifyObservationAction("clearText", {})).toBe("inPlace");
+      expect(classifyObservationAction("swipeOn", { direction: "up" })).toBe("scroll");
+      expect(classifyObservationAction("dragAndDrop", {})).toBe("scroll");
     });
 
     test("falls back to full when there is no sessionUuid (legacy single-agent path)", () => {

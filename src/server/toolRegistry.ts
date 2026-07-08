@@ -25,7 +25,11 @@ import { getMcpRecorder } from "./mcpRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
-import { finalizeToolResponse, type ObservationBaselineStore } from "./finalizeToolResponse";
+import {
+  classifyObservationAction,
+  finalizeToolResponse,
+  type ObservationBaselineStore,
+} from "./finalizeToolResponse";
 import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
 import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
@@ -609,7 +613,13 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 
     return {
       durationMs,
-      finalizedResponse: finalizeToolResponse(response, { name, sessionUuid, baselineStore, internal: internalCall }),
+      finalizedResponse: finalizeToolResponse(response, {
+        name,
+        sessionUuid,
+        baselineStore,
+        actionClass: classifyObservationAction(name, args),
+        internal: internalCall,
+      }),
     };
   }
 }

@@ -43,6 +43,20 @@ Part of the MCP output-context reduction effort. Each flag can be set either as 
 | **`--actions-no-observe`** | `AUTOMOBILE_ACTIONS_NO_OBSERVE` | Strip the embedded `observation` from non-observe tool results entirely (deleted from **both** `structuredContent` and the serialized `content[0].text`). Output-only — `BaseVisualChange` still computes the observation internally for its own success detection, so visual-change behavior is unchanged; the `observe` tool's own observation is never stripped. Applied at `finalizeToolResponse`. **Precedence:** when both `--actions-no-observe` and `--actions-diff-observe` are set, no-observe wins — the observation is removed, so there is nothing to diff. |
 | **`--tool-results-compact-json`** | `AUTOMOBILE_TOOL_RESULTS_COMPACT_JSON` | Serialize tool results as compact (non-pretty-printed) JSON — drops the 2-space indentation in `stringifyToolResponse`. Same data (parses back identically, no effect on `tapOn`/text matching); ~35% fewer characters on element-heavy payloads. Composes with the other flags. |
 
+`--actions-diff-observe` chooses the full-vs-diff policy by action class before
+calling the shared diff implementation. Navigation-prone actions (`tapOn`,
+`tapAny`, `homeScreen`, `recentApps`, `openLink`, and `pressButton` for
+back/home/recent/power) use strict screen identity and prefer a full observation
+when identity is uncertain, because a tap or navigation button can move to a new
+screen or modal. In-place mutations (`inputText`, `clearText`, `selectAllText`,
+`imeAction`, keyboard and clipboard operations, and non-navigation
+`pressButton`s such as volume) may diff when the app/activity/package surface is
+stable, even if heuristic screen identity is low confidence. Scroll-like actions
+(`swipeOn`, `dragAndDrop`) use the same stable-surface policy so scroll deltas can
+stay compact while still falling back to full output across screens. The diff
+shape remains `{ isDiff: true, added, removed, changed, fields }` for every
+class; only the gate that decides whether a diff is safe changes.
+
 > **Note on persistence:** like the other feature flags above, enabling one of these (via **either** the CLI flag or the env var) writes `enabled=true` to the daemon's feature-flag store, so it **stays on for subsequent daemon runs** until it is turned off through another surface — there is no `--no-*` CLI counterpart today. To clear a flag, toggle it off through the IDE feature-flag integration or reset the store.
 
 > **Note on the shared daemon:** in the default proxy mode these flags are applied to the daemon at startup. If a daemon is **already running**, a new MCP client that requests a different flag value does **not** restart it — only `--embedded-sdk` (which changes the exposed tool surface) forces a daemon restart on mismatch, because restarting the shared daemon would disrupt any other connected clients. To pick up a changed output-reduction flag on an already-running daemon, restart the daemon (`--daemon restart`). This behavior is shared by all daemon-forwarded feature flags, not specific to these.

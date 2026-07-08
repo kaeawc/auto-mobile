@@ -156,7 +156,7 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
   {
     key: "actions-diff-observe",
     label: "Actions: diff observe",
-    description: "Return only the diff of the observation after an action instead of the full observation.",
+    description: "Return action-aware observation diffs after non-observe tools, falling back to full observations for navigation-prone or uncertain screen changes.",
     defaultValue: false,
   },
   {

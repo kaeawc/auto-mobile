@@ -231,14 +231,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   @Volatile private var pendingScrollDeltaY: Int = 0
   private var pendingScrollPackageName: String? = null
 
-  private data class ScreenshotCapture(
-    val base64Image: String,
-    val captureDurationMs: Long,
-    val encodeDurationMs: Long,
-    val byteLength: Int,
-    val base64Length: Int,
-  )
-
   // Job for collecting hierarchy flow results
   private var hierarchyFlowJob: Job? = null
 
@@ -2139,7 +2131,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Takes a screenshot and returns it as a base64-encoded JPEG plus capture diagnostics.
    * Requires Android R (API 30) or higher. Runs on IO dispatcher to avoid blocking the main thread.
    */
-  private suspend fun takeScreenshotAsync(quality: Int = 80): ScreenshotCapture? {
+  private suspend fun takeScreenshotAsync(quality: Int = 80): ScreenshotCapturePayload? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
       Log.w(TAG, "Screenshot API requires Android R (API 30) or higher")
       return null
@@ -2204,7 +2196,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           "Screenshot encoded: ${jpegBytes.size} bytes -> ${base64String.length} base64 chars in ${encodeTime}ms (total: ${totalTime}ms)",
         )
 
-        ScreenshotCapture(
+        ScreenshotCapturePayload(
           base64Image = base64String,
           captureDurationMs = screenshotTime,
           encodeDurationMs = encodeTime,
@@ -4981,18 +4973,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     asyncActionRunner.launch(requestId, "screenshot") {
       val screenshot = takeScreenshotAsync()
       if (screenshot != null) {
-        val message = buildString {
-          append("""{"type":"screenshot","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","format":"jpeg","data":"${screenshot.base64Image}"""")
-          append(""","screenshotCaptureDurationMs":${screenshot.captureDurationMs}""")
-          append(""","screenshotEncodeDurationMs":${screenshot.encodeDurationMs}""")
-          append(""","screenshotByteLength":${screenshot.byteLength}""")
-          append(""","screenshotBase64Length":${screenshot.base64Length}""")
-          append("}")
-        }
+        val message = buildScreenshotMessageJson(requestId, System.currentTimeMillis(), screenshot)
         webSocketServer.broadcast(message)
         Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
       } else {

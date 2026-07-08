@@ -55,6 +55,7 @@ import dev.jasonpearson.automobile.protocol.NavigationEventData
 import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
+import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
@@ -69,7 +70,6 @@ import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.protocol.SdkNotificationActionEvent
 import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
-import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
@@ -2137,8 +2137,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Takes a screenshot and returns it as a base64-encoded JPEG plus capture diagnostics.
-   * Requires Android R (API 30) or higher. Runs on IO dispatcher to avoid blocking the main thread.
+   * Takes a screenshot and returns it as a base64-encoded JPEG plus capture diagnostics. Requires
+   * Android R (API 30) or higher. Runs on IO dispatcher to avoid blocking the main thread.
    */
   private suspend fun takeScreenshotAsync(quality: Int = 80): ScreenshotCapturePayload? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {

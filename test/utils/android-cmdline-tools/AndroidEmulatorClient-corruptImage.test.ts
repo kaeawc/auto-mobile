@@ -83,18 +83,6 @@ class DeviceScopedAdbClientFactory implements AdbClientFactory {
   }
 }
 
-class FailingDeviceScanExecutor extends FakeAdbExecutor {
-  async getBootedAndroidDevices(): Promise<BootedDevice[]> {
-    throw new Error("adb discovery failed");
-  }
-}
-
-type CorrelatedTestChildProcess = ChildProcess & EventEmitter & {
-  autoMobileEmulatorLaunch?: {
-    bootedDeviceIdsBeforeLaunch: readonly string[];
-  };
-};
-
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
   stderr,
@@ -265,11 +253,11 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     }
   });
 
-  test("attaches the pre-launch emulator device set to the spawned child process", async () => {
+  test("uses spawned process output deviceId to target readiness when AVD name is unavailable", async () => {
     const fakeChild = createFakeChildProcess();
     const spawnFn = ((_cmd: string, _args: string[]) => {
       process.nextTick(() => {
-        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+        fakeChild.stdout!.emit("data", Buffer.from("emulator-5558: INFO: console port 5558\nDetected GPU type: host\n"));
       });
       return fakeChild;
     }) as any;
@@ -285,44 +273,24 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     fakeAdb.setDevices([
       { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554" },
     ]);
+    fakeAdb.setCommandResponse("emu avd name", createExecResult(""));
+    fakeAdb.setCommandResponse("get-state", createExecResult("device\n"));
+    fakeAdb.setCommandResponse("shell pm list packages", createExecResult("package:android\n"));
+    fakeAdb.setCommandResponse("shell getprop sys.boot_completed", createExecResult("1\n"));
+    fakeAdb.setCommandResponse("shell getprop init.svc.bootanim", createExecResult("stopped\n"));
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
     skipEmulatorPathDetection(client);
 
     const child = await client.startEmulator("Pixel_9_Pro");
+    fakeAdb.setDevices([
+      { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554" },
+      { name: "Unknown (emulator-5558)", platform: "android", deviceId: "emulator-5558" },
+    ]);
 
-    expect((child as CorrelatedTestChildProcess).autoMobileEmulatorLaunch).toEqual({
-      bootedDeviceIdsBeforeLaunch: ["emulator-5554"],
-    });
-  });
+    const readyDevice = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, child);
 
-  test("does not attach launch diff correlation when the pre-launch device scan fails", async () => {
-    const fakeChild = createFakeChildProcess();
-    const spawnFn = ((_cmd: string, _args: string[]) => {
-      process.nextTick(() => {
-        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
-      });
-      return fakeChild;
-    }) as any;
-
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("-list-avds")) {
-        return createExecResult("Pixel_9_Pro\n");
-      }
-      return createExecResult("");
-    };
-
-    fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
-      execAsync,
-      spawnFn,
-      fakeTimer,
-      { create: () => new FailingDeviceScanExecutor() },
-    );
-    skipEmulatorPathDetection(client);
-
-    const child = await client.startEmulator("Pixel_9_Pro");
-
-    expect((child as CorrelatedTestChildProcess).autoMobileEmulatorLaunch).toBeUndefined();
+    expect(readyDevice.deviceId).toBe("emulator-5558");
+    expect(fakeAdb.getExecutedCommands().some(command => command.includes("get-state"))).toBe(true);
   });
 });
 
@@ -345,15 +313,6 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     emitter.pid = 1234;
     emitter.kill = () => { emitter.killed = true; return true; };
     return emitter;
-  }
-
-  function attachLaunchCorrelation(
-    childProcess: ChildProcess & EventEmitter,
-    bootedDeviceIdsBeforeLaunch: readonly string[],
-  ): void {
-    (childProcess as CorrelatedTestChildProcess).autoMobileEmulatorLaunch = {
-      bootedDeviceIdsBeforeLaunch,
-    };
   }
 
   test("throws immediately when child process exits with corrupt image during readiness wait", async () => {
@@ -571,10 +530,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5554:get-state"))).toBe(false);
   });
 
-  test("targets the newly launched emulator from cold-boot device set diff when AVD name is unavailable", async () => {
+  test("does not use a single new unknown emulator as identity without process-output correlation", async () => {
     fakeTimer.enableAutoAdvance();
     const fakeChild = createFakeChildProcess();
-    attachLaunchCorrelation(fakeChild, ["emulator-5554"]);
     const existingDevice: BootedDevice = {
       name: "Unknown (emulator-5554)",
       platform: "android",
@@ -594,17 +552,41 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
     skipEmulatorPathDetection(client);
 
-    const result = await client.waitForEmulatorReady("am-api33-ga-arm64", 5_000, fakeChild);
+    await expect(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, fakeChild),
+    ).rejects.toThrow("failed to become ready within 100ms");
 
-    expect(result.deviceId).toBe("emulator-5558");
-    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(true);
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(false);
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5554:get-state"))).toBe(false);
+  });
+
+  test("does not readiness-check multiple new unknown emulators", async () => {
+    fakeTimer.enableAutoAdvance();
+    const fakeChild = createFakeChildProcess();
+    const scopedFactory = new DeviceScopedAdbClientFactory([
+      [
+        { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554", source: "local" },
+        { name: "Unknown (emulator-5558)", platform: "android", deviceId: "emulator-5558", source: "local" },
+        { name: "Unknown (emulator-5560)", platform: "android", deviceId: "emulator-5560", source: "local" },
+      ],
+    ]);
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    await expect(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, fakeChild),
+    ).rejects.toThrow("failed to become ready within 100ms");
+
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(false);
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5560:get-state"))).toBe(false);
   });
 
   test("does not readiness-check a newly launched emulator whose resolved AVD name conflicts", async () => {
     fakeTimer.enableAutoAdvance();
     const fakeChild = createFakeChildProcess();
-    attachLaunchCorrelation(fakeChild, ["emulator-5554"]);
+    setImmediate(() => {
+      fakeChild.stdout!.emit("data", Buffer.from("emulator-5558: INFO: console port 5558\n"));
+    });
     const existingDevice: BootedDevice = {
       name: "am-api35-ga-arm64",
       platform: "android",
@@ -629,12 +611,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
     skipEmulatorPathDetection(client);
 
-    try {
-      await client.waitForEmulatorReady("am-api33-ga-arm64", 100, fakeChild);
-      expect(true).toBe(false);
-    } catch (error: any) {
-      expect(error.message).toContain("failed to become ready within 100ms");
-    }
+    await expect(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, fakeChild),
+    ).rejects.toThrow("failed to become ready within 100ms");
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(false);
   });
 });

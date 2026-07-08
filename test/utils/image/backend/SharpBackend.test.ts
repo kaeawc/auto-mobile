@@ -109,6 +109,33 @@ describe("SharpBackend", () => {
         "toBuffer"
       ]);
     });
+
+    test("materializes before a second crop before resize for sharp compatibility", async () => {
+      const events: string[] = [];
+      const backend = new SharpBackend({
+        loadSharp: async () => makeRecordingSharpFactory(events)
+      });
+
+      await backend.execute(Buffer.from("source"), {
+        operations: [
+          { type: "crop", x: 1, y: 1, width: 6, height: 6 },
+          { type: "crop", x: 1, y: 1, width: 4, height: 4 },
+          { type: "resize", width: 2, height: 2, maintainAspectRatio: false }
+        ],
+        encoding: { mime: "image/png" }
+      });
+
+      expect(events).toEqual([
+        "sharp:source",
+        "extract:{\"left\":1,\"top\":1,\"width\":6,\"height\":6}",
+        "toBuffer",
+        "sharp:encoded",
+        "extract:{\"left\":1,\"top\":1,\"width\":4,\"height\":4}",
+        "resize:{\"width\":2,\"height\":2,\"fit\":\"fill\"}",
+        "png",
+        "toBuffer"
+      ]);
+    });
   });
 });
 
@@ -197,6 +224,35 @@ describeSharp("SharpBackend native", () => {
           { type: "resize", width: 6, height: 6, maintainAspectRatio: false },
           { type: "crop", x: 1, y: 1, width: 4, height: 4 },
           { type: "crop", x: 1, y: 1, width: 2, height: 2 }
+        ],
+        encoding: { mime: "image/png" }
+      }));
+
+      expect(actual.width).toBe(2);
+      expect(actual.height).toBe(2);
+      expect(actual.data).toEqual(expected.data);
+    });
+
+    test("preserves repeated crop semantics before resize", async () => {
+      const backend = new SharpBackend();
+      const source = await makeSourcePng(8, 8);
+      const sharp = (await import("sharp")).default;
+      const firstCrop = await sharp(source)
+        .extract({ left: 1, top: 1, width: 6, height: 6 })
+        .toBuffer();
+      const secondCrop = await sharp(firstCrop)
+        .extract({ left: 1, top: 1, width: 4, height: 4 })
+        .toBuffer();
+      const expected = await backend.rawPixels(await sharp(secondCrop)
+        .resize({ width: 2, height: 2, fit: "fill" })
+        .png()
+        .toBuffer());
+
+      const actual = await backend.rawPixels(await backend.execute(source, {
+        operations: [
+          { type: "crop", x: 1, y: 1, width: 6, height: 6 },
+          { type: "crop", x: 1, y: 1, width: 4, height: 4 },
+          { type: "resize", width: 2, height: 2, maintainAspectRatio: false }
         ],
         encoding: { mime: "image/png" }
       }));

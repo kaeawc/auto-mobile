@@ -76,6 +76,31 @@ describe("ToolRegistry.getToolDefinitions", () => {
     expect(JSON.stringify(replacement.inputSchema)).toContain("after");
   });
 
+  test("invalidates converted schemas when adding a normal tool registration", () => {
+    ToolRegistry.register(
+      "existingTool",
+      "Existing tool",
+      z.object({ existing: z.string() }),
+      async () => ({ content: [{ type: "text", text: "existing" }] })
+    );
+    const originalExisting = ToolRegistry.getToolDefinitions()[0];
+
+    ToolRegistry.register(
+      "addedTool",
+      "Added tool",
+      z.object({ added: z.number() }),
+      async () => ({ content: [{ type: "text", text: "added" }] })
+    );
+    const definitions = ToolRegistry.getToolDefinitions();
+    const existing = definitions.find(tool => tool.name === "existingTool");
+    const added = definitions.find(tool => tool.name === "addedTool");
+
+    expect(existing).toBeDefined();
+    expect(added).toBeDefined();
+    expect(existing!.inputSchema).not.toBe(originalExisting.inputSchema);
+    expect(JSON.stringify(added!.inputSchema)).toContain("added");
+  });
+
   test("reconverts a replaced device-aware tool registration", () => {
     ToolRegistry.registerDeviceAware(
       "replaceDeviceTool",
@@ -96,6 +121,31 @@ describe("ToolRegistry.getToolDefinitions", () => {
     expect(replacement.description).toBe("Replacement device tool");
     expect(replacement.inputSchema).not.toBe(original.inputSchema);
     expect(JSON.stringify(replacement.inputSchema)).toContain("after");
+  });
+
+  test("invalidates converted schemas when adding a device-aware tool registration", () => {
+    ToolRegistry.registerDeviceAware(
+      "existingDeviceTool",
+      "Existing device tool",
+      z.object({ existing: z.string() }),
+      async () => ({ content: [{ type: "text", text: "existing" }] })
+    );
+    const originalExisting = ToolRegistry.getToolDefinitions()[0];
+
+    ToolRegistry.registerDeviceAware(
+      "addedDeviceTool",
+      "Added device tool",
+      z.object({ added: z.number() }),
+      async () => ({ content: [{ type: "text", text: "added" }] })
+    );
+    const definitions = ToolRegistry.getToolDefinitions();
+    const existing = definitions.find(tool => tool.name === "existingDeviceTool");
+    const added = definitions.find(tool => tool.name === "addedDeviceTool");
+
+    expect(existing).toBeDefined();
+    expect(added).toBeDefined();
+    expect(existing!.inputSchema).not.toBe(originalExisting.inputSchema);
+    expect(JSON.stringify(added!.inputSchema)).toContain("added");
   });
 
   test("caches output schema variants per structured-content and compact-bounds flags", () => {

@@ -117,6 +117,7 @@ describe("PostNotification", () => {
     expect(fakeAdb.wasCommandExecuted("am broadcast -n dev.jasonpearson.automobile.playground")).toBe(true);
     expect(fakeAdb.wasCommandExecuted("am broadcast -n com.google.android.apps.nexuslauncher")).toBe(false);
     expect(fakeWindow.getGetActiveCallCount()).toBe(1);
+    expect(fakeWindow.getLastGetActiveForceRefresh()).toBe(true);
   });
 
   test("fails when SDK receiver is missing", async () => {

@@ -4812,7 +4812,7 @@
         "appId": {
           "type": "string",
           "minLength": 1,
-          "description": "iOS target bundle ID"
+          "description": "Android target package name or iOS target bundle ID"
         },
         "platform": {
           "type": "string",

@@ -26,17 +26,19 @@ const postNotificationCommonShape = {
   channelId: z.string().optional().describe("Android channel ID / iOS APNs category"),
 };
 
+const postNotificationAppIdDescription = "Android target package name or iOS target bundle ID";
+
 export const postNotificationSchema = withAppIdAliases(z.discriminatedUnion("platform", [
   addDeviceTargetingToSchema(z.object({
     ...postNotificationCommonShape,
     appId: z.string({ error: iosAppIdRequiredMessage })
       .min(1, iosAppIdRequiredMessage)
-      .describe("iOS target bundle ID"),
+      .describe(postNotificationAppIdDescription),
     platform: z.literal("ios")
   })),
   addDeviceTargetingToSchema(z.object({
     ...postNotificationCommonShape,
-    appId: z.string().min(1).optional().describe("iOS target bundle ID"),
+    appId: z.string().min(1).optional().describe(postNotificationAppIdDescription),
     platform: z.literal("android")
   }))
 ]));

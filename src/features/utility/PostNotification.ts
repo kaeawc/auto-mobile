@@ -23,7 +23,7 @@ export interface PostNotificationOptions {
   imagePath?: string;
   actions?: PostNotificationAction[];
   channelId?: string;
-  /** iOS bundle identifier to target (required on iOS; maps to APNs "Simulator Target Bundle"). */
+  /** Android package name or iOS bundle identifier to target; required on iOS. */
   appId?: string;
 }
 

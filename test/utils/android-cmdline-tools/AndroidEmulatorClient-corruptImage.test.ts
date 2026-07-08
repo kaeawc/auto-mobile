@@ -513,6 +513,30 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5556:get-state"))).toBe(false);
   });
 
+  test("keeps explicit targetDeviceId authoritative when an unknown request name later resolves", async () => {
+    fakeTimer.enableAutoAdvance();
+    const scopedFactory = new DeviceScopedAdbClientFactory(
+      [
+        { name: "am-api32-ga-arm64", platform: "android", deviceId: "emulator-5556" },
+      ],
+      new Map([
+        ["emulator-5556", "am-api32-ga-arm64"],
+      ]),
+    );
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const result = await client.waitForEmulatorReady(
+      "Unknown (emulator-5556)",
+      5_000,
+      null,
+      "emulator-5556",
+    );
+
+    expect(result.deviceId).toBe("emulator-5556");
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5556:get-state"))).toBe(true);
+  });
+
   test("does not report a different local emulator ready during cold-boot name resolution", async () => {
     fakeTimer.enableAutoAdvance();
     const existingDevice: BootedDevice = {

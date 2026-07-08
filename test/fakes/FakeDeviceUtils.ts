@@ -17,6 +17,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   private runningDeviceNames: Set<string> = new Set();
   private executedOperations: string[] = [];
   private mockChildProcesses: Map<string, ChildProcess> = new Map();
+  private waitForDeviceReadyChildProcess: ChildProcess | null | undefined;
 
   /**
    * Configure available device images for a platform
@@ -84,6 +85,10 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
    */
   getExecutedOperations(): string[] {
     return [...this.executedOperations];
+  }
+
+  getWaitForDeviceReadyChildProcess(): ChildProcess | null | undefined {
+    return this.waitForDeviceReadyChildProcess;
   }
 
   /**
@@ -198,7 +203,9 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   async waitForDeviceReady(
     device: DeviceInfo,
     timeoutMs: number = 120000,
+    childProcess?: ChildProcess | null,
   ): Promise<BootedDevice> {
+    this.waitForDeviceReadyChildProcess = childProcess;
     this.executedOperations.push(
       `waitForDeviceReady:${device.name}:${timeoutMs}`,
     );

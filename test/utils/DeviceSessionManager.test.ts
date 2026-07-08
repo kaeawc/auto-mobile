@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { EventEmitter } from "events";
 import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -671,5 +672,25 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     expect(result.deviceId).toBe("emulator-5554");
     // Current device should now be updated to Android
     expect(manager.getCurrentPlatform()).toBe("android");
+  });
+
+  test("passes spawned Android emulator process into auto-start readiness wait", async () => {
+    const childProcess = new EventEmitter() as any;
+    const startedDevice: BootedDevice = {
+      name: "mock-Pixel_9_Pro",
+      deviceId: "mock-Pixel_9_Pro",
+      platform: "android",
+    };
+    fakeDeviceUtils.setDeviceImages("android", [
+      { name: "Pixel_9_Pro", platform: "android" },
+    ]);
+    fakeDeviceUtils.setMockChildProcess("Pixel_9_Pro", childProcess);
+    fakeAdb.setDevices([startedDevice]);
+
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+
+    await manager.findOrStartAndroidDevice();
+
+    expect(fakeDeviceUtils.getWaitForDeviceReadyChildProcess()).toBe(childProcess);
   });
 });

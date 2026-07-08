@@ -1172,8 +1172,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return name === `Unknown (${deviceId})`;
   }
 
-  private matchesRequestedAvdOrUnknown(emulator: BootedDevice, avdName: string): boolean {
-    return emulator.name === avdName || this.isUnknownEmulatorName(emulator.name, emulator.deviceId);
+  private matchesRequestedAvdOrUnknown(emulator: BootedDevice, avdName: string, targetDeviceId?: string): boolean {
+    return emulator.name === avdName
+      || this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
+      || (targetDeviceId === emulator.deviceId && this.isUnknownEmulatorName(avdName, targetDeviceId));
   }
 
   private findLaunchDiffEmulator(
@@ -1303,7 +1305,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
               : undefined;
             if (targetDeviceId) {
               logger.debug(`Exact deviceId match for '${targetDeviceId}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
-              if (emulator && !this.matchesRequestedAvdOrUnknown(emulator, avdName)) {
+              if (emulator && !this.matchesRequestedAvdOrUnknown(emulator, avdName, targetDeviceId)) {
                 logger.debug(`Exact deviceId match ${emulator.deviceId} resolved as '${emulator.name}', not requested AVD '${avdName}'`);
                 emulator = undefined;
               }

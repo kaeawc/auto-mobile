@@ -154,6 +154,10 @@ describe("AndroidCtrlProxyClient", function() {
     screenshotCaptureSource?: string;
     screenshotFallback?: boolean;
     screenshotFallbackReason?: string | null;
+    screenshotCaptureDurationMs?: number;
+    screenshotEncodeDurationMs?: number;
+    screenshotByteLength?: number;
+    screenshotBase64Length?: number;
   }
 
   const startStreamServerWithScreenshotSubscriber = async (): Promise<FakeSocket> => {
@@ -293,6 +297,10 @@ describe("AndroidCtrlProxyClient", function() {
       data: "jpeg-base64",
       format: "jpeg",
       timestamp: 123,
+      screenshotCaptureDurationMs: 42,
+      screenshotEncodeDurationMs: 7,
+      screenshotByteLength: 1200,
+      screenshotBase64Length: 1600,
     }));
     await flushPromises();
 
@@ -302,6 +310,10 @@ describe("AndroidCtrlProxyClient", function() {
       screenshotFormat: "jpeg",
       screenshotCaptureSource: "android_ctrlproxy_a11y",
       screenshotFallback: false,
+      screenshotCaptureDurationMs: 42,
+      screenshotEncodeDurationMs: 7,
+      screenshotByteLength: 1200,
+      screenshotBase64Length: 1600,
     });
   });
 

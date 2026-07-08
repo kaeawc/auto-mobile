@@ -55,6 +55,7 @@ import {
   metadataForScreenshotFormat,
   type ScreenshotFallbackReason,
   type ScreenshotMetadata,
+  type ScreenshotPerformanceMetadata,
 } from "../ScreenshotMetadata";
 import {
   normalizeAnr,
@@ -223,7 +224,7 @@ interface WsHierarchyUpdateMessage extends WsMessageBase {
   perfTiming?: AndroidPerfTiming[];
 }
 
-interface WsScreenshotMessage extends WsMessageBase {
+interface WsScreenshotMessage extends WsMessageBase, ScreenshotPerformanceMetadata {
   type: "screenshot";
   requestId: string;
   data: string;
@@ -233,6 +234,17 @@ interface WsScreenshotMessage extends WsMessageBase {
 interface WsScreenshotErrorMessage extends WsMessageBase {
   type: "screenshot_error";
   requestId: string;
+}
+
+function screenshotPerformanceMetadataFrom(
+  metadata: ScreenshotPerformanceMetadata
+): ScreenshotPerformanceMetadata {
+  return {
+    screenshotCaptureDurationMs: metadata.screenshotCaptureDurationMs,
+    screenshotEncodeDurationMs: metadata.screenshotEncodeDurationMs,
+    screenshotByteLength: metadata.screenshotByteLength,
+    screenshotBase64Length: metadata.screenshotBase64Length,
+  };
 }
 
 /**
@@ -2176,16 +2188,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Handle screenshot response
       if (message.type === "screenshot" && message.requestId) {
         const suppressObservationStreamPush = this.screenshotObservationStreamSuppressions.delete(message.requestId);
+        const metadata = {
+          ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, message.format),
+          ...screenshotPerformanceMetadataFrom(message),
+        };
         if (!suppressObservationStreamPush) {
           this.pushScreenshotToObservationStream(
             message.data,
-            metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, message.format)
+            metadata
           );
         } else {
           logger.debug("[CTRL_PROXY] Suppressed screenshot observation stream push for explicit initial-frame request");
         }
         this.requestManager.resolve<ScreenshotResult>(message.requestId, {
-          success: true, data: message.data, format: message.format || "jpeg", timestamp: message.timestamp
+          success: true,
+          data: message.data,
+          format: message.format || "jpeg",
+          timestamp: message.timestamp,
+          ...screenshotPerformanceMetadataFrom(message),
         });
       }
 
@@ -2886,6 +2906,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         data: result.data,
         checksum,
         ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, result.format),
+        ...screenshotPerformanceMetadataFrom(result),
       };
     } catch (error) {
       this.requestManager.resolve<ScreenshotResult>(requestId, { success: false, error: `${error}` });

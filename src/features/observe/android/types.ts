@@ -19,6 +19,7 @@ import type {
   ActionTimingResult,
   DelegateContext,
 } from "../shared/types";
+import type { ScreenshotPerformanceMetadata } from "../ScreenshotMetadata";
 
 // Re-export shared types so existing imports from "./types" continue to work
 export type { DelegateContext } from "../shared/types";
@@ -161,7 +162,7 @@ export interface AccessibilityHierarchyResponse {
 /**
  * Interface for screenshot result
  */
-export interface ScreenshotResult {
+export interface ScreenshotResult extends ScreenshotPerformanceMetadata {
   success: boolean;
   data?: string; // Base64 encoded JPEG
   format?: string;

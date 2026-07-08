@@ -1245,16 +1245,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
               logger.debug(`Exact name match for '${avdName}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
             }
 
-            // If not found by exact name, try to find any local emulator
-            if (!emulator && !targetDeviceId) {
-              emulator = runningEmulators.find(emu => emu.source === "local");
-              if (emulator) {
-                logger.debug(`Found local emulator with deviceId ${emulator.deviceId}, but name mismatch. Expected: ${avdName}, Found: ${emulator.name}`);
-              } else {
-                logger.debug(`No local emulators found to use as fallback`);
-              }
-            }
-
             if (emulator && emulator.deviceId) {
               logger.debug(`Target emulator found: ${emulator.name} (${emulator.deviceId}) - starting readiness checks`);
 

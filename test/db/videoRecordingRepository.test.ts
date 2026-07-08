@@ -119,6 +119,40 @@ describe("VideoRecordingRepository", () => {
     expect(result!.highlights![0].description).toBe("second insert highlight");
   });
 
+  test("insertRecording upsert clears stale optional fields", async () => {
+    await repo.insertRecording(
+      makeRecord({
+        recordingId: "rec-1",
+        outputName: "first-recording",
+        durationMs: 5000,
+        codec: "h264",
+        endedAt: "2024-01-01T00:05:00.000Z",
+        highlights: [
+          {
+            description: "first insert highlight",
+            shape: { type: "circle", cx: 100, cy: 200, r: 30 },
+            timeline: { appearedAtSeconds: 1.0 },
+          },
+        ],
+      })
+    );
+
+    await repo.insertRecording(
+      makeRecord({
+        recordingId: "rec-1",
+        status: "recording",
+      })
+    );
+
+    const result = await repo.getRecording("rec-1");
+    expect(result).not.toBeNull();
+    expect(result!.outputName).toBeUndefined();
+    expect(result!.durationMs).toBeUndefined();
+    expect(result!.codec).toBeUndefined();
+    expect(result!.endedAt).toBeUndefined();
+    expect(result!.highlights).toBeUndefined();
+  });
+
   test("getRecording returns null for unknown id", async () => {
     const result = await repo.getRecording("nonexistent");
     expect(result).toBeNull();

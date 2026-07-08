@@ -7,6 +7,9 @@ export class FakeDeviceSnapshotRepository {
   private readonly records = new Map<string, DeviceSnapshotRecord>();
 
   async insertSnapshot(record: DeviceSnapshotRecord): Promise<void> {
+    if (this.records.has(record.snapshotName)) {
+      return;
+    }
     this.records.set(record.snapshotName, { ...record });
   }
 

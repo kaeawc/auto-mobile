@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 import { getDatabasePath, getMigrationsError } from "./database";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -76,10 +75,6 @@ function executeSqliteSelectOneInWorker(
   timeoutMs: number,
   timer: Timer
 ): Promise<void> {
-  if (dbPath !== ":memory:" && !existsSync(dbPath)) {
-    return Promise.reject(new Error(`Database health probe path does not exist: ${dbPath}`));
-  }
-
   const worker = new Worker(`
     const { parentPort, workerData } = require("node:worker_threads");
     try {

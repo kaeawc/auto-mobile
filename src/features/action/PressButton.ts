@@ -6,16 +6,13 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { isNavigationPressButton } from "./pressButtonPolicy";
 
 export class PressButton extends BaseVisualChange {
   constructor(device: BootedDevice, adb: AdbClient | null = null) {
     super(device, adb);
     this.device = device;
   }
-
-  // Buttons that typically cause UI/navigation changes (dismiss keyboard, go home, lock screen, etc.)
-  // These should wait for hierarchy changes to ensure fresh observation data
-  private static readonly NAVIGATION_BUTTONS = new Set(["back", "home", "recent", "power"]);
 
   async execute(
     button: string,
@@ -28,7 +25,7 @@ export class PressButton extends BaseVisualChange {
     // dismissing keyboard, navigating screens, or showing lock screen. We set
     // changeExpected=true so the observation waits for the hierarchy to actually change.
     // Hardware buttons (volume, menu) don't change the hierarchy.
-    const isNavigationButton = PressButton.NAVIGATION_BUTTONS.has(button.toLowerCase());
+    const isNavigationButton = isNavigationPressButton(button);
 
     return this.observedInteraction(
       async () => {

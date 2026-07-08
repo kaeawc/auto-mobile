@@ -609,7 +609,13 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 
     return {
       durationMs,
-      finalizedResponse: finalizeToolResponse(response, { name, sessionUuid, baselineStore, internal: internalCall }),
+      finalizedResponse: finalizeToolResponse(response, {
+        name,
+        args,
+        sessionUuid,
+        baselineStore,
+        internal: internalCall,
+      }),
     };
   }
 }

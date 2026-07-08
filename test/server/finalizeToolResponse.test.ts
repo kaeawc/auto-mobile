@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
-import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
+import {
+  createStructuredToolResponse,
+  stringifyToolResponse,
+  type StructuredToolResponse,
+} from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { GFXINFO_DUMP_MARKER } from "../../src/features/observe/output/ObserveResultOutput";
 import type { ObserveResult } from "../../src/models/ObserveResult";
@@ -485,6 +489,39 @@ describe("finalizeToolResponse", () => {
       } as ObserveResult;
     }
 
+    function checkedIosScreenObserve(
+      key: string,
+      confidence: "high" | "medium" | "low" = "high"
+    ): ObserveResult {
+      const observation = iosScreenObserve(key, confidence);
+      (observation.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      return observation;
+    }
+
+    function finalizeChangedLowConfidenceAction(
+      name: string,
+      actionArgs: Record<string, unknown>,
+      key = "bundle=com.apple.reminders|focus=Title",
+      nextKey = key
+    ): StructuredToolResponse<{ success: boolean; observation: ObserveResult }> {
+      const { store } = makeStore();
+      const baseline = iosScreenObserve(key, "low");
+      finalizeToolResponse(
+        createStructuredToolResponse(baseline),
+        { name: "observe", sessionUuid: "s1", baselineStore: store }
+      );
+
+      return finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: checkedIosScreenObserve(nextKey, "low") }),
+        {
+          name,
+          args: actionArgs,
+          sessionUuid: "s1",
+          baselineStore: store,
+        }
+      );
+    }
+
     beforeEach(() => {
       originalDiff = serverConfig.isActionsDiffObserveEnabled();
       serverConfig.setActionsDiffObserveEnabled(true);
@@ -676,8 +713,7 @@ describe("finalizeToolResponse", () => {
       const baseline = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
       finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
 
-      const next = iosScreenObserve("bundle=com.apple.reminders|nav=New Reminder");
-      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const next = checkedIosScreenObserve("bundle=com.apple.reminders|nav=New Reminder");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
@@ -698,8 +734,7 @@ describe("finalizeToolResponse", () => {
       const baseline = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
       finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
 
-      const next = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
-      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const next = checkedIosScreenObserve("bundle=com.apple.reminders|nav=Reminders");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
@@ -744,8 +779,7 @@ describe("finalizeToolResponse", () => {
       const baseline = iosScreenObserve("bundle=com.apple.reminders|tab=Inbox", "medium");
       finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
 
-      const next = iosScreenObserve("bundle=com.apple.reminders|tab=Search", "medium");
-      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const next = checkedIosScreenObserve("bundle=com.apple.reminders|tab=Search", "medium");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
@@ -764,8 +798,7 @@ describe("finalizeToolResponse", () => {
       const baseline = iosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");
       finalizeToolResponse(createStructuredToolResponse(baseline), { name: "observe", sessionUuid: "s1", baselineStore: store });
 
-      const next = iosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");
-      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const next = checkedIosScreenObserve("bundle=com.apple.reminders|focus=Title", "low");
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
@@ -777,6 +810,152 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.viewHierarchy).toBeDefined();
       expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
       expect((map.get("s1")!.viewHierarchy!.hierarchy.node as any).node[0].checked).toBe("true");
+    });
+
+    test("action policy: navigation-prone tap stays full on uncertain identity", () => {
+      const finalized = finalizeChangedLowConfidenceAction("tapOn", { action: "tap" });
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+    });
+
+    test("action policy: inputText diffs on stable surface despite uncertain identity", () => {
+      const finalized = finalizeChangedLowConfidenceAction("inputText", { text: "hello" });
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
+      expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+    });
+
+    test("action policy: swipeOn diffs on stable surface despite uncertain identity", () => {
+      const finalized = finalizeChangedLowConfidenceAction(
+        "swipeOn",
+        { direction: "up" },
+        "bundle=com.apple.reminders|list=Inbox"
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
+      expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+    });
+
+    test("action policy: inputText emits full when uncertain identity key changes", () => {
+      const finalized = finalizeChangedLowConfidenceAction(
+        "inputText",
+        { text: "hello" },
+        "bundle=com.apple.reminders|focus=Title",
+        "bundle=com.apple.reminders|focus=Search"
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+    });
+
+    test("action policy: swipeOn emits full when uncertain identity key changes", () => {
+      const finalized = finalizeChangedLowConfidenceAction(
+        "swipeOn",
+        { direction: "up" },
+        "bundle=com.apple.reminders|list=Inbox",
+        "bundle=com.apple.reminders|list=Search"
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+    });
+
+    test("action policy: finalizer derives pressButton policy from args", () => {
+      const volume = finalizeChangedLowConfidenceAction("pressButton", { button: "volume_up" });
+      expect((volume.structuredContent as any).observation.isDiff).toBe(true);
+      expectObservationDiff(volume, { mode: "diff", reason: "diff_emitted" });
+
+      const back = finalizeChangedLowConfidenceAction("pressButton", { button: "back" });
+      expect((back.structuredContent as any).observation.isDiff).toBeUndefined();
+      expect((back.structuredContent as any).observation.viewHierarchy).toBeDefined();
+      expectObservationDiff(back, { mode: "full", reason: "screen_changed" });
+    });
+
+    test("action policy: submit-style IME actions are navigation-prone", () => {
+      const inputSearch = finalizeChangedLowConfidenceAction("inputText", { text: "query", imeAction: "search" });
+      expect((inputSearch.structuredContent as any).observation.isDiff).toBeUndefined();
+      expect((inputSearch.structuredContent as any).observation.viewHierarchy).toBeDefined();
+      expectObservationDiff(inputSearch, { mode: "full", reason: "screen_changed" });
+
+      const imeGo = finalizeChangedLowConfidenceAction("imeAction", { action: "go" });
+      expect((imeGo.structuredContent as any).observation.isDiff).toBeUndefined();
+      expect((imeGo.structuredContent as any).observation.viewHierarchy).toBeDefined();
+      expectObservationDiff(imeGo, { mode: "full", reason: "screen_changed" });
+    });
+
+    test("action policy: focus-traversal IME actions remain in-place", () => {
+      const inputNext = finalizeChangedLowConfidenceAction("inputText", { text: "value", imeAction: "next" });
+      expect((inputNext.structuredContent as any).observation.isDiff).toBe(true);
+      expectObservationDiff(inputNext, { mode: "diff", reason: "diff_emitted" });
+
+      const imePrevious = finalizeChangedLowConfidenceAction("imeAction", { action: "previous" });
+      expect((imePrevious.structuredContent as any).observation.isDiff).toBe(true);
+      expectObservationDiff(imePrevious, { mode: "diff", reason: "diff_emitted" });
+    });
+
+    test("action policy: documented navigation-prone actions emit full on uncertain identity", () => {
+      const cases: Array<[string, Record<string, unknown>]> = [
+        ["tapOn", { action: "tap" }],
+        ["tapAny", { action: "tap" }],
+        ["homeScreen", {}],
+        ["recentApps", {}],
+        ["openLink", { url: "https://example.com" }],
+        ["pressButton", { button: "back" }],
+        ["pressButton", { button: "home" }],
+        ["pressButton", { button: "recent" }],
+        ["pressButton", { button: "power" }],
+        ["inputText", { text: "query", imeAction: "done" }],
+        ["inputText", { text: "query", imeAction: "go" }],
+        ["inputText", { text: "query", imeAction: "search" }],
+        ["inputText", { text: "query", imeAction: "send" }],
+        ["imeAction", { action: "done" }],
+        ["imeAction", { action: "go" }],
+        ["imeAction", { action: "search" }],
+        ["imeAction", { action: "send" }],
+      ];
+
+      for (const [name, args] of cases) {
+        const finalized = finalizeChangedLowConfidenceAction(name, args);
+        expect((finalized.structuredContent as any).observation.isDiff).toBeUndefined();
+        expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
+        expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+      }
+    });
+
+    test("action policy: documented in-place and scroll actions diff on stable uncertain identity", () => {
+      const cases: Array<[string, Record<string, unknown>]> = [
+        ["inputText", { text: "hello" }],
+        ["inputText", { text: "hello", imeAction: "next" }],
+        ["inputText", { text: "hello", imeAction: "previous" }],
+        ["clearText", {}],
+        ["selectAllText", {}],
+        ["imeAction", { action: "next" }],
+        ["imeAction", { action: "previous" }],
+        ["keyboard", { action: "open" }],
+        ["clipboard", { action: "paste" }],
+        ["pressButton", { button: "menu" }],
+        ["pressButton", { button: "volume_up" }],
+        ["pressButton", { button: "volume_down" }],
+        ["swipeOn", { direction: "up" }],
+        ["dragAndDrop", {}],
+      ];
+
+      for (const [name, args] of cases) {
+        const finalized = finalizeChangedLowConfidenceAction(name, args);
+        expect((finalized.structuredContent as any).observation.isDiff).toBe(true);
+        expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+      }
     });
 
     test("falls back to full when there is no sessionUuid (legacy single-agent path)", () => {

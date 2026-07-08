@@ -5,8 +5,10 @@ import {
   isSameObservationScreen,
   type SanitizeObserveConfig,
 } from "../features/observe/output/ObserveResultOutput";
+import { isInPlacePressButton, isNavigationPressButton } from "../features/action/pressButtonPolicy";
 import { serverConfig } from "../utils/ServerConfig";
 import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
+import { isSubmitImeAction } from "../models/ImeActionResult";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -20,6 +22,45 @@ export interface ObservationBaselineStore {
   set(sessionUuid: string, observation: ObserveResult): void;
 }
 
+type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
+
+function classifyObservationAction(
+  name: string,
+  args?: Record<string, unknown>
+): ObservationActionClass {
+  switch (name) {
+    case "tapOn":
+    case "tapAny":
+    case "homeScreen":
+    case "recentApps":
+    case "openLink":
+      return "navigation";
+    case "pressButton": {
+      if (isNavigationPressButton(args?.button)) {
+        return "navigation";
+      }
+      if (isInPlacePressButton(args?.button)) {
+        return "inPlace";
+      }
+      return "unknown";
+    }
+    case "inputText":
+      return isSubmitImeAction(args?.imeAction) ? "navigation" : "inPlace";
+    case "clearText":
+    case "selectAllText":
+    case "keyboard":
+    case "clipboard":
+      return "inPlace";
+    case "imeAction":
+      return isSubmitImeAction(args?.action) ? "navigation" : "inPlace";
+    case "swipeOn":
+    case "dragAndDrop":
+      return "scroll";
+    default:
+      return "unknown";
+  }
+}
+
 /**
  * Context needed to finalize a tool response at the serialization chokepoint.
  * `name` selects where the `ObserveResult` lives (top-level for `observe`, else
@@ -30,6 +71,7 @@ export interface ObservationBaselineStore {
  */
 export interface FinalizeToolResponseContext {
   name: string;
+  args?: Record<string, unknown>;
   sessionUuid?: string;
   baselineStore?: ObservationBaselineStore;
   /**
@@ -196,7 +238,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             fromScreen: observationScreenIdentity(baseline),
             toScreen: observationScreenIdentity(sanitized),
           };
-        } else if (isSameObservationScreen(baseline, sanitized)) {
+        } else if (shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))) {
           observationOut = diffObserveResult(baseline, sanitized);
           observationDiff = {
             mode: "diff",
@@ -286,4 +328,48 @@ function observationScreenIdentity(observation: ObserveResult): ObservationDiffS
     identity.screenIdentity = observation.screenIdentity;
   }
   return identity;
+}
+
+function shouldDiffObservation(
+  baseline: ObserveResult,
+  next: ObserveResult,
+  actionClass: ObservationActionClass
+): boolean {
+  if (actionClass === "inPlace" || actionClass === "scroll") {
+    return isSameStableMutationSurface(baseline, next);
+  }
+  return isSameObservationScreen(baseline, next);
+}
+
+function isSameStableMutationSurface(baseline: ObserveResult, next: ObserveResult): boolean {
+  if (!hasSameWindowPackageSurface(baseline, next)) {
+    return false;
+  }
+
+  return hasCompatibleStableMutationIdentity(baseline, next);
+}
+
+function hasCompatibleStableMutationIdentity(baseline: ObserveResult, next: ObserveResult): boolean {
+  const baselineIdentity = baseline.screenIdentity;
+  const nextIdentity = next.screenIdentity;
+  if (!baselineIdentity || !nextIdentity) {
+    return true;
+  }
+
+  return baselineIdentity.platform === nextIdentity.platform
+    && baselineIdentity.source === nextIdentity.source
+    && baselineIdentity.key === nextIdentity.key;
+}
+
+function hasSameWindowPackageSurface(baseline: ObserveResult, next: ObserveResult): boolean {
+  if ((baseline.activeWindow?.appId ?? "") !== (next.activeWindow?.appId ?? "")) {
+    return false;
+  }
+  if ((baseline.activeWindow?.activityName ?? "") !== (next.activeWindow?.activityName ?? "")) {
+    return false;
+  }
+  if ((baseline.viewHierarchy?.packageName ?? "") !== (next.viewHierarchy?.packageName ?? "")) {
+    return false;
+  }
+  return true;
 }

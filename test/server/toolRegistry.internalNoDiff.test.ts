@@ -89,6 +89,60 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     );
   }
 
+  function lowConfidenceObserve(checked = false): ObserveResult {
+    const observation = sameScreenObserve();
+    observation.activeWindow = { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 };
+    observation.screenIdentity = {
+      platform: "ios",
+      source: "heuristic",
+      confidence: "low",
+      key: "bundle=com.example|focus=Search",
+      components: { bundleId: "com.example", focusedField: "Search" } as any,
+    };
+    observation.viewHierarchy = {
+      packageName: "com.example",
+      hierarchy: {
+        node: {
+          "resource-id": "com.example:id/root",
+          "content-desc": "keep",
+          "node": [
+            {
+              "resource-id": "com.example:id/field",
+              "checked": checked ? "true" : undefined,
+            } as any,
+          ],
+        } as any,
+      },
+    };
+    return observation;
+  }
+
+  function registerObserveAndTextActions(): void {
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      baseSchema,
+      async () => createStructuredToolResponse(lowConfidenceObserve(false))
+    );
+    ToolRegistry.registerDeviceAware(
+      "inputText",
+      "inputText",
+      baseSchema.extend({
+        text: z.string().optional(),
+        imeAction: z.string().optional(),
+      }),
+      async () => createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) })
+    );
+    ToolRegistry.registerDeviceAware(
+      "imeAction",
+      "imeAction",
+      baseSchema.extend({
+        action: z.string().optional(),
+      }),
+      async () => createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) })
+    );
+  }
+
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
@@ -166,5 +220,71 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     });
     expect((internal.structuredContent as any).observation).toBeDefined();
     expect((internal.structuredContent as any).observation.viewHierarchy).toBeDefined();
+  });
+
+  test("action policy: ToolRegistry forwards submit IME args so they emit full on uncertain identity", async () => {
+    serverConfig.setActionsDiffObserveEnabled(true);
+    serverConfig.setActionsNoObserveEnabled(false);
+    await setupAutolockedSession();
+    registerObserveAndTextActions();
+
+    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
+    const inputSearch = await ToolRegistry.getTool("inputText")!.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+      text: "query",
+      imeAction: "search",
+    });
+    expect((inputSearch.structuredContent as any).observation.isDiff).toBeUndefined();
+    expect((inputSearch.structuredContent as any).observation.viewHierarchy).toBeDefined();
+    expect((inputSearch.structuredContent as any).observationDiff).toMatchObject({
+      mode: "full",
+      reason: "screen_changed",
+    });
+
+    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
+    const imeGo = await ToolRegistry.getTool("imeAction")!.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+      action: "go",
+    });
+    expect((imeGo.structuredContent as any).observation.isDiff).toBeUndefined();
+    expect((imeGo.structuredContent as any).observation.viewHierarchy).toBeDefined();
+    expect((imeGo.structuredContent as any).observationDiff).toMatchObject({
+      mode: "full",
+      reason: "screen_changed",
+    });
+  });
+
+  test("action policy: ToolRegistry forwards traversal IME args so they still diff", async () => {
+    serverConfig.setActionsDiffObserveEnabled(true);
+    serverConfig.setActionsNoObserveEnabled(false);
+    await setupAutolockedSession();
+    registerObserveAndTextActions();
+
+    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
+    const inputNext = await ToolRegistry.getTool("inputText")!.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+      text: "query",
+      imeAction: "next",
+    });
+    expect((inputNext.structuredContent as any).observation.isDiff).toBe(true);
+    expect((inputNext.structuredContent as any).observationDiff).toMatchObject({
+      mode: "diff",
+      reason: "diff_emitted",
+    });
+
+    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
+    const imePrevious = await ToolRegistry.getTool("imeAction")!.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+      action: "previous",
+    });
+    expect((imePrevious.structuredContent as any).observation.isDiff).toBe(true);
+    expect((imePrevious.structuredContent as any).observationDiff).toMatchObject({
+      mode: "diff",
+      reason: "diff_emitted",
+    });
   });
 });

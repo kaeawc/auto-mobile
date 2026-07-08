@@ -3,7 +3,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
-import { PostNotification, PostNotificationOptions } from "../features/utility/PostNotification";
+import { ANDROID_PACKAGE_NAME_PATTERN, PostNotification, PostNotificationOptions } from "../features/utility/PostNotification";
 import { NotificationPolicy } from "../features/utility/NotificationPolicy";
 
 export interface PostNotificationArgs extends PostNotificationOptions {
@@ -39,7 +39,11 @@ export const postNotificationSchema = withAppIdAliases(z.discriminatedUnion("pla
   })),
   addDeviceTargetingToSchema(z.object({
     ...postNotificationCommonShape,
-    appId: z.string().min(1).optional().describe(postNotificationAppIdDescription),
+    appId: z.string()
+      .min(1)
+      .regex(ANDROID_PACKAGE_NAME_PATTERN, "appId must be an Android package name")
+      .optional()
+      .describe(postNotificationAppIdDescription),
     platform: z.literal("android")
   }))
 ]));

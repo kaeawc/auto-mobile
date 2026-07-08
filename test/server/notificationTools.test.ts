@@ -73,6 +73,20 @@ describe("notification tools", () => {
     }
   });
 
+  test("rejects invalid Android appId when posting notifications", () => {
+    const result = postNotificationSchema.safeParse({
+      platform: "android",
+      title: "T",
+      body: "B",
+      appId: "dev.jasonpearson.automobile.playground; echo injected",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe("appId must be an Android package name");
+    }
+  });
+
   test("keeps generated tool definition free of top-level combinators", () => {
     const toolDefinition = ToolRegistry.getToolDefinitions()
       .find(tool => tool.name === "postNotification");

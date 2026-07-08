@@ -90,6 +90,20 @@ describe("PostNotification", () => {
     expect(fakeWindow.getGetActiveCallCount()).toBe(0);
   });
 
+  test("rejects invalid explicit Android appId before SDK broadcast", async () => {
+    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const result = await postNotification.execute({
+      title: "AutoMobile Test",
+      body: "Body",
+      appId: "dev.jasonpearson.automobile.playground; echo injected"
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.supported).toBe(false);
+    expect(result.error).toContain("Invalid Android appId");
+    expect(fakeAdb.wasCommandExecuted("am broadcast")).toBe(false);
+  });
+
   test("refreshes active window instead of using stale cache when appId is omitted", async () => {
     fakeWindow.configureCachedActiveWindow({
       appId: "com.google.android.apps.nexuslauncher",

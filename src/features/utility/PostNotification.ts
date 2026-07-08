@@ -32,6 +32,7 @@ const NOTIFICATION_ACTION = "dev.jasonpearson.automobile.sdk.NOTIFICATION_POST";
 const NOTIFICATION_RECEIVER = "dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver";
 const SDK_RESULT_SUCCESS = 1;
 const DEVICE_IMAGE_DIR = "/sdcard/Download/automobile";
+export const ANDROID_PACKAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/;
 
 export class PostNotification {
   private device: BootedDevice;
@@ -220,6 +221,14 @@ export class PostNotification {
         supported: false,
         imageType,
         error: "Unable to determine the active app for SDK notifications."
+      };
+    }
+    if (!ANDROID_PACKAGE_NAME_PATTERN.test(appId)) {
+      return {
+        success: false,
+        supported: false,
+        imageType,
+        error: "Invalid Android appId. Provide an Android package name such as com.example.app."
       };
     }
 

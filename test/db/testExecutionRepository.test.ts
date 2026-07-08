@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import type { Kysely } from "kysely";
-import { Kysely as KyselyRuntime } from "kysely";
+import { Kysely as KyselyRuntime, sql } from "kysely";
 import type { Database } from "../../src/db/types";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { SQLITE_MAX_BOUND_PARAMETERS } from "../../src/db/sqliteBatch";
@@ -153,6 +153,76 @@ describe("TestExecutionRepository", () => {
       const runs = await repo.getTestRuns();
       expect(runs[0].steps).toEqual([]);
       expect(runs[0].screensVisited).toEqual([]);
+    });
+
+    test("rolls back the execution row when inserting steps fails", async () => {
+      await sql`
+        CREATE TEMP TRIGGER fail_test_execution_steps_insert
+        BEFORE INSERT ON test_execution_steps
+        BEGIN
+          SELECT RAISE(ABORT, 'injected step insert failure');
+        END
+      `.execute(db);
+
+      await expect(
+        repo.recordExecution(makeExecution({ steps: [makeStep()] }))
+      ).rejects.toThrow("injected step insert failure");
+
+      const row = await db
+        .selectFrom("test_executions")
+        .select(db.fn.count<number>("id").as("count"))
+        .executeTakeFirstOrThrow();
+      expect(Number(row.count)).toBe(0);
+    });
+
+    test("rolls back execution and steps when inserting screens fails", async () => {
+      await sql`
+        CREATE TEMP TRIGGER fail_test_execution_screens_insert
+        BEFORE INSERT ON test_execution_screens
+        BEGIN
+          SELECT RAISE(ABORT, 'injected screen insert failure');
+        END
+      `.execute(db);
+
+      await expect(
+        repo.recordExecution(
+          makeExecution({
+            steps: [makeStep()],
+            screensVisited: [{ screenName: "LoginScreen", timestamp: 1000 }],
+          })
+        )
+      ).rejects.toThrow("injected screen insert failure");
+
+      const executionRow = await db
+        .selectFrom("test_executions")
+        .select(db.fn.count<number>("id").as("count"))
+        .executeTakeFirstOrThrow();
+      const stepRow = await db
+        .selectFrom("test_execution_steps")
+        .select(db.fn.count<number>("id").as("count"))
+        .executeTakeFirstOrThrow();
+      expect(Number(executionRow.count)).toBe(0);
+      expect(Number(stepRow.count)).toBe(0);
+    });
+
+    test("runs on an enclosing transaction executor without opening a nested transaction", async () => {
+      let executionId = 0;
+
+      await db.transaction().execute(async trx => {
+        const boundRepo = new TestExecutionRepository(timer, trx);
+        executionId = await boundRepo.recordExecution(
+          makeExecution({
+            steps: [makeStep()],
+            screensVisited: [{ screenName: "LoginScreen", timestamp: 1000 }],
+          })
+        );
+      });
+
+      const runs = await repo.getTestRuns();
+      expect(runs).toHaveLength(1);
+      expect(runs[0].id).toBe(executionId);
+      expect(runs[0].steps).toHaveLength(1);
+      expect(runs[0].screensVisited).toEqual(["LoginScreen"]);
     });
   });
 

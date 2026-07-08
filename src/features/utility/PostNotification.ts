@@ -2,6 +2,7 @@ import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-c
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, PostNotificationResult } from "../../models";
 import { Window } from "../observe/Window";
+import type { Window as WindowInterface } from "../observe/interfaces/Window";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -36,13 +37,13 @@ export class PostNotification {
   private device: BootedDevice;
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
-  private window: Window;
+  private window: WindowInterface;
   private simctl: SimCtlClient;
 
   constructor(
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
-    window: Window | null = null,
+    window: WindowInterface | null = null,
     simctl: SimCtlClient | null = null
   ) {
     this.device = device;

@@ -26,7 +26,8 @@ const postNotificationCommonShape = {
   channelId: z.string().optional().describe("Android channel ID / iOS APNs category"),
 };
 
-const postNotificationAppIdDescription = "Android target package name or iOS target bundle ID";
+const postNotificationAppIdDescription =
+  "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted";
 
 export const postNotificationSchema = withAppIdAliases(z.discriminatedUnion("platform", [
   addDeviceTargetingToSchema(z.object({

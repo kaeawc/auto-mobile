@@ -4812,7 +4812,7 @@
         "appId": {
           "type": "string",
           "minLength": 1,
-          "description": "Android target package name or iOS target bundle ID"
+          "description": "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted"
         },
         "platform": {
           "type": "string",

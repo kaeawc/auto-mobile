@@ -20,20 +20,19 @@ class TestAdbClientFactory implements AdbClientFactory {
 class DeviceScopedAdbExecutor extends FakeAdbExecutor {
   constructor(
     private readonly device: BootedDevice | null,
-    private readonly devices: BootedDevice[],
-    private readonly commandLog: string[],
+    private readonly factory: DeviceScopedAdbClientFactory,
   ) {
     super();
   }
 
   async getBootedAndroidDevices(): Promise<BootedDevice[]> {
-    return this.devices;
+    return this.factory.nextDevices();
   }
 
   async executeCommand(command: string): Promise<ExecResult> {
-    this.commandLog.push(`${this.device?.deviceId ?? "global"}:${command}`);
+    this.factory.commandLog.push(`${this.device?.deviceId ?? "global"}:${command}`);
     if (command === "emu avd name") {
-      return createExecResult("");
+      return createExecResult(this.factory.getAvdName(this.device?.deviceId));
     }
     if (command === "shell getprop ro.product.model") {
       return createExecResult("");
@@ -56,11 +55,31 @@ class DeviceScopedAdbExecutor extends FakeAdbExecutor {
 
 class DeviceScopedAdbClientFactory implements AdbClientFactory {
   readonly commandLog: string[] = [];
+  private readonly deviceScans: BootedDevice[][];
+  private scanIndex = 0;
 
-  constructor(private readonly devices: BootedDevice[]) {}
+  constructor(
+    devices: BootedDevice[] | BootedDevice[][],
+    private readonly avdNamesByDeviceId = new Map<string, string>(),
+  ) {
+    const firstScan = devices[0];
+    this.deviceScans = Array.isArray(firstScan)
+      ? devices as BootedDevice[][]
+      : [devices as BootedDevice[]];
+  }
 
   create(device?: BootedDevice | null): AdbExecutor {
-    return new DeviceScopedAdbExecutor(device ?? null, this.devices, this.commandLog);
+    return new DeviceScopedAdbExecutor(device ?? null, this);
+  }
+
+  nextDevices(): BootedDevice[] {
+    const devices = this.deviceScans[Math.min(this.scanIndex, this.deviceScans.length - 1)] ?? [];
+    this.scanIndex += 1;
+    return devices;
+  }
+
+  getAvdName(deviceId: string | undefined): string {
+    return deviceId ? this.avdNamesByDeviceId.get(deviceId) ?? "" : "";
   }
 }
 
@@ -342,6 +361,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       deviceId: "emulator-5554",
       source: "local",
     }]);
+    fakeAdb.setCommandResponse("emu avd name", createExecResult("Pixel_9_Pro\n"));
     fakeAdb.setCommandResponse("get-state", createExecResult("device\n"));
     fakeAdb.setCommandResponse("shell pm list packages", createExecResult("package:android\n"));
     fakeAdb.setCommandResponseSequence("shell getprop sys.boot_completed", [
@@ -382,6 +402,40 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
 
     expect(result.deviceId).toBe("emulator-5556");
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5556:get-state"))).toBe(true);
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5554:get-state"))).toBe(false);
+  });
+
+  test("does not report a different local emulator ready during cold-boot name resolution", async () => {
+    fakeTimer.enableAutoAdvance();
+    const existingDevice: BootedDevice = {
+      name: "am-api35-ga-arm64",
+      platform: "android",
+      deviceId: "emulator-5554",
+      source: "local",
+    };
+    const launchedDevice: BootedDevice = {
+      name: "am-api33-ga-arm64",
+      platform: "android",
+      deviceId: "emulator-5558",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory(
+      [
+        [existingDevice],
+        [existingDevice, launchedDevice],
+      ],
+      new Map([
+        ["emulator-5554", "am-api35-ga-arm64"],
+        ["emulator-5558", "am-api33-ga-arm64"],
+      ]),
+    );
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const result = await client.waitForEmulatorReady("am-api33-ga-arm64", 5_000);
+
+    expect(result.deviceId).toBe("emulator-5558");
+    expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5558:get-state"))).toBe(true);
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5554:get-state"))).toBe(false);
   });
 });

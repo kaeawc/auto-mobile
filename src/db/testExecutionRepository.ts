@@ -142,6 +142,15 @@ export class TestExecutionRepository {
   async recordExecution(record: TestExecutionRecord): Promise<number> {
     const db = this.getDb();
 
+    const executionId = db.isTransaction
+      ? await this.recordExecutionWithin(db, record)
+      : await db.transaction().execute(trx => this.recordExecutionWithin(trx, record));
+
+    await this.cleanupRetention();
+    return executionId;
+  }
+
+  private async recordExecutionWithin(db: Kysely<Database>, record: TestExecutionRecord): Promise<number> {
     const entry: NewTestExecution = {
       test_class: record.testClass,
       test_method: record.testMethod,
@@ -198,7 +207,6 @@ export class TestExecutionRepository {
       await db.insertInto("test_execution_screens").values(screenEntries).execute();
     }
 
-    await this.cleanupRetention();
     return executionId;
   }
 

@@ -885,12 +885,37 @@ describe("finalizeToolResponse", () => {
       expectObservationDiff(back, { mode: "full", reason: "screen_changed" });
     });
 
+    test("action policy: submit-style IME actions are navigation-prone", () => {
+      const inputSearch = finalizeChangedLowConfidenceAction("inputText", { text: "query", imeAction: "search" });
+      expect((inputSearch.structuredContent as any).observation.isDiff).toBeUndefined();
+      expect((inputSearch.structuredContent as any).observation.viewHierarchy).toBeDefined();
+      expectObservationDiff(inputSearch, { mode: "full", reason: "screen_changed" });
+
+      const imeGo = finalizeChangedLowConfidenceAction("imeAction", { action: "go" });
+      expect((imeGo.structuredContent as any).observation.isDiff).toBeUndefined();
+      expect((imeGo.structuredContent as any).observation.viewHierarchy).toBeDefined();
+      expectObservationDiff(imeGo, { mode: "full", reason: "screen_changed" });
+    });
+
+    test("action policy: focus-traversal IME actions remain in-place", () => {
+      const inputNext = finalizeChangedLowConfidenceAction("inputText", { text: "value", imeAction: "next" });
+      expect((inputNext.structuredContent as any).observation.isDiff).toBe(true);
+      expectObservationDiff(inputNext, { mode: "diff", reason: "diff_emitted" });
+
+      const imePrevious = finalizeChangedLowConfidenceAction("imeAction", { action: "previous" });
+      expect((imePrevious.structuredContent as any).observation.isDiff).toBe(true);
+      expectObservationDiff(imePrevious, { mode: "diff", reason: "diff_emitted" });
+    });
+
     test("classifies non-observe actions for policy selection", () => {
       expect(classifyObservationAction("tapOn", { action: "tap" })).toBe("navigation");
       expect(classifyObservationAction("pressButton", { button: "back" })).toBe("navigation");
       expect(classifyObservationAction("pressButton", { button: "volume_up" })).toBe("inPlace");
       expect(classifyObservationAction("inputText", { text: "hello" })).toBe("inPlace");
+      expect(classifyObservationAction("inputText", { text: "hello", imeAction: "search" })).toBe("navigation");
       expect(classifyObservationAction("clearText", {})).toBe("inPlace");
+      expect(classifyObservationAction("imeAction", { action: "send" })).toBe("navigation");
+      expect(classifyObservationAction("imeAction", { action: "next" })).toBe("inPlace");
       expect(classifyObservationAction("swipeOn", { direction: "up" })).toBe("scroll");
       expect(classifyObservationAction("dragAndDrop", {})).toBe("scroll");
     });

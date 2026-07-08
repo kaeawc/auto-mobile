@@ -24,6 +24,7 @@ export type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unkn
 
 const NAVIGATION_PRESS_BUTTONS = new Set(["back", "home", "recent", "power"]);
 const IN_PLACE_PRESS_BUTTONS = new Set(["menu", "volume_up", "volume_down"]);
+const NAVIGATION_IME_ACTIONS = new Set(["done", "go", "search", "send"]);
 
 export function classifyObservationAction(
   name: string,
@@ -47,18 +48,24 @@ export function classifyObservationAction(
       return "unknown";
     }
     case "inputText":
+      return isNavigationImeAction(args?.imeAction) ? "navigation" : "inPlace";
     case "clearText":
     case "selectAllText":
-    case "imeAction":
     case "keyboard":
     case "clipboard":
       return "inPlace";
+    case "imeAction":
+      return isNavigationImeAction(args?.action) ? "navigation" : "inPlace";
     case "swipeOn":
     case "dragAndDrop":
       return "scroll";
     default:
       return "unknown";
   }
+}
+
+function isNavigationImeAction(action: unknown): boolean {
+  return typeof action === "string" && NAVIGATION_IME_ACTIONS.has(action);
 }
 
 /**

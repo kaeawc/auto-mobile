@@ -321,8 +321,8 @@ export class Explore extends BaseVisualChange {
             );
           } else {
             // Report discovery progress
-            const currentGraph = await this.navigationManager.exportGraph();
-            const currentNodeCount = currentGraph.nodes.length;
+            const currentStats = await this.navigationManager.getStats();
+            const currentNodeCount = currentStats.nodeCount;
             await progress(
               this.interactionCount,
               maxInteractions,

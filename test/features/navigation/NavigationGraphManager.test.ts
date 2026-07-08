@@ -14,7 +14,7 @@ import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
 import { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
-import type { Database } from "../../../src/db/types";
+import type { Database, NavigationEdge as DBNavigationEdge } from "../../../src/db/types";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { useTempFileDatabase, type TempFileDatabaseHandle } from "../../helpers/tempFileDatabase";
 import { readFileSync } from "fs";
@@ -300,6 +300,45 @@ describe("NavigationGraphManager", () => {
       expect(result.path[1].to).toBe("Advanced");
     });
 
+    test("should read DB edge sources linearly while searching a long path", async () => {
+      await manager.recordNavigationEvent(createEvent("Screen0", 1000));
+
+      let fromScreenReadCount = 0;
+      const edges = Array.from({ length: 40 }, (_, index) =>
+        createCountingDBEdge(index + 1, `Screen${index}`, `Screen${index + 1}`, () => {
+          fromScreenReadCount++;
+        })
+      );
+
+      const getEdgesSpy = spyOn(
+        NavigationRepository.prototype,
+        "getEdges"
+      ).mockResolvedValue(edges);
+
+      const result = await manager
+        .findPath("Screen40")
+        .finally(() => getEdgesSpy.mockRestore());
+
+      expect(result.found).toBe(true);
+      expect(result.path).toHaveLength(40);
+      expect(fromScreenReadCount).toBeLessThanOrEqual(edges.length * 3);
+    });
+
+    test("should keep BFS queue and path tracking linear in source", () => {
+      const managerSource = readFileSync(
+        join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
+        "utf8"
+      );
+      const findPathBody = extractMethodBody(managerSource, "public async findPath");
+
+      expect(findPathBody).toContain("const edgesBySource = new Map");
+      expect(findPathBody).toContain("let queueHead = 0");
+      expect(findPathBody).not.toContain(".shift(");
+      expect(findPathBody).toContain("const predecessor = new Map");
+      expect(findPathBody).not.toContain("[...path");
+      expect(findPathBody).toContain("this.reconstructPath(");
+    });
+
     test("should prefer a shorter path over an earlier longer path", async () => {
       await manager.recordNavigationEvent(createEvent("Home", 1000));
       await manager.recordNavigationEvent(createEvent("A", 1100));
@@ -552,6 +591,59 @@ function createEventWithApp(
     sequenceNumber: 0,
     applicationId
   };
+}
+
+function createCountingDBEdge(
+  id: number,
+  from: string,
+  to: string,
+  onFromScreenRead: () => void
+): DBNavigationEdge {
+  const edge = {
+    id,
+    app_id: "com.test.app",
+    to,
+    to_screen: to,
+    tool_name: null,
+    tool_args: null,
+    timestamp: 1000,
+    created_at: "2026-01-01T00:00:00.000Z",
+  } as DBNavigationEdge;
+
+  Object.defineProperty(edge, "from_screen", {
+    enumerable: true,
+    get: () => {
+      onFromScreenRead();
+      return from;
+    },
+  });
+
+  return edge;
+}
+
+function extractMethodBody(source: string, signature: string): string {
+  const signatureIndex = source.indexOf(signature);
+  if (signatureIndex < 0) {
+    throw new Error(`Could not find method signature: ${signature}`);
+  }
+
+  const openingBrace = source.indexOf("{", signatureIndex);
+  if (openingBrace < 0) {
+    throw new Error(`Could not find method body: ${signature}`);
+  }
+
+  let depth = 1;
+  let index = openingBrace + 1;
+  for (; index < source.length && depth > 0; index++) {
+    const char = source[index];
+    if (char === "{") {
+      depth++;
+    } else if (char === "}") {
+      depth--;
+    }
+  }
+
+  return source.slice(openingBrace + 1, index - 1);
 }
 
 describe("NavigationGraphManager - Scroll Position", () => {

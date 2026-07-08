@@ -875,24 +875,34 @@ export class NavigationGraphManager implements NavigationGraphService {
     // Get all edges for BFS
     const dbEdges = await this.repository.getEdges(this.currentAppId);
 
+    const edgesBySource = new Map<string, DBNavigationEdge[]>();
+    for (const edge of dbEdges) {
+      const source = edge.from_screen;
+      const outgoingEdges = edgesBySource.get(source);
+      if (outgoingEdges) {
+        outgoingEdges.push(edge);
+      } else {
+        edgesBySource.set(source, [edge]);
+      }
+    }
+
     // BFS to find shortest path
-    const queue: Array<{ screen: string; path: DBNavigationEdge[] }> = [
-      { screen: startScreen, path: [] },
-    ];
+    const queue: string[] = [startScreen];
+    let queueHead = 0;
     const visited = new Set<string>([startScreen]);
+    const predecessor = new Map<string, DBNavigationEdge>();
 
-    while (queue.length > 0) {
-      const { screen, path } = queue.shift()!;
-
-      // Find all edges from current screen
-      const outgoingEdges = dbEdges.filter(e => e.from_screen === screen);
+    while (queueHead < queue.length) {
+      const screen = queue[queueHead++];
+      const outgoingEdges = edgesBySource.get(screen) ?? [];
 
       for (const edge of outgoingEdges) {
         if (edge.to_screen === targetScreen) {
-          const pathEdges = await this.convertDBEdgesToNavigationEdges([
-            ...path,
-            edge,
-          ]);
+          predecessor.set(edge.to_screen, edge);
+          const pathEdges = await this.convertDBEdgesToNavigationEdges(
+            this.reconstructPath(startScreen, targetScreen, predecessor)
+          );
+
           // Found the target
           return {
             found: true,
@@ -904,10 +914,8 @@ export class NavigationGraphManager implements NavigationGraphService {
 
         if (!visited.has(edge.to_screen)) {
           visited.add(edge.to_screen);
-          queue.push({
-            screen: edge.to_screen,
-            path: [...path, edge],
-          });
+          predecessor.set(edge.to_screen, edge);
+          queue.push(edge.to_screen);
         }
       }
     }
@@ -919,6 +927,27 @@ export class NavigationGraphManager implements NavigationGraphService {
       startScreen,
       targetScreen,
     };
+  }
+
+  private reconstructPath(
+    startScreen: string,
+    targetScreen: string,
+    predecessor: Map<string, DBNavigationEdge>
+  ): DBNavigationEdge[] {
+    const path: DBNavigationEdge[] = [];
+    let screen = targetScreen;
+
+    while (screen !== startScreen) {
+      const edge = predecessor.get(screen);
+      if (!edge) {
+        return [];
+      }
+
+      path.push(edge);
+      screen = edge.from_screen;
+    }
+
+    return path.reverse();
   }
 
   /**

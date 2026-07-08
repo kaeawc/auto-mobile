@@ -71,6 +71,7 @@ export function classifyObservationAction(
  */
 export interface FinalizeToolResponseContext {
   name: string;
+  args?: Record<string, unknown>;
   sessionUuid?: string;
   baselineStore?: ObservationBaselineStore;
   actionClass?: ObservationActionClass;
@@ -238,7 +239,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             fromScreen: observationScreenIdentity(baseline),
             toScreen: observationScreenIdentity(sanitized),
           };
-        } else if (shouldDiffObservation(baseline, sanitized, ctx.actionClass ?? classifyObservationAction(ctx.name))) {
+        } else if (shouldDiffObservation(baseline, sanitized, ctx.actionClass ?? classifyObservationAction(ctx.name, ctx.args))) {
           observationOut = diffObserveResult(baseline, sanitized);
           observationDiff = {
             mode: "diff",
@@ -353,13 +354,6 @@ function hasCompatibleStableMutationIdentity(baseline: ObserveResult, next: Obse
   const baselineIdentity = baseline.screenIdentity;
   const nextIdentity = next.screenIdentity;
   if (!baselineIdentity || !nextIdentity) {
-    return true;
-  }
-
-  // Low-confidence screen identity is too uncertain for navigation-prone actions,
-  // but in-place edits and scrolls can still diff when the app/activity/package
-  // surface stayed stable.
-  if (baselineIdentity.confidence === "low" || nextIdentity.confidence === "low") {
     return true;
   }
 

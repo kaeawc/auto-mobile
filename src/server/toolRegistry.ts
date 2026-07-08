@@ -615,6 +615,7 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       durationMs,
       finalizedResponse: finalizeToolResponse(response, {
         name,
+        args,
         sessionUuid,
         baselineStore,
         actionClass: classifyObservationAction(name, args),

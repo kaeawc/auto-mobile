@@ -504,7 +504,8 @@ describe("finalizeToolResponse", () => {
     function finalizeChangedLowConfidenceAction(
       name: string,
       actionArgs: Record<string, unknown>,
-      key = "bundle=com.apple.reminders|focus=Title"
+      key = "bundle=com.apple.reminders|focus=Title",
+      nextKey = key
     ): StructuredToolResponse<{ success: boolean; observation: ObserveResult }> {
       const { store } = makeStore();
       const baseline = iosScreenObserve(key, "low");
@@ -514,10 +515,10 @@ describe("finalizeToolResponse", () => {
       );
 
       return finalizeToolResponse(
-        createStructuredToolResponse({ success: true, observation: checkedIosScreenObserve(key, "low") }),
+        createStructuredToolResponse({ success: true, observation: checkedIosScreenObserve(nextKey, "low") }),
         {
           name,
-          actionClass: classifyObservationAction(name, actionArgs),
+          args: actionArgs,
           sessionUuid: "s1",
           baselineStore: store,
         }
@@ -843,6 +844,45 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.isDiff).toBe(true);
       expect(obsSc.changed[0].changes.checked).toEqual({ from: undefined, to: "true" });
       expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+    });
+
+    test("action policy: inputText emits full when uncertain identity key changes", () => {
+      const finalized = finalizeChangedLowConfidenceAction(
+        "inputText",
+        { text: "hello" },
+        "bundle=com.apple.reminders|focus=Title",
+        "bundle=com.apple.reminders|focus=Search"
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+    });
+
+    test("action policy: swipeOn emits full when uncertain identity key changes", () => {
+      const finalized = finalizeChangedLowConfidenceAction(
+        "swipeOn",
+        { direction: "up" },
+        "bundle=com.apple.reminders|list=Inbox",
+        "bundle=com.apple.reminders|list=Search"
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBeUndefined();
+      expect(obsSc.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+    });
+
+    test("action policy: finalizer derives pressButton policy from args", () => {
+      const volume = finalizeChangedLowConfidenceAction("pressButton", { button: "volume_up" });
+      expect((volume.structuredContent as any).observation.isDiff).toBe(true);
+      expectObservationDiff(volume, { mode: "diff", reason: "diff_emitted" });
+
+      const back = finalizeChangedLowConfidenceAction("pressButton", { button: "back" });
+      expect((back.structuredContent as any).observation.isDiff).toBeUndefined();
+      expect((back.structuredContent as any).observation.viewHierarchy).toBeDefined();
+      expectObservationDiff(back, { mode: "full", reason: "screen_changed" });
     });
 
     test("classifies non-observe actions for policy selection", () => {

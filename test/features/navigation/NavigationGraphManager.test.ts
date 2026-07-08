@@ -2,8 +2,7 @@ import { expect, describe, test, beforeEach, afterEach, beforeAll, afterAll, it,
 import type { Kysely } from "kysely";
 import {
   NavigationGraphManager,
-  NavigationEvent,
-  type NavigationEdge
+  NavigationEvent
 } from "../../../src/features/navigation/NavigationGraphManager";
 import { runMigrations } from "../../helpers/database";
 import { createTestDatabase } from "../../db/testDbHelper";
@@ -15,7 +14,7 @@ import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
 import { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
-import type { Database } from "../../../src/db/types";
+import type { Database, NavigationEdge as DBNavigationEdge } from "../../../src/db/types";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { useTempFileDatabase, type TempFileDatabaseHandle } from "../../helpers/tempFileDatabase";
 import { readFileSync } from "fs";
@@ -301,30 +300,28 @@ describe("NavigationGraphManager", () => {
       expect(result.path[1].to).toBe("Advanced");
     });
 
-    test("should read edge sources linearly while searching a long path", async () => {
+    test("should read DB edge sources linearly while searching a long path", async () => {
       await manager.recordNavigationEvent(createEvent("Screen0", 1000));
 
-      let fromReadCount = 0;
+      let fromScreenReadCount = 0;
       const edges = Array.from({ length: 40 }, (_, index) =>
-        createCountingEdge(`Screen${index}`, `Screen${index + 1}`, () => {
-          fromReadCount++;
+        createCountingDBEdge(index + 1, `Screen${index}`, `Screen${index + 1}`, () => {
+          fromScreenReadCount++;
         })
       );
 
-      const conversionSpy = spyOn(
-        manager as unknown as {
-          convertDBEdgesToNavigationEdges: () => Promise<NavigationEdge[]>;
-        },
-        "convertDBEdgesToNavigationEdges"
+      const getEdgesSpy = spyOn(
+        NavigationRepository.prototype,
+        "getEdges"
       ).mockResolvedValue(edges);
 
       const result = await manager
         .findPath("Screen40")
-        .finally(() => conversionSpy.mockRestore());
+        .finally(() => getEdgesSpy.mockRestore());
 
       expect(result.found).toBe(true);
       expect(result.path).toHaveLength(40);
-      expect(fromReadCount).toBeLessThanOrEqual(edges.length + result.path.length);
+      expect(fromScreenReadCount).toBeLessThanOrEqual(edges.length * 3);
     });
 
     test("should keep BFS queue and path tracking linear in source", () => {
@@ -342,12 +339,125 @@ describe("NavigationGraphManager", () => {
       expect(findPathBody).toContain("this.reconstructPath(");
     });
 
+    test("should prefer a shorter path over an earlier longer path", async () => {
+      await manager.recordNavigationEvent(createEvent("Home", 1000));
+      await manager.recordNavigationEvent(createEvent("A", 1100));
+      await manager.recordNavigationEvent(createEvent("B", 1200));
+      await manager.recordNavigationEvent(createEvent("Target", 1300));
+      await manager.recordNavigationEvent(createEvent("Home", 1400));
+      await manager.recordNavigationEvent(createEvent("Shortcut", 1500));
+      await manager.recordNavigationEvent(createEvent("Target", 1600));
+      await manager.recordNavigationEvent(createEvent("Home", 1700));
+
+      const result = await manager.findPath("Target");
+
+      expect(result.found).toBe(true);
+      expect(result.path.map(edge => [edge.from, edge.to])).toEqual([
+        ["Home", "Shortcut"],
+        ["Shortcut", "Target"],
+      ]);
+    });
+
+    test("should enrich only edges in the returned path", async () => {
+      const now = Date.now();
+      await manager.recordNavigationEvent(createEvent("Home", now));
+
+      manager.recordToolCall("tapOn", { text: "Path A" });
+      await manager.recordNavigationEvent(createEvent("PathA", now + 100));
+
+      manager.recordToolCall("tapOn", { text: "Target" });
+      await manager.recordNavigationEvent(createEvent("Target", now + 200));
+
+      manager.recordToolCall("pressButton", { button: "BACK" });
+      await manager.recordNavigationEvent(createEvent("Home", now + 300));
+
+      manager.recordToolCall("tapOn", { text: "Decoy A" });
+      await manager.recordNavigationEvent(createEvent("DecoyA", now + 400));
+
+      manager.recordToolCall("pressButton", { button: "BACK" });
+      await manager.recordNavigationEvent(createEvent("Home", now + 500));
+
+      manager.recordToolCall("tapOn", { text: "Decoy B" });
+      await manager.recordNavigationEvent(createEvent("DecoyB", now + 600));
+
+      manager.recordToolCall("pressButton", { button: "BACK" });
+      await manager.recordNavigationEvent(createEvent("Home", now + 700));
+
+      const uiElementsSpy = spyOn(
+        NavigationRepository.prototype,
+        "getUIElementsForEdge"
+      );
+      const scrollPositionSpy = spyOn(
+        NavigationRepository.prototype,
+        "getScrollPosition"
+      );
+      const edgeModalsSpy = spyOn(
+        NavigationRepository.prototype,
+        "getEdgeModals"
+      );
+
+      try {
+        const result = await manager.findPath("Target");
+
+        expect(result.found).toBe(true);
+        expect(result.path.map(edge => [edge.from, edge.to])).toEqual([
+          ["Home", "PathA"],
+          ["PathA", "Target"],
+        ]);
+        expect(uiElementsSpy).toHaveBeenCalledTimes(result.path.length);
+        expect(scrollPositionSpy).toHaveBeenCalledTimes(result.path.length);
+        expect(edgeModalsSpy).toHaveBeenCalledTimes(result.path.length * 2);
+      } finally {
+        uiElementsSpy.mockRestore();
+        scrollPositionSpy.mockRestore();
+        edgeModalsSpy.mockRestore();
+      }
+    });
+
     test("should return not found when no path exists", async () => {
       await manager.recordNavigationEvent(createEvent("Screen1"));
 
       const result = await manager.findPath("UnknownScreen");
       expect(result.found).toBe(false);
       expect(result.path).toHaveLength(0);
+    });
+
+    test("should not enrich any edges when no path exists", async () => {
+      const now = Date.now();
+      await manager.recordNavigationEvent(createEvent("Home", now));
+
+      manager.recordToolCall("tapOn", { text: "A" });
+      await manager.recordNavigationEvent(createEvent("A", now + 100));
+
+      manager.recordToolCall("tapOn", { text: "B" });
+      await manager.recordNavigationEvent(createEvent("B", now + 200));
+
+      const uiElementsSpy = spyOn(
+        NavigationRepository.prototype,
+        "getUIElementsForEdge"
+      );
+      const scrollPositionSpy = spyOn(
+        NavigationRepository.prototype,
+        "getScrollPosition"
+      );
+      const edgeModalsSpy = spyOn(
+        NavigationRepository.prototype,
+        "getEdgeModals"
+      );
+
+      try {
+        const result = await manager.findPath("Missing");
+
+        expect(result.found).toBe(false);
+        expect(result.path).toHaveLength(0);
+        expect(uiElementsSpy).not.toHaveBeenCalled();
+        expect(scrollPositionSpy).not.toHaveBeenCalled();
+        expect(edgeModalsSpy).not.toHaveBeenCalled();
+      } finally {
+        uiElementsSpy.mockRestore();
+        scrollPositionSpy.mockRestore();
+        edgeModalsSpy.mockRestore();
+      }
     });
 
     test("should return not found when no current screen", async () => {
@@ -483,21 +593,27 @@ function createEventWithApp(
   };
 }
 
-function createCountingEdge(
+function createCountingDBEdge(
+  id: number,
   from: string,
   to: string,
-  onFromRead: () => void
-): NavigationEdge {
+  onFromScreenRead: () => void
+): DBNavigationEdge {
   const edge = {
+    id,
+    app_id: "com.test.app",
     to,
+    to_screen: to,
+    tool_name: null,
+    tool_args: null,
     timestamp: 1000,
-    edgeType: "unknown" as const,
-  } as NavigationEdge;
+    created_at: "2026-01-01T00:00:00.000Z",
+  } as DBNavigationEdge;
 
-  Object.defineProperty(edge, "from", {
+  Object.defineProperty(edge, "from_screen", {
     enumerable: true,
     get: () => {
-      onFromRead();
+      onFromScreenRead();
       return from;
     },
   });

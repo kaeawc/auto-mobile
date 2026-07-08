@@ -123,7 +123,24 @@ export class DeviceSnapshotRepository {
       manifest_json: JSON.stringify(record.manifest),
     };
 
-    await db.insertInto("device_snapshots").values(row).execute();
+    await db
+      .insertInto("device_snapshots")
+      .values(row)
+      .onConflict(oc =>
+        oc.column("snapshot_name").doUpdateSet({
+          device_id: row.device_id,
+          device_name: row.device_name,
+          platform: row.platform,
+          snapshot_type: row.snapshot_type,
+          include_app_data: row.include_app_data,
+          include_settings: row.include_settings,
+          created_at: row.created_at,
+          last_accessed_at: row.last_accessed_at,
+          size_bytes: row.size_bytes,
+          manifest_json: row.manifest_json,
+        })
+      )
+      .execute();
   }
 
   async updateSnapshot(

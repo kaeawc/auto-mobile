@@ -165,7 +165,30 @@ export class VideoRecordingRepository {
       highlights_json: record.highlights ? JSON.stringify(record.highlights) : null,
     };
 
-    await db.insertInto("video_recordings").values(row).execute();
+    await db
+      .insertInto("video_recordings")
+      .values(row)
+      .onConflict(oc =>
+        oc.column("recording_id").doUpdateSet({
+          device_id: row.device_id,
+          platform: row.platform,
+          status: row.status,
+          output_name: row.output_name,
+          file_name: row.file_name,
+          file_path: row.file_path,
+          format: row.format,
+          size_bytes: row.size_bytes,
+          duration_ms: row.duration_ms,
+          codec: row.codec,
+          created_at: row.created_at,
+          started_at: row.started_at,
+          ended_at: row.ended_at,
+          last_accessed_at: row.last_accessed_at,
+          config_json: row.config_json,
+          highlights_json: row.highlights_json,
+        })
+      )
+      .execute();
   }
 
   async updateRecording(

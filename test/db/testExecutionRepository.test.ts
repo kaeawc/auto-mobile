@@ -175,6 +175,36 @@ describe("TestExecutionRepository", () => {
       expect(Number(row.count)).toBe(0);
     });
 
+    test("rolls back execution and steps when inserting screens fails", async () => {
+      await sql`
+        CREATE TEMP TRIGGER fail_test_execution_screens_insert
+        BEFORE INSERT ON test_execution_screens
+        BEGIN
+          SELECT RAISE(ABORT, 'injected screen insert failure');
+        END
+      `.execute(db);
+
+      await expect(
+        repo.recordExecution(
+          makeExecution({
+            steps: [makeStep()],
+            screensVisited: [{ screenName: "LoginScreen", timestamp: 1000 }],
+          })
+        )
+      ).rejects.toThrow("injected screen insert failure");
+
+      const executionRow = await db
+        .selectFrom("test_executions")
+        .select(db.fn.count<number>("id").as("count"))
+        .executeTakeFirstOrThrow();
+      const stepRow = await db
+        .selectFrom("test_execution_steps")
+        .select(db.fn.count<number>("id").as("count"))
+        .executeTakeFirstOrThrow();
+      expect(Number(executionRow.count)).toBe(0);
+      expect(Number(stepRow.count)).toBe(0);
+    });
+
     test("runs on an enclosing transaction executor without opening a nested transaction", async () => {
       let executionId = 0;
 

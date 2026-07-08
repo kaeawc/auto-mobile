@@ -265,6 +265,36 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     }
   });
 
+  test("attaches the pre-launch emulator device set to the spawned child process", async () => {
+    const fakeChild = createFakeChildProcess();
+    const spawnFn = ((_cmd: string, _args: string[]) => {
+      process.nextTick(() => {
+        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      });
+      return fakeChild;
+    }) as any;
+
+    const execAsync = async (command: string): Promise<ExecResult> => {
+      if (command.includes("-list-avds")) {
+        return createExecResult("Pixel_9_Pro\n");
+      }
+      return createExecResult("");
+    };
+
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setDevices([
+      { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
+
+    const child = await client.startEmulator("Pixel_9_Pro");
+
+    expect((child as CorrelatedTestChildProcess).autoMobileEmulatorLaunch).toEqual({
+      bootedDeviceIdsBeforeLaunch: ["emulator-5554"],
+    });
+  });
+
   test("does not attach launch diff correlation when the pre-launch device scan fails", async () => {
     const fakeChild = createFakeChildProcess();
     const spawnFn = ((_cmd: string, _args: string[]) => {

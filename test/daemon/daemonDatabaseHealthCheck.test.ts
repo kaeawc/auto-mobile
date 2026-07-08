@@ -120,6 +120,74 @@ describe("Daemon database health check", () => {
     expect(exitCodes).toEqual([1]);
   });
 
+  test("does not exit for database recovery after mixed health failure kinds", async () => {
+    const timer = new FakeTimer();
+    const databaseHealthProbe = new FakeDatabaseHealthProbe();
+    databaseHealthProbe.failWith(new Error("database disk image is malformed"));
+    const exitCodes: number[] = [];
+    const daemon = buildDaemon(timer, databaseHealthProbe, code => {
+      exitCodes.push(code);
+    });
+    const internals = daemon as unknown as DaemonHealthInternals;
+    cleanup = { internals, timer };
+
+    internals.httpServer = { listening: false };
+    internals.socketServer = { isListening: () => true };
+    internals.startHealthCheckTimer();
+
+    for (let i = 0; i < MAX_FAILED_CHECKS - 1; i += 1) {
+      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    internals.httpServer = { listening: true };
+    await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+
+    expect(databaseHealthProbe.checkCalls).toBe(1);
+    expect(exitCodes).toEqual([]);
+
+    for (let i = 0; i < MAX_FAILED_CHECKS - 1; i += 1) {
+      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    expect(databaseHealthProbe.checkCalls).toBe(MAX_FAILED_CHECKS);
+    expect(exitCodes).toEqual([1]);
+  });
+
+  test("does not exit for database recovery after mixed http socket and database failures", async () => {
+    const timer = new FakeTimer();
+    const databaseHealthProbe = new FakeDatabaseHealthProbe();
+    databaseHealthProbe.failWith(new Error("database disk image is malformed"));
+    const exitCodes: number[] = [];
+    const daemon = buildDaemon(timer, databaseHealthProbe, code => {
+      exitCodes.push(code);
+    });
+    const internals = daemon as unknown as DaemonHealthInternals;
+    cleanup = { internals, timer };
+
+    internals.httpServer = { listening: false };
+    internals.socketServer = { isListening: () => true };
+    internals.startHealthCheckTimer();
+
+    await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+
+    internals.httpServer = { listening: true };
+    internals.socketServer = { isListening: () => false };
+    await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+
+    internals.socketServer = { isListening: () => true };
+    await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+
+    expect(databaseHealthProbe.checkCalls).toBe(1);
+    expect(exitCodes).toEqual([]);
+
+    for (let i = 0; i < MAX_FAILED_CHECKS - 1; i += 1) {
+      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    expect(databaseHealthProbe.checkCalls).toBe(MAX_FAILED_CHECKS);
+    expect(exitCodes).toEqual([1]);
+  });
+
   test("clears the health interval through the injected timer", () => {
     const timer = new FakeTimer();
     const databaseHealthProbe = new FakeDatabaseHealthProbe();

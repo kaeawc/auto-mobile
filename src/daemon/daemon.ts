@@ -940,34 +940,43 @@ export class Daemon {
     const MAX_FAILED_CHECKS = 3; // Allow 3 consecutive failures before taking action
     let failedCheckCount = 0;
     let lastFailureKind: HealthFailureKind = "unknown";
+    const recordHealthCheckFailure = (failureKind: HealthFailureKind): void => {
+      // Recovery behavior depends on the failure kind, so only same-kind streaks
+      // should reach a kind-specific recovery action.
+      if (lastFailureKind !== failureKind) {
+        failedCheckCount = 0;
+      }
+      lastFailureKind = failureKind;
+      failedCheckCount++;
+    };
+    const resetHealthCheckFailures = (): void => {
+      failedCheckCount = 0;
+      lastFailureKind = "unknown";
+    };
 
     this.healthCheckTimer = this.timer.setInterval(async () => {
       try {
         // Check if HTTP server is responsive
         if (!this.httpServer) {
           logger.warn("Health check failed: HTTP server not initialized");
-          lastFailureKind = "http";
-          failedCheckCount++;
+          recordHealthCheckFailure("http");
         } else if (!this.httpServer.listening) {
           logger.warn("Health check failed: HTTP server not listening");
-          lastFailureKind = "http";
-          failedCheckCount++;
+          recordHealthCheckFailure("http");
         } else {
           // Check if socket server is active before probing shared dependencies.
           if (!this.socketServer || !this.socketServer.isListening()) {
             logger.warn("Health check failed: Socket server not listening");
-            lastFailureKind = "socket";
-            failedCheckCount++;
+            recordHealthCheckFailure("socket");
           } else {
             try {
               await this.databaseHealthProbe.check();
               // Health check passed
-              failedCheckCount = 0;
+              resetHealthCheckFailures();
               logger.debug("Health check passed");
             } catch (error) {
               logger.warn(`Health check failed: Database probe failed: ${error}`);
-              lastFailureKind = "database";
-              failedCheckCount++;
+              recordHealthCheckFailure("database");
             }
           }
         }
@@ -976,12 +985,11 @@ export class Daemon {
         if (failedCheckCount >= MAX_FAILED_CHECKS) {
           logger.error(`Health check failed ${failedCheckCount} times, attempting recovery...`);
           await this.attemptRecovery(lastFailureKind);
-          failedCheckCount = 0;
+          resetHealthCheckFailures();
         }
       } catch (error) {
         logger.warn(`Health check error: ${error}`);
-        lastFailureKind = "unknown";
-        failedCheckCount++;
+        recordHealthCheckFailure("unknown");
       }
     }, HEALTH_CHECK_INTERVAL);
 

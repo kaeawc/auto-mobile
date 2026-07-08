@@ -58,7 +58,7 @@ function makeRecordingSharpFactory(events: string[]): SharpFactory {
 // These cases intentionally exercise the real native sharp backend on macOS/Linux only.
 const describeSharp = process.platform === "win32" ? describe.skip : describe;
 
-describeSharp("SharpBackend", () => {
+describe("SharpBackend", () => {
   describe("execute", () => {
     test("chains multi-operation pipelines without intermediate materialization", async () => {
       const events: string[] = [];
@@ -82,7 +82,11 @@ describeSharp("SharpBackend", () => {
         "toBuffer"
       ]);
     });
+  });
+});
 
+describeSharp("SharpBackend native", () => {
+  describe("execute", () => {
     test("resize with fill produces exact target dimensions", async () => {
       const backend = new SharpBackend();
       const source = await makeSourcePng(8, 8);

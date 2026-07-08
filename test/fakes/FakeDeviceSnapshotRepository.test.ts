@@ -36,7 +36,7 @@ function makeRecord(overrides: Partial<DeviceSnapshotRecord> = {}): DeviceSnapsh
 }
 
 describe("FakeDeviceSnapshotRepository", () => {
-  test("insertSnapshot preserves the first record for an existing snapshot name", async () => {
+  test("insertSnapshot overwrites an existing snapshot name", async () => {
     const repo = new FakeDeviceSnapshotRepository();
 
     await repo.insertSnapshot(
@@ -60,8 +60,8 @@ describe("FakeDeviceSnapshotRepository", () => {
 
     const result = await repo.getSnapshot("snap-1");
     expect(result).not.toBeNull();
-    expect(result!.deviceId).toBe("emulator-5554");
-    expect(result!.deviceName).toBe("Pixel_6");
-    expect(result!.manifest.osVersion).toBe("14");
+    expect(result!.deviceId).toBe("device-B");
+    expect(result!.deviceName).toBe("Pixel_8");
+    expect(result!.manifest.osVersion).toBe("17");
   });
 });

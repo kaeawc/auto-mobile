@@ -493,6 +493,28 @@ describe("cleanupIosXCTestHierarchy", () => {
     expect(nodes.filter(node => node.className === "WKWebView")).toHaveLength(0);
   });
 
+  test("preserves unique noise when an idless WKWebView collapses", () => {
+    const result = cleanupIosXCTestHierarchy({
+      updatedAt: 1,
+      hierarchy: {
+        className: "XCUIApplication",
+        node: {
+          className: "WKWebView",
+          bounds: [0, 0, 390, 844],
+          node: {
+            className: "UIView",
+            text: "Vertical scroll bar, 1 page",
+            bounds: [383, 156, 390, 704],
+          },
+        },
+      },
+    });
+
+    const nodes = collectNodes(result.hierarchy);
+    expect(nodes.filter(node => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
+    expect(nodes.filter(node => node.className === "WKWebView")).toHaveLength(0);
+  });
+
   test("preserves scrollable idless single-child WKWebView wrappers", () => {
     const result = cleanupIosXCTestHierarchy({
       updatedAt: 1,

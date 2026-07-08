@@ -118,10 +118,15 @@ function wasStructuralWrapperEmptiedByScopedDedupe(
   }
 
   const originalChildren = normalizeChildren(original.node);
-  return isStructuralWrapperWithOnlyScrollBarNoise(original) ||
-    originalChildren.length === 1 &&
-    noiseSiblingKey(originalChildren[0]) !== null &&
-    isSingleChildStructuralWrapper(original, originalChildren);
+  if (isStructuralWrapperWithOnlyScrollBarNoise(original)) {
+    return true;
+  }
+  if (originalChildren.length !== 1 || noiseSiblingKey(originalChildren[0]) === null) {
+    return false;
+  }
+
+  return isSingleChildStructuralWrapper(original, originalChildren) &&
+    readClassName(cleaned) === readClassName(original);
 }
 
 function dedupeCurrentNoiseSibling(

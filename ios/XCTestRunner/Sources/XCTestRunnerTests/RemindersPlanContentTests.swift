@@ -247,6 +247,7 @@ final class RemindersPlanContentTests: XCTestCase {
     func testPullRequestWorkflowWarmsTargetAppBeforeRemindersRuns() throws {
         let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
 
+        assertWorkflowUsesLocalCtrlProxyBuildForRemindersRun(workflow)
         assertWorkflowWarmsTargetAppBeforeRemindersRun(
             workflow,
             warmupStepName: "Warm up Reminders target app (Xcode 26.2)",
@@ -272,6 +273,15 @@ final class RemindersPlanContentTests: XCTestCase {
             warmupStepName: "Warm up Reminders target app (Xcode 26.3)",
             runStepName: "Run Reminders integration tests (Xcode 26.3)"
         )
+    }
+
+    /// PR integration runs build CtrlProxy locally before daemon startup. The daemon must use that
+    /// derived-data build instead of attempting a release IPA download for the package version under
+    /// test; otherwise source-only PRs can fail when no matching release artifact exists yet.
+    func testPullRequestWorkflowUsesLocalCtrlProxyBuildForRemindersRun() throws {
+        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
+
+        assertWorkflowUsesLocalCtrlProxyBuildForRemindersRun(workflow)
     }
 
     /// Regression guard preserving the flake-vs-regression distinction: warm-up handles target-app
@@ -614,6 +624,29 @@ private func assertRemindersTimeoutFitsWorkflowStepCap(
         line: line
     )
     XCTAssertEqual(testCase.timeoutSeconds, expectedTimeoutSeconds, file: file, line: line)
+}
+
+private func assertWorkflowUsesLocalCtrlProxyBuildForRemindersRun(
+    _ workflow: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    guard let jobRange = workflow.range(of: "ios-xctest-runner-simulator-tests:") else {
+        XCTFail("Workflow is missing the XCTestRunner simulator job", file: file, line: line)
+        return
+    }
+    guard let runRange = workflow.range(of: #"name: "Run Reminders integration tests (Xcode 26.2)""#) else {
+        XCTFail("Workflow is missing the Xcode 26.2 Reminders run step", file: file, line: line)
+        return
+    }
+
+    let jobBlock = workflow[jobRange.lowerBound ..< runRange.lowerBound]
+    XCTAssertTrue(
+        jobBlock.contains("AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: \"true\""),
+        "The PR XCTestRunner job must use the locally built CtrlProxy artifacts instead of downloading a release IPA",
+        file: file,
+        line: line
+    )
 }
 
 private func loadRepositoryFile(_ path: String) throws -> String {

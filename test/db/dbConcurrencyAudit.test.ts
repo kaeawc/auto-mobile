@@ -47,22 +47,40 @@ describe("DB concurrency RMW audit", () => {
       "utf8"
     );
 
-    for (const expected of [
-      "NavigationRepository.getOrCreateApp",
-      "NavigationRepository.getOrCreateNode",
-      "NavigationRepository.getOrCreateUIElement",
-      "NavigationRepository.getOrCreateFingerprint",
-      "NavigationRepository.addOrUpdateSuggestion",
-      "FailureAnalyticsRepository.recordFailure",
-      "TestCoverageRepository.getOrCreateSession",
-      "TestCoverageRepository.recordNodeVisit",
-      "PredictionHistoryRepository.upsertTransitionStats",
-      "SqliteFeatureFlagRepository.ensureFlags",
-      "SqliteFeatureFlagRepository.upsertFlag",
-      "recordStorageEvent",
-      "NavigationRepository.promoteSuggestion",
-    ]) {
-      expect(audit).toContain(expected);
+    const guardedPaths = [
+      ["NavigationRepository.getOrCreateApp", "Atomic upsert"],
+      ["NavigationRepository.getOrCreateNode", "Atomic upsert"],
+      ["NavigationRepository.getOrCreateUIElement", "guarded by `db.transaction()`"],
+      ["NavigationRepository.getOrCreateFingerprint", "Atomic upsert"],
+      ["NavigationRepository.addOrUpdateSuggestion", "Atomic upsert"],
+      ["FailureAnalyticsRepository.recordFailure", "Method-level transaction"],
+      ["TestCoverageRepository.getOrCreateSession", "Atomic upsert"],
+      ["TestCoverageRepository.recordNodeVisit", "Atomic upsert"],
+      ["TestCoverageRepository.recordEdgeTraversal", "Atomic upsert"],
+      ["PredictionHistoryRepository.upsertTransitionStats", "Atomic upsert"],
+      ["InstalledAppsRepository.replaceInstalledApps", "guarded by a transaction"],
+      ["InstalledAppsRepository.upsertInstalledApp", "Atomic upsert"],
+      ["DeviceSessionRepository.upsertActiveSession", "Atomic upsert"],
+      ["AppearanceConfigRepository.setConfig", "Atomic upsert"],
+      ["DeviceSnapshotConfigRepository.setConfig", "Atomic upsert"],
+      ["VideoRecordingConfigRepository.setConfig", "Atomic upsert"],
+    ] as const;
+
+    for (const [path, strategy] of guardedPaths) {
+      expect(audit).toContain(`| \`${path}\` |`);
+      expect(audit).toContain(strategy);
+    }
+
+    const followUpPaths = [
+      ["SqliteFeatureFlagRepository.ensureFlags", "Concurrent first initialization can race"],
+      ["SqliteFeatureFlagRepository.upsertFlag", "Concurrent first writes can race"],
+      ["recordStorageEvent", "Concurrent inserts can observe the same prior value"],
+      ["NavigationRepository.promoteSuggestion", "not an atomic unit"],
+    ] as const;
+
+    for (const [path, status] of followUpPaths) {
+      expect(audit).toContain(`| \`${path}\` |`);
+      expect(audit).toContain(status);
     }
   });
 

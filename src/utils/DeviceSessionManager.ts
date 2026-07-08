@@ -840,12 +840,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const deviceImage = availableImages[0];
     logger.info(`Starting Android emulator ${deviceImage}...`);
     perf.startOperation("startDevice");
-    await this.deviceUtils.startDevice(deviceImage);
+    const childProcess = await this.deviceUtils.startDevice(deviceImage);
     perf.endOperation("startDevice");
 
     // Wait for the emulator to fully boot and get its device ID
     perf.startOperation("waitForReady");
-    const newDevice = await this.deviceUtils.waitForDeviceReady(deviceImage);
+    const newDevice = await this.deviceUtils.waitForDeviceReady(deviceImage, undefined, childProcess);
     perf.endOperation("waitForReady");
 
     if (!newDevice) {

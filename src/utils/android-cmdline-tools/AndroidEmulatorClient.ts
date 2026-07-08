@@ -164,6 +164,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private adbFactory: AdbClientFactory;
   private modelNameCache = new Map<string, string>();
   private avdConfigReader: AvdConfigReader;
+  private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
 
   /**
    * Create an AndroidEmulatorClient instance
@@ -760,7 +761,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.debug(`AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
 
           runningDevices.push({
-            name: avdName || `Unknown (${deviceId})`,
+            name: avdName || this.unknownEmulatorName(deviceId),
             platform: "android",
             deviceId: deviceId,
             source: "local"
@@ -769,7 +770,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           // If we can't get the AVD name, just use the device ID
           logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
           runningDevices.push({
-            name: `Unknown (${deviceId})`,
+            name: this.unknownEmulatorName(deviceId),
             platform: "android",
             deviceId: deviceId,
             source: "local"
@@ -924,6 +925,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const monitorOutput = (data: any) => {
         const output = data.toString();
         initialOutput += output;
+        this.captureLaunchTargetDeviceId(child, initialOutput);
 
         // Keep a rolling buffer of recent output
         const lines = output.split("\n");
@@ -1142,6 +1144,59 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     logger.info(`Killed emulator '${device.name}'`);
   }
 
+  private getLaunchTargetDeviceId(childProcess?: ChildProcess | null): string | undefined {
+    return childProcess ? this.launchTargetDeviceIds.get(childProcess) : undefined;
+  }
+
+  private unknownEmulatorName(deviceId: string): string {
+    return `Unknown (${deviceId})`;
+  }
+
+  private isUnknownEmulatorName(name: string, deviceId: string): boolean {
+    return name === this.unknownEmulatorName(deviceId);
+  }
+
+  private matchesRequestedAvdOrUnknown(emulator: BootedDevice, avdName: string, targetDeviceId?: string): boolean {
+    if (targetDeviceId === emulator.deviceId && !targetDeviceId.startsWith("emulator-")) {
+      return true;
+    }
+
+    return emulator.name === avdName
+      || this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
+      || (targetDeviceId === emulator.deviceId && this.isUnknownEmulatorName(avdName, targetDeviceId));
+  }
+
+  private detectDeviceIdFromEmulatorOutput(output: string): string | undefined {
+    const explicitDeviceId = output.match(/\bemulator-(\d{4,5})\b/);
+    if (explicitDeviceId) {
+      return `emulator-${explicitDeviceId[1]}`;
+    }
+
+    const consolePort = output.match(/\bconsole(?:\s+on)?\s+port\s*(?:=|:|\s)\s*(\d{4,5})\b/i);
+    if (!consolePort) {
+      return undefined;
+    }
+
+    const port = Number.parseInt(consolePort[1], 10);
+    if (port < 5554 || port % 2 !== 0) {
+      return undefined;
+    }
+
+    return `emulator-${port}`;
+  }
+
+  private captureLaunchTargetDeviceId(childProcess: ChildProcess, output: string): void {
+    if (this.launchTargetDeviceIds.has(childProcess)) {
+      return;
+    }
+
+    const targetDeviceId = this.detectDeviceIdFromEmulatorOutput(output);
+    if (targetDeviceId) {
+      this.launchTargetDeviceIds.set(childProcess, targetDeviceId);
+      logger.debug(`Captured emulator launch target deviceId from process output: ${targetDeviceId}`);
+    }
+  }
+
   /**
    * Wait for the emulator to be ready for use
    * @param avdName - The AVD name to wait for
@@ -1169,6 +1224,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const captureOutput = (data: any) => {
         const output = data.toString();
         processOutput.push(output);
+        this.captureLaunchTargetDeviceId(childProcess, output);
         // Keep buffer bounded
         if (processOutput.length > 50) {
           processOutput.splice(0, processOutput.length - 50);
@@ -1231,16 +1287,22 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           if (runningEmulators.length > 0) {
             logger.debug(`Found ${runningEmulators.length} running emulators: ${runningEmulators.map(e => `${e.name}(${e.deviceId})`).join(", ")}`);
 
-            // Prefer an exact deviceId when startDevice already selected a running device.
-            let emulator = targetDeviceId
-              ? runningEmulators.find(emu => emu.deviceId === targetDeviceId)
+            const correlatedTargetDeviceId = targetDeviceId ?? this.getLaunchTargetDeviceId(childProcess);
+
+            // Prefer an exact deviceId when startDevice already selected or correlated a device.
+            let emulator = correlatedTargetDeviceId
+              ? runningEmulators.find(emu => emu.deviceId === correlatedTargetDeviceId)
               : undefined;
-            if (targetDeviceId) {
-              logger.debug(`Exact deviceId match for '${targetDeviceId}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+            if (correlatedTargetDeviceId) {
+              logger.debug(`Exact deviceId match for '${correlatedTargetDeviceId}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+              if (emulator && !this.matchesRequestedAvdOrUnknown(emulator, avdName, correlatedTargetDeviceId)) {
+                logger.debug(`Exact deviceId match ${emulator.deviceId} resolved as '${emulator.name}', not requested AVD '${avdName}'`);
+                emulator = undefined;
+              }
             }
 
             // Look for emulator by name next.
-            if (!emulator) {
+            if (!emulator && !correlatedTargetDeviceId) {
               emulator = runningEmulators.find(emu => emu.name === avdName);
               logger.debug(`Exact name match for '${avdName}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
             }

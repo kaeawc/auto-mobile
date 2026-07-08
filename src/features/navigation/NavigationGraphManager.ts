@@ -874,10 +874,9 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     // Get all edges for BFS
     const dbEdges = await this.repository.getEdges(this.currentAppId);
-    const edges = await this.convertDBEdgesToNavigationEdges(dbEdges);
 
     // BFS to find shortest path
-    const queue: Array<{ screen: string; path: NavigationEdge[] }> = [
+    const queue: Array<{ screen: string; path: DBNavigationEdge[] }> = [
       { screen: startScreen, path: [] },
     ];
     const visited = new Set<string>([startScreen]);
@@ -886,23 +885,27 @@ export class NavigationGraphManager implements NavigationGraphService {
       const { screen, path } = queue.shift()!;
 
       // Find all edges from current screen
-      const outgoingEdges = edges.filter(e => e.from === screen);
+      const outgoingEdges = dbEdges.filter(e => e.from_screen === screen);
 
       for (const edge of outgoingEdges) {
-        if (edge.to === targetScreen) {
+        if (edge.to_screen === targetScreen) {
+          const pathEdges = await this.convertDBEdgesToNavigationEdges([
+            ...path,
+            edge,
+          ]);
           // Found the target
           return {
             found: true,
-            path: [...path, edge],
+            path: pathEdges,
             startScreen,
             targetScreen,
           };
         }
 
-        if (!visited.has(edge.to)) {
-          visited.add(edge.to);
+        if (!visited.has(edge.to_screen)) {
+          visited.add(edge.to_screen);
           queue.push({
-            screen: edge.to,
+            screen: edge.to_screen,
             path: [...path, edge],
           });
         }

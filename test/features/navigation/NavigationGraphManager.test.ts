@@ -300,6 +300,62 @@ describe("NavigationGraphManager", () => {
       expect(result.path[1].to).toBe("Advanced");
     });
 
+    test("should enrich only edges in the returned path", async () => {
+      const now = Date.now();
+      await manager.recordNavigationEvent(createEvent("Home", now));
+
+      manager.recordToolCall("tapOn", { text: "Path A" });
+      await manager.recordNavigationEvent(createEvent("PathA", now + 100));
+
+      manager.recordToolCall("tapOn", { text: "Target" });
+      await manager.recordNavigationEvent(createEvent("Target", now + 200));
+
+      manager.recordToolCall("pressButton", { button: "BACK" });
+      await manager.recordNavigationEvent(createEvent("Home", now + 300));
+
+      manager.recordToolCall("tapOn", { text: "Decoy A" });
+      await manager.recordNavigationEvent(createEvent("DecoyA", now + 400));
+
+      manager.recordToolCall("pressButton", { button: "BACK" });
+      await manager.recordNavigationEvent(createEvent("Home", now + 500));
+
+      manager.recordToolCall("tapOn", { text: "Decoy B" });
+      await manager.recordNavigationEvent(createEvent("DecoyB", now + 600));
+
+      manager.recordToolCall("pressButton", { button: "BACK" });
+      await manager.recordNavigationEvent(createEvent("Home", now + 700));
+
+      const uiElementsSpy = spyOn(
+        NavigationRepository.prototype,
+        "getUIElementsForEdge"
+      );
+      const scrollPositionSpy = spyOn(
+        NavigationRepository.prototype,
+        "getScrollPosition"
+      );
+      const edgeModalsSpy = spyOn(
+        NavigationRepository.prototype,
+        "getEdgeModals"
+      );
+
+      try {
+        const result = await manager.findPath("Target");
+
+        expect(result.found).toBe(true);
+        expect(result.path.map(edge => [edge.from, edge.to])).toEqual([
+          ["Home", "PathA"],
+          ["PathA", "Target"],
+        ]);
+        expect(uiElementsSpy).toHaveBeenCalledTimes(result.path.length);
+        expect(scrollPositionSpy).toHaveBeenCalledTimes(result.path.length);
+        expect(edgeModalsSpy).toHaveBeenCalledTimes(result.path.length * 2);
+      } finally {
+        uiElementsSpy.mockRestore();
+        scrollPositionSpy.mockRestore();
+        edgeModalsSpy.mockRestore();
+      }
+    });
+
     test("should return not found when no path exists", async () => {
       await manager.recordNavigationEvent(createEvent("Screen1"));
 

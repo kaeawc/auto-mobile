@@ -58,6 +58,35 @@ describe("notification tools", () => {
     expect(result.success).toBe(true);
   });
 
+  test("accepts Android packageName alias when posting notifications", () => {
+    const result = postNotificationSchema.safeParse({
+      platform: "android",
+      title: "T",
+      body: "B",
+      packageName: "dev.jasonpearson.automobile.playground",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.appId).toBe("dev.jasonpearson.automobile.playground");
+      expect("packageName" in result.data).toBe(false);
+    }
+  });
+
+  test("rejects invalid Android appId when posting notifications", () => {
+    const result = postNotificationSchema.safeParse({
+      platform: "android",
+      title: "T",
+      body: "B",
+      appId: "dev.jasonpearson.automobile.playground; echo injected",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe("appId must be an Android package name");
+    }
+  });
+
   test("keeps generated tool definition free of top-level combinators", () => {
     const toolDefinition = ToolRegistry.getToolDefinitions()
       .find(tool => tool.name === "postNotification");
@@ -66,6 +95,7 @@ describe("notification tools", () => {
     const schema = toolDefinition!.inputSchema as any;
     expect(schema.required).toEqual(["title", "body", "platform"]);
     expect(schema.properties.platform.enum).toEqual(["ios", "android"]);
+    expect(schema.properties.appId.description).toContain("Android defaults to the live foreground app");
     expect(schema.anyOf).toBeUndefined();
     expect(schema.oneOf).toBeUndefined();
     expect(schema.allOf).toBeUndefined();

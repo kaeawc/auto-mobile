@@ -2,6 +2,7 @@ import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-c
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, PostNotificationResult } from "../../models";
 import { Window } from "../observe/Window";
+import type { Window as WindowInterface } from "../observe/interfaces/Window";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -23,7 +24,7 @@ export interface PostNotificationOptions {
   imagePath?: string;
   actions?: PostNotificationAction[];
   channelId?: string;
-  /** iOS bundle identifier to target (required on iOS; maps to APNs "Simulator Target Bundle"). */
+  /** Android package name or iOS bundle identifier to target; required on iOS. */
   appId?: string;
 }
 
@@ -31,18 +32,19 @@ const NOTIFICATION_ACTION = "dev.jasonpearson.automobile.sdk.NOTIFICATION_POST";
 const NOTIFICATION_RECEIVER = "dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver";
 const SDK_RESULT_SUCCESS = 1;
 const DEVICE_IMAGE_DIR = "/sdcard/Download/automobile";
+export const ANDROID_PACKAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/;
 
 export class PostNotification {
   private device: BootedDevice;
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
-  private window: Window;
+  private window: WindowInterface;
   private simctl: SimCtlClient;
 
   constructor(
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
-    window: Window | null = null,
+    window: WindowInterface | null = null,
     simctl: SimCtlClient | null = null
   ) {
     this.device = device;
@@ -212,13 +214,21 @@ export class PostNotification {
     imageType: "normal" | "bigPicture",
     signal?: AbortSignal
   ): Promise<PostNotificationResult> {
-    const appId = await this.getActiveAppId();
+    const appId = options.appId ?? (await this.getLiveActiveAppId());
     if (!appId) {
       return {
         success: false,
         supported: false,
         imageType,
         error: "Unable to determine the active app for SDK notifications."
+      };
+    }
+    if (!ANDROID_PACKAGE_NAME_PATTERN.test(appId)) {
+      return {
+        success: false,
+        supported: false,
+        imageType,
+        error: "Invalid Android appId. Provide an Android package name such as com.example.app."
       };
     }
 
@@ -395,14 +405,9 @@ export class PostNotification {
     return resolvePathFromDaemonLaunchWorkingDirectory(imagePath);
   }
 
-  private async getActiveAppId(): Promise<string | null> {
+  private async getLiveActiveAppId(): Promise<string | null> {
     try {
-      const cached = await this.window.getCachedActiveWindow();
-      if (cached?.appId) {
-        return cached.appId;
-      }
-
-      const active = await this.window.getActive();
+      const active = await this.window.getActive(true);
       return active?.appId ?? null;
     } catch (error) {
       logger.warn(`[PostNotification] Failed to read active window: ${error}`);

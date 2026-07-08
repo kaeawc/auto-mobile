@@ -86,9 +86,12 @@ export class FakeWindow implements Window {
     return this.configuredCachedActiveWindow;
   }
 
-  async getActive(): Promise<ActiveWindow> {
+  async getActive(forceRefresh: boolean = false): Promise<ActiveWindow> {
     this.executedOperations.push("getActive");
     this.getActiveCallCount++;
+    if (!forceRefresh && this.configuredCachedActiveWindow) {
+      return this.configuredCachedActiveWindow;
+    }
     if (!this.configuredActiveWindow) {
       throw new Error("No active window configured");
     }

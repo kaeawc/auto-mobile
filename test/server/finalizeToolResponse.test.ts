@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  classifyObservationAction,
-  finalizeToolResponse,
-} from "../../src/server/finalizeToolResponse";
+import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import {
   createStructuredToolResponse,
   stringifyToolResponse,
@@ -907,17 +904,58 @@ describe("finalizeToolResponse", () => {
       expectObservationDiff(imePrevious, { mode: "diff", reason: "diff_emitted" });
     });
 
-    test("classifies non-observe actions for policy selection", () => {
-      expect(classifyObservationAction("tapOn", { action: "tap" })).toBe("navigation");
-      expect(classifyObservationAction("pressButton", { button: "back" })).toBe("navigation");
-      expect(classifyObservationAction("pressButton", { button: "volume_up" })).toBe("inPlace");
-      expect(classifyObservationAction("inputText", { text: "hello" })).toBe("inPlace");
-      expect(classifyObservationAction("inputText", { text: "hello", imeAction: "search" })).toBe("navigation");
-      expect(classifyObservationAction("clearText", {})).toBe("inPlace");
-      expect(classifyObservationAction("imeAction", { action: "send" })).toBe("navigation");
-      expect(classifyObservationAction("imeAction", { action: "next" })).toBe("inPlace");
-      expect(classifyObservationAction("swipeOn", { direction: "up" })).toBe("scroll");
-      expect(classifyObservationAction("dragAndDrop", {})).toBe("scroll");
+    test("action policy: documented navigation-prone actions emit full on uncertain identity", () => {
+      const cases: Array<[string, Record<string, unknown>]> = [
+        ["tapOn", { action: "tap" }],
+        ["tapAny", { action: "tap" }],
+        ["homeScreen", {}],
+        ["recentApps", {}],
+        ["openLink", { url: "https://example.com" }],
+        ["pressButton", { button: "back" }],
+        ["pressButton", { button: "home" }],
+        ["pressButton", { button: "recent" }],
+        ["pressButton", { button: "power" }],
+        ["inputText", { text: "query", imeAction: "done" }],
+        ["inputText", { text: "query", imeAction: "go" }],
+        ["inputText", { text: "query", imeAction: "search" }],
+        ["inputText", { text: "query", imeAction: "send" }],
+        ["imeAction", { action: "done" }],
+        ["imeAction", { action: "go" }],
+        ["imeAction", { action: "search" }],
+        ["imeAction", { action: "send" }],
+      ];
+
+      for (const [name, args] of cases) {
+        const finalized = finalizeChangedLowConfidenceAction(name, args);
+        expect((finalized.structuredContent as any).observation.isDiff).toBeUndefined();
+        expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
+        expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+      }
+    });
+
+    test("action policy: documented in-place and scroll actions diff on stable uncertain identity", () => {
+      const cases: Array<[string, Record<string, unknown>]> = [
+        ["inputText", { text: "hello" }],
+        ["inputText", { text: "hello", imeAction: "next" }],
+        ["inputText", { text: "hello", imeAction: "previous" }],
+        ["clearText", {}],
+        ["selectAllText", {}],
+        ["imeAction", { action: "next" }],
+        ["imeAction", { action: "previous" }],
+        ["keyboard", { action: "open" }],
+        ["clipboard", { action: "paste" }],
+        ["pressButton", { button: "menu" }],
+        ["pressButton", { button: "volume_up" }],
+        ["pressButton", { button: "volume_down" }],
+        ["swipeOn", { direction: "up" }],
+        ["dragAndDrop", {}],
+      ];
+
+      for (const [name, args] of cases) {
+        const finalized = finalizeChangedLowConfidenceAction(name, args);
+        expect((finalized.structuredContent as any).observation.isDiff).toBe(true);
+        expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+      }
     });
 
     test("falls back to full when there is no sessionUuid (legacy single-agent path)", () => {

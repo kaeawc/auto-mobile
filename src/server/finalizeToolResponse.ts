@@ -5,8 +5,10 @@ import {
   isSameObservationScreen,
   type SanitizeObserveConfig,
 } from "../features/observe/output/ObserveResultOutput";
+import { isInPlacePressButton, isNavigationPressButton } from "../features/action/pressButtonPolicy";
 import { serverConfig } from "../utils/ServerConfig";
 import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
+import { isSubmitImeAction } from "../models/ImeActionResult";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -20,13 +22,9 @@ export interface ObservationBaselineStore {
   set(sessionUuid: string, observation: ObserveResult): void;
 }
 
-export type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
+type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
 
-const NAVIGATION_PRESS_BUTTONS = new Set(["back", "home", "recent", "power"]);
-const IN_PLACE_PRESS_BUTTONS = new Set(["menu", "volume_up", "volume_down"]);
-const NAVIGATION_IME_ACTIONS = new Set(["done", "go", "search", "send"]);
-
-export function classifyObservationAction(
+function classifyObservationAction(
   name: string,
   args?: Record<string, unknown>
 ): ObservationActionClass {
@@ -38,34 +36,29 @@ export function classifyObservationAction(
     case "openLink":
       return "navigation";
     case "pressButton": {
-      const button = typeof args?.button === "string" ? args.button.toLowerCase() : "";
-      if (NAVIGATION_PRESS_BUTTONS.has(button)) {
+      if (isNavigationPressButton(args?.button)) {
         return "navigation";
       }
-      if (IN_PLACE_PRESS_BUTTONS.has(button)) {
+      if (isInPlacePressButton(args?.button)) {
         return "inPlace";
       }
       return "unknown";
     }
     case "inputText":
-      return isNavigationImeAction(args?.imeAction) ? "navigation" : "inPlace";
+      return isSubmitImeAction(args?.imeAction) ? "navigation" : "inPlace";
     case "clearText":
     case "selectAllText":
     case "keyboard":
     case "clipboard":
       return "inPlace";
     case "imeAction":
-      return isNavigationImeAction(args?.action) ? "navigation" : "inPlace";
+      return isSubmitImeAction(args?.action) ? "navigation" : "inPlace";
     case "swipeOn":
     case "dragAndDrop":
       return "scroll";
     default:
       return "unknown";
   }
-}
-
-function isNavigationImeAction(action: unknown): boolean {
-  return typeof action === "string" && NAVIGATION_IME_ACTIONS.has(action);
 }
 
 /**
@@ -81,7 +74,6 @@ export interface FinalizeToolResponseContext {
   args?: Record<string, unknown>;
   sessionUuid?: string;
   baselineStore?: ObservationBaselineStore;
-  actionClass?: ObservationActionClass;
   /**
    * Internal tool-to-tool invocation guard (issue #3053). PlanExecutor calls the
    * wrapped `tool.handler` (so this hook runs) with an injected `sessionUuid`, so a
@@ -246,7 +238,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             fromScreen: observationScreenIdentity(baseline),
             toScreen: observationScreenIdentity(sanitized),
           };
-        } else if (shouldDiffObservation(baseline, sanitized, ctx.actionClass ?? classifyObservationAction(ctx.name, ctx.args))) {
+        } else if (shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))) {
           observationOut = diffObserveResult(baseline, sanitized);
           observationDiff = {
             mode: "diff",

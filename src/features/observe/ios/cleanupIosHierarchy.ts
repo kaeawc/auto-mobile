@@ -4,6 +4,11 @@ type IosHierarchyNode = Record<string, unknown> & {
   node?: IosHierarchyNode | IosHierarchyNode[];
 };
 
+type NoiseSiblingScope = {
+  additions: string[];
+  seen: Set<string>;
+};
+
 export function cleanupIosXCTestHierarchy<T>(hierarchy: T): T {
   if (!hierarchy || typeof hierarchy !== "object") {
     return hierarchy;
@@ -29,13 +34,22 @@ function cleanupNodeSlot(node: unknown): unknown {
   return node;
 }
 
-function cleanupNode(node: IosHierarchyNode): IosHierarchyNode | null {
-  const children = normalizeChildren(node.node)
-    .map(cleanupNode)
-    .filter((child): child is IosHierarchyNode => child !== null);
-  const compactedChildren = dedupeNoiseSiblings(
-    dropStructuralScrollBarWrappers(dropRedundantStaticTextChildren(node, children))
-  );
+function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingScope): IosHierarchyNode | null {
+  const childNoiseScope = siblingNoiseScope ?? createNoiseSiblingScope();
+  const compactedChildren: IosHierarchyNode[] = [];
+  for (const child of normalizeChildren(node.node)) {
+    const additionsStart = childNoiseScope.additions.length;
+    const cleaned = cleanupNode(child, childNoiseScope);
+    if (
+      cleaned &&
+      !isRedundantStaticTextChildForParent(node, cleaned) &&
+      !isStructuralWrapperWithOnlyScrollBarNoise(cleaned)
+    ) {
+      compactedChildren.push(cleaned);
+    } else {
+      rollbackNoiseAdditions(childNoiseScope, additionsStart);
+    }
+  }
   if (isSingleChildStructuralWrapper(node, compactedChildren)) {
     return compactedChildren[0];
   }
@@ -47,7 +61,7 @@ function cleanupNode(node: IosHierarchyNode): IosHierarchyNode | null {
     result.node = compactedChildren.length === 1 ? compactedChildren[0] : compactedChildren;
   }
 
-  return result;
+  return dedupeCurrentNoiseSibling(result, siblingNoiseScope);
 }
 
 function normalizeChildren(node: IosHierarchyNode["node"]): IosHierarchyNode[] {
@@ -57,16 +71,13 @@ function normalizeChildren(node: IosHierarchyNode["node"]): IosHierarchyNode[] {
   return Array.isArray(node) ? node : [node];
 }
 
-function dropRedundantStaticTextChildren(
-  parent: IosHierarchyNode,
-  children: IosHierarchyNode[]
-): IosHierarchyNode[] {
+function isRedundantStaticTextChildForParent(parent: IosHierarchyNode, child: IosHierarchyNode): boolean {
   const parentText = normalizedText(parent.text);
   if (!parentText || !canOwnStaticText(parent)) {
-    return children;
+    return false;
   }
 
-  return children.filter(child => !isRedundantStaticTextChild(parentText, child));
+  return isRedundantStaticTextChild(parentText, child);
 }
 
 function canOwnStaticText(node: IosHierarchyNode): boolean {
@@ -97,61 +108,40 @@ function isRedundantStaticTextChild(parentText: string, child: IosHierarchyNode)
   return !hasStandaloneContentProperties(child);
 }
 
-function dedupeNoiseSiblings(children: IosHierarchyNode[]): IosHierarchyNode[] {
-  const seen = new Set<string>();
-
-  return children
-    .map(child => dedupeNoiseDescendants(child, seen))
-    .filter((child): child is IosHierarchyNode => child !== null);
-}
-
-function dropStructuralScrollBarWrappers(children: IosHierarchyNode[]): IosHierarchyNode[] {
-  return children.filter(child => !isStructuralWrapperWithOnlyScrollBarNoise(child));
-}
-
-function dedupeNoiseDescendants(
+function dedupeCurrentNoiseSibling(
   node: IosHierarchyNode,
-  seen: Set<string>
+  scope: NoiseSiblingScope | undefined
 ): IosHierarchyNode | null {
+  if (!scope) {
+    return node;
+  }
+
   const key = noiseSiblingKey(node);
   if (key) {
-    if (seen.has(key)) {
+    if (scope.seen.has(key)) {
       return null;
     }
-    seen.add(key);
+    scope.seen.add(key);
+    scope.additions.push(key);
   }
 
-  const children = normalizeChildren(node.node);
-  if (children.length === 0) {
-    return node;
-  }
+  return node;
+}
 
-  const result: IosHierarchyNode[] = [];
-  let changed = false;
+function createNoiseSiblingScope(): NoiseSiblingScope {
+  return {
+    additions: [],
+    seen: new Set<string>(),
+  };
+}
 
-  for (const child of children) {
-    const cleaned = dedupeNoiseDescendants(child, seen);
-    if (cleaned) {
-      result.push(cleaned);
-      if (cleaned !== child) {
-        changed = true;
-      }
-    } else {
-      changed = true;
+function rollbackNoiseAdditions(scope: NoiseSiblingScope, additionsStart: number): void {
+  while (scope.additions.length > additionsStart) {
+    const key = scope.additions.pop();
+    if (key) {
+      scope.seen.delete(key);
     }
   }
-
-  if (!changed) {
-    return node;
-  }
-
-  const cleanedNode = { ...node };
-  if (result.length === 0) {
-    delete cleanedNode.node;
-  } else {
-    cleanedNode.node = result.length === 1 ? result[0] : result;
-  }
-  return cleanedNode;
 }
 
 function noiseSiblingKey(node: IosHierarchyNode): string | null {

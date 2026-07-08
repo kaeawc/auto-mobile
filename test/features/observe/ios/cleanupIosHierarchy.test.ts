@@ -11,6 +11,60 @@ function collectNodes(node: any): any[] {
 }
 
 describe("cleanupIosXCTestHierarchy", () => {
+  test("dedupes noise in a deep hierarchy without re-reading every ancestor subtree", () => {
+    let boundsReads = 0;
+    const depth = 40;
+    const noisyBounds = new Proxy([47, 811, 342, 841], {
+      get: (target, property, receiver) => {
+        if (property === "length" || typeof property === "string" && /^[0-9]+$/.test(property)) {
+          boundsReads += 1;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const duplicateNoise = [
+      {
+        className: "UIView",
+        text: "Horizontal scroll bar, 1 page",
+        bounds: noisyBounds,
+      },
+      {
+        className: "UIView",
+        text: "Horizontal scroll bar, 1 page",
+        bounds: noisyBounds,
+      },
+    ];
+    let child: any = {
+      className: "UIView",
+      text: "Content",
+      node: duplicateNoise,
+    };
+
+    for (let index = 0; index < depth; index += 1) {
+      const currentChild = child;
+      const parent: any = {
+        className: "UIView",
+        text: `Container ${index}`,
+      };
+      Object.defineProperty(parent, "node", {
+        enumerable: true,
+        get: () => currentChild,
+      });
+      child = parent;
+    }
+
+    const result = cleanupIosXCTestHierarchy({
+      updatedAt: 1,
+      hierarchy: {
+        className: "XCUIApplication",
+        node: child,
+      },
+    });
+
+    expect(collectNodes(result.hierarchy).filter(node => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
+    expect(boundsReads).toBeLessThan(20);
+  });
+
   test("dedupes exact duplicate known-noise siblings", () => {
     const result = cleanupIosXCTestHierarchy({
       updatedAt: 1,

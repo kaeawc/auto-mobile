@@ -71,6 +71,11 @@ interface ToolListingOptions {
   includeUnavailable?: boolean;
 }
 
+interface CachedToolDefinitionSchemas {
+  inputSchema: Record<string, unknown>;
+  outputSchemasByRuntimeFlags: Map<string, Record<string, unknown> | undefined>;
+}
+
 // Interface for a registered tool
 export interface RegisteredTool {
   name: string;
@@ -676,6 +681,7 @@ class ToolRegistryClass {
   private navigationToolCallRecorder: NavigationToolCallRecorder;
   private afterToolCall: AfterToolCallHandler;
   private planLifecycleManager: PlanLifecycleManager;
+  private toolDefinitionSchemaCache: Map<string, CachedToolDefinitionSchemas> = new Map();
 
   constructor(timer: Timer = defaultTimer) {
     this.deviceSessionManager = DeviceSessionManager.getInstance();
@@ -712,6 +718,7 @@ class ToolRegistryClass {
     handler: ToolHandler,
     options: ToolRegistrationOptions = {}
   ): void {
+    this.invalidateToolDefinitionSchemaCache();
     this.tools.set(name, {
       name,
       description,
@@ -733,6 +740,7 @@ class ToolRegistryClass {
     handler: DeviceAwareToolHandler,
     options: DeviceAwareToolOptions = {}
   ): void {
+    this.invalidateToolDefinitionSchemaCache();
     // Create a wrapper that handles device ID injection
     const wrappedHandler: ToolHandler = async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
       const toolStartMs = this.timer.now();
@@ -1004,6 +1012,7 @@ class ToolRegistryClass {
   // connected DaemonMcpProxy clients, which invalidate their tool cache and
   // re-emit to their own external clients.
   notifyToolListChanged(): void {
+    this.invalidateToolDefinitionSchemaCache();
     for (const server of this.servers) {
       try {
         server.sendToolListChanged();
@@ -1031,12 +1040,11 @@ class ToolRegistryClass {
     // `suppressOutputSchema` above keeps the two in sync for the strip flag.
     const compactBounds = serverConfig.isObserveResultCompactEnabled();
     return this.getAllTools(options).map(tool => {
-      const outputSchema = toolHasOutputSchema(tool) && !suppressOutputSchema
-        ? advertiseBoundsForCompact(
-          flattenTopLevelUnion(toJSONSchema(tool.outputSchema)),
-          compactBounds
-        ) as Record<string, unknown>
-        : undefined;
+      const { inputSchema, outputSchema } = this.getCachedToolDefinitionSchemas(
+        tool,
+        suppressOutputSchema,
+        compactBounds
+      );
 
       const definition: {
         name: string;
@@ -1047,7 +1055,7 @@ class ToolRegistryClass {
       } = {
         name: tool.name,
         description: tool.description,
-        inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)),
+        inputSchema,
       };
       if (outputSchema) {
         definition.outputSchema = outputSchema;
@@ -1057,6 +1065,41 @@ class ToolRegistryClass {
       }
       return definition;
     });
+  }
+
+  private getCachedToolDefinitionSchemas(
+    tool: RegisteredTool,
+    suppressOutputSchema: boolean,
+    compactBounds: boolean
+  ): { inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> | undefined } {
+    let cached = this.toolDefinitionSchemaCache.get(tool.name);
+    if (!cached) {
+      cached = {
+        inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)) as Record<string, unknown>,
+        outputSchemasByRuntimeFlags: new Map(),
+      };
+      this.toolDefinitionSchemaCache.set(tool.name, cached);
+    }
+
+    const outputSchemaCacheKey = `${suppressOutputSchema}:${compactBounds}`;
+    if (!cached.outputSchemasByRuntimeFlags.has(outputSchemaCacheKey)) {
+      const outputSchema = toolHasOutputSchema(tool) && !suppressOutputSchema
+        ? advertiseBoundsForCompact(
+          flattenTopLevelUnion(toJSONSchema(tool.outputSchema)),
+          compactBounds
+        ) as Record<string, unknown>
+        : undefined;
+      cached.outputSchemasByRuntimeFlags.set(outputSchemaCacheKey, outputSchema);
+    }
+
+    return {
+      inputSchema: cached.inputSchema,
+      outputSchema: cached.outputSchemasByRuntimeFlags.get(outputSchemaCacheKey),
+    };
+  }
+
+  private invalidateToolDefinitionSchemaCache(): void {
+    this.toolDefinitionSchemaCache.clear();
   }
 
   // Get a map of all schema
@@ -1111,6 +1154,7 @@ class ToolRegistryClass {
 
   // Clear all registered tools (for testing)
   clearTools(): void {
+    this.invalidateToolDefinitionSchemaCache();
     this.tools.clear();
   }
 }

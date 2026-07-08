@@ -39,6 +39,12 @@ function createDeferred<T = void>(): Deferred<T> {
 }
 
 describe("configureSqliteDatabase", () => {
+  test("documents conservative read workload pragma sizes", () => {
+    expect(SQLITE_CACHE_SIZE_KIB).toBe(16 * 1024);
+    expect(SQLITE_MMAP_SIZE_BYTES).toBe(64 * 1024 * 1024);
+    expect(SQLITE_TEMP_STORE).toBe("MEMORY");
+  });
+
   test("enables WAL, busy timeout, read pragmas, WAL size limit, and foreign keys for new connections", () => {
     const db = new FakeSqliteDatabase();
 

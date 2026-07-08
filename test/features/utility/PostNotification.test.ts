@@ -27,6 +27,11 @@ describe("PostNotification", () => {
       activityName: "MainActivity",
       layoutSeqSum: 1
     } as any);
+    fakeWindow.configureActiveWindow({
+      appId: "com.example.app",
+      activityName: "MainActivity",
+      layoutSeqSum: 1
+    } as any);
   });
 
   afterEach(() => {
@@ -57,6 +62,61 @@ describe("PostNotification", () => {
       .toBe(true);
     expect(fakeAdb.wasCommandExecuted("actions_json"))
       .toBe(true);
+  });
+
+  test("honors explicit Android appId instead of cached active window", async () => {
+    fakeWindow.configureCachedActiveWindow({
+      appId: "com.google.android.apps.nexuslauncher",
+      activityName: "NexusLauncherActivity",
+      layoutSeqSum: 1
+    } as any);
+    fakeAdb.setCommandResponse("am broadcast", {
+      stdout: "Broadcast completed: result=1",
+      stderr: ""
+    });
+
+    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const result = await postNotification.execute({
+      title: "AutoMobile Test",
+      body: "Body",
+      appId: "dev.jasonpearson.automobile.playground"
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.appId).toBe("dev.jasonpearson.automobile.playground");
+    expect(fakeAdb.wasCommandExecuted("am broadcast -n dev.jasonpearson.automobile.playground")).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("am broadcast -n com.google.android.apps.nexuslauncher")).toBe(false);
+    expect(fakeWindow.getGetCachedActiveWindowCallCount()).toBe(0);
+    expect(fakeWindow.getGetActiveCallCount()).toBe(0);
+  });
+
+  test("refreshes active window instead of using stale cache when appId is omitted", async () => {
+    fakeWindow.configureCachedActiveWindow({
+      appId: "com.google.android.apps.nexuslauncher",
+      activityName: "NexusLauncherActivity",
+      layoutSeqSum: 1
+    } as any);
+    fakeWindow.configureActiveWindow({
+      appId: "dev.jasonpearson.automobile.playground",
+      activityName: "MainActivity",
+      layoutSeqSum: 2
+    } as any);
+    fakeAdb.setCommandResponse("am broadcast", {
+      stdout: "Broadcast completed: result=1",
+      stderr: ""
+    });
+
+    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const result = await postNotification.execute({
+      title: "AutoMobile Test",
+      body: "Body"
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.appId).toBe("dev.jasonpearson.automobile.playground");
+    expect(fakeAdb.wasCommandExecuted("am broadcast -n dev.jasonpearson.automobile.playground")).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("am broadcast -n com.google.android.apps.nexuslauncher")).toBe(false);
+    expect(fakeWindow.getGetActiveCallCount()).toBe(1);
   });
 
   test("fails when SDK receiver is missing", async () => {

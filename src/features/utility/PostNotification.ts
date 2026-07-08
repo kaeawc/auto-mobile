@@ -212,7 +212,7 @@ export class PostNotification {
     imageType: "normal" | "bigPicture",
     signal?: AbortSignal
   ): Promise<PostNotificationResult> {
-    const appId = await this.getActiveAppId();
+    const appId = options.appId ?? (await this.getLiveActiveAppId());
     if (!appId) {
       return {
         success: false,
@@ -395,14 +395,9 @@ export class PostNotification {
     return resolvePathFromDaemonLaunchWorkingDirectory(imagePath);
   }
 
-  private async getActiveAppId(): Promise<string | null> {
+  private async getLiveActiveAppId(): Promise<string | null> {
     try {
-      const cached = await this.window.getCachedActiveWindow();
-      if (cached?.appId) {
-        return cached.appId;
-      }
-
-      const active = await this.window.getActive();
+      const active = await this.window.getActive(true);
       return active?.appId ?? null;
     } catch (error) {
       logger.warn(`[PostNotification] Failed to read active window: ${error}`);

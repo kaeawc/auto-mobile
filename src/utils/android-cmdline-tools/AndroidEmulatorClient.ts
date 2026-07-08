@@ -76,6 +76,14 @@ interface AndroidEmulator {
   waitForEmulatorReady(avdName: string, timeoutMs?: number, childProcess?: ChildProcess | null, targetDeviceId?: string): Promise<BootedDevice>;
 }
 
+interface EmulatorLaunchCorrelation {
+  bootedDeviceIdsBeforeLaunch: readonly string[];
+}
+
+type CorrelatedChildProcess = ChildProcess & {
+  autoMobileEmulatorLaunch?: EmulatorLaunchCorrelation;
+};
+
 /**
  * Infer form factor from AVD device name.
  * Tablet device names typically contain "tab", "pad", or "nexus_9/10".
@@ -895,6 +903,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       throw new ActionableError(`Cannot start AVD '${avdName}': ${compatibility.reason}. On ${compatibility.hostArch} hosts, use AVDs with compatible architectures (e.g., arm64-v8a for Apple Silicon Macs).`);
     }
 
+    let launchCorrelation: EmulatorLaunchCorrelation | undefined;
+    try {
+      launchCorrelation = {
+        bootedDeviceIdsBeforeLaunch: (await this.getBootedDevicesChecked(true))
+          .map(device => device.deviceId)
+          .filter(deviceId => deviceId.startsWith("emulator-")),
+      };
+    } catch (error) {
+      logger.warn(`Failed to capture emulator launch baseline for '${avdName}'; launch-diff correlation disabled: ${error}`, error);
+    }
+
     const args = ["-avd", avdName];
     const headlessMode = resolveHeadlessMode(process.platform, process.env);
     logger.info(`Emulator display mode: ${headlessMode.headless ? "headless" : "windowed"} (${headlessMode.reason})`);
@@ -910,7 +929,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     return new Promise((resolve, reject) => {
       perf.startOperation("spawnEmulator");
-      const child = this.spawnFn(this.emulatorPath, args);
+      const child = this.spawnFn(this.emulatorPath, args) as CorrelatedChildProcess;
+      if (launchCorrelation) {
+        child.autoMobileEmulatorLaunch = launchCorrelation;
+      }
       perf.endOperation("spawnEmulator");
 
       // Buffer to collect initial output for PANIC detection
@@ -1142,6 +1164,49 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     logger.info(`Killed emulator '${device.name}'`);
   }
 
+  private getLaunchCorrelation(childProcess?: ChildProcess | null): EmulatorLaunchCorrelation | undefined {
+    return (childProcess as CorrelatedChildProcess | null | undefined)?.autoMobileEmulatorLaunch;
+  }
+
+  private isUnknownEmulatorName(name: string, deviceId: string): boolean {
+    return name === `Unknown (${deviceId})`;
+  }
+
+  private matchesRequestedAvdOrUnknown(emulator: BootedDevice, avdName: string): boolean {
+    return emulator.name === avdName || this.isUnknownEmulatorName(emulator.name, emulator.deviceId);
+  }
+
+  private findLaunchDiffEmulator(
+    runningEmulators: BootedDevice[],
+    avdName: string,
+    launchCorrelation?: EmulatorLaunchCorrelation,
+  ): BootedDevice | undefined {
+    if (!launchCorrelation) {
+      return undefined;
+    }
+
+    const deviceIdsBeforeLaunch = new Set(launchCorrelation.bootedDeviceIdsBeforeLaunch);
+    const candidates = runningEmulators.filter(emu =>
+      emu.deviceId.startsWith("emulator-") && !deviceIdsBeforeLaunch.has(emu.deviceId)
+    );
+    if (candidates.length > 1) {
+      logger.debug(`Launch diff found multiple new emulators for '${avdName}': ${candidates.map(emu => emu.deviceId).join(", ")}`);
+      return undefined;
+    }
+    if (candidates.length === 0) {
+      return undefined;
+    }
+
+    const candidate = candidates[0];
+    if (!this.matchesRequestedAvdOrUnknown(candidate, avdName)) {
+      logger.debug(`Launch diff candidate ${candidate.deviceId} resolved as '${candidate.name}', not requested AVD '${avdName}'`);
+      return undefined;
+    }
+
+    logger.debug(`Launch diff selected ${candidate.deviceId} for '${avdName}'`);
+    return candidate;
+  }
+
   /**
    * Wait for the emulator to be ready for use
    * @param avdName - The AVD name to wait for
@@ -1216,6 +1281,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     // Start background polling immediately with configurable intervals
     let pollingActive = true;
     let foundDeviceId: string | null = null;
+    const launchCorrelation = this.getLaunchCorrelation(childProcess);
 
     perf.startOperation("devicePolling");
     const backgroundPoller = async () => {
@@ -1237,12 +1303,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
               : undefined;
             if (targetDeviceId) {
               logger.debug(`Exact deviceId match for '${targetDeviceId}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+              if (emulator && !this.matchesRequestedAvdOrUnknown(emulator, avdName)) {
+                logger.debug(`Exact deviceId match ${emulator.deviceId} resolved as '${emulator.name}', not requested AVD '${avdName}'`);
+                emulator = undefined;
+              }
             }
 
             // Look for emulator by name next.
-            if (!emulator) {
+            if (!emulator && !targetDeviceId) {
               emulator = runningEmulators.find(emu => emu.name === avdName);
               logger.debug(`Exact name match for '${avdName}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+            }
+
+            if (!emulator && !targetDeviceId) {
+              emulator = this.findLaunchDiffEmulator(runningEmulators, avdName, launchCorrelation);
             }
 
             if (emulator && emulator.deviceId) {

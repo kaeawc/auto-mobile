@@ -119,7 +119,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
     try {
       await this.adb.executeCommand(
-        `shell cmd locale set-app-locales --user ${targetUserId} ${quoteShellArg(appId)} --locales ${quoteShellArg(languageTag)}`
+        `shell cmd locale set-app-locales ${quoteShellArg(appId)} --user ${targetUserId} --locales ${quoteShellArg(languageTag)}`
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -165,8 +165,8 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     }
 
     try {
-      const runningUser = (await this.adb.listUsers()).find(user => user.running);
-      return runningUser?.userId ?? 0;
+      const workProfile = (await this.adb.listUsers()).find(user => user.userId > 0 && user.running);
+      return workProfile?.userId ?? 0;
     } catch (error) {
       logger.debug(`[SystemConfigurationManager] Failed to list Android users for ${appId}: ${error}`);
       return 0;
@@ -487,7 +487,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   private async getAppLocaleTag(appId: string, userId: number): Promise<string | null> {
     try {
       const result = await this.adb.executeCommand(
-        `shell cmd locale get-app-locales --user ${userId} ${quoteShellArg(appId)}`,
+        `shell cmd locale get-app-locales ${quoteShellArg(appId)} --user ${userId}`,
         undefined,
         undefined,
         true

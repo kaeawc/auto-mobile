@@ -458,14 +458,14 @@ describe("SystemConfigurationManager", () => {
   describe("Android setLocale still works", () => {
     test("uses app-scoped locale commands when an Android appId is provided", async () => {
       fakeAdbClient.setCommandResult("shell getprop ro.build.version.sdk", "36");
-      fakeAdbClient.setCommandResult("shell cmd locale get-app-locales 'com.example.app'", "Locales for com.example.app for user 0 are [ja-JP]\n");
+      fakeAdbClient.setCommandResult("shell cmd locale get-app-locales 'com.example.app' --user 0", "Locales for com.example.app for user 0 are [ja-JP]\n");
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
       const result = await mgr.setLocale("ja-JP", { appId: "com.example.app" });
 
       expect(result.success).toBe(true);
-      expect(result.method).toBe("cmd locale set-app-locales com.example.app");
+      expect(result.method).toBe("cmd locale set-app-locales com.example.app --user 0");
       expect(fakeExec.getExecutedCommands()).toHaveLength(0);
-      expect(fakeAdbClient.wasCommandExecuted("cmd locale set-app-locales 'com.example.app' --locales 'ja-JP'")).toBe(true);
+      expect(fakeAdbClient.wasCommandExecuted("cmd locale set-app-locales 'com.example.app' --user 0 --locales 'ja-JP'")).toBe(true);
       expect(fakeAdbClient.wasCommandExecuted("setprop persist.sys.locale")).toBe(false);
       expect(fakeAdbClient.wasCommandExecuted("stop; start")).toBe(false);
     });
@@ -835,7 +835,7 @@ describe("SystemConfigurationManager", () => {
 
     test("broadcasts locale change by default", async () => {
       fakeAdbClient.setCommandResult("shell getprop ro.build.version.sdk", "36");
-      fakeAdbClient.setCommandResult("shell cmd locale get-app-locales 'com.example.app'", "Locales for com.example.app for user 0 are [ja-JP]\n");
+      fakeAdbClient.setCommandResult("shell cmd locale get-app-locales 'com.example.app' --user 0", "Locales for com.example.app for user 0 are [ja-JP]\n");
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
       await mgr.setLocale("ja-JP", { appId: "com.example.app" });
 
@@ -844,7 +844,7 @@ describe("SystemConfigurationManager", () => {
 
     test("skips broadcast when option is false", async () => {
       fakeAdbClient.setCommandResult("shell getprop ro.build.version.sdk", "36");
-      fakeAdbClient.setCommandResult("shell cmd locale get-app-locales 'com.example.app'", "Locales for com.example.app for user 0 are [ja-JP]\n");
+      fakeAdbClient.setCommandResult("shell cmd locale get-app-locales 'com.example.app' --user 0", "Locales for com.example.app for user 0 are [ja-JP]\n");
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
       const result = await mgr.setLocale("ja-JP", { broadcast: false, appId: "com.example.app" });
 

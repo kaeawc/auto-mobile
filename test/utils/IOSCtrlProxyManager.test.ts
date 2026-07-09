@@ -56,6 +56,25 @@ function installListeningProcessFakes(
   fakeExecutor: FakeProcessExecutor,
   processes: FakeListeningProcess[]
 ): void {
+  const markProcessTreeDead = (rootPid: number, signal: "TERM" | "KILL") => {
+    const queue = [rootPid];
+    const visited = new Set<number>();
+    while (queue.length > 0) {
+      const pid = queue.shift()!;
+      if (visited.has(pid)) {
+        continue;
+      }
+      visited.add(pid);
+      const process = processes.find(candidate => candidate.pid === pid);
+      if (process && !(signal === "TERM" ? process.ignoreTerm : process.ignoreKill)) {
+        process.alive = false;
+      }
+      for (const child of processes.filter(candidate => candidate.ppid === pid)) {
+        queue.push(child.pid);
+      }
+    }
+  };
+
   fakeExecutor.setCommandHandler("lsof -nP -iTCP:", command => {
     const port = Number(command.match(/-iTCP:(\d+)/)?.[1]);
     const stdout = processes
@@ -81,6 +100,11 @@ function installListeningProcessFakes(
     );
   });
   fakeExecutor.setCommandHandler("kill -TERM", command => {
+    const groupPid = Number(command.match(/kill -TERM -- -(\d+)/)?.[1]);
+    if (!Number.isNaN(groupPid)) {
+      markProcessTreeDead(groupPid, "TERM");
+      return createExecResult("", "");
+    }
     const pid = Number(command.match(/kill -TERM\s+(\d+)/)?.[1]);
     const process = processes.find(candidate => candidate.pid === pid);
     if (process && !process.ignoreTerm) {
@@ -89,6 +113,11 @@ function installListeningProcessFakes(
     return createExecResult("", "");
   });
   fakeExecutor.setCommandHandler("kill -KILL", command => {
+    const groupPid = Number(command.match(/kill -KILL -- -(\d+)/)?.[1]);
+    if (!Number.isNaN(groupPid)) {
+      markProcessTreeDead(groupPid, "KILL");
+      return createExecResult("", "");
+    }
     const pid = Number(command.match(/kill -KILL\s+(\d+)/)?.[1]);
     const process = processes.find(candidate => candidate.pid === pid);
     if (process && !process.ignoreKill) {
@@ -583,6 +612,77 @@ describe("IOSCtrlProxyManager", function() {
         }
       }
     }
+
+    test("stop() tears down only the tracked owned runner tree without global pkill (#2847)", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 912345;
+
+      const ownedRunner = ownRunnerProcess(912345);
+      const otherDeviceRunner: FakeListeningProcess = {
+        pid: 912346,
+        port: 8766,
+        command: "xcodebuild test-without-building " +
+          "-xctestrun /tmp/automobile-ctrl-proxy/automobile-runner-OTHER.xctestrun " +
+          "-destination \"platform=iOS Simulator,id=OTHER-SIMULATOR\" " +
+          "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
+        environment: "CTRL_PROXY_IOS_PORT=8766 AUTOMOBILE_DEVICE_ID=OTHER-SIMULATOR",
+        alive: true,
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      const externalHotReloadRunner: FakeListeningProcess = {
+        pid: 912347,
+        port: 8767,
+        command: `xcodebuild test-without-building ` +
+          `-xctestrun /Users/me/hot-reload/CtrlProxy.xctestrun ` +
+          `-destination "platform=iOS Simulator,id=${testDevice.deviceId}" ` +
+          `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+        environment: `CTRL_PROXY_IOS_PORT=8767 AUTOMOBILE_EXTERNAL_RUNNER=1 AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [ownedRunner, otherDeviceRunner, externalHotReloadRunner]);
+
+      await manager.stop();
+
+      expect(fakeExecutor.wasCommandExecuted("pkill -f 'CtrlProxyUITests-Runner'")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("pkill -f 'xcodebuild.*CtrlProxyUITests'")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -912345")).toBe(true);
+      expect(ownedRunner.alive).toBe(false);
+      expect(otherDeviceRunner.alive).toBe(true);
+      expect(externalHotReloadRunner.alive).toBe(true);
+    });
+
+    test("stop() does not kill a recycled tracked PID that is no longer our runner (#2847)", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 912348;
+      const recycledProcess: FakeListeningProcess = {
+        pid: 912348,
+        port: 8999,
+        command: "/usr/sbin/some-unrelated-daemon --serve",
+        alive: true,
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [recycledProcess]);
+
+      await manager.stop();
+
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -912348")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 912348")).toBe(false);
+      expect(recycledProcess.alive).toBe(true);
+    });
 
     test("start() waits for an own runner then terminates it if it never becomes healthy (#2834)", async function() {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -1686,6 +1786,56 @@ describe("IOSCtrlProxyManager", function() {
       });
     });
 
+    test("start() reclaims a stale listener by terminating the daemon-managed shell root (#2847)", async function() {
+      const staleListener: FakeListeningProcess = {
+        pid: 2227,
+        port: 8765,
+        ppid: 2226,
+        command: `/tmp/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests-Runner`,
+        environment: `AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+      };
+      const daemonXcodebuild: FakeListeningProcess = {
+        pid: 2226,
+        port: 0,
+        ppid: 2225,
+        command: `xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun ` +
+          `-destination platform=iOS Simulator,id=${testDevice.deviceId} ` +
+          `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+        environment: `CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+      };
+      const daemonShell: FakeListeningProcess = {
+        pid: 2225,
+        port: 0,
+        ppid: 1,
+        command: `/bin/sh -c ${daemonXcodebuild.command} 2>&1`,
+        environment: daemonXcodebuild.environment,
+        alive: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [staleListener, daemonXcodebuild, daemonShell]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(fakeExecutor.getSpawnedProcesses().length > 0 ? "ok" : "", "")
+      );
+      fakeTimer.enableAutoAdvance();
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      await manager.start();
+
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -2225")).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 2227")).toBe(false);
+      expect(daemonShell.alive).toBe(false);
+      expect(daemonXcodebuild.alive).toBe(false);
+      expect(staleListener.alive).toBe(false);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+    });
+
     test("start() reallocates when the intended port is held by a foreign process", async function() {
       const foreignProcess: FakeListeningProcess = {
         pid: 3333,
@@ -1892,6 +2042,46 @@ describe("IOSCtrlProxyManager", function() {
 
       expect(orphanProcess.alive).toBe(false);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 4445")).toBe(true);
+    });
+
+    test("startup orphan reaping terminates daemon-managed shell-rooted runner trees (#2847)", async function() {
+      const orphanedRunner: FakeListeningProcess = {
+        pid: 4448,
+        port: 8765,
+        ppid: 4447,
+        command: `/tmp/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests-Runner`,
+        environment: `AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+      };
+      const orphanedXcodebuild: FakeListeningProcess = {
+        pid: 4447,
+        port: 0,
+        ppid: 4446,
+        command: `xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun ` +
+          `-destination platform=iOS Simulator,id=${testDevice.deviceId} ` +
+          `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+        environment: `CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+      };
+      const orphanedShell: FakeListeningProcess = {
+        pid: 4446,
+        port: 0,
+        ppid: 1,
+        command: `/bin/sh -c ${orphanedXcodebuild.command} 2>&1`,
+        environment: orphanedXcodebuild.environment,
+        alive: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [orphanedRunner, orphanedXcodebuild, orphanedShell]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("4447\n", ""));
+      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxyUITests-Runner'", createExecResult("4448\n", ""));
+      fakeTimer.enableAutoAdvance();
+
+      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(fakeExecutor, fakeTimer);
+
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -4446")).toBe(true);
+      expect(orphanedShell.alive).toBe(false);
+      expect(orphanedXcodebuild.alive).toBe(false);
+      expect(orphanedRunner.alive).toBe(false);
     });
 
     test("start() reports the bound PID and command when owned port cleanup cannot free the port", async function() {

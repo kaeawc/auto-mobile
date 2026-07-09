@@ -1,7 +1,9 @@
+import Ajv2020 from "ajv/dist/2020";
 import { describe, expect, test } from "bun:test";
 import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
-import { findWaitForElement, observeSchema, waitForObservation } from "../../src/server/observeTools";
+import { findWaitForElement, observeSchema, registerObserveTools, waitForObservation } from "../../src/server/observeTools";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -209,6 +211,124 @@ describe("observeSchema rich waitFor predicates", () => {
   });
 });
 
+describe("published observe waitFor input schema", () => {
+  const validatePublishedObserveInput = (input: unknown) => {
+    (ToolRegistry as any).tools.clear();
+    registerObserveTools();
+    const observeTool = ToolRegistry.getToolDefinitions()
+      .find(tool => tool.name === "observe");
+    expect(observeTool).toBeDefined();
+
+    const ajv = new Ajv2020({ strict: false, allErrors: true });
+    const validate = ajv.compile(observeTool!.inputSchema);
+    return {
+      valid: validate(input),
+      errors: validate.errors,
+    };
+  };
+
+  test.each([
+    {
+      label: "legacy elementId with timeout",
+      input: {
+        platform: "android",
+        waitFor: { elementId: "com.app:id/name", timeout: 5000 },
+      },
+    },
+    {
+      label: "legacy elementId with container",
+      input: {
+        platform: "android",
+        waitFor: {
+          elementId: "com.app:id/name",
+          container: { text: "People" },
+        },
+      },
+    },
+    {
+      label: "text with textMatch",
+      input: {
+        platform: "ios",
+        waitFor: { text: "Home", textMatch: "contains", timeout: 5000 },
+      },
+    },
+    {
+      label: "combined rich predicates",
+      input: {
+        platform: "ios",
+        waitFor: {
+          elementId: "home_tab_bar",
+          text: "Home",
+          className: "UITabBar",
+          contentDescription: "Home tab",
+          textMatch: "exact",
+          matchType: "all",
+        },
+      },
+    },
+    {
+      label: "activeWindow appId and activityName",
+      input: {
+        platform: "android",
+        waitFor: {
+          activeWindow: {
+            appId: "com.example.app",
+            activityName: "com.example.app.HomeActivity",
+          },
+          timeout: 5000,
+        },
+      },
+    },
+    {
+      label: "activeWindow packageName alias",
+      input: {
+        platform: "android",
+        waitFor: {
+          activeWindow: { packageName: "com.example.app" },
+        },
+      },
+    },
+    {
+      label: "activeWindow bundleId alias",
+      input: {
+        platform: "ios",
+        waitFor: {
+          activeWindow: { bundleId: "com.example.app" },
+        },
+      },
+    },
+  ])("accepts runtime-valid waitFor input: $label", ({ input }) => {
+    expect(observeSchema.safeParse(input).success).toBe(true);
+
+    const result = validatePublishedObserveInput(input);
+
+    expect(result.valid).toBe(true);
+  });
+
+  test.each([
+    {
+      label: "waitFor has only timeout",
+      input: {
+        platform: "android",
+        waitFor: { timeout: 5000 },
+      },
+    },
+    {
+      label: "activeWindow is empty",
+      input: {
+        platform: "android",
+        waitFor: { activeWindow: {} },
+      },
+    },
+  ])("rejects runtime-invalid waitFor input: $label", ({ input }) => {
+    expect(observeSchema.safeParse(input).success).toBe(false);
+
+    const result = validatePublishedObserveInput(input);
+
+    expect(result.valid).toBe(false);
+  });
+});
+
 describe("findWaitForElement textAny", () => {
   test("skips off-screen earlier variants when a later variant is visible", () => {
     const finder = new DefaultElementFinder();
@@ -361,6 +481,81 @@ describe("findWaitForElement rich predicates", () => {
       {
         elementId: "home_tab",
         text: "Home",
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
+  });
+
+  test("scopes rich predicates to the requested container", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "resource-id": "outside_container",
+          "bounds": bounds(0, 0, 200, 80),
+        },
+        node: [
+          {
+            $: {
+              "resource-id": "home_tab",
+              "class": "UITabBar",
+              "content-desc": "Home tab",
+              "bounds": bounds(10, 10, 190, 60),
+            },
+          },
+        ],
+      },
+      {
+        $: {
+          "resource-id": "target_container",
+          "bounds": bounds(0, 90, 200, 190),
+        },
+        node: [
+          {
+            $: {
+              "resource-id": "settings_tab",
+              "class": "UITabBar",
+              "content-desc": "Settings tab",
+              "bounds": bounds(10, 110, 190, 160),
+            },
+          },
+        ],
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        className: "UITabBar",
+        contentDescription: "Settings tab",
+        container: { elementId: "target_container" },
+      } as any,
+      hierarchy
+    );
+
+    expect(element?.["resource-id"]).toBe("settings_tab");
+  });
+
+  test("returns null for rich predicates when the requested container is missing", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "class": "UITabBar",
+          "content-desc": "Home tab",
+          "bounds": bounds(10, 10, 190, 60),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        className: "UITabBar",
+        contentDescription: "Home tab",
+        container: { elementId: "missing_container" },
       } as any,
       hierarchy
     );
@@ -526,6 +721,31 @@ describe("waitForObservation activeWindow", () => {
 
     expect(outcome.awaitTimeout).toBe(true);
     expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("ignores Android-only activityName on iOS", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(() => makeObservation("com.example.ios", ""));
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: {
+          appId: "com.example.ios",
+          activityName: "com.example.ios.IgnoredActivity",
+        },
+        timeout: 250,
+      } as any,
+      undefined,
+      false,
+      timer,
+      "ios"
+    );
+
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(observeScreen.getExecuteCallCount()).toBe(1);
   });
 
   test("times out when only the element predicate matches", async () => {

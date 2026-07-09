@@ -10,7 +10,7 @@ import { BootedDevice, Element, ObserveResult, ObserveToolPayload, ViewHierarchy
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { IdentifyInteractions, IdentifyInteractionsOptions } from "../features/observe/IdentifyInteractions";
-import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, appIdFieldAliases, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { elementContainerSchema } from "./elementSelectorSchemas";
 import { observeResultSchema } from "./toolOutputSchemas";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
@@ -32,14 +32,24 @@ const waitForContainerField = elementContainerSchema
     "Scope match to a container"
   );
 
+const appIdAliasShape = Object.fromEntries(
+  appIdFieldAliases.map(alias => [alias, z.string().optional()])
+) as Record<typeof appIdFieldAliases[number], z.ZodOptional<z.ZodString>>;
+
+const appIdPresenceBranches = [
+  z.object({ appId: z.string() }).passthrough(),
+  ...appIdFieldAliases.map(alias => z.object({ [alias]: z.string() }).passthrough())
+];
+
 const activeWindowWaitForBaseSchema = z.object({
   appId: z.string().optional().describe("Foreground app bundle ID / package name"),
+  ...appIdAliasShape,
   activityName: z.string().optional().describe("Foreground Android activity name")
 }).strict();
 
 const activeWindowWaitForSchema = activeWindowWaitForBaseSchema.and(z.union([
-  z.object({ appId: z.string() }),
-  z.object({ activityName: z.string() }),
+  ...appIdPresenceBranches,
+  z.object({ activityName: z.string() }).passthrough(),
 ]));
 
 const waitForBaseSchema = z.object({
@@ -97,12 +107,12 @@ const waitForBaseSchema = z.object({
 });
 
 const waitForPredicatePresenceSchema = z.union([
-  z.object({ elementId: z.string() }),
-  z.object({ text: z.string() }),
-  z.object({ textAny: z.array(z.string().min(1)).min(1) }),
-  z.object({ className: z.string() }),
-  z.object({ contentDescription: z.string() }),
-  z.object({ activeWindow: activeWindowWaitForSchema }),
+  z.object({ elementId: z.string() }).passthrough(),
+  z.object({ text: z.string() }).passthrough(),
+  z.object({ textAny: z.array(z.string().min(1)).min(1) }).passthrough(),
+  z.object({ className: z.string() }).passthrough(),
+  z.object({ contentDescription: z.string() }).passthrough(),
+  z.object({ activeWindow: activeWindowWaitForSchema }).passthrough(),
 ]);
 
 const waitForSchema = waitForBaseSchema.and(waitForPredicatePresenceSchema);
@@ -356,7 +366,8 @@ const findRichWaitForElement = (
 
 const matchesActiveWindow = (
   observation: ObserveResult,
-  waitFor: ObserveWaitForOptions
+  waitFor: ObserveWaitForOptions,
+  platform?: BootedDevice["platform"]
 ): boolean => {
   if (!waitFor.activeWindow) {
     return true;
@@ -371,7 +382,11 @@ const matchesActiveWindow = (
     return false;
   }
 
-  if (waitFor.activeWindow.activityName !== undefined && activeWindow.activityName !== waitFor.activeWindow.activityName) {
+  if (
+    platform !== "ios" &&
+    waitFor.activeWindow.activityName !== undefined &&
+    activeWindow.activityName !== waitFor.activeWindow.activityName
+  ) {
     return false;
   }
 
@@ -381,9 +396,10 @@ const matchesActiveWindow = (
 const evaluateWaitForObservation = (
   finder: ElementFinder,
   waitFor: ObserveWaitForOptions,
-  observation: ObserveResult
+  observation: ObserveResult,
+  platform?: BootedDevice["platform"]
 ): { matched: boolean; awaitedElement?: Element } => {
-  const activeWindowMatched = matchesActiveWindow(observation, waitFor);
+  const activeWindowMatched = matchesActiveWindow(observation, waitFor, platform);
   const needsElementMatch = hasElementPredicate(waitFor);
   const awaitedElement = needsElementMatch && observation.viewHierarchy
     ? findWaitForElement(finder, waitFor, observation.viewHierarchy)
@@ -400,7 +416,8 @@ export const waitForObservation = async (
   waitFor: ObserveWaitForOptions,
   signal?: AbortSignal,
   skipBackStack: boolean = false,
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
+  platform?: BootedDevice["platform"]
 ): Promise<{
   observation: ObserveResult;
   awaitedElement?: Element;
@@ -432,7 +449,7 @@ export const waitForObservation = async (
     skipBackStack: skipPollingOverhead || skipBackStack,
     skipScreenshot: skipPollingOverhead,
   });
-  let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation);
+  let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
 
   if (waitEvaluation.matched) {
     return {
@@ -464,7 +481,7 @@ export const waitForObservation = async (
       skipBackStack: skipPollingOverhead || skipBackStack,
       skipScreenshot: skipPollingOverhead,
     });
-    waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation);
+    waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
 
     if (waitEvaluation.matched) {
       return {
@@ -494,7 +511,7 @@ export function registerObserveTools() {
       // source, so every observation reaching here is already platform-validated
       // (raw-mode append below is likewise gated on a validated primary hierarchy).
       const waitOutcome = waitFor
-        ? await waitForObservation(observeScreen, waitFor, signal, args.skipBackStack ?? false)
+        ? await waitForObservation(observeScreen, waitFor, signal, args.skipBackStack ?? false, defaultTimer, device.platform)
         : null;
       const result = waitOutcome
         ? waitOutcome.observation

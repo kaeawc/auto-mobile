@@ -43,6 +43,7 @@ dependencies {
 
   // Kotlin coroutines
   implementation(libs.kotlinx.coroutines)
+  implementation(libs.kotlinx.serialization)
 
   testImplementation(libs.junit)
 }

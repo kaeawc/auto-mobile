@@ -10,6 +10,7 @@ import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.json.Json
 
 data class UserStats(
   val taps: Int = 0,
@@ -62,6 +63,8 @@ class AnalyticsRepository(context: Context) {
 
   private val _userStats = MutableStateFlow(UserStats())
   val userStats: StateFlow<UserStats> = _userStats.asStateFlow()
+
+  private val breakdownJson = Json
 
   private var sessionStartTime = System.currentTimeMillis()
   private val eventHistory = mutableListOf<AnalyticsEvent>()
@@ -135,22 +138,14 @@ class AnalyticsRepository(context: Context) {
 
   private fun parseBreakdownJson(json: String): Map<String, Int> {
     return try {
-      json
-        .removeSurrounding("{", "}")
-        .split(",")
-        .filter { it.isNotBlank() }
-        .associate { entry ->
-          val (key, value) = entry.split(":")
-          key.trim().removeSurrounding("\"") to value.trim().toInt()
-        }
+      breakdownJson.decodeFromString<Map<String, Int>>(json)
     } catch (e: Exception) {
       emptyMap()
     }
   }
 
   private fun saveBreakdown(key: String, breakdown: Map<String, Int>) {
-    val json = breakdown.entries.joinToString(",") { "\"${it.key}\":${it.value}" }
-    sharedPreferences.edit { putString(key, "{$json}") }
+    sharedPreferences.edit { putString(key, breakdownJson.encodeToString(breakdown)) }
   }
 
   fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()) {
@@ -468,9 +463,9 @@ class AnalyticsRepository(context: Context) {
       putLong(KEY_LAST_UPDATED, stats.lastUpdated)
       putLong(KEY_AVG_SESSION_DURATION, stats.averageSessionDuration)
       putInt(KEY_TOTAL_SESSIONS, stats.totalSessions)
-      putString(KEY_TAP_BREAKDOWN, stats.tapBreakdown.toString())
-      putString(KEY_SWIPE_BREAKDOWN, stats.swipeBreakdown.toString())
-      putString(KEY_SCREEN_BREAKDOWN, stats.screenBreakdown.toString())
+      putString(KEY_TAP_BREAKDOWN, breakdownJson.encodeToString(stats.tapBreakdown))
+      putString(KEY_SWIPE_BREAKDOWN, breakdownJson.encodeToString(stats.swipeBreakdown))
+      putString(KEY_SCREEN_BREAKDOWN, breakdownJson.encodeToString(stats.screenBreakdown))
     }
   }
 

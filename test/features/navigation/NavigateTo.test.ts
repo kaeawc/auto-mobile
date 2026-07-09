@@ -1,10 +1,13 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
+import { SmartNavigationHelper } from "../../../src/features/navigation/SmartNavigationHelper";
+import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { BootedDevice } from "../../../src/models";
 import { z } from "zod";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("NavigateTo", () => {
   let navigateTo: NavigateTo;
@@ -15,6 +18,7 @@ describe("NavigateTo", () => {
 
   // Map of text -> screen to simulate navigation when tools are called
   let navigationMap: Map<string, string>;
+  let shouldUseBackButtonSpy: ReturnType<typeof spyOn> | null;
 
   beforeEach(async () => {
     fakeGraph = new FakeNavigationGraphManager();
@@ -33,6 +37,7 @@ describe("NavigateTo", () => {
     // Track tool calls
     toolCallLog = [];
     navigationMap = new Map();
+    shouldUseBackButtonSpy = null;
 
     // Register fake tapOn tool that simulates navigation
     ToolRegistry.register(
@@ -70,6 +75,7 @@ describe("NavigateTo", () => {
 
   afterEach(() => {
     ToolRegistry.clearTools();
+    shouldUseBackButtonSpy?.mockRestore();
   });
 
   describe("execute", () => {
@@ -300,6 +306,58 @@ describe("NavigateTo", () => {
       expect(result.durationMs).toBeDefined();
       expect(typeof result.durationMs).toBe("number");
       expect(result.durationMs!).toBeGreaterThanOrEqual(0);
+    });
+
+    test("should await smart back-button recommendation and execute back navigation", async () => {
+      const now = Date.now();
+      await fakeGraph.recordNavigationEvent({
+        destination: "DetailScreen",
+        source: "TEST",
+        arguments: {},
+        metadata: {},
+        timestamp: now,
+        sequenceNumber: 0
+      });
+      fakeGraph.addNode({
+        screenName: "DetailScreen",
+        firstSeenAt: now,
+        lastSeenAt: now,
+        visitCount: 1,
+        backStackDepth: 1
+      });
+
+      shouldUseBackButtonSpy = spyOn(SmartNavigationHelper, "shouldUseBackButton").mockResolvedValue({
+        shouldUseBack: true,
+        backPresses: 1,
+        reason: "test recommendation"
+      });
+
+      const screenWaiter: ScreenTransitionWaiter = {
+        waitForScreen: async screenName => screenName === "HomeScreen"
+      };
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      navigateTo = new NavigateTo(
+        device,
+        fakeAdbFactory,
+        null,
+        screenWaiter,
+        fakeGraph,
+        fakeTimer
+      );
+
+      const result = await navigateTo.execute({
+        targetScreen: "HomeScreen",
+        platform: "android"
+      });
+
+      expect(shouldUseBackButtonSpy).toHaveBeenCalledWith("DetailScreen", "HomeScreen", 1);
+      expect(result.success).toBe(true);
+      expect(result.message).toBe("Successfully navigated to \"HomeScreen\" using back button");
+      expect(result.stepsExecuted).toBe(1);
+      expect(result.path).toEqual(["pressButton(back)"]);
+      expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual(["shell input keyevent 4"]);
+      expect(fakeTimer.getSleepHistory()).toEqual([300]);
     });
   });
 

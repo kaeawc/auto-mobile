@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import {
   JsonToolOutputArtifactWriter,
   type ToolOutputArtifactFileSystem,
@@ -36,8 +37,9 @@ describe("JsonToolOutputArtifactWriter", () => {
     const idGenerator = new FakeIdGenerator(["id/1", "id/2"]);
     const timer = new FakeTimer();
     timer.setCurrentTime(1234);
+    const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
     const writer = new JsonToolOutputArtifactWriter({
-      outputDirectory: "/tmp/auto-mobile artifacts",
+      outputDirectory,
       fileSystem,
       idGenerator,
       timer,
@@ -54,28 +56,32 @@ describe("JsonToolOutputArtifactWriter", () => {
       data: { isDiff: true, changed: [] },
     });
 
-    expect(fileSystem.ensureCalls).toEqual(["/tmp/auto-mobile artifacts", "/tmp/auto-mobile artifacts"]);
-    expect(fileSystem.assertWritableCalls).toEqual(["/tmp/auto-mobile artifacts", "/tmp/auto-mobile artifacts"]);
+    const firstPath = path.join(outputDirectory, "1234-tapOn-id_1.json");
+    const secondPath = path.join(outputDirectory, "1234-tapOn-id_2.json");
+    expect(fileSystem.ensureCalls).toEqual([outputDirectory, outputDirectory]);
+    expect(fileSystem.assertWritableCalls).toEqual([outputDirectory, outputDirectory]);
     expect(fileSystem.writes[0]).toEqual({
-      path: "/tmp/auto-mobile artifacts/1234-tapOn-id_1.json",
+      path: firstPath,
       content: stringifyToolResponse({ viewHierarchy: { hierarchy: { node: { text: "Hello" } } } }),
       mode: 0o600,
     });
     expect(first).toEqual({
       artifact: {
-        path: "/tmp/auto-mobile artifacts/1234-tapOn-id_1.json",
+        path: firstPath,
         format: "json",
         payload: "ObserveResult",
         bytes: Buffer.byteLength(fileSystem.writes[0].content, "utf8"),
         tool: "tapOn",
       },
     });
-    expect(second.artifact.path).toBe("/tmp/auto-mobile artifacts/1234-tapOn-id_2.json");
+    expect(second.artifact.path).toBe(secondPath);
   });
 
   test("resolves relative artifact directories from the daemon launch cwd", () => {
     const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
-    process.env[DAEMON_LAUNCH_CWD_ENV] = "/workspace/project";
+    const launchCwd = path.resolve("workspace/project");
+    const expectedDir = path.join(launchCwd, "scratch/artifacts");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
     try {
       const fileSystem = new FakeArtifactFileSystem();
       const writer = new JsonToolOutputArtifactWriter({
@@ -91,8 +97,8 @@ describe("JsonToolOutputArtifactWriter", () => {
         data: { updatedAt: 1 },
       });
 
-      expect(fileSystem.ensureCalls).toEqual(["/workspace/project/scratch/artifacts"]);
-      expect(metadata.artifact.path).toBe("/workspace/project/scratch/artifacts/0-observe-id.json");
+      expect(fileSystem.ensureCalls).toEqual([expectedDir]);
+      expect(metadata.artifact.path).toBe(path.join(expectedDir, "0-observe-id.json"));
     } finally {
       if (originalLaunchCwd === undefined) {
         delete process.env[DAEMON_LAUNCH_CWD_ENV];

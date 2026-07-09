@@ -39,13 +39,29 @@ function createTempRepo(): string {
 set -euo pipefail
 project="\${FAKE_REPO_ROOT}/ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"
 baseline="\${FAKE_REPO_ROOT}/baseline/project.pbxproj"
+tracked_path="ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"
 
-if [[ "$1" == "diff" && "\${2:-}" == "--quiet" ]]; then
-    cmp -s "\${baseline}" "\${project}"
-    exit $?
+if [[ "$1" == "status" && "\${2:-}" == "--porcelain" && "\${3:-}" == "--" && "\${4:-}" == "\${tracked_path}" ]]; then
+    if [[ -n "\${FAKE_GIT_STATUS_OUTPUT:-}" ]]; then
+        printf "%s" "\${FAKE_GIT_STATUS_OUTPUT}"
+    elif cmp -s "\${baseline}" "\${project}"; then
+        exit 0
+    else
+        printf " M %s\\n" "\${tracked_path}"
+    fi
+    exit 0
 fi
 
-if [[ "$1" == "diff" ]]; then
+if [[ "$1" == "status" && "\${2:-}" == "--short" && "\${3:-}" == "--" && "\${4:-}" == "\${tracked_path}" ]]; then
+    if [[ -n "\${FAKE_GIT_STATUS_OUTPUT:-}" ]]; then
+        printf "%s" "\${FAKE_GIT_STATUS_OUTPUT}"
+    elif ! cmp -s "\${baseline}" "\${project}"; then
+        printf " M %s\\n" "\${tracked_path}"
+    fi
+    exit 0
+fi
+
+if [[ "$1" == "diff" && "\${2:-}" == "--" && "\${3:-}" == "\${tracked_path}" ]]; then
     if cmp -s "\${baseline}" "\${project}"; then
         exit 0
     fi
@@ -94,6 +110,29 @@ describe("xcodegen drift check", () => {
 
     expect(result.status).toBe(1);
     expect(result.stdout + result.stderr).toContain("CtrlProxy.xcodeproj/project.pbxproj is out of date");
+  });
+
+  test("fails when the regenerated CtrlProxy project is untracked after deletion", () => {
+    const repoDir = createTempRepo();
+    writeFakeGenerator(
+      repoDir,
+      "rm -f ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj\nprintf 'committed project\\n' > ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"
+    );
+
+    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh"], {
+      cwd: repoDir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_REPO_ROOT: repoDir,
+        FAKE_GIT_STATUS_OUTPUT: "?? ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj\n",
+        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout + result.stderr).toContain("CtrlProxy.xcodeproj/project.pbxproj is out of date");
+    expect(result.stdout + result.stderr).toContain("?? ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj");
   });
 
   test("passes when xcodegen generation leaves the committed CtrlProxy project unchanged", () => {

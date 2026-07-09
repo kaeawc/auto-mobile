@@ -14,12 +14,13 @@ cd "${PROJECT_ROOT}"
 
 "${SCRIPT_DIR}/xcodegen-generate.sh"
 
-if git diff --quiet -- "${CTRL_PROXY_PROJECT}"; then
+if [ -z "$(git status --porcelain -- "${CTRL_PROXY_PROJECT}")" ]; then
     echo "CtrlProxy.xcodeproj/project.pbxproj is in sync with ios/control-proxy/project.yml"
     exit 0
 fi
 
 echo "Error: CtrlProxy.xcodeproj/project.pbxproj is out of date after xcodegen generation." >&2
 echo "Run scripts/ios/xcodegen-generate.sh and commit the regenerated project file." >&2
+git status --short -- "${CTRL_PROXY_PROJECT}" >&2
 git diff -- "${CTRL_PROXY_PROJECT}" >&2
 exit 1

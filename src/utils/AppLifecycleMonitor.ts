@@ -124,15 +124,20 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
    * Check if a specific package is currently running
    */
   public async isPackageRunning(device: BootedDevice, packageName: string): Promise<boolean> {
+    return (await this.probePackageRunning(device, packageName)) ?? false;
+  }
+
+  private async probePackageRunning(device: BootedDevice, packageName: string): Promise<boolean | undefined> {
     try {
       // Create ADB client for this device
       const adb = this.adbFactory.create(device);
-      const result = await adb.executeCommand(`shell pidof ${packageName}`);
+      const result = await adb.executeCommand(`shell pidof ${packageName} || true`);
 
       // pidof returns empty stdout if package is not running
       return result.stdout.trim().length > 0;
     } catch (error) {
-      return false;
+      logger.warn(`Failed to check whether ${packageName} is running on ${device.deviceId}`, error);
+      return undefined;
     }
   }
 
@@ -185,7 +190,11 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
    */
   private async updateRunningPackages(device: BootedDevice) {
     for (const packageName of this.trackedPackages) {
-      if (await this.isPackageRunning(device, packageName)) {
+      const isRunning = await this.probePackageRunning(device, packageName);
+      if (isRunning === undefined) {
+        continue;
+      }
+      if (isRunning) {
         this.runningPackages.add(packageName);
       } else {
         this.runningPackages.delete(packageName);

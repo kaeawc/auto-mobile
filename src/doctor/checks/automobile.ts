@@ -468,6 +468,7 @@ export async function checkCtrlProxy(
     };
   } catch (error) {
     if (error instanceof ActionableError) {
+      logger.warn(`CtrlProxy check failed: ${error.message}`, error);
       return {
         name: "CtrlProxy",
         status: "fail",

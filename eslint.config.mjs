@@ -2,10 +2,226 @@ import typescriptEslint from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 import stylistic from "@stylistic/eslint-plugin";
 import importRules from "eslint-plugin-import";
+import path from "node:path";
+
+const catchConventionAllowlist = new Set([
+	"src/daemon/client.ts:150:fallback",
+	"src/daemon/daemonFiles.ts:144:fallback",
+	"src/daemon/daemonFiles.ts:153:fallback",
+	"src/daemon/manager.ts:71:fallback",
+	"src/daemon/manager.ts:1173:fallback",
+	"src/daemon/socketServer.ts:1658:fallback",
+	"src/daemon/socketServer/BaseSocketServer.ts:107:fallback",
+	"src/daemon/socketServer/BaseSocketServer.ts:231:fallback",
+	"src/features/action/InstallApp.ts:137:fallback",
+	"src/features/action/TapAnyElement.ts:138:fallback",
+	"src/features/action/TerminateApp.ts:111:fallback",
+	"src/features/observe/android/AndroidSdkEventIngestor.ts:347:fallback",
+	"src/features/preferences/AppPreferences.ts:245:fallback",
+	"src/features/utility/system-configuration/IosLockdownLocaleClient.ts:95:fallback",
+	"src/features/utility/system-configuration/IosSystemConfigurationAdapter.ts:293:fallback",
+	"src/features/video/FfmpegVideoProcessingBackend.ts:105:fallback",
+	"src/server/appFileService.ts:778:fallback",
+	"src/server/systemTrayHelpers.ts:280:fallback",
+	"src/utils/AppLifecycleMonitor.ts:135:fallback",
+	"src/utils/ChildProcessTracker.ts:159:fallback",
+	"src/utils/DeviceSnapshotStore.ts:66:fallback",
+	"src/utils/IOSCtrlProxyBuilder.ts:208:fallback",
+	"src/utils/IOSCtrlProxyBuilder.ts:267:fallback",
+	"src/utils/IOSCtrlProxyBuilder.ts:567:fallback",
+	"src/utils/IOSCtrlProxyBuilder.ts:617:fallback",
+	"src/utils/IOSCtrlProxyBuilder.ts:635:fallback",
+	"src/utils/IOSCtrlProxyBuilder.ts:653:fallback",
+	"src/utils/IOSCtrlProxyBuilder.ts:765:fallback",
+	"src/utils/IOSCtrlProxyBuilder.ts:851:fallback",
+	"src/utils/IOSCtrlProxyManager.ts:1382:fallback",
+	"src/utils/IOSCtrlProxyManager.ts:1410:fallback",
+	"src/utils/IOSCtrlProxyManager.ts:1483:fallback",
+	"src/utils/IOSCtrlProxyManager.ts:1555:fallback",
+	"src/utils/IOSCtrlProxyManager.ts:1828:fallback",
+	"src/utils/IOSCtrlProxyManager.ts:1841:fallback",
+	"src/utils/IOSCtrlProxyManager.ts:2067:fallback",
+	"src/utils/IOSCtrlProxyManager.ts:2085:fallback",
+	"src/utils/IOSCtrlProxyManager.ts:2522:fallback",
+	"src/utils/IOSCtrlProxyManager.ts:2538:fallback",
+	"src/utils/android-cmdline-tools/detection.ts:206:fallback",
+	"src/utils/android-cmdline-tools/detection.ts:220:fallback",
+	"src/utils/android-cmdline-tools/readAndroidDeviceApiLevel.ts:21:fallback",
+	"src/utils/deviceUtils.ts:114:fallback",
+	"src/utils/dockerEnv.ts:12:fallback",
+	"src/utils/envBootstrap.ts:130:fallback",
+	"src/utils/fileLock.ts:129:fallback",
+	"src/utils/fileLock.ts:182:fallback",
+	"src/utils/fileLock.ts:216:fallback",
+	"src/utils/fileLock.ts:255:fallback",
+	"src/utils/filesystem/DefaultFileSystem.ts:10:fallback",
+	"src/utils/hostAppearance.ts:21:fallback",
+	"src/utils/image/webp/WebpBinaryResolver.ts:258:fallback",
+	"src/utils/ios-cmdline-tools/DeviceAppManager.ts:419:fallback",
+	"src/utils/ios-cmdline-tools/SimCtlClient.ts:492:fallback",
+	"src/utils/ios-cmdline-tools/XcodebuildClient.ts:95:fallback",
+	"src/utils/ios/IOSCtrlProxyHealthClient.ts:68:fallback",
+	"src/utils/ios/IOSCtrlProxyHealthClient.ts:92:fallback",
+	"src/utils/ios/IOSCtrlProxyHealthClient.ts:126:fallback",
+	"src/utils/logPruner.ts:72:fallback",
+	"src/utils/mcpVersion.ts:59:fallback",
+	"src/utils/mcpVersion.ts:74:fallback",
+	"src/utils/mcpVersion.ts:90:fallback",
+	"src/utils/plan/PlanExecutor.ts:150:fallback",
+	"src/utils/plan/PlanExecutor.ts:487:status",
+	"src/utils/plan/PlanExecutor.ts:507:status",
+]);
+
+function relativeLintPath(filename) {
+	return path.relative(process.cwd(), filename).replace(/\\/g, "/");
+}
+
+function propertyName(node) {
+	if (!node) {
+		return null;
+	}
+	if (node.type === "Identifier") {
+		return node.name;
+	}
+	if (node.type === "Literal" && typeof node.value === "string") {
+		return node.value;
+	}
+	return null;
+}
+
+function memberChainIncludesLogger(node) {
+	if (!node) {
+		return false;
+	}
+	if (node.type === "Identifier") {
+		return node.name === "logger" || node.name === "log";
+	}
+	if (node.type === "ThisExpression") {
+		return false;
+	}
+	if (node.type === "MemberExpression") {
+		return propertyName(node.property) === "logger" || memberChainIncludesLogger(node.object);
+	}
+	return false;
+}
+
+function isLoggerMethodCall(node, methodName) {
+	if (node?.type !== "CallExpression" || node.callee?.type !== "MemberExpression") {
+		return false;
+	}
+	return propertyName(node.callee.property) === methodName && memberChainIncludesLogger(node.callee.object);
+}
+
+function hasLoggerMethodCall(node, methodName, seen = new WeakSet()) {
+	if (!node || typeof node.type !== "string") {
+		return false;
+	}
+	if (seen.has(node)) {
+		return false;
+	}
+	seen.add(node);
+	if (isLoggerMethodCall(node, methodName)) {
+		return true;
+	}
+	for (const [key, value] of Object.entries(node)) {
+		if (key === "parent") {
+			continue;
+		}
+		if (Array.isArray(value)) {
+			if (value.some(child => hasLoggerMethodCall(child, methodName, seen))) {
+				return true;
+			}
+		} else if (value && typeof value === "object" && typeof value.type === "string" && hasLoggerMethodCall(value, methodName, seen)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function hasAnyLoggerCall(node) {
+	return hasLoggerMethodCall(node, "debug") || hasLoggerMethodCall(node, "warn") || hasLoggerMethodCall(node, "error");
+}
+
+function isUndefinedReturn(argument) {
+	return argument?.type === "Identifier" && argument.name === "undefined";
+}
+
+function isBooleanReturn(argument) {
+	return argument?.type === "Literal" && typeof argument.value === "boolean";
+}
+
+function isStatusObjectReturn(argument) {
+	return argument?.type === "ObjectExpression" &&
+		argument.properties.some(property =>
+			property.type === "Property" && propertyName(property.key) === "status"
+		);
+}
+
+function isFallbackReturn(argument) {
+	return !argument || argument.type === "Literal" && argument.value === null || isUndefinedReturn(argument) || isBooleanReturn(argument) || isStatusObjectReturn(argument);
+}
+
+function isAllowed(context, node, kind) {
+	const key = `${relativeLintPath(context.filename)}:${node.loc.start.line}:${kind}`;
+	return catchConventionAllowlist.has(key);
+}
+
+function catchConventionRule() {
+	return {
+		meta: {
+			type: "problem",
+			messages: {
+				fallbackReturn: "Catch blocks that return a fallback must log the caught error before returning.",
+				statusReturn: "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+			},
+		},
+		create(context) {
+			function reportStatusReturnsWithoutWarn(statements, hasPriorWarn) {
+				for (const statement of statements) {
+					if (hasLoggerMethodCall(statement, "warn")) {
+						hasPriorWarn = true;
+					}
+					if (statement.type === "ReturnStatement" && isStatusObjectReturn(statement.argument) && !hasPriorWarn && !isAllowed(context, statement, "status")) {
+						context.report({ node: statement, messageId: "statusReturn" });
+					}
+					if (statement.type === "IfStatement") {
+						reportStatusReturnsWithoutWarn(
+							statement.consequent.type === "BlockStatement" ? statement.consequent.body : [statement.consequent],
+							hasPriorWarn
+						);
+						if (statement.alternate) {
+							reportStatusReturnsWithoutWarn(
+								statement.alternate.type === "BlockStatement" ? statement.alternate.body : [statement.alternate],
+								hasPriorWarn
+							);
+						}
+					}
+				}
+			}
+
+			return {
+				CatchClause(node) {
+					const statements = node.body.body;
+					if (statements.length === 1 && statements[0].type === "ReturnStatement" && isFallbackReturn(statements[0].argument) && !hasAnyLoggerCall(node.body) && !isAllowed(context, statements[0], "fallback")) {
+						context.report({ node: statements[0], messageId: "fallbackReturn" });
+					}
+					reportStatusReturnsWithoutWarn(statements, false);
+				},
+			};
+		},
+	};
+}
+
+const catchConventionPlugin = {
+	rules: {
+		"catch-convention": catchConventionRule(),
+	},
+};
 
 const plugins = {
 	"@stylistic": stylistic,
 	"@typescript-eslint": typescriptEslint,
+	"auto-mobile": catchConventionPlugin,
 	import: importRules,
 };
 
@@ -217,106 +433,10 @@ export default [
 	},
 	{
 		files: ["src/**/*.ts"],
-		ignores: [
-			"src/daemon/buildIdentity.ts",
-			"src/daemon/client.ts",
-			"src/daemon/daemonFiles.ts",
-			"src/daemon/directModeGuard.ts",
-			"src/daemon/manager.ts",
-			"src/daemon/socketServer.ts",
-			"src/daemon/socketServer/BaseSocketServer.ts",
-			"src/features/accessibility/ContrastChecker.ts",
-			"src/features/action/AppPermissions.ts",
-			"src/features/action/BiometricAuth.ts",
-			"src/features/action/Clipboard.ts",
-			"src/features/action/InstallApp.ts",
-			"src/features/action/IosSimulatorPermissions.ts",
-			"src/features/action/PressButton.ts",
-			"src/features/action/SetUIState.ts",
-			"src/features/action/TapAnyElement.ts",
-			"src/features/action/Telephony.ts",
-			"src/features/action/TerminateApp.ts",
-			"src/features/action/UninstallApp.ts",
-			"src/features/observe/Idle.ts",
-			"src/features/observe/android/AndroidCtrlProxyClient.ts",
-			"src/features/observe/android/AndroidSdkEventIngestor.ts",
-			"src/features/observe/android/CtrlProxyCertificates.ts",
-			"src/features/observe/android/CtrlProxyPackages.ts",
-			"src/features/observe/ios/IOSCtrlProxyClient.ts",
-			"src/features/preferences/AppPreferences.ts",
-			"src/features/utility/DeviceState.ts",
-			"src/features/utility/PostNotification.ts",
-			"src/features/utility/system-configuration/IosLockdownLocaleClient.ts",
-			"src/features/utility/system-configuration/IosSystemConfigurationAdapter.ts",
-			"src/features/video/FfmpegVideoProcessingBackend.ts",
-			"src/server/appFileService.ts",
-			"src/server/finalizeToolResponse.ts",
-			"src/server/highlightTools.ts",
-			"src/server/systemTrayHelpers.ts",
-			"src/utils/AppLifecycleMonitor.ts",
-			"src/utils/ChildProcessTracker.ts",
-			"src/utils/DebugContextBuilder.ts",
-			"src/utils/DeepLinkManager.ts",
-			"src/utils/DeviceSnapshotStore.ts",
-			"src/utils/IOSCtrlProxyBuilder.ts",
-			"src/utils/IOSCtrlProxyManager.ts",
-			"src/utils/android-cmdline-tools/detection.ts",
-			"src/utils/android-cmdline-tools/readAndroidDeviceApiLevel.ts",
-			"src/utils/describeUnknownError.ts",
-			"src/utils/deviceUtils.ts",
-			"src/utils/dockerEnv.ts",
-			"src/utils/envBootstrap.ts",
-			"src/utils/fileLock.ts",
-			"src/utils/filesystem/DefaultFileSystem.ts",
-			"src/utils/hostAppearance.ts",
-			"src/utils/image/webp/WebpBinaryResolver.ts",
-			"src/utils/ios-cmdline-tools/DeviceAppManager.ts",
-			"src/utils/ios-cmdline-tools/SimCtlClient.ts",
-			"src/utils/ios-cmdline-tools/XcodeSigning.ts",
-			"src/utils/ios-cmdline-tools/XcodebuildClient.ts",
-			"src/utils/ios/IOSCtrlProxyHealthClient.ts",
-			"src/utils/logPruner.ts",
-			"src/utils/mcpVersion.ts",
-			"src/utils/plan/PlanExecutor.ts",
-			"src/utils/plan/PlanSchemaValidator.ts",
-			"src/utils/requireBootedDevice.ts",
-			"src/utils/truncateBodyText.ts",
-			"src/utils/workingDirectory.ts",
-		],
 		plugins,
 		languageOptions,
 		rules: {
-			"no-restricted-syntax": [
-				2,
-				{
-					selector: "ImportDeclaration[source.value=/^\\..*\\.js$/]",
-					message: "Do not use .js extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.js'). This causes MODULE_NOT_FOUND errors in tests.",
-				},
-				{
-					selector: "ImportDeclaration[source.value=/^\\..*\\.ts$/]",
-					message: "Do not use .ts extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.ts').",
-				},
-				{
-					selector: "CallExpression[callee.name='setTimeout']",
-					message: "Use Timer.setTimeout() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
-				},
-				{
-					selector: "CallExpression[callee.name='setInterval']",
-					message: "Use Timer.setInterval() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
-				},
-				{
-					selector: "CatchClause > BlockStatement[body.length=1] > ReturnStatement",
-					message: "Catch blocks that return a fallback must log the caught error before returning.",
-				},
-				{
-					selector: "CatchClause > BlockStatement:has(ReturnStatement > ObjectExpression > Property[key.name='status']):not(:has(CallExpression[callee.property.name='warn']))",
-					message: "Catch blocks that return a typed failure/status object must log at warn, not debug.",
-				},
-				{
-					selector: "MemberExpression[object.property.name='structuredContent']",
-					message: "Do not read a field off `structuredContent` directly. Use getStructuredField(response, key) for one field or getStructuredPayload(response) for the whole payload. Import from 'utils/toolUtils' (issue #2907).",
-				},
-			],
+			"auto-mobile/catch-convention": 2,
 		},
 	},
 	{

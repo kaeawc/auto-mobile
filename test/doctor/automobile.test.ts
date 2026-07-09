@@ -379,6 +379,43 @@ describe("checkCtrlProxy", () => {
     }
   });
 
+  test("fails (not skips) when a known pinned CtrlProxy APK SHA mismatches (#2815)", async () => {
+    const prevVersion = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    try {
+      fakeAdb.setDevices([{
+        deviceId: "emulator-5554",
+        platform: "android",
+        isEmulator: true,
+        name: "Pixel"
+      }]);
+      fakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+
+      const result = await checkCtrlProxy(fakeFactory);
+
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain("Installed CtrlProxy APK SHA differs from expected release checksum");
+      expect(result.message).toContain("AUTOMOBILE_VERSION=0.0.18");
+    } finally {
+      if (prevVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = prevVersion;
+      }
+    }
+  });
+
   test("warns when installed and enabled CtrlProxy is stale but accepted for readiness", async () => {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
     const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;

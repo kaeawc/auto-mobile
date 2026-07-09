@@ -30,6 +30,7 @@ import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { loadSharp, type SharpFactory } from "../../utils/image/loadSharp";
 import { WebpBinaryResolver, type ResolvedWebpBinaries } from "../../utils/image/webp/WebpBinaryResolver";
 import { logger } from "../../utils/logger";
+import { ActionableError } from "../../models/ActionableError";
 
 const RELEASES_URL = "https://github.com/kaeawc/auto-mobile/releases";
 
@@ -448,6 +449,13 @@ export async function checkCtrlProxy(
         : "Review CtrlProxy installation status",
     };
   } catch (error) {
+    if (error instanceof ActionableError) {
+      return {
+        name: "CtrlProxy",
+        status: "fail",
+        message: error.message,
+      };
+    }
     logger.debug(`CtrlProxy check failed: ${error}`);
     return {
       name: "CtrlProxy",

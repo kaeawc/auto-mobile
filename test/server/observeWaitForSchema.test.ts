@@ -227,6 +227,46 @@ describe("published observe waitFor input schema", () => {
     };
   };
 
+  const collectTextMatchDescriptions = (schema: unknown): string[] => {
+    if (schema === null || typeof schema !== "object") {
+      return [];
+    }
+
+    const record = schema as Record<string, unknown>;
+    const descriptions: string[] = [];
+    const properties = record.properties;
+    if (properties !== null && typeof properties === "object") {
+      const textMatch = (properties as Record<string, unknown>).textMatch;
+      if (textMatch !== null && typeof textMatch === "object") {
+        const description = (textMatch as Record<string, unknown>).description;
+        if (typeof description === "string") {
+          descriptions.push(description);
+        }
+      }
+    }
+
+    for (const value of Object.values(record)) {
+      descriptions.push(...collectTextMatchDescriptions(value));
+    }
+
+    return descriptions;
+  };
+
+  test("documents textMatch as applying only to waitFor.text", () => {
+    (ToolRegistry as any).tools.clear();
+    registerObserveTools();
+    const observeTool = ToolRegistry.getToolDefinitions()
+      .find(tool => tool.name === "observe");
+    expect(observeTool).toBeDefined();
+
+    const descriptions = collectTextMatchDescriptions(observeTool!.inputSchema);
+
+    expect(descriptions.length).toBeGreaterThan(0);
+    expect(new Set(descriptions)).toEqual(new Set([
+      "How to match waitFor.text; does not affect contentDescription",
+    ]));
+  });
+
   test.each([
     {
       label: "legacy elementId with timeout",

@@ -79,7 +79,7 @@ const waitForElementBaseSchema = z.object({
   className: z.string().optional().describe("Element class name"),
   contentDescription: z.string().optional().describe("Element content description / accessibility label"),
   matchType: z.enum(["all", "any"]).optional().describe("Whether element predicates must all match the same node or any one may match"),
-  textMatch: z.enum(["exact", "contains", "regex"]).optional().describe("How to match text predicates"),
+  textMatch: z.enum(["exact", "contains", "regex"]).optional().describe("How to match waitFor.text; does not affect contentDescription"),
   ...waitForCommonShape,
 }).strict().superRefine((value, ctx) => {
 

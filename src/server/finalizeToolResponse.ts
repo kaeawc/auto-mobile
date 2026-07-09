@@ -22,6 +22,26 @@ export interface ObservationBaselineStore {
   set(sessionUuid: string, observation: ObserveResult): void;
 }
 
+export interface ObservationArtifactMetadata {
+  artifact: {
+    path: string;
+    format: "json";
+    payload: "ObserveResult";
+    bytes: number;
+    tool: string;
+  };
+}
+
+export interface ObservationArtifactWriteInput {
+  tool: string;
+  payload: "ObserveResult";
+  data: unknown;
+}
+
+export interface ObservationArtifactWriter {
+  writeJsonArtifact(input: ObservationArtifactWriteInput): ObservationArtifactMetadata;
+}
+
 type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
 
 function classifyObservationAction(
@@ -86,6 +106,13 @@ export interface FinalizeToolResponseContext {
    * (#2758) still applies; only the agent-facing diff/strip is suppressed.
    */
   internal?: boolean;
+  /**
+   * External-response artifact writer (issue #3480). When supplied for an
+   * agent-facing call, the final post-transform observation payload is written
+   * out-of-band and replaced with rich artifact metadata. Internal calls ignore
+   * this writer so in-process consumers still receive full observations.
+   */
+  artifactWriter?: ObservationArtifactWriter;
 }
 
 type ObservationDiffMode = "diff" | "full";
@@ -183,6 +210,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
 
   // Locate the ObserveResult: the payload itself for `observe`, else `.observation`.
   let sanitizedPayload: Record<string, unknown> | undefined;
+  let hasArtifactableObservation = false;
   if (isObserveTool && isObserveResult(payload)) {
     // `observe` always emits the full sanitized observation (no-observe never
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
@@ -191,6 +219,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       ctx.baselineStore!.set(ctx.sessionUuid!, sanitized);
     }
     sanitizedPayload = sanitized as unknown as Record<string, unknown>;
+    hasArtifactableObservation = true;
   } else if (!isObserveTool && payload.observation !== undefined) {
     if (noObserveEnabled) {
       // `--actions-no-observe` (#2762/#3026): drop the embedded observation from
@@ -263,11 +292,23 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       if (observationDiff) {
         sanitizedPayload.observationDiff = observationDiff;
       }
+      hasArtifactableObservation = true;
     }
   }
 
   if (!sanitizedPayload) {
     return response;
+  }
+
+  if (ctx.artifactWriter && !ctx.internal && hasArtifactableObservation) {
+    if (isObserveTool) {
+      sanitizedPayload = writeObservationArtifact(ctx, sanitizedPayload) as unknown as Record<string, unknown>;
+    } else {
+      sanitizedPayload = {
+        ...sanitizedPayload,
+        observation: writeObservationArtifact(ctx, sanitizedPayload.observation),
+      };
+    }
   }
 
   // Rewrite both representations from the same object so they cannot diverge.
@@ -279,6 +320,17 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   }
 
   return response;
+}
+
+function writeObservationArtifact(
+  ctx: FinalizeToolResponseContext,
+  observationPayload: unknown
+): ObservationArtifactMetadata {
+  return ctx.artifactWriter!.writeJsonArtifact({
+    tool: ctx.name,
+    payload: "ObserveResult",
+    data: observationPayload,
+  });
 }
 
 /**

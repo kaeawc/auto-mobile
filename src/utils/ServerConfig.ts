@@ -274,6 +274,14 @@ class ServerConfig {
     return this._toolResultsCompactJson;
   }
 
+  setToolOutputArtifactDirectory(directory: string | undefined): void {
+    this.setToolOutputsDir(directory);
+  }
+
+  getToolOutputArtifactDirectory(): string | undefined {
+    return this.getToolOutputsDir();
+  }
+
 }
 
 export const serverConfig = ServerConfig.getInstance();

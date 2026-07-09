@@ -66,6 +66,27 @@ function makeObserveResultWithBounds(): ObserveResult {
   } as ObserveResult;
 }
 
+class FakeObservationArtifactWriter {
+  writes: Array<{ tool: string; payload: string; data: unknown }> = [];
+  throwOnWrite: Error | undefined;
+
+  writeJsonArtifact(input: { tool: string; payload: string; data: unknown }): unknown {
+    if (this.throwOnWrite) {
+      throw this.throwOnWrite;
+    }
+    this.writes.push(input);
+    return {
+      artifact: {
+        path: `/tmp/auto-mobile/${input.tool}-${this.writes.length}.json`,
+        format: "json",
+        payload: input.payload,
+        bytes: 123,
+        tool: input.tool,
+      },
+    };
+  }
+}
+
 describe("finalizeToolResponse", () => {
   let originalDropElements: boolean;
   let originalCompact: boolean;
@@ -1024,6 +1045,153 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.added).toHaveLength(1);
       expect(obsSc.added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
       expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+    });
+  });
+
+  describe("observation artifact mode (#3480)", () => {
+    let originalDiff: boolean;
+    let originalNoObserve: boolean;
+
+    function sameScreenObserve(): ObserveResult {
+      return {
+        ...makeObserveResultWithBounds(),
+        activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+        viewHierarchy: {
+          packageName: "com.example",
+          hierarchy: {
+            node: {
+              "resource-id": "com.example:id/root",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+              "node": [{ "resource-id": "com.example:id/child", "text": "Hello" } as any],
+            } as any,
+          },
+        },
+      } as ObserveResult;
+    }
+
+    function makeStore(): { store: { get: (u: string) => ObserveResult | undefined; set: (u: string, o: ObserveResult) => void }; map: Map<string, ObserveResult> } {
+      const map = new Map<string, ObserveResult>();
+      return {
+        map,
+        store: {
+          get: (u: string) => map.get(u),
+          set: (u: string, o: ObserveResult) => { map.set(u, o); },
+        },
+      };
+    }
+
+    beforeEach(() => {
+      originalDiff = serverConfig.isActionsDiffObserveEnabled();
+      originalNoObserve = serverConfig.isActionsNoObserveEnabled();
+      serverConfig.setActionsDiffObserveEnabled(false);
+      serverConfig.setActionsNoObserveEnabled(false);
+    });
+
+    afterEach(() => {
+      serverConfig.setActionsDiffObserveEnabled(originalDiff);
+      serverConfig.setActionsNoObserveEnabled(originalNoObserve);
+    });
+
+    test("observe returns artifact metadata instead of an inline ObserveResult", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(makeObserveResult()),
+        { name: "observe", sessionUuid: "s1", artifactWriter: writer } as any
+      );
+
+      expect(finalized.structuredContent).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/observe-1.json",
+          format: "json",
+          payload: "ObserveResult",
+          bytes: 123,
+          tool: "observe",
+        },
+      });
+      expect((finalized.structuredContent as any).viewHierarchy).toBeUndefined();
+      expect(writer.writes).toHaveLength(1);
+      expect((writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("action observation fields are replaced with artifact metadata", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
+        { name: "tapOn", sessionUuid: "s1", artifactWriter: writer } as any
+      );
+
+      expect((finalized.structuredContent as any).success).toBe(true);
+      expect((finalized.structuredContent as any).observation).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/tapOn-1.json",
+          format: "json",
+          payload: "ObserveResult",
+          bytes: 123,
+          tool: "tapOn",
+        },
+      });
+      expect((finalized.structuredContent as any).observation.viewHierarchy).toBeUndefined();
+      expect((writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
+      expect(JSON.parse(finalized.content[0].text)).toEqual(finalized.structuredContent);
+    });
+
+    test("artifact writer receives the compacted diff after existing output transforms", () => {
+      serverConfig.setObserveResultCompactEnabled(true);
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const { store } = makeStore();
+      finalizeToolResponse(
+        createStructuredToolResponse(sameScreenObserve()),
+        { name: "observe", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node = [
+        { "resource-id": "com.example:id/added", "bounds": { left: 5, top: 6, right: 7, bottom: 8 } },
+      ];
+      const writer = new FakeObservationArtifactWriter();
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer } as any
+      );
+
+      expect((writer.writes[0].data as any).isDiff).toBe(true);
+      expect((writer.writes[0].data as any).added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
+      expect((finalized.structuredContent as any).observation.artifact.path).toBe("/tmp/auto-mobile/tapOn-1.json");
+      expect((finalized.structuredContent as any).observationDiff).toMatchObject({
+        mode: "diff",
+        reason: "diff_emitted",
+      });
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("internal calls receive full observations and do not write artifacts", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      const writer = new FakeObservationArtifactWriter();
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
+        { name: "tapOn", sessionUuid: "s1", internal: true, artifactWriter: writer } as any
+      );
+
+      expect(writer.writes).toHaveLength(0);
+      expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
+      expect((finalized.structuredContent as any).observation.artifact).toBeUndefined();
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("artifact write failures are loud and do not produce inline fallback output", () => {
+      const writer = new FakeObservationArtifactWriter();
+      writer.throwOnWrite = new Error("artifact disk is full");
+      const response = createStructuredToolResponse(makeObserveResult());
+
+      expect(() => finalizeToolResponse(
+        response,
+        { name: "observe", sessionUuid: "s1", artifactWriter: writer } as any
+      )).toThrow("artifact disk is full");
+      expect((response.structuredContent as any).viewHierarchy).toBeDefined();
+      expect((response.structuredContent as any).artifact).toBeUndefined();
     });
   });
 

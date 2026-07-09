@@ -34,6 +34,7 @@ import {
   InternalToolPayloads,
   narrowInternalToolEnvelope,
 } from "./internalToolPayloads";
+import { JsonToolOutputArtifactWriter } from "./toolOutputArtifactWriter";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -611,6 +612,10 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
           set: (uuid, observation) => DaemonState.getInstance().getSessionManager().setLastRenderedObservation(uuid, observation),
         }
         : undefined;
+    const artifactDirectory = serverConfig.getToolOutputArtifactDirectory();
+    const artifactWriter = artifactDirectory && !internalCall
+      ? new JsonToolOutputArtifactWriter({ outputDirectory: artifactDirectory, timer })
+      : undefined;
 
     return {
       durationMs,
@@ -620,6 +625,7 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
         sessionUuid,
         baselineStore,
         internal: internalCall,
+        artifactWriter,
       }),
     };
   }

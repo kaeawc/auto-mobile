@@ -12,7 +12,7 @@ import { NavigationGraphManager } from "../features/navigation/NavigationGraphMa
 import { IdentifyInteractions, IdentifyInteractionsOptions } from "../features/observe/IdentifyInteractions";
 import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { elementContainerSchema } from "./elementSelectorSchemas";
-import { observeResultSchema } from "./toolOutputSchemas";
+import { observeToolResultSchema } from "./toolOutputSchemas";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import { normalizeQuotes } from "../features/utility/TextMatcher";
@@ -618,7 +618,7 @@ export function registerObserveTools() {
     "Get screen view hierarchy",
     observeSchema,
     observeHandler,
-    { outputSchema: observeResultSchema }
+    { outputSchema: observeToolResultSchema }
   );
 
   ToolRegistry.registerDeviceAware("identifyInteractions", "Suggest likely interactions", identifyInteractionsSchema, identifyInteractionsHandler, { debugOnly: true });

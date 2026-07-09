@@ -35,7 +35,8 @@ export class DefaultElementSelector implements ElementSelector {
       text,
       options?.container ?? null,
       options?.partialMatch ?? true,
-      options?.caseSensitive ?? false
+      options?.caseSensitive ?? false,
+      options?.index !== undefined
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
@@ -55,7 +56,8 @@ export class DefaultElementSelector implements ElementSelector {
       viewHierarchy,
       resourceId,
       options?.container ?? null,
-      options?.partialMatch ?? false
+      options?.partialMatch ?? false,
+      options?.index !== undefined
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }

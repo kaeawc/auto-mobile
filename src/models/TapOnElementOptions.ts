@@ -16,7 +16,7 @@ export interface TapOnElementOptions {
   // the on-screen matches (in hierarchy order, i.e. top-to-bottom for a vertical list)
   // instead of applying selectionStrategy. Use for repeated controls with no unique text
   // (e.g. the 2nd identical row action). Out of range → no match.
-  instance?: number;
+  index?: number;
 
   // Container to restrict search
   container?: {

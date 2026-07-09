@@ -124,7 +124,8 @@ export class DefaultElementFinder implements ElementFinder {
   private collectTextMatchesInRoots(
     rootNodes: ViewHierarchyNode[],
     text: string,
-    matchesText: (input?: string) => boolean
+    matchesText: (input?: string) => boolean,
+    sortByArea: boolean = true
   ): { exactMatches: Element[]; partialMatches: Element[] } {
     const partialMatches: Element[] = [];
     const exactMatches: Element[] = [];
@@ -198,10 +199,10 @@ export class DefaultElementFinder implements ElementFinder {
       });
     }
 
-    if (exactMatches.length > 0) {
+    if (sortByArea && exactMatches.length > 0) {
       this.sortElementsByArea(exactMatches);
     }
-    if (partialMatches.length > 0) {
+    if (sortByArea && partialMatches.length > 0) {
       this.sortElementsByArea(partialMatches);
     }
 
@@ -211,7 +212,8 @@ export class DefaultElementFinder implements ElementFinder {
   private collectResourceIdMatchesInRoots(
     rootNodes: ViewHierarchyNode[],
     resourceId: string,
-    partialMatch: boolean
+    partialMatch: boolean,
+    sortByArea: boolean = true
   ): Element[] {
     const matches: Element[] = [];
 
@@ -233,7 +235,7 @@ export class DefaultElementFinder implements ElementFinder {
       });
     }
 
-    if (matches.length > 0) {
+    if (sortByArea && matches.length > 0) {
       this.sortElementsByArea(matches);
     }
 
@@ -290,6 +292,17 @@ export class DefaultElementFinder implements ElementFinder {
     return isClickableElementProperties(props);
   }
 
+  private isCollectionNode(props: Record<string, unknown>): boolean {
+    const className = typeof props.class === "string" ? props.class : "";
+    const scrollable = props.scrollable === "true" || props.scrollable === true;
+    return scrollable ||
+      className.includes("RecyclerView") ||
+      className.includes("ListView") ||
+      className.includes("ScrollView") ||
+      className.includes("CollectionView") ||
+      className.includes("TableView");
+  }
+
   /**
    * Find elements in the view hierarchy that match the specified text
    * @param viewHierarchy - The view hierarchy to search
@@ -304,7 +317,8 @@ export class DefaultElementFinder implements ElementFinder {
     text: string,
     container: { elementId?: string; text?: string } | null = null,
     partialMatch: boolean = true,
-    caseSensitive: boolean = false
+    caseSensitive: boolean = false,
+    preserveTraversalOrder: boolean = false
   ): Element[] {
     if (!viewHierarchy || !text) {
       return [];
@@ -324,18 +338,33 @@ export class DefaultElementFinder implements ElementFinder {
     };
 
     if (containerNode) {
-      return selectMatches(this.collectTextMatchesInRoots([containerNode], text, matchesText));
+      return selectMatches(this.collectTextMatchesInRoots(
+        [containerNode],
+        text,
+        matchesText,
+        !preserveTraversalOrder
+      ));
     }
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const mainMatches = selectMatches(this.collectTextMatchesInRoots(rootNodes, text, matchesText));
+    const mainMatches = selectMatches(this.collectTextMatchesInRoots(
+      rootNodes,
+      text,
+      matchesText,
+      !preserveTraversalOrder
+    ));
     if (mainMatches.length > 0) {
       return mainMatches;
     }
 
     const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
     for (const windowRoots of windowRootGroups) {
-      const windowMatches = selectMatches(this.collectTextMatchesInRoots(windowRoots, text, matchesText));
+      const windowMatches = selectMatches(this.collectTextMatchesInRoots(
+        windowRoots,
+        text,
+        matchesText,
+        !preserveTraversalOrder
+      ));
       if (windowMatches.length > 0) {
         return windowMatches;
       }
@@ -376,7 +405,8 @@ export class DefaultElementFinder implements ElementFinder {
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     container: { elementId?: string; text?: string } | null = null,
-    partialMatch: boolean = false
+    partialMatch: boolean = false,
+    preserveTraversalOrder: boolean = false
   ): Element[] {
     if (!viewHierarchy || !resourceId) {
       return [];
@@ -391,18 +421,33 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     if (containerNode) {
-      return this.collectResourceIdMatchesInRoots([containerNode], resourceId, partialMatch);
+      return this.collectResourceIdMatchesInRoots(
+        [containerNode],
+        resourceId,
+        partialMatch,
+        !preserveTraversalOrder
+      );
     }
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const mainMatches = this.collectResourceIdMatchesInRoots(rootNodes, resourceId, partialMatch);
+    const mainMatches = this.collectResourceIdMatchesInRoots(
+      rootNodes,
+      resourceId,
+      partialMatch,
+      !preserveTraversalOrder
+    );
     if (mainMatches.length > 0) {
       return mainMatches;
     }
 
     const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
     for (const windowRoots of windowRootGroups) {
-      const windowMatches = this.collectResourceIdMatchesInRoots(windowRoots, resourceId, partialMatch);
+      const windowMatches = this.collectResourceIdMatchesInRoots(
+        windowRoots,
+        resourceId,
+        partialMatch,
+        !preserveTraversalOrder
+      );
       if (windowMatches.length > 0) {
         return windowMatches;
       }
@@ -1108,12 +1153,14 @@ export class DefaultElementFinder implements ElementFinder {
       return;
     }
 
-    // If that text-bearing child is ITSELF clickable, it is a row/list-item and THIS node
-    // is the list — collecting here would grab a sibling ROW's control (i.e. act on a
-    // different row). The real row is deeper; stop. This also means a matched row with
-    // no clickable control resolves to no match (a clean "not found") rather than silently
-    // hitting another row's control.
-    if (this.isClickableNode(this.parser.extractNodeProperties(textChild))) {
+    // If that text-bearing child is ITSELF clickable under a collection node, it is a
+    // row/list-item and THIS node is the list. Collecting here would grab a sibling
+    // ROW's control. A non-collection parent can still be an actual row with a
+    // clickable content group plus a trailing action, so let that case collect below.
+    if (
+      this.isClickableNode(this.parser.extractNodeProperties(textChild)) &&
+      this.isCollectionNode(this.parser.extractNodeProperties(node))
+    ) {
       return;
     }
 

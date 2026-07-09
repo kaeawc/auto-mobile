@@ -314,7 +314,7 @@ export class TapOnElement extends BaseVisualChange {
             fuzzyMatch: true,
             caseSensitive: false,
             strategy: options.selectionStrategy,
-            index: options.instance
+            index: options.index
           }),
           containerFound
         };
@@ -326,7 +326,7 @@ export class TapOnElement extends BaseVisualChange {
           partialMatch: true,
           caseSensitive: false,
           strategy: options.selectionStrategy,
-          index: options.instance
+          index: options.index
         }),
         containerFound
       };
@@ -343,14 +343,14 @@ export class TapOnElement extends BaseVisualChange {
             fuzzyMatch: true,
             caseSensitive: false,
             strategy: options.selectionStrategy,
-            index: options.instance
+            index: options.index
           })
           : this.elementSelector.selectByText(viewHierarchy, text, {
             container: options.container,
             partialMatch: true,
             caseSensitive: false,
             strategy: options.selectionStrategy,
-            index: options.instance
+            index: options.index
           });
         lastSelection = selection;
         if (selection.element) {
@@ -381,7 +381,7 @@ export class TapOnElement extends BaseVisualChange {
             container: options.container,
             partialMatch: false,
             strategy: options.selectionStrategy,
-            index: options.instance
+            index: options.index
           }),
           containerFound
         };
@@ -392,7 +392,7 @@ export class TapOnElement extends BaseVisualChange {
           container: options.container,
           partialMatch: false,
           strategy: options.selectionStrategy,
-          index: options.instance
+          index: options.index
         }),
         containerFound
       };

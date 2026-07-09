@@ -242,7 +242,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     }
 
     if (isRootNode) {
-      const rootCopy = JSON.parse(JSON.stringify(node));
+      const rootCopy = structuredClone(node);
 
       if (node.node) {
         const processedChildren = this.processNodeChildren(node, child => this.filterSingleNode(child));
@@ -291,7 +291,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       return viewHierarchy;
     }
 
-    const result = JSON.parse(JSON.stringify(viewHierarchy));
+    const result = structuredClone(viewHierarchy);
     result.hierarchy = this.filterSingleNode(viewHierarchy.hierarchy, true);
     return result;
   }

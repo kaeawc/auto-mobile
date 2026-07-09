@@ -351,6 +351,7 @@ export class CtrlProxyFocus {
     }
     if (node.className) {
       converted.class = node.className;
+      converted.className = node.className;
     }
     if (node.packageName) {
       converted.packageName = node.packageName;

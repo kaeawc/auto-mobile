@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { CtrlProxyFocus } from "../../../src/features/observe/android/CtrlProxyFocus";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
@@ -1109,7 +1110,7 @@ describe("AndroidCtrlProxyClient", function() {
       expect(result.hierarchy.text).toBe("6:43 AM");
       expect(result.hierarchy["content-desc"]).toBe("6:43 AM");
       expect(result.hierarchy.class).toBe("android.widget.TextClock");
-      expect(result.hierarchy.className).toBeUndefined();
+      expect(result.hierarchy.className).toBe("android.widget.TextClock");
       expect(result.hierarchy.bounds).toEqual({
         left: 175,
         top: 687,
@@ -1132,7 +1133,7 @@ describe("AndroidCtrlProxyClient", function() {
       expect(typeof result.hierarchy.node).toBe("object");
       expect(result.hierarchy.node.text).toBe("Child Node");
       expect(result.hierarchy.node.class).toBe("android.widget.TextView");
-      expect(result.hierarchy.node.className).toBeUndefined();
+      expect(result.hierarchy.node.className).toBe("android.widget.TextView");
       expect(result.hierarchy.node.bounds).toEqual({
         left: 0,
         top: 0,
@@ -1214,6 +1215,21 @@ describe("AndroidCtrlProxyClient", function() {
       expect(before.hierarchy["view-id"]).toBe("com.test.app:id/root");
     });
 
+  });
+
+  describe("focus element conversion", function() {
+    test("normalizes Android runner className while preserving the public compatibility alias", function() {
+      const focus = new CtrlProxyFocus({} as any);
+
+      const element = focus.convertAccessibilityNodeToElement({
+        text: "Focused",
+        className: "android.widget.Button",
+        bounds: { left: 10, top: 20, right: 110, bottom: 70 },
+      });
+
+      expect(element?.class).toBe("android.widget.Button");
+      expect(element?.className).toBe("android.widget.Button");
+    });
   });
 
   describe("getAccessibilityHierarchy", function() {

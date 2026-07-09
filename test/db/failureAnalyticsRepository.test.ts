@@ -12,6 +12,7 @@ import { runMigrations } from "../../src/db/migrator";
 import { createTestDatabase } from "./testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
 describe("FailureAnalyticsRepository", () => {
   let db: Kysely<Database>;
@@ -76,6 +77,35 @@ describe("FailureAnalyticsRepository", () => {
       expect(notifications[0].type).toBe("crash");
       expect(notifications[0].severity).toBe("critical");
       expect(notifications[0].acknowledged).toBe(0);
+    });
+
+    test("uses injected IdGenerator for persisted IDs", async () => {
+      const idGenerator = new FakeIdGenerator(["occurrence-id", "group-id", "capture-id"]);
+      const deterministicRepo = new FailureAnalyticsRepository(
+        timer,
+        db,
+        () => new FakeDbWriteBarrier(),
+        idGenerator,
+      );
+
+      const occurrenceId = await deterministicRepo.recordFailure(
+        makeFailureInput({
+          capture: {
+            type: "screenshot",
+            path: "/tmp/screenshot.png",
+          },
+        })
+      );
+
+      const groups = await db.selectFrom("failure_groups").selectAll().execute();
+      const occurrences = await db.selectFrom("failure_occurrences").selectAll().execute();
+      const captures = await db.selectFrom("failure_captures").selectAll().execute();
+
+      expect(occurrenceId).toBe("occurrence-id");
+      expect(groups[0].id).toBe("group-id");
+      expect(occurrences[0].id).toBe("occurrence-id");
+      expect(captures[0].id).toBe("capture-id");
+      expect(idGenerator.pendingCount()).toBe(0);
     });
 
     test("updates group count on second occurrence with same signature", async () => {

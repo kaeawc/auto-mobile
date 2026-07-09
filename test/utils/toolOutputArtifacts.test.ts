@@ -49,42 +49,46 @@ describe("parseToolOutputsDirConfig", () => {
   });
 
   test("resolves CLI paths to absolute paths from the launch working directory", () => {
+    const launchCwd = path.resolve("launch-root");
     expect(parseToolOutputsDirConfig(
       ["--tool-outputs-dir", "artifacts"],
       {},
-      "/launch"
-    )).toBe(path.join("/launch", "artifacts"));
+      launchCwd
+    )).toBe(path.resolve(launchCwd, "artifacts"));
   });
 
   test("supports the singular CLI alias", () => {
+    const launchCwd = path.resolve("launch-root");
     expect(parseToolOutputsDirConfig(
       ["--tool-output-dir", "artifacts"],
       {},
-      "/launch"
-    )).toBe(path.join("/launch", "artifacts"));
+      launchCwd
+    )).toBe(path.resolve(launchCwd, "artifacts"));
   });
 
   test("CLI flag wins over environment variable", () => {
+    const launchCwd = path.resolve("launch-root");
     expect(parseToolOutputsDirConfig(
       ["--tool-outputs-dir", "cli-artifacts"],
       { AUTOMOBILE_TOOL_OUTPUTS_DIR: "env-artifacts" },
-      "/launch"
-    )).toBe(path.join("/launch", "cli-artifacts"));
+      launchCwd
+    )).toBe(path.resolve(launchCwd, "cli-artifacts"));
   });
 
   test("resolves environment variable paths to absolute paths from the launch working directory", () => {
+    const launchCwd = path.resolve("launch-root");
     expect(parseToolOutputsDirConfig(
       [],
       { AUTOMOBILE_TOOL_OUTPUTS_DIR: "env-artifacts" },
-      "/launch"
-    )).toBe(path.join("/launch", "env-artifacts"));
+      launchCwd
+    )).toBe(path.resolve(launchCwd, "env-artifacts"));
   });
 
   test("ignores blank configured values", () => {
     expect(parseToolOutputsDirConfig(
       ["--tool-outputs-dir", "   "],
       { AUTOMOBILE_TOOL_OUTPUTS_DIR: "   " },
-      "/launch"
+      path.resolve("launch-root")
     )).toBeUndefined();
   });
 });

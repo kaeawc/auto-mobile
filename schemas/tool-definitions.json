@@ -4808,11 +4808,7 @@
               "const": "json"
             },
             "payload": {
-              "type": "string",
-              "enum": [
-                "ObserveResult",
-                "ObserveDiff"
-              ]
+              "type": "string"
             },
             "bytes": {
               "type": "integer",
@@ -7533,11 +7529,7 @@
                       "const": "json"
                     },
                     "payload": {
-                      "type": "string",
-                      "enum": [
-                        "ObserveResult",
-                        "ObserveDiff"
-                      ]
+                      "type": "string"
                     },
                     "bytes": {
                       "type": "integer",

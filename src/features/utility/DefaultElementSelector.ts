@@ -26,6 +26,7 @@ export class DefaultElementSelector implements ElementSelector {
       partialMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
+      index?: number;
     }
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
@@ -36,7 +37,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.partialMatch ?? true,
       options?.caseSensitive ?? false
     );
-    return this.pickMatch(matches, strategy, viewHierarchy);
+    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
 
   selectByResourceId(
@@ -46,6 +47,7 @@ export class DefaultElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
+      index?: number;
     }
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
@@ -55,7 +57,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.container ?? null,
       options?.partialMatch ?? false
     );
-    return this.pickMatch(matches, strategy, viewHierarchy);
+    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
 
   selectClickableParentByText(
@@ -104,6 +106,7 @@ export class DefaultElementSelector implements ElementSelector {
       fuzzyMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
+      index?: number;
     }
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
@@ -114,7 +117,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.fuzzyMatch ?? true,
       options?.caseSensitive ?? false
     );
-    return this.pickMatch(matches, strategy, viewHierarchy);
+    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
 
   selectClickableSiblingOfResourceId(
@@ -124,6 +127,7 @@ export class DefaultElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
+      index?: number;
     }
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
@@ -133,7 +137,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.container ?? null,
       options?.partialMatch ?? false
     );
-    return this.pickMatch(matches, strategy, viewHierarchy);
+    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
 
   private isElementCenterOffScreen(element: Element, viewHierarchy: ViewHierarchyResult): boolean {
@@ -150,7 +154,8 @@ export class DefaultElementSelector implements ElementSelector {
   private pickMatch(
     matches: Element[],
     strategy: ElementSelectionStrategy,
-    viewHierarchy: ViewHierarchyResult
+    viewHierarchy: ViewHierarchyResult,
+    index?: number
   ): ElementSelectionResult {
     const totalMatches = matches.length;
     if (totalMatches === 0) {
@@ -158,11 +163,22 @@ export class DefaultElementSelector implements ElementSelector {
     }
 
     const visibleMatches = matches
-      .map((element, index) => ({ element, index }))
+      .map((element, matchIndex) => ({ element, index: matchIndex }))
       .filter(match => !this.isElementCenterOffScreen(match.element, viewHierarchy));
 
     if (visibleMatches.length === 0) {
       return { element: null, indexInMatches: -1, totalMatches, strategy };
+    }
+
+    // Explicit 0-based index overrides strategy: pick the Nth on-screen match, or return
+    // no match if out of range (so a caller asking for "the 3rd" of 2 fails, not silently
+    // grabbing another element).
+    if (index !== undefined) {
+      if (index < 0 || index >= visibleMatches.length) {
+        return { element: null, indexInMatches: -1, totalMatches, strategy };
+      }
+      const chosen = visibleMatches[index];
+      return { element: chosen.element, indexInMatches: chosen.index, totalMatches, strategy };
     }
 
     let selectedVisibleIndex = 0;

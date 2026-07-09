@@ -60,6 +60,7 @@ export interface TapOnArgs {
     text?: string;
   };
   selectionStrategy?: ElementSelectionStrategy;
+  instance?: number;
   action: "tap" | "doubleTap" | "longPress" | "focus";
   duration?: number;
   searchUntil?: {

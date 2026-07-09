@@ -1050,14 +1050,29 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
-   * Recursively search for clickable siblings of text-matching elements.
-   * When a node has children where one directly matches text and another is clickable,
-   * we return the clickable sibling.
+   * Recursively find the clickable control that shares a ROW with a text-matching
+   * element — the control a user taps "next to" that text (a remove button, a row
+   * checkbox, etc.).
    *
-   * Uses nodeHasText (shallow) instead of nodeOrDescendantHasText (deep) to avoid
-   * false positives: a parent whose deeply-nested descendant has the text should not
-   * cause its other children to be collected as "siblings." The recursion naturally
-   * finds the correct level.
+   * The text is frequently NOT a direct sibling of the control. List rows commonly nest
+   * the label under an intermediate container (e.g. a name/email pair inside an avatar
+   * group) while the action sits as a sibling of that container. So we match on a child
+   * whose SUBTREE contains the text (deep), and collect the clickable, non-text children
+   * at the DEEPEST qualifying node — the row.
+   *
+   * Two rules keep the deep match precise, addressing the false-positive the previous
+   * shallow (`nodeHasText`) version guarded against — i.e. stopping a list/recycler
+   * ancestor from collecting every sibling row's control at once:
+   *   - Recurse FIRST and bail if a descendant level already matched, so the nearest
+   *     (deepest) row wins when the matching row yields a control.
+   *   - Only collect at a node whose text-bearing child is NOT itself clickable. A
+   *     clickable text-bearing child means that child is the row/list-item and THIS node
+   *     is the list, so its other clickable children are sibling rows, not this row's
+   *     control. This is essential when the matching row has NO control of its own:
+   *     without it, recursion would unwind to the list and return a different row's
+   *     control (a silent wrong tap); with it, the result is a clean "not found".
+   * This keeps the old direct-sibling case working (the text's parent is the row) while
+   * also reaching a nested label, which previously returned "no clickable sibling".
    */
   private findClickableSiblingsInNode(
     node: ViewHierarchyNode,
@@ -1073,25 +1088,46 @@ export class DefaultElementFinder implements ElementFinder {
       ? children
       : [children];
 
-    // Check if any direct child has matching text (shallow — not descendants)
-    const hasTextMatch = childArray.some(child => this.nodeHasText(child, matchesText));
-
-    if (hasTextMatch) {
-      for (const child of childArray) {
-        const childProps = this.parser.extractNodeProperties(child);
-        const isClickable = this.isClickableNode(childProps);
-
-        if (isClickable && !this.nodeHasText(child, matchesText)) {
-          const parsedNode = this.parser.parseNodeBounds(child);
-          if (parsedNode) {
-            results.push(parsedNode);
-          }
-        }
-      }
-    }
-
+    // Recurse first so the DEEPEST (nearest-to-text) row wins. If a descendant level
+    // already produced matches, don't also collect at this (ancestor) level — that is
+    // what would pull sibling rows' controls in from a shared list container.
+    const before = results.length;
     for (const child of childArray) {
       this.findClickableSiblingsInNode(child, matchesText, results);
+    }
+    if (results.length > before) {
+      return;
+    }
+
+    // At this level, which child's SUBTREE contains the text (deep, so a label nested
+    // under an avatar/content group still counts)?
+    const textChild = childArray.find(child =>
+      this.nodeOrDescendantHasText(child, matchesText)
+    );
+    if (!textChild) {
+      return;
+    }
+
+    // If that text-bearing child is ITSELF clickable, it is a row/list-item and THIS node
+    // is the list — collecting here would grab a sibling ROW's control (i.e. act on a
+    // different row). The real row is deeper; stop. This also means a matched row with
+    // no clickable control resolves to no match (a clean "not found") rather than silently
+    // hitting another row's control.
+    if (this.isClickableNode(this.parser.extractNodeProperties(textChild))) {
+      return;
+    }
+
+    // THIS node is the row: its clickable, non-text children are the action control(s).
+    for (const child of childArray) {
+      const childProps = this.parser.extractNodeProperties(child);
+      const isClickable = this.isClickableNode(childProps);
+
+      if (isClickable && !this.nodeOrDescendantHasText(child, matchesText)) {
+        const parsedNode = this.parser.parseNodeBounds(child);
+        if (parsedNode) {
+          results.push(parsedNode);
+        }
+      }
     }
   }
 

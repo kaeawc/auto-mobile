@@ -205,6 +205,7 @@ export async function checkDaemonStatus(
       recommendation: `Start the daemon with: bunx ${resolveDaemonInstallSpecifier()} --daemon start`,
     };
   } catch (error) {
+    logger.warn(`Daemon status check failed: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "Daemon Status",
       status: "warn",
@@ -246,6 +247,7 @@ export async function checkDaemonConnectivity(
       recommendation: report.recommendations.join("; ") || `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`,
     };
   } catch (error) {
+    logger.warn(`Daemon connectivity check failed: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "Daemon Connectivity",
       status: "warn",
@@ -466,13 +468,14 @@ export async function checkCtrlProxy(
     };
   } catch (error) {
     if (error instanceof ActionableError) {
+      logger.warn(`CtrlProxy check failed: ${error.message}`, error);
       return {
         name: "CtrlProxy",
         status: "fail",
         message: error.message,
       };
     }
-    logger.debug(`CtrlProxy check failed: ${error}`);
+    logger.warn(`CtrlProxy check failed: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "CtrlProxy",
       status: "skip",
@@ -557,7 +560,7 @@ export async function checkWorkProfileAccessibility(
       recommendation: `The accessibility service needs to be enabled in each work profile for full app install tracking. Run bunx ${resolveDaemonInstallSpecifier()} --cli doctor or enable manually in Settings > Accessibility.`,
     };
   } catch (error) {
-    logger.debug(`Work profile accessibility check failed: ${error}`);
+    logger.warn(`Work profile accessibility check failed: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "Work Profile Accessibility",
       status: "skip",

@@ -55,7 +55,8 @@ export class GetDumpsysWindow implements DumpsysWindow {
         return diskCached.data;
       }
     } catch (error) {
-      // Disk cache read failed, continue to refresh
+      // Disk cache is opportunistic; a cache read failure should fall through to ADB refresh.
+      logger.debug(`Failed to load dumpsys window disk cache for device ${this.device.deviceId}: ${error instanceof Error ? error.message : String(error)}`, error);
     }
 
     // No valid cache found, refresh and return
@@ -100,6 +101,8 @@ export class GetDumpsysWindow implements DumpsysWindow {
       const cacheData = await fs.readFile(this.cacheFilePath, "utf-8");
       return JSON.parse(cacheData);
     } catch (error) {
+      // Disk cache is opportunistic; callers can refresh from ADB when no cache is available.
+      logger.debug(`Failed to read dumpsys window disk cache for device ${this.device.deviceId}: ${error instanceof Error ? error.message : String(error)}`, error);
       return null;
     }
   }

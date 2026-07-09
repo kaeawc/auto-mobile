@@ -10,49 +10,112 @@ import { BootedDevice, Element, ObserveResult, ObserveToolPayload, ViewHierarchy
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { IdentifyInteractions, IdentifyInteractionsOptions } from "../features/observe/IdentifyInteractions";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { elementContainerSchema } from "./elementSelectorSchemas";
 import { observeResultSchema } from "./toolOutputSchemas";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
+import { DefaultElementParser } from "../features/utility/ElementParser";
+import { normalizeQuotes } from "../features/utility/TextMatcher";
 import type { ElementFinder } from "../utils/interfaces/ElementFinder";
-import { defaultTimer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { logger } from "../utils/logger";
 import { serverConfig } from "../utils/ServerConfig";
 
 // Schema definitions
-// waitFor accepts elementId OR text directly (oneOf), plus optional timeout and optional container (same shape as tapOn)
+// waitFor accepts legacy selectors plus richer predicates. Element predicates are
+// evaluated against the same node unless matchType is explicitly "any".
 const waitForContainerField = elementContainerSchema
   .optional()
   .describe(
     "Scope match to a container"
   );
 
-const waitForSchema = z.union([
-  z.object({
-    elementId: z.string().describe("Element resource ID / accessibility identifier"),
-    timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
-    container: waitForContainerField
-  }).strict(),
-  z.object({
-    text: z.string().describe("Element text"),
-    timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
-    container: waitForContainerField
-  }).strict(),
-  z.object({
-    textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins"),
-    timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
-    container: waitForContainerField
-  }).strict()
+const publicActiveWindowAppIdAliases = ["packageName", "bundleId"] as const;
+
+const appIdAliasShape = {
+  packageName: z.string().optional(),
+  bundleId: z.string().optional(),
+};
+
+const appIdPresenceBranches = [
+  z.object({ appId: z.string() }).passthrough(),
+  ...publicActiveWindowAppIdAliases.map(alias => z.object({ [alias]: z.string() }).passthrough())
+];
+
+const activeWindowWaitForBaseSchema = z.object({
+  appId: z.string().optional().describe("Foreground app bundle ID / package name"),
+  ...appIdAliasShape,
+  activityName: z.string().optional().describe("Foreground Android activity name")
+}).strict();
+
+const activeWindowWaitForSchema = activeWindowWaitForBaseSchema.and(z.union([
+  ...appIdPresenceBranches,
+  z.object({ activityName: z.string() }).passthrough(),
+]));
+
+const waitForCommonShape = {
+  activeWindow: activeWindowWaitForSchema.optional().describe("Foreground app/window predicates"),
+  timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
+  container: waitForContainerField
+};
+
+const waitForTextAnySchema = z.object({
+  textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins"),
+  elementId: z.never().optional(),
+  text: z.never().optional(),
+  className: z.never().optional(),
+  contentDescription: z.never().optional(),
+  matchType: z.never().optional(),
+  textMatch: z.never().optional(),
+  ...waitForCommonShape,
+}).strict();
+
+const waitForElementBaseSchema = z.object({
+  elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
+  text: z.string().optional().describe("Element text"),
+  textAny: z.never().optional(),
+  className: z.string().optional().describe("Element class name"),
+  contentDescription: z.string().optional().describe("Element content description / accessibility label"),
+  matchType: z.enum(["all", "any"]).optional().describe("Whether element predicates must all match the same node or any one may match"),
+  textMatch: z.enum(["exact", "contains", "regex"]).optional().describe("How to match text predicates"),
+  ...waitForCommonShape,
+}).strict().superRefine((value, ctx) => {
+
+  if (value.textMatch === "regex" && value.text !== undefined) {
+    try {
+      new RegExp(value.text);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "text must be a valid regular expression when textMatch is regex"
+      });
+    }
+  }
+});
+
+const waitForPredicatePresenceSchema = z.union([
+  z.object({ elementId: z.string() }).passthrough(),
+  z.object({ text: z.string() }).passthrough(),
+  z.object({ className: z.string() }).passthrough(),
+  z.object({ contentDescription: z.string() }).passthrough(),
+  z.object({ activeWindow: activeWindowWaitForSchema }).passthrough(),
 ]);
 
-export const observeSchema = addDeviceTargetingToSchema(z.object({
+const waitForElementSchema = waitForElementBaseSchema.and(waitForPredicatePresenceSchema);
+
+const waitForSchema = z.union([
+  waitForTextAnySchema,
+  waitForElementSchema,
+]);
+
+export const observeSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
   waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
   raw: z.boolean().optional().describe("Include raw view hierarchy"),
   skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling")
-}));
+})));
 
 export const identifyInteractionsSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
@@ -103,11 +166,12 @@ const isElementCenterOffScreen = (
 export const findWaitForElement = (
   finder: ElementFinder,
   waitFor: ObserveWaitForOptions,
-  viewHierarchy: ViewHierarchyResult
+  viewHierarchy: ViewHierarchyResult,
+  platform?: BootedDevice["platform"]
 ): Element | null => {
   const container = waitForContainerForFinder(waitFor);
 
-  if ("elementId" in waitFor) {
+  if (waitFor.elementId !== undefined && !hasRichElementPredicate(waitFor)) {
     return finder.findElementByResourceId(
       viewHierarchy,
       waitFor.elementId,
@@ -115,7 +179,7 @@ export const findWaitForElement = (
     );
   }
 
-  if ("text" in waitFor) {
+  if (waitFor.text !== undefined && !hasRichElementPredicate(waitFor)) {
     return finder.findElementByText(
       viewHierarchy,
       waitFor.text,
@@ -125,7 +189,7 @@ export const findWaitForElement = (
     );
   }
 
-  if ("textAny" in waitFor) {
+  if (waitFor.textAny !== undefined) {
     for (const text of waitFor.textAny) {
       const elements = finder.findElementsByText(
         viewHierarchy,
@@ -141,26 +205,237 @@ export const findWaitForElement = (
     }
   }
 
+  if (!hasElementPredicate(waitFor)) {
+    return null;
+  }
+
+  return findRichWaitForElement(finder, waitFor, viewHierarchy, platform);
+};
+
+const hasElementPredicate = (waitFor: ObserveWaitForOptions): boolean =>
+  waitFor.elementId !== undefined ||
+  waitFor.text !== undefined ||
+  waitFor.textAny !== undefined ||
+  waitFor.className !== undefined ||
+  waitFor.contentDescription !== undefined;
+
+const hasRichElementPredicate = (waitFor: ObserveWaitForOptions): boolean =>
+  waitFor.className !== undefined ||
+  waitFor.contentDescription !== undefined ||
+  waitFor.matchType !== undefined ||
+  waitFor.textMatch !== undefined ||
+  (
+    waitFor.elementId !== undefined &&
+    waitFor.text !== undefined
+  );
+
+const parser = new DefaultElementParser();
+
+const collectCandidateElements = (
+  finder: ElementFinder,
+  waitFor: ObserveWaitForOptions,
+  viewHierarchy: ViewHierarchyResult
+): Element[] => {
+  const container = waitForContainerForFinder(waitFor);
+  const containerNode = container
+    ? finder.findContainerNode(viewHierarchy, container)
+    : null;
+  if (container && !containerNode) {
+    return [];
+  }
+
+  const roots = containerNode
+    ? [containerNode]
+    : [
+      ...parser.extractRootNodes(viewHierarchy),
+      ...parser.extractWindowRootNodes(viewHierarchy, "topmost-first")
+    ];
+  const elements: Element[] = [];
+  for (const root of roots) {
+    parser.traverseNode(root, node => {
+      const element = parser.parseNodeBounds(node);
+      if (element) {
+        elements.push(element);
+      }
+    });
+  }
+  return elements;
+};
+
+const getClassName = (element: Element): string | undefined =>
+  typeof element.class === "string"
+    ? element.class
+    : typeof element.className === "string"
+      ? element.className
+      : undefined;
+
+const getContentDescription = (element: Element, platform?: BootedDevice["platform"]): string | undefined =>
+  typeof element["content-desc"] === "string"
+    ? element["content-desc"]
+    : typeof element["ios-accessibility-label"] === "string"
+      ? element["ios-accessibility-label"]
+      : typeof element.contentDescription === "string"
+        ? element.contentDescription
+        : typeof element.accessibilityLabel === "string"
+          ? element.accessibilityLabel
+          : platform === "ios" && typeof element.text === "string"
+            ? element.text
+            : undefined;
+
+const textFieldsForElement = (element: Element): string[] => [
+  element.text,
+  element["content-desc"],
+  element["ios-accessibility-label"],
+].filter((value): value is string => typeof value === "string");
+
+const matchesString = (
+  actual: string | undefined,
+  expected: string,
+  matchMode: "exact" | "contains" | "regex" = "contains"
+): boolean => {
+  if (actual === undefined) {
+    return false;
+  }
+
+  if (matchMode === "regex") {
+    return new RegExp(expected, "i").test(actual);
+  }
+
+  const normalizedActual = normalizeQuotes(actual).toLowerCase();
+  const normalizedExpected = normalizeQuotes(expected).toLowerCase();
+  return matchMode === "exact"
+    ? normalizedActual === normalizedExpected
+    : normalizedActual.includes(normalizedExpected);
+};
+
+const matchesTextPredicate = (element: Element, waitFor: ObserveWaitForOptions): boolean => {
+  if (waitFor.text === undefined) {
+    return false;
+  }
+  return textFieldsForElement(element).some(text => matchesString(text, waitFor.text!, waitFor.textMatch ?? "contains"));
+};
+
+const elementPredicateResults = (
+  element: Element,
+  waitFor: ObserveWaitForOptions,
+  platform?: BootedDevice["platform"]
+): boolean[] => {
+  const results: boolean[] = [];
+  if (waitFor.elementId !== undefined) {
+    results.push(element["resource-id"] === waitFor.elementId);
+  }
+  if (waitFor.text !== undefined) {
+    results.push(matchesTextPredicate(element, waitFor));
+  }
+  if (waitFor.className !== undefined) {
+    results.push(getClassName(element) === waitFor.className);
+  }
+  if (waitFor.contentDescription !== undefined) {
+    results.push(matchesString(getContentDescription(element, platform), waitFor.contentDescription, "exact"));
+  }
+  return results;
+};
+
+const findRichWaitForElement = (
+  finder: ElementFinder,
+  waitFor: ObserveWaitForOptions,
+  viewHierarchy: ViewHierarchyResult,
+  platform?: BootedDevice["platform"]
+): Element | null => {
+  const candidates = collectCandidateElements(finder, waitFor, viewHierarchy)
+    .filter(candidate => !isElementCenterOffScreen(candidate, viewHierarchy));
+  const matchType = waitFor.matchType ?? "all";
+
+  for (const candidate of candidates) {
+    const results = elementPredicateResults(candidate, waitFor, platform);
+    if (results.length === 0) {
+      continue;
+    }
+    const matched = matchType === "any"
+      ? results.some(Boolean)
+      : results.every(Boolean);
+    if (matched) {
+      return candidate;
+    }
+  }
+
   return null;
 };
 
-const waitForObservation = async (
+const matchesActiveWindow = (
+  observation: ObserveResult,
+  waitFor: ObserveWaitForOptions,
+  platform?: BootedDevice["platform"]
+): boolean => {
+  if (!waitFor.activeWindow) {
+    return true;
+  }
+
+  const activeWindow = observation.activeWindow;
+  if (!activeWindow) {
+    return false;
+  }
+
+  if (waitFor.activeWindow.appId !== undefined && activeWindow.appId !== waitFor.activeWindow.appId) {
+    return false;
+  }
+
+  if (
+    platform === "ios" &&
+    waitFor.activeWindow.activityName !== undefined &&
+    waitFor.activeWindow.appId === undefined
+  ) {
+    return false;
+  }
+
+  if (
+    platform !== "ios" &&
+    waitFor.activeWindow.activityName !== undefined &&
+    activeWindow.activityName !== waitFor.activeWindow.activityName
+  ) {
+    return false;
+  }
+
+  return true;
+};
+
+const evaluateWaitForObservation = (
+  finder: ElementFinder,
+  waitFor: ObserveWaitForOptions,
+  observation: ObserveResult,
+  platform?: BootedDevice["platform"]
+): { matched: boolean; awaitedElement?: Element } => {
+  const activeWindowMatched = matchesActiveWindow(observation, waitFor, platform);
+  const needsElementMatch = hasElementPredicate(waitFor);
+  const awaitedElement = needsElementMatch && observation.viewHierarchy
+    ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform)
+    : null;
+
+  return {
+    matched: activeWindowMatched && (!needsElementMatch || awaitedElement !== null),
+    awaitedElement: awaitedElement ?? undefined
+  };
+};
+
+export const waitForObservation = async (
   observeScreen: ObserveScreen,
   waitFor: ObserveWaitForOptions,
   signal?: AbortSignal,
-  skipBackStack: boolean = false
+  skipBackStack: boolean = false,
+  timer: Timer = defaultTimer,
+  platform?: BootedDevice["platform"]
 ): Promise<{
   observation: ObserveResult;
   awaitedElement?: Element;
   awaitDuration: number;
   awaitTimeout: boolean;
 }> => {
-  const startTime = defaultTimer.now();
+  const startTime = timer.now();
   const timeoutMs = waitFor.timeout ?? 5000;
   const finder = new DefaultElementFinder();
   const queryOptions = {
-    text: "text" in waitFor ? waitFor.text : ("textAny" in waitFor ? waitFor.textAny[0] : undefined),
-    elementId: "elementId" in waitFor ? waitFor.elementId : undefined
+    text: waitFor.text ?? waitFor.textAny?.[0] ?? waitFor.contentDescription,
+    elementId: waitFor.elementId
   };
 
   // When overhead is disabled, skip screenshots and back stack during ALL waitFor
@@ -180,29 +455,27 @@ const waitForObservation = async (
     skipBackStack: skipPollingOverhead || skipBackStack,
     skipScreenshot: skipPollingOverhead,
   });
-  let awaitedElement = observation.viewHierarchy
-    ? findWaitForElement(finder, waitFor, observation.viewHierarchy)
-    : null;
+  let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
 
-  if (awaitedElement) {
+  if (waitEvaluation.matched) {
     return {
       observation,
-      awaitedElement,
-      awaitDuration: defaultTimer.now() - startTime,
+      awaitedElement: waitEvaluation.awaitedElement,
+      awaitDuration: timer.now() - startTime,
       awaitTimeout: false
     };
   }
 
-  if (defaultTimer.now() - startTime >= timeoutMs) {
+  if (timer.now() - startTime >= timeoutMs) {
     return {
       observation,
-      awaitDuration: defaultTimer.now() - startTime,
+      awaitDuration: timer.now() - startTime,
       awaitTimeout: true
     };
   }
 
-  while (defaultTimer.now() - startTime < timeoutMs) {
-    await defaultTimer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
+  while (timer.now() - startTime < timeoutMs) {
+    await timer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
     throwIfAborted(signal);
 
     observation = await observeScreen.execute({
@@ -214,15 +487,13 @@ const waitForObservation = async (
       skipBackStack: skipPollingOverhead || skipBackStack,
       skipScreenshot: skipPollingOverhead,
     });
-    awaitedElement = observation.viewHierarchy
-      ? findWaitForElement(finder, waitFor, observation.viewHierarchy)
-      : null;
+    waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
 
-    if (awaitedElement) {
+    if (waitEvaluation.matched) {
       return {
         observation,
-        awaitedElement,
-        awaitDuration: defaultTimer.now() - startTime,
+        awaitedElement: waitEvaluation.awaitedElement,
+        awaitDuration: timer.now() - startTime,
         awaitTimeout: false
       };
     }
@@ -230,7 +501,7 @@ const waitForObservation = async (
 
   return {
     observation,
-    awaitDuration: defaultTimer.now() - startTime,
+    awaitDuration: timer.now() - startTime,
     awaitTimeout: true
   };
 };
@@ -246,7 +517,7 @@ export function registerObserveTools() {
       // source, so every observation reaching here is already platform-validated
       // (raw-mode append below is likewise gated on a validated primary hierarchy).
       const waitOutcome = waitFor
-        ? await waitForObservation(observeScreen, waitFor, signal, args.skipBackStack ?? false)
+        ? await waitForObservation(observeScreen, waitFor, signal, args.skipBackStack ?? false, defaultTimer, device.platform)
         : null;
       const result = waitOutcome
         ? waitOutcome.observation

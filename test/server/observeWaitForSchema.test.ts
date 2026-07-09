@@ -163,6 +163,28 @@ describe("observeSchema rich waitFor predicates", () => {
     });
   });
 
+  test("accepts activeWindow appId aliases", () => {
+    const androidParsed = observeSchema.parse({
+      platform: "android",
+      waitFor: {
+        activeWindow: {
+          packageName: "com.example.android",
+        },
+      },
+    });
+    const iosParsed = observeSchema.parse({
+      platform: "ios",
+      waitFor: {
+        activeWindow: {
+          bundleId: "com.example.ios",
+        },
+      },
+    });
+
+    expect(androidParsed.waitFor?.activeWindow?.appId).toBe("com.example.android");
+    expect(iosParsed.waitFor?.activeWindow?.appId).toBe("com.example.ios");
+  });
+
   test("rejects a rich waitFor with no predicate fields", () => {
     expect(() =>
       observeSchema.parse({

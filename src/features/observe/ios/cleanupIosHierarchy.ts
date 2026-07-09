@@ -126,7 +126,17 @@ function wasStructuralWrapperEmptiedByScopedDedupe(
   }
 
   return isSingleChildStructuralWrapper(original, originalChildren) &&
-    readClassName(cleaned) === readClassName(original);
+    isContentlessNodeOfClass(cleaned, readClassName(original));
+}
+
+function isContentlessNodeOfClass(node: IosHierarchyNode, className: unknown): boolean {
+  return readClassName(node) === className &&
+    !normalizedText(node.text) &&
+    !hasStandaloneContentProperties(node) &&
+    !hasExtras(node) &&
+    !hasActions(node) &&
+    !hasStateProperties(node) &&
+    !hasDirectActionProperties(node);
 }
 
 function dedupeCurrentNoiseSibling(

@@ -374,89 +374,39 @@ class ViewHierarchyExtractorTest {
   // MARK: - Occlusion Filtering Tests
 
   @Test
-  fun `occlusion filter keeps overlapping root-level siblings`() {
-    val siblingOne = elementWithBounds(resourceId = "sibling-one", bounds = bounds(0, 0, 100, 100))
-    val siblingTwo =
-      elementWithBounds(resourceId = "sibling-two", bounds = bounds(50, 50, 150, 150))
-    val root =
-      elementWithBounds(
-        resourceId = "root",
-        bounds = bounds(0, 0, 200, 200),
-        children = listOf(siblingOne, siblingTwo),
-      )
-
-    val filtered = extractor.applyOcclusionFilteringSingleWindowForTest(root)
-
-    assertNotNull(filtered)
-    val siblingOneResult = findElementByResourceId(filtered!!, "sibling-one")
-    val siblingTwoResult = findElementByResourceId(filtered, "sibling-two")
-    assertNotNull(siblingOneResult)
-    assertNotNull(siblingTwoResult)
-    assertNull(siblingOneResult!!.occlusionState)
-    assertNull(siblingOneResult.occludedBy)
-    assertNull(siblingTwoResult!!.occlusionState)
-    assertNull(siblingTwoResult.occludedBy)
-  }
-
-  @Test
-  fun `occlusion filter ignores descendant overlaps`() {
-    val child = elementWithBounds(resourceId = "child", bounds = bounds(0, 0, 100, 100))
-    val parent =
-      elementWithBounds(
-        resourceId = "parent",
-        bounds = bounds(0, 0, 100, 100),
-        children = listOf(child),
-      )
-    val root =
-      elementWithBounds(
-        resourceId = "root",
-        bounds = bounds(0, 0, 120, 120),
-        children = listOf(parent),
-      )
-
-    val filtered = extractor.applyOcclusionFilteringSingleWindowForTest(root)
-
-    assertNotNull(filtered)
-    val parentResult = findElementByResourceId(filtered!!, "parent")
-    val childResult = findElementByResourceId(filtered, "child")
-    assertNotNull(parentResult)
-    assertNotNull(childResult)
-    assertNull(parentResult!!.occlusionState)
-    assertNull(childResult!!.occlusionState)
-  }
-
-  @Test
-  fun `occlusion filter removes unrelated nodes when fully occluded`() {
-    val target = elementWithBounds(resourceId = "hidden-target", bounds = bounds(0, 0, 100, 100))
+  fun `same-window nodes never occlude each other even when fully overlapping`() {
+    // Regression test for the channel-header disappearance bug.
+    // Previously, an UNRELATED same-window node that fully covered another node would mark it
+    // "hidden" and strip it. After optimizeHierarchy promotes children of bounds-only wrappers,
+    // visual siblings (e.g., a Compose toolbar and a full-screen content area) can end up in
+    // different tree branches, be classified UNRELATED, and falsely occlude each other.
+    // Same-window occlusion is now skipped entirely; only cross-window occlusion applies.
+    val target = elementWithBounds(resourceId = "header-target", bounds = bounds(0, 0, 100, 100))
     val targetParent = elementWithBounds(resourceId = "target-parent", children = listOf(target))
-    val occluder = elementWithBounds(resourceId = "occluding-node", bounds = bounds(0, 0, 100, 100))
+    val occluder = elementWithBounds(resourceId = "content-node", bounds = bounds(0, 0, 100, 100))
     val occluderParent =
       elementWithBounds(resourceId = "occluder-parent", children = listOf(occluder))
     val root = elementWithBounds(children = listOf(targetParent, occluderParent))
 
-    val filtered = extractor.applyOcclusionFilteringSingleWindowForTest(root)
+    val windowEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = root)
+    val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(windowEntry))
+    val filtered =
+      extractor.filterOccludedHierarchyForTest(
+        element = root,
+        occlusionInfo = occlusionInfo,
+        windowKey = 1,
+        path = "",
+        isRoot = true,
+      )
 
     assertNotNull(filtered)
-    assertNull(findElementByResourceId(filtered!!, "hidden-target"))
-    assertNotNull(findElementByResourceId(filtered, "occluding-node"))
-  }
-
-  @Test
-  fun `occlusion filter keeps partial overlap and annotates metadata`() {
-    val target = elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
-    val targetParent = elementWithBounds(resourceId = "partial-parent", children = listOf(target))
-    val occluder = elementWithBounds(resourceId = "partial-occluder", bounds = bounds(0, 0, 50, 50))
-    val occluderParent =
-      elementWithBounds(resourceId = "occluder-parent", children = listOf(occluder))
-    val root = elementWithBounds(children = listOf(targetParent, occluderParent))
-
-    val filtered = extractor.applyOcclusionFilteringSingleWindowForTest(root)
-
-    assertNotNull(filtered)
-    val targetResult = findElementByResourceId(filtered!!, "partial-target")
+    // Both nodes retained — same-window occlusion no longer strips the covered node.
+    val targetResult = findElementByResourceId(filtered!!, "header-target")
+    val occluderResult = findElementByResourceId(filtered, "content-node")
     assertNotNull(targetResult)
-    assertEquals("partial", targetResult!!.occlusionState)
-    assertEquals("partial-occluder", targetResult.occludedBy)
+    assertNotNull(occluderResult)
+    assertNull(targetResult!!.occlusionState)
+    assertNull(targetResult.occludedBy)
   }
 
   @Test
@@ -940,6 +890,71 @@ class ViewHierarchyExtractorTest {
     assertEquals(ViewHierarchyExtractor.NodeRelationship.UNCLE, relationship)
   }
 
+  @Test
+  fun `determineNodeRelationship detects nephew - node is uncle of occluder`() {
+    // After optimizeHierarchy promotes a node to root level, it becomes a sibling of
+    // the content tree's root. A deeply nested child of that content tree should be
+    // recognized as related (nephew) to the promoted node.
+    // Example: promoted toolbar at "1" vs deep messages child at "0.0.0.3"
+    val nodePath = "1"
+    val occluderPath = "0.0.0.3"
+
+    val relationship =
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 50,
+        nodeSubtreeEnd = 50,
+        occluderOrder = 20,
+      )
+
+    // The node's parent "" is empty, so both share the root → SIBLING
+    assertEquals(ViewHierarchyExtractor.NodeRelationship.SIBLING, relationship)
+  }
+
+  @Test
+  fun `determineNodeRelationship root-level node is related to deep nested node`() {
+    // Root-level promoted node should not be UNRELATED to nodes in sibling branches.
+    // This prevents false occlusion after optimizeHierarchy flattens the tree.
+    val nodePath = "2"
+    val occluderPath = "0.1.0.2.0"
+
+    val relationship =
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 80,
+        nodeSubtreeEnd = 80,
+        occluderOrder = 30,
+      )
+
+    // Node's parent "" is empty → SIBLING (shares implicit root)
+    assertEquals(ViewHierarchyExtractor.NodeRelationship.SIBLING, relationship)
+  }
+
+  @Test
+  fun `determineNodeRelationship detects nephew at intermediate depth`() {
+    // Non-root nephew case: node at "0.1" is uncle of occluder at "0.1.2.3.4"
+    // because node's parent "0" is a prefix of occluder's path
+    val nodePath = "0.1"
+    val occluderPath = "0.1.2.3.4"
+
+    val relationship =
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 5,
+        nodeSubtreeEnd = 5,
+        occluderOrder = 20,
+      )
+
+    // occluder is a descendant check first: occluderOrder(20) > nodeOrder(5) && 20 <= 5? NO
+    // Then: nodeParent="0", occluderParent="0.1.2.3" → not equal
+    // Uncle check: occluderParent "0.1.2.3" prefix of "0.1"? NO
+    // Nephew check: nodeParent "0" prefix of "0.1.2.3.4"? "0.1.2.3.4".startsWith("0.") → YES
+    assertEquals(ViewHierarchyExtractor.NodeRelationship.UNCLE, relationship)
+  }
+
   // MARK: - viewId Generation Tests
 
   @Test
@@ -1243,18 +1258,6 @@ class ViewHierarchyExtractorTest {
       }
     }
     return null
-  }
-
-  private fun ViewHierarchyExtractor.applyOcclusionFilteringSingleWindowForTest(
-    element: UIElementInfo
-  ): UIElementInfo? {
-    return this.javaClass
-      .getDeclaredMethod("applyOcclusionFilteringSingleWindow", UIElementInfo::class.java)
-      .let { method ->
-        method.isAccessible = true
-        @Suppress("UNCHECKED_CAST")
-        method.invoke(this, element) as UIElementInfo?
-      }
   }
 
   private fun ViewHierarchyExtractor.createWindowEntry(

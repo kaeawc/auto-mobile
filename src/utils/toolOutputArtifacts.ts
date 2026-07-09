@@ -1,19 +1,20 @@
 import { promises as fsPromises, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { ActionableError } from "../models";
+import type { FileSystem } from "./filesystem/DefaultFileSystem";
 import { serverConfig } from "./ServerConfig";
 
 export const TOOL_OUTPUTS_DIR_FLAG = "--tool-outputs-dir";
 export const TOOL_OUTPUT_DIR_FLAG_ALIAS = "--tool-output-dir";
 export const TOOL_OUTPUTS_DIR_ENV = "AUTOMOBILE_TOOL_OUTPUTS_DIR";
+export const TOOL_OUTPUTS_DIR_ENV_ALIAS = "AUTO_MOBILE_TOOL_OUTPUTS_DIR";
 
-export interface ToolOutputsDirFileSystem {
-  ensureDir(dirPath: string): Promise<void>;
+export interface ToolOutputsDirValidationDeps extends Pick<FileSystem, "ensureDir"> {
   stat(dirPath: string): Promise<{ isDirectory(): boolean }>;
   access(dirPath: string): Promise<void>;
 }
 
-const nodeToolOutputsDirFileSystem: ToolOutputsDirFileSystem = {
+const nodeToolOutputsDirValidationDeps: ToolOutputsDirValidationDeps = {
   async ensureDir(dirPath: string): Promise<void> {
     await fsPromises.mkdir(dirPath, { recursive: true });
   },
@@ -55,7 +56,10 @@ export function parseToolOutputsDirConfig(
   launchCwd: string
 ): string | undefined {
   const cliValue = firstFlagValue(args, [TOOL_OUTPUTS_DIR_FLAG, TOOL_OUTPUT_DIR_FLAG_ALIAS]);
-  return normalizeConfiguredPath(cliValue ?? env[TOOL_OUTPUTS_DIR_ENV], launchCwd);
+  return normalizeConfiguredPath(
+    cliValue ?? env[TOOL_OUTPUTS_DIR_ENV] ?? env[TOOL_OUTPUTS_DIR_ENV_ALIAS],
+    launchCwd
+  );
 }
 
 function errorMessage(error: unknown): string {
@@ -64,7 +68,7 @@ function errorMessage(error: unknown): string {
 
 export async function validateToolOutputsDirForWrite(
   dirPath: string,
-  fileSystem: ToolOutputsDirFileSystem = nodeToolOutputsDirFileSystem
+  fileSystem: ToolOutputsDirValidationDeps = nodeToolOutputsDirValidationDeps
 ): Promise<string> {
   try {
     await fileSystem.ensureDir(dirPath);
@@ -99,7 +103,7 @@ export async function validateToolOutputsDirForWrite(
 }
 
 export async function getValidatedToolOutputsDirForWrite(
-  fileSystem: ToolOutputsDirFileSystem = nodeToolOutputsDirFileSystem
+  fileSystem: ToolOutputsDirValidationDeps = nodeToolOutputsDirValidationDeps
 ): Promise<string | undefined> {
   const configuredDir = serverConfig.getToolOutputsDir();
   if (!configuredDir) {

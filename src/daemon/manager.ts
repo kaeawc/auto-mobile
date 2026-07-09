@@ -56,6 +56,7 @@ import {
   parseToolOutputsDirConfig,
   TOOL_OUTPUTS_DIR_FLAG,
   TOOL_OUTPUT_DIR_FLAG_ALIAS,
+  TOOL_OUTPUTS_DIR_ENV,
 } from "../utils/toolOutputArtifacts";
 
 /**
@@ -636,6 +637,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (this.socketPath !== SOCKET_PATH) {
       childEnv.AUTOMOBILE_DAEMON_SOCKET_PATH = this.socketPath;
     }
+    if (options.toolOutputsDir) {
+      childEnv[TOOL_OUTPUTS_DIR_ENV] = options.toolOutputsDir;
+    }
 
     try {
       let retriedIncompleteExtraction = false;
@@ -723,9 +727,6 @@ export class DaemonManager implements DaemonManagerLike {
     }
     if (options.videoMaxArchiveSizeMb !== undefined) {
       args.push("--video-archive-size-mb", options.videoMaxArchiveSizeMb.toString());
-    }
-    if (options.toolOutputsDir) {
-      args.push(TOOL_OUTPUTS_DIR_FLAG, options.toolOutputsDir);
     }
     if (options.networkMockable) {
       args.push("--network-mockable");

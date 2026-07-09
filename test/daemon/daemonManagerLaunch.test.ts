@@ -6,6 +6,7 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
+import { TOOL_OUTPUTS_DIR_ENV, TOOL_OUTPUTS_DIR_FLAG } from "../../src/utils/toolOutputArtifacts";
 
 describe("DaemonManager launch", () => {
   const tempDirs: string[] = [];
@@ -177,14 +178,16 @@ describe("DaemonManager launch", () => {
     expect(realpathSync(capturedEnv![DAEMON_LAUNCH_CWD_ENV]!)).toBe(realpathSync(spawnerCwd));
   });
 
-  test("passes tool outputs directory option to the daemon child args", async () => {
+  test("passes tool outputs directory option to the daemon child env to preserve spaces", async () => {
     const stateDir = createTempDir("daemon-launch-state-");
     process.env.AUTOMOBILE_DATA_DIR = stateDir;
 
     let capturedArgs: string[] | undefined;
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
     const processSpawner: DaemonProcessSpawner = {
-      spawn: (_command: string, args: string[], _options: SpawnOptions) => {
+      spawn: (_command: string, args: string[], options: SpawnOptions) => {
         capturedArgs = args;
+        capturedEnv = options.env;
         return {
           unref() {},
           once() { return this; },
@@ -218,10 +221,11 @@ describe("DaemonManager launch", () => {
       processSpawner
     );
 
-    await manager.start({ toolOutputsDir: "/tmp/auto-mobile-artifacts" });
+    const toolOutputsDir = "/tmp/auto mobile artifacts";
+    await manager.start({ toolOutputsDir });
 
-    expect(capturedArgs).toContain("--tool-outputs-dir");
-    expect(capturedArgs).toContain("/tmp/auto-mobile-artifacts");
+    expect(capturedArgs).not.toContain(TOOL_OUTPUTS_DIR_FLAG);
+    expect(capturedEnv![TOOL_OUTPUTS_DIR_ENV]).toBe(toolOutputsDir);
   });
 
   test("resolves relative daemon state paths before changing daemon cwd", async () => {

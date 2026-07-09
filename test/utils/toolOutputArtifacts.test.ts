@@ -8,10 +8,10 @@ import {
   getValidatedToolOutputsDirForWrite,
   parseToolOutputsDirConfig,
   validateToolOutputsDirForWrite,
-  type ToolOutputsDirFileSystem,
+  type ToolOutputsDirValidationDeps,
 } from "../../src/utils/toolOutputArtifacts";
 
-class FakeToolOutputsDirFileSystem implements ToolOutputsDirFileSystem {
+class FakeToolOutputsDirFileSystem implements ToolOutputsDirValidationDeps {
   ensureDirCalls: string[] = [];
   statCalls: string[] = [];
   accessCalls: string[] = [];
@@ -82,6 +82,27 @@ describe("parseToolOutputsDirConfig", () => {
       { AUTOMOBILE_TOOL_OUTPUTS_DIR: "env-artifacts" },
       launchCwd
     )).toBe(path.resolve(launchCwd, "env-artifacts"));
+  });
+
+  test("supports the legacy AUTO_MOBILE environment variable alias", () => {
+    const launchCwd = path.resolve("launch-root");
+    expect(parseToolOutputsDirConfig(
+      [],
+      { AUTO_MOBILE_TOOL_OUTPUTS_DIR: "legacy-artifacts" },
+      launchCwd
+    )).toBe(path.resolve(launchCwd, "legacy-artifacts"));
+  });
+
+  test("primary environment variable wins over the legacy alias", () => {
+    const launchCwd = path.resolve("launch-root");
+    expect(parseToolOutputsDirConfig(
+      [],
+      {
+        AUTOMOBILE_TOOL_OUTPUTS_DIR: "primary-artifacts",
+        AUTO_MOBILE_TOOL_OUTPUTS_DIR: "legacy-artifacts",
+      },
+      launchCwd
+    )).toBe(path.resolve(launchCwd, "primary-artifacts"));
   });
 
   test("ignores blank configured values", () => {

@@ -96,6 +96,11 @@ describe("tool outputs directory daemon arg relay", () => {
       .toBe("/tmp/artifacts");
   });
 
+  test("legacy AUTO_MOBILE_TOOL_OUTPUTS_DIR env alias parses into DaemonOptions", () => {
+    expect(parseDaemonArgs([], { AUTO_MOBILE_TOOL_OUTPUTS_DIR: "/tmp/legacy-artifacts" }).toolOutputsDir)
+      .toBe("/tmp/legacy-artifacts");
+  });
+
   test("ignores missing or flag-shaped values", () => {
     expect(parseDaemonArgs(["--tool-outputs-dir"]).toolOutputsDir).toBeUndefined();
     expect(parseDaemonArgs(["--tool-outputs-dir", "--debug"]).toolOutputsDir).toBeUndefined();

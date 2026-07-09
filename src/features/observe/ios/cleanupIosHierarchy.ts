@@ -121,12 +121,13 @@ function wasStructuralWrapperEmptiedByScopedDedupe(
   if (isStructuralWrapperWithOnlyScrollBarNoise(original)) {
     return true;
   }
-  if (originalChildren.length !== 1 || noiseSiblingKey(originalChildren[0]) === null) {
+  if (originalChildren.length === 0) {
     return false;
   }
 
-  return isSingleChildStructuralWrapper(original, originalChildren) &&
-    isContentlessNodeOfClass(cleaned, readClassName(original));
+  return isContentlessNodeOfClass(cleaned, readClassName(original)) &&
+    isContentlessStructuralWrapper(original) &&
+    originalChildren.every(isNoiseOnlyStructuralSubtree);
 }
 
 function isContentlessNodeOfClass(node: IosHierarchyNode, className: unknown): boolean {
@@ -137,6 +138,28 @@ function isContentlessNodeOfClass(node: IosHierarchyNode, className: unknown): b
     !hasActions(node) &&
     !hasStateProperties(node) &&
     !hasDirectActionProperties(node);
+}
+
+function isContentlessStructuralWrapper(node: IosHierarchyNode): boolean {
+  const className = readClassName(node);
+  return (className === "UIView" || className === "WKWebView") &&
+    !normalizedText(node.text) &&
+    !hasStandaloneContentProperties(node) &&
+    !hasExtras(node) &&
+    !hasActions(node) &&
+    !hasStateProperties(node) &&
+    !hasDirectActionProperties(node);
+}
+
+function isNoiseOnlyStructuralSubtree(node: IosHierarchyNode): boolean {
+  if (noiseSiblingKey(node) !== null) {
+    return true;
+  }
+
+  const children = normalizeChildren(node.node);
+  return children.length > 0 &&
+    isContentlessStructuralWrapper(node) &&
+    children.every(isNoiseOnlyStructuralSubtree);
 }
 
 function dedupeCurrentNoiseSibling(

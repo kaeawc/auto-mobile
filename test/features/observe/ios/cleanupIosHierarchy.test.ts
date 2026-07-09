@@ -493,6 +493,86 @@ describe("cleanupIosXCTestHierarchy", () => {
     expect(nodes.filter(node => node.className === "WKWebView")).toHaveLength(0);
   });
 
+  test("drops empty UIView wrappers when several noise children are pruned", () => {
+    const result = cleanupIosXCTestHierarchy({
+      updatedAt: 1,
+      hierarchy: {
+        className: "XCUIApplication",
+        node: [
+          {
+            className: "UIView",
+            text: "Horizontal scroll bar, 1 page",
+            bounds: [47, 811, 342, 841],
+          },
+          {
+            className: "UIView",
+            bounds: [0, 0, 390, 844],
+            node: [
+              {
+                className: "UIView",
+                text: "Horizontal scroll bar, 1 page",
+                bounds: [47, 811, 342, 841],
+              },
+              {
+                className: "UIView",
+                bounds: [0, 0, 390, 844],
+                node: {
+                  className: "UIView",
+                  text: "Vertical scroll bar, 1 page",
+                  bounds: [383, 156, 390, 704],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const nodes = collectNodes(result.hierarchy);
+    expect(nodes.filter(node => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
+    expect(nodes.some(node => node.className === "UIView" && node.text === undefined && node.node === undefined)).toBe(false);
+  });
+
+  test("drops empty WKWebView wrappers when several noise children are pruned", () => {
+    const result = cleanupIosXCTestHierarchy({
+      updatedAt: 1,
+      hierarchy: {
+        className: "XCUIApplication",
+        node: [
+          {
+            className: "UIView",
+            text: "Horizontal scroll bar, 1 page",
+            bounds: [47, 811, 342, 841],
+          },
+          {
+            className: "WKWebView",
+            bounds: [0, 0, 390, 844],
+            node: [
+              {
+                className: "UIView",
+                text: "Horizontal scroll bar, 1 page",
+                bounds: [47, 811, 342, 841],
+              },
+              {
+                className: "UIView",
+                bounds: [0, 0, 390, 844],
+                node: {
+                  className: "UIView",
+                  text: "Vertical scroll bar, 1 page",
+                  bounds: [383, 156, 390, 704],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const nodes = collectNodes(result.hierarchy);
+    expect(nodes.filter(node => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
+    expect(nodes.filter(node => node.className === "WKWebView")).toHaveLength(0);
+  });
+
   test("preserves unique noise when an idless WKWebView collapses", () => {
     const result = cleanupIosXCTestHierarchy({
       updatedAt: 1,

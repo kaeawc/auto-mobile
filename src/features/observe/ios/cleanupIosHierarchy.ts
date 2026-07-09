@@ -52,7 +52,10 @@ function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingSco
       rollbackNoiseAdditions(childNoiseScope, additionsStart);
     }
   }
-  if (originalChildren.length === 1 && isSingleChildStructuralWrapper(node, compactedChildren)) {
+  if (
+    isSingleChildStructuralWrapper(node, compactedChildren) &&
+    (originalChildren.length === 1 || isNoiseOnlyCollapse(originalChildren, compactedChildren[0]))
+  ) {
     return compactedChildren[0];
   }
   const result: IosHierarchyNode = { ...node };
@@ -269,6 +272,17 @@ function isSingleChildStructuralWrapper(
   }
 
   return !hasStateProperties(node) && !hasDirectActionProperties(node);
+}
+
+function isNoiseOnlyCollapse(
+  originalChildren: IosHierarchyNode[],
+  remainingChild: IosHierarchyNode | undefined
+): boolean {
+  return Boolean(
+    remainingChild &&
+    isNoiseOnlyStructuralSubtree(remainingChild) &&
+    originalChildren.every(isNoiseOnlyStructuralSubtree)
+  );
 }
 
 function hasStateProperties(node: IosHierarchyNode): boolean {

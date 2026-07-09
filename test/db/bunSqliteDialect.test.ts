@@ -1,9 +1,10 @@
-import { describe, it, expect, test } from "bun:test";
+import { describe, it, expect, spyOn, test } from "bun:test";
 import { CompiledQuery, Kysely, sql } from "kysely";
 import { Database } from "bun:sqlite";
 import { BunSqliteConnectionState, BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { ActionableError } from "../../src/models/ActionableError";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { logger } from "../../src/utils/logger";
 
 /**
  * Regression for issue #2792: destroy() racing queries queued in Kysely's
@@ -573,9 +574,17 @@ describe("BunSqliteConnectionState — close-time database maintenance", () => {
     const db = new FakeDatabase();
     db.throwOnExecSql.set("PRAGMA optimize;", new Error("optimize failed"));
     const state = makeState(db);
+    const debugSpy = spyOn(logger, "debug");
 
-    // Best-effort: optimize failures must be swallowed, not rethrown.
-    expect(() => state.close()).not.toThrow();
+    try {
+      // Best-effort: optimize failures must be logged and swallowed, not rethrown.
+      expect(() => state.close()).not.toThrow();
+      expect(debugSpy).toHaveBeenCalledWith(
+        "PRAGMA optimize on close failed: Error: optimize failed"
+      );
+    } finally {
+      debugSpy.mockRestore();
+    }
 
     expect(db.lifecycleEvents).toEqual([
       "exec:PRAGMA wal_checkpoint(TRUNCATE);",

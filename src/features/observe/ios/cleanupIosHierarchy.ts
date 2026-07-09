@@ -36,8 +36,9 @@ function cleanupNodeSlot(node: unknown): unknown {
 
 function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingScope): IosHierarchyNode | null {
   const childNoiseScope = siblingNoiseScope ?? createNoiseSiblingScope();
+  const originalChildren = normalizeChildren(node.node);
   const compactedChildren: IosHierarchyNode[] = [];
-  for (const child of normalizeChildren(node.node)) {
+  for (const child of originalChildren) {
     const additionsStart = childNoiseScope.additions.length;
     const cleaned = cleanupNode(child, childNoiseScope);
     if (
@@ -51,7 +52,7 @@ function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingSco
       rollbackNoiseAdditions(childNoiseScope, additionsStart);
     }
   }
-  if (isSingleChildStructuralWrapper(node, compactedChildren)) {
+  if (originalChildren.length === 1 && isSingleChildStructuralWrapper(node, compactedChildren)) {
     return compactedChildren[0];
   }
   const result: IosHierarchyNode = { ...node };

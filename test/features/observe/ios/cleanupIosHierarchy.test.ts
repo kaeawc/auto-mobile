@@ -621,6 +621,41 @@ describe("cleanupIosXCTestHierarchy", () => {
     expect(nodes.some(node => node.className === "WKWebView" && node.text === undefined && node.node === undefined)).toBe(false);
   });
 
+  test("preserves multi-child WKWebView wrappers after duplicate noise pruning", () => {
+    const result = cleanupIosXCTestHierarchy({
+      updatedAt: 1,
+      hierarchy: {
+        className: "XCUIApplication",
+        node: [
+          {
+            className: "UIView",
+            text: "Dictate",
+          },
+          {
+            className: "WKWebView",
+            bounds: [0, 0, 390, 844],
+            node: [
+              {
+                className: "UIView",
+                text: "Dictate",
+              },
+              {
+                className: "UIView",
+                text: "Content",
+                bounds: [0, 47, 390, 781],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const webViews = collectNodes(result.hierarchy).filter(node => node.className === "WKWebView");
+    expect(webViews).toHaveLength(1);
+    expect(collectNodes(webViews[0]).some(node => node.text === "Content")).toBe(true);
+    expect(collectNodes(result.hierarchy).filter(node => node.text === "Dictate")).toHaveLength(1);
+  });
+
   test("preserves scrollable idless single-child WKWebView wrappers", () => {
     const result = cleanupIosXCTestHierarchy({
       updatedAt: 1,

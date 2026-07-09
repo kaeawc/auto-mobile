@@ -2,11 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { ObserveElementsBuilder } from "../../../src/features/observe/ObserveElementsBuilder";
 import { Element, ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
 import { IdentifyMediaViews } from "../../../src/features/observe/IdentifyMediaViews";
-import type { ObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
+import { DefaultObserveElementCollector, ObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
-import { FakeElementFinder } from "../../fakes/FakeElementFinder";
-import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { loadAndroidHomeObserve, loadIosFractionalObserve } from "../../fixtures/observe/observeFixture";
 
 const createElement = (bounds: Element["bounds"]): Element => ({
@@ -21,16 +19,6 @@ class TraversalCountingParser extends DefaultElementParser {
       this.rootTraversalStarts++;
     }
     super.traverseNode(node, callback, depth);
-  }
-}
-
-class ThrowingObserveFinder extends FakeElementFinder {
-  override findClickableElements(): Element[] {
-    throw new Error("ObserveElementsBuilder should collect clickable elements from the shared traversal");
-  }
-
-  override findScrollableElements(): Element[] {
-    throw new Error("ObserveElementsBuilder should collect scrollable elements from the shared traversal");
   }
 }
 
@@ -91,7 +79,6 @@ describe("ObserveElementsBuilder", () => {
       bounds: { left: 20, top: 20, right: 30, bottom: 30 }
     };
     const viewHierarchy = { hierarchy: { node: {} } } as ViewHierarchyResult;
-    const fakeParser = new FakeElementParser();
     const fakeCollector = new FakeObserveElementCollector();
     fakeCollector.nextElements = {
       clickable: [clickable],
@@ -100,12 +87,7 @@ describe("ObserveElementsBuilder", () => {
       media: [mediaElement]
     };
 
-    const builder = new ObserveElementsBuilder(
-      new FakeElementFinder(),
-      fakeParser,
-      new IdentifyMediaViews(fakeParser),
-      fakeCollector
-    );
+    const builder = new ObserveElementsBuilder(fakeCollector);
     const elements = builder.build(viewHierarchy, "ios");
 
     expect(fakeCollector.lastViewHierarchy).toBe(viewHierarchy);
@@ -175,9 +157,7 @@ describe("ObserveElementsBuilder", () => {
 
     const parser = new TraversalCountingParser();
     const builder = new ObserveElementsBuilder(
-      new ThrowingObserveFinder(),
-      parser,
-      new IdentifyMediaViews(parser)
+      new DefaultObserveElementCollector(parser, new IdentifyMediaViews(parser))
     );
 
     const elements = builder.build(viewHierarchy, "android");
@@ -239,9 +219,7 @@ describe("ObserveElementsBuilder", () => {
 
     const parser = new TraversalCountingParser();
     const builder = new ObserveElementsBuilder(
-      new ThrowingObserveFinder(),
-      parser,
-      new IdentifyMediaViews(parser)
+      new DefaultObserveElementCollector(parser, new IdentifyMediaViews(parser))
     );
 
     const elements = builder.build(viewHierarchy, "ios");

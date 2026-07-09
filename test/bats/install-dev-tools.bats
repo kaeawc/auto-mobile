@@ -51,3 +51,34 @@ STUB
   [ "$status" -ne 0 ]
   [[ "$output" == *"dev tool(s) could not be installed"* ]]
 }
+
+@test "Linux development tool installer fails when any apt package install fails" {
+  cat > "${STUB_BIN}/apt-get" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  "$CHMOD" +x "${STUB_BIN}/apt-get"
+
+  cat > "${STUB_BIN}/dpkg" <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+  "$CHMOD" +x "${STUB_BIN}/dpkg"
+
+  cat > "${STUB_BIN}/sudo" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "apt-get" && "${2:-}" == "install" && "${5:-}" == "shellcheck" ]]; then
+  exit 1
+fi
+
+exit 0
+STUB
+  "$CHMOD" +x "${STUB_BIN}/sudo"
+
+  run _install_dev_tools_apt
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"dev tool(s) could not be installed"* ]]
+}

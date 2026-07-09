@@ -93,6 +93,14 @@ STUB
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"All runtime dependencies verified."* ]]
+
+  resolved_bun=$(
+    PATH="${MOCK_BIN}:/usr/bin:/bin" \
+      HOME="${TEST_HOME}" \
+      FAKE_HOMEBREW_PREFIX="${homebrew_prefix}" \
+      bash -c 'source scripts/ci/verify-runtime-deps.sh >/dev/null; command -v bun'
+  )
+  [ "${resolved_bun}" = "${homebrew_prefix}/bin/bun" ]
 }
 
 @test "script is executable" {

@@ -18,17 +18,18 @@ prepend_path_if_dir() {
   fi
 }
 
-prepend_path_if_dir "${HOME}/.bun/bin"
 if [[ "$(uname -s)" == "Darwin" ]]; then
+  homebrew_prefix=""
   if command -v brew >/dev/null 2>&1; then
     homebrew_prefix="$(brew --prefix 2>/dev/null || true)"
-    if [[ -n "${homebrew_prefix}" ]]; then
-      prepend_path_if_dir "${homebrew_prefix}/bin"
-    fi
   fi
-  prepend_path_if_dir "/opt/homebrew/bin"
   prepend_path_if_dir "/usr/local/bin"
+  prepend_path_if_dir "/opt/homebrew/bin"
+  if [[ -n "${homebrew_prefix}" ]]; then
+    prepend_path_if_dir "${homebrew_prefix}/bin"
+  fi
 fi
+prepend_path_if_dir "${HOME}/.bun/bin"
 # shellcheck disable=SC1091
 if [[ -f "${HOME}/.bashrc" ]]; then source "${HOME}/.bashrc" 2>/dev/null || true; fi
 hash -r 2>/dev/null || true

@@ -340,6 +340,36 @@ describe("published observe waitFor input schema", () => {
         },
       },
     },
+    {
+      label: "textAny mixed with className",
+      input: {
+        platform: "android",
+        waitFor: {
+          textAny: ["Name"],
+          className: "android.widget.TextView",
+        },
+      },
+    },
+    {
+      label: "textAny mixed with contentDescription",
+      input: {
+        platform: "android",
+        waitFor: {
+          textAny: ["Name"],
+          contentDescription: "Name",
+        },
+      },
+    },
+    {
+      label: "textAny mixed with textMatch",
+      input: {
+        platform: "android",
+        waitFor: {
+          textAny: ["Name"],
+          textMatch: "exact",
+        },
+      },
+    },
   ])("rejects runtime-invalid waitFor input: $label", ({ input }) => {
     expect(observeSchema.safeParse(input).success).toBe(false);
 
@@ -662,10 +692,35 @@ describe("findWaitForElement rich predicates", () => {
       {
         contentDescription: "Home",
       } as any,
-      hierarchy
+      hierarchy,
+      "ios"
     );
 
     expect(element?.text).toBe("Home");
+  });
+
+  test("does not match Android text-only nodes for contentDescription", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          text: "Home",
+          class: "android.widget.TextView",
+          bounds: bounds(10, 10, 180, 60),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        contentDescription: "Home",
+      } as any,
+      hierarchy,
+      "android"
+    );
+
+    expect(element).toBeNull();
   });
 });
 
@@ -789,6 +844,30 @@ describe("waitForObservation activeWindow", () => {
 
     expect(outcome.awaitTimeout).toBe(false);
     expect(observeScreen.getExecuteCallCount()).toBe(1);
+  });
+
+  test("does not satisfy iOS activeWindow with only Android activityName", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(() => makeObservation("com.example.ios", ""));
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: {
+          activityName: "com.example.ios.IgnoredActivity",
+        },
+        timeout: 250,
+      } as any,
+      undefined,
+      false,
+      timer,
+      "ios"
+    );
+
+    expect(outcome.awaitTimeout).toBe(true);
+    expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(1);
   });
 
   test("times out when only the element predicate matches", async () => {

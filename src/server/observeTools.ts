@@ -166,7 +166,8 @@ const isElementCenterOffScreen = (
 export const findWaitForElement = (
   finder: ElementFinder,
   waitFor: ObserveWaitForOptions,
-  viewHierarchy: ViewHierarchyResult
+  viewHierarchy: ViewHierarchyResult,
+  platform?: BootedDevice["platform"]
 ): Element | null => {
   const container = waitForContainerForFinder(waitFor);
 
@@ -208,7 +209,7 @@ export const findWaitForElement = (
     return null;
   }
 
-  return findRichWaitForElement(finder, waitFor, viewHierarchy);
+  return findRichWaitForElement(finder, waitFor, viewHierarchy, platform);
 };
 
 const hasElementPredicate = (waitFor: ObserveWaitForOptions): boolean =>
@@ -268,7 +269,7 @@ const getClassName = (element: Element): string | undefined =>
       ? element.className
       : undefined;
 
-const getContentDescription = (element: Element): string | undefined =>
+const getContentDescription = (element: Element, platform?: BootedDevice["platform"]): string | undefined =>
   typeof element["content-desc"] === "string"
     ? element["content-desc"]
     : typeof element["ios-accessibility-label"] === "string"
@@ -277,7 +278,7 @@ const getContentDescription = (element: Element): string | undefined =>
         ? element.contentDescription
         : typeof element.accessibilityLabel === "string"
           ? element.accessibilityLabel
-          : typeof element.text === "string"
+          : platform === "ios" && typeof element.text === "string"
             ? element.text
             : undefined;
 
@@ -316,7 +317,8 @@ const matchesTextPredicate = (element: Element, waitFor: ObserveWaitForOptions):
 
 const elementPredicateResults = (
   element: Element,
-  waitFor: ObserveWaitForOptions
+  waitFor: ObserveWaitForOptions,
+  platform?: BootedDevice["platform"]
 ): boolean[] => {
   const results: boolean[] = [];
   if (waitFor.elementId !== undefined) {
@@ -329,7 +331,7 @@ const elementPredicateResults = (
     results.push(getClassName(element) === waitFor.className);
   }
   if (waitFor.contentDescription !== undefined) {
-    results.push(matchesString(getContentDescription(element), waitFor.contentDescription, "exact"));
+    results.push(matchesString(getContentDescription(element, platform), waitFor.contentDescription, "exact"));
   }
   return results;
 };
@@ -337,14 +339,15 @@ const elementPredicateResults = (
 const findRichWaitForElement = (
   finder: ElementFinder,
   waitFor: ObserveWaitForOptions,
-  viewHierarchy: ViewHierarchyResult
+  viewHierarchy: ViewHierarchyResult,
+  platform?: BootedDevice["platform"]
 ): Element | null => {
   const candidates = collectCandidateElements(finder, waitFor, viewHierarchy)
     .filter(candidate => !isElementCenterOffScreen(candidate, viewHierarchy));
   const matchType = waitFor.matchType ?? "all";
 
   for (const candidate of candidates) {
-    const results = elementPredicateResults(candidate, waitFor);
+    const results = elementPredicateResults(candidate, waitFor, platform);
     if (results.length === 0) {
       continue;
     }
@@ -378,6 +381,14 @@ const matchesActiveWindow = (
   }
 
   if (
+    platform === "ios" &&
+    waitFor.activeWindow.activityName !== undefined &&
+    waitFor.activeWindow.appId === undefined
+  ) {
+    return false;
+  }
+
+  if (
     platform !== "ios" &&
     waitFor.activeWindow.activityName !== undefined &&
     activeWindow.activityName !== waitFor.activeWindow.activityName
@@ -397,7 +408,7 @@ const evaluateWaitForObservation = (
   const activeWindowMatched = matchesActiveWindow(observation, waitFor, platform);
   const needsElementMatch = hasElementPredicate(waitFor);
   const awaitedElement = needsElementMatch && observation.viewHierarchy
-    ? findWaitForElement(finder, waitFor, observation.viewHierarchy)
+    ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform)
     : null;
 
   return {

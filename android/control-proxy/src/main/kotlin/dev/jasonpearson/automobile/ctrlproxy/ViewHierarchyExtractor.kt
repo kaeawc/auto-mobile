@@ -109,20 +109,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
             "[PROCESS] After wrapOptimizedElements: hasElement=${wrappedElement != null}, textNodes=$wrappedTextCount",
           )
 
-          val finalElement = wrappedElement?.let {
-            if (OCCLUSION_FILTER_ENABLED) {
-              val filtered = applyOcclusionFilteringSingleWindow(it)
-              val filteredTextCount = filtered?.let { countTextNodes(it) } ?: 0
-              Log.d(
-                TAG,
-                "[PROCESS] After applyOcclusionFiltering: hasElement=${filtered != null}, textNodes=$filteredTextCount",
-              )
-              filtered
-            } else {
-              it
-            }
-          }
-          finalElement
+          // Single-window occlusion filtering is intentionally skipped.
+          // After optimizeHierarchy promotes children from bounds-only wrappers, the tree
+          // structure no longer matches visual relationships, causing false occlusion between
+          // visual siblings that end up at different tree depths (e.g., Compose overlapping
+          // layouts).
+          wrappedElement
         }
 
       val intentChooserDetected =
@@ -1447,6 +1439,13 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    * Determines the relationship between a node and a potential occluder based on their paths and
    * traversal order.
    *
+   * NOTE: This function currently has no production callers. Same-window occlusion is skipped
+   * unconditionally in [buildOcclusionInfo], and [applyOcclusionFilteringSingleWindow] was removed,
+   * so nothing in production consults this relationship. It is retained (and kept semantically
+   * correct, including the nephew and root-level cases below) for the future direction of running
+   * occlusion on the pre-optimization tree, where path-based relationship detection is reliable
+   * again. It is exercised only by unit tests today.
+   *
    * @param nodePath The path of the node being checked (e.g., "0.0.0.1.0")
    * @param occluderPath The path of the potential occluder (e.g., "0.0.0.1.1")
    * @param nodeOrder The traversal order of the node
@@ -1476,8 +1475,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       return NodeRelationship.SIBLING
     }
 
-    // Check if occluder is a sibling of any ancestor (uncle/cousin)
-    // If occluder's parent is a prefix of node's path, they share a common ancestor
+    // Check if occluder is a sibling of any ancestor of the node (uncle relationship)
+    // If occluder's parent is a prefix of node's path, the occluder is an uncle of the node
     val isUncle =
       occluderParentPath.isNotEmpty() &&
         nodePath.startsWith(occluderParentPath + ".") &&
@@ -1486,29 +1485,31 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       return NodeRelationship.UNCLE
     }
 
+    // Check the reverse: if node is a sibling of any ancestor of the occluder (nephew relationship)
+    // If node's parent is a prefix of occluder's path, the node is an uncle of the occluder.
+    // After optimizeHierarchy promotes children from bounds-only wrappers, nodes at different
+    // depths
+    // can be visual siblings — this check prevents them from being classified as UNRELATED.
+    val isNephew =
+      nodeParentPath.isNotEmpty() &&
+        occluderPath.startsWith(nodeParentPath + ".") &&
+        nodeParentPath != occluderParentPath
+    if (isNephew) {
+      return NodeRelationship.UNCLE
+    }
+
+    // If either node is at the root level (empty parent path), they share the implicit root
+    // as a common ancestor and should be treated as related.
+    if (nodeParentPath.isEmpty() || occluderParentPath.isEmpty()) {
+      return NodeRelationship.SIBLING
+    }
+
     return NodeRelationship.UNRELATED
   }
 
-  private fun applyOcclusionFilteringSingleWindow(element: UIElementInfo): UIElementInfo? {
-    val windowEntry =
-      WindowEntry(
-        windowId = DEFAULT_WINDOW_KEY,
-        windowType = "application",
-        windowLayer = 0,
-        packageName = null,
-        isActive = true,
-        isFocused = true,
-        hierarchy = element,
-      )
-    val occlusionInfo = buildOcclusionInfo(listOf(windowEntry))
-    return filterOccludedHierarchy(
-      element,
-      occlusionInfo,
-      DEFAULT_WINDOW_KEY,
-      path = "",
-      isRoot = false,
-    )
-  }
+  // applyOcclusionFilteringSingleWindow removed: within-window occlusion filtering is disabled
+  // because optimizeHierarchy restructures the tree in ways that break path-based relationship
+  // detection, causing false occlusion between visual siblings at different depths.
 
   private fun buildOcclusionInfo(windowEntries: List<WindowEntry>): Map<NodeKey, OcclusionInfo> {
     val nodes = mutableListOf<OcclusionNode>()
@@ -1569,33 +1570,22 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           continue
         }
         if (occluder.windowKey == node.windowKey) {
-          // Determine relationship between node and occluder
-          val relationship =
-            determineNodeRelationship(
-              nodePath = node.key.path,
-              occluderPath = occluder.key.path,
-              nodeOrder = node.order,
-              nodeSubtreeEnd = node.subtreeEnd,
-              occluderOrder = occluder.order,
-            )
-
+          // Within the same window, nodes should never occlude each other.
+          // After optimizeHierarchy promotes children of bounds-only wrappers, the tree structure
+          // no longer reliably reflects visual relationships. Nodes that are visual siblings
+          // (e.g., a toolbar and a scrollable content area in a Compose Box) can end up at
+          // different depths in the optimized tree, causing determineNodeRelationship to
+          // incorrectly classify them as UNRELATED — leading to false occlusion (the Slack
+          // channel-header disappearance bug).
+          // This also makes the multi-window path consistent with the `windowEntries.size == 1`
+          // guard above, which already skips within-window occlusion when only one window exists.
           if (isDebugNode) {
             Log.d(
               TAG,
-              "[OCCLUSION]   Check relation: occluderPath='${occluder.key.path}', relationship=$relationship",
+              "[OCCLUSION]   Skip same-window: text='${occluder.element.text}', bounds=${occluder.bounds}, order=${occluder.order}",
             )
           }
-
-          // Skip descendants, siblings, and uncles - they should not occlude each other
-          if (relationship != NodeRelationship.UNRELATED) {
-            if (isDebugNode) {
-              Log.d(
-                TAG,
-                "[OCCLUSION]   Skip $relationship: text='${occluder.element.text}', bounds=${occluder.bounds}, order=${occluder.order}",
-              )
-            }
-            continue
-          }
+          continue
         }
 
         val intersection = intersectBounds(node.bounds, occluder.bounds) ?: continue

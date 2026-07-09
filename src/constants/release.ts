@@ -305,7 +305,7 @@ export function resolveAssetBaseUrl(env: EnvLike = process.env): string {
         `use a path-only base URL such as ${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}.`
       );
     }
-    return trimmed.replace(/\/+$/, "");
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "");
   }
   return DEFAULT_ASSET_BASE_URL;
 }

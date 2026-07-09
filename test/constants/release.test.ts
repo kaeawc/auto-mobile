@@ -148,6 +148,13 @@ describe("resolveAssetBaseUrl (AUTOMOBILE_ASSET_BASE_URL mirror knob)", function
       .toBe("https://mirror.test/am");
   });
 
+  test("normalizes parser-accepted mirror bases before URL composition", function() {
+    expect(resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https:mirror.test/am/" }))
+      .toBe("https://mirror.test/am");
+    expect(resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test\\am" }))
+      .toBe("https://mirror.test/am");
+  });
+
   test("ignores a blank mirror base", function() {
     expect(resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "  " })).toBe(DEFAULT_ASSET_BASE_URL);
   });

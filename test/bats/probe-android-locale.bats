@@ -84,5 +84,8 @@ SCRIPT
   [[ "$output" == *"adb root: failed"* ]]
   [[ "$output" == *"system setprop after adb root: skipped"* ]]
   [[ "$output" == *"per-app cmd locale: succeeded"* ]]
-  ! grep -q "emu kill" "$INVOCATION_FILE"
+  if grep -q "emu kill" "$INVOCATION_FILE"; then
+    echo "script should not kill externally supplied ADB_SERIAL" >&2
+    return 1
+  fi
 }

@@ -114,11 +114,12 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       return this.setSystemLocale(languageTag, options, "setprop persist.sys.locale + stop/start after adb root");
     }
 
-    const previousLanguageTag = await this.getAppLocaleTag(appId);
+    const targetUserId = await this.resolveTargetUserId(appId);
+    const previousLanguageTag = await this.getAppLocaleTag(appId, targetUserId);
 
     try {
       await this.adb.executeCommand(
-        `shell cmd locale set-app-locales ${quoteShellArg(appId)} --locales ${quoteShellArg(languageTag)}`
+        `shell cmd locale set-app-locales --user ${targetUserId} ${quoteShellArg(appId)} --locales ${quoteShellArg(languageTag)}`
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -130,7 +131,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       };
     }
 
-    const effectiveLanguageTag = await this.getAppLocaleTag(appId);
+    const effectiveLanguageTag = await this.getAppLocaleTag(appId, targetUserId);
     if (!this.localeTagsMatch(effectiveLanguageTag, languageTag)) {
       return {
         success: false,
@@ -148,9 +149,28 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       success: true,
       languageTag,
       previousLanguageTag,
-      method: `cmd locale set-app-locales ${appId}`,
+      method: `cmd locale set-app-locales ${appId} --user ${targetUserId}`,
       broadcasted
     };
+  }
+
+  private async resolveTargetUserId(appId: string): Promise<number> {
+    try {
+      const foregroundApp = await this.adb.getForegroundApp();
+      if (foregroundApp?.packageName === appId) {
+        return foregroundApp.userId;
+      }
+    } catch (error) {
+      logger.debug(`[SystemConfigurationManager] Failed to resolve foreground Android app user for ${appId}: ${error}`);
+    }
+
+    try {
+      const runningUser = (await this.adb.listUsers()).find(user => user.running);
+      return runningUser?.userId ?? 0;
+    } catch (error) {
+      logger.debug(`[SystemConfigurationManager] Failed to list Android users for ${appId}: ${error}`);
+      return 0;
+    }
   }
 
   private async ensureRootForLegacyLocale(apiLevel: number): Promise<{ success: true } | { success: false; error: string }> {
@@ -464,10 +484,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     return language;
   }
 
-  private async getAppLocaleTag(appId: string): Promise<string | null> {
+  private async getAppLocaleTag(appId: string, userId: number): Promise<string | null> {
     try {
       const result = await this.adb.executeCommand(
-        `shell cmd locale get-app-locales ${quoteShellArg(appId)}`,
+        `shell cmd locale get-app-locales --user ${userId} ${quoteShellArg(appId)}`,
         undefined,
         undefined,
         true

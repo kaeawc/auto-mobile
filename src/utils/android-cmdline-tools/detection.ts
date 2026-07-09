@@ -448,10 +448,14 @@ export async function detectAndroidCommandLineTools(systemDetection = createDefa
     logger.warn(`Error detecting Android tools in PATH: ${(error as Error).message}`);
   }
 
-  // Remove duplicates based on path
-  const uniqueLocations = locations.filter((location, index, self) =>
-    index === self.findIndex(l => l.path === location.path)
-  );
+  // Remove duplicates based on path while preserving first-seen ordering.
+  const uniqueLocationsByPath = new Map<string, AndroidToolsLocation>();
+  for (const location of locations) {
+    if (!uniqueLocationsByPath.has(location.path)) {
+      uniqueLocationsByPath.set(location.path, location);
+    }
+  }
+  const uniqueLocations = Array.from(uniqueLocationsByPath.values());
 
   logger.debug(`Detection complete. Found ${uniqueLocations.length} unique Android tools installations.`);
 

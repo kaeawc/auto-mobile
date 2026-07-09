@@ -431,6 +431,33 @@ describe("Android Command Line Tools - Detection", () => {
   });
 
   describe("detectAndroidCommandLineTools", () => {
+    test("should preserve first-seen order when deduplicating by path", async () => {
+      systemDetection.setPlatform("darwin");
+      systemDetection.setEnvVar("ANDROID_SDK_ROOT", "/android/sdk");
+
+      const homebrewPath = "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest";
+      systemDetection.addExistingFile(homebrewPath);
+      systemDetection.addExistingFile(`${homebrewPath}/bin`);
+      systemDetection.addExistingFile(`${homebrewPath}/bin/sdkmanager`);
+      systemDetection.setExecResponse(`${homebrewPath}/bin/sdkmanager --version`, "1.0\n");
+      systemDetection.setExecResponse("which sdkmanager", `${homebrewPath}/bin/sdkmanager\n`);
+
+      const sdkPath = "/android/sdk/cmdline-tools/latest";
+      systemDetection.addExistingFile("/android/sdk");
+      systemDetection.addExistingFile(sdkPath);
+      systemDetection.addExistingFile(`${sdkPath}/bin`);
+      systemDetection.addExistingFile(`${sdkPath}/bin/sdkmanager`);
+      systemDetection.setExecResponse(`${sdkPath}/bin/sdkmanager --version`, "2.0\n");
+
+      const result = await detectAndroidCommandLineTools(systemDetection);
+
+      expect(result.map(location => normalizePath(location.path))).toEqual([
+        homebrewPath,
+        sdkPath
+      ]);
+      expect(result.map(location => location.source)).toEqual(["homebrew", "android_sdk_root"]);
+    });
+
     test("should handle errors gracefully and continue detection", async () => {
       systemDetection.setPlatform("darwin");
       systemDetection.setHomeDir("/Users/test");

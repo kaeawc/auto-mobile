@@ -117,8 +117,6 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeFactory: TestAdbClientFactory;
   const savedHeadless = process.env.AUTOMOBILE_EMULATOR_HEADLESS;
-  const savedExternalMode = process.env.AUTOMOBILE_EMULATOR_EXTERNAL;
-  const savedAvdHome = process.env.ANDROID_AVD_HOME;
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
@@ -131,16 +129,6 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       delete process.env.AUTOMOBILE_EMULATOR_HEADLESS;
     } else {
       process.env.AUTOMOBILE_EMULATOR_HEADLESS = savedHeadless;
-    }
-    if (savedExternalMode === undefined) {
-      delete process.env.AUTOMOBILE_EMULATOR_EXTERNAL;
-    } else {
-      process.env.AUTOMOBILE_EMULATOR_EXTERNAL = savedExternalMode;
-    }
-    if (savedAvdHome === undefined) {
-      delete process.env.ANDROID_AVD_HOME;
-    } else {
-      process.env.ANDROID_AVD_HOME = savedAvdHome;
     }
   }
 
@@ -272,37 +260,4 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     );
   });
 
-  test("does not let legacy external emulator mode skip local emulator launch", async () => {
-    const emptyAvdHome = `${process.cwd()}/scratch/test-empty-avd-home`;
-    process.env.AUTOMOBILE_EMULATOR_EXTERNAL = "true";
-    process.env.ANDROID_AVD_HOME = emptyAvdHome;
-    let spawnCalled = false;
-    const fakeChild = createFakeChildProcess();
-
-    const spawnFn = ((_cmd: string, _args: string[]) => {
-      spawnCalled = true;
-      process.nextTick(() => {
-        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
-      });
-      return fakeChild;
-    }) as any;
-
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("-list-avds")) {
-        return createExecResult("Pixel_9_Pro\n");
-      }
-      return createExecResult("");
-    };
-
-    fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
-    skipEmulatorPathDetection(client);
-
-    try {
-      await client.startEmulator("Pixel_9_Pro");
-      expect(spawnCalled).toBe(true);
-    } finally {
-      restoreEnv();
-    }
-  });
 });

@@ -22,16 +22,14 @@ const noAvdConfigReader: AvdConfigReader = {
 };
 
 describe("AndroidEmulatorClient listAvds", () => {
-  test("does not use legacy external emulator mode to read host AVD config", async () => {
+  test("does not read AVD config files when the emulator command is missing", async () => {
     const homeDir = mkdtempSync(join(tmpdir(), "automobile-home-"));
     const originalHome = process.env.HOME;
-    const originalExternalMode = process.env.AUTOMOBILE_EMULATOR_EXTERNAL;
 
     try {
       mkdirSync(join(homeDir, ".android", "avd"), { recursive: true });
       writeFileSync(join(homeDir, ".android", "avd", "Pixel_9.ini"), "path=/host/Pixel_9.avd\n");
       process.env.HOME = homeDir;
-      process.env.AUTOMOBILE_EMULATOR_EXTERNAL = "true";
 
       const execAsync = async (_command: string): Promise<ExecResult> => {
         throw new Error("emulator: command not found");
@@ -45,11 +43,6 @@ describe("AndroidEmulatorClient listAvds", () => {
         delete process.env.HOME;
       } else {
         process.env.HOME = originalHome;
-      }
-      if (originalExternalMode === undefined) {
-        delete process.env.AUTOMOBILE_EMULATOR_EXTERNAL;
-      } else {
-        process.env.AUTOMOBILE_EMULATOR_EXTERNAL = originalExternalMode;
       }
       rmSync(homeDir, { recursive: true, force: true });
     }

@@ -143,9 +143,6 @@ docker-compose up
 
 # Run container structure tests
 ./scripts/docker/test_container.sh
-
-# Test host emulator access from the slim image (auto-starts host emulator if needed)
-./scripts/docker/test_host_emulator_mcp.sh
 ```
 
 ### Test MCP stdio Protocol

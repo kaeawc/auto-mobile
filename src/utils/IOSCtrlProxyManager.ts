@@ -103,7 +103,7 @@ export type { HostPortAvailabilityChecker };
 
 class RemoteServicePortUnavailableError extends Error {
   constructor(host: string, port: number) {
-    super(`Host control port ${port} is already in use on ${host}`);
+    super(`Remote runner port ${port} is already in use on ${host}`);
     this.name = "RemoteServicePortUnavailableError";
   }
 }
@@ -789,7 +789,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
               await this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: hungPid });
             } catch (error) {
               logger.warn(
-                `[IOSCtrlProxy] Host control stop of hung runner ${hungPid} failed: ` +
+                `[IOSCtrlProxy] Remote runner stop of hung runner ${hungPid} failed: ` +
                 `${error instanceof Error ? error.message : String(error)}`
               );
             }
@@ -851,7 +851,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           await this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: this.xcTestProcessId });
         }
       } catch (error) {
-        logger.warn(`[IOSCtrlProxy] Host control stop failed: ${error instanceof Error ? error.message : String(error)}`);
+        logger.warn(`[IOSCtrlProxy] Remote runner stop failed: ${error instanceof Error ? error.message : String(error)}`);
       }
 
       if (!this.isSimulator()) {
@@ -1107,7 +1107,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       const unavailablePort = this.servicePort;
       logger.warn(
-        `[IOSCtrlProxy] Host control port ${unavailablePort} is already in use on ${host}; reallocating`
+        `[IOSCtrlProxy] Remote runner port ${unavailablePort} is already in use on ${host}; reallocating`
       );
       if (!allowReallocation) {
         throw new RemoteServicePortUnavailableError(host, unavailablePort);
@@ -1140,7 +1140,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     if (this.useRemoteRunner()) {
       if (!await this.isRemoteRunnerAvailable()) {
-        throw new Error("Host control daemon not available for CtrlProxy startup");
+        throw new Error("Remote runner not available for CtrlProxy startup");
       }
 
       const existingProcess = await this.remoteRunner.status({ deviceId: this.device.deviceId });
@@ -1167,7 +1167,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       });
 
       if (!result.success || !result.data) {
-        throw new Error(result.error || "Host control failed to start CtrlProxy");
+        throw new Error(result.error || "Remote runner failed to start CtrlProxy");
       }
 
       if (typeof result.data.port === "number") {
@@ -1928,7 +1928,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     if (this.useRemoteRunner()) {
       if (!await this.isRemoteRunnerAvailable()) {
-        throw new Error("Host control daemon not available for CtrlProxy startup");
+        throw new Error("Remote runner not available for CtrlProxy startup");
       }
 
       const existingProcess = await this.remoteRunner.status({ deviceId: this.device.deviceId });
@@ -1956,7 +1956,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       });
 
       if (!result.success || !result.data) {
-        throw new Error(result.error || "Host control failed to start CtrlProxy");
+        throw new Error(result.error || "Remote runner failed to start CtrlProxy");
       }
 
       const resultDevicePort = result.data.port;

@@ -1,5 +1,5 @@
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { logger } from "../../utils/logger";
+import { logger, LogLevel } from "../../utils/logger";
 import { BootedDevice } from "../../models";
 import { Element } from "../../models";
 import { ViewHierarchyResult } from "../../models";
@@ -423,16 +423,17 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       return viewHierarchy;
     }
 
-    const originalSize = JSON.stringify(viewHierarchy.hierarchy).length;
-
     const result = { ...viewHierarchy };
     result.hierarchy = this.filterOffscreenNode(viewHierarchy.hierarchy, screenWidth, screenHeight, margin);
 
-    const filteredSize = JSON.stringify(result.hierarchy).length;
-    const reduction = Math.round((1 - filteredSize / originalSize) * 100);
+    if (logger.getLogLevel() <= LogLevel.DEBUG) {
+      const originalSize = JSON.stringify(viewHierarchy.hierarchy).length;
+      const filteredSize = JSON.stringify(result.hierarchy).length;
+      const reduction = Math.round((1 - filteredSize / originalSize) * 100);
 
-    if (reduction > 10) {
-      logger.debug(`Offscreen filtering reduced hierarchy by ${reduction}% (${originalSize} -> ${filteredSize} bytes)`);
+      if (reduction > 10) {
+        logger.debug(`Offscreen filtering reduced hierarchy by ${reduction}% (${originalSize} -> ${filteredSize} bytes)`);
+      }
     }
 
     return result;

@@ -5,6 +5,7 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 
 export type MediaType = "image" | "video" | "loading" | "mixed";
+export type FlattenedElementEntry = { element: Element; index: number; depth: number; text?: string };
 
 export interface MediaView {
   viewId?: string;
@@ -89,9 +90,13 @@ export class IdentifyMediaViews {
     this.parser = parser;
   }
 
-  classify(viewHierarchy: ViewHierarchyResult, platform: "android" | "ios"): MediaView[] {
+  classify(
+    viewHierarchy: ViewHierarchyResult,
+    platform: "android" | "ios",
+    flattenedEntries?: FlattenedElementEntry[]
+  ): MediaView[] {
     const patterns = platform === "ios" ? iosPatterns : androidPatterns;
-    const entries = this.parser.flattenViewHierarchy(viewHierarchy, {
+    const entries = flattenedEntries ?? this.parser.flattenViewHierarchy(viewHierarchy, {
       includeWindows: true,
       windowOrder: "topmost-first"
     });

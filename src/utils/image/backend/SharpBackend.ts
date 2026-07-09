@@ -76,12 +76,28 @@ export class SharpBackend implements ImageBackend {
   }
 
   private async applyPipeline(sharp: SharpFactory, source: Buffer, pipeline: ImagePipeline): Promise<ReturnType<SharpFactory>> {
-    let current = source;
+    let image = sharp(source);
+    let hasResizeInCurrentPipeline = false;
+    let hasCropInCurrentPipeline = false;
     for (const operation of pipeline.operations) {
-      current = await this.applyOperation(sharp(current), operation).toBuffer();
+      if (
+        (operation.type === "resize" && hasResizeInCurrentPipeline)
+        || (operation.type === "crop" && hasCropInCurrentPipeline)
+      ) {
+        // Sharp collapses some repeated operations in one pipeline; materialize only at compatibility boundaries.
+        image = sharp(await image.toBuffer());
+        hasResizeInCurrentPipeline = false;
+        hasCropInCurrentPipeline = false;
+      }
+      image = this.applyOperation(image, operation);
+      if (operation.type === "resize") {
+        hasResizeInCurrentPipeline = true;
+      } else {
+        hasCropInCurrentPipeline = true;
+      }
     }
 
-    return this.applyEncoding(sharp(current), pipeline);
+    return this.applyEncoding(image, pipeline);
   }
 
   public async execute(source: Buffer, pipeline: ImagePipeline): Promise<Buffer> {

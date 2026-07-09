@@ -4,6 +4,39 @@ import type { NavigationNode, NavigationEdge } from "../../db/types";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
+interface CoverageAnalysis {
+  totalNodes: number;
+  coveredNodes: number;
+  uncoveredNodes: NavigationNode[];
+  totalEdges: number;
+  coveredEdges: number;
+  uncoveredEdges: NavigationEdge[];
+  coveragePercentage: number;
+}
+
+interface TestCoverageAnalysisRepository {
+  getAggregatedCoverageAnalysis(appId: string): Promise<CoverageAnalysis>;
+}
+
+interface NavigationGraphRepository {
+  getNodes(appId: string): Promise<NavigationNode[]>;
+  getEdges(appId: string): Promise<NavigationEdge[]>;
+}
+
+interface TestCoverageAnalyzerOptions {
+  coverageRepository?: TestCoverageAnalysisRepository;
+  navigationRepository?: NavigationGraphRepository;
+  timer?: Timer;
+}
+
+interface GraphAnalysis {
+  nodeByScreen: Map<string, NavigationNode>;
+  inEdgesByScreen: Map<string, NavigationEdge[]>;
+  outEdgesByScreen: Map<string, NavigationEdge[]>;
+  depthsByScreen: Map<string, number>;
+  hasEntryPoints: boolean;
+}
+
 interface CoverageGap {
   type: "node" | "edge";
   id: number;
@@ -51,14 +84,19 @@ interface TestScenario {
 
 /**
  * Analyzes test coverage for navigation graphs and generates recommendations.
+ *
+ * @internal Exported for focused unit tests and internal dependency injection;
+ * production callers should use the `testCoverageAnalyzer` singleton.
  */
-class TestCoverageAnalyzer {
-  private navigationRepository: NavigationRepository;
+export class TestCoverageAnalyzer {
+  private coverageRepository: TestCoverageAnalysisRepository;
+  private navigationRepository: NavigationGraphRepository;
   private timer: Timer;
 
-  constructor(timer: Timer = defaultTimer) {
-    this.navigationRepository = new NavigationRepository();
-    this.timer = timer;
+  constructor(options: TestCoverageAnalyzerOptions = {}) {
+    this.coverageRepository = options.coverageRepository ?? testCoverageRepository;
+    this.navigationRepository = options.navigationRepository ?? new NavigationRepository();
+    this.timer = options.timer ?? defaultTimer;
   }
 
   /**
@@ -68,7 +106,7 @@ class TestCoverageAnalyzer {
     logger.info(`[TEST_COVERAGE] Generating coverage report for app: ${appId}`);
 
     // Get aggregated coverage data
-    const coverageData = await testCoverageRepository.getAggregatedCoverageAnalysis(appId);
+    const coverageData = await this.coverageRepository.getAggregatedCoverageAnalysis(appId);
 
     // Calculate criticality scores for uncovered elements
     const criticalGaps = await this.identifyCriticalGaps(
@@ -130,18 +168,19 @@ class TestCoverageAnalyzer {
     // Get all nodes and edges for frequency/depth analysis
     const allNodes = await this.navigationRepository.getNodes(appId);
     const allEdges = await this.navigationRepository.getEdges(appId);
+    const graphAnalysis = this.buildGraphAnalysis(allNodes, allEdges);
 
     // Calculate max values for normalization
     const maxVisits = Math.max(...allNodes.map(n => n.visit_count), 1);
 
     // Analyze uncovered nodes
     for (const node of uncoveredNodes) {
-      const inEdges = allEdges.filter(e => e.to_screen === node.screen_name);
-      const outEdges = allEdges.filter(e => e.from_screen === node.screen_name);
+      const inEdges = graphAnalysis.inEdgesByScreen.get(node.screen_name) ?? [];
+      const outEdges = graphAnalysis.outEdgesByScreen.get(node.screen_name) ?? [];
       const edgeCount = inEdges.length + outEdges.length;
 
       // Calculate depth (minimum hops from entry point)
-      const depth = await this.calculateNodeDepth(appId, node.screen_name, allEdges);
+      const depth = this.getNodeDepth(node.screen_name, graphAnalysis);
 
       // Criticality score: high frequency + shallow depth = high criticality
       // Frequency score: 0-50 based on visit count
@@ -162,15 +201,15 @@ class TestCoverageAnalyzer {
     // Analyze uncovered edges
     for (const edge of uncoveredEdges) {
       // Get frequency data for connected nodes
-      const fromNode = allNodes.find(n => n.screen_name === edge.from_screen);
-      const toNode = allNodes.find(n => n.screen_name === edge.to_screen);
+      const fromNode = graphAnalysis.nodeByScreen.get(edge.from_screen);
+      const toNode = graphAnalysis.nodeByScreen.get(edge.to_screen);
 
       if (!fromNode || !toNode) {
         continue;
       }
 
       // Calculate depth of source node
-      const depth = await this.calculateNodeDepth(appId, edge.from_screen, allEdges);
+      const depth = this.getNodeDepth(edge.from_screen, graphAnalysis);
 
       // Edge criticality based on node visit counts and depth
       const avgVisits = (fromNode.visit_count + toNode.visit_count) / 2;
@@ -195,73 +234,86 @@ class TestCoverageAnalyzer {
   }
 
   /**
-   * Calculate the depth (minimum hops) of a node from entry points.
-   * Entry points are nodes with no incoming edges.
+   * Build graph indexes once per report so each coverage gap can be scored with
+   * constant-time lookups.
    */
-  private async calculateNodeDepth(
-    appId: string,
-    screenName: string,
-    allEdges: NavigationEdge[]
-  ): Promise<number> {
-    // Find entry points (nodes with no incoming edges)
+  private buildGraphAnalysis(allNodes: NavigationNode[], allEdges: NavigationEdge[]): GraphAnalysis {
+    const nodeByScreen = new Map<string, NavigationNode>();
+    const inEdgesByScreen = new Map<string, NavigationEdge[]>();
+    const outEdgesByScreen = new Map<string, NavigationEdge[]>();
     const allScreens = new Set<string>();
-    allEdges.forEach(e => {
-      allScreens.add(e.from_screen);
-      allScreens.add(e.to_screen);
-    });
+    const incomingCounts = new Map<string, number>();
 
-    const entryPoints = [...allScreens].filter(screen => {
-      return !allEdges.some(e => e.to_screen === screen);
-    });
+    for (const node of allNodes) {
+      nodeByScreen.set(node.screen_name, node);
+    }
 
-    if (entryPoints.length === 0) {
-      // No clear entry point, assume depth of 1
+    for (const edge of allEdges) {
+      allScreens.add(edge.from_screen);
+      allScreens.add(edge.to_screen);
+      incomingCounts.set(edge.to_screen, (incomingCounts.get(edge.to_screen) ?? 0) + 1);
+
+      const outEdges = outEdgesByScreen.get(edge.from_screen) ?? [];
+      outEdges.push(edge);
+      outEdgesByScreen.set(edge.from_screen, outEdges);
+
+      const inEdges = inEdgesByScreen.get(edge.to_screen) ?? [];
+      inEdges.push(edge);
+      inEdgesByScreen.set(edge.to_screen, inEdges);
+    }
+
+    const entryPoints: string[] = [];
+    for (const screen of allScreens) {
+      if ((incomingCounts.get(screen) ?? 0) === 0) {
+        entryPoints.push(screen);
+      }
+    }
+
+    return {
+      nodeByScreen,
+      inEdgesByScreen,
+      outEdgesByScreen,
+      depthsByScreen: this.calculateDepthsFromEntryPoints(entryPoints, outEdgesByScreen),
+      hasEntryPoints: entryPoints.length > 0,
+    };
+  }
+
+  private calculateDepthsFromEntryPoints(
+    entryPoints: string[],
+    outEdgesByScreen: Map<string, NavigationEdge[]>
+  ): Map<string, number> {
+    const depthsByScreen = new Map<string, number>();
+    const queue: Array<{ screen: string; depth: number }> = [];
+
+    for (const entryPoint of entryPoints) {
+      depthsByScreen.set(entryPoint, 0);
+      queue.push({ screen: entryPoint, depth: 0 });
+    }
+
+    let queueIndex = 0;
+    while (queueIndex < queue.length) {
+      const { screen, depth } = queue[queueIndex++];
+      const outgoing = outEdgesByScreen.get(screen) ?? [];
+
+      for (const edge of outgoing) {
+        if (!depthsByScreen.has(edge.to_screen)) {
+          const nextDepth = depth + 1;
+          depthsByScreen.set(edge.to_screen, nextDepth);
+          queue.push({ screen: edge.to_screen, depth: nextDepth });
+        }
+      }
+    }
+
+    return depthsByScreen;
+  }
+
+  private getNodeDepth(screenName: string, graphAnalysis: GraphAnalysis): number {
+    if (!graphAnalysis.hasEntryPoints) {
+      // No clear entry point, preserve the previous depth fallback.
       return 1;
     }
 
-    // BFS to find shortest path from any entry point
-    let minDepth = Infinity;
-
-    for (const entryPoint of entryPoints) {
-      const depth = this.bfsDepth(entryPoint, screenName, allEdges);
-      if (depth < minDepth) {
-        minDepth = depth;
-      }
-    }
-
-    return minDepth === Infinity ? 99 : minDepth;
-  }
-
-  /**
-   * BFS to find depth from start to target screen.
-   */
-  private bfsDepth(start: string, target: string, edges: NavigationEdge[]): number {
-    if (start === target) {
-      return 0;
-    }
-
-    const queue: Array<{ screen: string; depth: number }> = [{ screen: start, depth: 0 }];
-    const visited = new Set<string>([start]);
-
-    while (queue.length > 0) {
-      const { screen, depth } = queue.shift()!;
-
-      // Find outgoing edges
-      const outgoing = edges.filter(e => e.from_screen === screen);
-
-      for (const edge of outgoing) {
-        if (edge.to_screen === target) {
-          return depth + 1;
-        }
-
-        if (!visited.has(edge.to_screen)) {
-          visited.add(edge.to_screen);
-          queue.push({ screen: edge.to_screen, depth: depth + 1 });
-        }
-      }
-    }
-
-    return Infinity;
+    return graphAnalysis.depthsByScreen.get(screenName) ?? 99;
   }
 
   /**

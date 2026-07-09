@@ -5,6 +5,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { logger, LogLevel } from "../../../src/utils/logger";
 
 // Note: the previous version of this file patched fs-extra's readFile to mock
 // screenshot reads. That dependency has been removed from production code, so
@@ -763,8 +764,10 @@ describe("Offscreen Node Filtering", function() {
   let viewHierarchy: ViewHierarchy;
   let fakeAdb: FakeAdbExecutor;
   let mockDevice: BootedDevice;
+  let originalLogLevel: LogLevel;
 
   beforeEach(function() {
+    originalLogLevel = logger.getLogLevel();
     mockDevice = {
       deviceId: "test-device",
       name: "Test Device",
@@ -772,6 +775,10 @@ describe("Offscreen Node Filtering", function() {
     };
     fakeAdb = new FakeAdbExecutor();
     viewHierarchy = new ViewHierarchy(mockDevice, new FakeAdbClientFactory(fakeAdb));
+  });
+
+  afterEach(function() {
+    logger.setLogLevel(originalLogLevel);
   });
 
   test("should filter out nodes completely below the screen", function() {
@@ -898,6 +905,55 @@ describe("Offscreen Node Filtering", function() {
     const result = viewHierarchy.filterOffscreenNodes(hierarchy, 0, 0);
 
     expect(result).toEqual(hierarchy);
+  });
+
+  test("should not serialize hierarchy size metrics when debug logging is disabled", function() {
+    logger.setLogLevel(LogLevel.INFO);
+    const stringifySpy = spyOn(JSON, "stringify");
+    const hierarchy = {
+      hierarchy: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        node: [
+          { text: "Visible", bounds: { left: 0, top: 100, right: 500, bottom: 200 } },
+          { text: "Below Screen", bounds: { left: 0, top: 3000, right: 500, bottom: 3200 } }
+        ]
+      }
+    };
+
+    try {
+      const result = viewHierarchy.filterOffscreenNodes(hierarchy, 1080, 2400);
+
+      expect(result.hierarchy.node.text).toBe("Visible");
+      expect(stringifySpy).not.toHaveBeenCalled();
+    } finally {
+      stringifySpy.mockRestore();
+    }
+  });
+
+  test("should keep hierarchy size metrics when debug logging is enabled", function() {
+    logger.setLogLevel(LogLevel.DEBUG);
+    const stringifySpy = spyOn(JSON, "stringify");
+    const debugSpy = spyOn(logger, "debug");
+    const hierarchy = {
+      hierarchy: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        node: [
+          { text: "Visible", bounds: { left: 0, top: 100, right: 500, bottom: 200 } },
+          { text: "Below Screen", bounds: { left: 0, top: 3000, right: 500, bottom: 3200 } },
+          { text: "Way Below", bounds: { left: 0, top: 3400, right: 500, bottom: 3600 } }
+        ]
+      }
+    };
+
+    try {
+      viewHierarchy.filterOffscreenNodes(hierarchy, 1080, 2400);
+
+      expect(stringifySpy).toHaveBeenCalledTimes(2);
+      expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("Offscreen filtering reduced hierarchy by"));
+    } finally {
+      debugSpy.mockRestore();
+      stringifySpy.mockRestore();
+    }
   });
 
   test("should preserve visible children of offscreen parents", function() {

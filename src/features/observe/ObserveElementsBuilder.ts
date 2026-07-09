@@ -23,11 +23,14 @@ export class ObserveElementsBuilder {
   build(viewHierarchy: ViewHierarchyResult, platform: "android" | "ios" = "android"): ObserveResult["elements"] {
     const clickable = this.finder.findClickableElements(viewHierarchy);
     const scrollable = this.finder.findScrollableElements(viewHierarchy);
-    const text = this.parser
-      .flattenViewHierarchy(viewHierarchy, { includeWindows: true, windowOrder: "topmost-first" })
+    const flattenedEntries = this.parser.flattenViewHierarchy(viewHierarchy, {
+      includeWindows: true,
+      windowOrder: "topmost-first"
+    });
+    const text = flattenedEntries
       .filter(entry => typeof entry.text === "string" && entry.text.trim().length > 0)
       .map(entry => entry.element);
-    const media = this.mediaClassifier.classify(viewHierarchy, platform);
+    const media = this.mediaClassifier.classify(viewHierarchy, platform, flattenedEntries);
 
     return { clickable, scrollable, text, media };
   }

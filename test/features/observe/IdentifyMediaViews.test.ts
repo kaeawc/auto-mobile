@@ -2,6 +2,8 @@ import { describe, test, expect } from "bun:test";
 import { IdentifyMediaViews } from "../../../src/features/observe/IdentifyMediaViews";
 import { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import { ElementBounds } from "../../../src/models/ElementBounds";
+import type { Element } from "../../../src/models/Element";
+import { FakeElementParser } from "../../fakes/FakeElementParser";
 
 function buildHierarchy(
   elements: Array<{
@@ -186,5 +188,29 @@ describe("IdentifyMediaViews", () => {
     const h: ViewHierarchyResult = { hierarchy: {} };
     const result = classifier.classify(h, "android");
     expect(result).toHaveLength(0);
+  });
+
+  test("classifies media from pre-flattened entries without flattening hierarchy", () => {
+    class NoFlattenParser extends FakeElementParser {
+      override flattenViewHierarchy(): Array<{ element: Element; index: number; depth: number; text?: string }> {
+        throw new Error("flattenViewHierarchy should not be called");
+      }
+    }
+
+    const imageElement: Element = {
+      "bounds": defaultBounds,
+      "class": "android.widget.ImageView"
+    };
+    const result = new IdentifyMediaViews(new NoFlattenParser()).classify(
+      { hierarchy: {} },
+      "android",
+      [{ element: imageElement, index: 0, depth: 0 }]
+    );
+
+    expect(result).toEqual([{
+      className: "android.widget.ImageView",
+      mediaType: "image",
+      bounds: defaultBounds
+    }]);
   });
 });

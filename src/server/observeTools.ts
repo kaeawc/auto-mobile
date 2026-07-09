@@ -10,7 +10,7 @@ import { BootedDevice, Element, ObserveResult, ObserveToolPayload, ViewHierarchy
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { IdentifyInteractions, IdentifyInteractionsOptions } from "../features/observe/IdentifyInteractions";
-import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases, withJsonSchemaOverride } from "./toolSchemaHelpers";
 import { elementContainerSchema } from "./elementSelectorSchemas";
 import { observeToolResultSchema } from "./toolOutputSchemas";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
@@ -110,7 +110,7 @@ const waitForSchema = z.union([
   waitForElementSchema,
 ]);
 
-const observeBaseSchema = addDeviceTargetingToSchema(z.object({
+const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
   waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
   raw: z.boolean().optional().describe("Include raw view hierarchy"),
@@ -128,6 +128,29 @@ const observeBaseSchema = addDeviceTargetingToSchema(z.object({
       message: "activityName is Android-only; use appId/bundleId on iOS"
     });
   }
+}), jsonSchema => {
+  jsonSchema.if = {
+    required: ["platform", "waitFor"],
+    properties: {
+      platform: { const: "ios" },
+      waitFor: {
+        required: ["activeWindow"],
+        properties: {
+          activeWindow: {
+            required: ["activityName"],
+            not: {
+              anyOf: [
+                { required: ["appId"] },
+                { required: ["bundleId"] },
+                { required: ["packageName"] }
+              ]
+            }
+          }
+        }
+      }
+    }
+  };
+  jsonSchema.then = false;
 });
 
 export const observeSchema = withAppIdAliases(observeBaseSchema);

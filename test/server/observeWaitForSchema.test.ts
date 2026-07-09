@@ -370,6 +370,17 @@ describe("published observe waitFor input schema", () => {
         },
       },
     },
+    {
+      label: "iOS activeWindow has activityName without app id",
+      input: {
+        platform: "ios",
+        waitFor: {
+          activeWindow: {
+            activityName: "com.example.ios.IgnoredActivity",
+          },
+        },
+      },
+    },
   ])("rejects runtime-invalid waitFor input: $label", ({ input }) => {
     expect(observeSchema.safeParse(input).success).toBe(false);
 

@@ -277,6 +277,75 @@ describe("findWaitForElement rich predicates", () => {
     expect(element?.class).toBe("android.widget.BottomNavigationView");
   });
 
+  test("requires elementId and text to match the same node", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "text": "Profile",
+          "resource-id": "home_tab",
+          "bounds": bounds(10, 10, 110, 60),
+        },
+      },
+      {
+        $: {
+          "text": "Home",
+          "resource-id": "other_tab",
+          "bounds": bounds(10, 80, 190, 140),
+        },
+      },
+      {
+        $: {
+          "text": "Home",
+          "resource-id": "home_tab",
+          "bounds": bounds(10, 150, 190, 190),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        elementId: "home_tab",
+        text: "Home",
+      } as any,
+      hierarchy
+    );
+
+    expect(element?.bounds).toEqual(bounds(10, 150, 190, 190));
+  });
+
+  test("does not satisfy elementId and text across different nodes", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "text": "Profile",
+          "resource-id": "home_tab",
+          "bounds": bounds(10, 10, 110, 60),
+        },
+      },
+      {
+        $: {
+          "text": "Home",
+          "resource-id": "other_tab",
+          "bounds": bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        elementId: "home_tab",
+        text: "Home",
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
+  });
+
   test("does not satisfy matchType all across different nodes", () => {
     const finder = new DefaultElementFinder();
     const hierarchy = makeHierarchy([
@@ -382,6 +451,59 @@ describe("waitForObservation activeWindow", () => {
     expect(outcome.awaitTimeout).toBe(false);
     expect(outcome.observation.activeWindow?.appId).toBe("com.example.app");
     expect(observeScreen.getExecuteCallCount()).toBe(2);
+  });
+
+  test("keeps polling until Android activityName matches", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const observations = [
+      makeObservation("com.example.app", "com.example.app.SplashActivity"),
+      makeObservation("com.example.app", "com.example.app.HomeActivity"),
+    ];
+    observeScreen.setObserveResult(() => observations.shift() ?? observations[0]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: {
+          appId: "com.example.app",
+          activityName: "com.example.app.HomeActivity",
+        },
+        timeout: 500,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(outcome.observation.activeWindow?.activityName).toBe("com.example.app.HomeActivity");
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
+  });
+
+  test("times out when only activeWindow appId matches but activityName does not", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(() => makeObservation("com.example.app", "com.example.app.SplashActivity"));
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: {
+          appId: "com.example.app",
+          activityName: "com.example.app.HomeActivity",
+        },
+        timeout: 250,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(true);
+    expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(1);
   });
 
   test("times out when only the element predicate matches", async () => {

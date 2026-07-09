@@ -32,19 +32,17 @@ const waitForContainerField = elementContainerSchema
     "Scope match to a container"
   );
 
-const activeWindowWaitForSchema = z.object({
+const activeWindowWaitForBaseSchema = z.object({
   appId: z.string().optional().describe("Foreground app bundle ID / package name"),
   activityName: z.string().optional().describe("Foreground Android activity name")
-}).strict().superRefine((value, ctx) => {
-  if (value.appId === undefined && value.activityName === undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Provide at least one activeWindow predicate"
-    });
-  }
-});
+}).strict();
 
-const waitForSchema = z.object({
+const activeWindowWaitForSchema = activeWindowWaitForBaseSchema.and(z.union([
+  z.object({ appId: z.string() }),
+  z.object({ activityName: z.string() }),
+]));
+
+const waitForBaseSchema = z.object({
   elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
   text: z.string().optional().describe("Element text"),
   textAny: z.array(z.string().min(1)).min(1).optional().describe("Ordered text variants; first visible match wins"),
@@ -97,6 +95,17 @@ const waitForSchema = z.object({
     }
   }
 });
+
+const waitForPredicatePresenceSchema = z.union([
+  z.object({ elementId: z.string() }),
+  z.object({ text: z.string() }),
+  z.object({ textAny: z.array(z.string().min(1)).min(1) }),
+  z.object({ className: z.string() }),
+  z.object({ contentDescription: z.string() }),
+  z.object({ activeWindow: activeWindowWaitForSchema }),
+]);
+
+const waitForSchema = waitForBaseSchema.and(waitForPredicatePresenceSchema);
 
 export const observeSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema,

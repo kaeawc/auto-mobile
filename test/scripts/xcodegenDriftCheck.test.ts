@@ -18,21 +18,48 @@ afterEach(() => {
   }
 });
 
-function createTempGitRepo(): string {
+function createTempRepo(): string {
   const tempDir = mkdtempSync(join(tmpdir(), "auto-mobile-xcodegen-drift-"));
   tempDirs.push(tempDir);
 
   mkdirSync(join(tempDir, "scripts/ios"), { recursive: true });
   mkdirSync(join(tempDir, "ios/control-proxy/CtrlProxy.xcodeproj"), { recursive: true });
+  mkdirSync(join(tempDir, "baseline"), { recursive: true });
+  mkdirSync(join(tempDir, "bin"), { recursive: true });
   writeFileSync(
     join(tempDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"),
     "committed project\n"
   );
+  writeFileSync(join(tempDir, "baseline/project.pbxproj"), "committed project\n");
   cpSync(driftCheckScript, join(tempDir, "scripts/ios/xcodegen-drift-check.sh"));
   chmodSync(join(tempDir, "scripts/ios/xcodegen-drift-check.sh"), 0o755);
+  writeFileSync(
+    join(tempDir, "bin/git"),
+    `#!/bin/bash
+set -euo pipefail
+project="\${FAKE_REPO_ROOT}/ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"
+baseline="\${FAKE_REPO_ROOT}/baseline/project.pbxproj"
 
-  expect(spawnSync("git", ["init"], { cwd: tempDir }).status).toBe(0);
-  expect(spawnSync("git", ["add", "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"], { cwd: tempDir }).status).toBe(0);
+if [[ "$1" == "diff" && "\${2:-}" == "--quiet" ]]; then
+    cmp -s "\${baseline}" "\${project}"
+    exit $?
+fi
+
+if [[ "$1" == "diff" ]]; then
+    if cmp -s "\${baseline}" "\${project}"; then
+        exit 0
+    fi
+    echo "diff --git a/ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj b/ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"
+    echo "-committed project"
+    echo "+regenerated project"
+    exit 0
+fi
+
+echo "unexpected git invocation: $*" >&2
+exit 2
+`
+  );
+  chmodSync(join(tempDir, "bin/git"), 0o755);
 
   return tempDir;
 }
@@ -49,7 +76,7 @@ describe("xcodegen drift check", () => {
   });
 
   test("fails when xcodegen generation changes the committed CtrlProxy project", () => {
-    const repoDir = createTempGitRepo();
+    const repoDir = createTempRepo();
     writeFakeGenerator(
       repoDir,
       "printf 'regenerated project\\n' > ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"
@@ -58,6 +85,11 @@ describe("xcodegen drift check", () => {
     const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh"], {
       cwd: repoDir,
       encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_REPO_ROOT: repoDir,
+        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
+      },
     });
 
     expect(result.status).toBe(1);
@@ -65,12 +97,17 @@ describe("xcodegen drift check", () => {
   });
 
   test("passes when xcodegen generation leaves the committed CtrlProxy project unchanged", () => {
-    const repoDir = createTempGitRepo();
+    const repoDir = createTempRepo();
     writeFakeGenerator(repoDir, "true");
 
     const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh"], {
       cwd: repoDir,
       encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_REPO_ROOT: repoDir,
+        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
+      },
     });
 
     expect(result.status).toBe(0);

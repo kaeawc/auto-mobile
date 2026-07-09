@@ -563,18 +563,6 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     }
 
     const durationMs = timer.now() - toolStartMs;
-    TelemetryRecorder.getInstance().recordToolCallEvent({
-      timestamp: toolStartMs,
-      toolName: name,
-      durationMs,
-      success: toolSuccess,
-      error: toolError,
-      args: typeof args === "object" ? args : null,
-    });
-
-    if (toolSuccess) {
-      getMcpRecorder()?.record(name, args);
-    }
 
     // Typed envelope views (issues #2932 / #3222): the heterogeneous pipeline
     // hands back `any`, so narrow to the concrete tool payload via
@@ -624,16 +612,31 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       ? this.createArtifactWriter(artifactDirectory, timer)
       : undefined;
 
+    const finalizedResponse = finalizeToolResponse(response, {
+      name,
+      args,
+      sessionUuid,
+      baselineStore,
+      internal: internalCall,
+      artifactWriter,
+    });
+
+    TelemetryRecorder.getInstance().recordToolCallEvent({
+      timestamp: toolStartMs,
+      toolName: name,
+      durationMs,
+      success: toolSuccess,
+      error: toolError,
+      args: typeof args === "object" ? args : null,
+    });
+
+    if (toolSuccess) {
+      getMcpRecorder()?.record(name, args);
+    }
+
     return {
       durationMs,
-      finalizedResponse: finalizeToolResponse(response, {
-        name,
-        args,
-        sessionUuid,
-        baselineStore,
-        internal: internalCall,
-        artifactWriter,
-      }),
+      finalizedResponse,
     };
   }
 }

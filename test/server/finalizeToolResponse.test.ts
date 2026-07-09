@@ -1195,6 +1195,28 @@ describe("finalizeToolResponse", () => {
       expect((response.structuredContent as any).viewHierarchy).toBeDefined();
       expect((response.structuredContent as any).artifact).toBeUndefined();
     });
+
+    test("artifact write failures do not advance the diff baseline", () => {
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const { store, map } = makeStore();
+      finalizeToolResponse(
+        createStructuredToolResponse(sameScreenObserve()),
+        { name: "observe", sessionUuid: "s1", baselineStore: store }
+      );
+      const renderedBaseline = map.get("s1");
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node = [
+        { "resource-id": "com.example:id/not-rendered", "bounds": { left: 1, top: 2, right: 3, bottom: 4 } },
+      ];
+      const writer = new FakeObservationArtifactWriter();
+      writer.throwOnWrite = new Error("artifact disk is full");
+
+      expect(() => finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer } as any
+      )).toThrow("artifact disk is full");
+      expect(map.get("s1")).toBe(renderedBaseline);
+    });
   });
 
   // --actions-no-observe (#2762, folded into #3026): strip the embedded

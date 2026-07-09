@@ -9,6 +9,8 @@ import type { ObservationArtifactPayload, ObservationArtifactWriter } from "../.
 import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
+import { getMcpRecordingStatus, resetMcpRecordingState, startMcpRecording } from "../../src/server/mcpRecordingManager";
 
 describe("ToolRegistry device-aware pipeline", () => {
   const device: BootedDevice = {
@@ -191,8 +193,12 @@ describe("ToolRegistry device-aware pipeline", () => {
 describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   class FakeObservationArtifactWriter implements ObservationArtifactWriter {
     writes: Array<{ tool: string; payload: string; data: unknown }> = [];
+    throwOnWrite: Error | undefined;
 
     writeJsonArtifact(input: { tool: string; payload: ObservationArtifactPayload; data: unknown }) {
+      if (this.throwOnWrite) {
+        throw this.throwOnWrite;
+      }
       this.writes.push(input);
       return {
         artifact: {
@@ -222,6 +228,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
   afterEach(() => {
     serverConfig.setToolOutputArtifactDirectory(undefined);
+    resetMcpRecordingState();
   });
 
   test("configured artifact directory creates a writer and replaces observe output metadata", async () => {
@@ -287,5 +294,42 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     expect(requestedDirectories).toEqual([]);
     expect(writer.writes).toHaveLength(0);
     expect((result.finalizedResponse.structuredContent as any).viewHierarchy).toBeDefined();
+  });
+
+  test("artifact finalization failures are not recorded as successful tool calls", async () => {
+    const writer = new FakeObservationArtifactWriter();
+    writer.throwOnWrite = new Error("artifact disk is full");
+    const telemetryEvents: unknown[] = [];
+    const originalGetInstance = (TelemetryRecorder as any).getInstance;
+    (TelemetryRecorder as any).getInstance = () => ({
+      recordToolCallEvent(event: unknown) {
+        telemetryEvents.push(event);
+      },
+    });
+    const timer = new FakeTimer();
+    timer.setCurrentTime(25);
+    startMcpRecording(timer);
+    serverConfig.setToolOutputArtifactDirectory("/tmp/artifacts");
+
+    try {
+      const handler = new DefaultAfterToolCallHandler(() => writer);
+
+      await expect(handler.handle({
+        name: "observe",
+        args: {},
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse(makeObservePayload()),
+        sessionUuid: "session-1",
+        shouldResolveDevice: false,
+        timer,
+        toolStartMs: 20,
+      })).rejects.toThrow("artifact disk is full");
+
+      expect(telemetryEvents).toHaveLength(0);
+      expect(getMcpRecordingStatus(timer)?.stepCount).toBe(0);
+    } finally {
+      (TelemetryRecorder as any).getInstance = originalGetInstance;
+    }
   });
 });

@@ -213,12 +213,13 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   // Locate the ObserveResult: the payload itself for `observe`, else `.observation`.
   let sanitizedPayload: Record<string, unknown> | undefined;
   let hasArtifactableObservation = false;
+  let pendingBaselineUpdate: { sessionUuid: string; observation: ObserveResult } | undefined;
   if (isObserveTool && isObserveResult(payload)) {
     // `observe` always emits the full sanitized observation (no-observe never
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
     const sanitized = sanitizeObserveResult(payload as unknown as ObserveResult, cfg);
     if (canDiff) {
-      ctx.baselineStore!.set(ctx.sessionUuid!, sanitized);
+      pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
     }
     sanitizedPayload = sanitized as unknown as Record<string, unknown>;
     hasArtifactableObservation = true;
@@ -285,7 +286,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             toScreen: observationScreenIdentity(sanitized),
           };
         }
-        ctx.baselineStore!.set(ctx.sessionUuid!, sanitized);
+        pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
       }
       sanitizedPayload = {
         ...payload,
@@ -320,6 +321,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   if (textPart) {
     textPart.text = stringifyToolResponse(sanitizedPayload);
   }
+  pendingBaselineUpdate && ctx.baselineStore!.set(pendingBaselineUpdate.sessionUuid, pendingBaselineUpdate.observation);
 
   return response;
 }

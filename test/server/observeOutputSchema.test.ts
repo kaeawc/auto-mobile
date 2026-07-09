@@ -208,7 +208,7 @@ describe("observe tool registration advertises the schema (#3025)", () => {
     withFreshRegistry(() => {
       const observe = ToolRegistry.getToolDefinitions().find(t => t.name === "observe");
       expect(JSON.stringify((observe as Record<string, unknown>).outputSchema)).toContain("\"artifact\"");
-      expect(JSON.stringify((observe as Record<string, unknown>).outputSchema)).toContain("\"ObserveResult\"");
+      expect(JSON.stringify((observe as Record<string, unknown>).outputSchema)).toContain("\"payload\"");
     });
   });
 

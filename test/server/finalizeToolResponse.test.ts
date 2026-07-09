@@ -1219,6 +1219,230 @@ describe("finalizeToolResponse", () => {
     });
   });
 
+  describe("non-observation artifact mode (#3481)", () => {
+    test("executePlan artifacts large failure/debug observation subtrees and keeps summaries inline", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const failureObservation = {
+        capturedAtMs: 123,
+        activeWindow: { appId: "com.example" },
+        viewHierarchy: { hierarchy: { node: { "resource-id": "root" } } },
+        rawViewHierarchy: "<hierarchy><node text=\"large\" /></hierarchy>",
+        visibleTextsSample: ["Submit"],
+        resourceIdsSample: ["com.example:id/submit"],
+      };
+      const stepObservation = {
+        capturedAtMs: 456,
+        viewHierarchy: { hierarchy: { node: { "resource-id": "step-root" } } },
+        visibleTextsSample: ["Step"],
+      };
+      const debugFailureObservation = {
+        capturedAtMs: 789,
+        viewHierarchy: { hierarchy: { node: { "resource-id": "debug-failure-root" } } },
+        rawViewHierarchy: "<hierarchy><node text=\"debug failure\" /></hierarchy>",
+        visibleTextsSample: ["Debug failure"],
+      };
+      const payload = {
+        success: false,
+        executedSteps: 1,
+        totalSteps: 2,
+        failedStep: {
+          stepIndex: 1,
+          tool: "tapOn",
+          error: "Button missing",
+          failureObservation,
+        },
+        debug: {
+          executionTimeMs: 50,
+          steps: [
+            {
+              step: "1: observe",
+              status: "completed",
+              durationMs: 10,
+              details: { stepObservation, failureObservation: debugFailureObservation },
+            },
+          ],
+        },
+      };
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(payload),
+        { name: "executePlan", artifactWriter: writer } as any
+      );
+
+      const failedObservation = (finalized.structuredContent as any).failedStep.failureObservation;
+      expect(failedObservation.capturedAtMs).toBe(123);
+      expect(failedObservation.visibleTextsSample).toEqual(["Submit"]);
+      expect(failedObservation.resourceIdsSample).toEqual(["com.example:id/submit"]);
+      expect(failedObservation.viewHierarchy).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/executePlan-1.json",
+          format: "json",
+          payload: "ExecutePlanFailureObservationViewHierarchy",
+          bytes: 123,
+          tool: "executePlan",
+        },
+      });
+      expect(failedObservation.rawViewHierarchy).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/executePlan-2.json",
+          format: "json",
+          payload: "ExecutePlanFailureObservationRawViewHierarchy",
+          bytes: 123,
+          tool: "executePlan",
+        },
+      });
+
+      const finalizedStepObservation = (finalized.structuredContent as any).debug.steps[0].details.stepObservation;
+      expect(finalizedStepObservation.visibleTextsSample).toEqual(["Step"]);
+      expect(finalizedStepObservation.viewHierarchy.artifact.payload).toBe("ExecutePlanDebugStepObservationViewHierarchy");
+      const finalizedDebugFailureObservation = (finalized.structuredContent as any).debug.steps[0].details.failureObservation;
+      expect(finalizedDebugFailureObservation.visibleTextsSample).toEqual(["Debug failure"]);
+      expect(finalizedDebugFailureObservation.viewHierarchy.artifact.payload).toBe("ExecutePlanDebugFailureObservationViewHierarchy");
+      expect(finalizedDebugFailureObservation.rawViewHierarchy.artifact.payload).toBe("ExecutePlanDebugFailureObservationRawViewHierarchy");
+      expect(writer.writes.map(write => write.payload)).toEqual([
+        "ExecutePlanFailureObservationViewHierarchy",
+        "ExecutePlanFailureObservationRawViewHierarchy",
+        "ExecutePlanDebugStepObservationViewHierarchy",
+        "ExecutePlanDebugFailureObservationViewHierarchy",
+        "ExecutePlanDebugFailureObservationRawViewHierarchy",
+      ]);
+      expect(writer.writes[0].data).toEqual(failureObservation.viewHierarchy);
+      expect(writer.writes[1].data).toBe(failureObservation.rawViewHierarchy);
+      expect(writer.writes[2].data).toEqual(stepObservation.viewHierarchy);
+      expect(writer.writes[3].data).toEqual(debugFailureObservation.viewHierarchy);
+      expect(writer.writes[4].data).toBe(debugFailureObservation.rawViewHierarchy);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("bugReport artifacts raw report details and keeps status summaries inline", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const payload = {
+        reportId: "bug-1",
+        timestamp: 123,
+        device: { deviceId: "emulator-5554", platform: "android" },
+        screenState: { currentPackage: "com.example" },
+        viewHierarchy: {
+          rawXml: "<hierarchy><node text=\"large\" /></hierarchy>",
+          elementCount: 42,
+          filteredNodeCount: 3,
+          clickableElements: [{ text: "Submit", bounds: { left: 0, top: 0, right: 1, bottom: 1 } }],
+        },
+        logcat: {
+          errors: ["E/Example: one", "E/Example: two"],
+          warnings: ["W/Example: warn"],
+          appLogs: ["I/Example: app"],
+        },
+        windowState: {
+          focusedWindow: "com.example/.Main",
+          windows: ["Window #1", "Window #2"],
+        },
+        savedTo: "/tmp/bug-report.json",
+        errors: [],
+      };
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(payload),
+        { name: "bugReport", artifactWriter: writer } as any
+      );
+
+      const report = finalized.structuredContent as any;
+      expect(report.reportId).toBe("bug-1");
+      expect(report.device.deviceId).toBe("emulator-5554");
+      expect(report.viewHierarchy.elementCount).toBe(42);
+      expect(report.viewHierarchy.clickableElements).toHaveLength(1);
+      expect(report.viewHierarchy.rawXml.artifact.payload).toBe("BugReportViewHierarchyRawXml");
+      expect(report.logcatSummary).toEqual({ errorCount: 2, warningCount: 1, appLogCount: 1 });
+      expect(report.logcat).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/bugReport-2.json",
+          format: "json",
+          payload: "BugReportLogcat",
+          bytes: 123,
+          tool: "bugReport",
+        },
+      });
+      expect(report.windowState.focusedWindow).toBe("com.example/.Main");
+      expect(report.windowState.windows.artifact.payload).toBe("BugReportWindowList");
+      expect(writer.writes.map(write => write.payload)).toEqual([
+        "BugReportViewHierarchyRawXml",
+        "BugReportLogcat",
+        "BugReportWindowList",
+      ]);
+      expect(writer.writes[0].data).toBe(payload.viewHierarchy.rawXml);
+      expect(writer.writes[1].data).toEqual(payload.logcat);
+      expect(writer.writes[2].data).toEqual(payload.windowState.windows);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("getNetworkGraph artifacts aggregate graph and keeps host count inline", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const payload = {
+        graph: [
+          {
+            scheme: "https",
+            host: "api.example.com",
+            paths: {
+              v1: {
+                paths: {
+                  "users[GET]": { method: "GET", success: 10, errors: 1, p50: 100, p95: 200 },
+                },
+              },
+            },
+          },
+        ],
+      };
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(payload),
+        { name: "getNetworkGraph", artifactWriter: writer } as any
+      );
+
+      expect(finalized.structuredContent).toEqual({
+        graph: {
+          artifact: {
+            path: "/tmp/auto-mobile/getNetworkGraph-1.json",
+            format: "json",
+            payload: "NetworkGraph",
+            bytes: 123,
+            tool: "getNetworkGraph",
+          },
+        },
+        graphSummary: { hostCount: 1 },
+      });
+      expect(writer.writes).toEqual([
+        { tool: "getNetworkGraph", payload: "NetworkGraph", data: payload.graph },
+      ]);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("internal executePlan calls do not artifact non-observation payloads", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const payload = {
+        success: false,
+        executedSteps: 1,
+        totalSteps: 2,
+        failedStep: {
+          stepIndex: 1,
+          tool: "tapOn",
+          error: "Button missing",
+          failureObservation: {
+            capturedAtMs: 123,
+            viewHierarchy: { hierarchy: { node: { text: "keep inline" } } },
+          },
+        },
+      };
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(payload),
+        { name: "executePlan", internal: true, artifactWriter: writer } as any
+      );
+
+      expect(writer.writes).toHaveLength(0);
+      expect(finalized.structuredContent).toEqual(payload);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(payload));
+    });
+  });
+
   // --actions-no-observe (#2762, folded into #3026): strip the embedded
   // observation from non-observe tool results entirely. Precedence over
   // --actions-diff-observe — nothing to diff once stripped.

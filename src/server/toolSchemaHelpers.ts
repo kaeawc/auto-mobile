@@ -29,6 +29,22 @@ export const appIdFieldAliases = [
 
 export type FieldAliasMap = Record<string, readonly string[]>;
 
+export type JsonSchemaOverride = (jsonSchema: Record<string, unknown>) => void;
+
+const jsonSchemaOverrides = new WeakMap<object, JsonSchemaOverride>();
+
+export function withJsonSchemaOverride<T extends z.ZodTypeAny>(schema: T, override: JsonSchemaOverride): T {
+  jsonSchemaOverrides.set(schema, override);
+  return schema;
+}
+
+export function applyJsonSchemaOverride(
+  zodSchema: object,
+  jsonSchema: Record<string, unknown>
+): void {
+  jsonSchemaOverrides.get(zodSchema)?.(jsonSchema);
+}
+
 export function withFieldAliases<T extends z.ZodTypeAny>(schema: T, aliases: FieldAliasMap): T {
   return z.preprocess(input => normalizeFieldAliases(input, aliases), schema) as unknown as T;
 }

@@ -508,7 +508,23 @@
       "required": [
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "platform": {
+            "const": "android"
+          }
+        },
+        "required": [
+          "platform",
+          "locale"
+        ]
+      },
+      "then": {
+        "required": [
+          "appId"
+        ]
+      }
     }
   },
   {

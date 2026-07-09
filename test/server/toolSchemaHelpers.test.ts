@@ -304,14 +304,29 @@ describe("appId aliases on tool schemas", () => {
 });
 
 describe("generated tool definitions", () => {
-  test("changeLocalization generated schema includes appId", () => {
+  test("changeLocalization generated schema conditionally requires appId for Android locale changes", () => {
     const schemas = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
       name: string;
-      inputSchema?: { properties?: Record<string, unknown> };
+      inputSchema?: {
+        properties?: Record<string, unknown>;
+        if?: unknown;
+        then?: unknown;
+        required?: string[];
+      };
     }>;
     const changeLocalization = schemas.find(schema => schema.name === "changeLocalization");
 
     expect(changeLocalization?.inputSchema?.properties?.appId).toBeDefined();
+    expect(changeLocalization?.inputSchema?.if).toEqual({
+      properties: {
+        platform: { const: "android" },
+      },
+      required: ["platform", "locale"],
+    });
+    expect(changeLocalization?.inputSchema?.then).toEqual({
+      required: ["appId"],
+    });
+    expect(changeLocalization?.inputSchema?.required).toEqual(["platform"]);
   });
 });
 

@@ -8,7 +8,13 @@ import { createJSONToolResponse } from "../utils/toolUtils";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { BootedDevice, Platform } from "../models";
-import { addDeviceTargetingToSchema, addSessionUuidToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  addSessionUuidToSchema,
+  platformSchema,
+  withAppIdAliases,
+  withJsonSchemaOverride,
+} from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
 
 // Schema definitions
@@ -28,35 +34,48 @@ const changeLocalizationBaseSchema = z.object({
   restartApp: z.string().min(1).optional().describe("iOS bundle ID to relaunch after locale change")
 });
 
-export const changeLocalizationSchema = withAppIdAliases(addDeviceTargetingToSchema(changeLocalizationBaseSchema)).superRefine((values, ctx) => {
-  if (!values.locale && !values.timeZone && !values.textDirection && !values.timeFormat && !values.calendarSystem) {
-    ctx.addIssue({
-      code: "custom",
-      message: "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided.",
-    });
+export const changeLocalizationSchema = withJsonSchemaOverride(
+  withAppIdAliases(addDeviceTargetingToSchema(changeLocalizationBaseSchema)).superRefine((values, ctx) => {
+    if (!values.locale && !values.timeZone && !values.textDirection && !values.timeFormat && !values.calendarSystem) {
+      ctx.addIssue({
+        code: "custom",
+        message: "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided.",
+      });
+    }
+    if (values.appId && values.platform !== "android") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["appId"],
+        message: "appId is only supported for Android locale changes.",
+      });
+    }
+    if (values.appId && !values.locale) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["appId"],
+        message: "appId only applies when locale is provided.",
+      });
+    }
+    if (values.platform === "android" && values.locale && !values.appId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["appId"],
+        message: "appId is required for Android locale changes.",
+      });
+    }
+  }),
+  jsonSchema => {
+    jsonSchema.if = {
+      properties: {
+        platform: { const: "android" },
+      },
+      required: ["platform", "locale"],
+    };
+    jsonSchema.then = {
+      required: ["appId"],
+    };
   }
-  if (values.appId && values.platform !== "android") {
-    ctx.addIssue({
-      code: "custom",
-      path: ["appId"],
-      message: "appId is only supported for Android locale changes.",
-    });
-  }
-  if (values.appId && !values.locale) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["appId"],
-      message: "appId only applies when locale is provided.",
-    });
-  }
-  if (values.platform === "android" && values.locale && !values.appId) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["appId"],
-      message: "appId is required for Android locale changes.",
-    });
-  }
-});
+);
 
 const doNotDisturbStateInputSchema = z.object({
   enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb"),

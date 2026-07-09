@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Network
 
 /// Global buffer for SDK events received via HTTP POST.
@@ -806,16 +807,9 @@ class WebSocketConnection: WebSocketResponding {
 
 extension Data {
     func sha1() -> Data {
-        var digest = [UInt8](repeating: 0, count: 20)
-        _ = withUnsafeBytes { bytes in
-            CC_SHA1(bytes.baseAddress, CC_LONG(self.count), &digest)
-        }
-        return Data(digest)
+        Data(Insecure.SHA1.hash(data: self))
     }
 }
-
-// CommonCrypto import for SHA1
-import CommonCrypto
 
 // MARK: - AnyEncodable Helper
 

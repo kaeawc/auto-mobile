@@ -1,4 +1,11 @@
 export { BaseSocketServer } from "./BaseSocketServer";
+export {
+  ConfigSocketServer,
+  type ConfigSocketMethod,
+  type ConfigSocketRequest,
+  type ConfigSocketResponse,
+  type ConfigSocketResult,
+} from "./ConfigSocketServer";
 export { RequestResponseSocketServer } from "./RequestResponseSocketServer";
 export {
   PushSubscriptionSocketServer,

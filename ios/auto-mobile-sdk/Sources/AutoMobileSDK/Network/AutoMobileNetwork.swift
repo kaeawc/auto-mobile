@@ -102,7 +102,7 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     /// Check if a content type is text-based and eligible for body capture.
     public static func isTextContentType(_ contentType: String?) -> Bool {
         guard let ct = contentType else { return false }
-        let base = ct.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        let base = ct.split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
         return textContentTypes.contains(base) || base.hasPrefix("text/")
     }
 

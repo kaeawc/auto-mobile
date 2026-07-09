@@ -65,6 +65,7 @@ export interface DeviceExecutionResult {
   executedSteps: number;
   totalSteps: number;
   executionTimeMs?: number;
+  skippedSteps?: DeviceSkippedStepResult[];
   failedStep?: {
     stepIndex: number; // Index in plan
     trackIndex: number; // Index in device track
@@ -72,6 +73,14 @@ export interface DeviceExecutionResult {
     error: string;
     failureObservation?: FailureObservationSummary;
   };
+}
+
+export interface DeviceSkippedStepResult {
+  stepIndex: number; // Index in plan
+  trackIndex: number; // Index in device track
+  tool: string;
+  error: string;
+  details?: Record<string, unknown>;
 }
 
 export type AbortStrategy = "immediate" | "finish-current-step";

@@ -129,22 +129,11 @@ export function convertDebugStepsToRecords(
     const action = toolMatch ? toolMatch[1] : step.step;
 
     const details = step.details as { params?: Record<string, unknown>; error?: string } | undefined;
-    const params = details?.params;
-    let target: string | null = null;
-    if (params) {
-      if (params.text) {
-        target = `text="${params.text}"`;
-      } else if (params.elementId) {
-        target = `id="${params.elementId}"`;
-      } else if (params.direction) {
-        target = `direction=${params.direction}`;
-      }
-    }
 
     return {
       stepIndex: index,
       action,
-      target,
+      target: buildStepRecordTarget(details?.params),
       status: step.status,
       durationMs: step.durationMs,
       screenName: null,
@@ -153,6 +142,54 @@ export function convertDebugStepsToRecords(
       details: step.details,
     };
   });
+}
+
+function buildStepRecordTarget(params: Record<string, unknown> | undefined): string | null {
+  if (!params) {
+    return null;
+  }
+  if (params.text) {
+    return `text="${params.text}"`;
+  }
+  if (params.elementId) {
+    return `id="${params.elementId}"`;
+  }
+  if (params.direction) {
+    return `direction=${params.direction}`;
+  }
+  return null;
+}
+
+export function convertPerDeviceSkippedStepsToRecords(
+  perDeviceResults: PlanExecutionResult["perDeviceResults"] | undefined
+): TestStepRecord[] {
+  if (!perDeviceResults) {
+    return [];
+  }
+
+  const skippedRecords: TestStepRecord[] = [];
+  for (const deviceResult of perDeviceResults.values()) {
+    for (const skippedStep of deviceResult.skippedSteps ?? []) {
+      const details = skippedStep.details as { params?: Record<string, unknown>; error?: string } | undefined;
+      skippedRecords.push({
+        stepIndex: skippedStep.stepIndex,
+        action: skippedStep.tool,
+        target: buildStepRecordTarget(details?.params),
+        status: "skipped",
+        durationMs: 0,
+        screenName: null,
+        screenshotPath: null,
+        errorMessage: skippedStep.error,
+        details: {
+          device: deviceResult.device,
+          trackIndex: skippedStep.trackIndex,
+          ...(skippedStep.details ?? {}),
+        },
+      });
+    }
+  }
+
+  return skippedRecords.sort((a, b) => a.stepIndex - b.stepIndex || a.action.localeCompare(b.action));
 }
 
 /**
@@ -248,8 +285,12 @@ export class PlanExecutionOrchestrator {
         throw new Error("Plan execution failed without producing a result");
       }
 
+      const recordedSteps = [
+        ...convertDebugStepsToRecords(result.debug?.steps),
+        ...convertPerDeviceSkippedStepsToRecords(result.perDeviceResults),
+      ];
       await this.recordExecution(result.success ? "passed" : "failed", startTime, {
-        steps: convertDebugStepsToRecords(result.debug?.steps),
+        steps: recordedSteps,
         errorMessage: result.failedStep?.error ?? undefined,
         videoPath: finalizedVideo.videoFilePaths[0],
       });

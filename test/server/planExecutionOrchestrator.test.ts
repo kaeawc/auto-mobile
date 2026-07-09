@@ -278,6 +278,71 @@ steps:
     expect(fakeRepo.recorded[0].errorMessage).toBe("element not found");
   });
 
+  test("execute() records skipped optional steps from multi-device per-device results", async () => {
+    executePlanMock.mockImplementationOnce(() =>
+      Promise.resolve({
+        success: true,
+        executedSteps: 1,
+        totalSteps: 2,
+        perDeviceResults: new Map([
+          ["device-a", {
+            device: "device-a",
+            success: true,
+            executedSteps: 1,
+            totalSteps: 2,
+            skippedSteps: [
+              {
+                stepIndex: 0,
+                trackIndex: 0,
+                tool: "tapOn",
+                error: "element not found",
+                details: {
+                  params: { text: "Not Now", device: "device-a" },
+                  error: "element not found",
+                  optional: true,
+                },
+              },
+            ],
+          }],
+        ]),
+      })
+    );
+    const fakeRepo = new FakeTestExecutionRepository();
+    const orchestrator = new PlanExecutionOrchestrator(
+      {
+        device: iosDevice,
+        request: {
+          ...baseRequest,
+          testMetadata: { testClass: "FooTest", testMethod: "parallelOptional" },
+        },
+      },
+      { ...baseDeps(), testExecutionRepository: fakeRepo as unknown as TestExecutionRepository }
+    );
+
+    const result = await orchestrator.execute();
+
+    expect(result.success).toBe(true);
+    expect(fakeRepo.recorded[0].steps).toEqual([
+      {
+        stepIndex: 0,
+        action: "tapOn",
+        target: 'text="Not Now"',
+        status: "skipped",
+        durationMs: 0,
+        screenName: null,
+        screenshotPath: null,
+        errorMessage: "element not found",
+        details: {
+          device: "device-a",
+          trackIndex: 0,
+          params: { text: "Not Now", device: "device-a" },
+          error: "element not found",
+          optional: true,
+        },
+      },
+    ]);
+  });
+
   test("repository write errors are logged and do not crash the run", async () => {
     const exploding = {
       recordExecution: () => Promise.reject(new Error("db down")),

@@ -3,6 +3,7 @@ import {
   PlanStep,
   PlanExecutionResult,
   DeviceExecutionResult,
+  DeviceSkippedStepResult,
   AbortStrategy,
   DEFAULT_ABORT_STRATEGY,
 } from "../../models/Plan";
@@ -781,6 +782,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           success: result.success,
           executedSteps: result.executedSteps,
           totalSteps: track.length,
+          skippedSteps: result.skippedSteps.length > 0 ? result.skippedSteps : undefined,
           executionTimeMs: debugMode ? this.timer.now() - deviceStartTime : undefined,
           failedStep: result.failedStep
             ? {
@@ -865,6 +867,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             tool: "unknown",
             error: errorMessage,
           },
+          skippedSteps: [],
         };
       }
     });
@@ -937,8 +940,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
       error: string;
       failureObservation?: FailureObservationSummary;
     };
+    skippedSteps: DeviceSkippedStepResult[];
   }> {
     let executedSteps = 0;
+    const skippedSteps: DeviceSkippedStepResult[] = [];
 
     try {
       for (let trackIndex = 0; trackIndex < track.length; trackIndex++) {
@@ -970,11 +975,16 @@ export class DefaultPlanExecutor implements PlanExecutor {
         });
 
         if (stepResult.status === "skipped") {
-          // Parallel tracks do not emit the unified debug-step array (see the captureObserveSteps
-          // warning in executeParallel), so a skipped optional step is logged rather than recorded.
           logger.warn(
             `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${stepResult.error}`
           );
+          skippedSteps.push({
+            stepIndex: planIndex,
+            trackIndex,
+            tool: step.tool,
+            error: stepResult.error ?? "Unknown error",
+            details: stepResult.details,
+          });
           continue;
         }
 
@@ -991,6 +1001,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
               error: stepResult.error ?? "Unknown error",
               ...(stepResult.failureObservation ? { failureObservation: stepResult.failureObservation } : {}),
             },
+            skippedSteps,
           };
         }
 
@@ -1008,6 +1019,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         success: true,
         executedSteps,
         totalSteps: track.length,
+        skippedSteps,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1023,6 +1035,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           tool: "unknown",
           error: errorMessage,
         },
+        skippedSteps,
       };
     }
   }

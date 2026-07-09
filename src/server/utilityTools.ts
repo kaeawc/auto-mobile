@@ -28,9 +28,27 @@ const changeLocalizationBaseSchema = z.object({
   restartApp: z.string().min(1).optional().describe("iOS bundle ID to relaunch after locale change")
 });
 
-export const changeLocalizationSchema = withAppIdAliases(addDeviceTargetingToSchema(changeLocalizationBaseSchema)).refine(values =>
-  values.locale || values.timeZone || values.textDirection || values.timeFormat || values.calendarSystem, {
-  message: "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided."
+export const changeLocalizationSchema = withAppIdAliases(addDeviceTargetingToSchema(changeLocalizationBaseSchema)).superRefine((values, ctx) => {
+  if (!values.locale && !values.timeZone && !values.textDirection && !values.timeFormat && !values.calendarSystem) {
+    ctx.addIssue({
+      code: "custom",
+      message: "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided.",
+    });
+  }
+  if (values.appId && values.platform !== "android") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["appId"],
+      message: "appId is only supported for Android locale changes.",
+    });
+  }
+  if (values.appId && !values.locale) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["appId"],
+      message: "appId only applies when locale is provided.",
+    });
+  }
 });
 
 const doNotDisturbStateInputSchema = z.object({
@@ -154,6 +172,11 @@ export function registerUtilityTools() {
       calendarSystem?: string;
     } = {};
     const errors: string[] = [];
+    let localeMetadata: {
+      localeScope?: "app" | "system";
+      localeAppId?: string;
+      localeMethod?: string;
+    } = {};
 
     if (args.locale !== undefined) {
       const localeOptions = args.appId && device.platform === "android"
@@ -162,6 +185,11 @@ export function registerUtilityTools() {
       const result = await manager.setLocale(args.locale, localeOptions);
       if (result.success) {
         changes.locale = result.languageTag;
+        localeMetadata = {
+          localeScope: args.appId && device.platform === "android" ? "app" : "system",
+          ...(args.appId && device.platform === "android" ? { localeAppId: args.appId } : {}),
+          ...(result.method ? { localeMethod: result.method } : {}),
+        };
       } else {
         errors.push(result.error ?? "Failed to set locale");
       }
@@ -221,6 +249,7 @@ export function registerUtilityTools() {
       success,
       changes,
       intentBroadcast,
+      ...localeMetadata,
       ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
       ...(success ? {} : { error: errors.join("; ") })
     });

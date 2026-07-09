@@ -9,7 +9,7 @@ APP_ID="${APP_ID:-com.android.settings}"
 ADB_SERIAL="${ADB_SERIAL:-}"
 BOOT_TIMEOUT_SECONDS="${BOOT_TIMEOUT_SECONDS:-180}"
 EMULATOR_PORT="${EMULATOR_PORT:-5554}"
-EMULATOR_ARGS="${EMULATOR_ARGS:--no-window -no-audio -no-snapshot}"
+EMULATOR_ARGS="${EMULATOR_ARGS:-}"
 KILL_ON_EXIT="${KILL_ON_EXIT:-false}"
 
 EMULATOR_PID=""
@@ -48,10 +48,8 @@ find_sdk_tool() {
 }
 
 ADB_BIN="$(find_sdk_tool "platform-tools/adb" "adb" || true)"
-EMULATOR_BIN="$(find_sdk_tool "emulator/emulator" "emulator" || true)"
 
 [[ -n "${ADB_BIN}" ]] || fail "adb not found. Set ANDROID_SDK_ROOT or ANDROID_HOME."
-[[ -n "${EMULATOR_BIN}" ]] || fail "emulator not found. Set ANDROID_SDK_ROOT or ANDROID_HOME."
 
 adb_cmd() {
   "${ADB_BIN}" -s "${ADB_SERIAL}" "$@"
@@ -183,8 +181,18 @@ fi
 
 if [[ -z "${ADB_SERIAL}" ]]; then
   log "Starting AVD ${AVD_NAME}"
-  # shellcheck disable=SC2206
-  emulator_args_array=(${EMULATOR_ARGS})
+  EMULATOR_BIN="$(find_sdk_tool "emulator/emulator" "emulator" || true)"
+  [[ -n "${EMULATOR_BIN}" ]] || fail "emulator not found. Set ANDROID_SDK_ROOT or ANDROID_HOME, or pass ADB_SERIAL for an already running emulator."
+
+  emulator_args_array=("-no-window" "-no-audio" "-no-snapshot")
+  if [[ -n "${EMULATOR_ARGS}" ]]; then
+    extra_emulator_args=()
+    while IFS= read -r arg; do
+      [[ -n "${arg}" ]] || continue
+      extra_emulator_args+=("${arg}")
+    done <<< "${EMULATOR_ARGS}"
+    emulator_args_array+=("${extra_emulator_args[@]}")
+  fi
   "${EMULATOR_BIN}" -avd "${AVD_NAME}" -port "${EMULATOR_PORT}" "${emulator_args_array[@]}" >/tmp/auto-mobile-locale-probe-emulator.log 2>&1 &
   EMULATOR_PID="$!"
   STARTED_EMULATOR="true"

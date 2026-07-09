@@ -1,4 +1,5 @@
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { readAndroidDeviceApiLevel } from "../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { logger } from "../../../utils/logger";
 import { AndroidCtrlProxyClient } from "../../observe/android/AndroidCtrlProxyClient";
 import type { SettingsNamespace } from "../../observe/android";
@@ -91,7 +92,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     appId: string,
     options: BroadcastOptions
   ): Promise<SetLocaleResult> {
-    const apiLevel = await this.getAndroidApiLevel();
+    const apiLevel = await readAndroidDeviceApiLevel(this.adb);
     if (apiLevel !== null && apiLevel < MIN_APP_LOCALE_API_LEVEL) {
       return {
         success: false,
@@ -434,23 +435,15 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     }
   }
 
-  private async getAndroidApiLevel(): Promise<number | null> {
-    try {
-      const result = await this.adb.executeCommand("shell getprop ro.build.version.sdk", undefined, undefined, true);
-      const parsed = Number.parseInt(result.stdout.trim(), 10);
-      return Number.isNaN(parsed) ? null : parsed;
-    } catch (error) {
-      logger.warn(`[SystemConfigurationManager] Failed to read Android API level: ${error}`);
-      return null;
-    }
-  }
-
   private parseAppLocalesOutput(output: string): string | null {
     const normalized = normalizeSettingValue(output);
     if (!normalized) {
       return null;
     }
-    const bracketedLocales = normalized.match(/\[([^\]]*)\]/)?.[1] ?? normalized;
+    const bracketedLocales = normalized.match(/\bare\s+\[([^\]]*)\]\s*$/)?.[1];
+    if (bracketedLocales === undefined) {
+      return null;
+    }
     return parseLocaleList(bracketedLocales);
   }
 

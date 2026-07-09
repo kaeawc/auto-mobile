@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
 import { z } from "zod";
 import {
   addDeviceTargetingToSchema,
@@ -261,6 +262,44 @@ describe("appId aliases on tool schemas", () => {
       expect(result.data.appId).toBe("com.example.app");
       expect("packageName" in result.data).toBe(false);
     }
+  });
+
+  test("changeLocalizationSchema rejects appId for iOS locale changes", () => {
+    const result = changeLocalizationSchema.safeParse({
+      platform: "ios",
+      bundleId: "com.example.app",
+      locale: "fr-FR",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(issue => issue.message.includes("appId is only supported for Android"))).toBe(true);
+    }
+  });
+
+  test("changeLocalizationSchema rejects appId when locale is omitted", () => {
+    const result = changeLocalizationSchema.safeParse({
+      platform: "android",
+      appId: "com.example.app",
+      timeZone: "Europe/Paris",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(issue => issue.message.includes("appId only applies when locale is provided"))).toBe(true);
+    }
+  });
+});
+
+describe("generated tool definitions", () => {
+  test("changeLocalization generated schema includes appId", () => {
+    const schemas = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
+      name: string;
+      inputSchema?: { properties?: Record<string, unknown> };
+    }>;
+    const changeLocalization = schemas.find(schema => schema.name === "changeLocalization");
+
+    expect(changeLocalization?.inputSchema?.properties?.appId).toBeDefined();
   });
 });
 

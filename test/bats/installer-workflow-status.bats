@@ -5,15 +5,43 @@ workflow_files=(
   ".github/workflows/merge.yml"
 )
 
+assert_step_contains() {
+  local workflow_file="$1"
+  local step_name="$2"
+  local expected="$3"
+
+  awk -v step_name="${step_name}" -v expected="${expected}" '
+    index($0, "id: run-installer-development") {
+      seen_development_installer = 1
+    }
+    seen_development_installer && index($0, "name: \"" step_name "\"") {
+      in_step = 1
+      next
+    }
+    in_step && /^      - name:/ {
+      exit(found ? 0 : 1)
+    }
+    in_step && index($0, expected) {
+      found = 1
+    }
+    END {
+      if (in_step && found) {
+        exit 0
+      }
+      exit 1
+    }
+  ' "${workflow_file}"
+}
+
 @test "installer development workflows gate follow-up steps on installer step output" {
   for workflow_file in "${workflow_files[@]}"; do
     run grep -q "id: run-installer-development" "${workflow_file}"
     [ "$status" -eq 0 ]
 
-    run grep -q "steps.run-installer-development.outputs.install_exit_code == '0'" "${workflow_file}"
-    [ "$status" -eq 0 ]
-
-    run grep -q "env.INSTALL_EXIT_CODE == '0'" "${workflow_file}"
-    [ "$status" -eq 1 ]
+    assert_step_contains "${workflow_file}" "Verify runtime dependencies" "steps.run-installer-development.outputs.install_exit_code == '0'"
+    assert_step_contains "${workflow_file}" "Build from source" "steps.run-installer-development.outputs.install_exit_code == '0'"
+    assert_step_contains "${workflow_file}" "Daemon lifecycle (start → health → doctor → stop)" "steps.run-installer-development.outputs.install_exit_code == '0'"
+    assert_step_contains "${workflow_file}" "Upload Logs" "steps.run-installer-development.outputs.install_exit_code != '0'"
+    assert_step_contains "${workflow_file}" "Fail on error" "steps.run-installer-development.outputs.install_exit_code != '0'"
   done
 }

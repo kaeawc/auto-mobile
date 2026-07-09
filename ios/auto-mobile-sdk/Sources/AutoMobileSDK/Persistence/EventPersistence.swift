@@ -76,9 +76,7 @@ final class FileEventPersistence: EventPersisting, @unchecked Sendable {
                 try? FileManager.default.removeItem(at: fileURL) // corrupt file
                 return nil
             }
-            let batchId = fileURL.lastPathComponent
-                .replacingOccurrences(of: "events_", with: "")
-                .replacingOccurrences(of: ".json", with: "")
+            let batchId = Self.extractBatchId(from: fileURL.lastPathComponent)
 
             let events: [any SdkEvent] = persisted.compactMap { entry in
                 decodeEvent(type: entry.eventType, data: entry.payload, decoder: decoder)
@@ -104,9 +102,7 @@ final class FileEventPersistence: EventPersisting, @unchecked Sendable {
         else { return }
 
         for file in files {
-            let name = file.lastPathComponent.replacingOccurrences(of: "events_", with: "")
-            if let tsString = name.components(separatedBy: "_").first,
-               let ts = Double(tsString), ts < cutoff {
+            if let ts = Self.extractTimestamp(from: file.lastPathComponent), ts < cutoff {
                 try? FileManager.default.removeItem(at: file)
             }
         }
@@ -115,8 +111,19 @@ final class FileEventPersistence: EventPersisting, @unchecked Sendable {
     // MARK: - Private
 
     private static func extractTimestamp(from filename: String) -> Double? {
-        let name = filename.replacingOccurrences(of: "events_", with: "").replacingOccurrences(of: ".json", with: "")
-        return Double(name.components(separatedBy: "_").first ?? "")
+        let batchId = extractBatchId(from: filename)
+        return Double(batchId.split(separator: "_", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+    }
+
+    private static func extractBatchId(from filename: String) -> String {
+        var batchId = filename[...]
+        if batchId.hasPrefix("events_") {
+            batchId = batchId.dropFirst("events_".count)
+        }
+        if batchId.hasSuffix(".json") {
+            batchId = batchId.dropLast(".json".count)
+        }
+        return String(batchId)
     }
 
     private func decodeEvent(type: SdkEventType, data: Data, decoder: JSONDecoder) -> (any SdkEvent)? {

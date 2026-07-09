@@ -162,6 +162,13 @@ describe("resolveAssetBaseUrl (AUTOMOBILE_ASSET_BASE_URL mirror knob)", function
       .toThrow("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
   });
 
+  test("rejects mirror bases with empty query or fragment delimiters", function() {
+    expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am?" }))
+      .toThrow("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
+    expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am#" }))
+      .toThrow("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
+  });
+
   test("rejects non-absolute mirror bases", function() {
     expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "/mirror/am" }))
       .toThrow("AUTOMOBILE_ASSET_BASE_URL must be an absolute URL");

@@ -373,6 +373,52 @@ describe("CtrlProxyManager", function() {
       expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
     });
 
+    test("fails closed on an installed APK SHA mismatch when a concrete version is pinned (#2815)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "0.0.18";
+      try {
+        const localFakeAdb = new FakeAdbExecutor();
+        localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: ""
+        });
+        localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: ""
+        });
+        localFakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: ""
+        });
+
+        let downloadCalls = 0;
+        AndroidCtrlProxyManager.resetInstances();
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          localFakeAdb,
+          new FakeTimer(),
+          {
+            download: async () => {
+              downloadCalls++;
+              throw new Error("download should not be called for a hermetic mismatch");
+            }
+          }
+        );
+
+        await expect(manager.ensureCompatibleVersion()).rejects.toThrow(
+          "Installed CtrlProxy APK SHA differs from expected release checksum"
+        );
+        expect(downloadCalls).toBe(0);
+        expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
     test("should upgrade when installed SHA mismatches expected and installed download is explicitly allowed", async function() {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();

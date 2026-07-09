@@ -12,6 +12,8 @@
  * scripts/generate-release-constants.sh
  */
 
+import { ActionableError } from "../models/ActionableError";
+
 export const LATEST_RELEASE_VERSION = "latest";
 
 export interface ReleaseChecksumEntry {
@@ -289,6 +291,20 @@ export function isPinnedVersionKnown(
 export function resolveAssetBaseUrl(env: EnvLike = process.env): string {
   const trimmed = env[AUTOMOBILE_ASSET_BASE_URL_ENV]?.trim();
   if (trimmed && trimmed.length > 0) {
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new ActionableError(
+        `${AUTOMOBILE_ASSET_BASE_URL_ENV} must be an absolute URL, for example https://mirror.example/auto-mobile.`
+      );
+    }
+    if (parsed.search || parsed.hash) {
+      throw new ActionableError(
+        `${AUTOMOBILE_ASSET_BASE_URL_ENV} must not include a query string or fragment; ` +
+        `use a path-only base URL such as ${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}.`
+      );
+    }
     return trimmed.replace(/\/+$/, "");
   }
   return DEFAULT_ASSET_BASE_URL;

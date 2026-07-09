@@ -151,6 +151,16 @@ describe("resolveAssetBaseUrl (AUTOMOBILE_ASSET_BASE_URL mirror knob)", function
   test("ignores a blank mirror base", function() {
     expect(resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "  " })).toBe(DEFAULT_ASSET_BASE_URL);
   });
+
+  test("rejects mirror bases with query strings", function() {
+    expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am?token=abc" }))
+      .toThrow("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
+  });
+
+  test("rejects mirror bases with fragments", function() {
+    expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am#release" }))
+      .toThrow("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
+  });
 });
 
 describe("resolveApkUrl / resolveIpaUrl (EC1, EC2, EC3)", function() {

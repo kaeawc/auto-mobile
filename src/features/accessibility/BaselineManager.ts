@@ -61,35 +61,22 @@ export class BaselineManager {
   async saveBaseline(screenId: string, violations: WcagViolation[]): Promise<void> {
     const db = this.db;
     const now = new Date().toISOString();
+    const violationsJson = JSON.stringify(violations);
 
-    // Upsert baseline
-    const existing = await db
-      .selectFrom("accessibility_baselines")
-      .select("id")
-      .where("screen_id", "=", screenId)
-      .executeTakeFirst();
-
-    if (existing) {
-      // Update existing baseline
-      await db
-        .updateTable("accessibility_baselines")
-        .set({
-          violations_json: JSON.stringify(violations),
+    await db
+      .insertInto("accessibility_baselines")
+      .values({
+        screen_id: screenId,
+        violations_json: violationsJson,
+        updated_at: now,
+      })
+      .onConflict(oc =>
+        oc.column("screen_id").doUpdateSet({
+          violations_json: violationsJson,
           updated_at: now,
         })
-        .where("screen_id", "=", screenId)
-        .execute();
-    } else {
-      // Insert new baseline
-      await db
-        .insertInto("accessibility_baselines")
-        .values({
-          screen_id: screenId,
-          violations_json: JSON.stringify(violations),
-          updated_at: now,
-        })
-        .execute();
-    }
+      )
+      .execute();
   }
 
   /**

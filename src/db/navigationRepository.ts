@@ -979,7 +979,21 @@ export class NavigationRepository {
     timestamp: number
   ): Promise<NavigationNodeFingerprint> {
     const db = this.getDb();
+    if (db.isTransaction) {
+      return this.promoteSuggestionWithin(db, suggestionId, nodeId, timestamp);
+    }
 
+    return db.transaction().execute(trx =>
+      this.withExecutor(trx).promoteSuggestionWithin(trx, suggestionId, nodeId, timestamp)
+    );
+  }
+
+  private async promoteSuggestionWithin(
+    db: Kysely<Database>,
+    suggestionId: number,
+    nodeId: number,
+    timestamp: number
+  ): Promise<NavigationNodeFingerprint> {
     // Get the suggestion
     const suggestion = await db
       .selectFrom("navigation_suggestions")
@@ -992,7 +1006,7 @@ export class NavigationRepository {
     }
 
     // Create fingerprint record (using app_id from suggestion)
-    const fingerprint = await this.getOrCreateFingerprint(
+    const fingerprint = await this.withExecutor(db).getOrCreateFingerprint(
       suggestion.app_id,
       nodeId,
       suggestion.fingerprint_hash,

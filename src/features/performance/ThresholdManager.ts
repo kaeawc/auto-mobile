@@ -5,7 +5,6 @@ import { logger } from "../../utils/logger";
 import { DeviceCapabilities, DeviceCapabilitiesDetector } from "../../utils/DeviceCapabilities";
 import { sql } from "kysely";
 import {
-  adjustWeight,
   calculateWeightedAverage,
   calculateMode,
   WEIGHT_BOUNDS,
@@ -48,9 +47,16 @@ export class ThresholdManager {
    * Clean up expired thresholds based on TTL
    */
   async cleanupExpiredThresholds(deviceId: string): Promise<void> {
+    await this.cleanupExpiredThresholdsWith(this.db, deviceId);
+  }
+
+  private async cleanupExpiredThresholdsWith(
+    db: Kysely<Database>,
+    deviceId: string
+  ): Promise<void> {
     try {
       // Delete thresholds where created_at + ttl_hours < now
-      const deleted = await this.db
+      const deleted = await db
         .deleteFrom("performance_thresholds")
         .where("device_id", "=", deviceId)
         .where(
@@ -72,11 +78,18 @@ export class ThresholdManager {
    * Get valid (non-expired) thresholds for a device
    */
   async getValidThresholds(deviceId: string): Promise<PerformanceThresholds[]> {
+    return this.getValidThresholdsWith(this.db, deviceId);
+  }
+
+  private async getValidThresholdsWith(
+    db: Kysely<Database>,
+    deviceId: string
+  ): Promise<PerformanceThresholds[]> {
     // First cleanup expired thresholds
-    await this.cleanupExpiredThresholds(deviceId);
+    await this.cleanupExpiredThresholdsWith(db, deviceId);
 
     // Get all valid thresholds
-    const thresholds = await this.db
+    const thresholds = await db
       .selectFrom("performance_thresholds")
       .selectAll()
       .where("device_id", "=", deviceId)
@@ -156,43 +169,71 @@ export class ThresholdManager {
     cpuUsageThresholdPercent: number;
     touchLatencyThresholdMs: number;
   }> {
+    const db = this.db;
+    const run = async (executor: Kysely<Database>) => {
     // Get existing valid thresholds
-    const existingThresholds = await this.getValidThresholds(deviceId);
+      const existingThresholds = await this.getValidThresholdsWith(executor, deviceId);
 
-    // If we have existing thresholds, calculate weighted average
-    if (existingThresholds.length > 0) {
-      const weighted = this.calculateWeightedAverageThresholds(existingThresholds);
-      if (weighted) {
-        logger.info(
-          `[ThresholdManager] Using weighted average of ${existingThresholds.length} threshold entries for device ${deviceId}`
-        );
-        return {
-          frameTimeThresholdMs: weighted.frame_time_threshold_ms,
-          p50ThresholdMs: weighted.p50_threshold_ms,
-          p90ThresholdMs: weighted.p90_threshold_ms,
-          p95ThresholdMs: weighted.p95_threshold_ms,
-          p99ThresholdMs: weighted.p99_threshold_ms,
-          jankCountThreshold: weighted.jank_count_threshold,
-          cpuUsageThresholdPercent: weighted.cpu_usage_threshold_percent,
-          touchLatencyThresholdMs: weighted.touch_latency_threshold_ms,
-        };
+      // If we have existing thresholds, calculate weighted average
+      if (existingThresholds.length > 0) {
+        const weighted = this.calculateWeightedAverageThresholds(existingThresholds);
+        if (weighted) {
+          logger.info(
+            `[ThresholdManager] Using weighted average of ${existingThresholds.length} threshold entries for device ${deviceId}`
+          );
+          return {
+            frameTimeThresholdMs: weighted.frame_time_threshold_ms,
+            p50ThresholdMs: weighted.p50_threshold_ms,
+            p90ThresholdMs: weighted.p90_threshold_ms,
+            p95ThresholdMs: weighted.p95_threshold_ms,
+            p99ThresholdMs: weighted.p99_threshold_ms,
+            jankCountThreshold: weighted.jank_count_threshold,
+            cpuUsageThresholdPercent: weighted.cpu_usage_threshold_percent,
+            touchLatencyThresholdMs: weighted.touch_latency_threshold_ms,
+          };
+        }
       }
+
+      // No existing thresholds, create new ones based on device capabilities
+      logger.info(`[ThresholdManager] Creating new thresholds for device ${deviceId}`);
+      const defaultThresholds = DeviceCapabilitiesDetector.calculateDefaultThresholds(capabilities);
+
+      // Store the new thresholds
+      await this.storeThresholdsWith(executor, deviceId, capabilities, defaultThresholds);
+
+      return defaultThresholds;
+    };
+
+    if (db.isTransaction) {
+      return run(db);
     }
-
-    // No existing thresholds, create new ones based on device capabilities
-    logger.info(`[ThresholdManager] Creating new thresholds for device ${deviceId}`);
-    const defaultThresholds = DeviceCapabilitiesDetector.calculateDefaultThresholds(capabilities);
-
-    // Store the new thresholds
-    await this.storeThresholds(deviceId, capabilities, defaultThresholds);
-
-    return defaultThresholds;
+    return db.transaction().execute(run);
   }
 
   /**
    * Store new thresholds for a device
    */
   async storeThresholds(
+    deviceId: string,
+    capabilities: DeviceCapabilities,
+    thresholds: {
+      frameTimeThresholdMs: number;
+      p50ThresholdMs: number;
+      p90ThresholdMs: number;
+      p95ThresholdMs: number;
+      p99ThresholdMs: number;
+      jankCountThreshold: number;
+      cpuUsageThresholdPercent: number;
+      touchLatencyThresholdMs: number;
+    },
+    weight: number = 1.0,
+    ttlHours: number = 24
+  ): Promise<void> {
+    await this.storeThresholdsWith(this.db, deviceId, capabilities, thresholds, weight, ttlHours);
+  }
+
+  private async storeThresholdsWith(
+    db: Kysely<Database>,
     deviceId: string,
     capabilities: DeviceCapabilities,
     thresholds: {
@@ -227,7 +268,7 @@ export class ThresholdManager {
     };
 
     try {
-      await this.db
+      await db
         .insertInto("performance_thresholds")
         .values(newThresholds)
         .execute();
@@ -249,33 +290,29 @@ export class ThresholdManager {
     passed: boolean
   ): Promise<void> {
     try {
-      // Get current thresholds for this session
-      const threshold = await this.db
-        .selectFrom("performance_thresholds")
-        .selectAll()
-        .where("device_id", "=", deviceId)
-        .where("session_id", "=", sessionId)
-        .orderBy("created_at", "desc")
-        .limit(1)
+      await this.cleanupExpiredThresholds(deviceId);
+      const adjustedWeight = passed
+        ? sql<number>`min(weight * ${WEIGHT_BOUNDS.successMultiplier}, ${WEIGHT_BOUNDS.max})`
+        : sql<number>`max(weight * ${WEIGHT_BOUNDS.failureMultiplier}, ${WEIGHT_BOUNDS.min})`;
+      const result = await this.db
+        .updateTable("performance_thresholds")
+        .set({ weight: adjustedWeight })
+        .where("id", "=", sql<number>`(
+          select id from performance_thresholds
+          where device_id = ${deviceId} and session_id = ${sessionId}
+            and datetime(created_at, '+' || ttl_hours || ' hours') >= datetime('now')
+          order by created_at desc
+          limit 1
+        )`)
         .executeTakeFirst();
 
-      if (!threshold) {
+      if (Number(result.numUpdatedRows) === 0) {
         logger.warn(`[ThresholdManager] No threshold found for device ${deviceId} session ${sessionId}`);
         return;
       }
 
-      // Adjust weight based on result using shared utility
-      const currentWeight = threshold.weight;
-      const newWeight = adjustWeight(currentWeight, passed);
-
-      await this.db
-        .updateTable("performance_thresholds")
-        .set({ weight: newWeight })
-        .where("id", "=", threshold.id)
-        .execute();
-
       logger.debug(
-        `[ThresholdManager] Updated threshold weight from ${currentWeight.toFixed(2)} to ${newWeight.toFixed(2)} (${passed ? "passed" : "failed"})`
+        `[ThresholdManager] Updated threshold weight (${passed ? "passed" : "failed"})`
       );
     } catch (error) {
       logger.warn(`[ThresholdManager] Failed to update threshold weight: ${error}`);

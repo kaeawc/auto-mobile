@@ -25,7 +25,7 @@ import { getMcpRecorder } from "./mcpRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
-import { finalizeToolResponse, type ObservationBaselineStore } from "./finalizeToolResponse";
+import { finalizeToolResponse, type ObservationArtifactWriter, type ObservationBaselineStore } from "./finalizeToolResponse";
 import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
 import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
@@ -162,6 +162,8 @@ interface AfterToolCallResult {
 interface AfterToolCallHandler {
   handle(input: AfterToolCallInput): Promise<AfterToolCallResult>;
 }
+
+type ObservationArtifactWriterFactory = (outputDirectory: string, timer: Timer) => ObservationArtifactWriter;
 
 export interface PlanLifecycleInput {
   name: string;
@@ -515,7 +517,12 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   }
 }
 
-class DefaultAfterToolCallHandler implements AfterToolCallHandler {
+export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
+  constructor(
+    private readonly createArtifactWriter: ObservationArtifactWriterFactory =
+    (outputDirectory, timer) => new JsonToolOutputArtifactWriter({ outputDirectory, timer })
+  ) {}
+
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
     const { name, args, internalCall, response, sessionUuid, shouldResolveDevice, signal, timer, toolStartMs } = input;
 
@@ -614,7 +621,7 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
         : undefined;
     const artifactDirectory = serverConfig.getToolOutputArtifactDirectory();
     const artifactWriter = artifactDirectory && !internalCall
-      ? new JsonToolOutputArtifactWriter({ outputDirectory: artifactDirectory, timer })
+      ? this.createArtifactWriter(artifactDirectory, timer)
       : undefined;
 
     return {

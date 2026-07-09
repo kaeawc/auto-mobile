@@ -117,6 +117,23 @@ describe("module-level URL and checksum exports", function() {
   test("iOS runner checksum matches the newest registered entry", function() {
     expect(IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM).toBe(newest.runnerSha256);
   });
+
+  test("malformed mirror config does not prevent importing release constants (#3491)", async function() {
+    const prevBaseUrl = process.env.AUTOMOBILE_ASSET_BASE_URL;
+    process.env.AUTOMOBILE_ASSET_BASE_URL = "https://mirror.test/am?";
+    try {
+      const module = await import(`../../src/constants/release.ts?malformed-mirror-import-${Date.now()}`);
+
+      expect(module.RELEASE_VERSION).toBe("latest");
+      expect(module.APK_URL).toContain("/releases/download/");
+    } finally {
+      if (prevBaseUrl === undefined) {
+        delete process.env.AUTOMOBILE_ASSET_BASE_URL;
+      } else {
+        process.env.AUTOMOBILE_ASSET_BASE_URL = prevBaseUrl;
+      }
+    }
+  });
 });
 
 // --- Issue #2746: hermetic single-version pinning knobs ---

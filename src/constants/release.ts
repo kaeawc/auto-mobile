@@ -365,14 +365,14 @@ export function resolveDaemonInstallSpecifier(env: EnvLike = process.env): strin
   return `${DAEMON_PACKAGE_NAME}@${resolveAssetVersion(resolvePinnedVersion(env))}`;
 }
 
-export const APK_URL: string = resolveApkUrl();
-export const APK_SHA256_CHECKSUM: string = resolveApkChecksum();
+export const APK_URL: string = resolveApkUrl({});
+export const APK_SHA256_CHECKSUM: string = resolveApkChecksum({});
 
 export const IOS_CTRL_PROXY_RELEASE_VERSION: string = RELEASE_VERSION;
-export const IOS_CTRL_PROXY_IPA_URL: string = resolveIpaUrl();
-export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveIpaChecksum();
+export const IOS_CTRL_PROXY_IPA_URL: string = resolveIpaUrl({});
+export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveIpaChecksum({});
 export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (device build), empty = skip verification
 // SHA256 of the simulator runner binary (CtrlProxyUITests-Runner), empty = skip
 // verification. Resolved through RELEASE_CHECKSUM_REGISTRY so pinned iOS
 // downloads verify against the runner hash recorded for the same release entry.
-export const IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM: string = resolveRunnerChecksum();
+export const IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM: string = resolveRunnerChecksum({});

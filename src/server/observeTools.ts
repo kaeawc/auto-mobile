@@ -10,7 +10,7 @@ import { BootedDevice, Element, ObserveResult, ObserveToolPayload, ViewHierarchy
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { IdentifyInteractions, IdentifyInteractionsOptions } from "../features/observe/IdentifyInteractions";
-import { addDeviceTargetingToSchema, appIdFieldAliases, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { elementContainerSchema } from "./elementSelectorSchemas";
 import { observeResultSchema } from "./toolOutputSchemas";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
@@ -32,13 +32,16 @@ const waitForContainerField = elementContainerSchema
     "Scope match to a container"
   );
 
-const appIdAliasShape = Object.fromEntries(
-  appIdFieldAliases.map(alias => [alias, z.string().optional()])
-) as Record<typeof appIdFieldAliases[number], z.ZodOptional<z.ZodString>>;
+const publicActiveWindowAppIdAliases = ["packageName", "bundleId"] as const;
+
+const appIdAliasShape = {
+  packageName: z.string().optional(),
+  bundleId: z.string().optional(),
+};
 
 const appIdPresenceBranches = [
   z.object({ appId: z.string() }).passthrough(),
-  ...appIdFieldAliases.map(alias => z.object({ [alias]: z.string() }).passthrough())
+  ...publicActiveWindowAppIdAliases.map(alias => z.object({ [alias]: z.string() }).passthrough())
 ];
 
 const activeWindowWaitForBaseSchema = z.object({

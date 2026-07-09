@@ -3152,58 +3152,10 @@
                           "description": "Foreground app bundle ID / package name",
                           "type": "string"
                         },
-                        "packageId": {
-                          "type": "string"
-                        },
-                        "package": {
-                          "type": "string"
-                        },
                         "packageName": {
                           "type": "string"
                         },
-                        "appPackage": {
-                          "type": "string"
-                        },
-                        "appPackageId": {
-                          "type": "string"
-                        },
-                        "bundle": {
-                          "type": "string"
-                        },
                         "bundleId": {
-                          "type": "string"
-                        },
-                        "bundleID": {
-                          "type": "string"
-                        },
-                        "bundleIdentifier": {
-                          "type": "string"
-                        },
-                        "application": {
-                          "type": "string"
-                        },
-                        "applicationId": {
-                          "type": "string"
-                        },
-                        "applicationIdentifier": {
-                          "type": "string"
-                        },
-                        "app": {
-                          "type": "string"
-                        },
-                        "appIdentifier": {
-                          "type": "string"
-                        },
-                        "package_id": {
-                          "type": "string"
-                        },
-                        "package_name": {
-                          "type": "string"
-                        },
-                        "bundle_id": {
-                          "type": "string"
-                        },
-                        "application_id": {
                           "type": "string"
                         },
                         "activityName": {
@@ -3230,30 +3182,6 @@
                         {
                           "type": "object",
                           "properties": {
-                            "packageId": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "packageId"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "package": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "package"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
                             "packageName": {
                               "type": "string"
                             }
@@ -3266,180 +3194,12 @@
                         {
                           "type": "object",
                           "properties": {
-                            "appPackage": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "appPackage"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "appPackageId": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "appPackageId"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "bundle": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "bundle"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
                             "bundleId": {
                               "type": "string"
                             }
                           },
                           "required": [
                             "bundleId"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "bundleID": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "bundleID"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "bundleIdentifier": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "bundleIdentifier"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "application": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "application"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "applicationId": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "applicationId"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "applicationIdentifier": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "applicationIdentifier"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "app": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "app"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "appIdentifier": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "appIdentifier"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "package_id": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "package_id"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "package_name": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "package_name"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "bundle_id": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "bundle_id"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "application_id": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "application_id"
                           ],
                           "additionalProperties": {}
                         },
@@ -3593,58 +3353,10 @@
                               "description": "Foreground app bundle ID / package name",
                               "type": "string"
                             },
-                            "packageId": {
-                              "type": "string"
-                            },
-                            "package": {
-                              "type": "string"
-                            },
                             "packageName": {
                               "type": "string"
                             },
-                            "appPackage": {
-                              "type": "string"
-                            },
-                            "appPackageId": {
-                              "type": "string"
-                            },
-                            "bundle": {
-                              "type": "string"
-                            },
                             "bundleId": {
-                              "type": "string"
-                            },
-                            "bundleID": {
-                              "type": "string"
-                            },
-                            "bundleIdentifier": {
-                              "type": "string"
-                            },
-                            "application": {
-                              "type": "string"
-                            },
-                            "applicationId": {
-                              "type": "string"
-                            },
-                            "applicationIdentifier": {
-                              "type": "string"
-                            },
-                            "app": {
-                              "type": "string"
-                            },
-                            "appIdentifier": {
-                              "type": "string"
-                            },
-                            "package_id": {
-                              "type": "string"
-                            },
-                            "package_name": {
-                              "type": "string"
-                            },
-                            "bundle_id": {
-                              "type": "string"
-                            },
-                            "application_id": {
                               "type": "string"
                             },
                             "activityName": {
@@ -3671,30 +3383,6 @@
                             {
                               "type": "object",
                               "properties": {
-                                "packageId": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "packageId"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "package": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "package"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
                                 "packageName": {
                                   "type": "string"
                                 }
@@ -3707,180 +3395,12 @@
                             {
                               "type": "object",
                               "properties": {
-                                "appPackage": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "appPackage"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "appPackageId": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "appPackageId"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "bundle": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "bundle"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
                                 "bundleId": {
                                   "type": "string"
                                 }
                               },
                               "required": [
                                 "bundleId"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "bundleID": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "bundleID"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "bundleIdentifier": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "bundleIdentifier"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "application": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "application"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "applicationId": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "applicationId"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "applicationIdentifier": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "applicationIdentifier"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "app": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "app"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "appIdentifier": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "appIdentifier"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "package_id": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "package_id"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "package_name": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "package_name"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "bundle_id": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "bundle_id"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "application_id": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "application_id"
                               ],
                               "additionalProperties": {}
                             },

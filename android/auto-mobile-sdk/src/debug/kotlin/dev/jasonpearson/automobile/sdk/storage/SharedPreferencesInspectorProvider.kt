@@ -10,6 +10,10 @@ import dev.jasonpearson.automobile.protocol.StorageEntry
 import dev.jasonpearson.automobile.protocol.StorageFileInfo
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /**
  * ContentProvider for SharedPreferences inspection via ADB.
@@ -27,6 +31,8 @@ import dev.jasonpearson.automobile.protocol.StorageResponse
  * ```
  */
 class SharedPreferencesInspectorProvider : ContentProvider() {
+
+  private val json = Json
 
   override fun onCreate(): Boolean {
     // Always return true - actual initialization happens in call()
@@ -137,8 +143,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
       value == null -> null
       type == KeyValueType.STRING_SET -> {
         @Suppress("UNCHECKED_CAST") val set = value as? Set<String> ?: return null
-        // Serialize as JSON array string
-        "[" + set.joinToString(",") { "\"$it\"" } + "]"
+        json.encodeToString(set.toList())
       }
       else -> value.toString()
     }
@@ -264,16 +269,10 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
         valueStr.toBooleanStrictOrNull()
           ?: throw IllegalArgumentException("Invalid BOOLEAN value: $valueStr")
       KeyValueType.STRING_SET -> {
-        // Parse JSON array format: ["a","b","c"]
-        val trimmed = valueStr.trim()
-        if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
-          throw IllegalArgumentException("STRING_SET must be a JSON array: $valueStr")
-        }
-        val inner = trimmed.substring(1, trimmed.length - 1)
-        if (inner.isBlank()) {
-          emptySet<String>()
-        } else {
-          inner.split(",").map { it.trim().removeSurrounding("\"") }.toSet()
+        try {
+          json.decodeFromString<List<String>>(valueStr).toSet()
+        } catch (e: SerializationException) {
+          throw IllegalArgumentException("STRING_SET must be a JSON array: $valueStr", e)
         }
       }
       KeyValueType.UNKNOWN -> throw IllegalArgumentException("Cannot deserialize UNKNOWN type")

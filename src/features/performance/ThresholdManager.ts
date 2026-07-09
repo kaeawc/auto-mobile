@@ -290,6 +290,7 @@ export class ThresholdManager {
     passed: boolean
   ): Promise<void> {
     try {
+      await this.cleanupExpiredThresholds(deviceId);
       const adjustedWeight = passed
         ? sql<number>`min(weight * ${WEIGHT_BOUNDS.successMultiplier}, ${WEIGHT_BOUNDS.max})`
         : sql<number>`max(weight * ${WEIGHT_BOUNDS.failureMultiplier}, ${WEIGHT_BOUNDS.min})`;
@@ -299,6 +300,7 @@ export class ThresholdManager {
         .where("id", "=", sql<number>`(
           select id from performance_thresholds
           where device_id = ${deviceId} and session_id = ${sessionId}
+            and datetime(created_at, '+' || ttl_hours || ' hours') >= datetime('now')
           order by created_at desc
           limit 1
         )`)

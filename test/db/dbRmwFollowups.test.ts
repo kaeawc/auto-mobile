@@ -274,6 +274,35 @@ describe("DB RMW follow-up fixes (#3415)", () => {
     expect(row.weight).toBeCloseTo(1.331);
   });
 
+  test("performance threshold weight update ignores expired threshold rows", async () => {
+    const db = await openDb();
+    const manager = new ThresholdManager(db);
+    await db
+      .insertInto("performance_thresholds")
+      .values({
+        device_id: "device-1",
+        session_id: "expired-session",
+        refresh_rate: 60,
+        frame_time_threshold_ms: 16,
+        p50_threshold_ms: 12,
+        p90_threshold_ms: 16,
+        p95_threshold_ms: 20,
+        p99_threshold_ms: 25,
+        jank_count_threshold: 5,
+        cpu_usage_threshold_percent: 80,
+        touch_latency_threshold_ms: 32,
+        weight: 1,
+        ttl_hours: 1,
+        created_at: "2000-01-01T00:00:00.000Z",
+      })
+      .execute();
+
+    await manager.updateThresholdWeight("device-1", "expired-session", true);
+
+    const rows = await db.selectFrom("performance_thresholds").selectAll().execute();
+    expect(rows).toHaveLength(0);
+  });
+
   test("memory thresholds get-or-create stores one initial threshold under concurrency", async () => {
     const db = await openDb();
     const manager = new MemoryThresholdManager(db);
@@ -305,5 +334,30 @@ describe("DB RMW follow-up fixes (#3415)", () => {
 
     const row = await db.selectFrom("memory_thresholds").selectAll().executeTakeFirstOrThrow();
     expect(row.weight).toBeCloseTo(1.331);
+  });
+
+  test("memory threshold weight update ignores expired threshold rows", async () => {
+    const db = await openDb();
+    const manager = new MemoryThresholdManager(db);
+    await db
+      .insertInto("memory_thresholds")
+      .values({
+        device_id: "device-1",
+        package_name: "com.example.app",
+        heap_growth_threshold_mb: 50,
+        native_heap_growth_threshold_mb: 30,
+        gc_count_threshold: 10,
+        gc_duration_threshold_ms: 500,
+        unreachable_objects_threshold: 1000,
+        weight: 1,
+        ttl_hours: 1,
+        created_at: "2000-01-01T00:00:00.000Z",
+      })
+      .execute();
+
+    await manager.updateThresholdWeight("device-1", "com.example.app", true);
+
+    const rows = await db.selectFrom("memory_thresholds").selectAll().execute();
+    expect(rows).toHaveLength(0);
   });
 });

@@ -654,6 +654,10 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.wasCommandExecuted("pkill -f 'CtrlProxyUITests-Runner'")).toBe(false);
       expect(fakeExecutor.wasCommandExecuted("pkill -f 'xcodebuild.*CtrlProxyUITests'")).toBe(false);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -912345")).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -912346")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL -- -912346")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -912347")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL -- -912347")).toBe(false);
       expect(ownedRunner.alive).toBe(false);
       expect(otherDeviceRunner.alive).toBe(true);
       expect(externalHotReloadRunner.alive).toBe(true);
@@ -1825,6 +1829,12 @@ describe("IOSCtrlProxyManager", function() {
         createFakeBuilder(),
         fakeExecutor
       );
+      const originalSpawn = fakeExecutor.spawn.bind(fakeExecutor);
+      let portWasFreeAtSpawn = false;
+      fakeExecutor.spawn = (command, args, options) => {
+        portWasFreeAtSpawn = !staleListener.alive;
+        return originalSpawn(command, args, options);
+      };
 
       await manager.start();
 
@@ -1833,6 +1843,7 @@ describe("IOSCtrlProxyManager", function() {
       expect(daemonShell.alive).toBe(false);
       expect(daemonXcodebuild.alive).toBe(false);
       expect(staleListener.alive).toBe(false);
+      expect(portWasFreeAtSpawn).toBe(true);
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
     });
 

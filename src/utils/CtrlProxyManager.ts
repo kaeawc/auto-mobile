@@ -822,6 +822,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       };
     } catch (reinstallError) {
       const reinstallMessage = reinstallError instanceof Error ? reinstallError.message : String(reinstallError);
+      logger.warn(`[CTRL_PROXY] APK reinstall failed: ${reinstallMessage}`, reinstallError);
       this.clearServiceAvailabilityCache();
       return {
         ...result,
@@ -1489,6 +1490,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         apkPath
       };
     } catch (error) {
+      logger.warn("[CTRL_PROXY] Failed to compute installed APK hash via host fallback", {
+        error: error instanceof Error ? error.message : String(error)
+      });
       return {
         sha256: null,
         source: "none",

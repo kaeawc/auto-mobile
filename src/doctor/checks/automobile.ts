@@ -205,6 +205,7 @@ export async function checkDaemonStatus(
       recommendation: `Start the daemon with: bunx ${resolveDaemonInstallSpecifier()} --daemon start`,
     };
   } catch (error) {
+    logger.warn(`Daemon status check failed: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "Daemon Status",
       status: "warn",
@@ -246,6 +247,7 @@ export async function checkDaemonConnectivity(
       recommendation: report.recommendations.join("; ") || `Try: bunx ${resolveDaemonInstallSpecifier()} --daemon restart`,
     };
   } catch (error) {
+    logger.warn(`Daemon connectivity check failed: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "Daemon Connectivity",
       status: "warn",

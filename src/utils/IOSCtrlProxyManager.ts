@@ -373,13 +373,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         if (!processInfo || !IOSCtrlProxyManager.isCtrlProxyRunnerCommand(processInfo.command)) {
           continue;
         }
-        const rootPid = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(processExecutor, {
-          pid,
-          port: IOSCtrlProxyManager.DEFAULT_PORT,
-          command: processInfo.command,
-          environment: processInfo.environment,
-          ppid: processInfo.ppid,
-        });
+        const rootPid = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(
+          processExecutor,
+          {
+            pid,
+            port: IOSCtrlProxyManager.DEFAULT_PORT,
+            command: processInfo.command,
+            environment: processInfo.environment,
+            ppid: processInfo.ppid,
+          },
+          { requireOrphanedRoot: true }
+        );
         if (rootPid === null) {
           continue;
         }
@@ -1719,7 +1723,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private static async findDaemonManagedRunnerTreeRoot(
     processExecutor: ProcessExecutor,
-    process: ListeningProcess
+    process: ListeningProcess,
+    options: { requireOrphanedRoot?: boolean } = {}
   ): Promise<number | null> {
     if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(process.command)) {
       return null;
@@ -1730,7 +1735,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const visitedPids = new Set<number>([process.pid]);
 
     if (IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)) {
-      rootPid = process.pid;
+      rootPid = options.requireOrphanedRoot && process.ppid !== 1 ? null : process.pid;
     }
 
     while (parentPid !== undefined && parentPid > 1 && !visitedPids.has(parentPid)) {
@@ -1744,11 +1749,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         IOSCtrlProxyManager.isShellCommand(parentInfo.command) &&
         IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command)
       ) {
-        return parentPid;
+        return options.requireOrphanedRoot && parentInfo.ppid !== 1 ? null : parentPid;
       }
 
       if (IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command)) {
-        rootPid = parentPid;
+        rootPid = options.requireOrphanedRoot && parentInfo.ppid !== 1 ? null : parentPid;
       }
 
       parentPid = parentInfo.ppid;

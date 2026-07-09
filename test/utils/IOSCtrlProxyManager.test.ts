@@ -2084,6 +2084,38 @@ describe("IOSCtrlProxyManager", function() {
       expect(orphanedRunner.alive).toBe(false);
     });
 
+    test("startup orphan reaping preserves CtrlProxy xcodebuild with a live non-orphan parent (#2847)", async function() {
+      const liveParent: FakeListeningProcess = {
+        pid: 4450,
+        port: 0,
+        ppid: 4400,
+        command: "node dist/src/index.js --daemon-mode",
+        alive: true,
+      };
+      const liveXcodebuild: FakeListeningProcess = {
+        pid: 4451,
+        port: 0,
+        ppid: 4450,
+        command: `xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun ` +
+          `-destination platform=iOS Simulator,id=${testDevice.deviceId} ` +
+          `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+        environment: `CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=${testDevice.deviceId}`,
+        alive: true,
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [liveParent, liveXcodebuild]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("4451\n", ""));
+      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxyUITests-Runner'", createExecResult("", ""));
+      fakeTimer.enableAutoAdvance();
+
+      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(fakeExecutor, fakeTimer);
+
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -4451")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 4451")).toBe(false);
+      expect(liveXcodebuild.alive).toBe(true);
+    });
+
     test("start() reports the bound PID and command when owned port cleanup cannot free the port", async function() {
       const stuckProcess: FakeListeningProcess = {
         pid: 5555,

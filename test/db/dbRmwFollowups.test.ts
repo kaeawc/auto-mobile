@@ -177,6 +177,12 @@ describe("DB RMW follow-up fixes (#3415)", () => {
     const concurrentEvents = events.filter(event => event.value !== "seed");
     expect(concurrentEvents).toHaveLength(N);
     expect(concurrentEvents.filter(event => event.previousValue === "seed")).toHaveLength(1);
+    expect(concurrentEvents.every(event => event.previousValue !== null)).toBe(true);
+    expect(
+      concurrentEvents
+        .filter(event => event.previousValue !== "seed")
+        .every(event => event.previousValue?.startsWith("value-"))
+    ).toBe(true);
   });
 
   test("direct suggestion promotion rolls back the fingerprint when linking fails", async () => {

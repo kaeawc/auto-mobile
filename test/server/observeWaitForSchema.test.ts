@@ -752,6 +752,30 @@ describe("findWaitForElement rich predicates", () => {
     expect(element?.text).toBe("Home");
   });
 
+  test("matches canonical iOS accessibility labels for contentDescription", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "ios-accessibility-label": "Home",
+          "class": "XCUIElementTypeButton",
+          "bounds": bounds(10, 10, 180, 60),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        contentDescription: "Home",
+      } as any,
+      hierarchy,
+      "ios"
+    );
+
+    expect(element?.["ios-accessibility-label"]).toBe("Home");
+  });
+
   test("does not match Android text-only nodes for contentDescription", () => {
     const finder = new DefaultElementFinder();
     const hierarchy = makeHierarchy([

@@ -1077,6 +1077,7 @@ describe("AndroidCtrlProxyClient", function() {
           "text": "6:43 AM",
           "content-desc": "6:43 AM",
           "resource-id": "com.google.android.deskclock:id/digital_clock",
+          "className": "android.widget.TextClock",
           "bounds": {
             left: 175,
             top: 687,
@@ -1088,6 +1089,7 @@ describe("AndroidCtrlProxyClient", function() {
           "node": [
             {
               text: "Child Node",
+              className: "android.widget.TextView",
               bounds: {
                 left: 0,
                 top: 0,
@@ -1106,6 +1108,8 @@ describe("AndroidCtrlProxyClient", function() {
       expect(result.hierarchy).toBeDefined();
       expect(result.hierarchy.text).toBe("6:43 AM");
       expect(result.hierarchy["content-desc"]).toBe("6:43 AM");
+      expect(result.hierarchy.class).toBe("android.widget.TextClock");
+      expect(result.hierarchy.className).toBeUndefined();
       expect(result.hierarchy.bounds).toEqual({
         left: 175,
         top: 687,
@@ -1127,6 +1131,8 @@ describe("AndroidCtrlProxyClient", function() {
       // Check child node conversion
       expect(typeof result.hierarchy.node).toBe("object");
       expect(result.hierarchy.node.text).toBe("Child Node");
+      expect(result.hierarchy.node.class).toBe("android.widget.TextView");
+      expect(result.hierarchy.node.className).toBeUndefined();
       expect(result.hierarchy.node.bounds).toEqual({
         left: 0,
         top: 0,

@@ -449,6 +449,11 @@
             "ios"
           ]
         },
+        "appId": {
+          "description": "Android app package for locale changes",
+          "type": "string",
+          "minLength": 1
+        },
         "locale": {
           "description": "Locale tag (e.g., ar-SA, ja-JP)",
           "type": "string",
@@ -503,7 +508,23 @@
       "required": [
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "platform": {
+            "const": "android"
+          }
+        },
+        "required": [
+          "platform",
+          "locale"
+        ]
+      },
+      "then": {
+        "required": [
+          "appId"
+        ]
+      }
     }
   },
   {

@@ -29,6 +29,7 @@ import { finalizeToolResponse, type ObservationArtifactWriter, type ObservationB
 import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
 import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
+import { applyJsonSchemaOverride } from "./toolSchemaHelpers";
 import {
   InternalToolName,
   InternalToolPayloads,
@@ -39,6 +40,14 @@ import { JsonToolOutputArtifactWriter } from "./toolOutputArtifactWriter";
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
 export { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
+
+function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
+  return flattenTopLevelUnion(toJSONSchema(schema, {
+    override: ({ zodSchema, jsonSchema }) => {
+      applyJsonSchemaOverride(zodSchema, jsonSchema);
+    },
+  }));
+}
 
 // Progress notification interface
 export interface ProgressCallback {
@@ -1091,7 +1100,7 @@ class ToolRegistryClass {
     let cached = this.toolDefinitionSchemaCache.get(tool.name);
     if (!cached) {
       cached = {
-        inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)) as Record<string, unknown>,
+        inputSchema: toAdvertisedJsonSchema(tool.schema),
         outputSchemasByRuntimeFlags: new Map(),
       };
       this.toolDefinitionSchemaCache.set(tool.name, cached);
@@ -1101,7 +1110,7 @@ class ToolRegistryClass {
     if (!cached.outputSchemasByRuntimeFlags.has(outputSchemaCacheKey)) {
       const outputSchema = toolHasOutputSchema(tool) && !suppressOutputSchema
         ? advertiseBoundsForCompact(
-          flattenTopLevelUnion(toJSONSchema(tool.outputSchema)),
+          toAdvertisedJsonSchema(tool.outputSchema),
           compactBounds
         ) as Record<string, unknown>
         : undefined;

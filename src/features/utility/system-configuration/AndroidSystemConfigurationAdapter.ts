@@ -1,4 +1,5 @@
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { readAndroidDeviceApiLevel } from "../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { logger } from "../../../utils/logger";
 import { AndroidCtrlProxyClient } from "../../observe/android/AndroidCtrlProxyClient";
 import type { SettingsNamespace } from "../../observe/android";
@@ -25,13 +26,16 @@ import {
 } from "./parsing";
 
 type TextDirectionSettingKey = "debug.force_rtl" | "force_rtl";
+const MIN_APP_LOCALE_API_LEVEL = 33;
 
 /**
  * Android implementation of {@link SystemConfigurationAdapter}. Uses
  * ADB shell commands (with an accessibility-service fast path for
- * `settings get`/`settings put`) and `getprop`/`setprop` to read and
- * write locale, time zone, RTL, 24-hour format, and calendar
- * settings.
+ * `settings get`/`settings put`) and ADB shell commands to read and
+ * write locale, time zone, RTL, 24-hour format, and calendar settings.
+ * Android locale changes require an app id. Android 13+ uses the app-scoped
+ * non-root LocaleManager shell command; older devices fall back to the
+ * root-backed system locale path after verifying `adb root` works.
  */
 export class AndroidSystemConfigurationAdapter implements SystemConfigurationAdapter {
   readonly defaultCalendarSystem = "gregory";
@@ -42,6 +46,18 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   ) {}
 
   async setLocale(languageTag: string, options: BroadcastOptions): Promise<SetLocaleResult> {
+    if (!options.appId) {
+      return {
+        success: false,
+        languageTag,
+        error: "appId is required for Android locale changes. Provide the target app package so AutoMobile can choose the supported Android locale path."
+      };
+    }
+
+    return this.setTargetAppLocale(languageTag, options.appId, options);
+  }
+
+  private async setSystemLocale(languageTag: string, options: BroadcastOptions, method: string): Promise<SetLocaleResult> {
     const previousLanguageTag = await this.getCurrentLocaleTag();
 
     try {
@@ -75,9 +91,97 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       success: true,
       languageTag,
       previousLanguageTag,
-      method: "setprop persist.sys.locale + stop/start",
+      method,
       broadcasted
     };
+  }
+
+  private async setTargetAppLocale(
+    languageTag: string,
+    appId: string,
+    options: BroadcastOptions
+  ): Promise<SetLocaleResult> {
+    const apiLevel = await readAndroidDeviceApiLevel(this.adb);
+    if (apiLevel !== null && apiLevel < MIN_APP_LOCALE_API_LEVEL) {
+      const rootResult = await this.ensureRootForLegacyLocale(apiLevel);
+      if (!rootResult.success) {
+        return {
+          success: false,
+          languageTag,
+          error: rootResult.error,
+        };
+      }
+      return this.setSystemLocale(languageTag, options, "setprop persist.sys.locale + stop/start after adb root");
+    }
+
+    const previousLanguageTag = await this.getAppLocaleTag(appId);
+
+    try {
+      await this.adb.executeCommand(
+        `shell cmd locale set-app-locales ${quoteShellArg(appId)} --locales ${quoteShellArg(languageTag)}`
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        languageTag,
+        previousLanguageTag,
+        error: `Failed to set app locale for ${appId}: ${errorMessage}`
+      };
+    }
+
+    const effectiveLanguageTag = await this.getAppLocaleTag(appId);
+    if (!this.localeTagsMatch(effectiveLanguageTag, languageTag)) {
+      return {
+        success: false,
+        languageTag,
+        previousLanguageTag,
+        error: `Read-back verification failed for ${appId}: expected "${languageTag}" but got "${effectiveLanguageTag ?? "null"}"`
+      };
+    }
+
+    const broadcasted = options.broadcast === false
+      ? false
+      : await this.broadcastLocaleChange();
+
+    return {
+      success: true,
+      languageTag,
+      previousLanguageTag,
+      method: `cmd locale set-app-locales ${appId}`,
+      broadcasted
+    };
+  }
+
+  private async ensureRootForLegacyLocale(apiLevel: number): Promise<{ success: true } | { success: false; error: string }> {
+    try {
+      await this.adb.executeCommand("root", undefined, undefined, true);
+      await this.adb.executeCommand("wait-for-device", undefined, undefined, true);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. Failed to run adb root; the target emulator is not root-capable or does not allow root ADB. adb root error: ${errorMessage}`
+      };
+    }
+
+    try {
+      const idResult = await this.adb.executeCommand("shell id", undefined, undefined, true);
+      if (!idResult.stdout.includes("uid=0(root)")) {
+        return {
+          success: false,
+          error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. adb root completed, but ADB shell is still not root; the target emulator is not root-capable. shell id: ${idResult.stdout.trim() || "unknown"}`
+        };
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must verify root before changing the system locale. Failed to verify root shell after adb root: ${errorMessage}`
+      };
+    }
+
+    return { success: true };
   }
 
   async setTimeZone(zoneId: string): Promise<SetTimeZoneResult> {
@@ -358,6 +462,33 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     }
 
     return language;
+  }
+
+  private async getAppLocaleTag(appId: string): Promise<string | null> {
+    try {
+      const result = await this.adb.executeCommand(
+        `shell cmd locale get-app-locales ${quoteShellArg(appId)}`,
+        undefined,
+        undefined,
+        true
+      );
+      return this.parseAppLocalesOutput(result.stdout);
+    } catch (error) {
+      logger.warn(`[SystemConfigurationManager] Failed to read Android app locale for ${appId}: ${error}`);
+      return null;
+    }
+  }
+
+  private parseAppLocalesOutput(output: string): string | null {
+    const normalized = normalizeSettingValue(output);
+    if (!normalized) {
+      return null;
+    }
+    const bracketedLocales = normalized.match(/\bare\s+\[([^\]]*)\]\s*$/)?.[1];
+    if (bracketedLocales === undefined) {
+      return null;
+    }
+    return parseLocaleList(bracketedLocales);
   }
 
   private async getEffectiveLocaleTag(): Promise<string | null> {

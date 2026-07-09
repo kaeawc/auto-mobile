@@ -8,7 +8,13 @@ import { createJSONToolResponse } from "../utils/toolUtils";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { BootedDevice, Platform } from "../models";
-import { addDeviceTargetingToSchema, addSessionUuidToSchema, platformSchema } from "./toolSchemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  addSessionUuidToSchema,
+  platformSchema,
+  withAppIdAliases,
+  withJsonSchemaOverride,
+} from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
 
 // Schema definitions
@@ -19,6 +25,7 @@ export const setActiveDeviceSchema = addSessionUuidToSchema(z.object({
 
 const changeLocalizationBaseSchema = z.object({
   platform: platformSchema,
+  appId: z.string().min(1).optional().describe("Android app package for locale changes"),
   locale: z.string().min(1).optional().describe("Locale tag (e.g., ar-SA, ja-JP)"),
   timeZone: z.string().min(1).optional().describe("Zone ID (e.g., America/Los_Angeles)"),
   textDirection: z.enum(["ltr", "rtl"]).optional().describe("Text direction"),
@@ -27,10 +34,48 @@ const changeLocalizationBaseSchema = z.object({
   restartApp: z.string().min(1).optional().describe("iOS bundle ID to relaunch after locale change")
 });
 
-export const changeLocalizationSchema = addDeviceTargetingToSchema(changeLocalizationBaseSchema).refine(values =>
-  values.locale || values.timeZone || values.textDirection || values.timeFormat || values.calendarSystem, {
-  message: "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided."
-});
+export const changeLocalizationSchema = withJsonSchemaOverride(
+  withAppIdAliases(addDeviceTargetingToSchema(changeLocalizationBaseSchema)).superRefine((values, ctx) => {
+    if (!values.locale && !values.timeZone && !values.textDirection && !values.timeFormat && !values.calendarSystem) {
+      ctx.addIssue({
+        code: "custom",
+        message: "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided.",
+      });
+    }
+    if (values.appId && values.platform !== "android") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["appId"],
+        message: "appId is only supported for Android locale changes.",
+      });
+    }
+    if (values.appId && !values.locale) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["appId"],
+        message: "appId only applies when locale is provided.",
+      });
+    }
+    if (values.platform === "android" && values.locale && !values.appId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["appId"],
+        message: "appId is required for Android locale changes.",
+      });
+    }
+  }),
+  jsonSchema => {
+    jsonSchema.if = {
+      properties: {
+        platform: { const: "android" },
+      },
+      required: ["platform", "locale"],
+    };
+    jsonSchema.then = {
+      required: ["appId"],
+    };
+  }
+);
 
 const doNotDisturbStateInputSchema = z.object({
   enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb"),
@@ -61,6 +106,7 @@ export interface SetActiveDeviceArgs {
 
 export interface ChangeLocalizationArgs {
   platform: Platform;
+  appId?: string;
   locale?: string;
   timeZone?: string;
   textDirection?: "ltr" | "rtl";
@@ -152,11 +198,24 @@ export function registerUtilityTools() {
       calendarSystem?: string;
     } = {};
     const errors: string[] = [];
+    let localeMetadata: {
+      localeScope?: "app" | "system";
+      localeAppId?: string;
+      localeMethod?: string;
+    } = {};
 
     if (args.locale !== undefined) {
-      const result = await manager.setLocale(args.locale, { broadcast: false });
+      const localeOptions = args.appId && device.platform === "android"
+        ? { broadcast: false, appId: args.appId }
+        : { broadcast: false };
+      const result = await manager.setLocale(args.locale, localeOptions);
       if (result.success) {
         changes.locale = result.languageTag;
+        localeMetadata = {
+          localeScope: result.method?.startsWith("cmd locale set-app-locales") ? "app" : "system",
+          ...(args.appId && device.platform === "android" ? { localeAppId: args.appId } : {}),
+          ...(result.method ? { localeMethod: result.method } : {}),
+        };
       } else {
         errors.push(result.error ?? "Failed to set locale");
       }
@@ -216,6 +275,7 @@ export function registerUtilityTools() {
       success,
       changes,
       intentBroadcast,
+      ...localeMetadata,
       ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
       ...(success ? {} : { error: errors.join("; ") })
     });

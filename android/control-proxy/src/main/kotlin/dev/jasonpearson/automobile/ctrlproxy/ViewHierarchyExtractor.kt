@@ -112,7 +112,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           // Single-window occlusion filtering is intentionally skipped.
           // After optimizeHierarchy promotes children from bounds-only wrappers, the tree
           // structure no longer matches visual relationships, causing false occlusion between
-          // visual siblings that end up at different tree depths (e.g., Compose overlapping layouts).
+          // visual siblings that end up at different tree depths (e.g., Compose overlapping
+          // layouts).
           wrappedElement
         }
 
@@ -1434,6 +1435,13 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    * Determines the relationship between a node and a potential occluder based on their paths and
    * traversal order.
    *
+   * NOTE: This function currently has no production callers. Same-window occlusion is skipped
+   * unconditionally in [buildOcclusionInfo], and [applyOcclusionFilteringSingleWindow] was removed,
+   * so nothing in production consults this relationship. It is retained (and kept semantically
+   * correct, including the nephew and root-level cases below) for the future direction of running
+   * occlusion on the pre-optimization tree, where path-based relationship detection is reliable
+   * again. It is exercised only by unit tests today.
+   *
    * @param nodePath The path of the node being checked (e.g., "0.0.0.1.0")
    * @param occluderPath The path of the potential occluder (e.g., "0.0.0.1.1")
    * @param nodeOrder The traversal order of the node
@@ -1475,7 +1483,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
     // Check the reverse: if node is a sibling of any ancestor of the occluder (nephew relationship)
     // If node's parent is a prefix of occluder's path, the node is an uncle of the occluder.
-    // After optimizeHierarchy promotes children from bounds-only wrappers, nodes at different depths
+    // After optimizeHierarchy promotes children from bounds-only wrappers, nodes at different
+    // depths
     // can be visual siblings — this check prevents them from being classified as UNRELATED.
     val isNephew =
       nodeParentPath.isNotEmpty() &&
@@ -1561,9 +1570,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           // no longer reliably reflects visual relationships. Nodes that are visual siblings
           // (e.g., a toolbar and a scrollable content area in a Compose Box) can end up at
           // different depths in the optimized tree, causing determineNodeRelationship to
-          // incorrectly classify them as UNRELATED — leading to false occlusion.
-          // This matches the single-window behavior (line 383) where within-window occlusion
-          // is already skipped entirely.
+          // incorrectly classify them as UNRELATED — leading to false occlusion (the Slack
+          // channel-header disappearance bug).
+          // This also makes the multi-window path consistent with the `windowEntries.size == 1`
+          // guard above, which already skips within-window occlusion when only one window exists.
           if (isDebugNode) {
             Log.d(
               TAG,

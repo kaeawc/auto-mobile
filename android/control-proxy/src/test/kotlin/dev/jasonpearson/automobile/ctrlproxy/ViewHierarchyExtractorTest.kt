@@ -410,6 +410,84 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `same-window occlusion skip rescues an asymmetric-depth cousin that fix 3 cannot`() {
+    // Faithful reproduction of the channel-header shape AND the justification for the full
+    // same-window skip (Option B) over the narrower determineNodeRelationship patch (Option A).
+    //
+    // optimizeHierarchy promotes the header's bounds-only wrappers, so a header lands at a
+    // shallow path ("0.0") while the content subtree stays deeply nested in a different branch
+    // ("1.0.0.0"). Neither parent is empty and neither path prefixes the other, so the fix #3
+    // nephew/root-level rules do NOT reclassify them — determineNodeRelationship still returns
+    // UNRELATED (see the companion characterization test below). The ONLY thing that keeps the
+    // fully-covered header is fix #1: skipping same-window occlusion entirely.
+    //
+    // Without the same-window skip this test fails: the content node (higher pre-order → occluder)
+    // fully covers the header (lower pre-order → node), coverage 100% >= 0.95, so the header is
+    // marked "hidden" and stripped. Intermediate wrappers carry no bounds so only the two leaf
+    // nodes participate in occlusion.
+    val headerTarget =
+      elementWithBounds(resourceId = "header-target", bounds = bounds(0, 0, 100, 100))
+    val headerParent =
+      elementWithBounds(resourceId = "header-parent", children = listOf(headerTarget))
+
+    val contentNode =
+      elementWithBounds(resourceId = "content-node", bounds = bounds(0, 0, 100, 100))
+    val contentInner =
+      elementWithBounds(resourceId = "content-inner", children = listOf(contentNode))
+    val contentMid = elementWithBounds(resourceId = "content-mid", children = listOf(contentInner))
+    val contentBranch =
+      elementWithBounds(resourceId = "content-branch", children = listOf(contentMid))
+
+    // root children: header branch (index 0, path "0") then content branch (index 1, path "1").
+    // → header-target path "0.0"; content-node path "1.0.0.0".
+    val root = elementWithBounds(children = listOf(headerParent, contentBranch))
+
+    val windowEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = root)
+    val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(windowEntry))
+    val filtered =
+      extractor.filterOccludedHierarchyForTest(
+        element = root,
+        occlusionInfo = occlusionInfo,
+        windowKey = 1,
+        path = "",
+        isRoot = true,
+      )
+
+    assertNotNull(filtered)
+    val targetResult = findElementByResourceId(filtered!!, "header-target")
+    assertNotNull(targetResult)
+    assertNull(targetResult!!.occlusionState)
+    assertNull(targetResult.occludedBy)
+    // Sanity: the occluder itself is always retained (highest order, no occluder above it).
+    assertNotNull(findElementByResourceId(filtered, "content-node"))
+  }
+
+  @Test
+  fun `determineNodeRelationship leaves mismatched-depth cousins UNRELATED - justifies full skip`() {
+    // Characterization test documenting the LIMIT of the fix #3 nephew/root-level patch, which is
+    // why Option B (skip same-window occlusion entirely) was chosen over Option A (patch this
+    // function only). For the doc's cited example — a cousin pair at mismatched depths where
+    // neither parent path is empty and neither prefixes the other — the patched function still
+    // returns UNRELATED. If someone deleted fix #1 believing fix #3 alone were sufficient, cases
+    // like this would regress to false occlusion. This test guards that reasoning.
+    val nodePath = "2.1" // depth-2 branch
+    val occluderPath = "3.0.0" // depth-3 branch, no prefix relationship to "2.1"
+
+    val relationship =
+      extractor.determineNodeRelationship(
+        nodePath = nodePath,
+        occluderPath = occluderPath,
+        nodeOrder = 10,
+        nodeSubtreeEnd = 10,
+        occluderOrder = 20,
+      )
+
+    // parents "2" and "3.0": not equal, no prefix either way, neither empty → UNRELATED.
+    // fix #3 does NOT rescue this; only the full same-window skip does.
+    assertEquals(ViewHierarchyExtractor.NodeRelationship.UNRELATED, relationship)
+  }
+
+  @Test
   fun `hidden root occlusion retains children`() {
     val child = elementWithBounds(resourceId = "root-child", bounds = bounds(98, 98, 100, 100))
     val root =
@@ -891,24 +969,27 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
-  fun `determineNodeRelationship detects nephew - node is uncle of occluder`() {
-    // After optimizeHierarchy promotes a node to root level, it becomes a sibling of
-    // the content tree's root. A deeply nested child of that content tree should be
-    // recognized as related (nephew) to the promoted node.
-    // Example: promoted toolbar at "1" vs deep messages child at "0.0.0.3"
-    val nodePath = "1"
-    val occluderPath = "0.0.0.3"
+  fun `determineNodeRelationship root-level promoted header is related to deep content occluder`() {
+    // The real channel-header scenario, with paths in the correct traversal direction.
+    // In the Slack Box, ChannelHeader is child 0 (traversed first) and the content fragment is
+    // child 1 (traversed later). optimizeHierarchy promotes the header's bounds-only wrappers, so
+    // the header lands at a shallow root-level path "0" (empty parent, low pre-order), while the
+    // content subtree stays deeply nested at e.g. "1.0.0.3" (higher pre-order). Because the content
+    // has the higher order, it is the *occluder* and the header is the *node* — the header's empty
+    // parent path makes them share the implicit root, so they are SIBLING (never UNRELATED).
+    val nodePath = "0" // promoted header, root-level, traversed first (low order)
+    val occluderPath = "1.0.0.3" // deep content child, traversed later (high order)
 
     val relationship =
       extractor.determineNodeRelationship(
         nodePath = nodePath,
         occluderPath = occluderPath,
-        nodeOrder = 50,
-        nodeSubtreeEnd = 50,
-        occluderOrder = 20,
+        nodeOrder = 1,
+        nodeSubtreeEnd = 1,
+        occluderOrder = 9,
       )
 
-    // The node's parent "" is empty, so both share the root → SIBLING
+    // Node's parent "" is empty → shares the implicit root with the occluder → SIBLING
     assertEquals(ViewHierarchyExtractor.NodeRelationship.SIBLING, relationship)
   }
 

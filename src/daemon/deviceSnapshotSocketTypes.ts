@@ -7,13 +7,13 @@ import type {
 
 export type DeviceSnapshotSocketMethod = ConfigSocketMethod;
 
-export type DeviceSnapshotSocketRequest = ConfigSocketRequest<
+export interface DeviceSnapshotSocketRequest extends ConfigSocketRequest<
   "device_snapshot_request",
   DeviceSnapshotConfigInput
->;
+> {}
 
-export type DeviceSnapshotSocketResponse = ConfigSocketResponse<
+export interface DeviceSnapshotSocketResponse extends ConfigSocketResponse<
   "device_snapshot_response",
   DeviceSnapshotConfig,
   "evictedSnapshotNames"
->;
+> {}

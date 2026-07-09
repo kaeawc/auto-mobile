@@ -7,13 +7,13 @@ import type {
 
 export type VideoRecordingSocketMethod = ConfigSocketMethod;
 
-export type VideoRecordingSocketRequest = ConfigSocketRequest<
+export interface VideoRecordingSocketRequest extends ConfigSocketRequest<
   "video_recording_request",
   VideoRecordingConfigInput
->;
+> {}
 
-export type VideoRecordingSocketResponse = ConfigSocketResponse<
+export interface VideoRecordingSocketResponse extends ConfigSocketResponse<
   "video_recording_response",
   VideoRecordingConfig,
   "evictedRecordingIds"
->;
+> {}

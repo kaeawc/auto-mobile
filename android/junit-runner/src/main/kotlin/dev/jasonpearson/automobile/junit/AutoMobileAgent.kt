@@ -433,20 +433,19 @@ open class AutoMobileAgent(
       }
     }
 
-    private fun buildJsonParameters(parameters: Map<String, Any>): JsonObject =
-      buildJsonObject {
-        parameters.forEach { (key, value) ->
-          put(
-            key,
-            when (value) {
-              is String -> JsonPrimitive(value)
-              is Number -> JsonPrimitive(value)
-              is Boolean -> JsonPrimitive(value)
-              else -> JsonPrimitive(value.toString())
-            },
-          )
-        }
+    private fun buildJsonParameters(parameters: Map<String, Any>): JsonObject = buildJsonObject {
+      parameters.forEach { (key, value) ->
+        put(
+          key,
+          when (value) {
+            is String -> JsonPrimitive(value)
+            is Number -> JsonPrimitive(value)
+            is Boolean -> JsonPrimitive(value)
+            else -> JsonPrimitive(value.toString())
+          },
+        )
       }
+    }
 
     private fun testConnection(): Boolean {
       val url = serverUrl ?: return false

@@ -377,6 +377,12 @@ export class BunSqliteConnectionState {
         // load and safe to ignore — db.close() still persists committed data.
         logger.debug(`WAL checkpoint on close failed: ${error}`);
       }
+      try {
+        this.#db.exec("PRAGMA optimize;");
+      } catch (error) {
+        // Best-effort: stale planner stats are preferable to blocking shutdown.
+        logger.debug(`PRAGMA optimize on close failed: ${error}`);
+      }
       this.#db.close();
       this.#db = null;
     }

@@ -163,6 +163,7 @@ class FakeDatabase {
   schemaVersion = 1;
   throwOn?: unknown;
   throwOnExec?: unknown;
+  readonly throwOnExecSql = new Map<string, unknown>();
 
   prepare(sql: string): FakeStatement {
     const statement = new FakeStatement(this, sql);
@@ -177,6 +178,10 @@ class FakeDatabase {
 
   exec(sql: string): void {
     this.lifecycleEvents.push(`exec:${sql}`);
+    const sqlError = this.throwOnExecSql.get(sql);
+    if (sqlError) {
+      throw sqlError;
+    }
     if (this.throwOnExec) {
       throw this.throwOnExec;
     }
@@ -535,8 +540,8 @@ describe("BunSqliteConnectionState — C6 word-boundary RETURNING detection", ()
   });
 });
 
-describe("BunSqliteConnectionState — WAL checkpoint on close (issue #2802)", () => {
-  test("issues wal_checkpoint(TRUNCATE) before closing the handle", () => {
+describe("BunSqliteConnectionState — close-time database maintenance", () => {
+  test("issues wal_checkpoint(TRUNCATE) and PRAGMA optimize before closing the handle", () => {
     const db = new FakeDatabase();
     const state = makeState(db);
 
@@ -544,6 +549,7 @@ describe("BunSqliteConnectionState — WAL checkpoint on close (issue #2802)", (
 
     expect(db.lifecycleEvents).toEqual([
       "exec:PRAGMA wal_checkpoint(TRUNCATE);",
+      "exec:PRAGMA optimize;",
       "close",
     ]);
   });
@@ -558,11 +564,27 @@ describe("BunSqliteConnectionState — WAL checkpoint on close (issue #2802)", (
 
     expect(db.lifecycleEvents).toEqual([
       "exec:PRAGMA wal_checkpoint(TRUNCATE);",
+      "exec:PRAGMA optimize;",
       "close",
     ]);
   });
 
-  test("close is idempotent: the checkpoint and close run once", () => {
+  test("a failing optimize never blocks the close", () => {
+    const db = new FakeDatabase();
+    db.throwOnExecSql.set("PRAGMA optimize;", new Error("optimize failed"));
+    const state = makeState(db);
+
+    // Best-effort: optimize failures must be swallowed, not rethrown.
+    expect(() => state.close()).not.toThrow();
+
+    expect(db.lifecycleEvents).toEqual([
+      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
+      "exec:PRAGMA optimize;",
+      "close",
+    ]);
+  });
+
+  test("close is idempotent: maintenance and close run once", () => {
     const db = new FakeDatabase();
     const state = makeState(db);
 
@@ -571,11 +593,12 @@ describe("BunSqliteConnectionState — WAL checkpoint on close (issue #2802)", (
 
     expect(db.lifecycleEvents).toEqual([
       "exec:PRAGMA wal_checkpoint(TRUNCATE);",
+      "exec:PRAGMA optimize;",
       "close",
     ]);
   });
 
-  test("does not open a lazily-unopened database just to checkpoint it", () => {
+  test("does not open a lazily-unopened database just to run maintenance", () => {
     let opened = false;
     const state = new BunSqliteConnectionState(() => {
       opened = true;

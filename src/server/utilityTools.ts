@@ -8,7 +8,7 @@ import { createJSONToolResponse } from "../utils/toolUtils";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { BootedDevice, Platform } from "../models";
-import { addDeviceTargetingToSchema, addSessionUuidToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, addSessionUuidToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
 
 // Schema definitions
@@ -19,6 +19,7 @@ export const setActiveDeviceSchema = addSessionUuidToSchema(z.object({
 
 const changeLocalizationBaseSchema = z.object({
   platform: platformSchema,
+  appId: z.string().min(1).optional().describe("Android app package for app-scoped locale changes"),
   locale: z.string().min(1).optional().describe("Locale tag (e.g., ar-SA, ja-JP)"),
   timeZone: z.string().min(1).optional().describe("Zone ID (e.g., America/Los_Angeles)"),
   textDirection: z.enum(["ltr", "rtl"]).optional().describe("Text direction"),
@@ -27,7 +28,7 @@ const changeLocalizationBaseSchema = z.object({
   restartApp: z.string().min(1).optional().describe("iOS bundle ID to relaunch after locale change")
 });
 
-export const changeLocalizationSchema = addDeviceTargetingToSchema(changeLocalizationBaseSchema).refine(values =>
+export const changeLocalizationSchema = withAppIdAliases(addDeviceTargetingToSchema(changeLocalizationBaseSchema)).refine(values =>
   values.locale || values.timeZone || values.textDirection || values.timeFormat || values.calendarSystem, {
   message: "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided."
 });
@@ -61,6 +62,7 @@ export interface SetActiveDeviceArgs {
 
 export interface ChangeLocalizationArgs {
   platform: Platform;
+  appId?: string;
   locale?: string;
   timeZone?: string;
   textDirection?: "ltr" | "rtl";
@@ -154,7 +156,10 @@ export function registerUtilityTools() {
     const errors: string[] = [];
 
     if (args.locale !== undefined) {
-      const result = await manager.setLocale(args.locale, { broadcast: false });
+      const localeOptions = args.appId && device.platform === "android"
+        ? { broadcast: false, appId: args.appId }
+        : { broadcast: false };
+      const result = await manager.setLocale(args.locale, localeOptions);
       if (result.success) {
         changes.locale = result.languageTag;
       } else {

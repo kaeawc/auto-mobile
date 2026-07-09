@@ -25,13 +25,15 @@ import {
 } from "./parsing";
 
 type TextDirectionSettingKey = "debug.force_rtl" | "force_rtl";
+const MIN_APP_LOCALE_API_LEVEL = 33;
 
 /**
  * Android implementation of {@link SystemConfigurationAdapter}. Uses
  * ADB shell commands (with an accessibility-service fast path for
- * `settings get`/`settings put`) and `getprop`/`setprop` to read and
- * write locale, time zone, RTL, 24-hour format, and calendar
- * settings.
+ * `settings get`/`settings put`) and ADB shell commands to read and
+ * write locale, time zone, RTL, 24-hour format, and calendar settings.
+ * App-scoped locale changes use Android 13+'s non-root LocaleManager shell
+ * command; system-wide locale changes keep the root-backed setprop path.
  */
 export class AndroidSystemConfigurationAdapter implements SystemConfigurationAdapter {
   readonly defaultCalendarSystem = "gregory";
@@ -42,6 +44,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   ) {}
 
   async setLocale(languageTag: string, options: BroadcastOptions): Promise<SetLocaleResult> {
+    if (options.appId) {
+      return this.setAppLocale(languageTag, options.appId, options);
+    }
+
     const previousLanguageTag = await this.getCurrentLocaleTag();
 
     try {
@@ -76,6 +82,59 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       languageTag,
       previousLanguageTag,
       method: "setprop persist.sys.locale + stop/start",
+      broadcasted
+    };
+  }
+
+  private async setAppLocale(
+    languageTag: string,
+    appId: string,
+    options: BroadcastOptions
+  ): Promise<SetLocaleResult> {
+    const apiLevel = await this.getAndroidApiLevel();
+    if (apiLevel !== null && apiLevel < MIN_APP_LOCALE_API_LEVEL) {
+      return {
+        success: false,
+        languageTag,
+        error: `Android app-scoped locale changes require API ${MIN_APP_LOCALE_API_LEVEL}+; device is API ${apiLevel}`
+      };
+    }
+
+    const previousLanguageTag = await this.getAppLocaleTag(appId);
+
+    try {
+      await this.adb.executeCommand(
+        `shell cmd locale set-app-locales ${quoteShellArg(appId)} --locales ${quoteShellArg(languageTag)}`
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        languageTag,
+        previousLanguageTag,
+        error: `Failed to set app locale for ${appId}: ${errorMessage}`
+      };
+    }
+
+    const effectiveLanguageTag = await this.getAppLocaleTag(appId);
+    if (!this.localeTagsMatch(effectiveLanguageTag, languageTag)) {
+      return {
+        success: false,
+        languageTag,
+        previousLanguageTag,
+        error: `Read-back verification failed for ${appId}: expected "${languageTag}" but got "${effectiveLanguageTag ?? "null"}"`
+      };
+    }
+
+    const broadcasted = options.broadcast === false
+      ? false
+      : await this.broadcastLocaleChange();
+
+    return {
+      success: true,
+      languageTag,
+      previousLanguageTag,
+      method: `cmd locale set-app-locales ${appId}`,
       broadcasted
     };
   }
@@ -358,6 +417,41 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     }
 
     return language;
+  }
+
+  private async getAppLocaleTag(appId: string): Promise<string | null> {
+    try {
+      const result = await this.adb.executeCommand(
+        `shell cmd locale get-app-locales ${quoteShellArg(appId)}`,
+        undefined,
+        undefined,
+        true
+      );
+      return this.parseAppLocalesOutput(result.stdout);
+    } catch (error) {
+      logger.warn(`[SystemConfigurationManager] Failed to read Android app locale for ${appId}: ${error}`);
+      return null;
+    }
+  }
+
+  private async getAndroidApiLevel(): Promise<number | null> {
+    try {
+      const result = await this.adb.executeCommand("shell getprop ro.build.version.sdk", undefined, undefined, true);
+      const parsed = Number.parseInt(result.stdout.trim(), 10);
+      return Number.isNaN(parsed) ? null : parsed;
+    } catch (error) {
+      logger.warn(`[SystemConfigurationManager] Failed to read Android API level: ${error}`);
+      return null;
+    }
+  }
+
+  private parseAppLocalesOutput(output: string): string | null {
+    const normalized = normalizeSettingValue(output);
+    if (!normalized) {
+      return null;
+    }
+    const bracketedLocales = normalized.match(/\[([^\]]*)\]/)?.[1] ?? normalized;
+    return parseLocaleList(bracketedLocales);
   }
 
   private async getEffectiveLocaleTag(): Promise<string | null> {

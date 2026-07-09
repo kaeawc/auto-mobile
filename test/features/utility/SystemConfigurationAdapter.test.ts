@@ -170,6 +170,63 @@ describe("SystemConfigurationAdapter", () => {
   }
 
   describe("AndroidSystemConfigurationAdapter behavior", () => {
+    it("sets an app-scoped locale with cmd locale when appId is provided", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
+      const appLocaleResponses = [
+        "Locales for com.example.app for user 0 are []\n",
+        "Locales for com.example.app for user 0 are [ja-JP]\n",
+      ];
+      const original = adb.executeCommand.bind(adb);
+      adb.executeCommand = (async (command: string, ...rest: any[]) => {
+        if (command === "shell cmd locale get-app-locales 'com.example.app'") {
+          const stdout = appLocaleResponses.shift() ?? "Locales for com.example.app for user 0 are [ja-JP]\n";
+          return {
+            stdout,
+            stderr: "",
+            toString: () => stdout,
+            trim: () => stdout.trim(),
+            includes: (s: string) => stdout.includes(s),
+          };
+        }
+        return original(command, ...rest);
+      }) as any;
+
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setLocale("ja-JP", { broadcast: false, appId: "com.example.app" });
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("cmd locale set-app-locales com.example.app");
+      expect(result.previousLanguageTag).toBeNull();
+      expect(adb.wasCommandExecuted("cmd locale set-app-locales 'com.example.app' --locales 'ja-JP'")).toBe(true);
+      expect(adb.wasCommandExecuted("setprop persist.sys.locale")).toBe(false);
+      expect(adb.wasCommandExecuted("stop; start")).toBe(false);
+    });
+
+    it("rejects app-scoped locale changes below Android 13", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell getprop ro.build.version.sdk", "32");
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setLocale("ja-JP", { appId: "com.example.app" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Android app-scoped locale changes require API 33+; device is API 32");
+      expect(adb.wasCommandExecuted("cmd locale set-app-locales")).toBe(false);
+      expect(adb.wasCommandExecuted("setprop persist.sys.locale")).toBe(false);
+    });
+
+    it("returns false when app-scoped locale read-back does not match", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
+      adb.setCommandResult("shell cmd locale get-app-locales 'com.example.app'", "Locales for com.example.app for user 0 are [en-US]\n");
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setLocale("ja-JP", { appId: "com.example.app" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Read-back verification failed for com.example.app: expected "ja-JP" but got "en-US"');
+      expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+    });
+
     it("sets system locale with setprop, restarts Android, and verifies am get-config", async () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell settings get system system_locales", "en-US");

@@ -456,6 +456,20 @@ describe("SystemConfigurationManager", () => {
   // --- Android: setLocale ---
 
   describe("Android setLocale still works", () => {
+    test("uses app-scoped locale commands when an Android appId is provided", async () => {
+      fakeAdbClient.setCommandResult("shell getprop ro.build.version.sdk", "36");
+      fakeAdbClient.setCommandResult("shell cmd locale get-app-locales 'com.example.app'", "Locales for com.example.app for user 0 are [ja-JP]\n");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setLocale("ja-JP", { appId: "com.example.app" });
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("cmd locale set-app-locales com.example.app");
+      expect(fakeExec.getExecutedCommands()).toHaveLength(0);
+      expect(fakeAdbClient.wasCommandExecuted("cmd locale set-app-locales 'com.example.app' --locales 'ja-JP'")).toBe(true);
+      expect(fakeAdbClient.wasCommandExecuted("setprop persist.sys.locale")).toBe(false);
+      expect(fakeAdbClient.wasCommandExecuted("stop; start")).toBe(false);
+    });
+
     test("uses root-backed adb commands for Android and verifies the effective locale", async () => {
       fakeAdbClient.setCommandResult("shell settings get system system_locales", "en-US");
       fakeAdbClient.setCommandResult("shell am get-config", "config: mcc310-mnc260-ja-rJP-sw411dp\n");

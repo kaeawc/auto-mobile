@@ -53,7 +53,7 @@ export class SystemConfigurationManager {
     );
   }
 
-  async setLocale(languageTag: string, options: { broadcast?: boolean } = {}): Promise<SetLocaleResult> {
+  async setLocale(languageTag: string, options: { broadcast?: boolean; appId?: string } = {}): Promise<SetLocaleResult> {
     const trimmedTag = languageTag.trim();
     if (!trimmedTag) {
       return {

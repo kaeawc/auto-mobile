@@ -131,7 +131,7 @@ cat "$APP_CONTAINER/Documents/fixtures/hello.txt"
 - 🌐 `openLink` launches URLs or deep links.
 - 🧰 `systemTray`, `homeScreen`, and `recentApps` control system surfaces.
 - 🔔 `postNotification` posts notifications from the app-under-test when SDK hooks are installed.
-- 🌍 `changeLocalization` sets locale, time zone, text direction, and time format in one call. Android system-wide locale changes require a root-capable device and are verified against the effective system configuration before success is reported.
+- 🌍 `changeLocalization` sets locale, time zone, text direction, and time format in one call. On Android, pass `appId` for non-root app-scoped locale changes on Android 13+; system-wide locale changes without `appId` require a root-capable device and are verified against the effective system configuration before success is reported.
 
 #### Navigation & Exploration
 

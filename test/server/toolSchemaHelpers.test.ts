@@ -248,6 +248,20 @@ describe("appId aliases on tool schemas", () => {
       expect("packageName" in (result.data.notification ?? {})).toBe(false);
     }
   });
+
+  test("changeLocalizationSchema accepts appId aliases for Android app-scoped locale changes", () => {
+    const result = changeLocalizationSchema.safeParse({
+      platform: "android",
+      packageName: "com.example.app",
+      locale: "fr-FR",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.appId).toBe("com.example.app");
+      expect("packageName" in result.data).toBe(false);
+    }
+  });
 });
 
 describe("platform field accepted by all device-targeting tool schemas", () => {

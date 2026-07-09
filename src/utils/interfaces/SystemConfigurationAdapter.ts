@@ -14,6 +14,7 @@ import type {
  */
 export interface BroadcastOptions {
   broadcast?: boolean;
+  appId?: string;
 }
 
 /**

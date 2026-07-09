@@ -80,6 +80,24 @@ export async function recordStorageEvent(
   // through here, so neither can reintroduce divergent casing/defaults.
   const input = normalizeStorageEvent(rawInput);
 
+  const previousValueSupplied = input.previousValue !== undefined;
+  const shouldLookupPreviousValue =
+    !previousValueSupplied && input.key !== null && input.deviceId !== null;
+
+  if (shouldLookupPreviousValue && !d.isTransaction) {
+    await d.transaction().execute(trx => insertStorageEventWithPreviousValue(input, trx, true));
+  } else {
+    await insertStorageEventWithPreviousValue(input, d, shouldLookupPreviousValue);
+  }
+
+  cleanupIfNeeded(db);
+}
+
+async function insertStorageEventWithPreviousValue(
+  input: RecordStorageEventInput,
+  d: Kysely<Database>,
+  shouldLookupPreviousValue: boolean
+): Promise<void> {
   // Look up the previous value for this key only when the caller did not supply
   // one. `!== undefined` (not `?? null`) is deliberate: a caller that passes an
   // explicit `previousValue: null` is asserting "there is no prior value" and
@@ -93,8 +111,7 @@ export async function recordStorageEvent(
   // RecordStorageEventInput, so it never binds NULL here (a NULL bind would make
   // `file_name = ?` match nothing regardless of the index).
   let previousValue: string | null = input.previousValue ?? null;
-  const previousValueSupplied = input.previousValue !== undefined;
-  if (!previousValueSupplied && input.key !== null && input.deviceId !== null) {
+  if (shouldLookupPreviousValue) {
     try {
       const q = d
         .selectFrom("storage_events")
@@ -130,8 +147,6 @@ export async function recordStorageEvent(
       previous_value: previousValue,
     })
     .execute();
-
-  cleanupIfNeeded(db);
 }
 
 export async function getStorageEvents(

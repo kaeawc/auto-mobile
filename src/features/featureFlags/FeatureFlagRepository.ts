@@ -1,4 +1,6 @@
+import type { Kysely } from "kysely";
 import { ensureMigrations, getDatabase } from "../../db/database";
+import type { Database } from "../../db/types";
 import type { FeatureFlagConfig, FeatureFlagDefinition, FeatureFlagKey } from "./FeatureFlagDefinitions";
 
 export interface FeatureFlagRecord {
@@ -15,38 +17,47 @@ export interface FeatureFlagRepository {
 }
 
 export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
+  private readonly injectedDb: Kysely<Database> | null;
+
+  constructor(db?: Kysely<Database>) {
+    this.injectedDb = db ?? null;
+  }
+
+  private async ensureReady(): Promise<void> {
+    if (!this.injectedDb) {
+      await ensureMigrations();
+    }
+  }
+
+  private getDb(): Kysely<Database> {
+    return this.injectedDb ?? getDatabase();
+  }
+
   async ensureFlags(definitions: FeatureFlagDefinition[]): Promise<void> {
-    await ensureMigrations();
-    const db = getDatabase();
-    const existing = await db
-      .selectFrom("feature_flags")
-      .select(["key"])
-      .execute();
-
-    const existingKeys = new Set(existing.map(row => row.key));
-    const now = new Date().toISOString();
-    const missing = definitions.filter(definition => !existingKeys.has(definition.key));
-
-    if (missing.length === 0) {
+    await this.ensureReady();
+    if (definitions.length === 0) {
       return;
     }
+    const db = this.getDb();
+    const now = new Date().toISOString();
 
     await db
       .insertInto("feature_flags")
       .values(
-        missing.map(definition => ({
+        definitions.map(definition => ({
           key: definition.key,
           enabled: definition.defaultValue ? 1 : 0,
           config_json: definition.defaultConfig ? JSON.stringify(definition.defaultConfig) : null,
           updated_at: now,
         }))
       )
+      .onConflict(oc => oc.column("key").doNothing())
       .execute();
   }
 
   async listFlags(): Promise<FeatureFlagRecord[]> {
-    await ensureMigrations();
-    const db = getDatabase();
+    await this.ensureReady();
+    const db = this.getDb();
     const rows = await db
       .selectFrom("feature_flags")
       .select(["key", "enabled", "config_json", "updated_at"])
@@ -61,39 +72,26 @@ export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
   }
 
   async upsertFlag(key: FeatureFlagKey, enabled: boolean, config?: FeatureFlagConfig | null): Promise<void> {
-    await ensureMigrations();
-    const db = getDatabase();
+    await this.ensureReady();
+    const db = this.getDb();
     const now = new Date().toISOString();
-    const existing = await db
-      .selectFrom("feature_flags")
-      .select(["key"])
-      .where("key", "=", key)
-      .executeTakeFirst();
-
-    if (existing) {
-      const updatePayload: Record<string, unknown> = {
-        enabled: enabled ? 1 : 0,
-        updated_at: now,
-      };
-      if (config !== undefined) {
-        updatePayload.config_json = config ? JSON.stringify(config) : null;
-      }
-      await db
-        .updateTable("feature_flags")
-        .set(updatePayload)
-        .where("key", "=", key)
-        .execute();
-      return;
-    }
+    const configJson = config ? JSON.stringify(config) : null;
 
     await db
       .insertInto("feature_flags")
       .values({
         key,
         enabled: enabled ? 1 : 0,
-        config_json: config ? JSON.stringify(config) : null,
+        config_json: configJson,
         updated_at: now,
       })
+      .onConflict(oc =>
+        oc.column("key").doUpdateSet(eb => ({
+          enabled: enabled ? 1 : 0,
+          config_json: config === undefined ? eb.ref("feature_flags.config_json") : configJson,
+          updated_at: now,
+        }))
+      )
       .execute();
   }
 }

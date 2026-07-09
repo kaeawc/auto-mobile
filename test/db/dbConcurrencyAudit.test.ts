@@ -78,6 +78,10 @@ describe("DB concurrency RMW audit", () => {
       ["AppearanceConfigRepository.setConfig", "Atomic upsert on the singleton `key`"],
       ["DeviceSnapshotConfigRepository.setConfig", "Atomic upsert on the singleton `key`"],
       ["VideoRecordingConfigRepository.setConfig", "Atomic upsert on the singleton `key`"],
+      ["SqliteFeatureFlagRepository.ensureFlags", "Atomic insert with `ON CONFLICT(key) DO NOTHING`"],
+      ["SqliteFeatureFlagRepository.upsertFlag", "Atomic upsert on `feature_flags.key`"],
+      ["recordStorageEvent", "omitted previous-value lookup plus insert runs in one transaction"],
+      ["NavigationRepository.promoteSuggestion", "Direct repository calls open a transaction"],
     ] as const;
 
     expect(tablePathsInSection(audit, "Guarded Paths")).toEqual(
@@ -88,37 +92,28 @@ describe("DB concurrency RMW audit", () => {
       expect(audit).toContain(strategy);
     }
 
-    const followUpPaths = [
-      ["SqliteFeatureFlagRepository.ensureFlags", "Concurrent first initialization can race"],
-      ["SqliteFeatureFlagRepository.upsertFlag", "Concurrent first writes can race"],
-      ["recordStorageEvent", "Concurrent inserts can observe the same prior value"],
-      ["NavigationRepository.promoteSuggestion", "the repository method itself does not enforce that contract"],
+    expect(tablePathsInSection(audit, "Follow-Up Candidates")).toEqual([]);
+    expect(audit).toContain("No unguarded repository RMW follow-up candidates remain from #3415.");
+
+    const guardedAdjacentPaths = [
+      ["ThresholdManager.getOrCreateThresholds", "runs in a short transaction"],
+      ["MemoryThresholdManager.getOrCreateThresholds", "runs in a short transaction"],
+      ["BaselineManager.saveBaseline", "Atomic upsert on the unique `screen_id`"],
+      ["MemoryBaselineManager.updateBaseline", "sample count increments and EMA calculations happen in SQL"],
+      ["ThresholdManager.updateThresholdWeight", "Atomic SQL update of the latest `(device_id, session_id)`"],
+      ["MemoryThresholdManager.updateThresholdWeight", "Atomic SQL update of the latest `(device_id, package_name)`"],
     ] as const;
 
-    expect(tablePathsInSection(audit, "Follow-Up Candidates")).toEqual(
-      followUpPaths.map(([path]) => path)
+    expect(tablePathsInSection(audit, "Guarded Adjacent Paths")).toEqual(
+      guardedAdjacentPaths.map(([path]) => path)
     );
-    for (const [path, status] of followUpPaths) {
+    for (const [path, status] of guardedAdjacentPaths) {
       expect(audit).toContain(`| \`${path}\` |`);
       expect(audit).toContain(status);
     }
 
-    const adjacentFollowUpPaths = [
-      ["ThresholdManager.getOrCreateThresholds", "Concurrent callers can insert duplicate threshold samples"],
-      ["MemoryThresholdManager.getOrCreateThresholds", "Concurrent callers can insert duplicate threshold samples"],
-      ["BaselineManager.saveBaseline", "Concurrent first saves can race on the unique key"],
-      ["MemoryBaselineManager.updateBaseline", "Concurrent updates can lose samples/averages"],
-      ["ThresholdManager.updateThresholdWeight", "Concurrent updates can lose weight adjustments"],
-      ["MemoryThresholdManager.updateThresholdWeight", "Concurrent updates can lose weight adjustments"],
-    ] as const;
-
-    expect(tablePathsInSection(audit, "Adjacent Follow-Up Candidates")).toEqual(
-      adjacentFollowUpPaths.map(([path]) => path)
-    );
-    for (const [path, status] of adjacentFollowUpPaths) {
-      expect(audit).toContain(`| \`${path}\` |`);
-      expect(audit).toContain(status);
-    }
+    expect(tablePathsInSection(audit, "Adjacent Follow-Up Candidates")).toEqual([]);
+    expect(audit).toContain("No unguarded adjacent manager RMW follow-up candidates remain from #3415.");
   });
 
   test("stresses guarded get-or-create and increment paths through the real dialect mutex", async () => {

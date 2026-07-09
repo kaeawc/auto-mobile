@@ -1,6 +1,6 @@
 # DB Concurrency RMW Audit
 
-Issue: #3405
+Issues: #3405, #3415
 
 ## Context
 
@@ -43,35 +43,33 @@ upsert.
 | `AppearanceConfigRepository.setConfig` | Atomic upsert on the singleton `key`. | Existing config tests. |
 | `DeviceSnapshotConfigRepository.setConfig` | Atomic upsert on the singleton `key`. | Existing config tests. |
 | `VideoRecordingConfigRepository.setConfig` | Atomic upsert on the singleton `key`. | Existing config tests. |
+| `SqliteFeatureFlagRepository.ensureFlags` | Atomic insert with `ON CONFLICT(key) DO NOTHING`, so concurrent default initialization ignores rows another caller already inserted. | `DB RMW follow-up fixes (#3415)`. |
+| `SqliteFeatureFlagRepository.upsertFlag` | Atomic upsert on `feature_flags.key`; omitted config preserves the current config on the conflict path. | `DB RMW follow-up fixes (#3415)`. |
+| `recordStorageEvent` | Caller-supplied `previousValue` stays on the zero-lookup fast path; omitted previous-value lookup plus insert runs in one transaction so same-key concurrent inserts observe a serialized prior value. | Existing storage tests and `DB RMW follow-up fixes (#3415)`. |
+| `NavigationRepository.promoteSuggestion` | Direct repository calls open a transaction unless already bound to one, so suggestion lookup, fingerprint upsert, and suggestion link update roll back together. | Existing manager rollback tests and `DB RMW follow-up fixes (#3415)`. |
+
+## Guarded Adjacent Paths
+
+These paths are DB-backed feature-manager methods rather than repositories. #3415
+guards the same read-modify-write shapes because they were found during the
+follow-up review.
+
+| Path | Strategy | Regression coverage |
+| --- | --- | --- |
+| `ThresholdManager.getOrCreateThresholds` | The get-valid-then-store initial threshold path runs in a short transaction, preserving one append-only threshold sample for concurrent first callers. | `DB RMW follow-up fixes (#3415)`. |
+| `MemoryThresholdManager.getOrCreateThresholds` | The get-valid-then-store initial threshold path runs in a short transaction, preserving one append-only threshold sample for concurrent first callers. | `DB RMW follow-up fixes (#3415)`. |
+| `BaselineManager.saveBaseline` | Atomic upsert on the unique `screen_id`. | `DB RMW follow-up fixes (#3415)`. |
+| `MemoryBaselineManager.updateBaseline` | Atomic upsert on `(device_id, package_name, tool_name)`; sample count increments and EMA calculations happen in SQL on the conflict path. | `DB RMW follow-up fixes (#3415)`. |
+| `ThresholdManager.updateThresholdWeight` | Atomic SQL update of the latest `(device_id, session_id)` threshold row; the multiplier applies to the current stored weight. | `DB RMW follow-up fixes (#3415)`. |
+| `MemoryThresholdManager.updateThresholdWeight` | Atomic SQL update of the latest `(device_id, package_name)` threshold row; the multiplier applies to the current stored weight. | `DB RMW follow-up fixes (#3415)`. |
 
 ## Follow-Up Candidates
 
-These paths still perform separate awaited reads and writes without a local
-transaction or atomic upsert. They were not fixed as part of #3405 because the
-acceptance criteria ask for follow-up fixes for any unguarded path found.
-
-| Path | Current behavior | Follow-up direction |
-| --- | --- | --- |
-| `SqliteFeatureFlagRepository.ensureFlags` | Reads all existing flag keys, computes missing definitions in JS, then inserts the missing rows. Concurrent first initialization can race on the primary key. | Convert to `INSERT ... ON CONFLICT DO NOTHING` or a transaction. |
-| `SqliteFeatureFlagRepository.upsertFlag` | SELECTs by key, then UPDATEs or INSERTs. Concurrent first writes can race on the primary key. | Replace with `insertInto(...).onConflict(...doUpdateSet(...))`. |
-| `recordStorageEvent` | When `previousValue` is omitted, SELECTs the latest same device/file/key value, then inserts a new event with that value. Concurrent inserts can observe the same prior value. | Decide whether previous-value derivation is best-effort telemetry or must be serialized per key; then either document best-effort semantics or guard the lookup+insert. |
-| `NavigationRepository.promoteSuggestion` | Direct raw repository callers SELECT a suggestion, upsert a fingerprint, then update the suggestion outside a transaction. The public `NavigationGraphManager.promoteSuggestion` path already wraps this in `runInTransaction`/`withExecutor`, but the repository method itself does not enforce that contract. | Either make the repository method transaction-safe for direct use or narrow its visibility/contract so callers cannot bypass the manager-owned transaction. |
+No unguarded repository RMW follow-up candidates remain from #3415.
 
 ## Adjacent Follow-Up Candidates
 
-These paths are DB-backed feature-manager methods rather than repositories, so
-they are outside the strict repository-method acceptance criterion. They still
-have the same awaited read-then-write shape and should be tracked with the
-follow-up fixes if their current best-effort/history semantics are not intended.
-
-| Path | Current behavior | Follow-up direction |
-| --- | --- | --- |
-| `ThresholdManager.getOrCreateThresholds` | Reads valid threshold rows, then stores a new append-only threshold row when none exist. Concurrent callers can insert duplicate threshold samples. | Decide whether duplicate threshold history is acceptable; if not, add a transaction or atomic key. |
-| `MemoryThresholdManager.getOrCreateThresholds` | Reads valid threshold rows, then stores a new append-only threshold row when no weighted/adaptive threshold exists. Concurrent callers can insert duplicate threshold samples. | Decide whether duplicate threshold history is acceptable; if not, add a transaction or atomic key. |
-| `BaselineManager.saveBaseline` | SELECTs by unique `screen_id`, then UPDATEs or INSERTs the accessibility baseline. Concurrent first saves can race on the unique key. | Replace with `INSERT ... ON CONFLICT(screen_id) DO UPDATE`. |
-| `MemoryBaselineManager.updateBaseline` | Reads the current `(device_id, package_name, tool_name)` baseline, computes EMA and `sample_count + 1` in JS, then UPDATEs or INSERTs. Concurrent updates can lose samples/averages and concurrent first writes can race on the unique key. | Convert to a transaction or an atomic upsert/update strategy that preserves read-derived calculations. |
-| `ThresholdManager.updateThresholdWeight` | Reads the latest performance threshold weight, computes the next weight in JS, then UPDATEs that row. Concurrent updates can lose weight adjustments. | Move the weight adjustment into SQL or serialize the read-derived update. |
-| `MemoryThresholdManager.updateThresholdWeight` | Reads the latest memory threshold weight, computes the next weight in JS, then UPDATEs that row. Concurrent updates can lose weight adjustments. | Move the weight adjustment into SQL or serialize the read-derived update. |
+No unguarded adjacent manager RMW follow-up candidates remain from #3415.
 
 `SessionManager.getOrCreateSession` is an in-memory session-map operation; its
 persistence path goes through `DeviceSessionRepository.upsertActiveSession`,

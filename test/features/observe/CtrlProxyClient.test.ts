@@ -1214,6 +1214,52 @@ describe("AndroidCtrlProxyClient", function() {
       expect(before.hierarchy["view-id"]).toBe("com.test.app:id/root");
     });
 
+    test("rewrites accessibility-focused mirror occlusion links against the emitted hierarchy ids", function() {
+      const focusedUuid = "11111111-1111-4111-8111-111111111111";
+      const occluderUuid = "22222222-2222-4222-8222-222222222222";
+      const accessibilityHierarchy = {
+        "updatedAt": 1750934583218,
+        "packageName": "com.test.app",
+        "hierarchy": {
+          "resource-id": "com.test.app:id/root",
+          "view-id": "com.test.app:id/root",
+          "node": [
+            {
+              "view-id": focusedUuid,
+              "text": "Covered",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+              "occlusionState": "partial",
+              "occludedBy": "unlabeled view",
+              "occludedByViewId": occluderUuid,
+            },
+            {
+              "view-id": occluderUuid,
+              "bounds": { left: 0, top: 0, right: 50, bottom: 50 },
+            },
+          ],
+        },
+        "accessibility-focused-element": {
+          "view-id": focusedUuid,
+          "text": "Covered",
+          "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+          "occlusionState": "partial",
+          "occludedBy": "unlabeled view",
+          "occludedByViewId": occluderUuid,
+        },
+      };
+
+      const result = accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
+      const hierarchyChildren = result.hierarchy.node as any[];
+      const focusedNode = hierarchyChildren[0];
+      const occluderNode = hierarchyChildren[1];
+      const focusedMirror = result["accessibility-focused-element"] as any;
+
+      expect(focusedNode.occludedByViewId).toBe(occluderNode["view-id"]);
+      expect(focusedMirror["view-id"]).toBe(focusedNode["view-id"]);
+      expect(focusedMirror.occludedByViewId).toBe(occluderNode["view-id"]);
+      expect(focusedMirror.occludedByViewId).not.toBe(occluderUuid);
+    });
+
   });
 
   describe("getAccessibilityHierarchy", function() {

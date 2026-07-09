@@ -409,6 +409,7 @@ class ViewHierarchyExtractorTest {
     assertNull(targetResult.occludedBy)
   }
 
+  @Test
   fun `same-window occlusion skip rescues an asymmetric-depth cousin that fix 3 cannot`() {
     // Faithful reproduction of the channel-header shape AND the justification for the full
     // same-window skip (Option B) over the narrower determineNodeRelationship patch (Option A).
@@ -525,8 +526,7 @@ class ViewHierarchyExtractorTest {
 
   @Test
   fun `cross-window occlusion annotates unlabeled occluder with view id`() {
-    val target =
-      elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
+    val target = elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
     val appRoot =
       elementWithBounds(
         resourceId = "app-root",

@@ -168,6 +168,15 @@
             "content-desc": {
               "type": "string"
             },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
+              "type": "string"
+            },
             "class": {
               "type": "string"
             },
@@ -4118,6 +4127,15 @@
             "content-desc": {
               "type": "string"
             },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
+              "type": "string"
+            },
             "class": {
               "type": "string"
             },
@@ -4308,6 +4326,15 @@
             "content-desc": {
               "type": "string"
             },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
+              "type": "string"
+            },
             "class": {
               "type": "string"
             },
@@ -4496,6 +4523,15 @@
               "type": "string"
             },
             "content-desc": {
+              "type": "string"
+            },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
               "type": "string"
             },
             "class": {
@@ -6831,6 +6867,15 @@
             "content-desc": {
               "type": "string"
             },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
+              "type": "string"
+            },
             "class": {
               "type": "string"
             },
@@ -7111,6 +7156,15 @@
                     "content-desc": {
                       "type": "string"
                     },
+                    "occlusionState": {
+                      "type": "string"
+                    },
+                    "occludedBy": {
+                      "type": "string"
+                    },
+                    "occludedByViewId": {
+                      "type": "string"
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -7299,6 +7353,15 @@
                       "type": "string"
                     },
                     "content-desc": {
+                      "type": "string"
+                    },
+                    "occlusionState": {
+                      "type": "string"
+                    },
+                    "occludedBy": {
+                      "type": "string"
+                    },
+                    "occludedByViewId": {
                       "type": "string"
                     },
                     "class": {

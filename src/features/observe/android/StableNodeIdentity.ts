@@ -91,9 +91,9 @@ function toChildArray(node: Record<string, unknown>): Record<string, unknown>[] 
  * own output. Accepts the converted hierarchy root (or any node-like object);
  * a non-object input is ignored.
  */
-export function assignStableViewIds(root: unknown): void {
+export function assignStableViewIds(root: unknown): Map<string, string> {
   if (!root || typeof root !== "object") {
-    return;
+    return new Map();
   }
   if (Array.isArray(root)) {
     // A multi-root capture: each root is an independent tree, but duplicates
@@ -102,7 +102,7 @@ export function assignStableViewIds(root: unknown): void {
     for (const item of root) {
       assignStableViewIds(item);
     }
-    return;
+    return new Map();
   }
   const rootNode = root as Record<string, unknown>;
 
@@ -149,19 +149,44 @@ export function assignStableViewIds(root: unknown): void {
   // runner fills occludedByViewId from the occluding node's pre-ingest view-id;
   // generated UUID ids are rewritten above, so references to those ids must
   // follow the same rewrite.
-  if (rewrittenViewIds.size > 0) {
-    const remapOcclusionReferences = (node: Record<string, unknown>): void => {
-      const occludedByViewId = node.occludedByViewId;
-      if (typeof occludedByViewId === "string") {
-        const stableViewId = rewrittenViewIds.get(occludedByViewId);
-        if (stableViewId) {
-          node.occludedByViewId = stableViewId;
-        }
-      }
-      for (const child of toChildArray(node)) {
-        remapOcclusionReferences(child);
-      }
-    };
-    remapOcclusionReferences(rootNode);
+  applyStableViewIdRewrites(rootNode, rewrittenViewIds);
+  return rewrittenViewIds;
+}
+
+/**
+ * Apply a view-id rewrite map produced from a related hierarchy tree. This keeps
+ * mirror nodes (for example `accessibility-focused-element`) linked to the exact
+ * ids emitted in the full hierarchy rather than recomputing them in isolation.
+ */
+export function applyStableViewIdRewrites(
+  root: unknown,
+  rewrittenViewIds: ReadonlyMap<string, string>
+): void {
+  if (!root || typeof root !== "object" || rewrittenViewIds.size === 0) {
+    return;
+  }
+  if (Array.isArray(root)) {
+    for (const item of root) {
+      applyStableViewIdRewrites(item, rewrittenViewIds);
+    }
+    return;
+  }
+  const node = root as Record<string, unknown>;
+  const viewId = node["view-id"];
+  if (typeof viewId === "string") {
+    const stableViewId = rewrittenViewIds.get(viewId);
+    if (stableViewId) {
+      node["view-id"] = stableViewId;
+    }
+  }
+  const occludedByViewId = node.occludedByViewId;
+  if (typeof occludedByViewId === "string") {
+    const stableViewId = rewrittenViewIds.get(occludedByViewId);
+    if (stableViewId) {
+      node.occludedByViewId = stableViewId;
+    }
+  }
+  for (const child of toChildArray(node)) {
+    applyStableViewIdRewrites(child, rewrittenViewIds);
   }
 }

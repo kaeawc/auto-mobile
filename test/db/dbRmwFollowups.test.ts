@@ -119,6 +119,24 @@ describe("DB RMW follow-up fixes (#3415)", () => {
     expect(flags[0].config).toHaveProperty("writer");
   });
 
+  test("feature flag upsert preserves existing config when config is omitted", async () => {
+    const db = await openDb();
+    const repository = new SqliteFeatureFlagRepository(db);
+
+    await repository.upsertFlag("debug", true, { writer: "initial" });
+    await repository.upsertFlag("debug", false);
+
+    const flags = await repository.listFlags();
+    expect(flags).toEqual([
+      {
+        key: "debug",
+        enabled: false,
+        config: { writer: "initial" },
+        updatedAt: expect.any(String),
+      },
+    ]);
+  });
+
   test("storage previous-value auto-lookup serializes lookup and insert", async () => {
     const db = await openDb();
     await recordStorageEvent(

@@ -617,7 +617,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const isInstalled = await this.isInstalled();
     perf.endOperation("checkInstalled");
 
-    if (isInstalled && this.shouldSkipDownloadIfInstalled() && !options.allowDownloadWhenInstalled) {
+    if (
+      isInstalled &&
+      this.shouldSkipDownloadIfInstalled() &&
+      !AndroidCtrlProxyManager.isKnownExplicitPinConfigured() &&
+      !options.allowDownloadWhenInstalled
+    ) {
       logger.warn("[CTRL_PROXY] Skipping APK download/version check (preinstalled APK allowed)");
       return this.cacheVersionCheckResult({
         status: "skipped",

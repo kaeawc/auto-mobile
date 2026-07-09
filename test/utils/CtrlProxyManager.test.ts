@@ -419,6 +419,57 @@ describe("CtrlProxyManager", function() {
       }
     });
 
+    test("fails closed on a pinned mismatch even when preinstalled download skip is set (#2815)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      const prevSkipDownload = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
+      process.env.AUTOMOBILE_VERSION = "0.0.18";
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = "true";
+      try {
+        const localFakeAdb = new FakeAdbExecutor();
+        localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: ""
+        });
+        localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: ""
+        });
+        localFakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: ""
+        });
+
+        AndroidCtrlProxyManager.resetInstances();
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          localFakeAdb,
+          new FakeTimer(),
+          {
+            download: async () => {
+              throw new Error("download should not be called for a hermetic mismatch");
+            }
+          }
+        );
+
+        await expect(manager.ensureCompatibleVersion()).rejects.toThrow(
+          "Installed CtrlProxy APK SHA differs from expected release checksum"
+        );
+        expect(localFakeAdb.wasCommandExecuted("shell sha256sum")).toBe(true);
+        expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+        if (prevSkipDownload === undefined) {
+          delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
+        } else {
+          process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = prevSkipDownload;
+        }
+      }
+    });
+
     test("should upgrade when installed SHA mismatches expected and installed download is explicitly allowed", async function() {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();

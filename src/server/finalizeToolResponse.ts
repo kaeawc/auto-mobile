@@ -22,6 +22,28 @@ export interface ObservationBaselineStore {
   set(sessionUuid: string, observation: ObserveResult): void;
 }
 
+export type ObservationArtifactPayload = "ObserveResult" | "ObserveDiff";
+
+export interface ObservationArtifactMetadata {
+  artifact: {
+    path: string;
+    format: "json";
+    payload: ObservationArtifactPayload;
+    bytes: number;
+    tool: string;
+  };
+}
+
+export interface ObservationArtifactWriteInput {
+  tool: string;
+  payload: ObservationArtifactPayload;
+  data: unknown;
+}
+
+export interface ObservationArtifactWriter {
+  writeJsonArtifact(input: ObservationArtifactWriteInput): ObservationArtifactMetadata;
+}
+
 type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
 
 function classifyObservationAction(
@@ -86,6 +108,13 @@ export interface FinalizeToolResponseContext {
    * (#2758) still applies; only the agent-facing diff/strip is suppressed.
    */
   internal?: boolean;
+  /**
+   * External-response artifact writer (issue #3480). When supplied for an
+   * agent-facing call, the final post-transform observation payload is written
+   * out-of-band and replaced with rich artifact metadata. Internal calls ignore
+   * this writer so in-process consumers still receive full observations.
+   */
+  artifactWriter?: ObservationArtifactWriter;
 }
 
 type ObservationDiffMode = "diff" | "full";
@@ -183,14 +212,17 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
 
   // Locate the ObserveResult: the payload itself for `observe`, else `.observation`.
   let sanitizedPayload: Record<string, unknown> | undefined;
+  let hasArtifactableObservation = false;
+  let pendingBaselineUpdate: { sessionUuid: string; observation: ObserveResult } | undefined;
   if (isObserveTool && isObserveResult(payload)) {
     // `observe` always emits the full sanitized observation (no-observe never
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
     const sanitized = sanitizeObserveResult(payload as unknown as ObserveResult, cfg);
     if (canDiff) {
-      ctx.baselineStore!.set(ctx.sessionUuid!, sanitized);
+      pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
     }
     sanitizedPayload = sanitized as unknown as Record<string, unknown>;
+    hasArtifactableObservation = true;
   } else if (!isObserveTool && payload.observation !== undefined) {
     if (noObserveEnabled) {
       // `--actions-no-observe` (#2762/#3026): drop the embedded observation from
@@ -254,7 +286,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             toScreen: observationScreenIdentity(sanitized),
           };
         }
-        ctx.baselineStore!.set(ctx.sessionUuid!, sanitized);
+        pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
       }
       sanitizedPayload = {
         ...payload,
@@ -263,11 +295,23 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       if (observationDiff) {
         sanitizedPayload.observationDiff = observationDiff;
       }
+      hasArtifactableObservation = true;
     }
   }
 
   if (!sanitizedPayload) {
     return response;
+  }
+
+  if (ctx.artifactWriter && !ctx.internal && hasArtifactableObservation) {
+    if (isObserveTool) {
+      sanitizedPayload = writeObservationArtifact(ctx, sanitizedPayload) as unknown as Record<string, unknown>;
+    } else {
+      sanitizedPayload = {
+        ...sanitizedPayload,
+        observation: writeObservationArtifact(ctx, sanitizedPayload.observation),
+      };
+    }
   }
 
   // Rewrite both representations from the same object so they cannot diverge.
@@ -277,8 +321,31 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   if (textPart) {
     textPart.text = stringifyToolResponse(sanitizedPayload);
   }
+  pendingBaselineUpdate && ctx.baselineStore!.set(pendingBaselineUpdate.sessionUuid, pendingBaselineUpdate.observation);
 
   return response;
+}
+
+function writeObservationArtifact(
+  ctx: FinalizeToolResponseContext,
+  observationPayload: unknown
+): ObservationArtifactMetadata {
+  return ctx.artifactWriter!.writeJsonArtifact({
+    tool: ctx.name,
+    payload: getObservationArtifactPayload(observationPayload),
+    data: observationPayload,
+  });
+}
+
+function getObservationArtifactPayload(observationPayload: unknown): ObservationArtifactPayload {
+  if (
+    observationPayload &&
+    typeof observationPayload === "object" &&
+    (observationPayload as Record<string, unknown>).isDiff === true
+  ) {
+    return "ObserveDiff";
+  }
+  return "ObserveResult";
 }
 
 /**

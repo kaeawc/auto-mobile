@@ -450,7 +450,7 @@
           ]
         },
         "appId": {
-          "description": "Android app package for app-scoped locale changes",
+          "description": "Android app package for locale changes",
           "type": "string",
           "minLength": 1
         },

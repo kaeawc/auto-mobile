@@ -289,6 +289,18 @@ describe("appId aliases on tool schemas", () => {
       expect(result.error.issues.some(issue => issue.message.includes("appId only applies when locale is provided"))).toBe(true);
     }
   });
+
+  test("changeLocalizationSchema requires appId for Android locale changes", () => {
+    const result = changeLocalizationSchema.safeParse({
+      platform: "android",
+      locale: "fr-FR",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(issue => issue.message.includes("appId is required for Android locale changes"))).toBe(true);
+    }
+  });
 });
 
 describe("generated tool definitions", () => {
@@ -325,7 +337,7 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
     ["observeSchema", observeSchema, { platform: "ios" }],
     ["identifyInteractionsSchema", identifyInteractionsSchema, { platform: "ios" }],
     ["deviceSnapshotSchema", deviceSnapshotSchema, { action: "capture" }],
-    ["changeLocalizationSchema", changeLocalizationSchema, { platform: "ios", locale: "en_US" }],
+    ["changeLocalizationSchema", changeLocalizationSchema, { platform: "ios", timeZone: "Europe/Paris" }],
     ["getDeviceStateSchema", getDeviceStateSchema, {}],
     ["setDeviceStateSchema", setDeviceStateSchema, { doNotDisturb: { enabled: true } }],
     ["shakeSchema", shakeSchema, { platform: "ios" }],

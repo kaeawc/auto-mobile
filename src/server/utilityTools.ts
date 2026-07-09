@@ -19,7 +19,7 @@ export const setActiveDeviceSchema = addSessionUuidToSchema(z.object({
 
 const changeLocalizationBaseSchema = z.object({
   platform: platformSchema,
-  appId: z.string().min(1).optional().describe("Android app package for app-scoped locale changes"),
+  appId: z.string().min(1).optional().describe("Android app package for locale changes"),
   locale: z.string().min(1).optional().describe("Locale tag (e.g., ar-SA, ja-JP)"),
   timeZone: z.string().min(1).optional().describe("Zone ID (e.g., America/Los_Angeles)"),
   textDirection: z.enum(["ltr", "rtl"]).optional().describe("Text direction"),
@@ -47,6 +47,13 @@ export const changeLocalizationSchema = withAppIdAliases(addDeviceTargetingToSch
       code: "custom",
       path: ["appId"],
       message: "appId only applies when locale is provided.",
+    });
+  }
+  if (values.platform === "android" && values.locale && !values.appId) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["appId"],
+      message: "appId is required for Android locale changes.",
     });
   }
 });
@@ -186,7 +193,7 @@ export function registerUtilityTools() {
       if (result.success) {
         changes.locale = result.languageTag;
         localeMetadata = {
-          localeScope: args.appId && device.platform === "android" ? "app" : "system",
+          localeScope: result.method?.startsWith("cmd locale set-app-locales") ? "app" : "system",
           ...(args.appId && device.platform === "android" ? { localeAppId: args.appId } : {}),
           ...(result.method ? { localeMethod: result.method } : {}),
         };

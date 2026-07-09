@@ -33,8 +33,9 @@ const MIN_APP_LOCALE_API_LEVEL = 33;
  * ADB shell commands (with an accessibility-service fast path for
  * `settings get`/`settings put`) and ADB shell commands to read and
  * write locale, time zone, RTL, 24-hour format, and calendar settings.
- * App-scoped locale changes use Android 13+'s non-root LocaleManager shell
- * command; system-wide locale changes keep the root-backed setprop path.
+ * Android locale changes require an app id. Android 13+ uses the app-scoped
+ * non-root LocaleManager shell command; older devices fall back to the
+ * root-backed system locale path after verifying `adb root` works.
  */
 export class AndroidSystemConfigurationAdapter implements SystemConfigurationAdapter {
   readonly defaultCalendarSystem = "gregory";
@@ -45,10 +46,18 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   ) {}
 
   async setLocale(languageTag: string, options: BroadcastOptions): Promise<SetLocaleResult> {
-    if (options.appId) {
-      return this.setAppLocale(languageTag, options.appId, options);
+    if (!options.appId) {
+      return {
+        success: false,
+        languageTag,
+        error: "appId is required for Android locale changes. Provide the target app package so AutoMobile can choose the supported Android locale path."
+      };
     }
 
+    return this.setTargetAppLocale(languageTag, options.appId, options);
+  }
+
+  private async setSystemLocale(languageTag: string, options: BroadcastOptions, method: string): Promise<SetLocaleResult> {
     const previousLanguageTag = await this.getCurrentLocaleTag();
 
     try {
@@ -82,23 +91,27 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       success: true,
       languageTag,
       previousLanguageTag,
-      method: "setprop persist.sys.locale + stop/start",
+      method,
       broadcasted
     };
   }
 
-  private async setAppLocale(
+  private async setTargetAppLocale(
     languageTag: string,
     appId: string,
     options: BroadcastOptions
   ): Promise<SetLocaleResult> {
     const apiLevel = await readAndroidDeviceApiLevel(this.adb);
     if (apiLevel !== null && apiLevel < MIN_APP_LOCALE_API_LEVEL) {
-      return {
-        success: false,
-        languageTag,
-        error: `Android app-scoped locale changes require API ${MIN_APP_LOCALE_API_LEVEL}+; device is API ${apiLevel}`
-      };
+      const rootResult = await this.ensureRootForLegacyLocale(apiLevel);
+      if (!rootResult.success) {
+        return {
+          success: false,
+          languageTag,
+          error: rootResult.error,
+        };
+      }
+      return this.setSystemLocale(languageTag, options, "setprop persist.sys.locale + stop/start after adb root");
     }
 
     const previousLanguageTag = await this.getAppLocaleTag(appId);
@@ -138,6 +151,37 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       method: `cmd locale set-app-locales ${appId}`,
       broadcasted
     };
+  }
+
+  private async ensureRootForLegacyLocale(apiLevel: number): Promise<{ success: true } | { success: false; error: string }> {
+    try {
+      await this.adb.executeCommand("root", undefined, undefined, true);
+      await this.adb.executeCommand("wait-for-device", undefined, undefined, true);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. Failed to run adb root; the target emulator is not root-capable or does not allow root ADB. adb root error: ${errorMessage}`
+      };
+    }
+
+    try {
+      const idResult = await this.adb.executeCommand("shell id", undefined, undefined, true);
+      if (!idResult.stdout.includes("uid=0(root)")) {
+        return {
+          success: false,
+          error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. adb root completed, but ADB shell is still not root; the target emulator is not root-capable. shell id: ${idResult.stdout.trim() || "unknown"}`
+        };
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must verify root before changing the system locale. Failed to verify root shell after adb root: ${errorMessage}`
+      };
+    }
+
+    return { success: true };
   }
 
   async setTimeZone(zoneId: string): Promise<SetTimeZoneResult> {

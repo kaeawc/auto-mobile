@@ -445,7 +445,12 @@ class ViewHierarchyExtractorTest {
   fun `occlusion filter keeps partial overlap and annotates metadata`() {
     val target = elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
     val targetParent = elementWithBounds(resourceId = "partial-parent", children = listOf(target))
-    val occluder = elementWithBounds(resourceId = "partial-occluder", bounds = bounds(0, 0, 50, 50))
+    val occluder =
+      elementWithBounds(
+        resourceId = "partial-occluder",
+        viewId = "stable-partial-occluder",
+        bounds = bounds(0, 0, 50, 50),
+      )
     val occluderParent =
       elementWithBounds(resourceId = "occluder-parent", children = listOf(occluder))
     val root = elementWithBounds(children = listOf(targetParent, occluderParent))
@@ -457,6 +462,31 @@ class ViewHierarchyExtractorTest {
     assertNotNull(targetResult)
     assertEquals("partial", targetResult!!.occlusionState)
     assertEquals("partial-occluder", targetResult.occludedBy)
+    assertEquals("stable-partial-occluder", targetResult.occludedByViewId)
+  }
+
+  @Test
+  fun `occlusion filter annotates unlabeled occluder with view id`() {
+    val target =
+      elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
+    val targetParent = elementWithBounds(resourceId = "partial-parent", children = listOf(target))
+    val occluder =
+      elementWithBounds(
+        viewId = "stable-unlabeled-occluder",
+        bounds = bounds(0, 0, 50, 50),
+      )
+    val occluderParent =
+      elementWithBounds(resourceId = "occluder-parent", children = listOf(occluder))
+    val root = elementWithBounds(children = listOf(targetParent, occluderParent))
+
+    val filtered = extractor.applyOcclusionFilteringSingleWindowForTest(root)
+
+    assertNotNull(filtered)
+    val targetResult = findElementByResourceId(filtered!!, "partial-target")
+    assertNotNull(targetResult)
+    assertEquals("partial", targetResult!!.occlusionState)
+    assertEquals("unlabeled view", targetResult.occludedBy)
+    assertEquals("stable-unlabeled-occluder", targetResult.occludedByViewId)
   }
 
   @Test
@@ -487,6 +517,7 @@ class ViewHierarchyExtractorTest {
     assertNotNull(filtered)
     assertEquals("hidden", filtered!!.occlusionState)
     assertEquals("occluding-root", filtered.occludedBy)
+    assertEquals("occluding-root", filtered.occludedByViewId)
     assertNotNull(findElementByResourceId(filtered, "root-child"))
   }
 
@@ -983,6 +1014,22 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `occludedByViewId field is serialized to JSON with correct key`() {
+    val element =
+      UIElementInfo(
+        text = "Covered",
+        occlusionState = "partial",
+        occludedBy = "unlabeled view",
+        occludedByViewId = "stable-unlabeled-occluder",
+      )
+    val jsonString = json.encodeToString(UIElementInfo.serializer(), element)
+    assertTrue(
+      "JSON should contain occludedByViewId field",
+      jsonString.contains("\"occludedByViewId\""),
+    )
+  }
+
+  @Test
   fun `detectContentHiddenRegions finds large empty non-interactive Compose descendant with sparse child coverage`() {
     val visibleToolbar =
       elementWithBounds(
@@ -1188,6 +1235,7 @@ class ViewHierarchyExtractorTest {
 
   private fun elementWithBounds(
     resourceId: String? = null,
+    viewId: String? = resourceId,
     bounds: ElementBounds? = null,
     className: String? = null,
     text: String? = null,
@@ -1203,6 +1251,7 @@ class ViewHierarchyExtractorTest {
       }
     return UIElementInfo(
       resourceId = resourceId,
+      viewId = viewId,
       bounds = bounds,
       className = className,
       text = text,

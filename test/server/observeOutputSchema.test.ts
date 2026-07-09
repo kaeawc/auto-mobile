@@ -137,10 +137,19 @@ describe("viewHierarchyNodeSchema: polymorphic node + bounds union (#3025)", () 
   });
 
   test("keeps the polymorphic `$` attribute bag and per-node metadata", () => {
-    const node = { "$": { class: "android.widget.TextView" }, "view-id": "id/foo", "occlusionState": "none" };
+    const node = {
+      "$": { class: "android.widget.TextView" },
+      "view-id": "id/foo",
+      "occlusionState": "partial",
+      "occludedBy": "unlabeled view",
+      "occludedByViewId": "id/occluder",
+    };
     const parsed = viewHierarchyNodeSchema.parse(node) as Record<string, unknown>;
     expect(parsed["$"]).toEqual({ class: "android.widget.TextView" });
     expect(parsed["view-id"]).toBe("id/foo");
+    expect(parsed.occlusionState).toBe("partial");
+    expect(parsed.occludedBy).toBe("unlabeled view");
+    expect(parsed.occludedByViewId).toBe("id/occluder");
   });
 });
 

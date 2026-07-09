@@ -1425,7 +1425,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     val subtreeEnd: Int,
   )
 
-  private data class OcclusionInfo(val coverage: Double, val occludedBy: String?)
+  private data class OcclusionInfo(
+    val coverage: Double,
+    val occludedBy: String?,
+    val occludedByViewId: String?,
+  )
 
   /** Represents the relationship between two nodes in a tree hierarchy. */
   enum class NodeRelationship {
@@ -1545,6 +1549,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       val intersections = mutableListOf<ElementBounds>()
       var maxOverlap = 0
       var occludedBy: String? = null
+      var occludedByViewId: String? = null
 
       // Debug: Track occlusion for text nodes
       val isDebugNode = node.element.text == "Tap" || node.element.text == "Discover"
@@ -1609,6 +1614,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         if (overlapArea > maxOverlap) {
           maxOverlap = overlapArea
           occludedBy = resolveOccluderLabel(occluder)
+          occludedByViewId = occluder.element.viewId
         }
       }
 
@@ -1623,7 +1629,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           )
         }
         if (coverage > 0.0) {
-          occlusionInfo[node.key] = OcclusionInfo(coverage = coverage, occludedBy = occludedBy)
+          occlusionInfo[node.key] =
+            OcclusionInfo(
+              coverage = coverage,
+              occludedBy = occludedBy,
+              occludedByViewId = occludedByViewId,
+            )
         }
       }
     }
@@ -1714,6 +1725,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       node = nodeToUse,
       occlusionState = occlusionState,
       occludedBy = info?.occludedBy,
+      occludedByViewId = info?.occludedByViewId,
     )
   }
 

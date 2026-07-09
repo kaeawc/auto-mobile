@@ -392,6 +392,9 @@ export class CtrlProxyFocus {
     if (node.occludedBy) {
       converted.occludedBy = node.occludedBy;
     }
+    if (node.occludedByViewId) {
+      converted.occludedByViewId = node.occludedByViewId;
+    }
     if (node.extras) {
       converted.extras = node.extras;
     }

@@ -1077,6 +1077,9 @@ describe("AndroidCtrlProxyClient", function() {
           "text": "6:43 AM",
           "content-desc": "6:43 AM",
           "resource-id": "com.google.android.deskclock:id/digital_clock",
+          "occlusionState": "partial",
+          "occludedBy": "Debug menu",
+          "occludedByViewId": "stable-debug-menu",
           "bounds": {
             left: 175,
             top: 687,
@@ -1114,6 +1117,9 @@ describe("AndroidCtrlProxyClient", function() {
       });
       expect(result.hierarchy.clickable).toBeUndefined();
       expect(result.hierarchy.enabled).toBe("true");
+      expect(result.hierarchy.occlusionState).toBe("partial");
+      expect(result.hierarchy.occludedBy).toBe("Debug menu");
+      expect(result.hierarchy.occludedByViewId).toBe("stable-debug-menu");
       expect(result.intentChooserDetected).toBe(true);
       expect(result.notificationPermissionDetected).toBe(true);
       expect(result.contentHiddenRegions).toEqual([

@@ -110,11 +110,11 @@ export class NavigateTo {
 
       // Check if we should use smart back button navigation
       // Get current screen's back stack depth from the last observation
-      const currentNode = this.navigationManager.getNode(currentScreen);
+      const currentNode = await this.navigationManager.getNode(currentScreen);
       const currentBackStackDepth = currentNode?.backStackDepth ?? 0;
 
       if (currentBackStackDepth > 0) {
-        const backNavResult = SmartNavigationHelper.shouldUseBackButton(
+        const backNavResult = await SmartNavigationHelper.shouldUseBackButton(
           currentScreen,
           targetScreen,
           currentBackStackDepth

@@ -349,16 +349,24 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p ci-logs
+          set +e
           bash ./scripts/install.sh --preset minimal --non-interactive 2>&1 | tee ci-logs/installer.log
-          echo "INSTALL_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+          install_status=${PIPESTATUS[0]}
+          set -e
+          echo "INSTALL_EXIT_CODE=${install_status}" >> "$GITHUB_ENV"
+          exit 0
 
       - name: "Run Uninstaller"
         shell: bash
         continue-on-error: true
         run: |
           set -uo pipefail
+          set +e
           bash ./scripts/uninstall.sh --all --force 2>&1 | tee ci-logs/uninstaller.log
-          echo "UNINSTALL_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+          uninstall_status=${PIPESTATUS[0]}
+          set -e
+          echo "UNINSTALL_EXIT_CODE=${uninstall_status}" >> "$GITHUB_ENV"
+          exit 0
 
       - name: "Upload Logs"
         if: env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0' || failure()
@@ -397,8 +405,12 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p ci-logs
+          set +e
           bash ./scripts/install.sh --preset development --non-interactive 2>&1 | tee ci-logs/installer.log
-          echo "INSTALL_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+          install_status=${PIPESTATUS[0]}
+          set -e
+          echo "INSTALL_EXIT_CODE=${install_status}" >> "$GITHUB_ENV"
+          exit 0
 
       - name: "Verify runtime dependencies"
         if: env.INSTALL_EXIT_CODE == '0'

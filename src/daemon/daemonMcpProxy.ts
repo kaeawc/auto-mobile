@@ -220,6 +220,10 @@ const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   ...OUTPUT_REDUCTION_FLAG_SPECS.map(spec => spec.field),
 ];
 
+const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = [
+  "toolOutputsDir",
+];
+
 /**
  * Boolean-valued startup options that differ between the requested MCP config
  * and the running daemon. Each option is compared as a strict boolean
@@ -237,6 +241,13 @@ function startupOptionMismatches(
     const have = running?.[key] === true;
     if (want !== have) {
       mismatches.push(`${key} (requested=${want}, running=${have})`);
+    }
+  }
+  for (const key of REUSE_CRITICAL_STRING_OPTION_KEYS) {
+    const want = typeof requested?.[key] === "string" ? requested[key] : undefined;
+    const have = typeof running?.[key] === "string" ? running[key] : undefined;
+    if (want !== have) {
+      mismatches.push(`${key} (requested=${want ?? "unset"}, running=${have ?? "unset"})`);
     }
   }
   return mismatches;

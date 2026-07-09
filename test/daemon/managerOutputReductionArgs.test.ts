@@ -84,3 +84,20 @@ describe("output-reduction daemon-arg round trip", () => {
     }
   });
 });
+
+describe("tool outputs directory daemon arg relay", () => {
+  test("--tool-outputs-dir parses into DaemonOptions", () => {
+    expect(parseDaemonArgs(["--tool-outputs-dir", "/tmp/artifacts"]).toolOutputsDir)
+      .toBe("/tmp/artifacts");
+  });
+
+  test("--tool-output-dir alias parses into DaemonOptions", () => {
+    expect(parseDaemonArgs(["--tool-output-dir", "/tmp/artifacts"]).toolOutputsDir)
+      .toBe("/tmp/artifacts");
+  });
+
+  test("ignores missing or flag-shaped values", () => {
+    expect(parseDaemonArgs(["--tool-outputs-dir"]).toolOutputsDir).toBeUndefined();
+    expect(parseDaemonArgs(["--tool-outputs-dir", "--debug"]).toolOutputsDir).toBeUndefined();
+  });
+});

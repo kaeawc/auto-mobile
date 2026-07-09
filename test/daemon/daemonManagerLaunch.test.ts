@@ -177,6 +177,53 @@ describe("DaemonManager launch", () => {
     expect(realpathSync(capturedEnv![DAEMON_LAUNCH_CWD_ENV]!)).toBe(realpathSync(spawnerCwd));
   });
 
+  test("passes tool outputs directory option to the daemon child args", async () => {
+    const stateDir = createTempDir("daemon-launch-state-");
+    process.env.AUTOMOBILE_DATA_DIR = stateDir;
+
+    let capturedArgs: string[] | undefined;
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (_command: string, args: string[], _options: SpawnOptions) => {
+        capturedArgs = args;
+        return {
+          unref() {},
+          once() { return this; },
+          off() { return this; },
+        } as ChildProcess;
+      }
+    };
+
+    let statusCallCount = 0;
+    class TestDaemonManager extends DaemonManager {
+      override findAllDaemonProcesses(): number[] { return []; }
+      override async status(): Promise<any> {
+        statusCallCount++;
+        return statusCallCount === 1
+          ? { running: false }
+          : { running: true, pid: 1234, port: 31847, socketPath: join(stateDir, "daemon.sock") };
+      }
+      override async waitForReady(_timeout: number): Promise<boolean> {
+        return true;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      new FakeTimer(),
+      join(stateDir, "daemon.lock"),
+      join(stateDir, "daemon.pid"),
+      join(stateDir, "daemon.sock"),
+      undefined,
+      processSpawner
+    );
+
+    await manager.start({ toolOutputsDir: "/tmp/auto-mobile-artifacts" });
+
+    expect(capturedArgs).toContain("--tool-outputs-dir");
+    expect(capturedArgs).toContain("/tmp/auto-mobile-artifacts");
+  });
+
   test("resolves relative daemon state paths before changing daemon cwd", async () => {
     const spawnerCwd = createTempDir("daemon-spawner-cwd-");
     process.chdir(spawnerCwd);

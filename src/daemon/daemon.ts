@@ -243,6 +243,9 @@ export class Daemon {
     if (options.toolResultsCompactJson) {
       serverConfig.setToolResultsCompactJsonEnabled(true);
     }
+    if (options.toolOutputsDir) {
+      serverConfig.setToolOutputsDir(options.toolOutputsDir);
+    }
   }
 
   /**

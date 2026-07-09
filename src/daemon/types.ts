@@ -172,6 +172,8 @@ export interface DaemonOptions {
   videoFormat?: string;
   /** Default video archive size limit in MB */
   videoMaxArchiveSizeMb?: number;
+  /** Absolute host-local directory for tool output artifacts */
+  toolOutputsDir?: string;
   /** Enable network mocking */
   networkMockable?: boolean;
   /** Expose tools that require the target app to embed the AutoMobile SDK */

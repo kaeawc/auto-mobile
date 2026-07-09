@@ -1,6 +1,10 @@
 #!/usr/bin/env bun
 import { bootstrapEnvironment } from "./utils/envBootstrap";
-import { DAEMON_LAUNCH_CWD_ENV, safeProcessCwd } from "./utils/workingDirectory";
+import {
+  DAEMON_LAUNCH_CWD_ENV,
+  resolveDaemonLaunchWorkingDirectory,
+  safeProcessCwd,
+} from "./utils/workingDirectory";
 
 // Run before any other imports that may resolve tool paths at module load time.
 bootstrapEnvironment();
@@ -32,6 +36,7 @@ import {
   SKIP_CTRL_PROXY_DOWNLOAD_FLAG,
   shouldSkipCtrlProxyDownload,
 } from "./utils/ctrlProxyDownloadControl";
+import { parseToolOutputsDirConfig } from "./utils/toolOutputArtifacts";
 import {
   installProcessLifecycleHandlers,
   setFatalProcessHandler,
@@ -100,6 +105,7 @@ function parseArgs(log: ParseLogger): {
   daemonArgs: string[];
   skipCtrlProxyDownload: boolean;
   embeddedSdk: boolean;
+  networkMockable: boolean;
   dismissKeyboardAfterInput: boolean;
   mcpRecording: boolean;
   navigationScreenshots: boolean;
@@ -110,6 +116,7 @@ function parseArgs(log: ParseLogger): {
   noA11yReportViewIds: boolean;
   noA11yRetrieveInteractiveWindows: boolean;
   outputReduction: OutputReductionFlags;
+  toolOutputsDir: string | undefined;
   } {
   const args = process.argv.slice(2);
 
@@ -175,6 +182,11 @@ function parseArgs(log: ParseLogger): {
   // Output-size reduction flags (issue #2756): each parses from CLI OR its
   // AUTOMOBILE_* env var, CLI winning via ||.
   const outputReduction = parseOutputReductionFlags(args, process.env);
+  const toolOutputsDir = parseToolOutputsDirConfig(
+    args,
+    process.env,
+    resolveDaemonLaunchWorkingDirectory()
+  );
   let planExecutionLockScope: PlanExecutionLockScope = "session";
   const videoRecordingDefaults: VideoRecordingConfigInput = {};
 
@@ -377,6 +389,7 @@ function parseArgs(log: ParseLogger): {
     noA11yReportViewIds,
     noA11yRetrieveInteractiveWindows,
     outputReduction,
+    toolOutputsDir,
   };
 }
 
@@ -460,10 +473,12 @@ async function main() {
       noA11yReportViewIds,
       noA11yRetrieveInteractiveWindows,
       outputReduction,
+      toolOutputsDir,
     } = parseArgs(logger);
 
     serverConfig.setPlanExecutionLockScope(planExecutionLockScope);
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);
+    serverConfig.setToolOutputsDir(toolOutputsDir);
     serverConfig.setSkipCtrlProxyDownload(skipCtrlProxyDownload);
     serverConfig.setEmbeddedSdkEnabled(embeddedSdk);
     serverConfig.setNetworkMockableEnabled(networkMockable);
@@ -604,6 +619,7 @@ async function main() {
         videoFps: videoRecordingDefaults.fps,
         videoFormat: videoRecordingDefaults.format,
         videoMaxArchiveSizeMb: videoRecordingDefaults.maxArchiveSizeMb,
+        toolOutputsDir,
         networkMockable,
         embeddedSdk,
         dismissKeyboardAfterInput,
@@ -665,6 +681,7 @@ async function main() {
         videoFps: videoRecordingDefaults.fps,
         videoFormat: videoRecordingDefaults.format,
         videoMaxArchiveSizeMb: videoRecordingDefaults.maxArchiveSizeMb,
+        toolOutputsDir,
         networkMockable,
         embeddedSdk,
         dismissKeyboardAfterInput,

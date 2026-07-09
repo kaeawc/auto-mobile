@@ -814,9 +814,11 @@ download_file() {
     local destination="$2"
 
     if command_exists curl; then
-        curl -fsSL "${url}" -o "${destination}"
+        curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --retry-all-errors \
+            "${url}" -o "${destination}"
     elif command_exists wget; then
-        wget -qO "${destination}" "${url}"
+        wget --quiet --tries=3 --waitretry=2 -O "${destination}" "${url}"
     else
         return 1
     fi

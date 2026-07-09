@@ -17,9 +17,12 @@ import java.time.Duration
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 /**
  * Handles AI agent loop functionality for AutoMobile test execution using Koog framework.
@@ -346,22 +349,19 @@ open class AutoMobileAgent(
       val url = serverUrl ?: throw RuntimeException("MCP client not connected")
 
       try {
-        // Create the JSON request manually by building the JSON string
-        val paramsJsonBuilder = StringBuilder("{")
-        parameters.entries.forEachIndexed { index, (key, value) ->
-          if (index > 0) paramsJsonBuilder.append(", ")
-          paramsJsonBuilder.append("\"$key\": ")
-          when (value) {
-            is String -> paramsJsonBuilder.append("\"$value\"")
-            is Number -> paramsJsonBuilder.append(value.toString())
-            is Boolean -> paramsJsonBuilder.append(value.toString())
-            else -> paramsJsonBuilder.append("\"$value\"")
-          }
-        }
-        paramsJsonBuilder.append("}")
-
         val requestJson =
-          """{"method":"tools/call","params":{"name":"$toolName","arguments":${paramsJsonBuilder}}}"""
+          koogJson.encodeToString(
+            buildJsonObject {
+              put("method", JsonPrimitive("tools/call"))
+              put(
+                "params",
+                buildJsonObject {
+                  put("name", JsonPrimitive(toolName))
+                  put("arguments", buildJsonParameters(parameters))
+                },
+              )
+            }
+          )
 
         val request =
           HttpRequest.newBuilder()
@@ -395,7 +395,13 @@ open class AutoMobileAgent(
       val url = serverUrl ?: throw RuntimeException("MCP client not connected")
 
       try {
-        val requestJson = """{"method":"tools/list","params":{}}"""
+        val requestJson =
+          koogJson.encodeToString(
+            buildJsonObject {
+              put("method", JsonPrimitive("tools/list"))
+              put("params", JsonObject(emptyMap()))
+            }
+          )
 
         val request =
           HttpRequest.newBuilder()
@@ -424,6 +430,20 @@ open class AutoMobileAgent(
         return listResponse.tools
       } catch (e: Exception) {
         throw RuntimeException("Failed to list MCP tools: ${e.message}", e)
+      }
+    }
+
+    private fun buildJsonParameters(parameters: Map<String, Any>): JsonObject = buildJsonObject {
+      parameters.forEach { (key, value) ->
+        put(
+          key,
+          when (value) {
+            is String -> JsonPrimitive(value)
+            is Number -> JsonPrimitive(value)
+            is Boolean -> JsonPrimitive(value)
+            else -> JsonPrimitive(value.toString())
+          },
+        )
       }
     }
 

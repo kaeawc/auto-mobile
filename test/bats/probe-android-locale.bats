@@ -7,12 +7,26 @@ SCRIPT="scripts/local-dev/probe-android-locale.sh"
 setup() {
   MOCK_BIN="$(mktemp -d)"
   ORIG_PATH="$PATH"
+  ORIG_ANDROID_HOME="${ANDROID_HOME-}"
+  ORIG_ANDROID_HOME_SET="${ANDROID_HOME+x}"
+  ORIG_ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT-}"
+  ORIG_ANDROID_SDK_ROOT_SET="${ANDROID_SDK_ROOT+x}"
   export INVOCATION_FILE="${MOCK_BIN}/adb-invocations"
 }
 
 teardown() {
   rm -rf "$MOCK_BIN"
   export PATH="$ORIG_PATH"
+  if [ -n "$ORIG_ANDROID_HOME_SET" ]; then
+    export ANDROID_HOME="$ORIG_ANDROID_HOME"
+  else
+    unset ANDROID_HOME
+  fi
+  if [ -n "$ORIG_ANDROID_SDK_ROOT_SET" ]; then
+    export ANDROID_SDK_ROOT="$ORIG_ANDROID_SDK_ROOT"
+  else
+    unset ANDROID_SDK_ROOT
+  fi
 }
 
 make_mock_adb() {
@@ -62,6 +76,8 @@ esac
 exit 0
 SCRIPT
   chmod +x "${MOCK_BIN}/adb"
+  unset ANDROID_HOME
+  unset ANDROID_SDK_ROOT
   export PATH="${MOCK_BIN}:/usr/bin:/bin"
 }
 

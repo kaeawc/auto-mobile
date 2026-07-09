@@ -148,7 +148,7 @@ const observationDiffMetadataSchema = z.object({
 const toolOutputArtifactDetailsSchema = z.object({
   path: z.string(),
   format: z.literal("json"),
-  payload: z.enum(["ObserveResult", "ObserveDiff"]),
+  payload: z.string(),
   bytes: z.number().int().nonnegative(),
   tool: z.string()
 }).passthrough();

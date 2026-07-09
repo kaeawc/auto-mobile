@@ -22,7 +22,7 @@ export interface ObservationBaselineStore {
   set(sessionUuid: string, observation: ObserveResult): void;
 }
 
-export type ObservationArtifactPayload = "ObserveResult" | "ObserveDiff";
+export type ObservationArtifactPayload = string;
 
 export interface ObservationArtifactMetadata {
   artifact: {
@@ -299,11 +299,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     }
   }
 
-  if (!sanitizedPayload) {
-    return response;
-  }
-
-  if (ctx.artifactWriter && !ctx.internal && hasArtifactableObservation) {
+  if (ctx.artifactWriter && !ctx.internal && hasArtifactableObservation && sanitizedPayload) {
     if (isObserveTool) {
       sanitizedPayload = writeObservationArtifact(ctx, sanitizedPayload) as unknown as Record<string, unknown>;
     } else {
@@ -312,6 +308,12 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         observation: writeObservationArtifact(ctx, sanitizedPayload.observation),
       };
     }
+  }
+
+  sanitizedPayload ??= artifactNonObservationPayload(ctx, payload);
+
+  if (!sanitizedPayload) {
+    return response;
   }
 
   // Rewrite both representations from the same object so they cannot diverge.
@@ -330,11 +332,7 @@ function writeObservationArtifact(
   ctx: FinalizeToolResponseContext,
   observationPayload: unknown
 ): ObservationArtifactMetadata {
-  return ctx.artifactWriter!.writeJsonArtifact({
-    tool: ctx.name,
-    payload: getObservationArtifactPayload(observationPayload),
-    data: observationPayload,
-  });
+  return writeJsonArtifact(ctx, getObservationArtifactPayload(observationPayload), observationPayload);
 }
 
 function getObservationArtifactPayload(observationPayload: unknown): ObservationArtifactPayload {
@@ -346,6 +344,185 @@ function getObservationArtifactPayload(observationPayload: unknown): Observation
     return "ObserveDiff";
   }
   return "ObserveResult";
+}
+
+function writeJsonArtifact(
+  ctx: FinalizeToolResponseContext,
+  payload: ObservationArtifactPayload,
+  data: unknown
+): ObservationArtifactMetadata {
+  return ctx.artifactWriter!.writeJsonArtifact({
+    tool: ctx.name,
+    payload,
+    data,
+  });
+}
+
+function artifactNonObservationPayload(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (!ctx.artifactWriter || ctx.internal) {
+    return undefined;
+  }
+
+  switch (ctx.name) {
+    case "executePlan":
+      return artifactExecutePlanPayload(ctx, payload);
+    case "bugReport":
+      return artifactBugReportPayload(ctx, payload);
+    case "getNetworkGraph":
+      return artifactNetworkGraphPayload(ctx, payload);
+    default:
+      return undefined;
+  }
+}
+
+function artifactExecutePlanPayload(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  let changed = false;
+  const nextPayload: Record<string, unknown> = { ...payload };
+  if (isRecord(payload.failedStep)) {
+    const failureObservation = artifactPlanObservation(
+      ctx,
+      payload.failedStep.failureObservation,
+      "ExecutePlanFailureObservation"
+    );
+    if (failureObservation) {
+      nextPayload.failedStep = { ...payload.failedStep, failureObservation };
+      changed = true;
+    }
+  }
+
+  if (isRecord(payload.debug) && Array.isArray(payload.debug.steps)) {
+    let debugChanged = false;
+    const steps = payload.debug.steps.map(step => {
+      if (!isRecord(step) || !isRecord(step.details)) {
+        return step;
+      }
+
+      let detailsChanged = false;
+      let details = step.details;
+      const stepObservation = artifactPlanObservation(
+        ctx,
+        details.stepObservation,
+        "ExecutePlanDebugStepObservation"
+      );
+      if (stepObservation) {
+        details = { ...details, stepObservation };
+        detailsChanged = true;
+      }
+
+      const failureObservation = artifactPlanObservation(
+        ctx,
+        details.failureObservation,
+        "ExecutePlanDebugFailureObservation"
+      );
+      if (failureObservation) {
+        details = { ...details, failureObservation };
+        detailsChanged = true;
+      }
+
+      if (!detailsChanged) {
+        return step;
+      }
+      debugChanged = true;
+      return { ...step, details };
+    });
+
+    if (debugChanged) {
+      nextPayload.debug = { ...payload.debug, steps };
+      changed = true;
+    }
+  }
+
+  return changed ? nextPayload : undefined;
+}
+
+function artifactPlanObservation(
+  ctx: FinalizeToolResponseContext,
+  observation: unknown,
+  payloadPrefix: string
+): Record<string, unknown> | undefined {
+  if (!isRecord(observation)) {
+    return undefined;
+  }
+
+  let changed = false;
+  const next: Record<string, unknown> = { ...observation };
+  if (observation.viewHierarchy !== undefined) {
+    next.viewHierarchy = writeJsonArtifact(ctx, `${payloadPrefix}ViewHierarchy`, observation.viewHierarchy);
+    changed = true;
+  }
+  if (observation.rawViewHierarchy !== undefined) {
+    next.rawViewHierarchy = writeJsonArtifact(ctx, `${payloadPrefix}RawViewHierarchy`, observation.rawViewHierarchy);
+    changed = true;
+  }
+
+  return changed ? next : undefined;
+}
+
+function artifactBugReportPayload(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  let changed = false;
+  const next: Record<string, unknown> = { ...payload };
+
+  if (isRecord(payload.viewHierarchy) && payload.viewHierarchy.rawXml !== undefined) {
+    next.viewHierarchy = {
+      ...payload.viewHierarchy,
+      rawXml: writeJsonArtifact(ctx, "BugReportViewHierarchyRawXml", payload.viewHierarchy.rawXml),
+    };
+    changed = true;
+  }
+
+  if (isRecord(payload.logcat)) {
+    next.logcatSummary = {
+      errorCount: arrayLength(payload.logcat.errors),
+      warningCount: arrayLength(payload.logcat.warnings),
+      appLogCount: arrayLength(payload.logcat.appLogs),
+    };
+    next.logcat = writeJsonArtifact(ctx, "BugReportLogcat", payload.logcat);
+    changed = true;
+  }
+
+  if (isRecord(payload.windowState) && Array.isArray(payload.windowState.windows)) {
+    next.windowState = {
+      ...payload.windowState,
+      windows: writeJsonArtifact(ctx, "BugReportWindowList", payload.windowState.windows),
+    };
+    changed = true;
+  }
+
+  return changed ? next : undefined;
+}
+
+function artifactNetworkGraphPayload(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (!Array.isArray(payload.graph)) {
+    return undefined;
+  }
+
+  return {
+    ...payload,
+    graph: writeJsonArtifact(ctx, "NetworkGraph", payload.graph),
+    graphSummary: {
+      hostCount: payload.graph.length,
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function arrayLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
 }
 
 /**

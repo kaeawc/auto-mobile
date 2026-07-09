@@ -43,6 +43,43 @@ Part of the MCP output-context reduction effort. Each flag can be set either as 
 | **`--actions-no-observe`** | `AUTOMOBILE_ACTIONS_NO_OBSERVE` | Strip the embedded `observation` from non-observe tool results entirely (deleted from **both** `structuredContent` and the serialized `content[0].text`). Output-only — `BaseVisualChange` still computes the observation internally for its own success detection, so visual-change behavior is unchanged; the `observe` tool's own observation is never stripped. Applied at `finalizeToolResponse`. **Precedence:** when both `--actions-no-observe` and `--actions-diff-observe` are set, no-observe wins — the observation is removed, so there is nothing to diff. |
 | **`--tool-results-compact-json`** | `AUTOMOBILE_TOOL_RESULTS_COMPACT_JSON` | Serialize tool results as compact (non-pretty-printed) JSON — drops the 2-space indentation in `stringifyToolResponse`. Same data (parses back identically, no effect on `tapOn`/text matching); ~35% fewer characters on element-heavy payloads. Composes with the other flags. |
 
+### Tool Output Artifact Mode
+
+`--tool-outputs-dir <path>` (alias `--tool-output-dir`; env
+`AUTOMOBILE_TOOL_OUTPUTS_DIR` or legacy `AUTO_MOBILE_TOOL_OUTPUTS_DIR`) enables
+artifact mode for large MCP tool-output subtrees. The directory is resolved to a
+host-local path at startup and validated again at write time. Artifact write
+failures are tool failures; AutoMobile does not fall back to inlining the large
+payload.
+
+Every artifact replacement uses the shared metadata shape:
+
+```json
+{
+  "artifact": {
+    "path": "/absolute/host/path/to/file.json",
+    "format": "json",
+    "payload": "NetworkGraph",
+    "bytes": 123456,
+    "tool": "getNetworkGraph"
+  }
+}
+```
+
+Artifact mode currently applies to:
+
+- `observe`: the final agent-facing `ObserveResult` or `ObserveDiff` payload is written to an artifact after existing observe output transforms.
+- Action tools with embedded `observation`: the embedded final agent-facing observation or diff is replaced with artifact metadata; internal tool-to-tool calls still receive full in-memory observations.
+- `executePlan`: large `viewHierarchy` and `rawViewHierarchy` subtrees inside `failedStep.failureObservation` and captured debug observations are artifacted. Small fields such as success/counts/errors, device metadata, video paths, and observation samples remain inline.
+- `bugReport`: `viewHierarchy.rawXml`, `logcat`, and long `windowState.windows` lists are artifacted. Report identity, device/screen state, hierarchy counts, clickable-element summary, saved report path, errors, and log counts remain inline.
+- `getNetworkGraph`: the aggregate `graph` tree is artifacted, with `graphSummary.hostCount` left inline.
+
+Evaluated but not selected for the first non-observation pass: `debugSearch`
+returns bounded summaries rather than raw hierarchies; `exportPlan` and
+`recordSteps` can return long YAML but that content is the primary result agents
+usually need immediately. Revisit them if size tests or real-world traces show
+they dominate context.
+
 `--actions-diff-observe` chooses the full-vs-diff policy by action class before
 calling the shared diff implementation. Navigation-prone actions (`tapOn`,
 `tapAny`, `homeScreen`, `recentApps`, `openLink`, and `pressButton` for

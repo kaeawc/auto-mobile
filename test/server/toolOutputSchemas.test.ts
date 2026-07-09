@@ -63,7 +63,7 @@ describe("tool output artifact metadata schema (#3480)", () => {
     },
   };
 
-  test("accepts the shared observation artifact metadata shape", () => {
+  test("accepts the shared artifact metadata shape", () => {
     expect(toolOutputArtifactMetadataSchema.parse(metadata)).toEqual(metadata);
   });
 
@@ -81,6 +81,16 @@ describe("tool output artifact metadata schema (#3480)", () => {
         payload: "ObserveDiff",
       },
     }).artifact.payload).toBe("ObserveDiff");
+  });
+
+  test("accepts non-observation artifact payload labels", () => {
+    expect(toolOutputArtifactMetadataSchema.parse({
+      artifact: {
+        ...metadata.artifact,
+        payload: "NetworkGraph",
+        tool: "getNetworkGraph",
+      },
+    }).artifact.payload).toBe("NetworkGraph");
   });
 });
 

@@ -41,7 +41,25 @@ function createTempRepo(): string {
   chmodSync(join(tempDir, "scripts/ios/xcodegen-drift-check.sh"), 0o755);
   writeFileSync(
     join(tempDir, "scripts/ios/xcodegen-generate.sh"),
-    "#!/bin/bash\necho 'repo-wide xcodegen-generate.sh should not be called' >&2\nexit 2\n"
+    `#!/bin/bash
+set -euo pipefail
+
+case "\${FAKE_REPO_WIDE_GENERATOR_BEHAVIOR:-fail}" in
+    unchanged)
+        ;;
+    modify)
+        printf 'regenerated project\\n' > ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj
+        ;;
+    fail)
+        echo 'repo-wide xcodegen-generate.sh should not be called' >&2
+        exit 2
+        ;;
+    *)
+        echo "unexpected repo-wide generator behavior: \${FAKE_REPO_WIDE_GENERATOR_BEHAVIOR}" >&2
+        exit 2
+        ;;
+esac
+`
   );
   chmodSync(join(tempDir, "scripts/ios/xcodegen-generate.sh"), 0o755);
   writeFileSync(
@@ -130,10 +148,10 @@ describe("xcodegen drift check", () => {
     expect(existsSync(driftCheckScript)).toBe(true);
   });
 
-  test("fails when xcodegen generation changes the committed CtrlProxy project", () => {
+  test("ctrl-proxy scope fails when xcodegen generation changes the committed CtrlProxy project", () => {
     const repoDir = createTempRepo();
 
-    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh"], {
+    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
       cwd: repoDir,
       encoding: "utf8",
       env: {
@@ -145,13 +163,13 @@ describe("xcodegen drift check", () => {
     });
 
     expectExitStatus(result, 1);
-    expect(result.stdout + result.stderr).toContain("CtrlProxy.xcodeproj/project.pbxproj is out of date");
+    expect(result.stdout + result.stderr).toContain("XcodeGen project files are out of date");
   });
 
-  test("fails when the regenerated CtrlProxy project is untracked after deletion", () => {
+  test("ctrl-proxy scope fails when the regenerated CtrlProxy project is untracked after deletion", () => {
     const repoDir = createTempRepo();
 
-    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh"], {
+    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
       cwd: repoDir,
       encoding: "utf8",
       env: {
@@ -164,14 +182,14 @@ describe("xcodegen drift check", () => {
     });
 
     expectExitStatus(result, 1);
-    expect(result.stdout + result.stderr).toContain("CtrlProxy.xcodeproj/project.pbxproj is out of date");
+    expect(result.stdout + result.stderr).toContain("XcodeGen project files are out of date");
     expect(result.stdout + result.stderr).toContain("?? ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj");
   });
 
-  test("passes when xcodegen generation leaves the committed CtrlProxy project unchanged", () => {
+  test("ctrl-proxy scope passes when xcodegen generation leaves the committed CtrlProxy project unchanged", () => {
     const repoDir = createTempRepo();
 
-    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh"], {
+    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
       cwd: repoDir,
       encoding: "utf8",
       env: {
@@ -182,16 +200,51 @@ describe("xcodegen drift check", () => {
     });
 
     expectExitStatus(result, 0);
-    expect(result.stdout + result.stderr).toContain("CtrlProxy.xcodeproj/project.pbxproj is in sync");
+    expect(result.stdout + result.stderr).toContain("XcodeGen project files are in sync");
+  });
+
+  test("all scope uses the repo-wide generator for wider iOS build gates", () => {
+    const repoDir = createTempRepo();
+
+    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--all"], {
+      cwd: repoDir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_REPO_ROOT: repoDir,
+        FAKE_REPO_WIDE_GENERATOR_BEHAVIOR: "modify",
+        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    expectExitStatus(result, 1);
+    expect(result.stdout + result.stderr).toContain("Run scripts/ios/xcodegen-generate.sh");
+  });
+
+  test("all scope fails when repo-wide generation fails", () => {
+    const repoDir = createTempRepo();
+
+    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--all"], {
+      cwd: repoDir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_REPO_ROOT: repoDir,
+        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    expectExitStatus(result, 2);
+    expect(result.stdout + result.stderr).toContain("repo-wide xcodegen-generate.sh should not be called");
   });
 
   test("pull request workflow gates both Xcode project jobs on the drift check", () => {
     const workflow = readFileSync(workflowPath, "utf8");
     const xcodeBuildJob = workflow.indexOf("ios-xcode-build:");
     const xctestRunnerJob = workflow.indexOf("ios-xctest-runner-simulator-tests:");
-    const xcodeBuildDriftCheck = workflow.indexOf("./scripts/ios/xcodegen-drift-check.sh", xcodeBuildJob);
+    const xcodeBuildDriftCheck = workflow.indexOf("./scripts/ios/xcodegen-drift-check.sh --all", xcodeBuildJob);
     const xcodeBuild = workflow.indexOf("./scripts/ios/xcode-build.sh", xcodeBuildJob);
-    const xctestRunnerDriftCheck = workflow.indexOf("./scripts/ios/xcodegen-drift-check.sh", xctestRunnerJob);
+    const xctestRunnerDriftCheck = workflow.indexOf("./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy", xctestRunnerJob);
     const xctestRunnerBuild = workflow.indexOf("./scripts/ios/ctrl-proxy-build-for-testing.sh", xctestRunnerJob);
 
     expect(xcodeBuildJob).toBeGreaterThan(-1);

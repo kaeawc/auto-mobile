@@ -1,10 +1,13 @@
 import type { AppearanceConfig, AppearanceConfigInput, AppearanceMode } from "../models";
-import { AppearanceConfigRepository } from "../db/appearanceConfigRepository";
+import { KeyedJsonConfigRepository } from "../db/keyedJsonConfigRepository";
 import { parseAppearanceConfig } from "../features/appearance";
 import { serverConfig } from "../utils/ServerConfig";
 import { detectHostAppearance } from "../utils/hostAppearance";
 
-const configRepository = new AppearanceConfigRepository();
+const configRepository = new KeyedJsonConfigRepository<AppearanceConfig>({
+  tableName: "appearance_configs",
+  loggerTag: "AppearanceConfigRepository",
+});
 
 function mergeConfigInput(
   defaults: AppearanceConfigInput,

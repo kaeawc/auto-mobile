@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import type { Kysely } from "kysely";
 import * as databaseModule from "../../src/db/database";
 import { KeyedJsonConfigRepository } from "../../src/db/keyedJsonConfigRepository";
@@ -8,6 +9,23 @@ import { createTestDatabase } from "./testDbHelper";
 
 describe("KeyedJsonConfigRepository", () => {
   let db: Kysely<Database>;
+  const tableCases = [
+    {
+      tableName: "appearance_configs",
+      firstConfig: { defaultMode: "dark" },
+      secondConfig: { defaultMode: "light" },
+    },
+    {
+      tableName: "device_snapshot_configs",
+      firstConfig: { includeAppData: true },
+      secondConfig: { includeAppData: false },
+    },
+    {
+      tableName: "video_recording_configs",
+      firstConfig: { qualityPreset: "high" },
+      secondConfig: { qualityPreset: "low" },
+    },
+  ] as const;
 
   beforeEach(async () => {
     db = await createTestDatabase();
@@ -16,6 +34,43 @@ describe("KeyedJsonConfigRepository", () => {
   afterEach(async () => {
     await db.destroy();
   });
+
+  for (const { tableName, firstConfig, secondConfig } of tableCases) {
+    test(`stores, updates, and clears the singleton config in ${tableName}`, async () => {
+      const repo = new KeyedJsonConfigRepository<typeof firstConfig>({
+        tableName,
+        db,
+      });
+
+      expect(await repo.getConfig()).toBeNull();
+
+      await repo.setConfig(firstConfig);
+      expect(await repo.getConfig()).toEqual(firstConfig);
+
+      await repo.setConfig(secondConfig);
+      expect(await repo.getConfig()).toEqual(secondConfig);
+
+      await repo.clearConfig();
+      expect(await repo.getConfig()).toBeNull();
+    });
+
+    test(`updates concurrent first writes with one row for the singleton key in ${tableName}`, async () => {
+      const repo = new KeyedJsonConfigRepository<typeof firstConfig>({
+        tableName,
+        db,
+      });
+
+      await expect(
+        Promise.all(
+          Array.from({ length: 10 }, (_unused, index) =>
+            repo.setConfig(index % 2 === 0 ? firstConfig : secondConfig)
+          )
+        )
+      ).resolves.toBeDefined();
+
+      expect(await db.selectFrom(tableName).selectAll().execute()).toHaveLength(1);
+    });
+  }
 
   test("stores the singleton config in the configured table only", async () => {
     const repo = new KeyedJsonConfigRepository<{ theme: string }>({
@@ -29,23 +84,6 @@ describe("KeyedJsonConfigRepository", () => {
     expect(await db.selectFrom("appearance_configs").selectAll().execute()).toHaveLength(1);
     expect(await db.selectFrom("device_snapshot_configs").selectAll().execute()).toHaveLength(0);
     expect(await db.selectFrom("video_recording_configs").selectAll().execute()).toHaveLength(0);
-  });
-
-  test("updates concurrent first writes with one row for the singleton key", async () => {
-    const repo = new KeyedJsonConfigRepository<{ enabled: boolean }>({
-      tableName: "video_recording_configs",
-      db,
-    });
-
-    await expect(
-      Promise.all(
-        Array.from({ length: 10 }, (_unused, index) =>
-          repo.setConfig({ enabled: index % 2 === 0 })
-        )
-      )
-    ).resolves.toBeDefined();
-
-    expect(await db.selectFrom("video_recording_configs").selectAll().execute()).toHaveLength(1);
   });
 
   test("defers default database resolution until the first operation", async () => {
@@ -99,5 +137,29 @@ describe("KeyedJsonConfigRepository", () => {
     } finally {
       logger.warn = originalWarn;
     }
+  });
+
+  test("uses the shared repository directly instead of per-table wrapper modules", () => {
+    const wrapperModulePaths = [
+      "../../src/db/appearanceConfigRepository.ts",
+      "../../src/db/deviceSnapshotConfigRepository.ts",
+      "../../src/db/videoRecordingConfigRepository.ts",
+    ];
+    for (const relativePath of wrapperModulePaths) {
+      expect(existsSync(new URL(relativePath, import.meta.url))).toBe(false);
+    }
+
+    const serverDir = new URL("../../src/server/", import.meta.url);
+    const serverSources = readdirSync(serverDir)
+      .filter(fileName => fileName.endsWith(".ts"))
+      .map(fileName => readFileSync(new URL(fileName, serverDir), "utf8"))
+      .join("\n");
+
+    expect(serverSources).not.toContain("../db/appearanceConfigRepository");
+    expect(serverSources).not.toContain("../db/deviceSnapshotConfigRepository");
+    expect(serverSources).not.toContain("../db/videoRecordingConfigRepository");
+    expect(serverSources).not.toContain("new AppearanceConfigRepository");
+    expect(serverSources).not.toContain("new DeviceSnapshotConfigRepository");
+    expect(serverSources).not.toContain("new VideoRecordingConfigRepository");
   });
 });

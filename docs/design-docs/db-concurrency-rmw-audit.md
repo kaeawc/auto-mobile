@@ -40,9 +40,9 @@ upsert.
 | `InstalledAppsRepository.replaceInstalledApps` | Delete-then-insert replacement is guarded by a transaction. | Existing installed apps tests. |
 | `InstalledAppsRepository.upsertInstalledApp` | Atomic upsert on `(device_id, user_id, package_name)`. | Existing installed apps tests. |
 | `DeviceSessionRepository.upsertActiveSession` | Atomic upsert on `session_uuid`. | Existing device session tests. |
-| `AppearanceConfigRepository.setConfig` | Atomic upsert on the singleton `key`. | Existing config tests. |
-| `DeviceSnapshotConfigRepository.setConfig` | Atomic upsert on the singleton `key`. | Existing config tests. |
-| `VideoRecordingConfigRepository.setConfig` | Atomic upsert on the singleton `key`. | Existing config tests. |
+| `KeyedJsonConfigRepository(appearance_configs).setConfig` | Atomic upsert on the singleton `key`. | Existing config tests. |
+| `KeyedJsonConfigRepository(device_snapshot_configs).setConfig` | Atomic upsert on the singleton `key`. | Existing config tests. |
+| `KeyedJsonConfigRepository(video_recording_configs).setConfig` | Atomic upsert on the singleton `key`. | Existing config tests. |
 | `SqliteFeatureFlagRepository.ensureFlags` | Atomic insert with `ON CONFLICT(key) DO NOTHING`, so concurrent default initialization ignores rows another caller already inserted. | `DB RMW follow-up fixes (#3415)`. |
 | `SqliteFeatureFlagRepository.upsertFlag` | Atomic upsert on `feature_flags.key`; omitted config preserves the current config on the conflict path. | `DB RMW follow-up fixes (#3415)`. |
 | `recordStorageEvent` | Caller-supplied `previousValue` stays on the zero-lookup fast path; omitted previous-value lookup plus insert runs in one transaction so same-key concurrent inserts observe a serialized prior value. | Existing storage tests and `DB RMW follow-up fixes (#3415)`. |

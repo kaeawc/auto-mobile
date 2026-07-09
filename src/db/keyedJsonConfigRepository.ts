@@ -16,7 +16,13 @@ export interface KeyedJsonConfigRepositoryOptions {
   db?: Kysely<Database>;
 }
 
-export class KeyedJsonConfigRepository<TConfig> {
+export interface ConfigRepository<TConfig> {
+  getConfig(): Promise<TConfig | null>;
+  setConfig(config: TConfig): Promise<void>;
+  clearConfig(): Promise<void>;
+}
+
+export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TConfig> {
   private readonly tableName: KeyedJsonConfigTableName;
   private readonly loggerTag: string;
   private readonly db: Kysely<Database> | null;

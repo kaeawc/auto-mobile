@@ -3,7 +3,10 @@ import type { Dirent } from "fs";
 import * as path from "path";
 import { ActionableError, BootedDevice, DeviceSnapshotConfig, DeviceSnapshotConfigInput, DeviceSnapshotManifest } from "../models";
 import { DeviceSnapshotRepository, type DeviceSnapshotRecord } from "../db/deviceSnapshotRepository";
-import { DeviceSnapshotConfigRepository } from "../db/deviceSnapshotConfigRepository";
+import {
+  KeyedJsonConfigRepository,
+  type ConfigRepository,
+} from "../db/keyedJsonConfigRepository";
 import { DeviceSnapshotStore, type SnapshotPathOptions } from "../utils/DeviceSnapshotStore";
 import { parseDeviceSnapshotConfig } from "../features/snapshot";
 import { serverConfig } from "../utils/ServerConfig";
@@ -51,7 +54,7 @@ interface SnapshotArchiveEvictionResult {
 
 interface DeviceSnapshotManagerDependencies {
   snapshotRepository: DeviceSnapshotRepository;
-  configRepository: DeviceSnapshotConfigRepository;
+  configRepository: ConfigRepository<DeviceSnapshotConfig>;
   snapshotStore: DeviceSnapshotStore;
   timer: Timer;
   now: () => Date;
@@ -83,7 +86,10 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
   if (!moduleDependencies) {
     moduleDependencies = {
       snapshotRepository: new DeviceSnapshotRepository(),
-      configRepository: new DeviceSnapshotConfigRepository(),
+      configRepository: new KeyedJsonConfigRepository<DeviceSnapshotConfig>({
+        tableName: "device_snapshot_configs",
+        loggerTag: "DeviceSnapshotConfigRepository",
+      }),
       snapshotStore: new DeviceSnapshotStore(),
       timer: defaultTimer,
       now: () => new Date(),

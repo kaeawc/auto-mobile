@@ -17,6 +17,7 @@ export {
 } from "./dbWriteBarrier";
 export {
   KeyedJsonConfigRepository,
+  type ConfigRepository,
   type KeyedJsonConfigRepositoryOptions,
   type KeyedJsonConfigTableName,
 } from "./keyedJsonConfigRepository";

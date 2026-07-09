@@ -80,6 +80,7 @@ export interface DeviceSkippedStepResult {
   trackIndex: number; // Index in device track
   tool: string;
   error: string;
+  durationMs: number;
   details?: Record<string, unknown>;
 }
 

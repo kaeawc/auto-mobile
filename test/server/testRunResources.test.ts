@@ -1,9 +1,55 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { convertToResponseEntry } from "../../src/server/testRunResources";
+import type { TestRun } from "../../src/db/testExecutionRepository";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import type { Database as DatabaseSchema, NewTestExecution, NewTestExecutionStep, NewTestExecutionScreen } from "../../src/db/types";
 import { runMigrations } from "../../src/db/migrator";
+
+describe("testRunResources", () => {
+  test("exposes step details in test run resource entries", () => {
+    const entry = convertToResponseEntry({
+      id: 1,
+      testClass: "com.example.LoginTest",
+      testMethod: "testLogin",
+      status: "passed",
+      startTime: 1000,
+      durationMs: 500,
+      deviceId: "sim-1",
+      deviceName: "iPhone",
+      platform: "ios",
+      errorMessage: null,
+      videoPath: null,
+      snapshotPath: null,
+      screensVisited: [],
+      steps: [
+        {
+          id: 10,
+          stepIndex: 0,
+          action: "tapOn",
+          target: 'text="Not Now"',
+          status: "skipped",
+          durationMs: 250,
+          screenName: null,
+          screenshotPath: null,
+          errorMessage: "element not found",
+          details: {
+            device: "device-a",
+            trackIndex: 0,
+            optional: true,
+          },
+        },
+      ],
+    } as TestRun, 1);
+
+    expect(entry.steps[0].details).toEqual({
+      device: "device-a",
+      trackIndex: 0,
+      optional: true,
+    });
+  });
+});
 
 describe("TestRunResources - Database Schema", () => {
   let db: Kysely<DatabaseSchema>;

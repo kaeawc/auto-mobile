@@ -296,6 +296,7 @@ steps:
                 trackIndex: 0,
                 tool: "tapOn",
                 error: "element not found",
+                durationMs: 250,
                 details: {
                   params: { text: "Not Now", device: "device-a" },
                   error: "element not found",
@@ -328,7 +329,7 @@ steps:
         action: "tapOn",
         target: 'text="Not Now"',
         status: "skipped",
-        durationMs: 0,
+        durationMs: 250,
         screenName: null,
         screenshotPath: null,
         errorMessage: "element not found",

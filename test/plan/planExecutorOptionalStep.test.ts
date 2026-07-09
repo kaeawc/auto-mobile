@@ -5,6 +5,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { z } from "zod";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
  * Optional (best-effort) plan steps. A step marked `optional: true` whose tool fails must NOT abort
@@ -193,6 +194,7 @@ describe("PlanExecutor — optional steps", () => {
         trackIndex: 0,
         tool: "optionalStepFail",
         error: "element not found",
+        durationMs: expect.any(Number),
         details: {
           params: { device: "device-a" },
           error: "element not found",
@@ -200,5 +202,37 @@ describe("PlanExecutor — optional steps", () => {
         },
       },
     ]);
+  });
+
+  test("records elapsed duration for skipped optional steps in multi-device results", async () => {
+    const fakeTimer = new FakeTimer();
+    const timedExecutor = new DefaultPlanExecutor(fakeTimer);
+    ToolRegistry.register(
+      "optionalStepTimedFail",
+      "fails after time passes",
+      z.object({
+        platform: z.string().optional(),
+        device: z.string().optional(),
+        sessionUuid: z.string().optional(),
+      }),
+      mock(async () => {
+        fakeTimer.advanceTime(250);
+        return createStructuredToolResponse({ success: false, error: "timed out" });
+      })
+    );
+    (ToolRegistry.getTool("optionalStepTimedFail") as { requiresDevice: boolean }).requiresDevice = true;
+
+    const plan: Plan = {
+      name: "parallel-optional-timed-fail",
+      devices: ["device-a"],
+      steps: [
+        { tool: "optionalStepTimedFail", params: { device: "device-a" }, optional: true },
+      ],
+    };
+
+    const result = await timedExecutor.executePlan(plan, 0, "ios", "sim-1", "session-1");
+
+    expect(result.success).toBe(true);
+    expect(result.perDeviceResults?.get("device-a")?.skippedSteps?.[0].durationMs).toBe(250);
   });
 });

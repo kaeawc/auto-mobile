@@ -965,6 +965,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           `[PARALLEL_EXEC][${device}] Step ${trackIndex + 1}/${track.length} (plan step ${planIndex}): ${step.tool}, Label: ${stepLabel}`
         );
 
+        const stepStartTime = this.timer.now();
         const stepResult = await this.executeStep(step, {
           platform,
           deviceId,
@@ -983,6 +984,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             trackIndex,
             tool: step.tool,
             error: stepResult.error ?? "Unknown error",
+            durationMs: this.timer.now() - stepStartTime,
             details: stepResult.details,
           });
           continue;

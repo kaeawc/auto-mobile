@@ -176,7 +176,7 @@ export function convertPerDeviceSkippedStepsToRecords(
         action: skippedStep.tool,
         target: buildStepRecordTarget(details?.params),
         status: "skipped",
-        durationMs: 0,
+        durationMs: skippedStep.durationMs,
         screenName: null,
         screenshotPath: null,
         errorMessage: skippedStep.error,

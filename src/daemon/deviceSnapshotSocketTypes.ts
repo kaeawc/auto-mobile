@@ -1,23 +1,19 @@
 import type { DeviceSnapshotConfig, DeviceSnapshotConfigInput } from "../models";
+import type {
+  ConfigSocketMethod,
+  ConfigSocketRequest,
+  ConfigSocketResponse,
+} from "./socketServer/index";
 
-export type DeviceSnapshotSocketMethod = "config/get" | "config/set";
+export type DeviceSnapshotSocketMethod = ConfigSocketMethod;
 
-export interface DeviceSnapshotSocketRequest {
-  id: string;
-  type: "device_snapshot_request";
-  method: DeviceSnapshotSocketMethod;
-  params?: {
-    config?: DeviceSnapshotConfigInput | null;
-  };
-}
+export type DeviceSnapshotSocketRequest = ConfigSocketRequest<
+  "device_snapshot_request",
+  DeviceSnapshotConfigInput
+>;
 
-export interface DeviceSnapshotSocketResponse {
-  id: string;
-  type: "device_snapshot_response";
-  success: boolean;
-  result?: {
-    config: DeviceSnapshotConfig;
-    evictedSnapshotNames?: string[];
-  };
-  error?: string;
-}
+export type DeviceSnapshotSocketResponse = ConfigSocketResponse<
+  "device_snapshot_response",
+  DeviceSnapshotConfig,
+  "evictedSnapshotNames"
+>;

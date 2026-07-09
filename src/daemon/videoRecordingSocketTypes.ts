@@ -1,23 +1,19 @@
 import type { VideoRecordingConfig, VideoRecordingConfigInput } from "../models";
+import type {
+  ConfigSocketMethod,
+  ConfigSocketRequest,
+  ConfigSocketResponse,
+} from "./socketServer/index";
 
-export type VideoRecordingSocketMethod = "config/get" | "config/set";
+export type VideoRecordingSocketMethod = ConfigSocketMethod;
 
-export interface VideoRecordingSocketRequest {
-  id: string;
-  type: "video_recording_request";
-  method: VideoRecordingSocketMethod;
-  params?: {
-    config?: VideoRecordingConfigInput | null;
-  };
-}
+export type VideoRecordingSocketRequest = ConfigSocketRequest<
+  "video_recording_request",
+  VideoRecordingConfigInput
+>;
 
-export interface VideoRecordingSocketResponse {
-  id: string;
-  type: "video_recording_response";
-  success: boolean;
-  result?: {
-    config: VideoRecordingConfig;
-    evictedRecordingIds?: string[];
-  };
-  error?: string;
-}
+export type VideoRecordingSocketResponse = ConfigSocketResponse<
+  "video_recording_response",
+  VideoRecordingConfig,
+  "evictedRecordingIds"
+>;

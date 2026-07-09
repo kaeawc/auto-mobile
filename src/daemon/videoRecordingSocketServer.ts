@@ -1,65 +1,51 @@
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
-import {
-  VideoRecordingSocketRequest,
-  VideoRecordingSocketResponse,
-} from "./videoRecordingSocketTypes";
+import { ConfigSocketServer, getSocketPath } from "./socketServer/index";
 import { getVideoRecordingConfig, updateVideoRecordingConfig } from "../server/videoRecordingManager";
 import { VIDEO_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
+import type { VideoRecordingConfig, VideoRecordingConfigInput } from "../models";
+
+interface VideoRecordingSocketServerDependencies {
+  getConfig: () => Promise<VideoRecordingConfig>;
+  updateConfig: (update: VideoRecordingConfigInput | null) => Promise<{
+    config: VideoRecordingConfig;
+    evictedRecordingIds: string[];
+  }>;
+}
+
+const defaultDependencies: VideoRecordingSocketServerDependencies = {
+  getConfig: getVideoRecordingConfig,
+  updateConfig: updateVideoRecordingConfig,
+};
 
 /**
  * Socket server for video recording configuration.
  * Handles config/get and config/set requests.
  */
-export class VideoRecordingSocketServer extends RequestResponseSocketServer<
-  VideoRecordingSocketRequest,
-  VideoRecordingSocketResponse
+export class VideoRecordingSocketServer extends ConfigSocketServer<
+  VideoRecordingConfig,
+  VideoRecordingConfigInput,
+  "video_recording_request",
+  "video_recording_response",
+  "evictedRecordingIds"
 > {
-  constructor(socketPath: string = getSocketPath(VIDEO_RECORDING_SOCKET_CONFIG), timer: Timer = defaultTimer) {
-    super(socketPath, timer, "VideoRecording");
-  }
-
-  protected async handleRequest(
-    request: VideoRecordingSocketRequest
-  ): Promise<VideoRecordingSocketResponse> {
-    switch (request.method) {
-      case "config/get": {
-        const config = await getVideoRecordingConfig();
-        return {
-          id: request.id,
-          type: "video_recording_response",
-          success: true,
-          result: { config },
-        };
-      }
-      case "config/set": {
-        if (!request.params || !("config" in request.params)) {
-          throw new Error("config/set requires params.config");
-        }
-        const update = request.params.config ?? null;
-        const { config, evictedRecordingIds } = await updateVideoRecordingConfig(update);
-        return {
-          id: request.id,
-          type: "video_recording_response",
-          success: true,
-          result: {
-            config,
-            evictedRecordingIds: evictedRecordingIds.length > 0 ? evictedRecordingIds : undefined,
-          },
-        };
-      }
-      default:
-        throw new Error(`Unsupported video recording method: ${request.method}`);
-    }
-  }
-
-  protected createErrorResponse(id: string | undefined, error: string): VideoRecordingSocketResponse {
-    return {
-      id: id ?? "unknown",
-      type: "video_recording_response",
-      success: false,
-      error,
-    };
+  constructor(
+    socketPath: string = getSocketPath(VIDEO_RECORDING_SOCKET_CONFIG),
+    timer: Timer = defaultTimer,
+    dependencies: VideoRecordingSocketServerDependencies = defaultDependencies
+  ) {
+    super({
+      socketPath,
+      timer,
+      serverName: "VideoRecording",
+      responseType: "video_recording_response",
+      evictedKey: "evictedRecordingIds",
+      methodLabel: "video recording",
+      getConfig: dependencies.getConfig,
+      updateConfig: async update => {
+        const { config, evictedRecordingIds } = await dependencies.updateConfig(update);
+        return { config, evictedItems: evictedRecordingIds };
+      },
+    });
   }
 }
 

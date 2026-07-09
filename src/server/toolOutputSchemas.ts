@@ -63,6 +63,9 @@ export const elementSchema = z.object({
   "text": z.string().optional(),
   "resource-id": z.string().optional(),
   "content-desc": z.string().optional(),
+  "occlusionState": z.string().optional(),
+  "occludedBy": z.string().optional(),
+  "occludedByViewId": z.string().optional(),
   "class": z.string().optional(),
   "package": z.string().optional(),
   "checkable": booleanOrString,
@@ -271,6 +274,9 @@ export const accessibilityFocusResultSchema = z.object({
 export const viewHierarchyNodeSchema: z.ZodType = z.lazy(() =>
   z.object({
     bounds: elementBoundsSchema.optional(),
+    occlusionState: z.string().optional(),
+    occludedBy: z.string().optional(),
+    occludedByViewId: z.string().optional(),
     node: z.union([viewHierarchyNodeSchema, z.array(viewHierarchyNodeSchema)]).optional()
   }).passthrough()
 );

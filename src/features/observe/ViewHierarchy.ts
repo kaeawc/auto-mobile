@@ -662,6 +662,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       "extras",
       "occlusionState",
       "occludedBy",
+      "occludedByViewId",
       "recomposition",
       "recompositionMetrics"
     ];

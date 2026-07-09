@@ -38,6 +38,36 @@ describe("ViewHierarchy filtering", () => {
     });
   });
 
+  test("preserves occlusion metadata when filtering retained nodes", () => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const result = viewHierarchy.filterViewHierarchy({
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+          node: [
+            {
+              "resource-id": "com.example:id/title",
+              "view-id": "com.example:id/title",
+              "bounds": { left: 0, top: 100, right: 800, bottom: 180 },
+              "occlusionState": "partial",
+              "occludedBy": "unlabeled view",
+              "occludedByViewId": "stable-occluder",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.hierarchy.node).toEqual({
+      "resource-id": "com.example:id/title",
+      "view-id": "com.example:id/title",
+      "bounds": { left: 0, top: 100, right: 800, bottom: 180 },
+      "occlusionState": "partial",
+      "occludedBy": "unlabeled view",
+      "occludedByViewId": "stable-occluder",
+    });
+  });
+
   test("filters a cloned hierarchy without mutating the source", () => {
     const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
     const source = {

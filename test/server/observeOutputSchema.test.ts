@@ -151,6 +151,19 @@ describe("viewHierarchyNodeSchema: polymorphic node + bounds union (#3025)", () 
     expect(parsed.occludedBy).toBe("unlabeled view");
     expect(parsed.occludedByViewId).toBe("id/occluder");
   });
+
+  test("advertises occlusion metadata as typed node properties", () => {
+    const schemaJson = JSON.stringify(toJSONSchema(viewHierarchyNodeSchema));
+    expect(schemaJson).toContain("\"occlusionState\"");
+    expect(schemaJson).toContain("\"occludedBy\"");
+    expect(schemaJson).toContain("\"occludedByViewId\"");
+    expect(() =>
+      viewHierarchyNodeSchema.parse({
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        occludedByViewId: 123,
+      })
+    ).toThrow();
+  });
 });
 
 describe("observeResultSchema: every bounds site is the advertised union (#3025)", () => {

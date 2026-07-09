@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Kysely } from "kysely";
+import * as databaseModule from "../../src/db/database";
 import { KeyedJsonConfigRepository } from "../../src/db/keyedJsonConfigRepository";
 import type { Database } from "../../src/db/types";
 import { logger } from "../../src/utils/logger";
@@ -45,6 +46,29 @@ describe("KeyedJsonConfigRepository", () => {
     ).resolves.toBeDefined();
 
     expect(await db.selectFrom("video_recording_configs").selectAll().execute()).toHaveLength(1);
+  });
+
+  test("defers default database resolution until the first operation", async () => {
+    const ensureMigrationsSpy = spyOn(databaseModule, "ensureMigrations").mockResolvedValue();
+    const getDatabaseSpy = spyOn(databaseModule, "getDatabase").mockReturnValue(db);
+
+    try {
+      const repo = new KeyedJsonConfigRepository<{ theme: string }>({
+        tableName: "appearance_configs",
+      });
+
+      expect(ensureMigrationsSpy).toHaveBeenCalledTimes(0);
+      expect(getDatabaseSpy).toHaveBeenCalledTimes(0);
+
+      await repo.setConfig({ theme: "dark" });
+
+      expect(ensureMigrationsSpy).toHaveBeenCalledTimes(1);
+      expect(getDatabaseSpy).toHaveBeenCalledTimes(1);
+      expect(await db.selectFrom("appearance_configs").selectAll().execute()).toHaveLength(1);
+    } finally {
+      ensureMigrationsSpy.mockRestore();
+      getDatabaseSpy.mockRestore();
+    }
   });
 
   test("returns null and logs a warning for malformed config JSON", async () => {

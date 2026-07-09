@@ -39,6 +39,7 @@ interface TestRunResponseStep {
   durationMs: number;
   status: "completed" | "failed" | "skipped";
   errorMessage: string | null;
+  details?: unknown;
 }
 
 interface TestRunResponseEntry {
@@ -189,7 +190,7 @@ function buildTestRunUri(options: TestRunQueryArgs): string {
   return queryString ? `${TEST_RUN_RESOURCE_URIS.BASE}?${queryString}` : TEST_RUN_RESOURCE_URIS.BASE;
 }
 
-function convertToResponseEntry(run: TestRun, sampleSize: number): TestRunResponseEntry {
+export function convertToResponseEntry(run: TestRun, sampleSize: number): TestRunResponseEntry {
   // Derive test name from class + method
   const classSimpleName = run.testClass.split(".").pop() || run.testClass;
   const testName = `${classSimpleName}.${run.testMethod}`;
@@ -218,6 +219,7 @@ function convertToResponseEntry(run: TestRun, sampleSize: number): TestRunRespon
       durationMs: step.durationMs,
       status: step.status,
       errorMessage: step.errorMessage,
+      ...(step.details !== undefined ? { details: step.details } : {}),
     })),
     screensVisited: run.screensVisited,
     sampleSize,

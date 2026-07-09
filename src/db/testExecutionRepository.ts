@@ -96,6 +96,7 @@ interface TestRunStep {
   screenName: string | null;
   screenshotPath: string | null;
   errorMessage: string | null;
+  details: unknown;
 }
 
 export interface TestRun {
@@ -121,6 +122,18 @@ export interface TestRunQueryOptions {
   lookbackDays?: number;
   limit?: number;
   orderDirection?: "asc" | "desc";
+}
+
+function parseStepDetailsJson(detailsJson: string | null, stepId: number): unknown {
+  if (!detailsJson) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(detailsJson) as unknown;
+  } catch (error) {
+    logger.warn(`[TestExecutionRepository] Failed to parse details_json for step ${stepId}: ${error}`);
+    return undefined;
+  }
 }
 
 export class TestExecutionRepository {
@@ -267,6 +280,7 @@ export class TestExecutionRepository {
       screenName: string | null;
       screenshotPath: string | null;
       errorMessage: string | null;
+      details: unknown;
     }>>();
     const screensByExecutionId = new Map<number, string[]>();
 
@@ -284,6 +298,7 @@ export class TestExecutionRepository {
           "screen_name as screenName",
           "screenshot_path as screenshotPath",
           "error_message as errorMessage",
+          "details_json as detailsJson",
         ])
         .where("execution_id", "in", chunk)
         .orderBy("execution_id", "asc")
@@ -309,6 +324,7 @@ export class TestExecutionRepository {
           screenName: step.screenName,
           screenshotPath: step.screenshotPath,
           errorMessage: step.errorMessage,
+          details: parseStepDetailsJson(step.detailsJson, step.id),
         });
       }
 

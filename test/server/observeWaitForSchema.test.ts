@@ -469,6 +469,59 @@ describe("findWaitForElement rich predicates", () => {
     expect(element?.class).toBe("android.widget.BottomNavigationView");
   });
 
+  test("ignores camelCase className attributes on parsed elements", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          className: "android.widget.BottomNavigationView",
+          bounds: bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        className: "android.widget.BottomNavigationView",
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
+  });
+
+  test.each([
+    {
+      label: "contentDescription",
+      attributes: { contentDescription: "Home tab" },
+    },
+    {
+      label: "accessibilityLabel",
+      attributes: { accessibilityLabel: "Home tab" },
+    },
+  ])("ignores camelCase $label attributes on parsed elements", ({ attributes }) => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          ...attributes,
+          bounds: bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        contentDescription: "Home tab",
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
+  });
+
   test("requires elementId and text to match the same node", () => {
     const finder = new DefaultElementFinder();
     const hierarchy = makeHierarchy([
@@ -697,6 +750,30 @@ describe("findWaitForElement rich predicates", () => {
     );
 
     expect(element?.text).toBe("Home");
+  });
+
+  test("matches canonical iOS accessibility labels for contentDescription", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "ios-accessibility-label": "Home",
+          "class": "XCUIElementTypeButton",
+          "bounds": bounds(10, 10, 180, 60),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        contentDescription: "Home",
+      } as any,
+      hierarchy,
+      "ios"
+    );
+
+    expect(element?.["ios-accessibility-label"]).toBe("Home");
   });
 
   test("does not match Android text-only nodes for contentDescription", () => {

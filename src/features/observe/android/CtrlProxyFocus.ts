@@ -350,7 +350,7 @@ export class CtrlProxyFocus {
       converted["view-id"] = node["view-id"];
     }
     if (node.className) {
-      converted.className = node.className;
+      converted.class = node.className;
     }
     if (node.packageName) {
       converted.packageName = node.packageName;

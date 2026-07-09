@@ -4,6 +4,22 @@ import {
 } from "../../../src/features/navigation/NavigationScreenshotManager";
 import { FileSystem } from "../../../src/utils/filesystem/DefaultFileSystem";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger, type Logger } from "../../../src/utils/logger";
+
+function captureDebugLogs(): { messages: string[]; restore(): void } {
+  const messages: string[] = [];
+  const originalDebug = logger.debug;
+  logger.debug = ((message: string) => {
+    messages.push(message);
+  }) as Logger["debug"];
+
+  return {
+    messages,
+    restore: () => {
+      logger.debug = originalDebug;
+    },
+  };
+}
 
 /**
  * Normalize a path to use forward slashes for consistent comparison.
@@ -19,6 +35,8 @@ function normalizePath(p: string): string {
 class FakeFileSystem implements FileSystem {
   private files: Map<string, { data: Buffer; mtimeMs: number }> = new Map();
   private directories: Set<string> = new Set();
+  private readdirError: Error | null = null;
+  private readFileBufferError: Error | null = null;
 
   private normalize(p: string): string {
     return normalizePath(p);
@@ -34,6 +52,10 @@ class FakeFileSystem implements FileSystem {
   }
 
   async readdir(dir: string): Promise<string[]> {
+    if (this.readdirError) {
+      throw this.readdirError;
+    }
+
     const normalizedDir = this.normalize(dir);
     const result: string[] = [];
     for (const filePath of this.files.keys()) {
@@ -66,6 +88,10 @@ class FakeFileSystem implements FileSystem {
   }
 
   async readFileBuffer(p: string): Promise<Buffer> {
+    if (this.readFileBufferError) {
+      throw this.readFileBufferError;
+    }
+
     const normalized = this.normalize(p);
     const file = this.files.get(normalized);
     if (!file) {
@@ -131,6 +157,14 @@ class FakeFileSystem implements FileSystem {
     if (file) {
       file.mtimeMs = mtimeMs;
     }
+  }
+
+  failReaddir(error: Error): void {
+    this.readdirError = error;
+  }
+
+  failReadFileBuffer(error: Error): void {
+    this.readFileBufferError = error;
   }
 }
 
@@ -237,6 +271,20 @@ describe("NavigationScreenshotManager", () => {
       // Compare normalized paths for cross-platform compatibility
       expect(normalizePath(result!)).toBe(normalizePath(newFile));
     });
+
+    test("logs directory read failures before returning null", async () => {
+      const debugLogs = captureDebugLogs();
+      fakeFs.failReaddir(new Error("directory unavailable"));
+      try {
+        const result = await manager.findExistingScreenshot("com.test.app", "HomeScreen");
+
+        expect(result).toBeNull();
+        expect(debugLogs.messages).toHaveLength(1);
+        expect(debugLogs.messages[0]).toContain("[NAV_SCREENSHOT] Failed to find existing screenshot");
+      } finally {
+        debugLogs.restore();
+      }
+    });
   });
 
   describe("readScreenshot", () => {
@@ -252,6 +300,22 @@ describe("NavigationScreenshotManager", () => {
 
       const result = await manager.readScreenshot(path);
       expect(result).toEqual(data);
+    });
+
+    test("logs read failures before returning null", async () => {
+      const debugLogs = captureDebugLogs();
+      const path = `${screenshotDir}/test.webp`;
+      fakeFs.setFile(path, Buffer.from("test image data"));
+      fakeFs.failReadFileBuffer(new Error("read failed"));
+      try {
+        const result = await manager.readScreenshot(path);
+
+        expect(result).toBeNull();
+        expect(debugLogs.messages).toHaveLength(1);
+        expect(debugLogs.messages[0]).toContain("[NAV_SCREENSHOT] Failed to read screenshot");
+      } finally {
+        debugLogs.restore();
+      }
     });
   });
 

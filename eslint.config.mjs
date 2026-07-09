@@ -103,6 +103,7 @@ export const baseRules = {
 		2,
 		{allowShortCircuit: true, allowTernary: true, allowTaggedTemplates: true},
 	],
+	"no-empty": [2, {allowEmptyCatch: false}],
 	"no-proto": 2,
 
 	// es2015 features
@@ -213,6 +214,77 @@ export default [
 		plugins,
 		languageOptions,
 		rules: baseRules,
+	},
+	{
+		files: ["src/**/*.ts"],
+		ignores: [
+			"src/daemon/daemonFiles.ts",
+			"src/daemon/manager.ts",
+			"src/daemon/socketServer.ts",
+			"src/daemon/socketServer/BaseSocketServer.ts",
+			"src/features/action/TapAnyElement.ts",
+			"src/features/observe/android/AndroidSdkEventIngestor.ts",
+			"src/features/preferences/AppPreferences.ts",
+			"src/features/utility/system-configuration/IosLockdownLocaleClient.ts",
+			"src/features/utility/system-configuration/IosSystemConfigurationAdapter.ts",
+			"src/features/video/FfmpegVideoProcessingBackend.ts",
+			"src/server/appFileService.ts",
+			"src/server/systemTrayHelpers.ts",
+			"src/utils/ChildProcessTracker.ts",
+			"src/utils/IOSCtrlProxyBuilder.ts",
+			"src/utils/IOSCtrlProxyManager.ts",
+			"src/utils/android-cmdline-tools/detection.ts",
+			"src/utils/android-cmdline-tools/readAndroidDeviceApiLevel.ts",
+			"src/utils/fileLock.ts",
+			"src/utils/hostAppearance.ts",
+			"src/utils/ios/IOSCtrlProxyHealthClient.ts",
+			"src/utils/logPruner.ts",
+			"src/utils/mcpVersion.ts",
+			"src/utils/plan/PlanExecutor.ts",
+		],
+		plugins,
+		languageOptions,
+		rules: {
+			"no-restricted-syntax": [
+				2,
+				{
+					selector: "ImportDeclaration[source.value=/^\\..*\\.js$/]",
+					message: "Do not use .js extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.js'). This causes MODULE_NOT_FOUND errors in tests.",
+				},
+				{
+					selector: "ImportDeclaration[source.value=/^\\..*\\.ts$/]",
+					message: "Do not use .ts extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.ts').",
+				},
+				{
+					selector: "CallExpression[callee.name='setTimeout']",
+					message: "Use Timer.setTimeout() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
+				},
+				{
+					selector: "CallExpression[callee.name='setInterval']",
+					message: "Use Timer.setInterval() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
+				},
+				{
+					selector: "CatchClause > BlockStatement[body.length=1] > ReturnStatement[argument=null]",
+					message: "Catch blocks that return a fallback must log the caught error before returning.",
+				},
+				{
+					selector: "CatchClause > BlockStatement[body.length=1] > ReturnStatement > Literal[value=null]",
+					message: "Catch blocks that return a fallback must log the caught error before returning.",
+				},
+				{
+					selector: "CatchClause > BlockStatement[body.length=1] > ReturnStatement > Identifier[name='undefined']",
+					message: "Catch blocks that return a fallback must log the caught error before returning.",
+				},
+				{
+					selector: "CatchClause > BlockStatement:has(CallExpression[callee.object.name='logger'][callee.property.name='debug']):has(ReturnStatement > ObjectExpression > Property[key.name='status'])",
+					message: "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+				},
+				{
+					selector: "MemberExpression[object.property.name='structuredContent']",
+					message: "Do not read a field off `structuredContent` directly. Use getStructuredField(response, key) for one field or getStructuredPayload(response) for the whole payload. Import from 'utils/toolUtils' (issue #2907).",
+				},
+			],
+		},
 	},
 	{
 		// Navigation hierarchy logic is correctness-sensitive: screen

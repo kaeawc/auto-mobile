@@ -290,7 +290,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       await AndroidCtrlProxyManager.prefetchPromise;
       return AndroidCtrlProxyManager.prefetchedApkPath;
-    } catch {
+    } catch (error) {
+      // APK prefetch is an optimization; callers can proceed without a prefetched APK.
+      logger.debug(`[CTRL_PROXY] Prefetched APK unavailable: ${error instanceof Error ? error.message : String(error)}`, error);
       return null;
     }
   }
@@ -901,7 +903,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Clean up failed download
       try {
         await this.cleanupApk(apkPath);
-      } catch {
+      } catch (cleanupError) {
+        // Failed-download cleanup is best-effort; the original download error still surfaces below.
+        logger.debug(`[CTRL_PROXY] Failed to clean up incomplete APK download: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`, cleanupError);
       }
 
       throw new Error(`Failed to download APK: ${error instanceof Error ? error.message : String(error)}`);
@@ -1494,7 +1498,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     } finally {
       try {
         await fs.rm(tempDir, { recursive: true, force: true });
-      } catch {
+      } catch (cleanupError) {
+        // Temp-dir cleanup is best-effort; checksum fallback already completed or returned.
+        logger.debug(`[CTRL_PROXY] Failed to remove temporary APK hash directory: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`, cleanupError);
       }
     }
   }

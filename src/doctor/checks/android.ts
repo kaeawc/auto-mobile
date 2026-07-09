@@ -300,7 +300,7 @@ async function checkAvailableAvds(): Promise<CheckResult> {
       value: avds.length,
     };
   } catch (error) {
-    logger.debug(`Failed to list AVDs: ${error}`);
+    logger.warn(`Failed to list AVDs: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "Available AVDs",
       status: "skip",

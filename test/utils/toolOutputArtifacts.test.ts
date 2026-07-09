@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { ActionableError } from "../../src/models";
+import { serverConfig } from "../../src/utils/ServerConfig";
 import {
+  getValidatedToolOutputsDirForWrite,
   parseToolOutputsDirConfig,
   validateToolOutputsDirForWrite,
   type ToolOutputsDirFileSystem,
@@ -96,6 +100,17 @@ describe("validateToolOutputsDirForWrite", () => {
     expect(fs.accessCalls).toEqual(["/artifacts"]);
   });
 
+  test("creates missing directories with the default filesystem adapter", async () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), "tool-output-artifacts-"));
+    const artifactsDir = path.join(tempDir, "missing", "outputs");
+    try {
+      await expect(validateToolOutputsDirForWrite(artifactsDir)).resolves.toBe(artifactsDir);
+      expect(existsSync(artifactsDir)).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("throws an actionable error when the path is not a directory", async () => {
     const fs = new FakeToolOutputsDirFileSystem();
     fs.isDirectory = false;
@@ -135,5 +150,31 @@ describe("validateToolOutputsDirForWrite", () => {
     expect(fs.ensureDirCalls).toEqual(["/artifacts", "/artifacts"]);
     expect(fs.statCalls).toEqual(["/artifacts", "/artifacts"]);
     expect(fs.accessCalls).toEqual(["/artifacts", "/artifacts"]);
+  });
+
+  test("validates the configured directory on every write attempt", async () => {
+    const fs = new FakeToolOutputsDirFileSystem();
+    serverConfig.setToolOutputsDir("/configured-artifacts");
+    try {
+      await expect(getValidatedToolOutputsDirForWrite(fs)).resolves.toBe("/configured-artifacts");
+      await expect(getValidatedToolOutputsDirForWrite(fs)).resolves.toBe("/configured-artifacts");
+    } finally {
+      serverConfig.setToolOutputsDir(undefined);
+    }
+
+    expect(fs.ensureDirCalls).toEqual(["/configured-artifacts", "/configured-artifacts"]);
+    expect(fs.statCalls).toEqual(["/configured-artifacts", "/configured-artifacts"]);
+    expect(fs.accessCalls).toEqual(["/configured-artifacts", "/configured-artifacts"]);
+  });
+
+  test("returns undefined without validation when artifact mode is disabled", async () => {
+    const fs = new FakeToolOutputsDirFileSystem();
+    serverConfig.setToolOutputsDir(undefined);
+
+    await expect(getValidatedToolOutputsDirForWrite(fs)).resolves.toBeUndefined();
+
+    expect(fs.ensureDirCalls).toEqual([]);
+    expect(fs.statCalls).toEqual([]);
+    expect(fs.accessCalls).toEqual([]);
   });
 });

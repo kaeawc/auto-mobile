@@ -1,6 +1,7 @@
 import { promises as fsPromises, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { ActionableError } from "../models";
+import { serverConfig } from "./ServerConfig";
 
 export const TOOL_OUTPUTS_DIR_FLAG = "--tool-outputs-dir";
 export const TOOL_OUTPUT_DIR_FLAG_ALIAS = "--tool-output-dir";
@@ -95,4 +96,15 @@ export async function validateToolOutputsDirForWrite(
   }
 
   return dirPath;
+}
+
+export async function getValidatedToolOutputsDirForWrite(
+  fileSystem: ToolOutputsDirFileSystem = nodeToolOutputsDirFileSystem
+): Promise<string | undefined> {
+  const configuredDir = serverConfig.getToolOutputsDir();
+  if (!configuredDir) {
+    return undefined;
+  }
+
+  return await validateToolOutputsDirForWrite(configuredDir, fileSystem);
 }

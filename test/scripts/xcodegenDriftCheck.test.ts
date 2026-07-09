@@ -119,13 +119,14 @@ describe("xcodegen drift check", () => {
     const xcodeBuildJob = workflow.indexOf("ios-xcode-build:");
     const xctestRunnerJob = workflow.indexOf("ios-xctest-runner-simulator-tests:");
     const xcodeBuildDriftCheck = workflow.indexOf("./scripts/ios/xcodegen-drift-check.sh", xcodeBuildJob);
+    const xcodeBuild = workflow.indexOf("./scripts/ios/xcode-build.sh", xcodeBuildJob);
     const xctestRunnerDriftCheck = workflow.indexOf("./scripts/ios/xcodegen-drift-check.sh", xctestRunnerJob);
     const xctestRunnerBuild = workflow.indexOf("./scripts/ios/ctrl-proxy-build-for-testing.sh", xctestRunnerJob);
 
     expect(xcodeBuildJob).toBeGreaterThan(-1);
     expect(xctestRunnerJob).toBeGreaterThan(-1);
     expect(xcodeBuildDriftCheck).toBeGreaterThan(xcodeBuildJob);
-    expect(xcodeBuildDriftCheck).toBeLessThan(xctestRunnerJob);
+    expect(xcodeBuildDriftCheck).toBeLessThan(xcodeBuild);
     expect(xctestRunnerDriftCheck).toBeGreaterThan(xctestRunnerJob);
     expect(xctestRunnerDriftCheck).toBeLessThan(xctestRunnerBuild);
   });

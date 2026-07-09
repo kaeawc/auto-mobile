@@ -131,7 +131,7 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
     try {
       // Create ADB client for this device
       const adb = this.adbFactory.create(device);
-      const result = await adb.executeCommand(`shell pidof ${packageName}`);
+      const result = await adb.executeCommand(`shell pidof ${packageName} || true`);
 
       // pidof returns empty stdout if package is not running
       return result.stdout.trim().length > 0;

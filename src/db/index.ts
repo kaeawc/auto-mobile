@@ -17,6 +17,10 @@ export {
 } from "./dbWriteBarrier";
 export {
   KeyedJsonConfigRepository,
+  createAppearanceConfigRepository,
+  createDeviceSnapshotConfigRepository,
+  createVideoRecordingConfigRepository,
+  type ConfigRepository,
   type KeyedJsonConfigRepositoryOptions,
   type KeyedJsonConfigTableName,
 } from "./keyedJsonConfigRepository";

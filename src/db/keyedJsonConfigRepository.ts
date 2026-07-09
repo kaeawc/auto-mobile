@@ -1,4 +1,9 @@
 import type { Kysely } from "kysely";
+import type {
+  AppearanceConfig,
+  DeviceSnapshotConfig,
+  VideoRecordingConfig,
+} from "../models";
 import { logger } from "../utils/logger";
 import { ensureMigrations, getDatabase } from "./database";
 import type { Database } from "./types";
@@ -16,7 +21,31 @@ export interface KeyedJsonConfigRepositoryOptions {
   db?: Kysely<Database>;
 }
 
-export class KeyedJsonConfigRepository<TConfig> {
+const KEYED_JSON_CONFIG_TABLES = {
+  appearance: {
+    tableName: "appearance_configs",
+    loggerTag: "AppearanceConfigRepository",
+  },
+  deviceSnapshot: {
+    tableName: "device_snapshot_configs",
+    loggerTag: "DeviceSnapshotConfigRepository",
+  },
+  videoRecording: {
+    tableName: "video_recording_configs",
+    loggerTag: "VideoRecordingConfigRepository",
+  },
+} as const satisfies Record<string, {
+  tableName: KeyedJsonConfigTableName;
+  loggerTag: string;
+}>;
+
+export interface ConfigRepository<TConfig> {
+  getConfig(): Promise<TConfig | null>;
+  setConfig(config: TConfig): Promise<void>;
+  clearConfig(): Promise<void>;
+}
+
+export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TConfig> {
   private readonly tableName: KeyedJsonConfigTableName;
   private readonly loggerTag: string;
   private readonly db: Kysely<Database> | null;
@@ -86,4 +115,32 @@ export class KeyedJsonConfigRepository<TConfig> {
       .where("key", "=", CONFIG_KEY)
       .execute();
   }
+}
+
+function createConfigRepository<TConfig>(
+  key: keyof typeof KEYED_JSON_CONFIG_TABLES,
+  db?: Kysely<Database>
+): ConfigRepository<TConfig> {
+  return new KeyedJsonConfigRepository<TConfig>({
+    ...KEYED_JSON_CONFIG_TABLES[key],
+    db,
+  });
+}
+
+export function createAppearanceConfigRepository(
+  db?: Kysely<Database>
+): ConfigRepository<AppearanceConfig> {
+  return createConfigRepository<AppearanceConfig>("appearance", db);
+}
+
+export function createDeviceSnapshotConfigRepository(
+  db?: Kysely<Database>
+): ConfigRepository<DeviceSnapshotConfig> {
+  return createConfigRepository<DeviceSnapshotConfig>("deviceSnapshot", db);
+}
+
+export function createVideoRecordingConfigRepository(
+  db?: Kysely<Database>
+): ConfigRepository<VideoRecordingConfig> {
+  return createConfigRepository<VideoRecordingConfig>("videoRecording", db);
 }

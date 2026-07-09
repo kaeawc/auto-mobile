@@ -3113,157 +3113,102 @@
         },
         "waitFor": {
           "description": "Wait for element to appear before returning observation",
-          "anyOf": [
-            {
+          "type": "object",
+          "properties": {
+            "elementId": {
+              "description": "Element resource ID / accessibility identifier",
+              "type": "string"
+            },
+            "text": {
+              "description": "Element text",
+              "type": "string"
+            },
+            "textAny": {
+              "description": "Ordered text variants; first visible match wins",
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "className": {
+              "description": "Element class name",
+              "type": "string"
+            },
+            "contentDescription": {
+              "description": "Element content description / accessibility label",
+              "type": "string"
+            },
+            "activeWindow": {
+              "description": "Foreground app/window predicates",
               "type": "object",
               "properties": {
-                "elementId": {
-                  "type": "string",
-                  "description": "Element resource ID / accessibility identifier"
+                "appId": {
+                  "description": "Foreground app bundle ID / package name",
+                  "type": "string"
                 },
-                "timeout": {
-                  "description": "Wait timeout ms (default: 5000)",
-                  "type": "number"
-                },
-                "container": {
-                  "description": "Scope match to a container",
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "elementId": {
-                          "type": "string",
-                          "description": "Container resource ID"
-                        }
-                      },
-                      "required": [
-                        "elementId"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "text": {
-                          "type": "string",
-                          "description": "Container text"
-                        }
-                      },
-                      "required": [
-                        "text"
-                      ],
-                      "additionalProperties": false
-                    }
-                  ]
+                "activityName": {
+                  "description": "Foreground Android activity name",
+                  "type": "string"
                 }
               },
-              "required": [
-                "elementId"
-              ],
               "additionalProperties": false
             },
-            {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "description": "Element text"
-                },
-                "timeout": {
-                  "description": "Wait timeout ms (default: 5000)",
-                  "type": "number"
-                },
-                "container": {
-                  "description": "Scope match to a container",
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "elementId": {
-                          "type": "string",
-                          "description": "Container resource ID"
-                        }
-                      },
-                      "required": [
-                        "elementId"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "text": {
-                          "type": "string",
-                          "description": "Container text"
-                        }
-                      },
-                      "required": [
-                        "text"
-                      ],
-                      "additionalProperties": false
+            "matchType": {
+              "description": "Whether element predicates must all match the same node or any one may match",
+              "type": "string",
+              "enum": [
+                "all",
+                "any"
+              ]
+            },
+            "textMatch": {
+              "description": "How to match text predicates",
+              "type": "string",
+              "enum": [
+                "exact",
+                "contains",
+                "regex"
+              ]
+            },
+            "timeout": {
+              "description": "Wait timeout ms (default: 5000)",
+              "type": "number"
+            },
+            "container": {
+              "description": "Scope match to a container",
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "elementId": {
+                      "type": "string",
+                      "description": "Container resource ID"
                     }
-                  ]
-                }
-              },
-              "required": [
-                "text"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "textAny": {
-                  "minItems": 1,
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
                   },
-                  "description": "Ordered text variants; first visible match wins"
+                  "required": [
+                    "elementId"
+                  ],
+                  "additionalProperties": false
                 },
-                "timeout": {
-                  "description": "Wait timeout ms (default: 5000)",
-                  "type": "number"
-                },
-                "container": {
-                  "description": "Scope match to a container",
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "elementId": {
-                          "type": "string",
-                          "description": "Container resource ID"
-                        }
-                      },
-                      "required": [
-                        "elementId"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "text": {
-                          "type": "string",
-                          "description": "Container text"
-                        }
-                      },
-                      "required": [
-                        "text"
-                      ],
-                      "additionalProperties": false
+                {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "description": "Container text"
                     }
-                  ]
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "additionalProperties": false
                 }
-              },
-              "required": [
-                "textAny"
-              ],
-              "additionalProperties": false
+              ]
             }
-          ]
+          },
+          "additionalProperties": false
         },
         "raw": {
           "description": "Include raw view hierarchy",

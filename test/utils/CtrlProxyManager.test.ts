@@ -373,6 +373,103 @@ describe("CtrlProxyManager", function() {
       expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
     });
 
+    test("fails closed on an installed APK SHA mismatch when a concrete version is pinned (#2815)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "0.0.18";
+      try {
+        const localFakeAdb = new FakeAdbExecutor();
+        localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: ""
+        });
+        localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: ""
+        });
+        localFakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: ""
+        });
+
+        let downloadCalls = 0;
+        AndroidCtrlProxyManager.resetInstances();
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          localFakeAdb,
+          new FakeTimer(),
+          {
+            download: async () => {
+              downloadCalls++;
+              throw new Error("download should not be called for a hermetic mismatch");
+            }
+          }
+        );
+
+        await expect(manager.ensureCompatibleVersion()).rejects.toThrow(
+          "Installed CtrlProxy APK SHA differs from expected release checksum"
+        );
+        expect(downloadCalls).toBe(0);
+        expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
+    });
+
+    test("fails closed on a pinned mismatch even when preinstalled download skip is set (#2815)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      const prevSkipDownload = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
+      process.env.AUTOMOBILE_VERSION = "0.0.18";
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = "true";
+      try {
+        const localFakeAdb = new FakeAdbExecutor();
+        localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: ""
+        });
+        localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: ""
+        });
+        localFakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: ""
+        });
+
+        AndroidCtrlProxyManager.resetInstances();
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          localFakeAdb,
+          new FakeTimer(),
+          {
+            download: async () => {
+              throw new Error("download should not be called for a hermetic mismatch");
+            }
+          }
+        );
+
+        await expect(manager.ensureCompatibleVersion()).rejects.toThrow(
+          "Installed CtrlProxy APK SHA differs from expected release checksum"
+        );
+        expect(localFakeAdb.wasCommandExecuted("shell sha256sum")).toBe(true);
+        expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+        if (prevSkipDownload === undefined) {
+          delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
+        } else {
+          process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = prevSkipDownload;
+        }
+      }
+    });
+
     test("should upgrade when installed SHA mismatches expected and installed download is explicitly allowed", async function() {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();
@@ -525,6 +622,56 @@ describe("CtrlProxyManager", function() {
       expect(result.attemptedReinstall).toBe(true);
       expect(packageCheckCalls.length).toBe(2);
       expect(localFakeAdb.wasCommandExecuted(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`)).toBe(true);
+    });
+
+    test("fails closed on a pinned mismatch when completed prefetch install fails and old APK remains (#2815)", async function() {
+      const prevVersion = process.env.AUTOMOBILE_VERSION;
+      process.env.AUTOMOBILE_VERSION = "0.0.18";
+      try {
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-prefetch-source-"));
+        const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
+        await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
+        (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+
+        const packageCheckCommand = `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`;
+        const localFakeAdb = new FakeAdbExecutor();
+        localFakeAdb.setCommandResponseSequence(packageCheckCommand, [
+          createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+          createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, "")
+        ]);
+        localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: ""
+        });
+        localFakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: ""
+        });
+        localFakeAdb.setCommandError("install -r -d", new Error("INSTALL_FAILED_UPDATE_INCOMPATIBLE"));
+        localFakeAdb.setCommandResponse(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`, createExecResult("Success", ""));
+        localFakeAdb.setCommandError("install \"", new Error("INSTALL_FAILED_ABORTED"));
+
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          localFakeAdb,
+          new FakeTimer(),
+          {
+            download: async () => {
+              throw new Error("download should not be called for completed prefetch");
+            }
+          }
+        );
+
+        await expect(manager.ensureCompatibleVersion()).rejects.toThrow(
+          "Installed CtrlProxy APK SHA differs from expected release checksum"
+        );
+      } finally {
+        if (prevVersion === undefined) {
+          delete process.env.AUTOMOBILE_VERSION;
+        } else {
+          process.env.AUTOMOBILE_VERSION = prevVersion;
+        }
+      }
     });
 
     test("prefetch is skipped (no network) for an unknown pin (#2746)", async function() {

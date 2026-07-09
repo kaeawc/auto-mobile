@@ -19,6 +19,10 @@ import { getMcpServerVersion } from "../../src/utils/mcpVersion";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import * as fs from "fs/promises";
+import * as path from "path";
+import AdmZip from "adm-zip";
+import crypto from "crypto";
 
 describe("checkDaemonVersion", () => {
   test("returns pass status", () => {
@@ -352,6 +356,26 @@ describe("checkCtrlProxy", () => {
     expect(result.message).toBe("No Android devices connected");
   });
 
+  test("fails malformed mirror configuration even when no devices are connected (#2815)", async () => {
+    const prevBaseUrl = process.env.AUTOMOBILE_ASSET_BASE_URL;
+    process.env.AUTOMOBILE_ASSET_BASE_URL = "https://mirror.test/am?";
+    try {
+      fakeAdb.setDevices([]);
+
+      const result = await checkCtrlProxy(fakeFactory);
+
+      expect(result.name).toBe("CtrlProxy");
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
+    } finally {
+      if (prevBaseUrl === undefined) {
+        delete process.env.AUTOMOBILE_ASSET_BASE_URL;
+      } else {
+        process.env.AUTOMOBILE_ASSET_BASE_URL = prevBaseUrl;
+      }
+    }
+  });
+
   test("fails (not skips) when AUTOMOBILE_VERSION pins an unverifiable version (#2746)", async () => {
     const prevVersion = process.env.AUTOMOBILE_VERSION;
     process.env.AUTOMOBILE_VERSION = "99.99.99";
@@ -371,6 +395,83 @@ describe("checkCtrlProxy", () => {
       expect(result.message).toContain("99.99.99");
       expect(result.recommendation).toContain("AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM");
     } finally {
+      if (prevVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = prevVersion;
+      }
+    }
+  });
+
+  test("fails (not skips) when a known pinned CtrlProxy APK SHA mismatches (#2815)", async () => {
+    const prevVersion = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    try {
+      fakeAdb.setDevices([{
+        deviceId: "emulator-5554",
+        platform: "android",
+        isEmulator: true,
+        name: "Pixel"
+      }]);
+      fakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+
+      const result = await checkCtrlProxy(fakeFactory);
+
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain("Installed CtrlProxy APK SHA differs from expected release checksum");
+      expect(result.message).toContain("AUTOMOBILE_VERSION=0.0.18");
+    } finally {
+      if (prevVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = prevVersion;
+      }
+    }
+  });
+
+  test("fails (not warns) when a known pinned CtrlProxy APK download fails checksum verification (#2815)", async () => {
+    const prevVersion = process.env.AUTOMOBILE_VERSION;
+    const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    try {
+      (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+        download: async (_url: string, destination: string) => {
+          const zip = new AdmZip();
+          zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+          zip.addFile("classes.dex", crypto.randomBytes(15000));
+          await fs.mkdir(path.dirname(destination), { recursive: true });
+          zip.writeZip(destination);
+        }
+      };
+      fakeAdb.setDevices([{
+        deviceId: "emulator-5554",
+        platform: "android",
+        isEmulator: true,
+        name: "Pixel"
+      }]);
+      fakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "",
+        stderr: ""
+      });
+
+      const result = await checkCtrlProxy(fakeFactory);
+
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain("versionStatus=failed");
+      expect(result.message).toContain("APK checksum verification failed");
+    } finally {
+      (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
       if (prevVersion === undefined) {
         delete process.env.AUTOMOBILE_VERSION;
       } else {

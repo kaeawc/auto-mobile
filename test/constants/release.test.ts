@@ -148,8 +148,37 @@ describe("resolveAssetBaseUrl (AUTOMOBILE_ASSET_BASE_URL mirror knob)", function
       .toBe("https://mirror.test/am");
   });
 
+  test("normalizes parser-accepted mirror bases before URL composition", function() {
+    expect(resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https:mirror.test/am/" }))
+      .toBe("https://mirror.test/am");
+    expect(resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test\\am" }))
+      .toBe("https://mirror.test/am");
+  });
+
   test("ignores a blank mirror base", function() {
     expect(resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "  " })).toBe(DEFAULT_ASSET_BASE_URL);
+  });
+
+  test("rejects mirror bases with query strings", function() {
+    expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am?token=abc" }))
+      .toThrow("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
+  });
+
+  test("rejects mirror bases with fragments", function() {
+    expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am#release" }))
+      .toThrow("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
+  });
+
+  test("rejects mirror bases with empty query or fragment delimiters", function() {
+    expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am?" }))
+      .toThrow("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
+    expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am#" }))
+      .toThrow("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
+  });
+
+  test("rejects non-absolute mirror bases", function() {
+    expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "/mirror/am" }))
+      .toThrow("AUTOMOBILE_ASSET_BASE_URL must be an absolute URL");
   });
 });
 
